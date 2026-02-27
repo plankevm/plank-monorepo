@@ -5,6 +5,7 @@ pub mod diagnostics;
 pub mod error_report;
 pub mod interner;
 pub mod lexer;
+pub mod module;
 pub mod parser;
 pub mod source;
 
