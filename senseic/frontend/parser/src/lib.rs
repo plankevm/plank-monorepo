@@ -6,6 +6,7 @@ pub mod error_report;
 pub mod interner;
 pub mod lexer;
 pub mod parser;
+pub mod source;
 
 pub use interner::{PlankInterner, StrId};
 
