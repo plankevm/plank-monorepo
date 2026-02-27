@@ -1,10 +1,12 @@
-use hashbrown::{HashMap, hash_map::Entry};
+use hashbrown::HashMap;
 use sensei_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use sensei_parser::{
     StrId,
     ast::{self, Statement, TopLevelDef},
     cst::{ConcreteSyntaxTree, NodeIdx, NumLitId},
     lexer::TokenIdx,
+    project::{FileImport, ParsedProject},
+    source::SourceId,
 };
 
 pub use sensei_values;
@@ -97,14 +99,9 @@ pub struct StructDef {
     pub fields: FieldsId,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ConstMap {
-    pub const_name_to_id: HashMap<StrId, ConstId>,
-    pub const_defs: IndexVec<ConstId, ConstDef>,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct ConstDef {
+    pub name: StrId,
     pub source: Span<TokenIdx>,
     pub body: BlockId,
     pub result: LocalId,
@@ -117,7 +114,7 @@ pub struct Hir {
     pub run: Option<BlockId>,
 
     pub blocks: ListOfLists<BlockId, Instruction>,
-    pub consts: ConstMap,
+    pub consts: IndexVec<ConstId, ConstDef>,
 
     pub call_args: ListOfLists<CallArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
@@ -156,7 +153,7 @@ impl HirBuilder {
 }
 
 struct BlockLowerer<'a> {
-    consts: &'a HashMap<StrId, ConstId>,
+    consts: HashMap<StrId, ConstId>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
 
     big_nums: &'a mut BigNumInterner,
@@ -543,51 +540,16 @@ impl<'a> BlockLowerer<'a> {
     }
 }
 
-pub fn lower(cst: &ConcreteSyntaxTree, big_nums: &mut BigNumInterner) -> Hir {
-    let mut consts = ConstMap::default();
-    let file = ast::File::new(cst.file_view()).expect("failed to init file from CST");
-
-    let mut found_init = false;
-    let mut found_run = false;
-
-    for def in file.iter_defs() {
-        match def {
-            TopLevelDef::Const(const_def) => {
-                match consts.const_name_to_id.entry(const_def.name) {
-                    Entry::Occupied(_) => {
-                        // TODO: error diagnostic
-                        panic!("duplicate const def")
-                    }
-                    Entry::Vacant(entry) => {
-                        let new_const_id = consts.const_defs.push(ConstDef {
-                            source: const_def.span(),
-                            body: BlockId::ZERO,
-                            result: LocalId::ZERO,
-                        });
-
-                        entry.insert(new_const_id);
-                    }
-                }
-            }
-            TopLevelDef::Init(_) => {
-                assert!(!found_init, "more than one init"); // TODO: Error diagnostic
-                found_init = true;
-            }
-            TopLevelDef::Run(_) => {
-                assert!(!found_run, "more than one run"); // TODO: Error diagnostic
-                found_run = true;
-            }
-            TopLevelDef::Import(_) => todo!("imports"),
-        }
-    }
+pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
+    let (mut consts, source_consts) = register_consts(&project.csts);
 
     let mut builder = HirBuilder::new();
     let mut init = None;
     let mut run = None;
 
     let mut lowerer = BlockLowerer {
-        consts: &consts.const_name_to_id,
-        num_lit_limbs: &cst.num_lit_limbs,
+        consts: HashMap::new(),
+        num_lit_limbs: &project.csts[SourceId::ZERO].num_lit_limbs,
 
         big_nums,
         builder: &mut builder,
@@ -602,45 +564,48 @@ pub fn lower(cst: &ConcreteSyntaxTree, big_nums: &mut BigNumInterner) -> Hir {
         captures_buf: Vec::new(),
     };
 
-    for def in file.iter_defs() {
-        match def {
-            TopLevelDef::Const(const_def) => {
-                lowerer.reset();
-                let id = consts.const_name_to_id[&const_def.name];
-                let def = &mut consts.const_defs[id];
-                def.result = lowerer.alloc_local(const_def.name);
-                def.body = lowerer.create_sub_block(|l| {
-                    if let Some(type_expr) = const_def.r#type {
-                        let type_local = l.lower_expr_to_local(type_expr);
-                        let assign = l.lower_expr(const_def.assign);
-                        l.emit(Instruction::Set { local: def.result, expr: assign });
-                        l.emit(Instruction::AssertType { value: def.result, of_type: type_local });
-                    } else {
-                        let assign = l.lower_expr(const_def.assign);
-                        l.emit(Instruction::Set { local: def.result, expr: assign });
-                    }
-                });
-            }
-            TopLevelDef::Init(init_def) => {
-                if init.is_some() {
-                    todo!("diagnostic: multiple init blocks");
+    for (source_id, cst) in project.csts.enumerate_idx() {
+        build_file_scope(source_id, &source_consts, &project.imports, &mut lowerer.consts);
+        lowerer.num_lit_limbs = &cst.num_lit_limbs;
+
+        let file = ast::File::new(cst.file_view()).expect("failed to init file from CST");
+        for def in file.iter_defs() {
+            match def {
+                TopLevelDef::Const(const_def) => {
+                    lowerer.reset();
+                    let id = lowerer.consts[&const_def.name];
+                    let hir_def = &mut consts[id];
+                    hir_def.result = lowerer.alloc_local(const_def.name);
+                    hir_def.body = lowerer.create_sub_block(|lowerer| {
+                        if let Some(type_expr) = const_def.r#type {
+                            let type_local = lowerer.lower_expr_to_local(type_expr);
+                            let assign = lowerer.lower_expr(const_def.assign);
+                            lowerer.emit(Instruction::Set { local: hir_def.result, expr: assign });
+                            lowerer.emit(Instruction::AssertType {
+                                value: hir_def.result,
+                                of_type: type_local,
+                            });
+                        } else {
+                            let assign = lowerer.lower_expr(const_def.assign);
+                            lowerer.emit(Instruction::Set { local: hir_def.result, expr: assign });
+                        }
+                    });
                 }
-                lowerer.reset();
-                init = Some(lowerer.lower_body_to_block(init_def.body()));
-            }
-            TopLevelDef::Run(run_def) => {
-                if run.is_some() {
-                    todo!("diagnostic: multiple run blocks");
+                TopLevelDef::Init(init_def) => {
+                    assert!(source_id == project.entry, "init only allowed in entry file");
+                    lowerer.reset();
+                    init = Some(lowerer.lower_body_to_block(init_def.body()));
                 }
-                lowerer.reset();
-                let block = lowerer.lower_body_to_block(run_def.body());
-                run = Some(block);
+                TopLevelDef::Run(run_def) => {
+                    assert!(source_id == project.entry, "run only allowed in entry file");
+                    lowerer.reset();
+                    run = Some(lowerer.lower_body_to_block(run_def.body()));
+                }
+                TopLevelDef::Import(_) => {}
             }
-            TopLevelDef::Import(_) => unreachable!(),
         }
     }
 
-    // TODO: Diagnostic for missing init block
     let init = init.expect("missing init block");
 
     Hir {

@@ -21,7 +21,7 @@ impl<'a> DisplayHir<'a> {
         write!(f, "%{}", local.get())
     }
 
-    fn fmt_const(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
+    fn fmt_const_ref(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
         write!(f, "${}", const_id.get())
     }
 
@@ -47,7 +47,7 @@ impl<'a> DisplayHir<'a> {
 
     fn fmt_expr(&self, f: &mut Formatter<'_>, expr: Expr) -> fmt::Result {
         match expr {
-            Expr::ConstRef(id) => self.fmt_const(f, id),
+            Expr::ConstRef(id) => self.fmt_const_ref(f, id),
             Expr::LocalRef(id) => self.fmt_local(f, id),
             Expr::FnDef(id) => self.fmt_fn_ref(f, id),
             Expr::Bool(b) => write!(f, "{b}"),
@@ -160,20 +160,10 @@ impl<'a> DisplayHir<'a> {
         Ok(())
     }
 
-    fn fmt_const_def(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
-        let const_name = self
-            .hir
-            .consts
-            .const_name_to_id
-            .iter()
-            .find_map(|(&name, &id)| (id == const_id).then(|| &self.interner[name]))
-            .unwrap_or("<unnamed>");
-
-        let const_def = &self.hir.consts.const_defs[const_id];
-        write!(f, "${} ", const_id.get())?;
-        write!(f, "({const_name}) -> ")?;
-        self.fmt_local(f, const_def.result)?;
-        writeln!(f, " {{")?;
+    fn fmt_const(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
+        let const_def = &self.hir.consts[const_id];
+        let const_name = &self.interner[const_def.name];
+        writeln!(f, "{const_id:?} ({const_name:?}) result={:?} {{", const_def.result)?;
         self.fmt_block(f, const_def.body, 1)?;
         writeln!(f, "}}")
     }
@@ -244,8 +234,8 @@ impl<'a> DisplayHir<'a> {
 impl Display for DisplayHir<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "==== Constants ====")?;
-        for (&_, &const_id) in self.hir.consts.const_name_to_id.iter() {
-            self.fmt_const_def(f, const_id)?;
+        for (const_id, _) in self.hir.consts.enumerate_idx() {
+            self.fmt_const(f, const_id)?;
         }
 
         if !self.hir.fns.is_empty() {
