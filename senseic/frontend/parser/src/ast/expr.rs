@@ -320,8 +320,8 @@ pub struct FnDef<'cst> {
 
 impl<'cst> FnDef<'cst> {
     pub fn params(&self) -> impl Iterator<Item = Param<'cst>> {
-        let param_list = self.view.child(0);
-        param_list.into_iter().flat_map(|list| list.children()).filter_map(Param::new)
+        let param_list = self.view.child(0).expect("FnDef missing ParamList");
+        param_list.children().filter_map(Param::new)
     }
 
     pub fn return_type(&self) -> Expr<'cst> {
@@ -329,9 +329,9 @@ impl<'cst> FnDef<'cst> {
         Expr::new_unwrap(node)
     }
 
-    pub fn body(&self) -> Expr<'cst> {
+    pub fn body(&self) -> BlockExpr<'cst> {
         let node = self.view.child(2).expect("FnDef must have body child");
-        Expr::new_unwrap(node)
+        BlockExpr::new(node)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -343,7 +343,7 @@ impl<'cst> FnDef<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct Param<'cst> {
     pub name: StrId,
-    pub comptime: bool,
+    pub is_comptime: bool,
     view: NodeView<'cst>,
 }
 
@@ -358,7 +358,7 @@ impl<'cst> Param<'cst> {
             .child(0)
             .and_then(|v| v.kind().as_ident())
             .expect("TODO: handle malformed Parameter");
-        Some(Self { name, comptime, view })
+        Some(Self { name, is_comptime: comptime, view })
     }
 
     pub fn type_expr(&self) -> Expr<'cst> {
@@ -521,7 +521,7 @@ impl<'cst> Statement<'cst> {
 }
 
 impl<'cst> BlockExpr<'cst> {
-    pub(super) fn from_view(view: NodeView<'cst>) -> Self {
+    pub(super) fn new(view: NodeView<'cst>) -> Self {
         assert!(
             matches!(
                 view.kind(),
@@ -530,15 +530,6 @@ impl<'cst> BlockExpr<'cst> {
                     | NodeKind::InitBlock
                     | NodeKind::RunBlock
             ),
-            "BlockExpr::from_view called with non-block node: {:?}",
-            view.kind()
-        );
-        Self { view }
-    }
-
-    fn new(view: NodeView<'cst>) -> Self {
-        assert!(
-            matches!(view.kind(), NodeKind::Block | NodeKind::ComptimeBlock),
             "BlockExpr::new called with non-block node: {:?}",
             view.kind()
         );

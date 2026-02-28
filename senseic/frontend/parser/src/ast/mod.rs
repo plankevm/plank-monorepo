@@ -23,7 +23,7 @@ impl<'cst> InitBlock<'cst> {
     }
 
     pub fn body(&self) -> BlockExpr<'cst> {
-        BlockExpr::from_view(self.view)
+        BlockExpr::new(self.view)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -45,7 +45,7 @@ impl<'cst> RunBlock<'cst> {
     }
 
     pub fn body(&self) -> BlockExpr<'cst> {
-        BlockExpr::from_view(self.view)
+        BlockExpr::new(self.view)
     }
 
     pub fn node(&self) -> NodeView<'cst> {

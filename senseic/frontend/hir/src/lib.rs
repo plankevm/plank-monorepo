@@ -68,8 +68,9 @@ const _INSTR_SIZE: () = const { assert!(std::mem::size_of::<Instruction>() == 20
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParamInfo {
-    pub comptime: bool,
-    pub local: LocalId,
+    pub is_comptime: bool,
+    pub value: LocalId,
+    pub r#type: LocalId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -86,8 +87,12 @@ pub struct FieldInfo {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FnDef {
-    pub source: NodeIdx,
+    /// Parameters & return type comptime type expressions.
+    pub type_preamble: BlockId,
+    /// Function body.
     pub body: BlockId,
+    /// Preamble set local that holds the return type expression.
+    pub return_type: LocalId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -112,29 +117,33 @@ pub struct ConstDef {
 
 #[derive(Debug, Clone)]
 pub struct Hir {
-    // Instruction storage
-    pub blocks: ListOfLists<BlockId, Instruction>,
-    pub call_params: ListOfLists<CallArgsId, LocalId>,
-    pub fields: ListOfLists<FieldsId, FieldInfo>,
-    // Top-level definitions
-    pub consts: ConstMap,
-    pub fns: IndexVec<FnDefId, FnDef>,
-    pub fn_params: ListOfLists<FnDefId, ParamInfo>,
-    pub fn_captures: ListOfLists<FnDefId, CaptureInfo>,
-    pub struct_defs: IndexVec<StructDefId, StructDef>,
     // Entry points
     pub init: BlockId,
     pub run: Option<BlockId>,
+
+    pub blocks: ListOfLists<BlockId, Instruction>,
+    pub consts: ConstMap,
+
+    pub call_args: ListOfLists<CallArgsId, LocalId>,
+    pub fields: ListOfLists<FieldsId, FieldInfo>,
+    pub struct_defs: IndexVec<StructDefId, StructDef>,
+
+    // Function definition data
+    pub fns: IndexVec<FnDefId, FnDef>,
+    pub fn_params: ListOfLists<FnDefId, ParamInfo>,
+    pub fn_captures: ListOfLists<FnDefId, CaptureInfo>,
 }
 
 struct HirBuilder {
     blocks: ListOfLists<BlockId, Instruction>,
+
     call_args: ListOfLists<CallArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
+    struct_defs: IndexVec<StructDefId, StructDef>,
+
     fns: IndexVec<FnDefId, FnDef>,
     fn_params: ListOfLists<FnDefId, ParamInfo>,
     fn_captures: ListOfLists<FnDefId, CaptureInfo>,
-    struct_defs: IndexVec<StructDefId, StructDef>,
 }
 
 impl HirBuilder {
@@ -154,36 +163,41 @@ impl HirBuilder {
 struct BlockLowerer<'a> {
     consts: &'a HashMap<StrId, ConstId>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
+
     big_nums: &'a mut BigNumInterner,
     builder: &'a mut HirBuilder,
-    instructions: Vec<Instruction>,
-    locals: Vec<(StrId, LocalId)>,
+    scoped_locals_stack: Vec<(StrId, LocalId)>,
     fn_scope_start: usize,
+    fn_captures_start: usize,
     next_local_id: LocalId,
-    arg_buf: Vec<LocalId>,
+
+    instructions_buf: Vec<Instruction>,
+    locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
-    capture_buf: Vec<CaptureInfo>,
+    captures_buf: Vec<CaptureInfo>,
 }
 
 impl<'a> BlockLowerer<'a> {
     fn reset(&mut self) {
-        self.instructions.clear();
-        self.locals.clear();
-        self.fn_scope_start = 0;
         self.next_local_id = LocalId::ZERO;
-        debug_assert!(self.arg_buf.is_empty());
+
+        debug_assert!(self.scoped_locals_stack.is_empty());
+        debug_assert_eq!(self.fn_scope_start, 0);
+        debug_assert_eq!(self.fn_captures_start, 0);
+
+        debug_assert!(self.instructions_buf.is_empty());
+        debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
-        debug_assert!(self.capture_buf.is_empty());
+        debug_assert!(self.captures_buf.is_empty());
     }
 
     fn alloc_local(&mut self, name: StrId) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
-            // TODO: Diagnostic
-            panic!("shadowing primitive");
+            todo!("diagnostic: shadowing primitive");
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.locals.push((name, id));
+        self.scoped_locals_stack.push((name, id));
         id
     }
 
@@ -203,23 +217,11 @@ impl<'a> BlockLowerer<'a> {
     }
 
     fn create_sub_block_with<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> (BlockId, R) {
-        let locals_start = self.locals.len();
-        let block_start = self.instructions.len();
+        let locals_start = self.scoped_locals_stack.len();
+        let block_start = self.instructions_buf.len();
         let result = f(self);
-        self.locals.truncate(locals_start);
+        self.scoped_locals_stack.truncate(locals_start);
         (self.flush_instructions_from(block_start), result)
-    }
-
-    fn create_fn_body_block(&mut self, f: impl FnOnce(&mut Self)) -> BlockId {
-        let saved_scope_start = self.fn_scope_start;
-        let saved_next_local = std::mem::replace(&mut self.next_local_id, LocalId::ZERO);
-        self.fn_scope_start = self.locals.len();
-        let block_start = self.instructions.len();
-        f(self);
-        self.locals.truncate(self.fn_scope_start);
-        self.fn_scope_start = saved_scope_start;
-        self.next_local_id = saved_next_local;
-        self.flush_instructions_from(block_start)
     }
 
     fn lower_body_to_block(&mut self, block: ast::BlockExpr<'_>) -> BlockId {
@@ -250,31 +252,40 @@ impl<'a> BlockLowerer<'a> {
         })
     }
 
+    fn lookup_scope(scope: &[(StrId, LocalId)], name: StrId) -> Option<LocalId> {
+        for &(bound_name, id) in scope.iter().rev() {
+            if bound_name == name {
+                return Some(id);
+            }
+        }
+        None
+    }
+
     fn lookup_local(&self, name: StrId) -> Option<LocalId> {
-        self.locals[self.fn_scope_start..]
-            .iter()
-            .rev()
-            .find_map(|(n, id)| (*n == name).then_some(*id))
+        Self::lookup_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
     }
 
     fn lookup_capture(&mut self, name: StrId) -> Option<LocalId> {
-        self.locals[..self.fn_scope_start]
-            .iter()
-            .rev()
-            .find_map(|(n, id)| (*n == name).then_some(*id))
-            .map(|outer_local| {
-                let inner_local = self.alloc_local(name);
-                self.capture_buf.push(CaptureInfo { outer_local, inner_local });
-                inner_local
-            })
+        let outer_local =
+            Self::lookup_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?;
+
+        for capture in &self.captures_buf[self.fn_captures_start..] {
+            if capture.outer_local == outer_local {
+                return Some(capture.inner_local);
+            }
+        }
+
+        let inner_local = self.alloc_local(name);
+        self.captures_buf.push(CaptureInfo { outer_local, inner_local });
+        Some(inner_local)
     }
 
     fn emit(&mut self, instr: Instruction) {
-        self.instructions.push(instr);
+        self.instructions_buf.push(instr);
     }
 
     fn flush_instructions_from(&mut self, start: usize) -> BlockId {
-        self.builder.blocks.push_iter(self.instructions.drain(start..))
+        self.builder.blocks.push_iter(self.instructions_buf.drain(start..))
     }
 
     fn resolve_name(&mut self, name: StrId) -> Expr {
@@ -316,12 +327,12 @@ impl<'a> BlockLowerer<'a> {
             }
             ast::Expr::Call(call_expr) => {
                 let callee = self.lower_expr_to_local(call_expr.callee());
-                let buf_start = self.arg_buf.len();
+                let buf_start = self.locals_buf.len();
                 for arg in call_expr.args() {
                     let local = self.lower_expr_to_local(arg);
-                    self.arg_buf.push(local);
+                    self.locals_buf.push(local);
                 }
-                let args = self.builder.call_args.push_iter(self.arg_buf.drain(buf_start..));
+                let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
                 Expr::Call { callee, args }
             }
             ast::Expr::StructLit(struct_lit) => {
@@ -347,50 +358,7 @@ impl<'a> BlockLowerer<'a> {
                     self.builder.struct_defs.push(StructDef { source, type_index, fields });
                 Expr::StructDef(struct_def_id)
             }
-            ast::Expr::FnDef(fn_def) => {
-                let source = fn_def.node().idx();
-                let capture_start = self.capture_buf.len();
-
-                let body = self.create_fn_body_block(|lowerer| {
-                    // Phase 1: Allocate param locals (0..n)
-                    for param in fn_def.params() {
-                        lowerer.alloc_local(param.name);
-                    }
-
-                    // Phase 2: Lower param type annotations, emit AssertType
-                    for (i, param) in fn_def.params().enumerate() {
-                        let type_local = lowerer.lower_expr_to_local(param.type_expr());
-                        let param_local = LocalId::new(i as u32);
-                        lowerer.emit(Instruction::AssertType {
-                            value: param_local,
-                            of_type: type_local,
-                        });
-                    }
-
-                    // Phase 3: Lower return type then body (following syntactic order)
-                    let return_type_local = lowerer.lower_expr_to_local(fn_def.return_type());
-                    let body_value = lowerer.lower_expr(fn_def.body());
-                    let result_local = lowerer.alloc_temp();
-                    lowerer.emit(Instruction::Set { local: result_local, expr: body_value });
-                    lowerer.emit(Instruction::AssertType {
-                        value: result_local,
-                        of_type: return_type_local,
-                    });
-                    lowerer.emit(Instruction::Return(Expr::LocalRef(result_local)));
-                });
-
-                let fn_def_id = self.builder.fns.push(FnDef { source, body });
-                let fn_params_id =
-                    self.builder.fn_params.push_iter(fn_def.params().enumerate().map(|(i, p)| {
-                        ParamInfo { comptime: p.comptime, local: LocalId::new(i as u32) }
-                    }));
-                let fn_captures_id =
-                    self.builder.fn_captures.push_iter(self.capture_buf.drain(capture_start..));
-                assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
-                assert_eq!(fn_def_id, fn_captures_id, "fn and fn_captures out of sync");
-
-                Expr::FnDef(fn_def_id)
-            }
+            ast::Expr::FnDef(fn_def) => Expr::FnDef(self.lower_fn_def(fn_def)),
             ast::Expr::If(if_expr) => {
                 let result = self.alloc_temp();
                 let condition = self.lower_expr_to_local(if_expr.condition());
@@ -412,10 +380,60 @@ impl<'a> BlockLowerer<'a> {
         }
     }
 
+    fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
+        self.alloc_local(param.name)
+    }
+
+    fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
+        let saved_next_local = std::mem::replace(&mut self.next_local_id, LocalId::ZERO);
+        let saved_fn_scope_start =
+            std::mem::replace(&mut self.fn_scope_start, self.scoped_locals_stack.len());
+        let saved_captures_start =
+            std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
+
+        let param_locals_start = self.locals_buf.len();
+        let return_type;
+        let type_preamble = {
+            let preamble_block_start = self.instructions_buf.len();
+            for param in fn_def.params() {
+                let param_type = self.lower_expr_to_local(param.type_expr());
+                self.locals_buf.push(param_type);
+                let param_value = self.add_param_to_scope_as_local(param);
+                self.locals_buf.push(param_value);
+                self.emit(Instruction::AssertType { value: param_value, of_type: param_type });
+            }
+            return_type = self.lower_expr_to_local(fn_def.return_type());
+            self.flush_instructions_from(preamble_block_start)
+        };
+
+        let body = self.lower_body_to_block(fn_def.body());
+        let fn_def_id = self.builder.fns.push(FnDef { type_preamble, body, return_type });
+
+        let fn_params_id = self.builder.fn_params.push_iter(
+            self.locals_buf[param_locals_start..].chunks(2).zip(fn_def.params()).map(
+                |(type_value_chunk, param)| {
+                    let &[r#type, value] = type_value_chunk else { unreachable!() };
+                    ParamInfo { is_comptime: param.is_comptime, value, r#type }
+                },
+            ),
+        );
+        let fn_captures_id =
+            self.builder.fn_captures.push_iter(self.captures_buf.drain(self.fn_captures_start..));
+        assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
+        assert_eq!(fn_def_id, fn_captures_id, "fn and fn_captures out of sync");
+
+        self.scoped_locals_stack.truncate(self.fn_scope_start);
+        self.next_local_id = saved_next_local;
+        self.fn_scope_start = saved_fn_scope_start;
+        self.fn_captures_start = saved_captures_start;
+
+        fn_def_id
+    }
+
     fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
-        let scope_start = self.locals.len();
+        let scope_start = self.scoped_locals_stack.len();
         let result = f(self);
-        self.locals.truncate(scope_start);
+        self.scoped_locals_stack.truncate(scope_start);
         result
     }
 
@@ -544,15 +562,18 @@ pub fn lower(cst: &ConcreteSyntaxTree, big_nums: &mut BigNumInterner) -> Hir {
     let mut lowerer = BlockLowerer {
         consts: &consts.const_name_to_id,
         num_lit_limbs: &cst.num_lit_limbs,
+
         big_nums,
         builder: &mut builder,
-        instructions: Vec::new(),
-        locals: Vec::new(),
+        scoped_locals_stack: Vec::new(),
         fn_scope_start: 0,
+        fn_captures_start: 0,
         next_local_id: LocalId::ZERO,
-        arg_buf: Vec::new(),
+
+        instructions_buf: Vec::new(),
+        locals_buf: Vec::new(),
         field_buf: Vec::new(),
-        capture_buf: Vec::new(),
+        captures_buf: Vec::new(),
     };
 
     for def in file.iter_defs() {
@@ -592,7 +613,7 @@ pub fn lower(cst: &ConcreteSyntaxTree, big_nums: &mut BigNumInterner) -> Hir {
 
     Hir {
         blocks: builder.blocks,
-        call_params: builder.call_args,
+        call_args: builder.call_args,
         fields: builder.fields,
         consts,
         fns: builder.fns,
