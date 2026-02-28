@@ -576,28 +576,32 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
                     let id = lowerer.consts[&const_def.name];
                     let hir_def = &mut consts[id];
                     hir_def.result = lowerer.alloc_local(const_def.name);
-                    hir_def.body = lowerer.create_sub_block(|lowerer| {
+                    hir_def.body = lowerer.create_sub_block(|l| {
                         if let Some(type_expr) = const_def.r#type {
-                            let type_local = lowerer.lower_expr_to_local(type_expr);
-                            let assign = lowerer.lower_expr(const_def.assign);
-                            lowerer.emit(Instruction::Set { local: hir_def.result, expr: assign });
-                            lowerer.emit(Instruction::AssertType {
+                            let type_local = l.lower_expr_to_local(type_expr);
+                            let assign = l.lower_expr(const_def.assign);
+                            l.emit(Instruction::Set { local: hir_def.result, expr: assign });
+                            l.emit(Instruction::AssertType {
                                 value: hir_def.result,
                                 of_type: type_local,
                             });
                         } else {
-                            let assign = lowerer.lower_expr(const_def.assign);
-                            lowerer.emit(Instruction::Set { local: hir_def.result, expr: assign });
+                            let assign = l.lower_expr(const_def.assign);
+                            l.emit(Instruction::Set { local: hir_def.result, expr: assign });
                         }
                     });
                 }
                 TopLevelDef::Init(init_def) => {
-                    assert!(source_id == project.entry, "init only allowed in entry file");
+                    if source_id != project.entry {
+                        panic!("init only allowed in entry file");
+                    }
                     lowerer.reset();
                     init = Some(lowerer.lower_body_to_block(init_def.body()));
                 }
                 TopLevelDef::Run(run_def) => {
-                    assert!(source_id == project.entry, "run only allowed in entry file");
+                    if source_id != project.entry {
+                        panic!("run only allowed in entry file");
+                    }
                     lowerer.reset();
                     run = Some(lowerer.lower_body_to_block(run_def.body()));
                 }
@@ -606,6 +610,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
         }
     }
 
+    // TODO: Diagnostic for missing init block
     let init = init.expect("missing init block");
 
     Hir {
@@ -619,6 +624,69 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
         struct_defs: builder.struct_defs,
         init,
         run,
+    }
+}
+
+fn register_consts(
+    csts: &IndexVec<SourceId, ConcreteSyntaxTree>,
+) -> (IndexVec<ConstId, ConstDef>, ListOfLists<SourceId, (StrId, ConstId)>) {
+    let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
+    let mut source_consts: ListOfLists<SourceId, (StrId, ConstId)> = ListOfLists::new();
+
+    let mut seen = HashMap::new();
+    for cst in csts.iter() {
+        let file = ast::File::new(cst.file_view()).expect("failed to init file from CST");
+        seen.clear();
+        source_consts.push_with(|mut list| {
+            for def in file.iter_defs() {
+                let TopLevelDef::Const(const_def) = def else { continue };
+                let const_id = consts.push(ConstDef {
+                    name: const_def.name,
+                    source: const_def.span(),
+                    body: BlockId::ZERO,
+                    result: LocalId::ZERO,
+                });
+                if seen.insert(const_def.name, const_id).is_some() {
+                    panic!("duplicate const def");
+                }
+                list.push((const_def.name, const_id));
+            }
+        });
+    }
+
+    (consts, source_consts)
+}
+
+fn build_file_scope(
+    source_id: SourceId,
+    source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
+    imports: &ListOfLists<SourceId, FileImport>,
+    scope: &mut HashMap<StrId, ConstId>,
+) {
+    scope.clear();
+    for &(name, const_id) in &source_consts[source_id] {
+        scope.insert(name, const_id);
+    }
+    for import in &imports[source_id] {
+        match import.target_const {
+            Some(const_name) => {
+                let &(_, const_id) = source_consts[import.target_source]
+                    .iter()
+                    .find(|(name, _)| *name == const_name)
+                    .expect("imported const not found");
+                let local_name = import.local_name.expect("named import has local_name");
+                if scope.insert(local_name, const_id).is_some() {
+                    panic!("name collision on import");
+                }
+            }
+            None => {
+                for &(name, const_id) in &source_consts[import.target_source] {
+                    if scope.insert(name, const_id).is_some() {
+                        panic!("name collision on glob import");
+                    }
+                }
+            }
+        }
     }
 }
 
