@@ -26,7 +26,7 @@ impl<'a> DisplayHir<'a> {
             }
             Expr::Type(id) => write!(f, "Type({id:?})"),
             Expr::Call { callee, args } => {
-                let arg_locals = &self.hir.call_params[args];
+                let arg_locals = &self.hir.call_args[args];
                 write!(f, "Call {{ callee: {callee:?}, args: {arg_locals:?} }}")
             }
             Expr::Member { object, member } => {
@@ -127,8 +127,8 @@ impl<'a> DisplayHir<'a> {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            let comptime_str = if param.comptime { "comptime " } else { "" };
-            write!(f, "{comptime_str}{:?}", param.local)?;
+            let comptime_str = if param.is_comptime { "comptime " } else { "" };
+            write!(f, "{comptime_str}{:?}", param.value)?;
         }
         writeln!(f, "]")?;
 

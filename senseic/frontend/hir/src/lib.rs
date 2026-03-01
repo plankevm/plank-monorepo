@@ -93,6 +93,7 @@ pub struct FnDef {
     pub body: BlockId,
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
+    pub return_value: LocalId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -406,8 +407,10 @@ impl<'a> BlockLowerer<'a> {
             self.flush_instructions_from(preamble_block_start)
         };
 
-        let body = self.lower_body_to_block(fn_def.body());
-        let fn_def_id = self.builder.fns.push(FnDef { type_preamble, body, return_type });
+        let return_value = self.alloc_temp();
+        let body = self.lower_body_to_block_with_result(fn_def.body(), return_value);
+        let fn_def_id =
+            self.builder.fns.push(FnDef { type_preamble, body, return_type, return_value });
 
         let fn_params_id = self.builder.fn_params.push_iter(
             self.locals_buf[param_locals_start..].chunks(2).zip(fn_def.params()).map(
@@ -596,10 +599,16 @@ pub fn lower(cst: &ConcreteSyntaxTree, big_nums: &mut BigNumInterner) -> Hir {
                 });
             }
             TopLevelDef::Init(init_def) => {
+                if init.is_some() {
+                    todo!("diagnostic: multiple init blocks");
+                }
                 lowerer.reset();
                 init = Some(lowerer.lower_body_to_block(init_def.body()));
             }
             TopLevelDef::Run(run_def) => {
+                if run.is_some() {
+                    todo!("diagnostic: multiple run blocks");
+                }
                 lowerer.reset();
                 let block = lowerer.lower_body_to_block(run_def.body());
                 run = Some(block);

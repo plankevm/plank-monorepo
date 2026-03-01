@@ -41,7 +41,7 @@ pub struct Mir {
     pub blocks: ListOfLists<BlockId, Instruction>,
     pub args: ListOfLists<ArgsId, LocalId>,
     pub fns: IndexVec<FnId, FnDef>,
-    pub fn_locals: ListOfLists<FnId, Option<TypeId>>,
+    pub fn_locals: ListOfLists<FnId, TypeId>,
     pub types: TypeInterner,
     pub init: FnId,
     pub run: Option<FnId>,

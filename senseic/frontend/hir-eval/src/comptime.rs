@@ -1,4 +1,4 @@
-use sensei_core::{Idx, IndexVec};
+use sensei_core::{Idx, IndexVec, vec_buf::VecBuf};
 use sensei_hir::{self as hir, ConstDef};
 use sensei_parser::StrId;
 use sensei_values::{TypeId, ValueId};
@@ -8,52 +8,47 @@ use crate::{Evaluator, value::Value};
 #[derive(Debug)]
 struct ReturnValue(ValueId);
 
-pub(crate) struct ComptimeInterpreter<'a, 'hir> {
-    eval: &'a mut Evaluator<'hir>,
-    bindings: IndexVec<hir::LocalId, Option<ValueId>>,
-    value_buf: Vec<ValueId>,
-    type_buf: Vec<TypeId>,
-    name_buf: Vec<StrId>,
+#[derive(Default)]
+struct Bindings(IndexVec<hir::LocalId, Option<ValueId>>);
+
+impl Bindings {
+    fn set(&mut self, local: hir::LocalId, value: ValueId) -> Option<ValueId> {
+        if local.get() as usize >= self.0.len() {
+            self.0.raw.resize(local.idx() + 1, None);
+        }
+        self.0[local].replace(value)
+    }
+
+    fn get(&self, local: hir::LocalId) -> ValueId {
+        self.0[local].expect("hir: unbound local")
+    }
 }
 
-impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
-    fn new(eval: &'a mut Evaluator<'hir>) -> Self {
+pub(crate) struct ComptimeInterpreter<'e, 'hir> {
+    eval: &'e mut Evaluator<'hir>,
+    bindings: Bindings,
+
+    value_buf: VecBuf<ValueId>,
+    type_buf: VecBuf<TypeId>,
+    name_buf: VecBuf<StrId>,
+}
+
+impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
+    fn new(eval: &'e mut Evaluator<'hir>) -> Self {
         const EST_MAX_FIELD_COUNT: usize = 64;
         Self {
             eval,
-            bindings: IndexVec::new(),
-            value_buf: Vec::new(),
-            type_buf: Vec::with_capacity(EST_MAX_FIELD_COUNT),
-            name_buf: Vec::with_capacity(EST_MAX_FIELD_COUNT),
+            bindings: Bindings::default(),
+            value_buf: VecBuf::default(),
+            type_buf: VecBuf::with_capacity(EST_MAX_FIELD_COUNT),
+            name_buf: VecBuf::with_capacity(EST_MAX_FIELD_COUNT),
         }
     }
 
     pub fn eval_const(eval: &mut Evaluator<'hir>, const_def: ConstDef) -> ValueId {
         let mut comptime = ComptimeInterpreter::new(eval);
         comptime.interpret_block(const_def.body).expect("hir: const expr shouldn't have `return`");
-        comptime.get_local(const_def.result)
-    }
-
-    fn set_local(&mut self, local: hir::LocalId, value: ValueId) -> Option<ValueId> {
-        if local.get() as usize >= self.bindings.len() {
-            self.bindings.raw.resize(local.idx() + 1, None);
-        }
-        self.bindings[local].replace(value)
-    }
-
-    fn get_local(&self, local: hir::LocalId) -> ValueId {
-        self.bindings[local].expect("hir: unbound local")
-    }
-
-    fn type_of_value(&self, value: ValueId) -> TypeId {
-        match self.eval.values.lookup(value) {
-            Value::Void => TypeId::VOID,
-            Value::Bool(_) => TypeId::BOOL,
-            Value::BigNum(_) => TypeId::U256,
-            Value::Type(_) => TypeId::TYPE,
-            Value::Closure { .. } => TypeId::FUNCTION,
-            Value::StructVal { ty, .. } => ty,
-        }
+        comptime.bindings.get(const_def.result)
     }
 
     fn interpret_block(&mut self, block_id: hir::BlockId) -> Result<(), ReturnValue> {
@@ -67,7 +62,7 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
         match instr {
             hir::Instruction::Set { local, expr } => {
                 let value = self.eval_expr(expr)?;
-                if self.set_local(local, value).is_some() {
+                if self.bindings.set(local, value).is_some() {
                     unreachable!("hir: overwriting with set");
                 }
             }
@@ -79,28 +74,30 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
                 return Err(ReturnValue(value));
             }
             hir::Instruction::AssertType { value, of_type } => {
-                let type_vid = self.get_local(of_type);
+                let type_vid = self.bindings.get(of_type);
                 let expected_type = match self.eval.values.lookup(type_vid) {
                     Value::Type(tid) => tid,
                     _ => todo!("diagnostic: type error, value not type"),
                 };
-                let value_vid = self.get_local(value);
-                let actual_type = self.type_of_value(value_vid);
+                let value_vid = self.bindings.get(value);
+                let actual_type = self.eval.values.type_of_value(value_vid);
                 if actual_type != expected_type {
                     todo!("diagnostic: hir-ty-assert type mismatch");
                 }
             }
             hir::Instruction::Assign { target, value } => {
                 let new_value = self.eval_expr(value)?;
-                let Some(prev_value) = self.set_local(target, new_value) else {
+                let Some(prev_value) = self.bindings.set(target, new_value) else {
                     unreachable!("hir: init with assign")
                 };
-                if self.type_of_value(new_value) != self.type_of_value(prev_value) {
+                if self.eval.values.type_of_value(new_value)
+                    != self.eval.values.type_of_value(prev_value)
+                {
                     todo!("diagnostic: assign type mismatch");
                 }
             }
             hir::Instruction::If { condition, then_block, else_block } => {
-                let cond_vid = self.get_local(condition);
+                let cond_vid = self.bindings.get(condition);
                 match self.eval.values.lookup(cond_vid) {
                     Value::Bool(true) => self.interpret_block(then_block)?,
                     Value::Bool(false) => self.interpret_block(else_block)?,
@@ -122,7 +119,7 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
             hir::Expr::BigNum(id) => self.eval.values.intern_num(id),
             hir::Expr::Type(type_id) => self.eval.values.intern_type(type_id),
             hir::Expr::ConstRef(const_id) => self.eval.ensure_const_evaluated(const_id),
-            hir::Expr::LocalRef(local_id) => self.get_local(local_id),
+            hir::Expr::LocalRef(local_id) => self.bindings.get(local_id),
             hir::Expr::FnDef(fn_def_id) => self.eval_fn_def(fn_def_id)?,
             hir::Expr::Call { callee, args } => self.eval_call(callee, args)?,
             hir::Expr::StructDef(struct_def_id) => self.eval_struct_def(struct_def_id)?,
@@ -133,48 +130,43 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
     }
 
     fn eval_fn_def(&mut self, fn_def: hir::FnDefId) -> Result<ValueId, ReturnValue> {
-        let capture_start = self.value_buf.len();
-        for capture in &self.eval.hir.fn_captures[fn_def] {
-            self.value_buf.push(self.get_local(capture.outer_local));
-        }
-
-        let closure = Value::Closure { fn_def, captures: &self.value_buf[capture_start..] };
-        let value_id = self.eval.values.intern(closure);
-
-        self.value_buf.truncate(capture_start);
+        let value_id = self.value_buf.use_as(|captures| {
+            for capture in &self.eval.hir.fn_captures[fn_def] {
+                captures.push(self.bindings.get(capture.outer_local));
+            }
+            let closure = Value::Closure { fn_def, captures };
+            self.eval.values.intern(closure)
+        });
 
         Ok(value_id)
     }
 
     fn eval_struct_def(&mut self, struct_def_id: hir::StructDefId) -> Result<ValueId, ReturnValue> {
         let struct_def = self.eval.hir.struct_defs[struct_def_id];
-        let type_index_vid = self.get_local(struct_def.type_index);
+        let type_index_vid = self.bindings.get(struct_def.type_index);
         let fields_info = &self.eval.hir.fields[struct_def.fields];
 
-        debug_assert!(self.type_buf.is_empty());
-        debug_assert!(self.name_buf.is_empty());
-
-        for field in fields_info {
-            let field_vid = self.get_local(field.value);
-            match self.eval.values.lookup(field_vid) {
-                Value::Type(tid) => {
-                    self.type_buf.push(tid);
-                    self.name_buf.push(field.name);
+        let struct_type_id = self.type_buf.use_as(|types| {
+            self.name_buf.use_as(|names| {
+                for field in fields_info {
+                    let field_vid = self.bindings.get(field.value);
+                    match self.eval.values.lookup(field_vid) {
+                        Value::Type(tid) => {
+                            types.push(tid);
+                            names.push(field.name);
+                        }
+                        _ => todo!("diagnostic: struct field type must be Type"),
+                    }
                 }
-                _ => todo!("diagnostic: struct field type must be Type"),
-            }
-        }
 
-        let struct_type_id =
-            self.eval.types.intern(sensei_values::Type::Struct(sensei_values::StructInfo {
-                source: struct_def.source,
-                type_index: type_index_vid,
-                fields: &self.type_buf,
-                field_names: &self.name_buf,
-            }));
-
-        self.type_buf.clear();
-        self.name_buf.clear();
+                self.eval.types.intern(sensei_values::Type::Struct(sensei_values::StructInfo {
+                    source: struct_def.source,
+                    type_index: type_index_vid,
+                    field_types: types,
+                    field_names: names,
+                }))
+            })
+        });
 
         Ok(self.eval.values.intern_type(struct_type_id))
     }
@@ -184,7 +176,7 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
         ty: hir::LocalId,
         fields_id: hir::FieldsId,
     ) -> Result<ValueId, ReturnValue> {
-        let type_vid = self.get_local(ty);
+        let type_vid = self.bindings.get(ty);
         let struct_type_id = match self.eval.values.lookup(type_vid) {
             Value::Type(tid) => tid,
             _ => todo!("diagnostic: struct literal type must be Type"),
@@ -192,19 +184,12 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
 
         let fields_info = &self.eval.hir.fields[fields_id];
 
-        let buf_start = self.value_buf.len();
-        for field in fields_info {
-            self.value_buf.push(self.get_local(field.value));
-        }
-
-        let result = self
-            .eval
-            .values
-            .intern(Value::StructVal { ty: struct_type_id, fields: &self.value_buf[buf_start..] });
-
-        self.value_buf.truncate(buf_start);
-
-        Ok(result)
+        self.value_buf.use_as(|fields| {
+            for field in fields_info {
+                fields.push(self.bindings.get(field.value));
+            }
+            Ok(self.eval.values.intern(Value::StructVal { ty: struct_type_id, fields }))
+        })
     }
 
     fn eval_member(
@@ -212,7 +197,7 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
         object: hir::LocalId,
         member: sensei_parser::StrId,
     ) -> Result<ValueId, ReturnValue> {
-        let obj_vid = self.get_local(object);
+        let obj_vid = self.bindings.get(object);
         match self.eval.values.lookup(obj_vid) {
             Value::StructVal { ty, fields } => {
                 let Some(field_index) = self.eval.types.field_index_by_name(ty, member) else {
@@ -229,48 +214,48 @@ impl<'a, 'hir> ComptimeInterpreter<'a, 'hir> {
         callee: hir::LocalId,
         args: hir::CallArgsId,
     ) -> Result<ValueId, ReturnValue> {
-        let closure_vid = self.get_local(callee);
-        let (fn_def_id, captures) = match self.eval.values.lookup(closure_vid) {
-            Value::Closure { fn_def, captures } => (fn_def, captures),
-            _ => todo!("diagnostic: comptime call on non-function"),
+        let closure_vid = self.bindings.get(callee);
+        let Value::Closure { fn_def: fn_def_id, captures } = self.eval.values.lookup(closure_vid)
+        else {
+            todo!("diagnostic: comptime call on non-function")
         };
-
-        let capture_start = self.value_buf.len();
-        self.value_buf.extend_from_slice(captures);
 
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
         let hir_captures = &self.eval.hir.fn_captures[fn_def_id];
-        let arg_locals = &self.eval.hir.call_params[args];
+
+        let arg_locals = &self.eval.hir.call_args[args];
 
         if params.len() != arg_locals.len() {
             todo!("diagnostic: function argument count mismatch");
         }
 
-        let args_start = self.value_buf.len();
-        for &local in arg_locals {
-            self.value_buf.push(self.get_local(local));
-        }
+        let saved_bindings = self.value_buf.use_as(|args| {
+            for &local in arg_locals {
+                args.push(self.bindings.get(local));
+            }
 
-        let saved_bindings = std::mem::take(&mut self.bindings);
+            let saved_bindings = std::mem::take(&mut self.bindings);
 
-        for (i, capture_info) in hir_captures.iter().enumerate() {
-            self.set_local(capture_info.inner_local, self.value_buf[capture_start + i]);
-        }
+            for (capture_info, capture) in hir_captures.iter().zip(captures) {
+                self.bindings.set(capture_info.inner_local, *capture);
+            }
 
-        for (i, param) in params.iter().enumerate() {
-            self.set_local(param.local, self.value_buf[args_start + i]);
-        }
+            for (param, arg) in params.iter().zip(args) {
+                self.bindings.set(param.value, *arg);
+            }
 
-        self.value_buf.truncate(capture_start);
+            saved_bindings
+        });
+
+        self.interpret_block(fn_def.type_preamble).expect("hir: preamble with return?");
 
         let result = match self.interpret_block(fn_def.body) {
-            Ok(()) => ValueId::VOID,
+            Ok(()) => self.bindings.get(fn_def.return_value),
             Err(ReturnValue(vid)) => vid,
         };
 
         self.bindings = saved_bindings;
-
         Ok(result)
     }
 }

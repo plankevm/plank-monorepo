@@ -20,7 +20,7 @@ pub struct StructExtraInfo {
 pub struct StructInfo<'a> {
     pub source: cst::NodeIdx,
     pub type_index: ValueId,
-    pub fields: &'a [TypeId],
+    pub field_types: &'a [TypeId],
     pub field_names: &'a [StrId],
 }
 
@@ -152,7 +152,8 @@ impl TypeInterner {
         match entry {
             Entry::Occupied(occupied) => (*occupied.get()).into(),
             Entry::Vacant(vacant) => {
-                let field_struct_idx = self.storage.struct_fields.push_copy_slice(r#struct.fields);
+                let field_struct_idx =
+                    self.storage.struct_fields.push_copy_slice(r#struct.field_types);
                 let name_struct_idx =
                     self.storage.struct_field_names.push_copy_slice(r#struct.field_names);
                 let new_struct_idx = self.storage.index_to_struct.push(StructExtraInfo {
@@ -176,7 +177,7 @@ impl TypeInterner {
         Type::Struct(StructInfo {
             source: stored.source,
             type_index: stored.type_index,
-            fields: &self.storage.struct_fields[struct_idx],
+            field_types: &self.storage.struct_fields[struct_idx],
             field_names: &self.storage.struct_field_names[struct_idx],
         })
     }
@@ -196,7 +197,7 @@ impl StructStorage {
         let type_index = self.index_to_struct[idx].type_index;
         let fields = &self.struct_fields[idx];
         let field_names = &self.struct_field_names[idx];
-        StructInfo { source, type_index, fields, field_names }
+        StructInfo { source, type_index, field_types: fields, field_names }
     }
 
     fn hash_struct_id(&self, idx: StructIdx) -> u64 {

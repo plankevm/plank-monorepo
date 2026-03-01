@@ -26,7 +26,7 @@ pub(crate) struct Evaluator<'hir> {
     const_states: IndexVec<ConstId, ConstState>,
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,
-    pub mir_fn_locals: ListOfLists<mir::FnId, Option<TypeId>>,
+    pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
     pub fn_cache: HashMap<ValueId, mir::FnId>,
 }

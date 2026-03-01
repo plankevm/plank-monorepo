@@ -71,6 +71,17 @@ impl ValueInterner {
         self.hasher.hash_one(value)
     }
 
+    pub fn type_of_value(&self, value: ValueId) -> TypeId {
+        match self.lookup(value) {
+            Value::Void => TypeId::VOID,
+            Value::Bool(_) => TypeId::BOOL,
+            Value::BigNum(_) => TypeId::U256,
+            Value::Type(_) => TypeId::TYPE,
+            Value::Closure { .. } => TypeId::FUNCTION,
+            Value::StructVal { ty, .. } => ty,
+        }
+    }
+
     pub fn intern_num(&mut self, num: BigNumId) -> ValueId {
         self.intern(Value::BigNum(num))
     }
