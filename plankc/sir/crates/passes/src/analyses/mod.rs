@@ -9,6 +9,7 @@ mod predecessors;
 
 pub use allocation_liveness::{
     AllocData, AllocId, AllocKind, AllocationLiveness, Interval, IntervalEnd, IntervalStart,
+    discover_allocations,
 };
 pub use basic_block_ownership::BasicBlockOwnershipAndReachability;
 pub use cache::{AnalysesMask, AnalysesStore};
