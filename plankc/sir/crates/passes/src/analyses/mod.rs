@@ -6,6 +6,7 @@ mod def_use;
 mod dominators;
 mod legalizer;
 mod predecessors;
+mod traversal;
 
 pub use allocation_liveness::{
     AllocData, AllocId, AllocKind, AllocationLiveness, Interval, IntervalEnd, IntervalStart,
@@ -18,3 +19,4 @@ pub use def_use::{DefUse, UseKind, UseLocation};
 pub use dominators::{DominanceFrontiers, Dominators};
 pub use legalizer::{Legalizer, LegalizerError};
 pub use predecessors::Predecessors;
+pub use traversal::dfs_postorder;
