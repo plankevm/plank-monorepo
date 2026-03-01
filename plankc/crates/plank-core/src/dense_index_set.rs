@@ -87,6 +87,26 @@ impl<I: Idx> DenseIndexSet<I> {
         added
     }
 
+    /// Returns `true` if this set and `other` share no elements.
+    pub fn is_disjoint(&self, other: &Self) -> bool {
+        for i in 0..self.inner.len().min(other.inner.len()) {
+            if self.inner[i] & other.inner[i] != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Adds all elements from `other` into this set.
+    pub fn union_with(&mut self, other: &Self) {
+        if other.inner.len() > self.inner.len() {
+            self.inner.resize(other.inner.len(), 0);
+        }
+        for i in 0..other.inner.len() {
+            self.inner[i] |= other.inner[i];
+        }
+    }
+
     /// Removes an index from the set.
     ///
     /// Returns `true` if the index was present and removed, or `false` if it wasn't in the set.
@@ -251,5 +271,37 @@ mod tests {
         assert_eq!(set.len(), indices.len());
         let collected: Vec<u32> = set.iter().map(|i| i.get()).collect();
         assert_eq!(collected, indices);
+    }
+
+    #[test]
+    fn test_is_disjoint() {
+        let empty: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        assert!(empty.is_disjoint(&empty));
+
+        let mut a: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        a.add(TestIdx::new(5));
+        assert!(a.is_disjoint(&empty));
+
+        let mut b: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        b.add(TestIdx::new(1000));
+        assert!(a.is_disjoint(&b));
+        b.add(TestIdx::new(5));
+        assert!(!a.is_disjoint(&b));
+    }
+
+    #[test]
+    fn test_union_with() {
+        let mut a: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        a.add(TestIdx::new(1));
+        a.add(TestIdx::new(3));
+
+        let mut b: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        b.add(TestIdx::new(2));
+        b.add(TestIdx::new(3));
+        b.add(TestIdx::new(1000));
+
+        a.union_with(&b);
+        let collected: Vec<u32> = a.iter().map(|i| i.get()).collect();
+        assert_eq!(collected, [1, 2, 3, 1000]);
     }
 }
