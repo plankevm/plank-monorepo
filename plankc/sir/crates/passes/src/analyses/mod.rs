@@ -1,3 +1,4 @@
+mod allocation_liveness;
 mod basic_block_ownership;
 mod cache;
 mod cfg_in_out_bundling;
@@ -6,6 +7,9 @@ mod dominators;
 mod legalizer;
 mod predecessors;
 
+pub use allocation_liveness::{
+    AllocData, AllocId, AllocKind, AllocationLiveness, Interval, IntervalEnd, IntervalStart,
+};
 pub use basic_block_ownership::BasicBlockOwnershipAndReachability;
 pub use cache::{AnalysesMask, AnalysesStore};
 pub use cfg_in_out_bundling::{ControlFlowGraphInOutBundling, InOutGroupId};
