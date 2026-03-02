@@ -29,6 +29,10 @@ impl<'a> DisplayHir<'a> {
                 let arg_locals = &self.hir.call_args[args];
                 write!(f, "Call {{ callee: {callee:?}, args: {arg_locals:?} }}")
             }
+            Expr::BuiltinCall { builtin, args } => {
+                let arg_locals = &self.hir.call_args[args];
+                write!(f, "{builtin} {{ args: {arg_locals:?} }}")
+            }
             Expr::Member { object, member } => {
                 let name = &self.interner[member];
                 write!(f, "Member {{ object: {object:?}, member: {name:?} }}")

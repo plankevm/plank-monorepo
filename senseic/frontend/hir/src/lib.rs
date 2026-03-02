@@ -15,6 +15,8 @@ pub mod display;
 
 pub use sensei_values::{BigNumId, BigNumInterner};
 
+use crate::builtins::Builtin;
+
 newtype_index! {
     pub struct ConstId;
     pub struct LocalId;
@@ -38,6 +40,7 @@ pub enum Expr {
     Type(TypeId),
     // Compound expressions
     Call { callee: LocalId, args: CallArgsId },
+    BuiltinCall { builtin: Builtin, args: CallArgsId },
     Member { object: LocalId, member: StrId },
     StructLit { ty: LocalId, fields: FieldsId },
     StructDef(StructDefId),
@@ -194,7 +197,11 @@ impl<'a> BlockLowerer<'a> {
 
     fn alloc_local(&mut self, name: StrId) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
-            todo!("diagnostic: shadowing primitive");
+            todo!("diagnostic: shadowing primitive type");
+        }
+
+        if Builtin::from_str_id(name).is_some() {
+            todo!("diagnostic: shadowing builtin");
         }
 
         let id = self.next_local_id.get_and_inc();
@@ -304,6 +311,10 @@ impl<'a> BlockLowerer<'a> {
             return Expr::Type(ty);
         }
 
+        if Builtin::from_str_id(name).is_some() {
+            todo!("diagnostic: non-call reference to builtin");
+        }
+
         if let Some(local_id) = self.lookup_local(name) {
             return Expr::LocalRef(local_id);
         }
@@ -337,14 +348,27 @@ impl<'a> BlockLowerer<'a> {
                 Expr::Member { object, member: member_expr.member }
             }
             ast::Expr::Call(call_expr) => {
-                let callee = self.lower_expr_to_local(call_expr.callee());
-                let buf_start = self.locals_buf.len();
-                for arg in call_expr.args() {
-                    let local = self.lower_expr_to_local(arg);
-                    self.locals_buf.push(local);
+                let callee = call_expr.callee();
+                if let ast::Expr::Ident(name) = callee
+                    && let Some(builtin) = Builtin::from_str_id(name)
+                {
+                    let buf_start = self.locals_buf.len();
+                    for arg in call_expr.args() {
+                        let local = self.lower_expr_to_local(arg);
+                        self.locals_buf.push(local);
+                    }
+                    let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
+                    Expr::BuiltinCall { builtin, args }
+                } else {
+                    let callee = self.lower_expr_to_local(callee);
+                    let buf_start = self.locals_buf.len();
+                    for arg in call_expr.args() {
+                        let local = self.lower_expr_to_local(arg);
+                        self.locals_buf.push(local);
+                    }
+                    let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
+                    Expr::Call { callee, args }
                 }
-                let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
-                Expr::Call { callee, args }
             }
             ast::Expr::StructLit(struct_lit) => {
                 let ty = self.lower_expr_to_local(struct_lit.type_expr());

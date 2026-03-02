@@ -97,7 +97,7 @@ impl TypeId {
         }
     }
 
-    pub fn is_struct(self) -> bool {
+    pub const fn is_struct(self) -> bool {
         self.0.get() > Self::LAST_FIXED_ID.0.get()
     }
 }

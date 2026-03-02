@@ -53,6 +53,10 @@ impl<'a> DisplayMir<'a> {
                 write!(f, "call @fn{}", callee.get())?;
                 self.fmt_args(f, args)
             }
+            Expr::BuiltinCall { builtin, args } => {
+                write!(f, "{builtin}")?;
+                self.fmt_args(f, args)
+            }
             Expr::FieldAccess { object, field_index } => {
                 self.fmt_local(f, object)?;
                 write!(f, ".{field_index}")

@@ -139,6 +139,7 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
             hir::Expr::StructDef(struct_def_id) => self.eval_struct_def(struct_def_id)?,
             hir::Expr::StructLit { ty, fields } => self.eval_struct_lit(ty, fields)?,
             hir::Expr::Member { object, member } => self.eval_member(object, member)?,
+            hir::Expr::BuiltinCall { .. } => todo!("comptime builtin eval not yet implemented"),
         };
         Ok(value)
     }

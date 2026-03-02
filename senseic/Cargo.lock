@@ -1584,6 +1584,7 @@ name = "sensei-mir"
 version = "0.1.0"
 dependencies = [
  "sensei-core",
+ "sensei-hir",
  "sensei-values",
 ]
 

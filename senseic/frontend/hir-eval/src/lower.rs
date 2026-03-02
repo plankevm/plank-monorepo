@@ -139,6 +139,24 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
         }
     }
 
+    fn translate_call_args(&mut self, call_args_id: hir::CallArgsId) -> mir::ArgsId {
+        let arg_count = self.eval.hir.call_args[call_args_id].len();
+        let buf_start = self.arg_buf.len();
+        for i in 0..arg_count {
+            let arg_local = self.eval.hir.call_args[call_args_id][i];
+            let arg = self.bindings.get(arg_local);
+            let mir_local = self.ensure_runtime(arg);
+            self.arg_buf.push(mir_local);
+        }
+        self.eval.mir_args.push_iter(self.arg_buf.drain(buf_start..))
+    }
+
+    fn emit_call_expr(&mut self, return_type: TypeId, expr: mir::Expr) -> LocalValue {
+        let mir_local = self.alloc_mir_local(return_type);
+        self.instructions_buf.push(mir::Instruction::Set { local: mir_local, expr });
+        LocalValue::Runtime { mir_local, ty: return_type }
+    }
+
     fn translate_expr(&mut self, expr: hir::Expr) -> LocalValue {
         match expr {
             hir::Expr::Void => LocalValue::Comptime(ValueId::VOID),
@@ -178,6 +196,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     todo!("diagnostic: dynamically dispatching functions not supported")
                 };
 
+                // TODO: Handle comptime parameter based partial evaluation.
                 let mir_fn_id = if let Some(&cached) = self.eval.fn_cache.get(&closure_value_id) {
                     cached
                 } else {
@@ -186,23 +205,35 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     fn_id
                 };
 
-                let arg_count = self.eval.hir.call_args[call_args_id].len();
-                let buf_start = self.arg_buf.len();
-                for i in 0..arg_count {
-                    let arg_local = self.eval.hir.call_args[call_args_id][i];
-                    let arg = self.bindings.get(arg_local);
-                    let mir_local = self.ensure_runtime(arg);
-                    self.arg_buf.push(mir_local);
-                }
-                let args = self.eval.mir_args.push_iter(self.arg_buf.drain(buf_start..));
-
+                let args = self.translate_call_args(call_args_id);
                 let return_type = self.eval.mir_fns[mir_fn_id].return_type;
-                let mir_local = self.alloc_mir_local(return_type);
-                self.instructions_buf.push(mir::Instruction::Set {
-                    local: mir_local,
-                    expr: mir::Expr::Call { callee: mir_fn_id, args },
-                });
-                LocalValue::Runtime { mir_local, ty: return_type }
+                self.emit_call_expr(return_type, mir::Expr::Call { callee: mir_fn_id, args })
+            }
+            hir::Expr::BuiltinCall { builtin, args: call_args_id } => {
+                let arg_locals = &self.eval.hir.call_args[call_args_id];
+                let signatures = builtin.signatures();
+
+                let types_start = self.types_buf.len();
+                for &arg_local in arg_locals {
+                    let arg_ty = match self.bindings.get(arg_local) {
+                        LocalValue::Runtime { ty, .. } => ty,
+                        LocalValue::Comptime(vid) => self.eval.values.type_of_value(vid),
+                    };
+                    self.types_buf.push(arg_ty);
+                }
+                let actual_types = &self.types_buf[types_start..];
+
+                let return_type = signatures
+                    .iter()
+                    .find_map(|(inputs, output)| (*inputs == actual_types).then_some(*output))
+                    .unwrap_or_else(|| {
+                        todo!("diagnostic: no matching builtin signature for {builtin}")
+                    });
+
+                self.types_buf.truncate(types_start);
+
+                let args = self.translate_call_args(call_args_id);
+                self.emit_call_expr(return_type, mir::Expr::BuiltinCall { builtin, args })
             }
             hir::Expr::StructDef(struct_def_id) => {
                 let struct_def = self.eval.hir.struct_defs[struct_def_id];

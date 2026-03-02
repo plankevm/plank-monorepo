@@ -1,6 +1,7 @@
 pub mod display;
 
 use sensei_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use sensei_hir::builtins::Builtin;
 use sensei_values::{BigNumId, TypeId, TypeInterner};
 
 newtype_index! {
@@ -17,6 +18,7 @@ pub enum Expr {
     Void,
     BigNum(BigNumId),
     Call { callee: FnId, args: ArgsId },
+    BuiltinCall { builtin: Builtin, args: ArgsId },
     FieldAccess { object: LocalId, field_index: u32 },
     StructLit { ty: TypeId, fields: ArgsId },
 }
