@@ -10,6 +10,7 @@ use sensei_parser::{
 pub use sensei_values;
 use sensei_values::TypeId;
 
+pub mod builtins;
 pub mod display;
 
 pub use sensei_values::{BigNumId, BigNumInterner};

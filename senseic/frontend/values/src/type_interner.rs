@@ -63,12 +63,12 @@ impl TypeId {
 
     pub fn resolve_primitive(name: StrId) -> Option<TypeId> {
         match name {
-            PlankInterner::VOID_NAME => Some(TypeId::VOID),
-            PlankInterner::U256_NAME => Some(TypeId::U256),
-            PlankInterner::BOOL_NAME => Some(TypeId::BOOL),
-            PlankInterner::MEMPTR_NAME => Some(TypeId::MEMORY_POINTER),
-            PlankInterner::TYPE_NAME => Some(TypeId::TYPE),
-            PlankInterner::FUNCTION_NAME => Some(TypeId::FUNCTION),
+            PlankInterner::VOID_TYPE_NAME => Some(TypeId::VOID),
+            PlankInterner::U256_TYPE_NAME => Some(TypeId::U256),
+            PlankInterner::BOOL_TYPE_NAME => Some(TypeId::BOOL),
+            PlankInterner::MEMPTR_TYPE_NAME => Some(TypeId::MEMORY_POINTER),
+            PlankInterner::TYPE_TYPE_NAME => Some(TypeId::TYPE),
+            PlankInterner::FUNCTION_TYPE_NAME => Some(TypeId::FUNCTION),
             _ => None,
         }
     }
