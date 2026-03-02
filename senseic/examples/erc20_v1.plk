@@ -1,0 +1,74 @@
+const return_runtime = fn() void {
+    let runtime: memptr = malloc_uninit(runtime_length());
+    codecopy(runtime, runtime_start_offset(), runtime_length());
+    evm_return(runtime, runtime_length());
+};
+
+const dangling = fn() memptr { malloc_uninit(0) };
+
+const revert_empty = fn() void {
+    revert(dangling(), 0);
+};
+
+const addr = struct { raw: u256 };
+
+const to_addr = fn (raw: u256) addr {
+    if gt(shr(160, raw), 0) {
+        revert_empty();
+    }
+    addr { raw: raw }
+};
+
+const get_balance_slot = fn (owner: addr) u256 {
+    let buf = malloc_uninit(32);
+    mstore32(buf, owner.raw);
+    keccak256(buf, 32)
+};
+
+init {
+    let constructor_args = malloc_uninit(64);
+    codecopy(constructor_args, init_end_offset(), 64);
+
+    let owner = to_addr(mload32(constructor_args));
+    let amount = mload32(add(constructor_args, 32));
+
+    let bal_slot = get_balance_slot(owner);
+    sstore(bal_slot, amount);
+
+    return_runtime();
+}
+
+const BALANCE_OF_SELECTOR = 0x70a08231;
+const TRANSFER_SELECTOR = 0xa9059cbb;
+
+run {
+    let selector = shr(sub(256, 32), calldataload(0));
+
+    if eq(selector, TRANSFER_SELECTOR) {
+        let to: addr = to_addr(calldataload(0x04));
+        let amount: u256 = calldataload(0x24);
+
+        let from_balance_slot = get_balance_slot(addr { raw: caller() });
+        let from_balance = sload(from_balance_slot);
+        if lt(from_balance, amount) {
+            revert_empty();
+        }
+        sstore(from_balance_slot, sub(from_balance, amount));
+
+        let to_balance_slot = get_balance_slot(to);
+        let to_balance = sload(to_balance_slot);
+        sstore(to_balance_slot, add(to_balance, amount));
+
+        evm_stop();
+    } else if eq(selector, BALANCE_OF_SELECTOR) {
+        let owner: addr = to_addr(calldataload(0x04));
+        let bal_slot = get_balance_slot(owner);
+        let bal = sload(bal_slot);
+
+        let ret_buf = malloc_uninit(32);
+        mstore32(ret_buf, bal);
+        evm_return(ret_buf, 32);
+    } else {
+        revert_empty();
+    }
+}
