@@ -6,7 +6,7 @@ use sensei_values::{TypeId, ValueId};
 
 use crate::{
     Evaluator,
-    comptime::{Bindings, ComptimeInterpreter},
+    comptime::{self, ComptimeInterpreter},
     value::{Value, ValueInterner},
 };
 
@@ -65,7 +65,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
         self.local_types.push(ty)
     }
 
-    fn import_comptime_bindings(&mut self, bindings: &Bindings) {
+    fn import_comptime_bindings(&mut self, bindings: &comptime::Bindings) {
         for (local, vid) in bindings.iter() {
             self.bindings.set(local, LocalValue::Comptime(vid));
         }
@@ -200,14 +200,32 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                 let mir_fn_id = if let Some(&cached) = self.eval.fn_cache.get(&closure_value_id) {
                     cached
                 } else {
-                    let fn_id = lower_fn_body(self.eval, closure_value_id);
+                    let fn_id: mir::FnId = lower_fn_body(self.eval, closure_value_id);
                     self.eval.fn_cache.insert(closure_value_id, fn_id);
                     fn_id
                 };
 
+                let fn_def = self.eval.mir_fns[mir_fn_id];
+                let arg_locals = &self.eval.hir.call_args[call_args_id];
+
+                if arg_locals.len() != fn_def.param_count as usize {
+                    todo!("diagnostic: function call argument count mismatch");
+                }
+
+                let param_types =
+                    &self.eval.mir_fn_locals[mir_fn_id][..fn_def.param_count as usize];
+                for (&arg_local, &expected_ty) in arg_locals.iter().zip(param_types) {
+                    let actual_ty = match self.bindings.get(arg_local) {
+                        LocalValue::Runtime { ty, .. } => ty,
+                        LocalValue::Comptime(vid) => self.eval.values.type_of_value(vid),
+                    };
+                    if actual_ty != expected_ty {
+                        todo!("diagnostic: function call argument type mismatch");
+                    }
+                }
+
                 let args = self.translate_call_args(call_args_id);
-                let return_type = self.eval.mir_fns[mir_fn_id].return_type;
-                self.emit_call_expr(return_type, mir::Expr::Call { callee: mir_fn_id, args })
+                self.emit_call_expr(fn_def.return_type, mir::Expr::Call { callee: mir_fn_id, args })
             }
             hir::Expr::BuiltinCall { builtin, args: call_args_id } => {
                 let arg_locals = &self.eval.hir.call_args[call_args_id];
@@ -497,7 +515,7 @@ fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::Fn
     let hir_captures = &eval.hir.fn_captures[fn_def_id];
 
     // Phase 1: Bind captures into preamble bindings, evaluate type preamble.
-    let mut preamble_bindings = Bindings::default();
+    let mut preamble_bindings = comptime::Bindings::default();
     for (capture_info, &value_id) in hir_captures.iter().zip(captures) {
         preamble_bindings.set(capture_info.inner_local, value_id);
     }

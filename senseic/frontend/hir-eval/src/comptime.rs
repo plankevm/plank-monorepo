@@ -264,6 +264,18 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
 
         self.interpret_block(fn_def.type_preamble).expect("hir: preamble with return?");
 
+        for param in params {
+            let expected_type_vid = self.bindings.get(param.r#type);
+            let Value::Type(expected_type) = self.eval.values.lookup(expected_type_vid) else {
+                todo!("diagnostic: param type must be Type")
+            };
+            let actual_arg_vid = self.bindings.get(param.value);
+            let actual_type = self.eval.values.type_of_value(actual_arg_vid);
+            if actual_type != expected_type {
+                todo!("diagnostic: comptime call argument type mismatch");
+            }
+        }
+
         let Err(ReturnValue(result)) = self.interpret_block(fn_def.body) else {
             unreachable!("function body must end with Return instruction")
         };
