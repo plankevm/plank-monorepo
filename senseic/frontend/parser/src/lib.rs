@@ -1,4 +1,5 @@
 pub mod ast;
+pub mod builtin_names;
 pub mod cst;
 pub mod diagnostics;
 pub mod error_report;

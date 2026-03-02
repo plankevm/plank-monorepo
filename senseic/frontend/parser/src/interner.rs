@@ -1,3 +1,4 @@
+use crate::builtin_names;
 use sensei_core::{intern::StringInterner, newtype_index};
 
 newtype_index! {
@@ -196,178 +197,187 @@ impl PlankInterner {
     }
 
     fn inject_primitives(interner: &mut StringInterner<StrId>) {
-        assert_eq!(interner.intern("void"), Self::VOID_TYPE_NAME);
-        assert_eq!(interner.intern("u256"), Self::U256_TYPE_NAME);
-        assert_eq!(interner.intern("bool"), Self::BOOL_TYPE_NAME);
-        assert_eq!(interner.intern("memptr"), Self::MEMPTR_TYPE_NAME);
-        assert_eq!(interner.intern("type"), Self::TYPE_TYPE_NAME);
-        assert_eq!(interner.intern("function"), Self::FUNCTION_TYPE_NAME);
+        assert_eq!(interner.intern(builtin_names::VOID_TYPE_NAME), Self::VOID_TYPE_NAME);
+        assert_eq!(interner.intern(builtin_names::U256_TYPE_NAME), Self::U256_TYPE_NAME);
+        assert_eq!(interner.intern(builtin_names::BOOL_TYPE_NAME), Self::BOOL_TYPE_NAME);
+        assert_eq!(interner.intern(builtin_names::MEMPTR_TYPE_NAME), Self::MEMPTR_TYPE_NAME);
+        assert_eq!(interner.intern(builtin_names::TYPE_TYPE_NAME), Self::TYPE_TYPE_NAME);
+        assert_eq!(interner.intern(builtin_names::FUNCTION_TYPE_NAME), Self::FUNCTION_TYPE_NAME);
 
         // ========== EVM Arithmetic ==========
-        assert_eq!(interner.intern("add"), Self::ADD);
-        assert_eq!(interner.intern("mul"), Self::MUL);
-        assert_eq!(interner.intern("sub"), Self::SUB);
-        assert_eq!(interner.intern("raw_div"), Self::DIV);
-        assert_eq!(interner.intern("raw_sdiv"), Self::SDIV);
-        assert_eq!(interner.intern("raw_mod"), Self::MOD);
-        assert_eq!(interner.intern("raw_smod"), Self::SMOD);
-        assert_eq!(interner.intern("raw_addmod"), Self::ADDMOD);
-        assert_eq!(interner.intern("raw_mulmod"), Self::MULMOD);
-        assert_eq!(interner.intern("exp"), Self::EXP);
-        assert_eq!(interner.intern("signextend"), Self::SIGNEXTEND);
+        assert_eq!(interner.intern(builtin_names::ADD), Self::ADD);
+        assert_eq!(interner.intern(builtin_names::MUL), Self::MUL);
+        assert_eq!(interner.intern(builtin_names::SUB), Self::SUB);
+        assert_eq!(interner.intern(builtin_names::DIV), Self::DIV);
+        assert_eq!(interner.intern(builtin_names::SDIV), Self::SDIV);
+        assert_eq!(interner.intern(builtin_names::MOD), Self::MOD);
+        assert_eq!(interner.intern(builtin_names::SMOD), Self::SMOD);
+        assert_eq!(interner.intern(builtin_names::ADDMOD), Self::ADDMOD);
+        assert_eq!(interner.intern(builtin_names::MULMOD), Self::MULMOD);
+        assert_eq!(interner.intern(builtin_names::EXP), Self::EXP);
+        assert_eq!(interner.intern(builtin_names::SIGNEXTEND), Self::SIGNEXTEND);
 
         // ========== EVM Comparison & Bitwise Logic ==========
-        assert_eq!(interner.intern("lt"), Self::LT);
-        assert_eq!(interner.intern("gt"), Self::GT);
-        assert_eq!(interner.intern("slt"), Self::SLT);
-        assert_eq!(interner.intern("sgt"), Self::SGT);
-        assert_eq!(interner.intern("eq"), Self::EQ);
-        assert_eq!(interner.intern("iszero"), Self::ISZERO);
-        assert_eq!(interner.intern("bitwise_and"), Self::AND);
-        assert_eq!(interner.intern("bitwise_or"), Self::OR);
-        assert_eq!(interner.intern("bitwise_xor"), Self::XOR);
-        assert_eq!(interner.intern("bitwise_not"), Self::NOT);
-        assert_eq!(interner.intern("byte"), Self::BYTE);
-        assert_eq!(interner.intern("shl"), Self::SHL);
-        assert_eq!(interner.intern("shr"), Self::SHR);
-        assert_eq!(interner.intern("sar"), Self::SAR);
+        assert_eq!(interner.intern(builtin_names::LT), Self::LT);
+        assert_eq!(interner.intern(builtin_names::GT), Self::GT);
+        assert_eq!(interner.intern(builtin_names::SLT), Self::SLT);
+        assert_eq!(interner.intern(builtin_names::SGT), Self::SGT);
+        assert_eq!(interner.intern(builtin_names::EQ), Self::EQ);
+        assert_eq!(interner.intern(builtin_names::ISZERO), Self::ISZERO);
+        assert_eq!(interner.intern(builtin_names::AND), Self::AND);
+        assert_eq!(interner.intern(builtin_names::OR), Self::OR);
+        assert_eq!(interner.intern(builtin_names::XOR), Self::XOR);
+        assert_eq!(interner.intern(builtin_names::NOT), Self::NOT);
+        assert_eq!(interner.intern(builtin_names::BYTE), Self::BYTE);
+        assert_eq!(interner.intern(builtin_names::SHL), Self::SHL);
+        assert_eq!(interner.intern(builtin_names::SHR), Self::SHR);
+        assert_eq!(interner.intern(builtin_names::SAR), Self::SAR);
 
         // ========== EVM Keccak-256 ==========
-        assert_eq!(interner.intern("keccak256"), Self::KECCAK256);
+        assert_eq!(interner.intern(builtin_names::KECCAK256), Self::KECCAK256);
 
         // ========== EVM Environment Information ==========
-        assert_eq!(interner.intern("address_this"), Self::ADDRESS);
-        assert_eq!(interner.intern("balance"), Self::BALANCE);
-        assert_eq!(interner.intern("origin"), Self::ORIGIN);
-        assert_eq!(interner.intern("caller"), Self::CALLER);
-        assert_eq!(interner.intern("callvalue"), Self::CALLVALUE);
-        assert_eq!(interner.intern("calldataload"), Self::CALLDATALOAD);
-        assert_eq!(interner.intern("calldatasize"), Self::CALLDATASIZE);
-        assert_eq!(interner.intern("calldatacopy"), Self::CALLDATACOPY);
-        assert_eq!(interner.intern("codesize"), Self::CODESIZE);
-        assert_eq!(interner.intern("codecopy"), Self::CODECOPY);
-        assert_eq!(interner.intern("gasprice"), Self::GASPRICE);
-        assert_eq!(interner.intern("extcodesize"), Self::EXTCODESIZE);
-        assert_eq!(interner.intern("extcodecopy"), Self::EXTCODECOPY);
-        assert_eq!(interner.intern("returndatasize"), Self::RETURNDATASIZE);
-        assert_eq!(interner.intern("returndatacopy"), Self::RETURNDATACOPY);
-        assert_eq!(interner.intern("extcodehash"), Self::EXTCODEHASH);
-        assert_eq!(interner.intern("gas"), Self::GAS);
+        assert_eq!(interner.intern(builtin_names::ADDRESS), Self::ADDRESS);
+        assert_eq!(interner.intern(builtin_names::BALANCE), Self::BALANCE);
+        assert_eq!(interner.intern(builtin_names::ORIGIN), Self::ORIGIN);
+        assert_eq!(interner.intern(builtin_names::CALLER), Self::CALLER);
+        assert_eq!(interner.intern(builtin_names::CALLVALUE), Self::CALLVALUE);
+        assert_eq!(interner.intern(builtin_names::CALLDATALOAD), Self::CALLDATALOAD);
+        assert_eq!(interner.intern(builtin_names::CALLDATASIZE), Self::CALLDATASIZE);
+        assert_eq!(interner.intern(builtin_names::CALLDATACOPY), Self::CALLDATACOPY);
+        assert_eq!(interner.intern(builtin_names::CODESIZE), Self::CODESIZE);
+        assert_eq!(interner.intern(builtin_names::CODECOPY), Self::CODECOPY);
+        assert_eq!(interner.intern(builtin_names::GASPRICE), Self::GASPRICE);
+        assert_eq!(interner.intern(builtin_names::EXTCODESIZE), Self::EXTCODESIZE);
+        assert_eq!(interner.intern(builtin_names::EXTCODECOPY), Self::EXTCODECOPY);
+        assert_eq!(interner.intern(builtin_names::RETURNDATASIZE), Self::RETURNDATASIZE);
+        assert_eq!(interner.intern(builtin_names::RETURNDATACOPY), Self::RETURNDATACOPY);
+        assert_eq!(interner.intern(builtin_names::EXTCODEHASH), Self::EXTCODEHASH);
+        assert_eq!(interner.intern(builtin_names::GAS), Self::GAS);
 
         // ========== EVM Block Information ==========
-        assert_eq!(interner.intern("blockhash"), Self::BLOCKHASH);
-        assert_eq!(interner.intern("coinbase"), Self::COINBASE);
-        assert_eq!(interner.intern("timestamp"), Self::TIMESTAMP);
-        assert_eq!(interner.intern("number"), Self::NUMBER);
-        assert_eq!(interner.intern("difficulty"), Self::DIFFICULTY);
-        assert_eq!(interner.intern("gaslimit"), Self::GASLIMIT);
-        assert_eq!(interner.intern("chainid"), Self::CHAINID);
-        assert_eq!(interner.intern("selfbalance"), Self::SELFBALANCE);
-        assert_eq!(interner.intern("basefee"), Self::BASEFEE);
-        assert_eq!(interner.intern("blobhash"), Self::BLOBHASH);
-        assert_eq!(interner.intern("blobbasefee"), Self::BLOBBASEFEE);
+        assert_eq!(interner.intern(builtin_names::BLOCKHASH), Self::BLOCKHASH);
+        assert_eq!(interner.intern(builtin_names::COINBASE), Self::COINBASE);
+        assert_eq!(interner.intern(builtin_names::TIMESTAMP), Self::TIMESTAMP);
+        assert_eq!(interner.intern(builtin_names::NUMBER), Self::NUMBER);
+        assert_eq!(interner.intern(builtin_names::DIFFICULTY), Self::DIFFICULTY);
+        assert_eq!(interner.intern(builtin_names::GASLIMIT), Self::GASLIMIT);
+        assert_eq!(interner.intern(builtin_names::CHAINID), Self::CHAINID);
+        assert_eq!(interner.intern(builtin_names::SELFBALANCE), Self::SELFBALANCE);
+        assert_eq!(interner.intern(builtin_names::BASEFEE), Self::BASEFEE);
+        assert_eq!(interner.intern(builtin_names::BLOBHASH), Self::BLOBHASH);
+        assert_eq!(interner.intern(builtin_names::BLOBBASEFEE), Self::BLOBBASEFEE);
 
         // ========== EVM State Manipulation ==========
-        assert_eq!(interner.intern("sload"), Self::SLOAD);
-        assert_eq!(interner.intern("sstore"), Self::SSTORE);
-        assert_eq!(interner.intern("tload"), Self::TLOAD);
-        assert_eq!(interner.intern("tstore"), Self::TSTORE);
+        assert_eq!(interner.intern(builtin_names::SLOAD), Self::SLOAD);
+        assert_eq!(interner.intern(builtin_names::SSTORE), Self::SSTORE);
+        assert_eq!(interner.intern(builtin_names::TLOAD), Self::TLOAD);
+        assert_eq!(interner.intern(builtin_names::TSTORE), Self::TSTORE);
 
         // ========== EVM Logging Operations ==========
-        assert_eq!(interner.intern("log0"), Self::LOG0);
-        assert_eq!(interner.intern("log1"), Self::LOG1);
-        assert_eq!(interner.intern("log2"), Self::LOG2);
-        assert_eq!(interner.intern("log3"), Self::LOG3);
-        assert_eq!(interner.intern("log4"), Self::LOG4);
+        assert_eq!(interner.intern(builtin_names::LOG0), Self::LOG0);
+        assert_eq!(interner.intern(builtin_names::LOG1), Self::LOG1);
+        assert_eq!(interner.intern(builtin_names::LOG2), Self::LOG2);
+        assert_eq!(interner.intern(builtin_names::LOG3), Self::LOG3);
+        assert_eq!(interner.intern(builtin_names::LOG4), Self::LOG4);
 
         // ========== EVM System Calls ==========
-        assert_eq!(interner.intern("create"), Self::CREATE);
-        assert_eq!(interner.intern("create2"), Self::CREATE2);
-        assert_eq!(interner.intern("call"), Self::CALL);
-        assert_eq!(interner.intern("callcode"), Self::CALLCODE);
-        assert_eq!(interner.intern("delegatecall"), Self::DELEGATECALL);
-        assert_eq!(interner.intern("staticcall"), Self::STATICCALL);
-        assert_eq!(interner.intern("return"), Self::RETURN);
-        assert_eq!(interner.intern("stop"), Self::STOP);
-        assert_eq!(interner.intern("revert"), Self::REVERT);
-        assert_eq!(interner.intern("invalid"), Self::INVALID);
-        assert_eq!(interner.intern("selfdestruct"), Self::SELFDESTRUCT);
+        assert_eq!(interner.intern(builtin_names::CREATE), Self::CREATE);
+        assert_eq!(interner.intern(builtin_names::CREATE2), Self::CREATE2);
+        assert_eq!(interner.intern(builtin_names::CALL), Self::CALL);
+        assert_eq!(interner.intern(builtin_names::CALLCODE), Self::CALLCODE);
+        assert_eq!(interner.intern(builtin_names::DELEGATECALL), Self::DELEGATECALL);
+        assert_eq!(interner.intern(builtin_names::STATICCALL), Self::STATICCALL);
+        assert_eq!(interner.intern(builtin_names::RETURN), Self::RETURN);
+        assert_eq!(interner.intern(builtin_names::STOP), Self::STOP);
+        assert_eq!(interner.intern(builtin_names::REVERT), Self::REVERT);
+        assert_eq!(interner.intern(builtin_names::INVALID), Self::INVALID);
+        assert_eq!(interner.intern(builtin_names::SELFDESTRUCT), Self::SELFDESTRUCT);
 
         // ========== IR Memory Primitives ==========
-        assert_eq!(interner.intern("malloc_zeroed"), Self::DYNAMIC_ALLOC_ZEROED);
-        assert_eq!(interner.intern("malloc_uninit"), Self::DYNAMIC_ALLOC_ANY_BYTES);
+        assert_eq!(
+            interner.intern(builtin_names::DYNAMIC_ALLOC_ZEROED),
+            Self::DYNAMIC_ALLOC_ZEROED
+        );
+        assert_eq!(
+            interner.intern(builtin_names::DYNAMIC_ALLOC_ANY_BYTES),
+            Self::DYNAMIC_ALLOC_ANY_BYTES
+        );
 
         // ========== Memory Manipulation ==========
-        assert_eq!(interner.intern("mcopy"), Self::MEMORY_COPY);
-        assert_eq!(interner.intern("mload1"), Self::MLOAD1);
-        assert_eq!(interner.intern("mload2"), Self::MLOAD2);
-        assert_eq!(interner.intern("mload3"), Self::MLOAD3);
-        assert_eq!(interner.intern("mload4"), Self::MLOAD4);
-        assert_eq!(interner.intern("mload5"), Self::MLOAD5);
-        assert_eq!(interner.intern("mload6"), Self::MLOAD6);
-        assert_eq!(interner.intern("mload7"), Self::MLOAD7);
-        assert_eq!(interner.intern("mload8"), Self::MLOAD8);
-        assert_eq!(interner.intern("mload9"), Self::MLOAD9);
-        assert_eq!(interner.intern("mload10"), Self::MLOAD10);
-        assert_eq!(interner.intern("mload11"), Self::MLOAD11);
-        assert_eq!(interner.intern("mload12"), Self::MLOAD12);
-        assert_eq!(interner.intern("mload13"), Self::MLOAD13);
-        assert_eq!(interner.intern("mload14"), Self::MLOAD14);
-        assert_eq!(interner.intern("mload15"), Self::MLOAD15);
-        assert_eq!(interner.intern("mload16"), Self::MLOAD16);
-        assert_eq!(interner.intern("mload17"), Self::MLOAD17);
-        assert_eq!(interner.intern("mload18"), Self::MLOAD18);
-        assert_eq!(interner.intern("mload19"), Self::MLOAD19);
-        assert_eq!(interner.intern("mload20"), Self::MLOAD20);
-        assert_eq!(interner.intern("mload21"), Self::MLOAD21);
-        assert_eq!(interner.intern("mload22"), Self::MLOAD22);
-        assert_eq!(interner.intern("mload23"), Self::MLOAD23);
-        assert_eq!(interner.intern("mload24"), Self::MLOAD24);
-        assert_eq!(interner.intern("mload25"), Self::MLOAD25);
-        assert_eq!(interner.intern("mload26"), Self::MLOAD26);
-        assert_eq!(interner.intern("mload27"), Self::MLOAD27);
-        assert_eq!(interner.intern("mload28"), Self::MLOAD28);
-        assert_eq!(interner.intern("mload29"), Self::MLOAD29);
-        assert_eq!(interner.intern("mload30"), Self::MLOAD30);
-        assert_eq!(interner.intern("mload31"), Self::MLOAD31);
-        assert_eq!(interner.intern("mload32"), Self::MLOAD32);
-        assert_eq!(interner.intern("mstore1"), Self::MSTORE1);
-        assert_eq!(interner.intern("mstore2"), Self::MSTORE2);
-        assert_eq!(interner.intern("mstore3"), Self::MSTORE3);
-        assert_eq!(interner.intern("mstore4"), Self::MSTORE4);
-        assert_eq!(interner.intern("mstore5"), Self::MSTORE5);
-        assert_eq!(interner.intern("mstore6"), Self::MSTORE6);
-        assert_eq!(interner.intern("mstore7"), Self::MSTORE7);
-        assert_eq!(interner.intern("mstore8"), Self::MSTORE8);
-        assert_eq!(interner.intern("mstore9"), Self::MSTORE9);
-        assert_eq!(interner.intern("mstore10"), Self::MSTORE10);
-        assert_eq!(interner.intern("mstore11"), Self::MSTORE11);
-        assert_eq!(interner.intern("mstore12"), Self::MSTORE12);
-        assert_eq!(interner.intern("mstore13"), Self::MSTORE13);
-        assert_eq!(interner.intern("mstore14"), Self::MSTORE14);
-        assert_eq!(interner.intern("mstore15"), Self::MSTORE15);
-        assert_eq!(interner.intern("mstore16"), Self::MSTORE16);
-        assert_eq!(interner.intern("mstore17"), Self::MSTORE17);
-        assert_eq!(interner.intern("mstore18"), Self::MSTORE18);
-        assert_eq!(interner.intern("mstore19"), Self::MSTORE19);
-        assert_eq!(interner.intern("mstore20"), Self::MSTORE20);
-        assert_eq!(interner.intern("mstore21"), Self::MSTORE21);
-        assert_eq!(interner.intern("mstore22"), Self::MSTORE22);
-        assert_eq!(interner.intern("mstore23"), Self::MSTORE23);
-        assert_eq!(interner.intern("mstore24"), Self::MSTORE24);
-        assert_eq!(interner.intern("mstore25"), Self::MSTORE25);
-        assert_eq!(interner.intern("mstore26"), Self::MSTORE26);
-        assert_eq!(interner.intern("mstore27"), Self::MSTORE27);
-        assert_eq!(interner.intern("mstore28"), Self::MSTORE28);
-        assert_eq!(interner.intern("mstore29"), Self::MSTORE29);
-        assert_eq!(interner.intern("mstore30"), Self::MSTORE30);
-        assert_eq!(interner.intern("mstore31"), Self::MSTORE31);
-        assert_eq!(interner.intern("mstore32"), Self::MSTORE32);
+        assert_eq!(interner.intern(builtin_names::MEMORY_COPY), Self::MEMORY_COPY);
+        assert_eq!(interner.intern(builtin_names::MLOAD1), Self::MLOAD1);
+        assert_eq!(interner.intern(builtin_names::MLOAD2), Self::MLOAD2);
+        assert_eq!(interner.intern(builtin_names::MLOAD3), Self::MLOAD3);
+        assert_eq!(interner.intern(builtin_names::MLOAD4), Self::MLOAD4);
+        assert_eq!(interner.intern(builtin_names::MLOAD5), Self::MLOAD5);
+        assert_eq!(interner.intern(builtin_names::MLOAD6), Self::MLOAD6);
+        assert_eq!(interner.intern(builtin_names::MLOAD7), Self::MLOAD7);
+        assert_eq!(interner.intern(builtin_names::MLOAD8), Self::MLOAD8);
+        assert_eq!(interner.intern(builtin_names::MLOAD9), Self::MLOAD9);
+        assert_eq!(interner.intern(builtin_names::MLOAD10), Self::MLOAD10);
+        assert_eq!(interner.intern(builtin_names::MLOAD11), Self::MLOAD11);
+        assert_eq!(interner.intern(builtin_names::MLOAD12), Self::MLOAD12);
+        assert_eq!(interner.intern(builtin_names::MLOAD13), Self::MLOAD13);
+        assert_eq!(interner.intern(builtin_names::MLOAD14), Self::MLOAD14);
+        assert_eq!(interner.intern(builtin_names::MLOAD15), Self::MLOAD15);
+        assert_eq!(interner.intern(builtin_names::MLOAD16), Self::MLOAD16);
+        assert_eq!(interner.intern(builtin_names::MLOAD17), Self::MLOAD17);
+        assert_eq!(interner.intern(builtin_names::MLOAD18), Self::MLOAD18);
+        assert_eq!(interner.intern(builtin_names::MLOAD19), Self::MLOAD19);
+        assert_eq!(interner.intern(builtin_names::MLOAD20), Self::MLOAD20);
+        assert_eq!(interner.intern(builtin_names::MLOAD21), Self::MLOAD21);
+        assert_eq!(interner.intern(builtin_names::MLOAD22), Self::MLOAD22);
+        assert_eq!(interner.intern(builtin_names::MLOAD23), Self::MLOAD23);
+        assert_eq!(interner.intern(builtin_names::MLOAD24), Self::MLOAD24);
+        assert_eq!(interner.intern(builtin_names::MLOAD25), Self::MLOAD25);
+        assert_eq!(interner.intern(builtin_names::MLOAD26), Self::MLOAD26);
+        assert_eq!(interner.intern(builtin_names::MLOAD27), Self::MLOAD27);
+        assert_eq!(interner.intern(builtin_names::MLOAD28), Self::MLOAD28);
+        assert_eq!(interner.intern(builtin_names::MLOAD29), Self::MLOAD29);
+        assert_eq!(interner.intern(builtin_names::MLOAD30), Self::MLOAD30);
+        assert_eq!(interner.intern(builtin_names::MLOAD31), Self::MLOAD31);
+        assert_eq!(interner.intern(builtin_names::MLOAD32), Self::MLOAD32);
+        assert_eq!(interner.intern(builtin_names::MSTORE1), Self::MSTORE1);
+        assert_eq!(interner.intern(builtin_names::MSTORE2), Self::MSTORE2);
+        assert_eq!(interner.intern(builtin_names::MSTORE3), Self::MSTORE3);
+        assert_eq!(interner.intern(builtin_names::MSTORE4), Self::MSTORE4);
+        assert_eq!(interner.intern(builtin_names::MSTORE5), Self::MSTORE5);
+        assert_eq!(interner.intern(builtin_names::MSTORE6), Self::MSTORE6);
+        assert_eq!(interner.intern(builtin_names::MSTORE7), Self::MSTORE7);
+        assert_eq!(interner.intern(builtin_names::MSTORE8), Self::MSTORE8);
+        assert_eq!(interner.intern(builtin_names::MSTORE9), Self::MSTORE9);
+        assert_eq!(interner.intern(builtin_names::MSTORE10), Self::MSTORE10);
+        assert_eq!(interner.intern(builtin_names::MSTORE11), Self::MSTORE11);
+        assert_eq!(interner.intern(builtin_names::MSTORE12), Self::MSTORE12);
+        assert_eq!(interner.intern(builtin_names::MSTORE13), Self::MSTORE13);
+        assert_eq!(interner.intern(builtin_names::MSTORE14), Self::MSTORE14);
+        assert_eq!(interner.intern(builtin_names::MSTORE15), Self::MSTORE15);
+        assert_eq!(interner.intern(builtin_names::MSTORE16), Self::MSTORE16);
+        assert_eq!(interner.intern(builtin_names::MSTORE17), Self::MSTORE17);
+        assert_eq!(interner.intern(builtin_names::MSTORE18), Self::MSTORE18);
+        assert_eq!(interner.intern(builtin_names::MSTORE19), Self::MSTORE19);
+        assert_eq!(interner.intern(builtin_names::MSTORE20), Self::MSTORE20);
+        assert_eq!(interner.intern(builtin_names::MSTORE21), Self::MSTORE21);
+        assert_eq!(interner.intern(builtin_names::MSTORE22), Self::MSTORE22);
+        assert_eq!(interner.intern(builtin_names::MSTORE23), Self::MSTORE23);
+        assert_eq!(interner.intern(builtin_names::MSTORE24), Self::MSTORE24);
+        assert_eq!(interner.intern(builtin_names::MSTORE25), Self::MSTORE25);
+        assert_eq!(interner.intern(builtin_names::MSTORE26), Self::MSTORE26);
+        assert_eq!(interner.intern(builtin_names::MSTORE27), Self::MSTORE27);
+        assert_eq!(interner.intern(builtin_names::MSTORE28), Self::MSTORE28);
+        assert_eq!(interner.intern(builtin_names::MSTORE29), Self::MSTORE29);
+        assert_eq!(interner.intern(builtin_names::MSTORE30), Self::MSTORE30);
+        assert_eq!(interner.intern(builtin_names::MSTORE31), Self::MSTORE31);
+        assert_eq!(interner.intern(builtin_names::MSTORE32), Self::MSTORE32);
 
         // ========== Bytecode Introspection ==========
-        assert_eq!(interner.intern("runtime_start_offset"), Self::RUNTIME_START_OFFSET);
-        assert_eq!(interner.intern("init_end_offset"), Self::INIT_END_OFFSET);
-        assert_eq!(interner.intern("runtime_length"), Self::RUNTIME_LENGTH);
+        assert_eq!(
+            interner.intern(builtin_names::RUNTIME_START_OFFSET),
+            Self::RUNTIME_START_OFFSET
+        );
+        assert_eq!(interner.intern(builtin_names::INIT_END_OFFSET), Self::INIT_END_OFFSET);
+        assert_eq!(interner.intern(builtin_names::RUNTIME_LENGTH), Self::RUNTIME_LENGTH);
     }
 
     pub fn intern(&mut self, string: &str) -> StrId {

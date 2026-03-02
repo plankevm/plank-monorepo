@@ -80,12 +80,20 @@ impl<'a> DisplayMir<'a> {
         }
     }
 
-    fn fmt_instr(&self, f: &mut Formatter<'_>, instr: Instruction, indent: usize) -> fmt::Result {
+    fn fmt_instr(
+        &self,
+        f: &mut Formatter<'_>,
+        fn_id: FnId,
+        instr: Instruction,
+        indent: usize,
+    ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         match instr {
             Instruction::Set { local, expr } => {
                 write!(f, "{pad}")?;
                 self.fmt_local(f, local)?;
+                write!(f, " : ")?;
+                self.fmt_type(f, self.mir.fn_locals[fn_id][local.idx()])?;
                 write!(f, " = ")?;
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
@@ -111,29 +119,35 @@ impl<'a> DisplayMir<'a> {
                 write!(f, "{pad}if ")?;
                 self.fmt_local(f, condition)?;
                 writeln!(f, " {{")?;
-                self.fmt_block(f, then_block, indent + 1)?;
+                self.fmt_block(f, fn_id, then_block, indent + 1)?;
                 writeln!(f, "{pad}}} else {{")?;
-                self.fmt_block(f, else_block, indent + 1)?;
+                self.fmt_block(f, fn_id, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
             Instruction::While { condition_block, condition, body } => {
                 writeln!(f, "{pad}while {{")?;
                 writeln!(f, "{pad}  cond:")?;
-                self.fmt_block(f, condition_block, indent + 2)?;
+                self.fmt_block(f, fn_id, condition_block, indent + 2)?;
                 write!(f, "{pad}  test ")?;
                 self.fmt_local(f, condition)?;
                 writeln!(f)?;
                 writeln!(f, "{pad}  body:")?;
-                self.fmt_block(f, body, indent + 2)?;
+                self.fmt_block(f, fn_id, body, indent + 2)?;
                 writeln!(f, "{pad}}}")
             }
         }
     }
 
-    fn fmt_block(&self, f: &mut Formatter<'_>, block_id: BlockId, indent: usize) -> fmt::Result {
+    fn fmt_block(
+        &self,
+        f: &mut Formatter<'_>,
+        fn_id: FnId,
+        block_id: BlockId,
+        indent: usize,
+    ) -> fmt::Result {
         let instructions = &self.mir.blocks[block_id];
         for &instr in instructions {
-            self.fmt_instr(f, instr, indent)?;
+            self.fmt_instr(f, fn_id, instr, indent)?;
         }
         Ok(())
     }
@@ -154,17 +168,7 @@ impl<'a> DisplayMir<'a> {
         self.fmt_type(f, fn_def.return_type)?;
         writeln!(f, " {{")?;
 
-        if fn_def.param_count < locals.len() as u32 {
-            writeln!(f, "    ; locals")?;
-            for (i, &ty) in locals.iter().enumerate().skip(fn_def.param_count as usize) {
-                write!(f, "    ; %{i}: ")?;
-                self.fmt_type(f, ty)?;
-                writeln!(f)?;
-            }
-            writeln!(f)?;
-        }
-
-        self.fmt_block(f, fn_def.body, 1)?;
+        self.fmt_block(f, fn_id, fn_def.body, 1)?;
         writeln!(f, "}}")
     }
 }

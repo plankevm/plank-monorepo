@@ -46,15 +46,6 @@ pub enum Expr {
     StructDef(StructDefId),
 }
 
-impl Expr {
-    fn has_side_effects(&self) -> bool {
-        matches!(
-            self,
-            Expr::Call { .. } | Expr::Member { .. } | Expr::StructLit { .. } | Expr::StructDef(_)
-        )
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub enum Instruction {
     // Define local
@@ -239,9 +230,7 @@ impl<'a> BlockLowerer<'a> {
             }
             if let Some(e) = block.end_expr() {
                 let value = lowerer.lower_expr(e);
-                if value.has_side_effects() {
-                    lowerer.emit(Instruction::Eval(value));
-                }
+                lowerer.emit(Instruction::Eval(value));
             }
         })
     }
@@ -327,8 +316,7 @@ impl<'a> BlockLowerer<'a> {
             return Expr::ConstRef(const_id);
         }
 
-        // TODO: diagnostic
-        panic!("unresolved identifier")
+        todo!("diagnostic: unresolved identifier");
     }
 
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
@@ -527,9 +515,7 @@ impl<'a> BlockLowerer<'a> {
             }
             Statement::Expr(expr) => {
                 let value = self.lower_expr(expr);
-                if value.has_side_effects() {
-                    self.emit(Instruction::Eval(value));
-                }
+                self.emit(Instruction::Eval(value));
             }
             Statement::Return(return_stmt) => {
                 let value = self.lower_expr(return_stmt.value());
