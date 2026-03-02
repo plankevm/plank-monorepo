@@ -1,3 +1,5 @@
+pub mod display;
+
 use sensei_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
 use sensei_values::{BigNumId, TypeId, TypeInterner};
 

@@ -9,18 +9,22 @@ use crate::{Evaluator, value::Value};
 struct ReturnValue(ValueId);
 
 #[derive(Default)]
-struct Bindings(IndexVec<hir::LocalId, Option<ValueId>>);
+pub(crate) struct Bindings(IndexVec<hir::LocalId, Option<ValueId>>);
 
 impl Bindings {
-    fn set(&mut self, local: hir::LocalId, value: ValueId) -> Option<ValueId> {
+    pub(crate) fn set(&mut self, local: hir::LocalId, value: ValueId) -> Option<ValueId> {
         if local.get() as usize >= self.0.len() {
             self.0.raw.resize(local.idx() + 1, None);
         }
         self.0[local].replace(value)
     }
 
-    fn get(&self, local: hir::LocalId) -> ValueId {
+    pub(crate) fn get(&self, local: hir::LocalId) -> ValueId {
         self.0[local].expect("hir: unbound local")
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (hir::LocalId, ValueId)> + '_ {
+        self.0.enumerate_idx().filter_map(|(id, opt)| opt.map(|vid| (id, vid)))
     }
 }
 
@@ -51,6 +55,17 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
         comptime.bindings.get(const_def.result)
     }
 
+    pub fn eval_preamble_block(
+        eval: &'e mut Evaluator<'hir>,
+        bindings: Bindings,
+        block_id: hir::BlockId,
+    ) -> Bindings {
+        let mut comptime = ComptimeInterpreter::new(eval);
+        comptime.bindings = bindings;
+        comptime.interpret_block(block_id).expect("hir: preamble shouldn't have `return`");
+        comptime.bindings
+    }
+
     fn interpret_block(&mut self, block_id: hir::BlockId) -> Result<(), ReturnValue> {
         for &instr in &self.eval.hir.blocks[block_id] {
             self.interpret_instruction(instr)?;
@@ -75,9 +90,8 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
             }
             hir::Instruction::AssertType { value, of_type } => {
                 let type_vid = self.bindings.get(of_type);
-                let expected_type = match self.eval.values.lookup(type_vid) {
-                    Value::Type(tid) => tid,
-                    _ => todo!("diagnostic: type error, value not type"),
+                let Value::Type(expected_type) = self.eval.values.lookup(type_vid) else {
+                    todo!("diagnostic: type error, value not type")
                 };
                 let value_vid = self.bindings.get(value);
                 let actual_type = self.eval.values.type_of_value(value_vid);
@@ -177,9 +191,8 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
         fields_id: hir::FieldsId,
     ) -> Result<ValueId, ReturnValue> {
         let type_vid = self.bindings.get(ty);
-        let struct_type_id = match self.eval.values.lookup(type_vid) {
-            Value::Type(tid) => tid,
-            _ => todo!("diagnostic: struct literal type must be Type"),
+        let Value::Type(struct_type_id) = self.eval.values.lookup(type_vid) else {
+            todo!("diagnostic: struct literal type must be Type")
         };
 
         let fields_info = &self.eval.hir.fields[fields_id];
@@ -250,9 +263,8 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
 
         self.interpret_block(fn_def.type_preamble).expect("hir: preamble with return?");
 
-        let result = match self.interpret_block(fn_def.body) {
-            Ok(()) => self.bindings.get(fn_def.return_value),
-            Err(ReturnValue(vid)) => vid,
+        let Err(ReturnValue(result)) = self.interpret_block(fn_def.body) else {
+            unreachable!("function body must end with Return instruction")
         };
 
         self.bindings = saved_bindings;

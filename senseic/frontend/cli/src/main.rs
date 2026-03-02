@@ -1,5 +1,6 @@
 use clap::Parser;
 use sensei_hir::{BigNumInterner, display::DisplayHir, lower};
+use sensei_mir::display::DisplayMir;
 use sensei_parser::{
     cst::display::DisplayCST,
     error_report::{ErrorCollector, LineIndex, format_error},
@@ -59,6 +60,6 @@ fn main() {
     let mir = sensei_hir_eval::evaluate(&hir);
 
     if args.show_mir {
-        println!("{mir:#?}");
+        print!("{}", DisplayMir::new(&mir, &big_nums));
     }
 }

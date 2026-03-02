@@ -6,8 +6,8 @@ codegeneration CLI and eventually also LSP server.
 1. Lexing & Parser: input source files are parsed into CSTs
 2. Semantic Analysis (Sema): Performs simultaenous analysis and lowering from
    the CST to untyped HIR with the help of AST wrappers
-3. HIR Interpreter: Executes the emitted HIR to resolve compile-time functions,
-   generics and type-checks emitting the final pre-MIR instructions.
+3. Evaluator: Executes the emitted HIR to resolve compile-time functions,
+   generics and initial type-checks emitting MIR.
 4. Typecheck & final MIR validation:
     - Typechecking ensures all types are concrete, correct and certain runtime-illegal
     - Validation ensures comptime only structures such as first class

@@ -24,11 +24,6 @@ const add_nums = fn (a: u256, b: u256) u256 {
     a
 };
 
-// Function with comptime param
-const type_identity = fn (comptime T: type, skibidi: u256, comptime crack: memptr) type {
-    T
-};
-
 // Struct definition
 const Point = struct {} {
     x: u256,
@@ -74,16 +69,6 @@ const mutating = fn (start: u256) u256 {
     x
 };
 
-// Function with while loop
-const loop_example = fn (limit: u256) u256 {
-    let i = 0;
-    let sum = 0;
-    while true {
-        i
-    }
-    sum
-};
-
 // Function calls
 const caller = fn () u256 {
     let result = add_nums(1, 2);
@@ -127,25 +112,26 @@ init {
         };
     };
 
-    // While loop
-    let counter = 0;
-    while false {
-        counter
-    }
 
     // Assignment
-    counter = 999;
+    let counter = 999;
 
     // Void result
     {}
 }
 
+
 run {
     // Similar to init but separate block
-    let val = DOUBLED;
+    let val: u256 = DOUBLED;
 
     // Call with struct operations
     let p = make_point(10, 20);
+
+    let p2 = Point {
+        x: val,
+        y: false
+    };
 
     // If/else chain
     if false {
@@ -155,4 +141,7 @@ run {
     } else {
         let z = 3;
     }
+
+    let abc = p2.y;
+    abc = p2.x;
 }

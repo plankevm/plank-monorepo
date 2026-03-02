@@ -93,7 +93,6 @@ pub struct FnDef {
     pub body: BlockId,
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
-    pub return_value: LocalId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -181,8 +180,8 @@ struct BlockLowerer<'a> {
 impl<'a> BlockLowerer<'a> {
     fn reset(&mut self) {
         self.next_local_id = LocalId::ZERO;
+        self.scoped_locals_stack.clear();
 
-        debug_assert!(self.scoped_locals_stack.is_empty());
         debug_assert_eq!(self.fn_scope_start, 0);
         debug_assert_eq!(self.fn_captures_start, 0);
 
@@ -250,6 +249,16 @@ impl<'a> BlockLowerer<'a> {
             }
             let value = block.end_expr().map(|e| lowerer.lower_expr(e)).unwrap_or(Expr::Void);
             lowerer.emit(Instruction::Set { local: result, expr: value });
+        })
+    }
+
+    fn lower_fn_body_block(&mut self, block: ast::BlockExpr<'_>) -> BlockId {
+        self.create_sub_block(|lowerer| {
+            for stmt in block.statements() {
+                lowerer.lower_statement(stmt);
+            }
+            let value = block.end_expr().map(|e| lowerer.lower_expr(e)).unwrap_or(Expr::Void);
+            lowerer.emit(Instruction::Return(value));
         })
     }
 
@@ -401,16 +410,13 @@ impl<'a> BlockLowerer<'a> {
                 self.locals_buf.push(param_type);
                 let param_value = self.add_param_to_scope_as_local(param);
                 self.locals_buf.push(param_value);
-                self.emit(Instruction::AssertType { value: param_value, of_type: param_type });
             }
             return_type = self.lower_expr_to_local(fn_def.return_type());
             self.flush_instructions_from(preamble_block_start)
         };
 
-        let return_value = self.alloc_temp();
-        let body = self.lower_body_to_block_with_result(fn_def.body(), return_value);
-        let fn_def_id =
-            self.builder.fns.push(FnDef { type_preamble, body, return_type, return_value });
+        let body = self.lower_fn_body_block(fn_def.body());
+        let fn_def_id = self.builder.fns.push(FnDef { type_preamble, body, return_type });
 
         let fn_params_id = self.builder.fn_params.push_iter(
             self.locals_buf[param_locals_start..].chunks(2).zip(fn_def.params()).map(
@@ -420,6 +426,7 @@ impl<'a> BlockLowerer<'a> {
                 },
             ),
         );
+        self.locals_buf.truncate(param_locals_start);
         let fn_captures_id =
             self.builder.fn_captures.push_iter(self.captures_buf.drain(self.fn_captures_start..));
         assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
@@ -497,12 +504,10 @@ impl<'a> BlockLowerer<'a> {
                 self.emit(Instruction::Return(value));
             }
             Statement::Assign(assign_stmt) => {
-                let target = match assign_stmt.target() {
-                    ast::Expr::Ident(name) => {
-                        self.lookup_local(name).expect("unresolved assignment target")
-                    }
-                    _ => panic!("complex assignment targets not yet supported"),
+                let ast::Expr::Ident(name) = assign_stmt.target() else {
+                    panic!("complex assignment targets not yet supported")
                 };
+                let target = self.lookup_local(name).expect("unresolved assignment target");
                 let value = self.lower_expr(assign_stmt.value());
                 self.emit(Instruction::Assign { target, value });
             }

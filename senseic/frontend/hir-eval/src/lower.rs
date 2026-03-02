@@ -1,10 +1,14 @@
-use hashbrown::hash_map::Entry;
-use sensei_core::{Idx, IndexVec, vec_buf::VecBuf};
+use sensei_core::{Idx, IndexVec, list_of_lists::ListOfLists};
 use sensei_hir::{self as hir};
 use sensei_mir::{self as mir};
+use sensei_parser::StrId;
 use sensei_values::{TypeId, ValueId};
 
-use crate::{Evaluator, value::Value};
+use crate::{
+    Evaluator,
+    comptime::{Bindings, ComptimeInterpreter},
+    value::{Value, ValueInterner},
+};
 
 #[derive(Clone, Copy)]
 pub(crate) enum LocalValue {
@@ -12,30 +16,48 @@ pub(crate) enum LocalValue {
     Runtime { mir_local: mir::LocalId, ty: TypeId },
 }
 
+#[derive(Default)]
+struct PartialBindings(IndexVec<hir::LocalId, Option<LocalValue>>);
+
+impl PartialBindings {
+    fn set(&mut self, local: hir::LocalId, value: LocalValue) -> Option<LocalValue> {
+        if local >= self.0.len_idx() {
+            self.0.raw.resize(local.idx() + 1, None);
+        }
+        self.0[local].replace(value)
+    }
+
+    fn get(&self, local: hir::LocalId) -> LocalValue {
+        self.0[local].expect("hir: undefined local")
+    }
+}
+
 struct BodyLowerer<'a, 'hir> {
     eval: &'a mut Evaluator<'hir>,
-    bindings: IndexVec<hir::LocalId, Option<LocalValue>>,
-    instructions: Vec<mir::Instruction>,
+    bindings: PartialBindings,
     local_types: IndexVec<mir::LocalId, TypeId>,
-    arg_buf: Vec<mir::LocalId>,
     return_type: Option<TypeId>,
 
-    values_buf: VecBuf<ValueId>,
+    arg_buf: Vec<mir::LocalId>,
+    instructions_buf: Vec<mir::Instruction>,
+    values_buf: Vec<ValueId>,
+    types_buf: Vec<TypeId>,
+    names_buf: Vec<StrId>,
 }
 
 impl<'a, 'hir> BodyLowerer<'a, 'hir> {
     fn new(eval: &'a mut Evaluator<'hir>) -> Self {
-        const EST_CAPTURE_COUNT: usize = 64;
-
         Self {
             eval,
-            bindings: IndexVec::new(),
-            instructions: Vec::new(),
+            bindings: PartialBindings::default(),
             local_types: IndexVec::new(),
-            arg_buf: Vec::new(),
             return_type: None,
 
-            values_buf: VecBuf::with_capacity(EST_CAPTURE_COUNT),
+            arg_buf: Vec::new(),
+            instructions_buf: Vec::new(),
+            values_buf: Vec::new(),
+            types_buf: Vec::new(),
+            names_buf: Vec::new(),
         }
     }
 
@@ -43,52 +65,67 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
         self.local_types.push(ty)
     }
 
-    fn set_local(&mut self, local: hir::LocalId, value: LocalValue) -> Option<LocalValue> {
-        if local >= self.bindings.len_idx() {
-            self.bindings.raw.resize(local.idx() + 1, None);
+    fn import_comptime_bindings(&mut self, bindings: &Bindings) {
+        for (local, vid) in bindings.iter() {
+            self.bindings.set(local, LocalValue::Comptime(vid));
         }
-        self.bindings[local].replace(value)
-    }
-
-    fn get_local(&self, local: hir::LocalId) -> LocalValue {
-        self.bindings[local].expect("hir: undefined local")
     }
 
     fn materialize(&mut self, value_id: ValueId) -> mir::LocalId {
-        let value = self.eval.values.lookup(value_id);
-        match value {
+        Self::materialize_inner(
+            &self.eval.values,
+            &mut self.local_types,
+            &mut self.instructions_buf,
+            &mut self.arg_buf,
+            &mut self.eval.mir_args,
+            value_id,
+        )
+    }
+
+    fn materialize_inner(
+        values: &ValueInterner,
+        local_types: &mut IndexVec<mir::LocalId, TypeId>,
+        instructions_buf: &mut Vec<mir::Instruction>,
+        arg_buf: &mut Vec<mir::LocalId>,
+        mir_args: &mut ListOfLists<mir::ArgsId, mir::LocalId>,
+        value_id: ValueId,
+    ) -> mir::LocalId {
+        match values.lookup(value_id) {
             Value::Void => {
-                let mir_local = self.alloc_mir_local(TypeId::VOID);
-                self.instructions
-                    .push(mir::Instruction::Set { local: mir_local, expr: mir::Expr::Void });
-                mir_local
+                let local = local_types.push(TypeId::VOID);
+                instructions_buf.push(mir::Instruction::Set { local, expr: mir::Expr::Void });
+                local
             }
             Value::Bool(b) => {
-                let mir_local = self.alloc_mir_local(TypeId::BOOL);
-                self.instructions
-                    .push(mir::Instruction::Set { local: mir_local, expr: mir::Expr::Bool(b) });
-                mir_local
+                let local = local_types.push(TypeId::BOOL);
+                instructions_buf.push(mir::Instruction::Set { local, expr: mir::Expr::Bool(b) });
+                local
             }
             Value::BigNum(id) => {
-                let mir_local = self.alloc_mir_local(TypeId::U256);
-                self.instructions
-                    .push(mir::Instruction::Set { local: mir_local, expr: mir::Expr::BigNum(id) });
-                mir_local
+                let local = local_types.push(TypeId::U256);
+                instructions_buf.push(mir::Instruction::Set { local, expr: mir::Expr::BigNum(id) });
+                local
             }
             Value::StructVal { ty, fields } => {
-                let field_vids: Vec<ValueId> = fields.to_vec();
-                let buf_start = self.arg_buf.len();
-                for field_vid in field_vids {
-                    let mir_local = self.materialize(field_vid);
-                    self.arg_buf.push(mir_local);
+                let buf_start = arg_buf.len();
+                for &field in fields {
+                    let mir_local = Self::materialize_inner(
+                        values,
+                        local_types,
+                        instructions_buf,
+                        arg_buf,
+                        mir_args,
+                        field,
+                    );
+                    arg_buf.push(mir_local);
                 }
-                let args = self.eval.mir_args.push_iter(self.arg_buf.drain(buf_start..));
-                let mir_local = self.alloc_mir_local(ty);
-                self.instructions.push(mir::Instruction::Set {
-                    local: mir_local,
-                    expr: mir::Expr::StructLit { ty, fields: args },
+                let fields = mir_args.push_iter(arg_buf.drain(buf_start..));
+                let local = local_types.push(ty);
+                instructions_buf.push(mir::Instruction::Set {
+                    local,
+                    expr: mir::Expr::StructLit { ty, fields },
                 });
-                mir_local
+                local
             }
             Value::Type(_) => todo!("cannot materialize type"),
             Value::Closure { .. } => todo!("cannot materialize closure"),
@@ -102,7 +139,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
         }
     }
 
-    fn eval_expr(&mut self, expr: hir::Expr) -> LocalValue {
+    fn translate_expr(&mut self, expr: hir::Expr) -> LocalValue {
         match expr {
             hir::Expr::Void => LocalValue::Comptime(ValueId::VOID),
             hir::Expr::Bool(b) => {
@@ -114,80 +151,80 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                 let value_id = self.eval.ensure_const_evaluated(const_id);
                 LocalValue::Comptime(value_id)
             }
-            hir::Expr::LocalRef(local_id) => self.get_local(local_id),
-            hir::Expr::FnDef(fn_def_id) => {
-                let value_id = self.values_buf.use_as(|captured_values| {
-                    let captures = &self.eval.hir.fn_captures[fn_def_id];
-                    for capture in captures {
-                        match self.get_local(capture.outer_local) {
-                            LocalValue::Comptime(vid) => captured_values.push(vid),
-                            LocalValue::Runtime { .. } => {
-                                todo!("diagnostic: runtime capture not supported")
-                            }
+            hir::Expr::LocalRef(local_id) => self.bindings.get(local_id),
+            hir::Expr::FnDef(fn_def) => {
+                let captured_values_start = self.values_buf.len();
+
+                let captures = &self.eval.hir.fn_captures[fn_def];
+                for capture in captures {
+                    match self.bindings.get(capture.outer_local) {
+                        LocalValue::Comptime(vid) => self.values_buf.push(vid),
+                        LocalValue::Runtime { .. } => {
+                            todo!("diagnostic: runtime capture not supported")
                         }
                     }
-                    self.eval
-                        .values
-                        .intern(Value::Closure { fn_def: fn_def_id, captures: captured_values })
+                }
+                let value_id = self.eval.values.intern(Value::Closure {
+                    fn_def,
+                    captures: &self.values_buf[captured_values_start..],
                 });
+
+                self.values_buf.truncate(captured_values_start);
                 LocalValue::Comptime(value_id)
             }
             hir::Expr::Call { callee, args: call_args_id } => {
-                let callee_local = self.get_local(callee);
+                let callee_local = self.bindings.get(callee);
                 let LocalValue::Comptime(closure_value_id) = callee_local else {
                     todo!("diagnostic: dynamically dispatching functions not supported")
                 };
-                let closure = self.eval.values.lookup(closure_value_id);
-                let Value::Closure { fn_def, captures } = closure else {
-                    todo!("diagnostic: callee is not a function")
+
+                let mir_fn_id = if let Some(&cached) = self.eval.fn_cache.get(&closure_value_id) {
+                    cached
+                } else {
+                    let fn_id = lower_fn_body(self.eval, closure_value_id);
+                    self.eval.fn_cache.insert(closure_value_id, fn_id);
+                    fn_id
                 };
 
-                let mir_fn_id = match self.eval.fn_cache.entry(closure_value_id) {
-                    Entry::Occupied(entry) => *entry.get(),
-                    Entry::Vacant(entry) => {
-                        let fn_id = lower_fn_body(self.eval, fn_def, captures);
-                        entry.insert(fn_id);
-                        fn_id
-                    }
-                };
-
-                let hir_args: Vec<hir::LocalId> = self.eval.hir.call_args[call_args_id].to_vec();
+                let arg_count = self.eval.hir.call_args[call_args_id].len();
                 let buf_start = self.arg_buf.len();
-                for &arg_local in &hir_args {
-                    let arg = self.get_local(arg_local);
+                for i in 0..arg_count {
+                    let arg_local = self.eval.hir.call_args[call_args_id][i];
+                    let arg = self.bindings.get(arg_local);
                     let mir_local = self.ensure_runtime(arg);
                     self.arg_buf.push(mir_local);
                 }
                 let args = self.eval.mir_args.push_iter(self.arg_buf.drain(buf_start..));
 
-                let mir_local = self.alloc_mir_local(None);
-                self.instructions.push(mir::Instruction::Set {
+                let return_type = self.eval.mir_fns[mir_fn_id].return_type;
+                let mir_local = self.alloc_mir_local(return_type);
+                self.instructions_buf.push(mir::Instruction::Set {
                     local: mir_local,
                     expr: mir::Expr::Call { callee: mir_fn_id, args },
                 });
-                LocalValue::Runtime { mir_local, ty: None }
+                LocalValue::Runtime { mir_local, ty: return_type }
             }
             hir::Expr::StructDef(struct_def_id) => {
                 let struct_def = self.eval.hir.struct_defs[struct_def_id];
-                let type_index_value = match self.get_local(struct_def.type_index) {
+                let type_index_value = match self.bindings.get(struct_def.type_index) {
                     LocalValue::Comptime(vid) => vid,
                     LocalValue::Runtime { .. } => {
                         unreachable!("hir invariant: struct type_index must be comptime")
                     }
                 };
 
-                let fields_info: Vec<hir::FieldInfo> =
-                    self.eval.hir.fields[struct_def.fields].to_vec();
-                let mut field_types: Vec<TypeId> = Vec::new();
-                let mut field_names = Vec::new();
+                let field_count = self.eval.hir.fields[struct_def.fields].len();
+                let types_start = self.types_buf.len();
+                let names_start = self.names_buf.len();
 
-                for field in &fields_info {
-                    let value = self.get_local(field.value);
+                for i in 0..field_count {
+                    let field = self.eval.hir.fields[struct_def.fields][i];
+                    let value = self.bindings.get(field.value);
                     match value {
                         LocalValue::Comptime(vid) => match self.eval.values.lookup(vid) {
                             Value::Type(tid) => {
-                                field_types.push(tid);
-                                field_names.push(field.name);
+                                self.types_buf.push(tid);
+                                self.names_buf.push(field.name);
                             }
                             _ => todo!("diagnostic: struct field type must be Type"),
                         },
@@ -201,15 +238,17 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     sensei_values::StructInfo {
                         source: struct_def.source,
                         type_index: type_index_value,
-                        field_types: &field_types,
-                        field_names: &field_names,
+                        field_types: &self.types_buf[types_start..],
+                        field_names: &self.names_buf[names_start..],
                     },
                 ));
+                self.types_buf.truncate(types_start);
+                self.names_buf.truncate(names_start);
 
                 LocalValue::Comptime(self.eval.values.intern_type(struct_type_id))
             }
             hir::Expr::StructLit { ty, fields: fields_id } => {
-                let struct_type_id = match self.get_local(ty) {
+                let struct_type_id = match self.bindings.get(ty) {
                     LocalValue::Comptime(vid) => match self.eval.values.lookup(vid) {
                         Value::Type(tid) => tid,
                         _ => todo!("diagnostic: struct lit type must be Type"),
@@ -219,45 +258,50 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     }
                 };
 
-                let fields_info: Vec<hir::FieldInfo> = self.eval.hir.fields[fields_id].to_vec();
-                let mut field_locals: Vec<LocalValue> = Vec::new();
-                for field in &fields_info {
-                    field_locals.push(self.get_local(field.value));
+                let field_count = self.eval.hir.fields[fields_id].len();
+
+                // Pass 1: try comptime — push ValueIds into values_buf
+                let buf_start = self.values_buf.len();
+                let mut all_comptime = true;
+                for i in 0..field_count {
+                    let field_value = self.eval.hir.fields[fields_id][i].value;
+                    match self.bindings.get(field_value) {
+                        LocalValue::Comptime(vid) => self.values_buf.push(vid),
+                        _ => {
+                            all_comptime = false;
+                            break;
+                        }
+                    }
                 }
 
-                let all_comptime =
-                    field_locals.iter().all(|l| matches!(l, LocalValue::Comptime(_)));
-
                 if all_comptime {
-                    let value_ids: Vec<ValueId> = field_locals
-                        .iter()
-                        .map(|l| match l {
-                            LocalValue::Comptime(vid) => *vid,
-                            _ => unreachable!("already verified all_comptime is true"),
-                        })
-                        .collect();
-                    let value_id = self
-                        .eval
-                        .values
-                        .intern(Value::StructVal { ty: struct_type_id, fields: &value_ids });
+                    let value_id = self.eval.values.intern(Value::StructVal {
+                        ty: struct_type_id,
+                        fields: &self.values_buf[buf_start..],
+                    });
+                    self.values_buf.truncate(buf_start);
                     LocalValue::Comptime(value_id)
                 } else {
+                    self.values_buf.truncate(buf_start);
+                    // Pass 2: runtime path — re-iterate, ensure_runtime each field
                     let buf_start = self.arg_buf.len();
-                    for local in field_locals {
+                    for i in 0..field_count {
+                        let field_value = self.eval.hir.fields[fields_id][i].value;
+                        let local = self.bindings.get(field_value);
                         let mir_local = self.ensure_runtime(local);
                         self.arg_buf.push(mir_local);
                     }
                     let args = self.eval.mir_args.push_iter(self.arg_buf.drain(buf_start..));
-                    let mir_local = self.alloc_mir_local(Some(struct_type_id));
-                    self.instructions.push(mir::Instruction::Set {
+                    let mir_local = self.alloc_mir_local(struct_type_id);
+                    self.instructions_buf.push(mir::Instruction::Set {
                         local: mir_local,
                         expr: mir::Expr::StructLit { ty: struct_type_id, fields: args },
                     });
-                    LocalValue::Runtime { mir_local, ty: Some(struct_type_id) }
+                    LocalValue::Runtime { mir_local, ty: struct_type_id }
                 }
             }
             hir::Expr::Member { object, member } => {
-                let obj_local = self.get_local(object);
+                let obj_local = self.bindings.get(object);
 
                 match obj_local {
                     LocalValue::Comptime(vid) => match self.eval.values.lookup(vid) {
@@ -272,28 +316,24 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                         _ => todo!("diagnostic: member access on non-struct comptime value"),
                     },
                     LocalValue::Runtime { mir_local, ty } => {
-                        let type_id = ty.expect(
-                            "hir invariant: runtime struct member requires type from AssertType",
-                        );
-                        let Some(field_index) =
-                            self.eval.types.field_index_by_name(type_id, member)
+                        let Some(field_index) = self.eval.types.field_index_by_name(ty, member)
                         else {
                             todo!("diagnostic: unknown struct field");
                         };
 
-                        let field_ty = match self.eval.types.lookup(type_id) {
+                        let field_ty = match self.eval.types.lookup(ty) {
                             sensei_values::Type::Struct(info) => {
                                 info.field_types[field_index as usize]
                             }
                             _ => unreachable!("hir invariant: member access type must be struct"),
                         };
 
-                        let result = self.alloc_mir_local(Some(field_ty));
-                        self.instructions.push(mir::Instruction::Set {
+                        let result = self.alloc_mir_local(field_ty);
+                        self.instructions_buf.push(mir::Instruction::Set {
                             local: result,
                             expr: mir::Expr::FieldAccess { object: mir_local, field_index },
                         });
-                        LocalValue::Runtime { mir_local: result, ty: Some(field_ty) }
+                        LocalValue::Runtime { mir_local: result, ty: field_ty }
                     }
                 }
             }
@@ -301,10 +341,10 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
     }
 
     fn walk_sub_block(&mut self, block_id: hir::BlockId) -> mir::BlockId {
-        let saved = std::mem::take(&mut self.instructions);
+        let saved = std::mem::take(&mut self.instructions_buf);
         self.walk_block(block_id);
-        let mir_block = self.eval.mir_blocks.push_iter(self.instructions.drain(..));
-        self.instructions = saved;
+        let mir_block = self.eval.mir_blocks.push_iter(self.instructions_buf.drain(..));
+        self.instructions_buf = saved;
         mir_block
     }
 
@@ -317,26 +357,26 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
     fn walk_instruction(&mut self, instr: hir::Instruction) {
         match instr {
             hir::Instruction::Set { local, expr } => {
-                let value = self.eval_expr(expr);
+                let value = self.translate_expr(expr);
                 match value {
                     LocalValue::Comptime(value) => {
-                        self.set_local(local, LocalValue::Comptime(value));
+                        self.bindings.set(local, LocalValue::Comptime(value));
                     }
                     LocalValue::Runtime { mir_local: src, ty } => {
                         let dst = self.alloc_mir_local(ty);
-                        self.instructions.push(mir::Instruction::Set {
+                        self.instructions_buf.push(mir::Instruction::Set {
                             local: dst,
                             expr: mir::Expr::LocalRef(src),
                         });
-                        self.set_local(local, LocalValue::Runtime { mir_local: dst, ty });
+                        self.bindings.set(local, LocalValue::Runtime { mir_local: dst, ty });
                     }
                 }
             }
             hir::Instruction::Eval(expr) => {
-                self.eval_expr(expr);
+                self.translate_expr(expr);
             }
             hir::Instruction::AssertType { value, of_type } => {
-                let type_local = self.get_local(of_type);
+                let type_local = self.bindings.get(of_type);
                 let expected = match type_local {
                     LocalValue::Comptime(vid) => match self.eval.values.lookup(vid) {
                         Value::Type(tid) => tid,
@@ -345,7 +385,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     _ => unreachable!("hir: AssertType of_type must be comptime"),
                 };
 
-                let ty = match self.get_local(value) {
+                let ty = match self.bindings.get(value) {
                     LocalValue::Runtime { ty, .. } => ty,
                     LocalValue::Comptime(value) => self.eval.values.type_of_value(value),
                 };
@@ -355,19 +395,20 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                 }
             }
             hir::Instruction::Return(expr) => {
-                let value = self.eval_expr(expr);
+                let value = self.translate_expr(expr);
                 if let LocalValue::Runtime { ty, .. } = value {
                     self.return_type = Some(ty);
                 }
                 let mir_local = self.ensure_runtime(value);
-                self.instructions.push(mir::Instruction::Return(mir::Expr::LocalRef(mir_local)));
+                self.instructions_buf
+                    .push(mir::Instruction::Return(mir::Expr::LocalRef(mir_local)));
             }
             hir::Instruction::If { condition, then_block, else_block } => {
-                let cond_local = self.get_local(condition);
+                let cond_local = self.bindings.get(condition);
                 let mir_condition = self.ensure_runtime(cond_local);
                 let mir_then = self.walk_sub_block(then_block);
                 let mir_else = self.walk_sub_block(else_block);
-                self.instructions.push(mir::Instruction::If {
+                self.instructions_buf.push(mir::Instruction::If {
                     condition: mir_condition,
                     then_block: mir_then,
                     else_block: mir_else,
@@ -375,31 +416,30 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
             }
             hir::Instruction::While { condition_block, condition, body } => {
                 let mir_condition_block = self.walk_sub_block(condition_block);
-                let mir_condition = match self.get_local(condition) {
+                let mir_condition = match self.bindings.get(condition) {
                     LocalValue::Runtime { mir_local, .. } => mir_local,
                     LocalValue::Comptime(_) => todo!("comptime while condition"),
                 };
                 let mir_body = self.walk_sub_block(body);
-                self.instructions.push(mir::Instruction::While {
+                self.instructions_buf.push(mir::Instruction::While {
                     condition_block: mir_condition_block,
                     condition: mir_condition,
                     body: mir_body,
                 });
             }
             hir::Instruction::Assign { target, value } => {
-                let target_local = match self.get_local(target) {
+                let target_local = match self.bindings.get(target) {
                     LocalValue::Runtime { mir_local, .. } => mir_local,
                     LocalValue::Comptime(vid) => {
-                        // Local was comptime but is now being assigned to, promote to
-                        // runtime so further references see a MIR local.
+                        let ty = self.eval.values.type_of_value(vid);
                         let mir_local = self.materialize(vid);
-                        self.set_local(target, LocalValue::Runtime { mir_local, ty: None });
+                        self.bindings.set(target, LocalValue::Runtime { mir_local, ty });
                         mir_local
                     }
                 };
-                let rhs = self.eval_expr(value);
+                let rhs = self.translate_expr(value);
                 let rhs_mir = self.ensure_runtime(rhs);
-                self.instructions.push(mir::Instruction::Assign {
+                self.instructions_buf.push(mir::Instruction::Assign {
                     target: target_local,
                     value: mir::Expr::LocalRef(rhs_mir),
                 });
@@ -408,38 +448,59 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
     }
 
     fn flush_as_fn(self, param_count: u32, return_type: TypeId) -> mir::FnId {
-        let body = self.eval.mir_blocks.push_iter(self.instructions.into_iter());
+        let body = self.eval.mir_blocks.push_iter(self.instructions_buf.into_iter());
         let fn_id = self.eval.mir_fns.push(mir::FnDef { body, param_count, return_type });
         let locals_id = self.eval.mir_fn_locals.push_iter(self.local_types.raw.into_iter());
-        debug_assert_eq!(fn_id, locals_id);
+        assert_eq!(fn_id, locals_id);
         fn_id
     }
 }
 
-fn lower_fn_body(
-    eval: &mut Evaluator<'_>,
-    fn_def_id: hir::FnDefId,
-    captures: &[ValueId],
-) -> mir::FnId {
+fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::FnId {
+    let Value::Closure { fn_def: fn_def_id, captures } = eval.values.lookup(closure_value_id)
+    else {
+        todo!("diagnostic: callee is not a function")
+    };
     let fn_def = eval.hir.fns[fn_def_id];
-    let params: Vec<hir::ParamInfo> = eval.hir.fn_params[fn_def_id].to_vec();
-    let hir_captures: Vec<hir::CaptureInfo> = eval.hir.fn_captures[fn_def_id].to_vec();
+    let params = &eval.hir.fn_params[fn_def_id];
+    let hir_captures = &eval.hir.fn_captures[fn_def_id];
 
-    let mut lowerer = BodyLowerer::new(eval);
-
+    // Phase 1: Bind captures into preamble bindings, evaluate type preamble.
+    let mut preamble_bindings = Bindings::default();
     for (capture_info, &value_id) in hir_captures.iter().zip(captures) {
-        lowerer.set_local(capture_info.inner_local, LocalValue::Comptime(value_id));
+        preamble_bindings.set(capture_info.inner_local, value_id);
     }
+    let preamble_bindings =
+        ComptimeInterpreter::eval_preamble_block(eval, preamble_bindings, fn_def.type_preamble);
+
+    // Phase 2: Extract param types and return type from evaluated preamble.
+    let param_types: Vec<TypeId> = params
+        .iter()
+        .map(|param| {
+            let type_vid = preamble_bindings.get(param.r#type);
+            let Value::Type(tid) = eval.values.lookup(type_vid) else {
+                todo!("diagnostic: param type must be Type")
+            };
+            tid
+        })
+        .collect();
+
+    let return_type_vid = preamble_bindings.get(fn_def.return_type);
+    let Value::Type(return_type) = eval.values.lookup(return_type_vid) else {
+        todo!("diagnostic: return type must be Type")
+    };
+
+    // Phase 3: Create lowerer, import preamble bindings, allocate typed params, walk body.
+    let mut lowerer = BodyLowerer::new(eval);
+    lowerer.import_comptime_bindings(&preamble_bindings);
 
     let param_count = params.len() as u32;
-    for param in &params {
-        let mir_local = lowerer.alloc_mir_local(None);
-        lowerer.set_local(param.local, LocalValue::Runtime { mir_local, ty: None });
+    for (param, &ty) in params.iter().zip(&param_types) {
+        let mir_local = lowerer.alloc_mir_local(ty);
+        lowerer.bindings.set(param.value, LocalValue::Runtime { mir_local, ty });
     }
 
     lowerer.walk_block(fn_def.body);
-
-    let return_type = lowerer.return_type.unwrap_or(TypeId::VOID);
     lowerer.flush_as_fn(param_count, return_type)
 }
 
