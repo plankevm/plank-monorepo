@@ -260,6 +260,55 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
 
                 let field_count = self.eval.hir.fields[fields_id].len();
 
+                // Validate against the struct definition
+                let sensei_values::Type::Struct(struct_info) =
+                    self.eval.types.lookup(struct_type_id)
+                else {
+                    panic!("struct literal type is not a struct type");
+                };
+
+                // Check field count
+                if field_count != struct_info.field_names.len() {
+                    panic!(
+                        "struct literal has {} field(s), but struct definition has {} field(s)",
+                        field_count,
+                        struct_info.field_names.len()
+                    );
+                }
+
+                // Validate field names and types
+                for i in 0..field_count {
+                    let field = self.eval.hir.fields[fields_id][i];
+                    let expected_name = struct_info.field_names[i];
+                    if field.name != expected_name {
+                        if struct_info.field_names.contains(&field.name) {
+                            panic!(
+                                "struct literal field at position {} has name {:?}, expected {:?} (fields are out of order)",
+                                i, field.name, expected_name
+                            );
+                        } else {
+                            panic!(
+                                "struct literal contains field {:?} which does not exist in the struct definition",
+                                field.name
+                            );
+                        }
+                    }
+
+                    // Check field type
+                    let field_value = self.bindings.get(field.value);
+                    let actual_type = match field_value {
+                        LocalValue::Runtime { ty, .. } => ty,
+                        LocalValue::Comptime(vid) => self.eval.values.type_of_value(vid),
+                    };
+                    let expected_type = struct_info.field_types[i];
+                    if actual_type != expected_type {
+                        panic!(
+                            "struct literal field at position {} has type {:?}, but struct definition expects {:?}",
+                            i, actual_type, expected_type
+                        );
+                    }
+                }
+
                 // Pass 1: try comptime — push ValueIds into values_buf
                 let buf_start = self.values_buf.len();
                 let mut all_comptime = true;

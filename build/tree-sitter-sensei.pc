@@ -1,0 +1,10 @@
+prefix=/usr/local
+libdir=${prefix}/
+includedir=${prefix}/
+
+Name: tree-sitter-sensei
+Description: A tree-sitter parser for sensei
+URL: https://github.com/senseilang/sensei-tree-sitter
+Version: 0.1.0
+Libs: -L${libdir} -ltree-sitter-sensei
+Cflags: -I${includedir}

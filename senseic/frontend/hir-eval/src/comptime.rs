@@ -197,6 +197,52 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
 
         let fields_info = &self.eval.hir.fields[fields_id];
 
+        // Validate against the struct definition
+        let sensei_values::Type::Struct(struct_info) = self.eval.types.lookup(struct_type_id)
+        else {
+            panic!("struct literal type is not a struct type");
+        };
+
+        // Check field count
+        if fields_info.len() != struct_info.field_names.len() {
+            panic!(
+                "struct literal has {} field(s), but struct definition has {} field(s)",
+                fields_info.len(),
+                struct_info.field_names.len()
+            );
+        }
+
+        // Validate field names and types
+        for (i, field) in fields_info.iter().enumerate() {
+            // Check field name exists and is in the correct position
+            let expected_name = struct_info.field_names[i];
+            if field.name != expected_name {
+                // Check if the field name exists at all in the struct
+                if struct_info.field_names.contains(&field.name) {
+                    panic!(
+                        "struct literal field at position {} has name {:?}, expected {:?} (fields are out of order)",
+                        i, field.name, expected_name
+                    );
+                } else {
+                    panic!(
+                        "struct literal contains field {:?} which does not exist in the struct definition",
+                        field.name
+                    );
+                }
+            }
+
+            // Check field type matches
+            let field_vid = self.bindings.get(field.value);
+            let actual_type = self.eval.values.type_of_value(field_vid);
+            let expected_type = struct_info.field_types[i];
+            if actual_type != expected_type {
+                panic!(
+                    "struct literal field at position {} has type {:?}, but struct definition expects {:?}",
+                    i, actual_type, expected_type
+                );
+            }
+        }
+
         self.value_buf.use_as(|fields| {
             for field in fields_info {
                 fields.push(self.bindings.get(field.value));

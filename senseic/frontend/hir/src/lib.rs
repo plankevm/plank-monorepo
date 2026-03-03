@@ -1,4 +1,4 @@
-use hashbrown::{HashMap, hash_map::Entry};
+use hashbrown::{HashMap, HashSet, hash_map::Entry};
 use sensei_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use sensei_parser::{
     StrId,
@@ -348,7 +348,11 @@ impl<'a> BlockLowerer<'a> {
             ast::Expr::StructLit(struct_lit) => {
                 let ty = self.lower_expr_to_local(struct_lit.type_expr());
                 let buf_start = self.field_buf.len();
+                let mut seen_fields: HashSet<StrId> = HashSet::new();
                 for field in struct_lit.fields() {
+                    if !seen_fields.insert(field.name) {
+                        panic!("duplicate field name in struct literal");
+                    }
                     let value = self.lower_expr_to_local(field.value());
                     self.field_buf.push(FieldInfo { name: field.name, value });
                 }
@@ -366,7 +370,11 @@ impl<'a> BlockLowerer<'a> {
                         local
                     });
                 let buf_start = self.field_buf.len();
+                let mut seen_fields: HashSet<StrId> = HashSet::new();
                 for field in struct_def.fields() {
+                    if !seen_fields.insert(field.name) {
+                        panic!("duplicate field name in struct definition");
+                    }
                     let value = self.lower_expr_to_local(field.type_expr());
                     self.field_buf.push(FieldInfo { name: field.name, value });
                 }

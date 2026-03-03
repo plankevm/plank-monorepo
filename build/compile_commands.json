@@ -1,0 +1,8 @@
+[
+{
+  "directory": "/workspaces/plank-monorepo/build",
+  "command": "/usr/bin/cc -DTREE_SITTER_DEBUG -I/workspaces/plank-monorepo/sensei-tree-sitter/src -g -std=gnu11 -fPIC -o CMakeFiles/tree-sitter-sensei.dir/src/parser.c.o -c /workspaces/plank-monorepo/sensei-tree-sitter/src/parser.c",
+  "file": "/workspaces/plank-monorepo/sensei-tree-sitter/src/parser.c",
+  "output": "CMakeFiles/tree-sitter-sensei.dir/src/parser.c.o"
+}
+]

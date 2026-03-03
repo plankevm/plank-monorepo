@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -g -shared -Wl,-soname,libtree-sitter-sensei.so.15.0 -o libtree-sitter-sensei.so.15.0 "CMakeFiles/tree-sitter-sensei.dir/src/parser.c.o" 

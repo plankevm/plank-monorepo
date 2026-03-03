@@ -1,0 +1,8 @@
+/workspaces/plank-monorepo/build/CMakeFiles/tree-sitter-sensei.dir
+/workspaces/plank-monorepo/build/CMakeFiles/ts-test.dir
+/workspaces/plank-monorepo/build/CMakeFiles/edit_cache.dir
+/workspaces/plank-monorepo/build/CMakeFiles/rebuild_cache.dir
+/workspaces/plank-monorepo/build/CMakeFiles/list_install_components.dir
+/workspaces/plank-monorepo/build/CMakeFiles/install.dir
+/workspaces/plank-monorepo/build/CMakeFiles/install/local.dir
+/workspaces/plank-monorepo/build/CMakeFiles/install/strip.dir
