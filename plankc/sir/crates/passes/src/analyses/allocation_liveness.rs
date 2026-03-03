@@ -1,3 +1,6 @@
+use hashbrown::HashMap;
+use smallvec::SmallVec;
+
 use crate::{DefUse, UseKind};
 use sensei_core::Idx;
 use sir_data::{
@@ -48,7 +51,69 @@ pub struct AllocationLiveness {
     pub local_to_alloc: IndexVec<LocalId, Option<AllocId>>,
 }
 
-pub fn discover_allocations(program: &EthIRProgram, def_use: &DefUse) -> AllocationLiveness {
+pub fn compute_allocation_liveness(program: &EthIRProgram, def_use: &DefUse) -> AllocationLiveness {
+    let mut result = discover_allocations(program, def_use);
+    if result.allocations.is_empty() {
+        return result;
+    }
+
+    let local_to_block_input = build_local_to_block_input(program, def_use, &result.local_to_alloc);
+
+    let mut postorder = Vec::new();
+    let mut visited = sensei_core::DenseIndexSet::new();
+    for func in program.functions_iter() {
+        crate::dfs_postorder(program, func.entry().id(), &mut visited, &mut postorder);
+    }
+
+    let mut predecessors = IndexVec::new();
+    crate::compute_predecessors(program, &mut predecessors);
+
+    let block_exit_liveness = compute_block_exit_liveness(
+        program,
+        def_use,
+        &result.local_to_alloc,
+        &local_to_block_input,
+        &predecessors,
+        &postorder,
+    );
+
+    build_intervals(program, &mut result, &local_to_block_input, &postorder, &block_exit_liveness);
+
+    result
+}
+
+type BlockInputOrigins = SmallVec<[(BasicBlockId, u32); 1]>;
+
+fn build_local_to_block_input(
+    _program: &EthIRProgram,
+    _def_use: &DefUse,
+    _local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
+) -> HashMap<LocalId, BlockInputOrigins> {
+    todo!()
+}
+
+fn compute_block_exit_liveness(
+    _program: &EthIRProgram,
+    _def_use: &DefUse,
+    _local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
+    _local_to_block_input: &HashMap<LocalId, BlockInputOrigins>,
+    _predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    _postorder: &[BasicBlockId],
+) -> IndexVec<BasicBlockId, sensei_core::DenseIndexSet<AllocId>> {
+    todo!()
+}
+
+fn build_intervals(
+    _program: &EthIRProgram,
+    _result: &mut AllocationLiveness,
+    _local_to_block_input: &HashMap<LocalId, BlockInputOrigins>,
+    _postorder: &[BasicBlockId],
+    _block_exit_liveness: &IndexVec<BasicBlockId, sensei_core::DenseIndexSet<AllocId>>,
+) {
+    todo!()
+}
+
+fn discover_allocations(program: &EthIRProgram, def_use: &DefUse) -> AllocationLiveness {
     let mut allocations: IndexVec<AllocId, AllocData> = IndexVec::new();
     let mut local_to_alloc = index_vec![None; program.next_free_local_id.get() as usize];
 
@@ -204,7 +269,7 @@ mod tests {
     fn analyze(ir: &EthIRProgram) -> AllocationLiveness {
         let mut def_use = IndexVec::new();
         compute_def_use(ir, &mut def_use);
-        discover_allocations(ir, &def_use)
+        compute_allocation_liveness(ir, &def_use)
     }
 
     #[test]
