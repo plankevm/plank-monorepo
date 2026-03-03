@@ -121,6 +121,18 @@ impl<T: IncIterable> Iterator for IncIterator<T> {
     }
 }
 
+impl<T: IncIterable + Copy + std::ops::Sub<u32, Output = T>> DoubleEndedIterator
+    for IncIterator<T>
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.start >= self.end {
+            return None;
+        }
+        self.end = self.end - 1;
+        Some(self.end)
+    }
+}
+
 pub trait SpanLike {
     type Idx: Copy;
     fn start(&self) -> Self::Idx;
