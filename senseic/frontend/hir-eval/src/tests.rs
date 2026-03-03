@@ -73,11 +73,45 @@ fn test_simple_malloc_mstore_return() {
 
 #[test]
 #[should_panic(expected = "type mismatch in AssertType")]
-fn test_type_error_u256_bool() {
+fn test_type_annotation_type_mismatch() {
     let _ = try_lower(
         "
         init {
             let x: u256 = false;
+        }
+        ",
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: type mismatch on set")]
+fn test_if_branches_type_mismatch() {
+    let _ = try_lower(
+        "
+        init {
+            let c = calldataload(0);
+            let x = if slt(c, 0)  {
+                3
+            } else {
+                false
+            };
+        }
+        ",
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: type mismatch in AssertType")]
+fn test_if_type_mismatch() {
+    let _ = try_lower(
+        "
+        init {
+            let c = calldataload(0);
+            let x: u256 = if slt(c, 0)  {
+                true
+            } else {
+                false
+            };
         }
         ",
     );
