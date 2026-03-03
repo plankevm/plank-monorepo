@@ -1,4 +1,8 @@
-use crate::{BigNumInterner, BlockId, ConstId, Expr, FnDefId, Hir, Instruction, StructDefId};
+use crate::{
+    BigNumInterner, BlockId, CallArgsId, ConstId, Expr, FnDefId, Hir, Instruction, LocalId,
+    StructDefId,
+};
+use sensei_core::Idx;
 use sensei_parser::PlankInterner;
 use std::fmt::{self, Display, Formatter};
 
@@ -13,85 +17,132 @@ impl<'a> DisplayHir<'a> {
         Self { hir, big_nums, interner }
     }
 
+    fn fmt_local(&self, f: &mut Formatter<'_>, local: LocalId) -> fmt::Result {
+        write!(f, "%{}", local.get())
+    }
+
+    fn fmt_const(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
+        write!(f, "${}", const_id.get())
+    }
+
+    fn fmt_fn_ref(&self, f: &mut Formatter<'_>, fn_id: FnDefId) -> fmt::Result {
+        write!(f, "@fn{}", fn_id.get())
+    }
+
+    fn fmt_struct_ref(&self, f: &mut Formatter<'_>, struct_id: StructDefId) -> fmt::Result {
+        write!(f, "@struct{}", struct_id.get())
+    }
+
+    fn fmt_args(&self, f: &mut Formatter<'_>, args_id: CallArgsId) -> fmt::Result {
+        let args = &self.hir.call_args[args_id];
+        write!(f, "(")?;
+        for (i, &local) in args.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            self.fmt_local(f, local)?;
+        }
+        write!(f, ")")
+    }
+
     fn fmt_expr(&self, f: &mut Formatter<'_>, expr: Expr) -> fmt::Result {
         match expr {
-            Expr::ConstRef(id) => write!(f, "ConstRef({id:?})"),
-            Expr::LocalRef(id) => write!(f, "LocalRef({id:?})"),
-            Expr::FnDef(id) => write!(f, "FnDef({id:?})"),
-            Expr::Bool(b) => write!(f, "Bool({b})"),
-            Expr::Void => write!(f, "Void"),
-            Expr::BigNum(id) => {
-                let value = &self.big_nums[id];
-                write!(f, "BigNum({value})")
-            }
-            Expr::Type(id) => write!(f, "Type({id:?})"),
+            Expr::ConstRef(id) => self.fmt_const(f, id),
+            Expr::LocalRef(id) => self.fmt_local(f, id),
+            Expr::FnDef(id) => self.fmt_fn_ref(f, id),
+            Expr::Bool(b) => write!(f, "{b}"),
+            Expr::Void => write!(f, "void"),
+            Expr::BigNum(id) => write!(f, "{}", self.big_nums[id]),
+            Expr::Type(id) => write!(f, "type#{}", id.get()),
             Expr::Call { callee, args } => {
-                let arg_locals = &self.hir.call_args[args];
-                write!(f, "Call {{ callee: {callee:?}, args: {arg_locals:?} }}")
+                write!(f, "call ")?;
+                self.fmt_local(f, callee)?;
+                self.fmt_args(f, args)
             }
             Expr::BuiltinCall { builtin, args } => {
-                let arg_locals = &self.hir.call_args[args];
-                write!(f, "{builtin} {{ args: {arg_locals:?} }}")
+                write!(f, "{builtin}")?;
+                self.fmt_args(f, args)
             }
             Expr::Member { object, member } => {
+                self.fmt_local(f, object)?;
                 let name = &self.interner[member];
-                write!(f, "Member {{ object: {object:?}, member: {name:?} }}")
+                write!(f, ".{name}")
             }
             Expr::StructLit { ty, fields } => {
-                write!(f, "StructLit {{ ty: {ty:?}, fields: [")?;
-                for (i, field) in self.hir.fields[fields].iter().enumerate() {
+                self.fmt_local(f, ty)?;
+                write!(f, " {{")?;
+                let field_infos = &self.hir.fields[fields];
+                for (i, field) in field_infos.iter().enumerate() {
                     if i > 0 {
-                        write!(f, ", ")?;
+                        write!(f, ",")?;
                     }
                     let name = &self.interner[field.name];
-                    write!(f, "{name:?}: {:?}", field.value)?;
+                    write!(f, " {name}: ")?;
+                    self.fmt_local(f, field.value)?;
                 }
-                write!(f, "] }}")
+                if !field_infos.is_empty() {
+                    write!(f, " ")?;
+                }
+                write!(f, "}}")
             }
-            Expr::StructDef(id) => write!(f, "StructDef({id:?})"),
+            Expr::StructDef(id) => self.fmt_struct_ref(f, id),
         }
     }
 
     fn fmt_instr(&self, f: &mut Formatter<'_>, instr: Instruction, indent: usize) -> fmt::Result {
-        let indent_str = "    ".repeat(indent);
+        let pad = "    ".repeat(indent);
         match instr {
             Instruction::Set { local, expr } => {
-                write!(f, "{indent_str}Set {{ local: {local:?}, expr: ")?;
+                write!(f, "{pad}")?;
+                self.fmt_local(f, local)?;
+                write!(f, " = ")?;
                 self.fmt_expr(f, expr)?;
-                writeln!(f, " }}")
+                writeln!(f)
             }
             Instruction::Assign { target, value } => {
-                write!(f, "{indent_str}Assign {{ target: {target:?}, value: ")?;
+                write!(f, "{pad}")?;
+                self.fmt_local(f, target)?;
+                write!(f, " := ")?;
                 self.fmt_expr(f, value)?;
-                writeln!(f, " }}")
+                writeln!(f)
             }
             Instruction::AssertType { value, of_type } => {
-                writeln!(f, "{indent_str}AssertType {{ value: {value:?}, of_type: {of_type:?} }}")
+                write!(f, "{pad}assert_type ")?;
+                self.fmt_local(f, value)?;
+                write!(f, " : ")?;
+                self.fmt_local(f, of_type)?;
+                writeln!(f)
             }
             Instruction::Eval(expr) => {
-                write!(f, "{indent_str}Eval(")?;
+                write!(f, "{pad}eval ")?;
                 self.fmt_expr(f, expr)?;
-                writeln!(f, ")")
+                writeln!(f)
             }
             Instruction::Return(expr) => {
-                write!(f, "{indent_str}Return(")?;
+                write!(f, "{pad}ret ")?;
                 self.fmt_expr(f, expr)?;
-                writeln!(f, ")")
+                writeln!(f)
             }
-            Instruction::If { condition, then_block, else_block } => {
-                writeln!(f, "{indent_str}If {{ condition: {condition:?} }}")?;
-                writeln!(f, "{indent_str}  then:")?;
-                self.fmt_block(f, then_block, indent + 2)?;
-                writeln!(f, "{indent_str}  else:")?;
-                self.fmt_block(f, else_block, indent + 2)
+            Instruction::If { condition, then_block, else_block, result } => {
+                self.fmt_local(f, result)?;
+                write!(f, "{pad}if ")?;
+                self.fmt_local(f, condition)?;
+                writeln!(f, " {{")?;
+                self.fmt_block(f, then_block, indent + 1)?;
+                writeln!(f, "{pad}}} else {{")?;
+                self.fmt_block(f, else_block, indent + 1)?;
+                writeln!(f, "{pad}}}")
             }
             Instruction::While { condition_block, condition, body } => {
-                writeln!(f, "{indent_str}While {{")?;
-                writeln!(f, "{indent_str}  condition ({condition:?}):")?;
+                writeln!(f, "{pad}while {{")?;
+                writeln!(f, "{pad}    cond:")?;
                 self.fmt_block(f, condition_block, indent + 2)?;
-                writeln!(f, "{indent_str}  body:")?;
+                write!(f, "{pad}    test ")?;
+                self.fmt_local(f, condition)?;
+                writeln!(f)?;
+                writeln!(f, "{pad}    body:")?;
                 self.fmt_block(f, body, indent + 2)?;
-                writeln!(f, "{indent_str}}}")
+                writeln!(f, "{pad}}}")
             }
         }
     }
@@ -104,17 +155,20 @@ impl<'a> DisplayHir<'a> {
         Ok(())
     }
 
-    fn fmt_const(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
+    fn fmt_const_def(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
         let const_name = self
             .hir
             .consts
             .const_name_to_id
             .iter()
             .find_map(|(&name, &id)| (id == const_id).then(|| &self.interner[name]))
-            .expect("missing name map for const ID");
+            .unwrap_or("<unnamed>");
 
         let const_def = &self.hir.consts.const_defs[const_id];
-        writeln!(f, "{const_id:?} ({const_name:?}) result={:?} {{", const_def.result)?;
+        write!(f, "${} ", const_id.get())?;
+        write!(f, "({const_name}) -> ")?;
+        self.fmt_local(f, const_def.result)?;
+        writeln!(f, " {{")?;
         self.fmt_block(f, const_def.body, 1)?;
         writeln!(f, "}}")
     }
@@ -124,29 +178,37 @@ impl<'a> DisplayHir<'a> {
         let params = &self.hir.fn_params[fn_def_id];
         let captures = &self.hir.fn_captures[fn_def_id];
 
-        writeln!(f, "{fn_def_id:?} {{")?;
-
-        write!(f, "    params: [")?;
+        write!(f, "@fn{}(", fn_def_id.get())?;
         for (i, param) in params.iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
-            let comptime_str = if param.is_comptime { "comptime " } else { "" };
-            write!(f, "{comptime_str}{:?}", param.value)?;
+            if param.is_comptime {
+                write!(f, "comptime ")?;
+            }
+            self.fmt_local(f, param.value)?;
+            write!(f, ": ")?;
+            self.fmt_local(f, param.r#type)?;
         }
-        writeln!(f, "]")?;
+        write!(f, ") -> ")?;
+        self.fmt_local(f, fn_def.return_type)?;
+        writeln!(f, " {{")?;
 
         if !captures.is_empty() {
-            write!(f, "    captures: [")?;
+            write!(f, "  captures: [")?;
             for (i, capture) in captures.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                write!(f, "{:?} -> {:?}", capture.outer_local, capture.inner_local)?;
+                self.fmt_local(f, capture.outer_local)?;
+                write!(f, " -> ")?;
+                self.fmt_local(f, capture.inner_local)?;
             }
             writeln!(f, "]")?;
         }
 
+        writeln!(f, "    preamble:")?;
+        self.fmt_block(f, fn_def.type_preamble, 2)?;
         writeln!(f, "    body:")?;
         self.fmt_block(f, fn_def.body, 2)?;
         writeln!(f, "}}")
@@ -156,17 +218,20 @@ impl<'a> DisplayHir<'a> {
         let struct_def = &self.hir.struct_defs[struct_def_id];
         let fields = &self.hir.fields[struct_def.fields];
 
-        writeln!(f, "{struct_def_id:?} {{")?;
-        writeln!(f, "    type_index: {:?}", struct_def.type_index)?;
-        write!(f, "    fields: [")?;
+        write!(f, "@struct{}[index: ", struct_def_id.get())?;
+        self.fmt_local(f, struct_def.type_index)?;
+        write!(f, "] {{")?;
         for (i, field) in fields.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, ",")?;
             }
             let name = &self.interner[field.name];
-            write!(f, "{name:?}: {:?}", field.value)?;
+            write!(f, " {name}: ")?;
+            self.fmt_local(f, field.value)?;
         }
-        writeln!(f, "]")?;
+        if !fields.is_empty() {
+            write!(f, " ")?;
+        }
         writeln!(f, "}}")
     }
 }
@@ -175,29 +240,29 @@ impl Display for DisplayHir<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "==== Constants ====")?;
         for (&_, &const_id) in self.hir.consts.const_name_to_id.iter() {
-            self.fmt_const(f, const_id)?;
+            self.fmt_const_def(f, const_id)?;
         }
 
         if !self.hir.fns.is_empty() {
-            writeln!(f, "\n==== Function Definitions ====")?;
+            writeln!(f, "\n==== Functions ====")?;
             for (fn_def_id, _) in self.hir.fns.enumerate_idx() {
                 self.fmt_fn_def(f, fn_def_id)?;
             }
         }
 
         if !self.hir.struct_defs.is_empty() {
-            writeln!(f, "\n==== Struct Definitions ====")?;
+            writeln!(f, "\n==== Structs ====")?;
             for (struct_def_id, _) in self.hir.struct_defs.enumerate_idx() {
                 self.fmt_struct_def(f, struct_def_id)?;
             }
         }
 
         writeln!(f, "\n==== Init ====")?;
-        self.fmt_block(f, self.hir.init, 1)?;
+        self.fmt_block(f, self.hir.init, 0)?;
 
         if let Some(run_block) = self.hir.run {
             writeln!(f, "\n==== Run ====")?;
-            self.fmt_block(f, run_block, 1)?;
+            self.fmt_block(f, run_block, 0)?;
         }
 
         Ok(())

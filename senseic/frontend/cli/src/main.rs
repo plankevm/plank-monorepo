@@ -54,7 +54,18 @@ fn main() {
     let hir = lower(&cst, &mut big_nums);
 
     if args.show_hir {
+        if args.show_mir {
+            println!("////////////////////////////////////////////////////////////////");
+            println!("//                            HIR                             //");
+            println!("////////////////////////////////////////////////////////////////");
+        }
         print!("{}", DisplayHir::new(&hir, &big_nums, &interner));
+        if args.show_mir {
+            println!("\n");
+            println!("////////////////////////////////////////////////////////////////");
+            println!("//                            MIR                             //");
+            println!("////////////////////////////////////////////////////////////////");
+        }
     }
 
     let mir = sensei_hir_eval::evaluate(&hir);

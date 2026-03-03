@@ -110,7 +110,7 @@ impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
                     todo!("diagnostic: assign type mismatch");
                 }
             }
-            hir::Instruction::If { condition, then_block, else_block } => {
+            hir::Instruction::If { condition, then_block, else_block, result: _ } => {
                 let cond_vid = self.bindings.get(condition);
                 match self.eval.values.lookup(cond_vid) {
                     Value::Bool(true) => self.interpret_block(then_block)?,

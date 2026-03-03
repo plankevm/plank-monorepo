@@ -41,6 +41,11 @@ Cargo workspace with general-purpose crates in `crates/` and frontend crates in 
 
 ## Coding Style
 
+### Code QA
+
+All issues raised by the `code-qa` agent MUST BE ADDRESSED, any
+issues that are not fixed must be listed with an explanation in the completion summary.
+
 ### Comments
 Do NOT add inline comments that describe *what* the code does
 (e.g., "// Parse next element"). The code should be self-documenting.

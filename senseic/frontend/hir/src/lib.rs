@@ -55,7 +55,7 @@ pub enum Instruction {
     AssertType { value: LocalId, of_type: LocalId },
     Eval(Expr),
     Return(Expr),
-    If { condition: LocalId, then_block: BlockId, else_block: BlockId },
+    If { condition: LocalId, then_block: BlockId, else_block: BlockId, result: LocalId },
     While { condition_block: BlockId, condition: LocalId, body: BlockId },
 }
 
@@ -395,7 +395,7 @@ impl<'a> BlockLowerer<'a> {
                 let then_block = self.lower_body_to_block_with_result(if_expr.body(), result);
                 let else_block =
                     self.lower_else_chain(result, if_expr.else_if_branches(), if_expr.else_body());
-                self.emit(Instruction::If { condition, then_block, else_block });
+                self.emit(Instruction::If { condition, then_block, else_block, result });
                 Expr::LocalRef(result)
             }
             ast::Expr::ComptimeBlock(_) => {
@@ -491,7 +491,7 @@ impl<'a> BlockLowerer<'a> {
                 let condition = lowerer.lower_expr_to_local(first.condition());
                 let then_block = lowerer.lower_body_to_block_with_result(first.body(), result);
                 let else_block = lowerer.lower_else_chain(result, branches, else_body);
-                lowerer.emit(Instruction::If { condition, then_block, else_block });
+                lowerer.emit(Instruction::If { condition, then_block, else_block, result });
             })
         } else if let Some(body) = else_body {
             self.lower_body_to_block_with_result(body, result)
