@@ -58,6 +58,7 @@ impl LocalState {
         }
     }
 
+    /// Returns `Err(TypeId)` if reassigning with different type.
     fn assign_or_define(&mut self, hir: hir::LocalId, ty: TypeId) -> Result<mir::LocalId, TypeId> {
         self.ensure_hir_entries(hir);
         if let Some(mir) = self.get_mir(hir) {
@@ -533,7 +534,6 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                 match self.translate_expr(expr) {
                     ExprResult::ComptimeOnly(value_id) => self.locals.set_comptime(local, value_id),
                     ExprResult::Runtime { mir_local: src_mir, ty, comptime_value } => {
-                        // Get or allocate MIR local for this HIR local
                         let Ok(dst_mir) = self.locals.assign_or_define(local, ty) else {
                             todo!("diagnostic: type mismatch on set")
                         };
@@ -554,15 +554,13 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                 self.translate_expr(expr);
             }
             hir::Instruction::AssertType { value, of_type } => {
-                let Some(expected) = self.locals.get_comptime(of_type) else {
+                let Some(type_value) = self.locals.get_comptime(of_type) else {
                     todo!("diagnostic: AssertType of_type must be comptime")
                 };
-                let Value::Type(expected) = self.eval.values.lookup(expected) else {
+                let Value::Type(expected) = self.eval.values.lookup(type_value) else {
                     todo!("diagnostic: AssertType of_type must be Type");
                 };
-
                 let actual = self.locals.get_type(value, &self.eval.values);
-
                 if actual != expected {
                     todo!("diagnostic: type mismatch in AssertType")
                 }
