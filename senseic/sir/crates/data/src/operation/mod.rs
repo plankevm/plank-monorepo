@@ -223,6 +223,17 @@ define_operations! {
 }
 
 impl OperationKind {
+    pub const fn is_terminating(&self) -> bool {
+        matches!(
+            self,
+            OperationKind::Return
+                | OperationKind::Stop
+                | OperationKind::Revert
+                | OperationKind::Invalid
+                | OperationKind::SelfDestruct
+        )
+    }
+
     pub fn is_removable_when_unused(&self) -> bool {
         match self {
             OperationKind::Add

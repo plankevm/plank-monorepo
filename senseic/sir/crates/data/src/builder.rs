@@ -1,4 +1,7 @@
-use crate::*;
+use crate::{
+    operation::{SetLargeConstData, SetSmallConstData},
+    *,
+};
 use alloy_primitives::U256;
 use sensei_core::span::IncIterable;
 
@@ -153,7 +156,7 @@ impl<'ir> FunctionBuilder<'ir> {
         SwitchBuilder { context: self, values_start, targets_start, cases_count: 0 }
     }
 
-    fn push_completed_basic_block(&mut self, bb: BasicBlock) -> Result<BasicBlockId, BuildError> {
+    fn push_final_basic_block(&mut self, bb: BasicBlock) -> Result<BasicBlockId, BuildError> {
         let implied_out = bb.implied_fn_out();
 
         if let Some((set_outputs, implied_out)) = self.outputs.zip(implied_out)
@@ -208,6 +211,18 @@ impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
         idx
     }
 
+    pub fn add_set_const_op(&mut self, sets: LocalId, value: U256) -> OperationIdx {
+        match u32::try_from(value) {
+            Ok(value) => {
+                self.add_operation(Operation::SetSmallConst(SetSmallConstData { sets, value }))
+            }
+            Err(_) => {
+                let value = self.alloc_u256(value);
+                self.add_operation(Operation::SetLargeConst(SetLargeConstData { sets, value }))
+            }
+        }
+    }
+
     pub fn set_inputs(&mut self, new_inputs: &[LocalId]) {
         overwrite_span_via_copy(
             &mut self.inputs,
@@ -232,12 +247,16 @@ impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
     }
 
     pub fn finish(self, control: Control) -> Result<BasicBlockId, BuildError> {
-        self.fn_builder.push_completed_basic_block(BasicBlock {
+        self.fn_builder.push_final_basic_block(BasicBlock {
             inputs: self.inputs,
             outputs: self.outputs,
             operations: self.operations,
             control,
         })
+    }
+
+    pub fn alloc_u256(&mut self, value: U256) -> LargeConstId {
+        self.fn_builder.ir_builder.alloc_u256(value)
     }
 }
 
