@@ -5,28 +5,10 @@ use crate::{
     lexer::Lexed,
     parser::parse,
 };
+use sensei_test_utils::{dedent, dedent_preserve_indent};
 
 // mod resiliency;
 mod errorless;
-
-fn dedent(s: &str) -> String {
-    s.lines().map(|line| line.trim()).filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n")
-}
-
-fn dedent_preserve_indent(s: &str) -> String {
-    let lines: Vec<&str> = s.lines().collect();
-    let non_empty_lines: Vec<&str> =
-        lines.iter().copied().filter(|l| !l.trim().is_empty()).collect();
-
-    if non_empty_lines.is_empty() {
-        return String::new();
-    }
-
-    let min_indent =
-        non_empty_lines.iter().map(|line| line.len() - line.trim_start().len()).min().unwrap_or(0);
-
-    non_empty_lines.iter().map(|line| &line[min_indent..]).collect::<Vec<_>>().join("\n")
-}
 
 pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let source = dedent(source);

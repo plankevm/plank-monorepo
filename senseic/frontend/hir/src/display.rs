@@ -133,6 +133,11 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
+            // Instruction::Comptime(block) => {
+            //     writeln!(f, "{pad}comptime {{")?;
+            //     self.fmt_block(f, block, indent + 1)?;
+            //     writeln!(f, "{pad}}}")
+            // }
             Instruction::While { condition_block, condition, body } => {
                 writeln!(f, "{pad}while {{")?;
                 writeln!(f, "{pad}    cond:")?;

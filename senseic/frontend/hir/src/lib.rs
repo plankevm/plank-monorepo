@@ -656,3 +656,6 @@ pub fn lower(cst: &ConcreteSyntaxTree, big_nums: &mut BigNumInterner) -> Hir {
         run,
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -13,3 +13,7 @@ plank-diagnostics.workspace = true
 hashbrown.workspace = true
 allocator-api2.workspace = true
 alloy-primitives.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+sensei-test-utils.workspace = true
