@@ -57,7 +57,7 @@ pub fn compute_allocation_liveness(program: &EthIRProgram, def_use: &DefUse) -> 
         return result;
     }
 
-    let local_to_block_input = build_local_to_block_input(program, def_use, &result.local_to_alloc);
+    let local_to_input_origins = propagate_block_input_origins(program, def_use);
 
     let mut postorder = Vec::new();
     let mut visited = sensei_core::DenseIndexSet::new();
@@ -72,31 +72,66 @@ pub fn compute_allocation_liveness(program: &EthIRProgram, def_use: &DefUse) -> 
         program,
         def_use,
         &result.local_to_alloc,
-        &local_to_block_input,
+        &local_to_input_origins,
         &predecessors,
         &postorder,
     );
 
-    build_intervals(program, &mut result, &local_to_block_input, &postorder, &block_exit_liveness);
+    build_intervals(
+        program,
+        &mut result,
+        &local_to_input_origins,
+        &postorder,
+        &block_exit_liveness,
+    );
 
     result
 }
 
 type BlockInputOrigins = SmallVec<[(BasicBlockId, u32); 1]>;
 
-fn build_local_to_block_input(
-    _program: &EthIRProgram,
-    _def_use: &DefUse,
-    _local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
+fn propagate_block_input_origins(
+    program: &EthIRProgram,
+    def_use: &DefUse,
 ) -> HashMap<LocalId, BlockInputOrigins> {
-    todo!()
+    let mut local_to_input_origins: HashMap<LocalId, BlockInputOrigins> = HashMap::new();
+    let mut worklist: Vec<(LocalId, (BasicBlockId, u32))> = Vec::new();
+
+    for block in program.blocks() {
+        let bb_id = block.id();
+        for (pos, &input) in block.inputs().iter().enumerate() {
+            let input_site = (bb_id, pos as u32);
+            local_to_input_origins.entry(input).or_default().push(input_site);
+            worklist.push((input, input_site));
+        }
+    }
+
+    while let Some((local, input_site)) = worklist.pop() {
+        for use_loc in &def_use[local] {
+            let UseKind::Operation(op_idx) = use_loc.kind else { continue };
+            let op = program.operations[op_idx];
+            if !can_derive_pointer(op) {
+                continue;
+            }
+            for output in op.outputs(program) {
+                let sites = local_to_input_origins.entry(*output).or_default();
+                if sites.contains(&input_site) {
+                    continue;
+                }
+                sites.push(input_site);
+                worklist.push((*output, input_site));
+            }
+        }
+    }
+
+    local_to_input_origins
 }
 
 fn compute_block_exit_liveness(
     _program: &EthIRProgram,
     _def_use: &DefUse,
     _local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
-    _local_to_block_input: &HashMap<LocalId, BlockInputOrigins>,
+    _local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
     _predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
     _postorder: &[BasicBlockId],
 ) -> IndexVec<BasicBlockId, sensei_core::DenseIndexSet<AllocId>> {
@@ -106,7 +141,7 @@ fn compute_block_exit_liveness(
 fn build_intervals(
     _program: &EthIRProgram,
     _result: &mut AllocationLiveness,
-    _local_to_block_input: &HashMap<LocalId, BlockInputOrigins>,
+    _local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
     _postorder: &[BasicBlockId],
     _block_exit_liveness: &IndexVec<BasicBlockId, sensei_core::DenseIndexSet<AllocId>>,
 ) {
