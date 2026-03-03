@@ -89,7 +89,7 @@ impl<'a> DisplayMir<'a> {
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         match instr {
-            Instruction::Set { local, expr } => {
+            Instruction::Set { target: local, value: expr } => {
                 write!(f, "{pad}")?;
                 self.fmt_local(f, local)?;
                 write!(f, " : ")?;
@@ -103,11 +103,6 @@ impl<'a> DisplayMir<'a> {
                 self.fmt_local(f, target)?;
                 write!(f, " := ")?;
                 self.fmt_expr(f, value)?;
-                writeln!(f)
-            }
-            Instruction::Eval(expr) => {
-                write!(f, "{pad}eval ")?;
-                self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
             Instruction::Return(expr) => {

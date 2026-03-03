@@ -25,9 +25,8 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Instruction {
-    Set { local: LocalId, expr: Expr },
+    Set { target: LocalId, value: Expr },
     Assign { target: LocalId, value: Expr },
-    Eval(Expr),
     Return(Expr),
     If { condition: LocalId, then_block: BlockId, else_block: BlockId },
     While { condition_block: BlockId, condition: LocalId, body: BlockId },

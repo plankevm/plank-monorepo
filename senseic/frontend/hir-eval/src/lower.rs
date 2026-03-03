@@ -153,10 +153,10 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
     }
 
     /// Emit a mir::Set instruction and return the allocated local.
-    fn emit_set(&mut self, ty: TypeId, expr: mir::Expr) -> mir::LocalId {
-        let mir_local = self.locals.alloc_mir_typed(ty);
-        self.instructions_buf.push(mir::Instruction::Set { local: mir_local, expr });
-        mir_local
+    fn emit_set(&mut self, ty: TypeId, value: mir::Expr) -> mir::LocalId {
+        let target = self.locals.alloc_mir_typed(ty);
+        self.instructions_buf.push(mir::Instruction::Set { target, value });
+        target
     }
 
     fn translate_call_args(&mut self, call_args_id: hir::CallArgsId) -> mir::ArgsId {
@@ -539,8 +539,8 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                         };
 
                         self.instructions_buf.push(mir::Instruction::Set {
-                            local: dst_mir,
-                            expr: mir::Expr::LocalRef(src_mir),
+                            target: dst_mir,
+                            value: mir::Expr::LocalRef(src_mir),
                         });
 
                         // Record comptime value if known
