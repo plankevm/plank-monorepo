@@ -10,6 +10,9 @@ mod comptime;
 mod lower;
 mod value;
 
+#[cfg(test)]
+mod tests;
+
 use value::ValueInterner;
 
 #[derive(Clone)]
