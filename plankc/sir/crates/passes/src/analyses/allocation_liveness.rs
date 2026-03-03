@@ -2,7 +2,7 @@ use crate::{DefUse, UseKind};
 use sensei_core::Idx;
 use sir_data::{
     BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Operation, OperationIdx, StaticAllocId,
-    index_vec, newtype_index, operation::op_data::InlineOperands,
+    index_vec, newtype_index,
 };
 
 newtype_index! {
@@ -49,7 +49,7 @@ pub struct AllocationLiveness {
 }
 
 pub fn discover_allocations(program: &EthIRProgram, def_use: &DefUse) -> AllocationLiveness {
-    let mut allocations = IndexVec::new();
+    let mut allocations: IndexVec<AllocId, AllocData> = IndexVec::new();
     let mut local_to_alloc = index_vec![None; program.next_free_local_id.get() as usize];
 
     for block in program.blocks() {
@@ -79,18 +79,30 @@ pub fn discover_allocations(program: &EthIRProgram, def_use: &DefUse) -> Allocat
                 _ => continue,
             };
             local_to_alloc[base_ptr] = Some(alloc_id);
-            propagate_pointers_and_mark_escapes(
-                program,
-                def_use,
-                &mut allocations,
-                &mut local_to_alloc,
-                alloc_id,
-                base_ptr,
-            );
         }
     }
 
+    for alloc_id in allocations.indices() {
+        let ptr_local = base_ptr_of(program, allocations[alloc_id].def_op);
+        propagate_pointers_and_mark_escapes(
+            program,
+            def_use,
+            &mut allocations,
+            &mut local_to_alloc,
+            alloc_id,
+            ptr_local,
+        );
+    }
+
     AllocationLiveness { allocations, local_to_alloc }
+}
+
+fn base_ptr_of(program: &EthIRProgram, def_op: OperationIdx) -> LocalId {
+    match program.operations[def_op] {
+        Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => data.ptr_out,
+        Operation::DynamicAllocZeroed(data) | Operation::DynamicAllocAnyBytes(data) => data.outs[0],
+        _ => unreachable!(),
+    }
 }
 
 fn propagate_pointers_and_mark_escapes(
@@ -99,42 +111,52 @@ fn propagate_pointers_and_mark_escapes(
     allocations: &mut IndexVec<AllocId, AllocData>,
     local_to_alloc: &mut IndexVec<LocalId, Option<AllocId>>,
     alloc_id: AllocId,
-    base_ptr: LocalId,
+    ptr_local: LocalId,
 ) {
-    let mut worklist = vec![base_ptr];
+    let mut worklist = vec![ptr_local];
 
     while let Some(local) = worklist.pop() {
         for use_loc in &def_use[local] {
             match use_loc.kind {
-                UseKind::Operation(op_idx) => match program.operations[op_idx] {
-                    Operation::Add(InlineOperands { outs: [derived], .. })
-                    | Operation::Sub(InlineOperands { outs: [derived], .. })
-                    | Operation::SetCopy(InlineOperands { outs: [derived], .. }) => {
-                        debug_assert!(
-                            local_to_alloc[derived].is_none(),
-                            "local already claimed by another allocation"
-                        );
-                        local_to_alloc[derived] = Some(alloc_id);
-                        worklist.push(derived);
+                UseKind::Operation(op_idx) => {
+                    let op = program.operations[op_idx];
+
+                    if can_derive_pointer(op) {
+                        for &out in op.outputs(program) {
+                            match local_to_alloc[out] {
+                                None => {
+                                    local_to_alloc[out] = Some(alloc_id);
+                                    worklist.push(out);
+                                }
+                                Some(existing) if existing != alloc_id => {
+                                    allocations[alloc_id].escapes = true;
+                                    allocations[existing].escapes = true;
+                                }
+                                Some(_) => {}
+                            }
+                        }
                     }
-                    Operation::Return(_)
-                    | Operation::Revert(_)
-                    | Operation::Log0(_)
-                    | Operation::Log1(_)
-                    | Operation::Log2(_)
-                    | Operation::Log3(_)
-                    | Operation::Log4(_)
-                    | Operation::Call(_)
-                    | Operation::CallCode(_)
-                    | Operation::DelegateCall(_)
-                    | Operation::StaticCall(_)
-                    | Operation::Create(_)
-                    | Operation::Create2(_)
-                    | Operation::InternalCall(_) => {
-                        allocations[alloc_id].escapes = true;
+
+                    match op {
+                        Operation::Return(_)
+                        | Operation::Revert(_)
+                        | Operation::Log0(_)
+                        | Operation::Log1(_)
+                        | Operation::Log2(_)
+                        | Operation::Log3(_)
+                        | Operation::Log4(_)
+                        | Operation::Call(_)
+                        | Operation::CallCode(_)
+                        | Operation::DelegateCall(_)
+                        | Operation::StaticCall(_)
+                        | Operation::Create(_)
+                        | Operation::Create2(_)
+                        | Operation::InternalCall(_) => {
+                            allocations[alloc_id].escapes = true;
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 UseKind::BlockOutput => {
                     let block = &program.basic_blocks[use_loc.block_id];
                     if matches!(block.control, Control::InternalReturn) {
@@ -145,6 +167,32 @@ fn propagate_pointers_and_mark_escapes(
             }
         }
     }
+}
+
+fn can_derive_pointer(op: Operation) -> bool {
+    matches!(
+        op,
+        Operation::Add(_)
+            | Operation::Sub(_)
+            | Operation::Mul(_)
+            | Operation::Div(_)
+            | Operation::SDiv(_)
+            | Operation::Mod(_)
+            | Operation::SMod(_)
+            | Operation::AddMod(_)
+            | Operation::MulMod(_)
+            | Operation::Exp(_)
+            | Operation::SignExtend(_)
+            | Operation::And(_)
+            | Operation::Or(_)
+            | Operation::Xor(_)
+            | Operation::Not(_)
+            | Operation::Byte(_)
+            | Operation::Shl(_)
+            | Operation::Shr(_)
+            | Operation::Sar(_)
+            | Operation::SetCopy(_)
+    )
 }
 
 #[cfg(test)]
