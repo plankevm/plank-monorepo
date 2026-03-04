@@ -1,9 +1,3 @@
-const return_runtime = fn() void {
-    let runtime: memptr = malloc_uninit(runtime_length());
-    codecopy(runtime, runtime_start_offset(), runtime_length());
-    evm_return(runtime, runtime_length());
-};
-
 const dangling = fn() memptr { malloc_uninit(0) };
 
 const revert_empty = fn() void {
@@ -35,7 +29,10 @@ init {
     let bal_slot = get_balance_slot(owner);
     sstore(bal_slot, amount);
 
-    return_runtime();
+    // Return runtime.
+    let runtime: memptr = malloc_uninit(runtime_length());
+    codecopy(runtime, runtime_start_offset(), runtime_length());
+    evm_return(runtime, runtime_length());
 }
 
 const BALANCE_OF_SELECTOR = 0x70a08231;
@@ -71,4 +68,6 @@ run {
     } else {
         revert_empty();
     }
+
+    invalid();
 }

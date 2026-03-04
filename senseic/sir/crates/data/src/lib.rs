@@ -66,6 +66,134 @@ impl EthIRProgram {
         self.next_static_alloc_id = StaticAllocId::ZERO;
     }
 }
+
+impl EthIRProgram {
+    pub fn display_raw(&self) -> String {
+        use fmt::Write;
+        let mut output = String::new();
+
+        writeln!(&mut output, "=== Entry Points ===").unwrap();
+        writeln!(&mut output, "init: @{}", self.init_entry).unwrap();
+        if let Some(main) = self.main_entry {
+            writeln!(&mut output, "main: @{main}").unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Functions ({}) ===", self.functions.len()).unwrap();
+        for (id, func) in self.functions.enumerate_idx() {
+            writeln!(&mut output, "@{id}: entry=@{}, outputs={}", func.entry(), func.get_outputs())
+                .unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Basic Blocks ({}) ===", self.basic_blocks.len()).unwrap();
+        for (id, bb) in self.basic_blocks.enumerate_idx() {
+            write!(
+                &mut output,
+                "@{id:>8}: ins=[{},{}), outs=[{},{}), ops=[{},{}), ",
+                bb.inputs.start,
+                bb.inputs.end,
+                bb.outputs.start,
+                bb.outputs.end,
+                bb.operations.start,
+                bb.operations.end
+            )
+            .unwrap();
+            match bb.control {
+                Control::LastOpTerminates => writeln!(&mut output, "term").unwrap(),
+                Control::InternalReturn => writeln!(&mut output, "iret").unwrap(),
+                Control::ContinuesTo(target) => writeln!(&mut output, "->@{target}").unwrap(),
+                Control::Branches(ref b) => writeln!(
+                    &mut output,
+                    "br ${} ? @{} : @{}",
+                    b.condition, b.non_zero_target, b.zero_target
+                )
+                .unwrap(),
+                Control::Switch(ref s) => {
+                    write!(&mut output, "sw ${} cases={}", s.condition, s.cases).unwrap();
+                    if let Some(fb) = s.fallback {
+                        write!(&mut output, " else=@{fb}").unwrap();
+                    }
+                    writeln!(&mut output).unwrap();
+                }
+            }
+        }
+
+        writeln!(&mut output, "\n=== Operations ({}) ===", self.operations.len()).unwrap();
+        for (id, op) in self.operations.enumerate_idx() {
+            write!(&mut output, "{id}: ").unwrap();
+            op.op_fmt(&mut output, self).unwrap();
+            let spans = op.allocated_spans(self);
+            if let Some(ins) = spans.input {
+                write!(&mut output, " [ins: {},{})", ins.start, ins.end).unwrap();
+            }
+            if let Some(outs) = spans.output {
+                write!(&mut output, " [outs: {},{})", outs.start, outs.end).unwrap();
+            }
+            writeln!(&mut output).unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Locals ({}) ===", self.locals.len()).unwrap();
+        if !self.locals.is_empty() {
+            write!(&mut output, "[").unwrap();
+            for (i, local) in self.locals.iter().enumerate() {
+                if i > 0 {
+                    write!(&mut output, ", ").unwrap();
+                }
+                write!(&mut output, "${local}").unwrap();
+            }
+            writeln!(&mut output, "]").unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Large Consts ({}) ===", self.large_consts.len()).unwrap();
+        for (id, val) in self.large_consts.enumerate_idx() {
+            writeln!(&mut output, "{id}: {val:#x}").unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Data Segments ({}) ===", self.data_segments.len()).unwrap();
+        for (id, data) in self.data_segments.enumerate_idx() {
+            write!(&mut output, ".{id}: 0x").unwrap();
+            for &byte in data {
+                write!(&mut output, "{byte:02x}").unwrap();
+            }
+            writeln!(&mut output, " ({} bytes)", data.len()).unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Cases ({}) ===", self.cases.len()).unwrap();
+        for (id, case) in self.cases.enumerate_idx() {
+            writeln!(
+                &mut output,
+                "{id}: vals=[{},{}), targets=[{},{}), count={}",
+                case.values_start_id,
+                case.values_start_id + case.cases_count,
+                case.targets_start_id,
+                case.targets_start_id + case.cases_count,
+                case.cases_count
+            )
+            .unwrap();
+        }
+
+        writeln!(&mut output, "\n=== Cases BB IDs ({}) ===", self.cases_bb_ids.len()).unwrap();
+        if !self.cases_bb_ids.is_empty() {
+            write!(&mut output, "[").unwrap();
+            for (i, bb_id) in self.cases_bb_ids.iter().enumerate() {
+                if i > 0 {
+                    write!(&mut output, ", ").unwrap();
+                }
+                write!(&mut output, "@{bb_id}").unwrap();
+            }
+            writeln!(&mut output, "]").unwrap();
+        }
+
+        writeln!(
+            &mut output,
+            "\n=== Counters ===\nnext_free_local_id: ${}\nnext_static_alloc_id: #{}",
+            self.next_free_local_id, self.next_static_alloc_id
+        )
+        .unwrap();
+
+        output
+    }
+}
+
 /// Simple display of IR program - shows all elements independently without grouping
 pub fn display_program(ir: &EthIRProgram) -> String {
     use fmt::Write;

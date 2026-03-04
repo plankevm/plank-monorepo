@@ -11,6 +11,7 @@ sensei-hir-eval.workspace = true
 sensei-mir.workspace = true
 sensei-mir-lower.workspace = true
 sir-debug-backend.workspace = true
+sir-data.workspace = true
 sir-optimizations.workspace = true
 sir-analyses.workspace = true
 sir-transforms.workspace = true

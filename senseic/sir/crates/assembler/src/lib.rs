@@ -1,5 +1,7 @@
 use alloy_primitives::U256;
 use sensei_core::{Idx, IndexVec, Span, index_vec, newtype_index};
+
+mod display;
 pub mod op;
 
 const ASSUMED_MARK_COUNT_WITHOUT_HINT: usize = 128;
@@ -135,7 +137,9 @@ impl AsmSection {
             AsmSection::MarkRef(mark_ref) => {
                 let value = match mark_ref.mark_ref {
                     MarkReference::Direct(id) => mark_map[id],
-                    MarkReference::Delta(span) => mark_map[span.end] - mark_map[span.start],
+                    MarkReference::Delta(span) => mark_map[span.end]
+                        .checked_sub(mark_map[span.start])
+                        .unwrap_or_else(|| panic!("delta subtraction underflow: {span}")),
                 };
                 let ref_size = bytes_to_hold(value);
                 match (mark_ref.set_size, mark_ref.pushed) {

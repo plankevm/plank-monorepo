@@ -495,6 +495,7 @@ impl<'a> Legalizer<'a> {
     }
 }
 
+#[derive(Debug)]
 struct TrackedSpan<I> {
     start: I,
     end: I,
@@ -505,7 +506,7 @@ fn validate_spans<I: Ord + Idx>(
     spans: &mut [TrackedSpan<I>],
     max_bound: usize,
 ) -> Result<(), LegalizerError> {
-    spans.sort_by_key(|s| s.start);
+    spans.sort_by_key(|s| (s.start, s.end));
     for window in spans.windows(2) {
         if window[0].end > window[1].start {
             return Err(LegalizerError::OverlappingSpans(window[0].source, window[1].source));

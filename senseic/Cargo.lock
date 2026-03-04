@@ -1648,6 +1648,7 @@ dependencies = [
  "sensei-mir-lower",
  "sensei-parser",
  "sir-analyses",
+ "sir-data",
  "sir-debug-backend",
  "sir-optimizations",
  "sir-transforms",
