@@ -27,7 +27,7 @@ pub enum Expr {
 pub enum Instruction {
     Set { target: LocalId, value: Expr },
     Assign { target: LocalId, value: Expr },
-    Return(Expr),
+    Return(LocalId),
     If { condition: LocalId, then_block: BlockId, else_block: BlockId },
     While { condition_block: BlockId, condition: LocalId, body: BlockId },
 }

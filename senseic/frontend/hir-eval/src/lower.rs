@@ -576,8 +576,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                         todo!("diagnostic: cannot return comptime-only value {vid:?}")
                     }
                 };
-                self.instructions_buf
-                    .push(mir::Instruction::Return(mir::Expr::LocalRef(mir_local)));
+                self.instructions_buf.push(mir::Instruction::Return(mir_local));
             }
             hir::Instruction::If { condition, then_block, else_block, result } => {
                 let cond_comptime = self.locals.get_comptime(condition);

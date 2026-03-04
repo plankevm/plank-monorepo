@@ -105,9 +105,9 @@ impl<'a> DisplayMir<'a> {
                 self.fmt_expr(f, value)?;
                 writeln!(f)
             }
-            Instruction::Return(expr) => {
+            Instruction::Return(value) => {
                 write!(f, "{pad}ret ")?;
-                self.fmt_expr(f, expr)?;
+                self.fmt_local(f, value)?;
                 writeln!(f)
             }
             Instruction::If { condition, then_block, else_block } => {
