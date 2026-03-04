@@ -759,10 +759,13 @@ where
         let mut end_expr = None;
 
         while !self.check(Token::RightCurly) {
+            let checkpoint = self.expected.len();
             let Some(result) = self.try_parse_stmt() else {
+                self.expected.truncate(checkpoint);
                 self.emit_unexpected();
                 break;
             };
+            self.expected.clear();
 
             if let Some(prev_end) = end_expr.take() {
                 self.push_child(&mut statements_list, prev_end);

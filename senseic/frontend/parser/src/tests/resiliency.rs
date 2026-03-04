@@ -11,11 +11,11 @@ fn test_missing_semicolon() {
             }
             "#,
         &["
-                error: unexpected `init`, expected one of `-`, `!`, `~`, decimal literal, hex literal, binary literal, `true`, `false`, `(`, `fn`, `struct`, `if`, `comptime`, identifier
-                  --> line 2:13
+                error: unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+                  --> line 2:1
                    |
-                  2|             init {
-                   |             ^^^^
+                  2| init {
+                   | ^^^^
             "],
     );
 }
@@ -32,10 +32,10 @@ fn test_unclosed_if() {
         }"#,
         &["
                 error: unexpected EOF, expected `}`
-                  --> line 7:9
+                  --> line 4:2
                    |
-                  7|         }
-                   |         ^
+                  4| }
+                   |  ^
             "],
     );
 }
@@ -61,10 +61,10 @@ fn test_missing_close_run_block() {
         "run {",
         &["
                 error: unexpected EOF, expected `}`
-                  --> line 1:5
+                  --> line 1:6
                    |
                   1| run {
-                   |     ^
+                   |      ^
             "],
     );
 }
@@ -75,14 +75,14 @@ fn test_unexpected_token_at_top_level() {
         "5;",
         &[
             "
-                    error: unexpected decimal literal, expected one of `init`, `run`, `const`
+                    error: unexpected decimal literal, expected one of `init`, `run`, `const`, `import`
                       --> line 1:1
                        |
                       1| 5;
                        | ^
                 ",
             "
-                    error: unexpected `;`, expected one of `init`, `run`, `const`
+                    error: unexpected `;`, expected one of `init`, `run`, `const`, `import`
                       --> line 1:2
                        |
                       1| 5;
@@ -117,7 +117,7 @@ fn test_const_decl_missing_expr() {
         "#,
         &[
             "
-            error: unexpected `init`, expected one of `-`, `!`, `~`, decimal literal, hex literal, binary literal, `true`, `false`, `(`, `fn`, `struct`, `if`, `comptime`, identifier
+            error: unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
               --> line 2:1
                |
               2| init { }
@@ -415,64 +415,55 @@ fn test_member_access_missing_ident() {
     );
 }
 
-/// Issue: Binary expression RHS uses `advance_with_error()` without checking recovery.
-/// Input: `run { x = 1 + ; }`
-/// Ideal: Error about missing operand after `+`, then continue parsing.
-/// Actual: `;` consumed as error node, causing missing `;` error at `}`.
+/// Issue (fixed): Binary expression RHS used to consume `;` via `advance_with_error()`.
+/// Now creates a zero-width Error node, so `;` is properly consumed by `expect(Semicolon)`.
 #[test]
 fn test_binary_expr_missing_rhs() {
     assert_parser_errors(
         r#"run { x = 1 + ; }"#,
         &[
-            // `;` was eaten by advance_with_error(), now expects `;` at `}`
             r#"
-                error: unexpected `}`, expected one of `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `|`, `^`, `&`, `<<`, `>>`, `+`, `-`, `+%`, `-%`, `*`, `/`, `%`, `*%`, `/+`, `/-`, `/<`, `/>`, `;`
-                  --> line 1:17
+                error: unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+                  --> line 1:15
                    |
                   1| run { x = 1 + ; }
-                   |                 ^
+                   |               ^
             "#,
         ],
     );
 }
 
-/// Issue: Unary expression operand uses `advance_with_error()` without checking recovery.
-/// Input: `run { x = -; }`
-/// Ideal: Error about missing operand after `-`.
-/// Actual: `;` consumed as error node, causing missing `;` error at `}`.
+/// Issue (fixed): Unary expression operand used to consume `;` via `advance_with_error()`.
+/// Now creates a zero-width Error node, so `;` is properly consumed by `expect(Semicolon)`.
 #[test]
 fn test_unary_expr_missing_operand() {
     assert_parser_errors(
         r#"run { x = -; }"#,
         &[
-            // `;` was eaten by advance_with_error(), now expects `;` at `}`
             r#"
-                error: unexpected `}`, expected one of `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `|`, `^`, `&`, `<<`, `>>`, `+`, `-`, `+%`, `-%`, `*`, `/`, `%`, `*%`, `/+`, `/-`, `/<`, `/>`, `;`
-                  --> line 1:14
+                error: unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+                  --> line 1:12
                    |
                   1| run { x = -; }
-                   |              ^
+                   |            ^
             "#,
         ],
     );
 }
 
-/// Issue: Paren expression uses `advance_with_error()` for missing inner expr.
-/// Input: `run { x = (); }`
-/// Ideal: Error about empty parentheses at `)`.
-/// Actual: `)` consumed as error node, then expects `)` at `;`.
+/// Issue (fixed): Paren expression used to consume `)` via `advance_with_error()`.
+/// Now creates a zero-width Error node, so `)` is properly consumed by `expect(RightRound)`.
 #[test]
 fn test_paren_expr_empty() {
     assert_parser_errors(
         r#"run { x = (); }"#,
         &[
-            // `)` was eaten by advance_with_error(), now expects `)` at `;`
             r#"
-                error: unexpected `;`, expected `)`
-                  --> line 1:13
+                error: unexpected `)`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+                  --> line 1:12
                    |
                   1| run { x = (); }
-                   |             ^
+                   |            ^
             "#,
         ],
     );
