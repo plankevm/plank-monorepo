@@ -1641,12 +1641,16 @@ dependencies = [
 name = "senseic"
 version = "0.1.0"
 dependencies = [
- "bumpalo",
  "clap",
  "sensei-hir",
  "sensei-hir-eval",
  "sensei-mir",
+ "sensei-mir-lower",
  "sensei-parser",
+ "sir-analyses",
+ "sir-debug-backend",
+ "sir-optimizations",
+ "sir-transforms",
 ]
 
 [[package]]

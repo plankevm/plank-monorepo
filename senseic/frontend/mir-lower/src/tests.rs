@@ -52,6 +52,8 @@ fn test_simple_set() {
         }
         "#,
         r#"
+        Init: @0
+        Run: @1
         Functions:
             fn @0 -> entry @0  (outputs: 0)
             fn @1 -> entry @1  (outputs: 0)
@@ -88,6 +90,7 @@ fn test_evm_builtins() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -136,6 +139,7 @@ fn test_assign() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -161,6 +165,7 @@ fn test_explicit_terminator() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -193,6 +198,7 @@ fn test_simple_call() {
         }
         "#,
         r#"
+        Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 1)
             fn @1 -> entry @1  (outputs: 0)
@@ -232,6 +238,7 @@ fn test_call_with_args() {
         }
         "#,
         r#"
+        Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 1)
             fn @1 -> entry @1  (outputs: 0)
@@ -271,6 +278,7 @@ fn test_simple_if() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -326,6 +334,7 @@ fn test_nested_if_assign() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -395,6 +404,7 @@ fn test_while() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -442,6 +452,7 @@ fn test_struct_lit() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -482,6 +493,7 @@ fn test_struct_field_access() {
         }
         "#,
         r#"
+        Init: @0
         Functions:
             fn @0 -> entry @0  (outputs: 0)
 
@@ -499,6 +511,139 @@ fn test_struct_field_access() {
                 $9 = copy $7
                 $10 = copy $8
                 $11 = copy $10
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_fn_struct_return() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        const swap = fn (x: u256, y: u256) Pair {
+            Pair { a: y, b: x }
+        };
+
+        init {
+            let x = swap(3, 4);
+            evm_stop();
+        }
+        "#,
+        r#"
+        Init: @1
+        Functions:
+            fn @0 -> entry @0  (outputs: 2)
+            fn @1 -> entry @1  (outputs: 0)
+
+        Basic Blocks:
+            @0 $0 $1 -> $4 $5 {
+                $2 = copy $1
+                $3 = copy $0
+                $4 = copy $2
+                $5 = copy $3
+                iret
+            }
+
+            @1 {
+                $6 = const 0x3
+                $7 = copy $6
+                $8 = const 0x4
+                $9 = copy $8
+                $10 $11 = icall @0 $7 $9
+                $12 = copy $10
+                $13 = copy $11
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_weird_error() {
+    assert_lowers_to(
+        r#"
+        const return_runtime = fn() void {
+            let runtime: memptr = malloc_uninit(runtime_length());
+            codecopy(runtime, runtime_start_offset(), runtime_length());
+            evm_return(runtime, runtime_length());
+        };
+
+
+        const get_balance_slot = fn (owner: u256) u256 {
+            let buf = malloc_uninit(32);
+            mstore32(buf, owner);
+            keccak256(buf, 32)
+        };
+
+        init {
+            let owner = 34;
+            let bal_slot = get_balance_slot(owner);
+
+            return_runtime();
+
+            evm_stop();
+        }
+
+
+        run {
+            evm_stop();
+        }
+        "#,
+        r#"
+        Init: @2
+        Run: @3
+        Functions:
+            fn @0 -> entry @0  (outputs: 1)
+            fn @1 -> entry @1  (outputs: 0)
+            fn @2 -> entry @2  (outputs: 0)
+            fn @3 -> entry @3  (outputs: 0)
+
+        Basic Blocks:
+            @0 $0 -> $10 {
+                $1 = const 0x20
+                $2 = copy $1
+                $3 = mallocany $2
+                $4 = copy $3
+                $5 = copy $4
+                $6 = copy $0
+                mstore256 $5 $6
+                $7 = copy $4
+                $8 = const 0x20
+                $9 = copy $8
+                $10 = keccak256 $7 $9
+                iret
+            }
+
+            @1 {
+                $11 = runtime_length
+                $12 = copy $11
+                $13 = mallocany $12
+                $14 = copy $13
+                $15 = copy $14
+                $16 = runtime_start_offset
+                $17 = copy $16
+                $18 = runtime_length
+                $19 = copy $18
+                codecopy $15 $17 $19
+                $20 = copy $14
+                $21 = runtime_length
+                $22 = copy $21
+                return $20 $22
+            }
+
+            @2 {
+                $23 = const 0x22
+                $24 = copy $23
+                $25 = copy $24
+                $26 = icall @0 $25
+                $27 = copy $26
+                icall @1
+                stop
+            }
+
+            @3 {
                 stop
             }
         "#,

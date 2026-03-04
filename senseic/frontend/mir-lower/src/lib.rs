@@ -5,7 +5,7 @@ mod tests;
 
 use sensei_core::{DenseIndexMap, DenseIndexSet, Idx};
 use sensei_hir::BigNumInterner;
-use sensei_mir::{self as mir, ArgsId, Expr, Instruction, Mir};
+use sensei_mir::{self as mir, Expr, Instruction, Mir};
 use sensei_values::{Type, TypeId};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,

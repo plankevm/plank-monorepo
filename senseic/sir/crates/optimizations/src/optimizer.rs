@@ -37,6 +37,18 @@ mod with_analysis {
     }
 }
 
+pub fn parse_passes_string(s: &str) -> Result<String, String> {
+    for c in s.chars() {
+        if !matches!(c, 's' | 'c' | 'u' | 'd') {
+            return Err(format!(
+                "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment)",
+                c
+            ));
+        }
+    }
+    Ok(s.to_string())
+}
+
 pub struct Optimizer {
     src: EthIRProgram,
     dst: Option<EthIRProgram>,

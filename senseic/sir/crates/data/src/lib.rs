@@ -71,6 +71,11 @@ pub fn display_program(ir: &EthIRProgram) -> String {
     use fmt::Write;
     let mut output = String::new();
 
+    writeln!(&mut output, "Init: @{}", ir.init_entry).unwrap();
+    if let Some(run) = ir.main_entry {
+        writeln!(&mut output, "Run: @{}", run).unwrap();
+    }
+
     if !ir.functions.is_empty() {
         writeln!(&mut output, "Functions:").unwrap();
     }
@@ -332,6 +337,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 1)
 
@@ -387,6 +393,7 @@ Basic Blocks:
         let program = builder.build(func0_id, None);
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @2  (outputs: 1)
@@ -449,6 +456,7 @@ Basic Blocks:
         let program = builder.build(func_id, None);
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
