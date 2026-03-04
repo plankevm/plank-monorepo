@@ -397,10 +397,8 @@ fn test_param_list_empty_after_comma() {
     );
 }
 
-/// Issue: `expect_ident` returns None without creating error node in member access.
-/// Input: `run { foo.; }`
-/// Expected: Error about missing identifier after `.`.
-/// Actual: Error emitted but no error node in CST.
+/// Issue (fixed): `expect_ident` was not calling `emit_unexpected` on failure.
+/// Now emits "expected identifier" error.
 #[test]
 fn test_member_access_missing_ident() {
     assert_parser_errors(
@@ -421,15 +419,13 @@ fn test_member_access_missing_ident() {
 fn test_binary_expr_missing_rhs() {
     assert_parser_errors(
         r#"run { x = 1 + ; }"#,
-        &[
-            r#"
+        &[r#"
                 error: unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
                   --> line 1:15
                    |
                   1| run { x = 1 + ; }
                    |               ^
-            "#,
-        ],
+            "#],
     );
 }
 
@@ -439,15 +435,13 @@ fn test_binary_expr_missing_rhs() {
 fn test_unary_expr_missing_operand() {
     assert_parser_errors(
         r#"run { x = -; }"#,
-        &[
-            r#"
+        &[r#"
                 error: unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
                   --> line 1:12
                    |
                   1| run { x = -; }
                    |            ^
-            "#,
-        ],
+            "#],
     );
 }
 
@@ -457,14 +451,12 @@ fn test_unary_expr_missing_operand() {
 fn test_paren_expr_empty() {
     assert_parser_errors(
         r#"run { x = (); }"#,
-        &[
-            r#"
+        &[r#"
                 error: unexpected `)`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
                   --> line 1:12
                    |
                   1| run { x = (); }
                    |            ^
-            "#,
-        ],
+            "#],
     );
 }

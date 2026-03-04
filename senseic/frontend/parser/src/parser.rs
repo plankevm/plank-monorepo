@@ -357,6 +357,7 @@ where
 
     fn expect_ident(&mut self) -> NodeIdx {
         self.try_parse_ident().unwrap_or_else(|| {
+            self.emit_unexpected();
             let error = self.alloc_node(NodeKind::Error);
             self.close_node(error)
         })
