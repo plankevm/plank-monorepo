@@ -437,6 +437,7 @@ mod tests {
 
         let src_str = sir_data::display_program(&ir);
         let expected_src = r#"
+Init: @2
 Functions:
     fn @0 -> entry @0  (outputs: 1)
     fn @1 -> entry @1  (outputs: 2)
@@ -488,6 +489,7 @@ data .0 0xcafebabe
 
         let dst_str = sir_data::display_program(&dst);
         let expected_dst = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @2  (outputs: 1)
@@ -559,6 +561,7 @@ Basic Blocks:
 
         let src_str = sir_data::display_program(&ir);
         let expected_src = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @4  (outputs: 0)
@@ -627,6 +630,7 @@ data .1 0x5678
 
         let dst_str = sir_data::display_program(&dst);
         let expected_dst = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 

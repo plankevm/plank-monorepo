@@ -180,6 +180,7 @@ mod tests {
     #[test]
     fn test_csud() {
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -200,6 +201,7 @@ Basic Blocks:
     #[test]
     fn test_cusd() {
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -221,6 +223,7 @@ Basic Blocks:
     #[test]
     fn test_ucsd() {
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -243,6 +246,7 @@ Basic Blocks:
     #[test]
     fn test_uscd() {
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -274,6 +278,7 @@ Basic Blocks:
     #[test]
     fn test_scsud() {
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 

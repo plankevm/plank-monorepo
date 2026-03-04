@@ -593,6 +593,7 @@ mod tests {
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @1  (outputs: 0)
@@ -649,6 +650,7 @@ Basic Blocks:
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -684,6 +686,7 @@ Basic Blocks:
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -724,6 +727,7 @@ Basic Blocks:
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -766,6 +770,7 @@ Basic Blocks:
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -812,6 +817,7 @@ Basic Blocks:
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @1  (outputs: 0)
@@ -929,6 +935,7 @@ Basic Blocks:
         "#;
 
         let expected = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
 
@@ -1291,6 +1298,7 @@ Basic Blocks:
         "#;
 
         let expected_ir = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @1  (outputs: 0)
@@ -1376,6 +1384,7 @@ Basic Blocks:
         "#;
 
         let expected_ir = r#"
+Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
     fn @1 -> entry @1  (outputs: 0)
