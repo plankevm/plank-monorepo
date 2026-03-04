@@ -429,3 +429,42 @@ fn test_while() {
         "#,
     );
 }
+
+#[test]
+fn test_struct_lit() {
+    assert_lowers_to(
+        r#"
+        const A = struct { a: u256, b: bool };
+        init {
+            let mut a = A { a: 3, b: false };
+            a = A { a: 2, b: true };
+            evm_stop();
+        }
+        "#,
+        r#"
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x3
+                $1 = copy $0
+                $2 = const 0x0
+                $3 = copy $2
+                $4 = copy $1
+                $5 = copy $3
+                $6 = copy $4
+                $7 = copy $5
+                $8 = const 0x2
+                $9 = copy $8
+                $10 = const 0x1
+                $11 = copy $10
+                $12 = copy $9
+                $13 = copy $11
+                $6 = copy $12
+                $7 = copy $13
+                stop
+            }
+        "#,
+    );
+}

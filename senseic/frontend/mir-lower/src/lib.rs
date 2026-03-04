@@ -5,11 +5,11 @@ mod tests;
 
 use sensei_core::{DenseIndexMap, DenseIndexSet, Idx};
 use sensei_hir::BigNumInterner;
-use sensei_mir::{self as mir, Expr, Instruction, Mir};
+use sensei_mir::{self as mir, ArgsId, Expr, Instruction, Mir};
 use sensei_values::{Type, TypeId};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
-    builder::{EthIRBuilder, FunctionBuilder},
+    builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},
     operation::{InlineOperands, OpExtraData, OperationKind, SetSmallConstData},
 };
 use std::collections::{HashMap, hash_map::Entry};
@@ -41,7 +41,7 @@ impl LocalMap {
         single
     }
 
-    fn verify_or_create_many(
+    fn ensure_many(
         &mut self,
         local: mir::LocalId,
         mut create: impl FnMut() -> sir::LocalId,
@@ -123,7 +123,7 @@ fn lower_function(
     for param in fn_def.iter_params() {
         let ty = ctx.mir.fn_locals[mir_func][param.idx()];
         let size = ctx.size_in_locals(ty);
-        ctx.locals_map.verify_or_create_many(param, || new_func.new_local(), size as usize);
+        ctx.locals_map.ensure_many(param, || new_func.new_local(), size as usize);
     }
 
     let CFGSegment { bb_in: entry_bb_id, .. } =
@@ -184,7 +184,7 @@ fn lower_basic_block(
                             continue;
                         }
                         let src_sir_locals = ctx.locals_map.get(mir_src).len();
-                        ctx.locals_map.verify_or_create_many(
+                        ctx.locals_map.ensure_many(
                             target,
                             || current_bb.new_local(),
                             src_sir_locals,
@@ -227,7 +227,7 @@ fn lower_basic_block(
                     }
                     Expr::Call { callee, args } => {
                         let ret_type = ctx.mir.fns[callee].return_type;
-                        ctx.locals_map.verify_or_create_many(
+                        ctx.locals_map.ensure_many(
                             target,
                             || current_bb.new_local(),
                             ctx.size_in_locals(ret_type) as usize,
@@ -246,7 +246,10 @@ fn lower_basic_block(
                             )
                             .expect("mir should guarantee valid construction");
                     }
-                    Expr::FieldAccess { .. } | Expr::StructLit { .. } => todo!(),
+                    Expr::StructLit { ty, fields } => {
+                        lower_struct_literal(ctx, &mut current_bb, target, ty, fields);
+                    }
+                    Expr::FieldAccess { .. } => todo!(),
                 }
             }
             Instruction::Return(local) => {
@@ -343,6 +346,27 @@ fn lower_basic_block(
     // For non entry segments the parent is responsible for hooking up control flow.
     let bb_out = current_bb.finish_with_placeholder_control();
     CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: true }
+}
+
+fn lower_struct_literal(
+    ctx: &mut LowerCtx<'_>,
+    bb: &mut BasicBlockBuilder<'_, '_>,
+    target: mir::LocalId,
+    struct_type: TypeId,
+    fields: mir::ArgsId,
+) {
+    let size = ctx.size_in_locals(struct_type);
+    if size == 0 {
+        return;
+    }
+    ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);
+    for (src, dst) in ctx.mir.args[fields]
+        .iter()
+        .flat_map(|src_local| ctx.locals_map.get(*src_local))
+        .zip(ctx.locals_map.get(target))
+    {
+        bb.add_operation(Operation::SetCopy(InlineOperands { outs: [*dst], ins: [*src] }));
+    }
 }
 
 fn ensure_block_func_deps_lowered(
