@@ -136,16 +136,14 @@ fn test_const_decl_missing_expr() {
 /// Expected: One error about missing expression, then `init` block parses normally.
 /// Actual: `init` gets consumed as error, causing "unexpected `{`" cascade.
 
-/// Issue: `parse_name_path` leaves dot unconsumed when followed by non-identifier.
-/// Input: `run { foo.123; }`
+/// Issue: `123` after `.` is not consumed by error recovery, so it leaks out of the block.
 /// Ideal: Single error about expecting identifier after `.`.
-/// Actual: Dot left unconsumed, causes re-parsing of `123` producing duplicate errors.
+/// Actual: `123` cascades to top level because block parser doesn't recover.
 #[test]
 fn test_name_path_dot_not_followed_by_ident() {
     assert_parser_errors(
         r#"run { foo.123; }"#,
         &[
-            // First error from parse_member when it can't find ident after dot
             r#"
                 error: unexpected decimal literal, expected identifier
                   --> line 1:11
@@ -153,13 +151,19 @@ fn test_name_path_dot_not_followed_by_ident() {
                   1| run { foo.123; }
                    |           ^^^
             "#,
-            // Second error: `123` re-parsed as statement, cascading error
             r#"
-                error: unexpected decimal literal, expected one of identifier, `||`, `&&`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `|`, `^`, `&`, `<<`, `>>`, `+`, `-`, `+%`, `-%`, `*`, `/`, `%`, `*%`, `/+`, `/-`, `/<`, `/>`, `=`, `;`
-                  --> line 1:11
+                error: unexpected `;`, expected one of `init`, `run`, `const`, `import`
+                  --> line 1:14
                    |
                   1| run { foo.123; }
-                   |           ^^^
+                   |              ^
+            "#,
+            r#"
+                error: unexpected `}`, expected one of `init`, `run`, `const`, `import`
+                  --> line 1:16
+                   |
+                  1| run { foo.123; }
+                   |                ^
             "#,
         ],
     );
