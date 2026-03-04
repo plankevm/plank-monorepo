@@ -1,0 +1,19 @@
+[package]
+name = "sensei-mir-lower"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sensei-core.workspace = true
+sensei-hir.workspace = true
+sensei-mir.workspace = true
+sensei-values.workspace = true
+sir-data.workspace = true
+alloy-primitives.workspace = true
+
+[dev-dependencies]
+sensei-parser.workspace = true
+sensei-hir-eval.workspace = true
+sensei-test-utils.workspace = true
+pretty_assertions.workspace = true
