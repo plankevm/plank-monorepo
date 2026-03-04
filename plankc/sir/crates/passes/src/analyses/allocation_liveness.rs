@@ -568,38 +568,244 @@ mod tests {
     use crate::compute_def_use;
     use sir_parser::{EmitConfig, parse_or_panic};
 
-    fn analyze(ir: &EthIRProgram) -> AllocationLiveness {
+    fn compute_test_liveness(ir: &EthIRProgram) -> AllocationLiveness {
         let mut def_use = IndexVec::new();
         compute_def_use(ir, &mut def_use);
         compute_allocation_liveness(ir, &def_use)
     }
 
+    fn get_alloc(liveness: &AllocationLiveness, idx: u32) -> &AllocData {
+        &liveness.allocations[AllocId::new(idx)]
+    }
+
+    fn op_idx_in_block(ir: &EthIRProgram, bb: BasicBlockId, n: usize) -> OperationIdx {
+        ir.basic_blocks[bb].operations.iter().nth(n).expect("operation index out of bounds")
+    }
+
+    fn assert_has_interval(
+        alloc: &AllocData,
+        bb: BasicBlockId,
+        start: IntervalStart,
+        end: IntervalEnd,
+    ) {
+        let found =
+            alloc.intervals.iter().any(|&(b, iv)| b == bb && iv.start == start && iv.end == end);
+        assert!(found, "expected ({start:?}, {end:?}) in {bb}, got {:?}", alloc.intervals);
+    }
+
     #[test]
-    fn discover_static_and_dynamic() {
+    fn single_alloc_straight_line() {
         let ir = parse_or_panic(
             r#"
             fn init:
                 entry {
                     buf = salloc 32
-                    sz = const 64
-                    dbuf = malloc sz
-                    mstore256 buf dbuf
-                    return buf dbuf
+                    v = const 42
+                    mstore256 buf v
+                    x = mload256 buf
+                    stop
                 }
             "#,
             EmitConfig::init_only(),
         );
-        let result = analyze(&ir);
-        assert_eq!(result.allocations.len(), 2);
-        assert!(matches!(
-            result.allocations[AllocId::new(0)].kind,
-            AllocKind::Static { size: 32, .. }
-        ));
-        assert!(matches!(result.allocations[AllocId::new(1)].kind, AllocKind::Dynamic { .. }));
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 1);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(!alloc.escapes);
+        assert_eq!(alloc.intervals.len(), 1);
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mload256
+        );
     }
 
     #[test]
-    fn discover_no_allocs() {
+    fn multiple_allocs_same_block() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    a = salloc 32
+                    v = mload256 a
+                    b = salloc 64
+                    mstore256 b v
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 2);
+
+        let alloc0 = get_alloc(&liveness, 0);
+        let alloc1 = get_alloc(&liveness, 1);
+        assert_eq!(alloc0.intervals.len(), 1);
+        assert_eq!(alloc1.intervals.len(), 1);
+
+        assert_has_interval(
+            alloc0,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc 32
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 1)),   // mload256
+        );
+        assert_has_interval(
+            alloc1,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)), // salloc 64
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mstore256
+        );
+    }
+
+    #[test]
+    fn branching_alloc_one_side() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    cond = calldatasize
+                    => cond ? @then : @done
+                }
+                then {
+                    buf = salloc 32
+                    v = mload256 buf
+                    => @done
+                }
+                done {
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 1);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(!alloc.escapes);
+        assert_eq!(alloc.intervals.len(), 1);
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(1),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(1), 0)), // salloc
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(1), 1)),   // mload256
+        );
+    }
+
+    #[test]
+    fn merge_block_alloc_from_both_predecessors() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    buf = salloc 32
+                    cond = calldatasize
+                    => cond ? @left : @right
+                }
+                left {
+                    => @merge
+                }
+                right {
+                    => @merge
+                }
+                merge {
+                    v = mload256 buf
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 1);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(!alloc.escapes);
+        assert_eq!(alloc.intervals.len(), 4);
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
+            IntervalEnd::LiveOut,
+        );
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(1),
+            IntervalStart::LiveIn,
+            IntervalEnd::LiveOut,
+        );
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(2),
+            IntervalStart::LiveIn,
+            IntervalEnd::LiveOut,
+        );
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(3),
+            IntervalStart::LiveIn,
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(3), 0)), // mload256
+        );
+    }
+
+    #[test]
+    fn loop_alloc_defined_outside() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    buf = salloc 32
+                    => @loop_body
+                }
+                loop_body {
+                    v = mload256 buf
+                    cond = iszero v
+                    => cond ? @done : @loop_body
+                }
+                done {
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 1);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(!alloc.escapes);
+        assert_eq!(alloc.intervals.len(), 2);
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
+            IntervalEnd::LiveOut,
+        );
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(1),
+            IntervalStart::LiveIn,
+            IntervalEnd::LiveOut,
+        );
+    }
+
+    #[test]
+    fn escaping_alloc_no_intervals() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    buf = salloc 32
+                    sz = const 32
+                    mstore256 buf sz
+                    return buf sz
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(alloc.escapes);
+        assert!(alloc.intervals.is_empty());
+    }
+
+    #[test]
+    fn no_allocations() {
         let ir = parse_or_panic(
             r#"
             fn init:
@@ -612,12 +818,12 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        let result = analyze(&ir);
-        assert_eq!(result.allocations.len(), 0);
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 0);
     }
 
     #[test]
-    fn propagate_derived_pointer() {
+    fn derived_pointer_arithmetic() {
         let ir = parse_or_panic(
             r#"
             fn init:
@@ -631,48 +837,35 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        let result = analyze(&ir);
-        assert_eq!(result.allocations.len(), 1);
-        let alloc_id = AllocId::new(0);
-        let buf_local = result.allocations[alloc_id].kind;
-        assert!(matches!(buf_local, AllocKind::Static { size: 64, .. }));
-        let derived_alloc = result.local_to_alloc.iter().filter(|a| **a == Some(alloc_id)).count();
-        assert_eq!(derived_alloc, 2);
-        assert!(!result.allocations[alloc_id].escapes);
-    }
-
-    #[test]
-    fn escaping_via_return() {
-        let ir = parse_or_panic(
-            r#"
-            fn init:
-                entry {
-                    buf = salloc 32
-                    sz = const 32
-                    mstore256 buf sz
-                    return buf sz
-                }
-            "#,
-            EmitConfig::init_only(),
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 1);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(!alloc.escapes);
+        assert_eq!(alloc.intervals.len(), 1);
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mload256
         );
-        let result = analyze(&ir);
-        assert!(result.allocations[AllocId::new(0)].escapes);
     }
 
     #[test]
-    fn non_escaping() {
+    fn dead_allocation() {
         let ir = parse_or_panic(
             r#"
             fn init:
                 entry {
                     buf = salloc 32
-                    v = mload256 buf
                     stop
                 }
             "#,
             EmitConfig::init_only(),
         );
-        let result = analyze(&ir);
-        assert!(!result.allocations[AllocId::new(0)].escapes);
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 1);
+        let alloc = get_alloc(&liveness, 0);
+        assert!(alloc.intervals.is_empty());
     }
+
 }
