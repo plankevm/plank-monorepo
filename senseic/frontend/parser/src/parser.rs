@@ -594,7 +594,12 @@ where
     }
 
     fn try_parse_expr(&mut self, mode: ParseExprMode) -> Option<NodeIdx> {
-        self.try_parse_expr_min_bp(mode, OpPriority::ZERO)
+        let checkpoint = self.expected.len();
+        let node = self.try_parse_expr_min_bp(mode, OpPriority::ZERO);
+        if node.is_some() {
+            self.expected.truncate(checkpoint);
+        }
+        node
     }
 
     fn try_parse_expr_min_bp(
