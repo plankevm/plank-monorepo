@@ -257,3 +257,175 @@ fn test_call_with_args() {
         "#,
     );
 }
+
+#[test]
+fn test_simple_if() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x = calldataload(0);
+            if slt(x, 0) {
+                revert(malloc_uninit(0), 0);
+            }
+            evm_stop();
+        }
+        "#,
+        r#"
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = copy $0
+                $2 = calldataload $1
+                $3 = copy $2
+                $4 = copy $3
+                $5 = const 0x0
+                $6 = copy $5
+                $7 = slt $4 $6
+                $8 = copy $7
+                => $8 ? @1 : @2
+            }
+
+            @1 {
+                $9 = const 0x0
+                $10 = copy $9
+                $11 = mallocany $10
+                $12 = copy $11
+                $13 = const 0x0
+                $14 = copy $13
+                revert $12 $14
+            }
+
+            @2 {
+                => @3
+            }
+
+            @3 {
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_if_assign() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x = calldataload(0);
+            let z = if slt(x, 0) {
+                0
+            } else if lt(x, 237) {
+                1
+            } else {
+                2
+            };
+            evm_stop();
+        }
+        "#,
+        r#"
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = copy $0
+                $2 = calldataload $1
+                $3 = copy $2
+                $4 = copy $3
+                $5 = const 0x0
+                $6 = copy $5
+                $7 = slt $4 $6
+                $8 = copy $7
+                => $8 ? @1 : @2
+            }
+
+            @1 {
+                $9 = const 0x0
+                $10 = copy $9
+                => @6
+            }
+
+            @2 {
+                $11 = copy $3
+                $12 = const 0xed
+                $13 = copy $12
+                $14 = lt $11 $13
+                $15 = copy $14
+                => $15 ? @3 : @4
+            }
+
+            @3 {
+                $16 = const 0x1
+                $10 = copy $16
+                => @5
+            }
+
+            @4 {
+                $17 = const 0x2
+                $10 = copy $17
+                => @5
+            }
+
+            @5 {
+                => @6
+            }
+
+            @6 {
+                $18 = copy $10
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_while() {
+    assert_lowers_to(
+        r#"
+        init {
+            let mut i = 0;
+            while lt(i, 10) {
+                i = add(i, 1);
+            }
+            evm_stop();
+        }
+        "#,
+        r#"
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = copy $0
+                => @1
+            }
+
+            @1 {
+                $2 = copy $1
+                $3 = const 0xa
+                $4 = copy $3
+                $5 = lt $2 $4
+                $6 = copy $5
+                => $6 ? @2 : @3
+            }
+
+            @2 {
+                $7 = copy $1
+                $8 = const 0x1
+                $9 = copy $8
+                $10 = add $7 $9
+                $1 = copy $10
+                => @1
+            }
+
+            @3 {
+                stop
+            }
+        "#,
+    );
+}

@@ -8,7 +8,7 @@ use sensei_hir::BigNumInterner;
 use sensei_mir::{self as mir, Expr, Instruction, Mir};
 use sensei_values::{Type, TypeId};
 use sir_data::{
-    self as sir, Control, EthIRProgram, Operation, Span,
+    self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{EthIRBuilder, FunctionBuilder},
     operation::{InlineOperands, OpExtraData, OperationKind, SetSmallConstData},
 };
@@ -27,7 +27,7 @@ impl LocalMap {
     }
 
     fn get(&self, local: mir::LocalId) -> &[sir::LocalId] {
-        self.0[&local].as_slice()
+        self.0.get(&local).unwrap_or_else(|| panic!("{local:?} not found")).as_slice()
     }
 
     fn get_or_create_single(
@@ -126,11 +126,17 @@ fn lower_function(
         ctx.locals_map.verify_or_create_many(param, || new_func.new_local(), size as usize);
     }
 
-    let entry_bb_id =
+    let CFGSegment { bb_in: entry_bb_id, .. } =
         lower_basic_block(ctx, &mut new_func, mir_func, ctx.mir.fns[mir_func].body, true);
     let fn_id = new_func.finish(entry_bb_id);
     ctx.mir_to_sir_functions.insert(mir_func, fn_id);
-    return fn_id;
+    fn_id
+}
+
+struct CFGSegment {
+    bb_in: sir::BasicBlockId,
+    bb_out: sir::BasicBlockId,
+    end_loose: bool,
 }
 
 fn lower_basic_block(
@@ -139,7 +145,7 @@ fn lower_basic_block(
     mir_func: mir::FnId,
     block: mir::BlockId,
     is_entry: bool,
-) -> sir::BasicBlockId {
+) -> CFGSegment {
     let mut current_bb = fn_builder.begin_basic_block();
     if is_entry {
         ctx.locals_buf.clear();
@@ -149,6 +155,8 @@ fn lower_basic_block(
 
         current_bb.set_inputs(&ctx.locals_buf);
     }
+
+    let mut bb_in = None;
 
     for &instr in &ctx.mir.blocks[block] {
         match instr {
@@ -171,8 +179,10 @@ fn lower_basic_block(
                         current_bb.add_set_const_op(sets, value);
                     }
                     Expr::LocalRef(mir_src) => {
-                        println!("mir_src: {:?}", mir_src);
-                        println!("ctx.locals_map: {:?}", ctx.locals_map);
+                        let ty = ctx.mir.fn_locals[mir_func][mir_src.idx()];
+                        if ctx.size_in_locals(ty) == 0 {
+                            continue;
+                        }
                         let src_sir_locals = ctx.locals_map.get(mir_src).len();
                         ctx.locals_map.verify_or_create_many(
                             target,
@@ -200,17 +210,19 @@ fn lower_basic_block(
                             ctx.locals_buf.extend(inputs);
                         }
 
-                        let operation = builtins::builtin_to_operation(
-                            builtin,
-                            &ctx.locals_buf,
-                            output,
-                            current_bb.fn_builder.ir_builder,
-                        )
-                        .expect("mistyped MIR");
-                        current_bb.add_operation(operation);
+                        let operation =
+                            builtins::add_as_op(builtin, &ctx.locals_buf, output, &mut current_bb)
+                                .expect("mistyped MIR");
 
-                        if operation.kind().is_terminating() {
-                            return current_bb.finish(Control::LastOpTerminates).unwrap();
+                        if operation.is_terminating() {
+                            let end_id = current_bb
+                                .finish_terminating()
+                                .expect("error dispite `is_terminating` check");
+                            return CFGSegment {
+                                bb_in: bb_in.unwrap_or(end_id),
+                                bb_out: end_id,
+                                end_loose: false,
+                            };
                         }
                     }
                     Expr::Call { callee, args } => {
@@ -225,28 +237,112 @@ fn lower_basic_block(
                             let inputs = ctx.locals_map.get(arg);
                             ctx.locals_buf.extend(inputs);
                         }
-                        let icall = Operation::try_build(
-                            OperationKind::InternalCall,
-                            &ctx.locals_buf,
-                            ctx.locals_map.get(target),
-                            OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
-                            current_bb.fn_builder.ir_builder,
-                        )
-                        .expect("MIR structure should guarantee valid construction");
-                        current_bb.add_operation(icall);
+                        current_bb
+                            .try_add_op(
+                                OperationKind::InternalCall,
+                                &ctx.locals_buf,
+                                ctx.locals_map.get(target),
+                                OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
+                            )
+                            .expect("mir should guarantee valid construction");
                     }
-                    other => todo!("set: {other:#?}"),
+                    Expr::FieldAccess { .. } | Expr::StructLit { .. } => todo!(),
                 }
             }
             Instruction::Return(local) => {
                 current_bb.set_outputs(ctx.locals_map.get(local));
-                return current_bb.finish(Control::InternalReturn).unwrap();
+                let end_id = current_bb.finish_with_internal_return().expect("invalid MIR");
+                return CFGSegment {
+                    bb_in: bb_in.unwrap_or(end_id),
+                    bb_out: end_id,
+                    end_loose: false,
+                };
             }
-            other => todo!("instr: {other:#?}"),
+            Instruction::If { condition, then_block, else_block } => {
+                let &[condition] = ctx.locals_map.get(condition) else {
+                    unreachable!("invalid mir")
+                };
+
+                let last_end_id = current_bb.finish_with_placeholder_control();
+
+                bb_in = bb_in.or(Some(last_end_id));
+                let then = lower_basic_block(ctx, fn_builder, mir_func, then_block, false);
+                let r#else = lower_basic_block(ctx, fn_builder, mir_func, else_block, false);
+
+                let mut continue_bb = fn_builder.begin_basic_block();
+                continue_bb
+                    .set_fn_control(
+                        last_end_id,
+                        Control::Branches(Branch {
+                            condition,
+                            non_zero_target: then.bb_in,
+                            zero_target: r#else.bb_in,
+                        }),
+                    )
+                    .unwrap();
+                let merge_id = continue_bb.id();
+                if then.end_loose {
+                    continue_bb
+                        .set_fn_control(then.bb_out, Control::ContinuesTo(merge_id))
+                        .unwrap();
+                }
+                if r#else.end_loose {
+                    continue_bb
+                        .set_fn_control(r#else.bb_out, Control::ContinuesTo(merge_id))
+                        .unwrap();
+                }
+
+                current_bb = continue_bb;
+            }
+            Instruction::While { condition_block, condition, body } => {
+                // Purposefully invalid placeholder control.
+                let loop_entry_id = current_bb.finish_with_placeholder_control();
+                bb_in = bb_in.or(Some(loop_entry_id));
+
+                let condition_segment =
+                    lower_basic_block(ctx, fn_builder, mir_func, condition_block, false);
+                let &[condition] = ctx.locals_map.get(condition) else {
+                    unreachable!("invalid mir")
+                };
+
+                fn_builder
+                    .set_control(loop_entry_id, Control::ContinuesTo(condition_segment.bb_in))
+                    .unwrap();
+                let body = lower_basic_block(ctx, fn_builder, mir_func, body, false);
+                if body.end_loose {
+                    fn_builder
+                        .set_control(body.bb_out, Control::ContinuesTo(condition_segment.bb_in))
+                        .unwrap();
+                }
+
+                let mut continue_bb = fn_builder.begin_basic_block();
+                let continue_id = continue_bb.id();
+
+                if condition_segment.end_loose {
+                    continue_bb
+                        .set_fn_control(
+                            condition_segment.bb_out,
+                            Control::Branches(Branch {
+                                condition,
+                                non_zero_target: body.bb_in,
+                                zero_target: continue_id,
+                            }),
+                        )
+                        .unwrap();
+                }
+
+                current_bb = continue_bb;
+            }
         }
     }
 
-    unreachable!("malformed MIR, missing explicit terminator");
+    if is_entry {
+        unreachable!("malformed MIR, missing explicit terminator");
+    }
+
+    // For non entry segments the parent is responsible for hooking up control flow.
+    let bb_out = current_bb.finish_with_placeholder_control();
+    CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: true }
 }
 
 fn ensure_block_func_deps_lowered(

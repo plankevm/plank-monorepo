@@ -1,7 +1,7 @@
 use alloy_primitives::U256;
 use sensei_hir::builtins::Builtin;
 use sir_data::{
-    self as sir, Operation,
+    self as sir,
     builder::BasicBlockBuilder,
     operation::{OpExtraData, OperationKind},
 };
