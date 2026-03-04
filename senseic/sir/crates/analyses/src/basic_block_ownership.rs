@@ -105,11 +105,13 @@ mod tests {
 
         let mut bb0 = func.begin_basic_block();
         bb0.add_operation(Operation::Noop(()));
-        let bb0_id = bb0.finish(Control::ContinuesTo(BasicBlockId::new(1))).unwrap();
+        let bb0_id = bb0.finish_with_placeholder_control();
 
         let mut bb1 = func.begin_basic_block();
         bb1.add_operation(Operation::Stop(()));
-        let bb1_id = bb1.finish(Control::LastOpTerminates).unwrap();
+        let bb1_id = bb1.finish_terminating().unwrap();
+
+        func.set_control(bb0_id, Control::ContinuesTo(bb1_id)).unwrap();
 
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);
@@ -132,13 +134,13 @@ mod tests {
         let mut func = builder.begin_function();
         let mut bb0 = func.begin_basic_block();
         bb0.add_operation(Operation::Stop(()));
-        let bb0_id = bb0.finish(Control::LastOpTerminates).unwrap();
+        let bb0_id = bb0.finish_terminating().unwrap();
         let func_id = func.finish(bb0_id);
 
         let mut orphan_func = builder.begin_function();
         let mut bb1 = orphan_func.begin_basic_block();
         bb1.add_operation(Operation::Stop(()));
-        let bb1_id = bb1.finish(Control::LastOpTerminates).unwrap();
+        let bb1_id = bb1.finish_terminating().unwrap();
 
         let program = builder.build(func_id, None);
 
@@ -158,11 +160,11 @@ mod tests {
 
         let mut bb0 = func0.begin_basic_block();
         bb0.add_operation(Operation::Noop(()));
-        let bb0_id = bb0.finish(Control::LastOpTerminates).unwrap();
+        let bb0_id = bb0.finish_with_placeholder_control();
 
         let mut bb1 = func0.begin_basic_block();
         bb1.add_operation(Operation::Stop(()));
-        let bb1_id = bb1.finish(Control::LastOpTerminates).unwrap();
+        let bb1_id = bb1.finish_terminating().unwrap();
 
         func0.set_control(bb0_id, Control::ContinuesTo(bb1_id)).unwrap();
 
@@ -171,7 +173,7 @@ mod tests {
         let mut func1 = builder.begin_function();
         let mut bb2 = func1.begin_basic_block();
         bb2.add_operation(Operation::Noop(()));
-        let bb2_id = bb2.finish(Control::InternalReturn).unwrap();
+        let bb2_id = bb2.finish_with_internal_return().unwrap();
         let func1_id = func1.finish(bb2_id);
 
         let program = builder.build(func0_id, None);
@@ -208,7 +210,8 @@ mod tests {
         func.set_control(
             bb0_id,
             Control::Branches(Branch { condition, zero_target: bb1_id, non_zero_target: bb2_id }),
-        );
+        )
+        .unwrap();
 
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);

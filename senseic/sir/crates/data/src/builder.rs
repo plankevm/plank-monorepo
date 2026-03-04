@@ -3,7 +3,7 @@ use crate::{
     *,
 };
 use alloy_primitives::U256;
-use sensei_core::span::IncIterable;
+use sensei_core::{must_use::MustUseStrict, span::IncIterable};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
@@ -142,6 +142,7 @@ impl<'ir> FunctionBuilder<'ir> {
             operations: Span::new(next_op, next_op),
             inputs: Span::new(next_local, next_local),
             outputs: Span::new(next_local, next_local),
+            _must_use: MustUseStrict,
         }
     }
 
@@ -156,8 +157,11 @@ impl<'ir> FunctionBuilder<'ir> {
 
         let bb = &mut self.ir_builder.basic_blocks[bb_id];
         bb.control = control;
+
         let bb = *bb;
-        self.track_bb_internal_return(bb)
+        self.validate_terminating(bb)?;
+        self.track_bb_internal_return(bb)?;
+        Ok(())
     }
 
     pub fn begin_switch(&mut self) -> SwitchBuilder<'_, Self> {
@@ -186,7 +190,7 @@ impl<'ir> FunctionBuilder<'ir> {
     }
 
     fn validate_terminating(&mut self, bb: BasicBlock) -> Result<(), BuildError> {
-        if matches!(bb.control, Control::LastOpTerminates) {
+        if !matches!(bb.control, Control::LastOpTerminates) {
             return Ok(());
         }
         let last_op = self.ir_builder.operations[bb.operations].last();
@@ -202,6 +206,11 @@ impl<'ir> FunctionBuilder<'ir> {
         assert!(
             basic_blocks.contains(&entry_bb_id),
             "Specifying entry basic block that's not part of function"
+        );
+        assert!(
+            self.ir_builder.placehodler_control_blocks.is_empty(),
+            "unset placeholder blocks: {:?}",
+            self.ir_builder.placehodler_control_blocks
         );
 
         self.ir_builder.functions.push(Function { entry_bb_id, outputs: self.outputs.unwrap_or(0) })
@@ -220,15 +229,8 @@ pub struct BasicBlockBuilder<'func, 'ir: 'func> {
     operations: Span<OperationIdx>,
     inputs: Span<LocalIdx>,
     outputs: Span<LocalIdx>,
-}
 
-/// Poor man's linear type. Ensures that `BasicBlockBuilder` is used.
-impl Drop for BasicBlockBuilder<'_, '_> {
-    fn drop(&mut self) {
-        if !std::thread::panicking() {
-            panic!("dropped basic block builder without calling .finish");
-        }
-    }
+    _must_use: MustUseStrict,
 }
 
 impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
@@ -300,7 +302,11 @@ impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
         SwitchBuilder { context: self, values_start, targets_start, cases_count: 0 }
     }
 
-    fn finish(&mut self, control: Control) -> (BasicBlockId, BasicBlock) {
+    fn finish(
+        self,
+        control: Control,
+    ) -> (BasicBlockId, BasicBlock, &'func mut FunctionBuilder<'ir>) {
+        std::mem::forget(self._must_use);
         let bb = BasicBlock {
             inputs: self.inputs,
             outputs: self.outputs,
@@ -308,35 +314,36 @@ impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
             control,
         };
         let id = self.fn_builder.push_block(bb);
-        (id, bb)
+        (id, bb, self.fn_builder)
     }
 
-    pub fn finish_with_branch(mut self, branch: Branch) -> BasicBlockId {
+    pub fn finish_with_continues_to(self, to: BasicBlockId) -> BasicBlockId {
+        self.finish(Control::ContinuesTo(to)).0
+    }
+
+    pub fn finish_with_branch(self, branch: Branch) -> BasicBlockId {
         self.finish(Control::Branches(branch)).0
     }
 
-    pub fn finish_with_internal_return(mut self) -> Result<BasicBlockId, BuildError> {
-        let (id, bb) = self.finish(Control::InternalReturn);
-        self.fn_builder.track_bb_internal_return(bb)?;
+    pub fn finish_with_internal_return(self) -> Result<BasicBlockId, BuildError> {
+        let (id, bb, fn_builder) = self.finish(Control::InternalReturn);
+        fn_builder.track_bb_internal_return(bb)?;
         Ok(id)
     }
 
-    pub fn finish_with_switch(mut self, switch: Switch) -> BasicBlockId {
+    pub fn finish_with_switch(self, switch: Switch) -> BasicBlockId {
         self.finish(Control::Switch(switch)).0
     }
 
-    pub fn finish_terminating(mut self) -> Result<BasicBlockId, BuildError> {
-        let (id, _bb) = self.finish(Control::LastOpTerminates);
-        let last_op = self.fn_builder.ir_builder.operations[self.operations].last();
-        if last_op.is_none_or(|&op| !op.kind().is_terminating()) {
-            return Err(BuildError::TerminatingBlockWithoutOp);
-        }
+    pub fn finish_terminating(self) -> Result<BasicBlockId, BuildError> {
+        let (id, bb, fn_builder) = self.finish(Control::LastOpTerminates);
+        fn_builder.validate_terminating(bb)?;
         Ok(id)
     }
 
-    pub fn finish_with_placeholder_control(mut self) -> BasicBlockId {
-        let (id, _) = self.finish(Control::LastOpTerminates);
-        self.fn_builder.ir_builder.placehodler_control_blocks.push(id);
+    pub fn finish_with_placeholder_control(self) -> BasicBlockId {
+        let (id, _, fn_builder) = self.finish(Control::LastOpTerminates);
+        fn_builder.ir_builder.placehodler_control_blocks.push(id);
         id
     }
 

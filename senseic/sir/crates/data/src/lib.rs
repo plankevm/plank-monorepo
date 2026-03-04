@@ -358,14 +358,14 @@ Basic Blocks:
         let mut func0 = builder.begin_function();
         let mut bb0 = func0.begin_basic_block();
         bb0.add_operation(Operation::Stop(()));
-        let bb0_id = bb0.finish_with_internal_return().unwrap();
+        let bb0_id = bb0.finish_terminating().unwrap();
         let func0_id = func0.finish(bb0_id);
 
         // Unreachable block 1
         let mut orphan1 = builder.begin_function();
         let mut bb1 = orphan1.begin_basic_block();
         bb1.add_operation(Operation::Invalid(()));
-        bb1.finish_with_internal_return().unwrap();
+        bb1.finish_terminating().unwrap();
 
         // Function 1: one block with setcopy
         let mut func1 = builder.begin_function();
@@ -382,7 +382,7 @@ Basic Blocks:
         let mut orphan2 = builder.begin_function();
         let mut bb3 = orphan2.begin_basic_block();
         bb3.add_operation(Operation::Stop(()));
-        bb3.finish_with_internal_return().unwrap();
+        bb3.finish_terminating().unwrap();
 
         let program = builder.build(func0_id, None);
 

@@ -538,7 +538,7 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
                     spans: arena.alloc([bb_id.span()]),
                     reason: format_in!(
                         arena,
-                        "Basic block {:?} missing without terminating op or control flow",
+                        "Basic block {:?} without terminating op or control flow",
                         func.name.inner,
                     ),
                 },
