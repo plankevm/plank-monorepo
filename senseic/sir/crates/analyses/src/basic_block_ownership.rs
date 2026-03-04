@@ -193,29 +193,22 @@ mod tests {
 
         let condition = func.new_local();
 
-        let bb1_id = func.ir_builder.next_basic_block_id() + 1;
-        let bb2_id = func.ir_builder.next_basic_block_id() + 2;
-
         let mut bb0 = func.begin_basic_block();
         bb0.add_operation(Operation::Noop(()));
-        let bb0_id = bb0
-            .finish(Control::Branches(Branch {
-                condition,
-                zero_target: bb1_id,
-                non_zero_target: bb2_id,
-            }))
-            .unwrap();
+        let bb0_id = bb0.finish_with_placeholder_control();
 
         let mut bb1 = func.begin_basic_block();
         bb1.add_operation(Operation::Stop(()));
-        let bb1_id_actual = bb1.finish(Control::LastOpTerminates).unwrap();
+        let bb1_id = bb1.finish_terminating().unwrap();
 
         let mut bb2 = func.begin_basic_block();
         bb2.add_operation(Operation::Stop(()));
-        let bb2_id_actual = bb2.finish(Control::LastOpTerminates).unwrap();
+        let bb2_id = bb2.finish_terminating().unwrap();
 
-        assert_eq!(bb1_id, bb1_id_actual);
-        assert_eq!(bb2_id, bb2_id_actual);
+        func.set_control(
+            bb0_id,
+            Control::Branches(Branch { condition, zero_target: bb1_id, non_zero_target: bb2_id }),
+        );
 
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);

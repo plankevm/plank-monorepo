@@ -147,7 +147,7 @@ impl Function {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct BasicBlock {
     /// Input locals.
     pub inputs: Span<LocalIdx>,
@@ -326,7 +326,7 @@ mod tests {
         bb.add_operation(Operation::Add(InlineOperands { ins: [local0, local1], outs: [local2] }));
         bb.add_operation(Operation::Stop(()));
         bb.set_outputs(&[local2]);
-        let bb_id = bb.finish(Control::InternalReturn).unwrap();
+        let bb_id = bb.finish_with_internal_return().unwrap();
 
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
@@ -358,14 +358,14 @@ Basic Blocks:
         let mut func0 = builder.begin_function();
         let mut bb0 = func0.begin_basic_block();
         bb0.add_operation(Operation::Stop(()));
-        let bb0_id = bb0.finish(Control::LastOpTerminates).unwrap();
+        let bb0_id = bb0.finish_with_internal_return().unwrap();
         let func0_id = func0.finish(bb0_id);
 
         // Unreachable block 1
         let mut orphan1 = builder.begin_function();
         let mut bb1 = orphan1.begin_basic_block();
         bb1.add_operation(Operation::Invalid(()));
-        bb1.finish(Control::LastOpTerminates).unwrap();
+        bb1.finish_with_internal_return().unwrap();
 
         // Function 1: one block with setcopy
         let mut func1 = builder.begin_function();
@@ -375,14 +375,14 @@ Basic Blocks:
         bb2.set_inputs(&[local0]);
         bb2.add_operation(Operation::SetCopy(InlineOperands { ins: [local0], outs: [local1] }));
         bb2.set_outputs(&[local1]);
-        let bb2_id = bb2.finish(Control::InternalReturn).unwrap();
+        let bb2_id = bb2.finish_with_internal_return().unwrap();
         let _func1_id = func1.finish(bb2_id);
 
         // Unreachable block 2
         let mut orphan2 = builder.begin_function();
         let mut bb3 = orphan2.begin_basic_block();
         bb3.add_operation(Operation::Stop(()));
-        bb3.finish(Control::LastOpTerminates).unwrap();
+        bb3.finish_with_internal_return().unwrap();
 
         let program = builder.build(func0_id, None);
 
@@ -443,7 +443,7 @@ Basic Blocks:
             segment_id: data_segment_1,
         }));
         bb.add_operation(Operation::Stop(()));
-        let bb_id = bb.finish(Control::LastOpTerminates).unwrap();
+        let bb_id = bb.finish_terminating().unwrap();
 
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);

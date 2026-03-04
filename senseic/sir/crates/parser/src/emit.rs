@@ -398,13 +398,7 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
                 bb_builder.add_operation(operation);
             }
 
-            // Placeholder control to get overriden later.
-            let bb_id =
-                bb_builder.finish(Control::LastOpTerminates).unwrap_or_else(|err| match err {
-                    BuildError::ConflictingFunctionOutputs { .. } => {
-                        unreachable!("we just set a default last op terminates, shouldn't error")
-                    }
-                });
+            let bb_id = bb_builder.finish_with_placeholder_control();
             if bb_index == 0 {
                 entry_bb_id = Some(bb_id);
             }
@@ -539,6 +533,17 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
                             implied_out
                         ),
                     }
+                }
+                BuildError::TerminatingBlockWithoutOp => SirAstSemaError {
+                    spans: arena.alloc([bb_id.span()]),
+                    reason: format_in!(
+                        arena,
+                        "Basic block {:?} missing without terminating op or control flow",
+                        func.name.inner,
+                    ),
+                },
+                BuildError::SettingControlForNonPlaceholder => {
+                    unreachable!("tried to overwrite non-placeholder control?")
                 }
             })?;
         }

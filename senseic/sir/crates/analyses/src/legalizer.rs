@@ -147,16 +147,9 @@ impl<'a> Legalizer<'a> {
         bb: &BasicBlock,
     ) -> Result<(), LegalizerError> {
         if matches!(bb.control, Control::LastOpTerminates)
-            && self.program.operations[bb.operations].last().is_none_or(|op| {
-                !matches!(
-                    op,
-                    Operation::Return(_)
-                        | Operation::Stop(_)
-                        | Operation::Revert(_)
-                        | Operation::Invalid(_)
-                        | Operation::SelfDestruct(_)
-                )
-            })
+            && self.program.operations[bb.operations]
+                .last()
+                .is_none_or(|op| !op.kind().is_terminating())
         {
             return Err(LegalizerError::MissingTerminator(bb_id));
         }
