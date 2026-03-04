@@ -478,15 +478,18 @@ where
                 let name = self.expect_ident();
                 self.push_child(&mut parameter, name);
                 parameter
-            } else {
-                if !self.eat(Token::Identifier) {
-                    break;
-                }
+            } else if self.eat(Token::Identifier) {
                 let mut parameter = self.alloc_node_from(parameter_start, NodeKind::Parameter);
                 let ident = self.intern(self.tokens.current() - 1);
                 let name = self.alloc_last_token_as_node(NodeKind::Identifier { ident });
                 self.push_child(&mut parameter, name);
                 parameter
+            } else if !self.check(Token::RightRound) && !self.eof() {
+                self.emit_unexpected();
+                self.advance();
+                continue;
+            } else {
+                break;
             };
 
             self.expect(Token::Colon);
@@ -524,21 +527,28 @@ where
 
         self.expect(Token::LeftCurly);
 
-        while self.check(Token::Identifier) {
-            let mut field = self.alloc_node(NodeKind::FieldDef);
+        loop {
+            if self.check(Token::Identifier) {
+                let mut field = self.alloc_node(NodeKind::FieldDef);
 
-            let name = self.try_parse_ident().expect("read ident token, but no ident?");
-            self.push_child(&mut field, name);
+                let name = self.try_parse_ident().expect("read ident token, but no ident?");
+                self.push_child(&mut field, name);
 
-            self.expect(Token::Colon);
+                self.expect(Token::Colon);
 
-            let r#type = self.parse_expr(ParseExprMode::AllowAll);
-            self.push_child(&mut field, r#type);
+                let r#type = self.parse_expr(ParseExprMode::AllowAll);
+                self.push_child(&mut field, r#type);
 
-            let field = self.close_node(field);
-            self.push_child(&mut struct_def, field);
+                let field = self.close_node(field);
+                self.push_child(&mut struct_def, field);
 
-            if !self.eat(Token::Comma) {
+                if !self.eat(Token::Comma) {
+                    break;
+                }
+            } else if !self.check(Token::RightCurly) && !self.eof() {
+                self.emit_unexpected();
+                self.advance();
+            } else {
                 break;
             }
         }
@@ -585,7 +595,19 @@ where
             if Self::MEMBER_PRIORITY > min_bp && self.eat(Token::Dot) {
                 let mut member = self.alloc_node_from(start, NodeKind::MemberExpr);
                 self.push_child(&mut member, expr);
-                let access_name = self.expect_ident();
+                let access_name = if let Some(ident) = self.try_parse_ident() {
+                    ident
+                } else {
+                    self.emit_unexpected();
+                    let error = self.alloc_node(NodeKind::Error);
+                    if !self.at(Token::Semicolon)
+                        && !self.at(Token::RightCurly)
+                        && !self.at(Token::Eof)
+                    {
+                        self.advance();
+                    }
+                    self.close_node(error)
+                };
                 self.push_child(&mut member, access_name);
                 expr = self.close_node(member);
                 continue;
@@ -594,10 +616,17 @@ where
             if Self::FN_CALL_PRIORITY > min_bp && self.eat(Token::LeftRound) {
                 let mut call = self.alloc_node_from(start, NodeKind::CallExpr);
                 self.push_child(&mut call, expr);
-                while let Some(argument) = self.try_parse_expr(ParseExprMode::AllowAll) {
-                    self.push_child(&mut call, argument);
+                loop {
+                    if let Some(argument) = self.try_parse_expr(ParseExprMode::AllowAll) {
+                        self.push_child(&mut call, argument);
 
-                    if !self.eat(Token::Comma) {
+                        if !self.eat(Token::Comma) {
+                            break;
+                        }
+                    } else if !self.check(Token::RightRound) && !self.eof() {
+                        self.emit_unexpected();
+                        self.advance();
+                    } else {
                         break;
                     }
                 }
@@ -613,18 +642,25 @@ where
                 let mut struct_literal = self.alloc_node_from(start, NodeKind::StructLit);
                 self.push_child(&mut struct_literal, expr);
 
-                while self.check(Token::Identifier) {
-                    let mut field = self.alloc_node(NodeKind::FieldAssign);
-                    let name = self.try_parse_ident().expect("read ident token, but no ident?");
-                    self.push_child(&mut field, name);
-                    self.expect(Token::Colon);
-                    let value = self.parse_expr(ParseExprMode::AllowAll);
-                    self.push_child(&mut field, value);
+                loop {
+                    if self.check(Token::Identifier) {
+                        let mut field = self.alloc_node(NodeKind::FieldAssign);
+                        let name = self.try_parse_ident().expect("read ident token, but no ident?");
+                        self.push_child(&mut field, name);
+                        self.expect(Token::Colon);
+                        let value = self.parse_expr(ParseExprMode::AllowAll);
+                        self.push_child(&mut field, value);
 
-                    let field = self.close_node(field);
-                    self.push_child(&mut struct_literal, field);
+                        let field = self.close_node(field);
+                        self.push_child(&mut struct_literal, field);
 
-                    if !self.eat(Token::Comma) {
+                        if !self.eat(Token::Comma) {
+                            break;
+                        }
+                    } else if !self.check(Token::RightCurly) && !self.eof() {
+                        self.emit_unexpected();
+                        self.advance();
+                    } else {
                         break;
                     }
                 }
@@ -776,8 +812,13 @@ where
                 StmtResult::Statement(stmt) => self.push_child(&mut statements_list, stmt),
                 StmtResult::EndExprOrStmt(expr) => end_expr = Some(expr),
                 StmtResult::EndExpr(expr) => {
-                    end_expr = Some(expr);
-                    break;
+                    if self.check(Token::RightCurly) || self.eof() {
+                        end_expr = Some(expr);
+                        break;
+                    } else {
+                        self.diagnostics.emit_missing_token(Token::Semicolon, self.last_src_span);
+                        self.push_child(&mut statements_list, expr);
+                    }
                 }
             }
         }
