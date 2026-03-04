@@ -1,5 +1,5 @@
 use hashbrown::HashMap;
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 
 use crate::{DefUse, UseKind, compute_predecessors, dfs_postorder};
 use sensei_core::{DenseIndexSet, Idx};
@@ -18,19 +18,19 @@ pub enum AllocKind {
     Dynamic { size_local: LocalId },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IntervalStart {
     LiveIn,
     At(OperationIdx),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum IntervalEnd {
     LiveOut,
     At(OperationIdx),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Interval {
     pub start: IntervalStart,
     pub end: IntervalEnd,
@@ -52,6 +52,7 @@ pub struct AllocationLiveness {
     pub local_to_alloc: IndexVec<LocalId, Option<AllocId>>,
 }
 
+/// Only tracks non-escaping allocations for now.
 pub fn compute_allocation_liveness(program: &EthIRProgram, def_use: &DefUse) -> AllocationLiveness {
     let mut liveness = discover_allocations(program, def_use);
     if liveness.allocations.is_empty() {
@@ -82,7 +83,7 @@ pub fn compute_allocation_liveness(program: &EthIRProgram, def_use: &DefUse) -> 
         program,
         &mut liveness,
         &local_to_input_origins,
-        &blocks_postorder,
+        &predecessors,
         &block_exit_alloc_liveness,
     );
 
@@ -280,6 +281,7 @@ fn compute_block_exit_alloc_liveness(
     let mut block_exit_alloc_liveness: IndexVec<BasicBlockId, DenseIndexSet<AllocId>> =
         index_vec![DenseIndexSet::new(); program.basic_blocks.len()];
 
+    // Note: we recompute input_live_flags per iteration rather than precomputing and storing it.
     let mut input_live_flags = SmallVec::<[bool; 8]>::new();
     let mut changed = true;
     while changed {
@@ -295,7 +297,6 @@ fn compute_block_exit_alloc_liveness(
                 program,
                 local_to_input_origins,
                 bb_id,
-                block,
                 &mut input_live_flags,
             );
 
@@ -349,16 +350,16 @@ fn update_block_liveness(
 
 fn populate_input_live_flags(
     program: &EthIRProgram,
-    local_input_origins: &HashMap<LocalId, BlockInputOrigins>,
+    local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
     bb_id: BasicBlockId,
-    block: &BasicBlock,
     input_live_flags: &mut SmallVec<[bool; 8]>,
 ) {
+    let block = &program.basic_blocks[bb_id];
     input_live_flags.clear();
     input_live_flags.resize(block.inputs.len() as usize, false);
 
     let mut mark_input_origins_live = |local: &LocalId| {
-        let Some(origins) = local_input_origins.get(local) else { return };
+        let Some(origins) = local_to_input_origins.get(local) else { return };
         for &(origin_block, pos) in origins {
             debug_assert_eq!(origin_block, bb_id);
             input_live_flags[pos as usize] = true;
@@ -414,13 +415,151 @@ fn propagate_alloc_liveness_to_predecessors(
 }
 
 fn populate_allocation_intervals(
-    _program: &EthIRProgram,
-    _liveness: &mut AllocationLiveness,
-    _local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-    _blocks_postorder: &[BasicBlockId],
-    _block_exit_alloc_liveness: &IndexVec<BasicBlockId, DenseIndexSet<AllocId>>,
+    program: &EthIRProgram,
+    liveness: &mut AllocationLiveness,
+    local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
+    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    block_exit_alloc_liveness: &IndexVec<BasicBlockId, DenseIndexSet<AllocId>>,
 ) {
-    todo!()
+    let AllocationLiveness { allocations, local_to_alloc } = liveness;
+    let mut input_live_flags = SmallVec::<[bool; 8]>::new();
+    let mut interval_ends: HashMap<AllocId, IntervalEnd> = HashMap::new();
+
+    for bb_id in program.basic_blocks.indices() {
+        compute_block_intervals(
+            program,
+            allocations,
+            local_to_alloc,
+            bb_id,
+            &block_exit_alloc_liveness[bb_id],
+            &mut interval_ends,
+        );
+
+        // Note: we recompute input_live_flags here rather than storing it from the fixpoint phase.
+        populate_input_live_flags(program, local_to_input_origins, bb_id, &mut input_live_flags);
+
+        build_input_intervals(
+            program,
+            allocations,
+            local_to_alloc,
+            local_to_input_origins,
+            bb_id,
+            block_exit_alloc_liveness,
+            &predecessors[bb_id],
+            &input_live_flags,
+        );
+    }
+
+    for alloc in allocations.iter_mut() {
+        alloc.intervals.sort();
+        alloc.intervals.dedup();
+    }
+}
+
+fn compute_block_intervals(
+    program: &EthIRProgram,
+    allocations: &mut IndexVec<AllocId, AllocData>,
+    local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
+    bb_id: BasicBlockId,
+    exit_alloc_liveness: &DenseIndexSet<AllocId>,
+    interval_ends: &mut HashMap<AllocId, IntervalEnd>,
+) {
+    let block = &program.basic_blocks[bb_id];
+    interval_ends.clear();
+    for alloc_id in exit_alloc_liveness.iter() {
+        interval_ends.insert(alloc_id, IntervalEnd::LiveOut);
+    }
+
+    for op_idx in block.operations.iter().rev() {
+        let op = program.operations[op_idx];
+
+        match op {
+            Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => {
+                if let Some(alloc_id) = local_to_alloc[data.ptr_out]
+                    && let Some(end) = interval_ends.remove(&alloc_id)
+                {
+                    allocations[alloc_id]
+                        .intervals
+                        .push((bb_id, Interval { start: IntervalStart::At(op_idx), end }));
+                }
+            }
+            Operation::DynamicAllocZeroed(data) | Operation::DynamicAllocAnyBytes(data) => {
+                if let Some(alloc_id) = local_to_alloc[data.outs[0]]
+                    && let Some(end) = interval_ends.remove(&alloc_id)
+                {
+                    allocations[alloc_id]
+                        .intervals
+                        .push((bb_id, Interval { start: IntervalStart::At(op_idx), end }));
+                }
+            }
+            _ => {}
+        }
+
+        for input in op.inputs(program) {
+            let Some(alloc_id) = local_to_alloc[*input] else { continue };
+            if !allocations[alloc_id].escapes {
+                interval_ends.entry(alloc_id).or_insert(IntervalEnd::At(op_idx));
+            }
+        }
+    }
+
+    for (alloc_id, end) in interval_ends.drain() {
+        allocations[alloc_id]
+            .intervals
+            .push((bb_id, Interval { start: IntervalStart::LiveIn, end }));
+    }
+}
+
+fn build_input_intervals(
+    program: &EthIRProgram,
+    allocations: &mut IndexVec<AllocId, AllocData>,
+    local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
+    local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
+    bb_id: BasicBlockId,
+    block_exit_alloc_liveness: &IndexVec<BasicBlockId, DenseIndexSet<AllocId>>,
+    predecessors: &[BasicBlockId],
+    input_live_flags: &[bool],
+) {
+    let block = &program.basic_blocks[bb_id];
+    let mut last_use_per_input: SmallVec<[Option<OperationIdx>; 8]> =
+        smallvec![None; input_live_flags.len()];
+
+    for op_idx in block.operations.iter().rev() {
+        for input in program.operations[op_idx].inputs(program) {
+            let Some(origins) = local_to_input_origins.get(input) else { continue };
+            for &(origin_block, pos) in origins {
+                debug_assert_eq!(origin_block, bb_id);
+                if last_use_per_input[pos as usize].is_none() {
+                    last_use_per_input[pos as usize] = Some(op_idx);
+                }
+            }
+        }
+    }
+
+    for (pos, &live) in input_live_flags.iter().enumerate() {
+        if !live {
+            continue;
+        }
+        let Some(end_op) = last_use_per_input[pos] else { continue };
+
+        for pred_id in predecessors {
+            let Some(alloc_id) = local_to_alloc[program.block(*pred_id).outputs()[pos]] else {
+                continue;
+            };
+            if allocations[alloc_id].escapes {
+                continue;
+            }
+            // Already handled by compute_block_intervals.
+            if block_exit_alloc_liveness[bb_id].contains(alloc_id) {
+                continue;
+            }
+
+            allocations[alloc_id].intervals.push((
+                bb_id,
+                Interval { start: IntervalStart::LiveIn, end: IntervalEnd::At(end_op) },
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
