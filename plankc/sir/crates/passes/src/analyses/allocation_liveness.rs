@@ -190,6 +190,9 @@ fn propagate_pointers_and_mark_escapes(
                         | Operation::InternalCall(_) => {
                             allocations[alloc_id].escapes = true;
                         }
+                        Operation::MemoryStore(data) if data.value() == local => {
+                            allocations[alloc_id].escapes = true;
+                        }
                         _ => {}
                     }
                 }
@@ -422,7 +425,6 @@ fn populate_allocation_intervals(
     block_exit_alloc_liveness: &IndexVec<BasicBlockId, DenseIndexSet<AllocId>>,
 ) {
     let AllocationLiveness { allocations, local_to_alloc } = liveness;
-    let mut input_live_flags = SmallVec::<[bool; 8]>::new();
     let mut interval_ends: HashMap<AllocId, IntervalEnd> = HashMap::new();
 
     for bb_id in program.basic_blocks.indices() {
@@ -435,18 +437,14 @@ fn populate_allocation_intervals(
             &mut interval_ends,
         );
 
-        // Note: we recompute input_live_flags here rather than storing it from the fixpoint phase.
-        populate_input_live_flags(program, local_to_input_origins, bb_id, &mut input_live_flags);
-
         build_input_intervals(
             program,
             allocations,
             local_to_alloc,
             local_to_input_origins,
             bb_id,
-            block_exit_alloc_liveness,
+            &block_exit_alloc_liveness[bb_id],
             &predecessors[bb_id],
-            &input_live_flags,
         );
     }
 
@@ -516,13 +514,12 @@ fn build_input_intervals(
     local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
     local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
     bb_id: BasicBlockId,
-    block_exit_alloc_liveness: &IndexVec<BasicBlockId, DenseIndexSet<AllocId>>,
+    exit_alloc_liveness: &DenseIndexSet<AllocId>,
     predecessors: &[BasicBlockId],
-    input_live_flags: &[bool],
 ) {
     let block = &program.basic_blocks[bb_id];
     let mut last_use_per_input: SmallVec<[Option<OperationIdx>; 8]> =
-        smallvec![None; input_live_flags.len()];
+        smallvec![None; block.inputs.len() as usize];
 
     for op_idx in block.operations.iter().rev() {
         for input in program.operations[op_idx].inputs(program) {
@@ -536,11 +533,8 @@ fn build_input_intervals(
         }
     }
 
-    for (pos, &live) in input_live_flags.iter().enumerate() {
-        if !live {
-            continue;
-        }
-        let Some(end_op) = last_use_per_input[pos] else { continue };
+    for (pos, end_op) in last_use_per_input.iter().enumerate() {
+        let Some(&end_op) = end_op.as_ref() else { continue };
 
         for pred_id in predecessors {
             let Some(alloc_id) = local_to_alloc[program.block(*pred_id).outputs()[pos]] else {
@@ -550,7 +544,7 @@ fn build_input_intervals(
                 continue;
             }
             // Already handled by compute_block_intervals.
-            if block_exit_alloc_liveness[bb_id].contains(alloc_id) {
+            if exit_alloc_liveness.contains(alloc_id) {
                 continue;
             }
 
@@ -628,8 +622,9 @@ mod tests {
             fn init:
                 entry {
                     a = salloc 32
+                    sz = const 64
+                    b = malloc sz
                     v = mload256 a
-                    b = salloc 64
                     mstore256 b v
                     stop
                 }
@@ -648,13 +643,13 @@ mod tests {
             alloc0,
             BasicBlockId::new(0),
             IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc 32
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 1)),   // mload256
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mload256
         );
         assert_has_interval(
             alloc1,
             BasicBlockId::new(0),
-            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)), // salloc 64
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mstore256
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)), // malloc
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 4)),   // mstore256
         );
     }
 
@@ -663,16 +658,16 @@ mod tests {
         let ir = parse_or_panic(
             r#"
             fn init:
-                entry {
+                entry -> buf {
+                    buf = salloc 32
                     cond = calldatasize
                     => cond ? @then : @done
                 }
-                then {
-                    buf = salloc 32
-                    v = mload256 buf
+                then ptr -> ptr {
+                    v = mload256 ptr
                     => @done
                 }
-                done {
+                done _p {
                     stop
                 }
             "#,
@@ -682,12 +677,18 @@ mod tests {
         assert_eq!(liveness.allocations.len(), 1);
         let alloc = get_alloc(&liveness, 0);
         assert!(!alloc.escapes);
-        assert_eq!(alloc.intervals.len(), 1);
+        assert_eq!(alloc.intervals.len(), 2);
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
+            IntervalEnd::LiveOut,
+        );
         assert_has_interval(
             alloc,
             BasicBlockId::new(1),
-            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(1), 0)), // salloc
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(1), 1)),   // mload256
+            IntervalStart::LiveIn,
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(1), 0)), // mload256
         );
     }
 
@@ -868,4 +869,47 @@ mod tests {
         assert!(alloc.intervals.is_empty());
     }
 
+    #[test]
+    fn aliased_pointers_both_escape() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    a = salloc 32
+                    sz = const 64
+                    b = malloc sz
+                    merged = add a b
+                    mstore256 merged merged
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 2);
+        assert!(get_alloc(&liveness, 0).escapes);
+        assert!(get_alloc(&liveness, 1).escapes);
+        assert!(get_alloc(&liveness, 0).intervals.is_empty());
+        assert!(get_alloc(&liveness, 1).intervals.is_empty());
+    }
+
+    #[test]
+    fn pointer_stored_to_memory_escapes() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    buf = salloc 32
+                    scratch = salloc 32
+                    mstore256 scratch buf
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let liveness = compute_test_liveness(&ir);
+        assert_eq!(liveness.allocations.len(), 2);
+        assert!(get_alloc(&liveness, 0).escapes, "pointer stored as value should escape");
+        assert!(!get_alloc(&liveness, 1).escapes, "pointer used as address should not escape");
+    }
 }
