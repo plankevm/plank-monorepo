@@ -27,7 +27,7 @@ impl LocalMap {
     }
 
     fn get(&self, local: mir::LocalId) -> &[sir::LocalId] {
-        self.0.get(&local).unwrap_or_else(|| panic!("{local:?} not found")).as_slice()
+        self.0.get(&local).map_or(&[] as &[_], Vec::as_slice)
     }
 
     fn get_or_create_single(
@@ -249,7 +249,16 @@ fn lower_basic_block(
                     Expr::StructLit { ty, fields } => {
                         lower_struct_literal(ctx, &mut current_bb, target, ty, fields);
                     }
-                    Expr::FieldAccess { .. } => todo!(),
+                    Expr::FieldAccess { object, field_index } => {
+                        lower_field_access(
+                            ctx,
+                            &mut current_bb,
+                            target,
+                            mir_func,
+                            object,
+                            field_index,
+                        );
+                    }
                 }
             }
             Instruction::Return(local) => {
@@ -363,6 +372,39 @@ fn lower_struct_literal(
     for (src, dst) in ctx.mir.args[fields]
         .iter()
         .flat_map(|src_local| ctx.locals_map.get(*src_local))
+        .zip(ctx.locals_map.get(target))
+    {
+        bb.add_operation(Operation::SetCopy(InlineOperands { outs: [*dst], ins: [*src] }));
+    }
+}
+
+fn lower_field_access(
+    ctx: &mut LowerCtx<'_>,
+    bb: &mut BasicBlockBuilder<'_, '_>,
+    target: mir::LocalId,
+    mir_func: mir::FnId,
+    object: mir::LocalId,
+    field_index: u32,
+) {
+    let object_type = ctx.mir.fn_locals[mir_func][object.idx()];
+    let Type::Struct(r#struct) = ctx.mir.types.lookup(object_type) else {
+        unreachable!("invalid mir");
+    };
+    let field_type = r#struct.field_types[field_index as usize];
+    let size = ctx.size_in_locals(field_type);
+    if size == 0 {
+        return;
+    }
+
+    let flattened_fields_offset = r#struct.field_types[..field_index as usize]
+        .iter()
+        .map(|&field_type| ctx.size_in_locals(field_type))
+        .sum::<u32>() as usize;
+
+    ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);
+
+    for (src, dst) in ctx.locals_map.get(object)[flattened_fields_offset..][..size as usize]
+        .iter()
         .zip(ctx.locals_map.get(target))
     {
         bb.add_operation(Operation::SetCopy(InlineOperands { outs: [*dst], ins: [*src] }));

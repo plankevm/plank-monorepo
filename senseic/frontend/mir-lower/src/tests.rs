@@ -468,3 +468,39 @@ fn test_struct_lit() {
         "#,
     );
 }
+
+#[test]
+fn test_struct_field_access() {
+    assert_lowers_to(
+        r#"
+        const A = struct { a: u256, wow: void,  b: bool };
+        init {
+            let a = A { a: 3, wow: {}, b: false };
+            let x = a.a;
+
+            evm_stop();
+        }
+        "#,
+        r#"
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x3
+                $1 = copy $0
+                $2 = const 0x0
+                $3 = copy $2
+                $4 = copy $1
+                $5 = copy $3
+                $6 = copy $4
+                $7 = copy $5
+                $8 = copy $6
+                $9 = copy $7
+                $10 = copy $8
+                $11 = copy $10
+                stop
+            }
+        "#,
+    );
+}
