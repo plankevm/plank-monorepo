@@ -2,16 +2,16 @@ use alloy_primitives::U256;
 use sensei_hir::builtins::Builtin;
 use sir_data::{
     self as sir, Operation,
-    builder::EthIRBuilder,
+    builder::BasicBlockBuilder,
     operation::{OpExtraData, OperationKind},
 };
 
-pub(crate) fn builtin_to_operation(
+pub(crate) fn add_as_op(
     builtin: Builtin,
     inputs: &[sir::LocalId],
     output: Option<sir::LocalId>,
-    builder: &mut EthIRBuilder,
-) -> Result<Operation, sir::operation::OpBuildError> {
+    builder: &mut BasicBlockBuilder<'_, '_>,
+) -> Result<OperationKind, sir::operation::OpBuildError> {
     let kind = match builtin {
         // ========== EVM Arithmetic ==========
         Builtin::Add => OperationKind::Add,
@@ -215,5 +215,6 @@ pub(crate) fn builtin_to_operation(
         _ => OpExtraData::Empty,
     };
     let outputs = output.as_ref().map_or(&[] as &[_], std::slice::from_ref);
-    Operation::try_build(kind, inputs, outputs, op_extra_data, builder)
+    builder.try_add_op(kind, inputs, outputs, op_extra_data)?;
+    Ok(kind)
 }

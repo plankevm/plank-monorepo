@@ -1,5 +1,5 @@
 use crate::{
-    operation::{SetLargeConstData, SetSmallConstData},
+    operation::{OpBuildError, OpExtraData, OperationKind, SetLargeConstData, SetSmallConstData},
     *,
 };
 use alloy_primitives::U256;
@@ -193,13 +193,33 @@ impl<'ir> AsMut<EthIRBuilder> for FunctionBuilder<'ir> {
 
 #[must_use]
 pub struct BasicBlockBuilder<'func, 'ir: 'func> {
-    pub fn_builder: &'func mut FunctionBuilder<'ir>,
+    fn_builder: &'func mut FunctionBuilder<'ir>,
     operations: Span<OperationIdx>,
     inputs: Span<LocalIdx>,
     outputs: Span<LocalIdx>,
 }
 
 impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
+    pub fn id(&self) -> BasicBlockId {
+        self.fn_builder.ir_builder.next_basic_block_id()
+    }
+
+    pub fn try_add_op(
+        &mut self,
+        kind: OperationKind,
+        inputs: &[LocalId],
+        outputs: &[LocalId],
+        extra: OpExtraData,
+    ) -> Result<(), OpBuildError> {
+        let op = Operation::try_build(kind, inputs, outputs, extra, self.fn_builder.ir_builder)?;
+        self.add_operation(op);
+        Ok(())
+    }
+
+    pub fn set_fn_control(&mut self, id: BasicBlockId, control: Control) -> Result<(), BuildError> {
+        self.fn_builder.set_control(id, control)
+    }
+
     pub fn new_local(&mut self) -> LocalId {
         self.fn_builder.new_local()
     }
