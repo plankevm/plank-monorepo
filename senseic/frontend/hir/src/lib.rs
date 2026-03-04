@@ -570,9 +570,9 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
 
         let file = ast::File::new(cst.file_view()).expect("failed to init file from CST");
         for def in file.iter_defs() {
+            lowerer.reset();
             match def {
                 TopLevelDef::Const(const_def) => {
-                    lowerer.reset();
                     let id = lowerer.consts[&const_def.name];
                     let hir_def = &mut consts[id];
                     hir_def.result = lowerer.alloc_local(const_def.name);
@@ -595,14 +595,12 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
                     if source_id != project.entry {
                         panic!("init only allowed in entry file");
                     }
-                    lowerer.reset();
                     init = Some(lowerer.lower_body_to_block(init_def.body()));
                 }
                 TopLevelDef::Run(run_def) => {
                     if source_id != project.entry {
                         panic!("run only allowed in entry file");
                     }
-                    lowerer.reset();
                     run = Some(lowerer.lower_body_to_block(run_def.body()));
                 }
                 TopLevelDef::Import(_) => {}
