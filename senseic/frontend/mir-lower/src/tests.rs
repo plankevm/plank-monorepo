@@ -194,18 +194,65 @@ fn test_simple_call() {
         "#,
         r#"
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (outputs: 1)
+            fn @1 -> entry @1  (outputs: 0)
 
         Basic Blocks:
-            @0 {
+            @0 -> $2 {
                 $0 = const 0x0
                 $1 = copy $0
                 $2 = mallocany $1
-                $3 = copy $2
+                iret
+            }
+
+            @1 {
+                $3 = icall @0
                 $4 = copy $3
-                $5 = const 0x0
-                $6 = copy $5
-                return $4 $6
+                $5 = copy $4
+                $6 = const 0x0
+                $7 = copy $6
+                return $5 $7
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_call_with_args() {
+    assert_lowers_to(
+        r#"
+        const safe_add = fn (x: u256, y: u256) u256 {
+            let z = add(x, y);
+            z
+        };
+
+        init {
+            let z = safe_add(3, 4);
+            evm_stop();
+        }
+        "#,
+        r#"
+        Functions:
+            fn @0 -> entry @0  (outputs: 1)
+            fn @1 -> entry @1  (outputs: 0)
+
+        Basic Blocks:
+            @0 $0 $1 -> $5 {
+                $2 = copy $0
+                $3 = copy $1
+                $4 = add $2 $3
+                $5 = copy $4
+                iret
+            }
+
+            @1 {
+                $6 = const 0x3
+                $7 = copy $6
+                $8 = const 0x4
+                $9 = copy $8
+                $10 = icall @0 $7 $9
+                $11 = copy $10
+                stop
             }
         "#,
     );

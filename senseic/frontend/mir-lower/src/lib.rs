@@ -6,14 +6,15 @@ mod tests;
 use sensei_core::{DenseIndexMap, DenseIndexSet, Idx};
 use sensei_hir::BigNumInterner;
 use sensei_mir::{self as mir, Expr, Instruction, Mir};
-use sensei_values::TypeId;
+use sensei_values::{Type, TypeId};
 use sir_data::{
-    self as sir, Control, EthIRProgram, Operation,
+    self as sir, Control, EthIRProgram, Operation, Span,
     builder::{EthIRBuilder, FunctionBuilder},
-    operation::{InlineOperands, SetSmallConstData},
+    operation::{InlineOperands, OpExtraData, OperationKind, SetSmallConstData},
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
+#[derive(Debug)]
 struct LocalMap(HashMap<mir::LocalId, Vec<sir::LocalId>>);
 
 impl LocalMap {
@@ -39,6 +40,20 @@ impl LocalMap {
         };
         single
     }
+
+    fn verify_or_create_many(
+        &mut self,
+        local: mir::LocalId,
+        mut create: impl FnMut() -> sir::LocalId,
+        count: usize,
+    ) {
+        match self.0.entry(local) {
+            Entry::Occupied(mapped) => assert_eq!(mapped.get().len(), count),
+            Entry::Vacant(vacant) => {
+                vacant.insert((0..count).map(|_| create()).collect());
+            }
+        }
+    }
 }
 
 struct LowerCtx<'mir> {
@@ -50,6 +65,20 @@ struct LowerCtx<'mir> {
     locals_map: LocalMap,
 
     locals_buf: Vec<sir::LocalId>,
+}
+
+impl LowerCtx<'_> {
+    fn size_in_locals(&self, ty: TypeId) -> u32 {
+        match self.mir.types.lookup(ty) {
+            Type::Void => 0,
+            Type::Bool | Type::Int | Type::MemoryPointer => 1,
+            Type::Function => panic!("function unsizeable in SIR"),
+            Type::Type => panic!("type unsizeable in SIR"),
+            Type::Struct(r#struct) => {
+                r#struct.field_types.iter().map(|&ty| self.size_in_locals(ty)).sum()
+            }
+        }
+    }
 }
 
 pub fn lower(mir: &Mir, big_nums: &BigNumInterner) -> EthIRProgram {
@@ -67,7 +96,6 @@ pub fn lower(mir: &Mir, big_nums: &BigNumInterner) -> EthIRProgram {
     };
 
     let init = lower_function(&mut ctx, &mut builder, mir.init);
-
     let run = mir.run.as_ref().map(|&run| lower_function(&mut ctx, &mut builder, run));
 
     builder.build(init, run)
@@ -85,13 +113,21 @@ fn lower_function(
     if !ctx.entered_functions.add(mir_func) {
         todo!("diagnostic: cyclic call graph");
     }
-    ensure_block_func_deps_lowered(ctx, builder, ctx.mir.fns[mir_func].body);
+    let fn_def = ctx.mir.fns[mir_func];
+    ensure_block_func_deps_lowered(ctx, builder, fn_def.body);
     ctx.entered_functions.remove(mir_func);
 
     let mut new_func = builder.begin_function();
     ctx.locals_map.reset();
 
-    let entry_bb_id = lower_basic_block(ctx, &mut new_func, mir_func, ctx.mir.fns[mir_func].body);
+    for param in fn_def.iter_params() {
+        let ty = ctx.mir.fn_locals[mir_func][param.idx()];
+        let size = ctx.size_in_locals(ty);
+        ctx.locals_map.verify_or_create_many(param, || new_func.new_local(), size as usize);
+    }
+
+    let entry_bb_id =
+        lower_basic_block(ctx, &mut new_func, mir_func, ctx.mir.fns[mir_func].body, true);
     let fn_id = new_func.finish(entry_bb_id);
     ctx.mir_to_sir_functions.insert(mir_func, fn_id);
     return fn_id;
@@ -102,8 +138,17 @@ fn lower_basic_block(
     fn_builder: &mut FunctionBuilder<'_>,
     mir_func: mir::FnId,
     block: mir::BlockId,
+    is_entry: bool,
 ) -> sir::BasicBlockId {
     let mut current_bb = fn_builder.begin_basic_block();
+    if is_entry {
+        ctx.locals_buf.clear();
+        for param in ctx.mir.fns[mir_func].iter_params() {
+            ctx.locals_buf.extend(ctx.locals_map.get(param));
+        }
+
+        current_bb.set_inputs(&ctx.locals_buf);
+    }
 
     for &instr in &ctx.mir.blocks[block] {
         match instr {
@@ -126,18 +171,16 @@ fn lower_basic_block(
                         current_bb.add_set_const_op(sets, value);
                     }
                     Expr::LocalRef(mir_src) => {
-                        let src_sir_locals = ctx.locals_map.0[&mir_src].len();
-                        let dst_sir_locals = ctx
-                            .locals_map
-                            .0
-                            .entry(target)
-                            .or_insert_with(|| {
-                                (0..src_sir_locals).map(|_| current_bb.new_local()).collect()
-                            })
-                            .len();
-                        assert_eq!(src_sir_locals, dst_sir_locals);
+                        println!("mir_src: {:?}", mir_src);
+                        println!("ctx.locals_map: {:?}", ctx.locals_map);
+                        let src_sir_locals = ctx.locals_map.get(mir_src).len();
+                        ctx.locals_map.verify_or_create_many(
+                            target,
+                            || current_bb.new_local(),
+                            src_sir_locals,
+                        );
                         for (src, dst) in
-                            ctx.locals_map.0[&mir_src].iter().zip(&ctx.locals_map.0[&target])
+                            ctx.locals_map.get(mir_src).iter().zip(ctx.locals_map.get(target))
                         {
                             current_bb.add_operation(Operation::SetCopy(InlineOperands {
                                 outs: [*dst],
@@ -151,11 +194,10 @@ fn lower_basic_block(
                             ctx.locals_map.get_or_create_single(target, || current_bb.new_local())
                         });
 
-                        assert!(ctx.locals_buf.is_empty());
+                        ctx.locals_buf.clear();
                         for &arg in &ctx.mir.args[args] {
-                            let input =
-                                ctx.locals_map.get_or_create_single(arg, || current_bb.new_local());
-                            ctx.locals_buf.push(input);
+                            let inputs = ctx.locals_map.get(arg);
+                            ctx.locals_buf.extend(inputs);
                         }
 
                         let operation = builtins::builtin_to_operation(
@@ -166,11 +208,32 @@ fn lower_basic_block(
                         )
                         .expect("mistyped MIR");
                         current_bb.add_operation(operation);
-                        ctx.locals_buf.clear();
 
                         if operation.kind().is_terminating() {
                             return current_bb.finish(Control::LastOpTerminates).unwrap();
                         }
+                    }
+                    Expr::Call { callee, args } => {
+                        let ret_type = ctx.mir.fns[callee].return_type;
+                        ctx.locals_map.verify_or_create_many(
+                            target,
+                            || current_bb.new_local(),
+                            ctx.size_in_locals(ret_type) as usize,
+                        );
+                        ctx.locals_buf.clear();
+                        for &arg in &ctx.mir.args[args] {
+                            let inputs = ctx.locals_map.get(arg);
+                            ctx.locals_buf.extend(inputs);
+                        }
+                        let icall = Operation::try_build(
+                            OperationKind::InternalCall,
+                            &ctx.locals_buf,
+                            ctx.locals_map.get(target),
+                            OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
+                            current_bb.fn_builder.ir_builder,
+                        )
+                        .expect("MIR structure should guarantee valid construction");
+                        current_bb.add_operation(icall);
                     }
                     other => todo!("set: {other:#?}"),
                 }

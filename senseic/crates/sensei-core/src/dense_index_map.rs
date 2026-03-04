@@ -64,6 +64,14 @@ impl<I: Idx, V: std::fmt::Debug> std::fmt::Debug for DenseIndexMap<I, V> {
     }
 }
 
+impl<I: Idx, V> std::ops::Index<I> for DenseIndexMap<I, V> {
+    type Output = V;
+
+    fn index(&self, index: I) -> &Self::Output {
+        self.get(index).expect("index out of bounds")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::newtype_index;

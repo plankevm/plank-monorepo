@@ -1,6 +1,6 @@
 pub mod display;
 
-use sensei_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use sensei_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use sensei_hir::builtins::Builtin;
 use sensei_values::{BigNumId, TypeId, TypeInterner};
 
@@ -37,6 +37,12 @@ pub struct FnDef {
     pub body: BlockId,
     pub param_count: u32,
     pub return_type: TypeId,
+}
+
+impl FnDef {
+    pub fn iter_params(&self) -> impl Iterator<Item = LocalId> {
+        Span::new(LocalId::ZERO, LocalId::new(self.param_count)).iter()
+    }
 }
 
 #[derive(Debug)]

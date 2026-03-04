@@ -278,7 +278,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     .iter()
                     .find_map(|(inputs, output)| (*inputs == actual_types).then_some(*output))
                     .unwrap_or_else(|| {
-                        todo!("diagnostic: no matching builtin signature for {builtin}")
+                        todo!("diagnostic: no matching builtin signature for {builtin} (sigs: {signatures:?}, actual: {actual_types:?})")
                     });
 
                 self.types_buf.truncate(types_start);
