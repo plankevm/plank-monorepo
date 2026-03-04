@@ -168,6 +168,22 @@ fn test_field_list_garbage_silent_exit() {
     );
 }
 
+/// Issue: multiple consecutive garbage tokens in a delimited list emit one error per token.
+/// Should emit a single error for the entire garbage run.
+#[test]
+fn test_field_list_multiple_garbage_tokens() {
+    assert_parser_errors(
+        r#"const S = struct { x: u32, 123 456 y: u32 };"#,
+        &[r#"
+                error: unexpected decimal literal, expected one of identifier, `}`
+                  --> line 1:28
+                   |
+                  1| const S = struct { x: u32, 123 456 y: u32 };
+                   |                            ^^^
+            "#],
+    );
+}
+
 /// Issue (fixed): `parse_arg_list` used to break silently after comma when expression parsing
 /// failed. Now skips garbage and resumes parsing remaining arguments.
 #[test]

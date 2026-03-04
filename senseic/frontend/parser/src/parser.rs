@@ -197,6 +197,38 @@ where
         self.at(Token::Eof)
     }
 
+    fn parse_delimited(
+        &mut self,
+        terminator: Token,
+        delimiter: Token,
+        mut parse_fn: impl FnMut(&mut Self) -> bool,
+    ) {
+        let mut error_emitted = false;
+        loop {
+            let expected_checkpoint = self.expected.len();
+            if parse_fn(self) {
+                error_emitted = false;
+                if !self.eat(delimiter) {
+                    break;
+                }
+            } else {
+                debug_assert!(
+                    self.expected.len() > expected_checkpoint,
+                    "parse_fn must use check/eat before returning false to populate expected tokens"
+                );
+                if !self.check(terminator) && !self.eof() {
+                    if !error_emitted {
+                        self.emit_unexpected();
+                        error_emitted = true;
+                    }
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
     fn expect(&mut self, token: Token) -> bool {
         let eaten = self.eat(token);
         if !eaten {
@@ -470,39 +502,32 @@ where
         self.expect(Token::LeftRound);
 
         let mut parameter_list = self.alloc_node(NodeKind::ParamList);
-        loop {
-            let parameter_start = self.tokens.current();
-            let mut parameter = if self.eat(Token::Comptime) {
+        self.parse_delimited(Token::RightRound, Token::Comma, |parser| {
+            let parameter_start = parser.tokens.current();
+            let mut parameter = if parser.eat(Token::Comptime) {
                 let mut parameter =
-                    self.alloc_node_from(parameter_start, NodeKind::ComptimeParameter);
-                let name = self.expect_ident();
-                self.push_child(&mut parameter, name);
+                    parser.alloc_node_from(parameter_start, NodeKind::ComptimeParameter);
+                let name = parser.expect_ident();
+                parser.push_child(&mut parameter, name);
                 parameter
-            } else if self.eat(Token::Identifier) {
-                let mut parameter = self.alloc_node_from(parameter_start, NodeKind::Parameter);
-                let ident = self.intern(self.tokens.current() - 1);
-                let name = self.alloc_last_token_as_node(NodeKind::Identifier { ident });
-                self.push_child(&mut parameter, name);
+            } else if parser.eat(Token::Identifier) {
+                let mut parameter = parser.alloc_node_from(parameter_start, NodeKind::Parameter);
+                let ident = parser.intern(parser.tokens.current() - 1);
+                let name = parser.alloc_last_token_as_node(NodeKind::Identifier { ident });
+                parser.push_child(&mut parameter, name);
                 parameter
-            } else if !self.check(Token::RightRound) && !self.eof() {
-                self.emit_unexpected();
-                self.advance();
-                continue;
             } else {
-                break;
+                return false;
             };
 
-            self.expect(Token::Colon);
-            let r#type = self.parse_expr(ParseExprMode::AllowAll);
-            self.push_child(&mut parameter, r#type);
+            parser.expect(Token::Colon);
+            let r#type = parser.parse_expr(ParseExprMode::AllowAll);
+            parser.push_child(&mut parameter, r#type);
 
-            let parameter = self.close_node(parameter);
-            self.push_child(&mut parameter_list, parameter);
-
-            if !self.eat(Token::Comma) {
-                break;
-            }
-        }
+            let parameter = parser.close_node(parameter);
+            parser.push_child(&mut parameter_list, parameter);
+            true
+        });
         let parameter_list = self.close_node(parameter_list);
         self.push_child(&mut function, parameter_list);
 
@@ -527,31 +552,25 @@ where
 
         self.expect(Token::LeftCurly);
 
-        loop {
-            if self.check(Token::Identifier) {
-                let mut field = self.alloc_node(NodeKind::FieldDef);
-
-                let name = self.try_parse_ident().expect("read ident token, but no ident?");
-                self.push_child(&mut field, name);
-
-                self.expect(Token::Colon);
-
-                let r#type = self.parse_expr(ParseExprMode::AllowAll);
-                self.push_child(&mut field, r#type);
-
-                let field = self.close_node(field);
-                self.push_child(&mut struct_def, field);
-
-                if !self.eat(Token::Comma) {
-                    break;
-                }
-            } else if !self.check(Token::RightCurly) && !self.eof() {
-                self.emit_unexpected();
-                self.advance();
-            } else {
-                break;
+        self.parse_delimited(Token::RightCurly, Token::Comma, |parser| {
+            if !parser.check(Token::Identifier) {
+                return false;
             }
-        }
+
+            let mut field = parser.alloc_node(NodeKind::FieldDef);
+
+            let name = parser.try_parse_ident().expect("read ident token, but no ident?");
+            parser.push_child(&mut field, name);
+
+            parser.expect(Token::Colon);
+
+            let r#type = parser.parse_expr(ParseExprMode::AllowAll);
+            parser.push_child(&mut field, r#type);
+
+            let field = parser.close_node(field);
+            parser.push_child(&mut struct_def, field);
+            true
+        });
 
         self.expect(Token::RightCurly);
 
@@ -616,20 +635,13 @@ where
             if Self::FN_CALL_PRIORITY > min_bp && self.eat(Token::LeftRound) {
                 let mut call = self.alloc_node_from(start, NodeKind::CallExpr);
                 self.push_child(&mut call, expr);
-                loop {
-                    if let Some(argument) = self.try_parse_expr(ParseExprMode::AllowAll) {
-                        self.push_child(&mut call, argument);
-
-                        if !self.eat(Token::Comma) {
-                            break;
-                        }
-                    } else if !self.check(Token::RightRound) && !self.eof() {
-                        self.emit_unexpected();
-                        self.advance();
-                    } else {
-                        break;
-                    }
-                }
+                self.parse_delimited(Token::RightRound, Token::Comma, |parser| {
+                    let Some(argument) = parser.try_parse_expr(ParseExprMode::AllowAll) else {
+                        return false;
+                    };
+                    parser.push_child(&mut call, argument);
+                    true
+                });
                 self.expect(Token::RightRound);
                 expr = self.close_node(call);
                 continue;
@@ -642,28 +654,22 @@ where
                 let mut struct_literal = self.alloc_node_from(start, NodeKind::StructLit);
                 self.push_child(&mut struct_literal, expr);
 
-                loop {
-                    if self.check(Token::Identifier) {
-                        let mut field = self.alloc_node(NodeKind::FieldAssign);
-                        let name = self.try_parse_ident().expect("read ident token, but no ident?");
-                        self.push_child(&mut field, name);
-                        self.expect(Token::Colon);
-                        let value = self.parse_expr(ParseExprMode::AllowAll);
-                        self.push_child(&mut field, value);
-
-                        let field = self.close_node(field);
-                        self.push_child(&mut struct_literal, field);
-
-                        if !self.eat(Token::Comma) {
-                            break;
-                        }
-                    } else if !self.check(Token::RightCurly) && !self.eof() {
-                        self.emit_unexpected();
-                        self.advance();
-                    } else {
-                        break;
+                self.parse_delimited(Token::RightCurly, Token::Comma, |parser| {
+                    if !parser.check(Token::Identifier) {
+                        return false;
                     }
-                }
+
+                    let mut field = parser.alloc_node(NodeKind::FieldAssign);
+                    let name = parser.try_parse_ident().expect("read ident token, but no ident?");
+                    parser.push_child(&mut field, name);
+                    parser.expect(Token::Colon);
+                    let value = parser.parse_expr(ParseExprMode::AllowAll);
+                    parser.push_child(&mut field, value);
+
+                    let field = parser.close_node(field);
+                    parser.push_child(&mut struct_literal, field);
+                    true
+                });
 
                 self.expect(Token::RightCurly);
                 expr = self.close_node(struct_literal);
