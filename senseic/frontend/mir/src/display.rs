@@ -47,7 +47,7 @@ impl<'a> DisplayMir<'a> {
         match expr {
             Expr::LocalRef(local) => self.fmt_local(f, local),
             Expr::Bool(b) => write!(f, "{b}"),
-            Expr::Void => write!(f, "void"),
+            Expr::Void => write!(f, "unit"),
             Expr::BigNum(id) => write!(f, "{}", self.big_nums[id]),
             Expr::Call { callee, args } => {
                 write!(f, "call @fn{}", callee.get())?;
