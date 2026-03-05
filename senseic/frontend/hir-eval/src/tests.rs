@@ -54,7 +54,7 @@ fn test_simple_malloc_mstore_return() {
             %8 : memptr = %3
             %9 : u256 = 32
             %10 : u256 = %9
-            %11 : void = evm_return(%8, %10)
+            %11 : never = evm_return(%8, %10)
         }
         "#,
     );
@@ -104,4 +104,49 @@ fn test_if_type_mismatch() {
         }
         ",
     );
+}
+
+#[test]
+#[should_panic(expected = "init/run block must end with a terminating expression")]
+fn test_run_missing_termination() {
+    let _ = try_lower(
+        "
+            init {
+                evm_stop();
+            }
+            run {
+                let x = 5;
+            }
+        ",
+    );
+}
+
+#[test]
+#[should_panic(expected = "function with never return type must end with a terminating expression")]
+fn test_never_fn_missing_termination() {
+    let _ = try_lower(
+        "
+            init {
+                let halt = fn() never {
+                    let x = 5;
+                };
+                halt();
+            }
+        ",
+    );
+}
+
+#[test]
+fn test_init_with_never_fn() {
+    let result = try_lower(
+        "
+            init {
+                let halt = fn() never {
+                    evm_stop();
+                };
+                halt();
+            }
+        ",
+    );
+    assert!(result.is_ok());
 }

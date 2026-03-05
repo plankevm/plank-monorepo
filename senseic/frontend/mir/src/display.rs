@@ -21,6 +21,7 @@ impl<'a> DisplayMir<'a> {
             Type::MemoryPointer => write!(f, "memptr"),
             Type::Type => write!(f, "type"),
             Type::Function => write!(f, "function"),
+            Type::Never => write!(f, "never"),
             Type::Struct(info) => {
                 write!(f, "struct#{}", info.type_index.get())
             }

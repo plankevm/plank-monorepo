@@ -32,6 +32,7 @@ pub enum Type<'fields> {
     MemoryPointer,
     Type,
     Function,
+    Never,
     Struct(StructInfo<'fields>),
 }
 
@@ -57,8 +58,9 @@ impl TypeId {
     pub const MEMORY_POINTER: TypeId = TypeId::new(3);
     pub const TYPE: TypeId = TypeId::new(4);
     pub const FUNCTION: TypeId = TypeId::new(5);
+    pub const NEVER: TypeId = TypeId::new(6);
 
-    const LAST_FIXED_ID: TypeId = Self::FUNCTION;
+    const LAST_FIXED_ID: TypeId = Self::NEVER;
     const STRUCT_IDS_OFFSET: u32 = Self::LAST_FIXED_ID.const_get() + 1;
 
     pub fn resolve_primitive(name: StrId) -> Option<TypeId> {
@@ -69,6 +71,7 @@ impl TypeId {
             PlankInterner::MEMPTR_TYPE_NAME => Some(TypeId::MEMORY_POINTER),
             PlankInterner::TYPE_TYPE_NAME => Some(TypeId::TYPE),
             PlankInterner::FUNCTION_TYPE_NAME => Some(TypeId::FUNCTION),
+            PlankInterner::NEVER_TYPE_NAME => Some(TypeId::NEVER),
             _ => None,
         }
     }
@@ -81,6 +84,7 @@ impl TypeId {
             Type::MemoryPointer => Ok(Self::MEMORY_POINTER),
             Type::Type => Ok(Self::TYPE),
             Type::Function => Ok(Self::FUNCTION),
+            Type::Never => Ok(Self::NEVER),
             Type::Struct(r#struct) => Err(r#struct),
         }
     }
@@ -93,6 +97,7 @@ impl TypeId {
             Self::MEMORY_POINTER => Ok(Type::MemoryPointer),
             Self::TYPE => Ok(Type::Type),
             Self::FUNCTION => Ok(Type::Function),
+            Self::NEVER => Ok(Type::Never),
             _ => Err(StructIdx::new(self.const_get() - Self::STRUCT_IDS_OFFSET)),
         }
     }

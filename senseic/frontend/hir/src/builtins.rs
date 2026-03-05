@@ -351,6 +351,7 @@ impl Builtin {
         const BOOL: TypeId = TypeId::BOOL;
         const MP: TypeId = TypeId::MEMORY_POINTER;
         const VOID: TypeId = TypeId::VOID;
+        const NEVER: TypeId = TypeId::NEVER;
 
         match self {
             // Pointer offset: ptr + offset or offset + ptr
@@ -529,14 +530,14 @@ impl Builtin {
                 &[(&[U256, U256, MP, U256, MP, U256], U256)]
             }
 
-            // Control flow: (memptr, size) -> void (divergent)
-            Builtin::Return | Builtin::Revert => &[(&[MP, U256], VOID)],
+            // Control flow: (memptr, size) -> never
+            Builtin::Return | Builtin::Revert => &[(&[MP, U256], NEVER)],
 
-            // No args -> void
-            Builtin::Stop | Builtin::Invalid => &[(&[], VOID)],
+            // No args -> never
+            Builtin::Stop | Builtin::Invalid => &[(&[], NEVER)],
 
-            // SelfDestruct: (addr) -> void
-            Builtin::SelfDestruct => &[(&[U256], VOID)],
+            // SelfDestruct: (addr) -> never
+            Builtin::SelfDestruct => &[(&[U256], NEVER)],
         }
     }
 }

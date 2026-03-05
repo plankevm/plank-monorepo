@@ -5,6 +5,7 @@ pub const BOOL_TYPE_NAME: &str = "bool";
 pub const MEMPTR_TYPE_NAME: &str = "memptr";
 pub const TYPE_TYPE_NAME: &str = "type";
 pub const FUNCTION_TYPE_NAME: &str = "function";
+pub const NEVER_TYPE_NAME: &str = "never";
 
 // ========== EVM Arithmetic ==========
 pub const ADD: &str = "add";

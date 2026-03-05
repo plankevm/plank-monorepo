@@ -70,7 +70,7 @@ struct LowerCtx<'mir> {
 impl LowerCtx<'_> {
     fn size_in_locals(&self, ty: TypeId) -> u32 {
         match self.mir.types.lookup(ty) {
-            Type::Void => 0,
+            Type::Void | Type::Never => 0,
             Type::Bool | Type::Int | Type::MemoryPointer => 1,
             Type::Function => panic!("function unsizeable in SIR"),
             Type::Type => panic!("type unsizeable in SIR"),
@@ -200,7 +200,7 @@ fn lower_basic_block(
                     }
                     Expr::BuiltinCall { builtin, args } => {
                         let ty = ctx.mir.fn_locals[mir_func][target.idx()];
-                        let output = (ty != TypeId::VOID).then(|| {
+                        let output = (ctx.size_in_locals(ty) > 0).then(|| {
                             ctx.locals_map.get_or_create_single(target, || current_bb.new_local())
                         });
 
