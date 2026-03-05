@@ -538,8 +538,10 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
         let mut last_ty = None;
         let mut diverged = false;
         for &instr in &self.eval.hir.blocks[block_id] {
-            // HIR auto-inserts Return for all function bodies, but it is
-            // dead code when the block has diverged.
+            // HIR auto-inserts Return for all function bodies. We skip it
+            // for last_ty because Return always yields `never`, which would
+            // make every function body appear diverged. The return type is
+            // tracked separately via self.return_type, set inside walk_instruction.
             if matches!(instr, hir::Instruction::Return(_)) {
                 if !diverged {
                     self.walk_instruction(instr);
@@ -724,18 +726,7 @@ fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::Fn
     let preamble_bindings =
         ComptimeInterpreter::eval_preamble_block(eval, preamble_bindings, fn_def.type_preamble);
 
-    // Phase 2: Extract param types and return type from evaluated preamble.
-    let param_types: Vec<TypeId> = params
-        .iter()
-        .map(|param| {
-            let type_vid = preamble_bindings.get(param.r#type);
-            let Value::Type(tid) = eval.values.lookup(type_vid) else {
-                todo!("diagnostic: param type must be Type")
-            };
-            tid
-        })
-        .collect();
-
+    // Phase 2: Extract return type from evaluated preamble.
     let return_type_vid = preamble_bindings.get(fn_def.return_type);
     let Value::Type(return_type) = eval.values.lookup(return_type_vid) else {
         todo!("diagnostic: return type must be Type")
@@ -746,7 +737,11 @@ fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::Fn
     lowerer.import_comptime_bindings(&preamble_bindings);
 
     let param_count = params.len() as u32;
-    for (param, &ty) in params.iter().zip(&param_types) {
+    for param in params {
+        let type_vid = preamble_bindings.get(param.r#type);
+        let Value::Type(ty) = lowerer.eval.values.lookup(type_vid) else {
+            todo!("diagnostic: param type must be Type")
+        };
         lowerer.locals.assign_or_define(param.value, ty).expect("overwriting via params?");
     }
 

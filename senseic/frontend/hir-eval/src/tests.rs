@@ -147,8 +147,11 @@ fn test_init_run_with_never_fn() {
                 halt();
             }
             run {
-                let abort = fn() never {
+                let halt = fn() never {
                     invalid();
+                };
+                let abort = fn() never {
+                    halt();
                 };
                 abort();
             }
@@ -168,9 +171,13 @@ fn test_init_run_with_never_fn() {
             %0 : never = invalid()
         }
 
-        ; run
-        @fn3() -> void {
+        @fn3() -> never {
             %0 : never = call @fn2()
+        }
+
+        ; run
+        @fn4() -> void {
+            %0 : never = call @fn3()
         }
         ",
     );
