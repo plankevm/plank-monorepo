@@ -1,27 +1,16 @@
 use sensei_hir::BigNumInterner;
 use sensei_mir::{Mir, display::DisplayMir};
-use sensei_parser::{
-    PlankInterner,
-    error_report::{ErrorCollector, ParserError},
-    lexer::Lexed,
-    parser::parse,
-};
-use sensei_test_utils::{dedent_preserve_blank_lines, dedent_preserve_indent};
+use sensei_parser::{PlankInterner, error_report::ParserError};
+use sensei_test_utils::{TestProject, dedent_preserve_blank_lines};
 
 fn try_lower(source: &str) -> Result<(Mir, BigNumInterner, PlankInterner), Vec<ParserError>> {
-    let source = dedent_preserve_indent(source);
-
-    let lexed = Lexed::lex(&source);
     let mut interner = PlankInterner::default();
-    let mut diagnostics = ErrorCollector::default();
-    let cst = parse(&lexed, &mut interner, &mut diagnostics);
-
-    if !diagnostics.errors.is_empty() {
-        return Err(diagnostics.errors);
-    }
+    let project = TestProject::single(source).build(&mut interner).map_err(|errors| {
+        errors.iter().flat_map(|errs| errs.iter().cloned()).collect::<Vec<_>>()
+    })?;
 
     let mut big_nums = BigNumInterner::default();
-    let hir = sensei_hir::lower(&cst, &mut big_nums);
+    let hir = sensei_hir::lower(&project, &mut big_nums);
     let mir = crate::evaluate(&hir);
 
     Ok((mir, big_nums, interner))

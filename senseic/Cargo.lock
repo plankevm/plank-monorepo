@@ -1599,6 +1599,10 @@ dependencies = [
 [[package]]
 name = "sensei-test-utils"
 version = "0.1.0"
+dependencies = [
+ "sensei-core",
+ "sensei-parser",
+]
 
 [[package]]
 name = "sensei-values"

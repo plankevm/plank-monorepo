@@ -1,33 +1,15 @@
 use crate::{BigNumInterner, Hir, display::DisplayHir};
-use sensei_parser::{
-    PlankInterner,
-    error_report::{ErrorCollector, ParserError},
-    lexer::Lexed,
-    parser::parse,
-};
-use sensei_test_utils::{dedent_preserve_blank_lines, dedent_preserve_indent};
+use sensei_parser::{PlankInterner, error_report::ParserError};
+use sensei_test_utils::{TestProject, dedent_preserve_blank_lines};
 
 fn try_lower(source: &str) -> Result<(Hir, BigNumInterner, PlankInterner), Vec<ParserError>> {
-    let source = dedent_preserve_indent(source);
-
-    let lexed = Lexed::lex(&source);
     let mut interner = PlankInterner::default();
-    let mut diagnostics = ErrorCollector::default();
-    let cst = parse(&lexed, &mut interner, &mut diagnostics);
-
-    if !diagnostics.errors.is_empty() {
-        return Err(diagnostics.errors);
-    }
-
-    assert!(
-        diagnostics.errors.is_empty(),
-        "Expected no parse errors, but found {}:\n{:#?}",
-        diagnostics.errors.len(),
-        diagnostics.errors
-    );
+    let project = TestProject::single(source).build(&mut interner).map_err(|errors| {
+        errors.iter().flat_map(|errs| errs.iter().cloned()).collect::<Vec<_>>()
+    })?;
 
     let mut big_nums = BigNumInterner::default();
-    let hir = crate::lower(&cst, &mut big_nums);
+    let hir = crate::lower(&project, &mut big_nums);
 
     Ok((hir, big_nums, interner))
 }

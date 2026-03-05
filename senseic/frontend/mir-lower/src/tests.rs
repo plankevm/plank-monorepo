@@ -1,25 +1,15 @@
-use sensei_parser::{
-    PlankInterner,
-    error_report::{ErrorCollector, ParserError},
-    lexer::Lexed,
-    parser::parse,
-};
-use sensei_test_utils::dedent_preserve_indent;
+use sensei_parser::{PlankInterner, error_report::ParserError};
+use sensei_test_utils::TestProject;
 use sensei_values::BigNumInterner;
 
 fn try_lower(source: &str) -> Result<sir_data::EthIRProgram, Vec<ParserError>> {
-    let source = dedent_preserve_indent(source);
-    let lexed = Lexed::lex(&source);
     let mut interner = PlankInterner::default();
-    let mut diagnostics = ErrorCollector::default();
-    let cst = parse(&lexed, &mut interner, &mut diagnostics);
-
-    if !diagnostics.errors.is_empty() {
-        return Err(diagnostics.errors);
-    }
+    let project = TestProject::single(source).build(&mut interner).map_err(|errors| {
+        errors.iter().flat_map(|errs| errs.iter().cloned()).collect::<Vec<_>>()
+    })?;
 
     let mut big_nums = BigNumInterner::default();
-    let hir = sensei_hir::lower(&cst, &mut big_nums);
+    let hir = sensei_hir::lower(&project, &mut big_nums);
     let mir = sensei_hir_eval::evaluate(&hir);
     let sir = crate::lower(&mir, &big_nums);
     Ok(sir)
