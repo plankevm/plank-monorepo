@@ -1,5 +1,7 @@
 use crate::{
+    ROOT_SOURCE,
     cst::display::DisplayCST,
+    diagnostics::DiagnosticsContext,
     error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
     lexer::Lexed,
@@ -10,17 +12,26 @@ use sensei_test_utils::{dedent, dedent_preserve_indent};
 // mod resiliency;
 mod errorless;
 
+fn parse_single_source(
+    source: &str,
+    interner: &mut PlankInterner,
+) -> (ErrorCollector, crate::cst::ConcreteSyntaxTree) {
+    let lexed = Lexed::lex(source);
+    let mut collector = ErrorCollector::default();
+    let cst = parse(&lexed, interner, &mut collector);
+    collector.finish_source(ROOT_SOURCE);
+    (collector, cst)
+}
+
 pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let source = dedent(source);
-    let lexed = Lexed::lex(&source);
-    let mut collector = ErrorCollector::default();
     let mut interner = PlankInterner::default();
+    let (collector, _) = parse_single_source(&source, &mut interner);
 
-    let _cst = parse(&lexed, &mut interner, &mut collector);
-
+    let errors = &collector.errors[ROOT_SOURCE];
     let line_index = LineIndex::new(&source);
     let actual: Vec<String> =
-        collector.errors.iter().map(|e| format_error(e, &source, &line_index)).collect();
+        errors.iter().map(|e| format_error(e, &source, &line_index)).collect();
 
     let expected: Vec<String> = expected_errors.iter().map(|s| dedent(s)).collect();
 
@@ -30,23 +41,22 @@ pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
 }
 
 pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {
-    let lexed = Lexed::lex(source);
-    let mut collector = ErrorCollector::default();
     let mut interner = PlankInterner::default();
+    let (collector, cst) = parse_single_source(source, &mut interner);
 
-    let cst = parse(&lexed, &mut interner, &mut collector);
-
-    if !collector.errors.is_empty() {
+    let errors = &collector.errors[ROOT_SOURCE];
+    if !errors.is_empty() {
         let line_index = LineIndex::new(source);
-        let errors: Vec<String> =
-            collector.errors.iter().map(|e| format_error(e, source, &line_index)).collect();
+        let formatted: Vec<String> =
+            errors.iter().map(|e| format_error(e, source, &line_index)).collect();
         panic!(
             "Expected no parser errors, but found {}:\n\n{}",
-            collector.errors.len(),
-            errors.join("\n\n---\n\n")
+            errors.len(),
+            formatted.join("\n\n---\n\n")
         );
     }
 
+    let lexed = Lexed::lex(source);
     let actual = format!("{}", DisplayCST::new(&cst, source, &lexed));
 
     pretty_assertions::assert_str_eq!(

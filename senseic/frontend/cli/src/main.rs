@@ -3,7 +3,7 @@ use sensei_hir::{BigNumInterner, display::DisplayHir, lower};
 use sensei_mir::display::DisplayMir;
 use sensei_parser::{
     cst::display::DisplayCST,
-    error_report::{LineIndex, format_error},
+    error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
     lexer::Lexed,
     module::ModuleManager,
@@ -77,7 +77,9 @@ fn main() {
         module_manager.register(name_id, path.clone());
     }
 
-    let project = parse_project(Path::new(&args.file_path), &module_manager, &mut interner);
+    let mut collector = ErrorCollector::default();
+    let project =
+        parse_project(Path::new(&args.file_path), &module_manager, &mut interner, &mut collector);
 
     if args.show_cst {
         let source = &project.sources[project.entry];
@@ -87,19 +89,17 @@ fn main() {
         println!("{}", display);
     }
 
-    let mut has_errors = false;
-    for (source_id, errors) in project.errors.enumerate_idx() {
+    for (source_id, errors) in collector.errors.enumerate_idx() {
         if errors.is_empty() {
             continue;
         }
-        has_errors = true;
         let source = &project.sources[source_id];
         let line_index = LineIndex::new(source);
         for error in errors {
             eprintln!("{}\n", format_error(error, source, &line_index));
         }
     }
-    if has_errors {
+    if collector.has_errors() {
         std::process::exit(1);
     }
 

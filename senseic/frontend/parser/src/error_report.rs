@@ -1,8 +1,9 @@
 use crate::{
     diagnostics::DiagnosticsContext,
     lexer::{SourceByteOffset, SourceSpan, Token, TokenIdx},
+    source::SourceId,
 };
-use sensei_core::Idx;
+use sensei_core::{Idx, list_of_lists::ListOfLists};
 
 #[derive(Debug, Clone)]
 pub enum ParserError {
@@ -14,16 +15,23 @@ pub enum ParserError {
 
 #[derive(Debug, Default)]
 pub struct ErrorCollector {
-    pub errors: Vec<ParserError>,
+    current: Vec<ParserError>,
+    pub errors: ListOfLists<SourceId, ParserError>,
+}
+
+impl ErrorCollector {
+    pub fn has_errors(&self) -> bool {
+        self.errors.iter().any(|errs| !errs.is_empty())
+    }
 }
 
 impl DiagnosticsContext for ErrorCollector {
     fn emit_lexer_error(&mut self, token: Token, _index: TokenIdx, src_span: SourceSpan) {
-        self.errors.push(ParserError::LexerError { token, span: src_span });
+        self.current.push(ParserError::LexerError { token, span: src_span });
     }
 
     fn emit_unexpected_token(&mut self, found: Token, expected: &[Token], src_span: SourceSpan) {
-        self.errors.push(ParserError::UnexpectedToken {
+        self.current.push(ParserError::UnexpectedToken {
             found,
             expected: expected.to_vec(),
             span: src_span,
@@ -31,7 +39,7 @@ impl DiagnosticsContext for ErrorCollector {
     }
 
     fn emit_missing_token(&mut self, expected: Token, at_span: SourceSpan) {
-        self.errors.push(ParserError::MissingToken { expected, at_span });
+        self.current.push(ParserError::MissingToken { expected, at_span });
     }
 
     fn emit_unclosed_delimiter(
@@ -40,7 +48,11 @@ impl DiagnosticsContext for ErrorCollector {
         open_span: SourceSpan,
         found_span: SourceSpan,
     ) {
-        self.errors.push(ParserError::UnclosedDelimiter { opener, open_span, found_span });
+        self.current.push(ParserError::UnclosedDelimiter { opener, open_span, found_span });
+    }
+
+    fn finish_source(&mut self, _source_id: SourceId) {
+        self.errors.push_iter(self.current.drain(..));
     }
 }
 

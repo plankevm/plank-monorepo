@@ -2,7 +2,7 @@ use crate::{
     StrId,
     ast::{File, ImportKind, TopLevelDef},
     cst::ConcreteSyntaxTree,
-    error_report::{ErrorCollector, ParserError},
+    diagnostics::DiagnosticsContext,
     interner::PlankInterner,
     lexer::Lexed,
     module::ModuleManager,
@@ -27,7 +27,6 @@ pub struct ParsedProject {
     pub sources: IndexVec<SourceId, String>,
     pub csts: IndexVec<SourceId, ConcreteSyntaxTree>,
     pub imports: ListOfLists<SourceId, FileImport>,
-    pub errors: ListOfLists<SourceId, ParserError>,
     pub entry: SourceId,
 }
 
@@ -35,16 +34,15 @@ pub fn parse_project(
     entry_path: &Path,
     module_manager: &ModuleManager,
     interner: &mut PlankInterner,
+    diagnostics: &mut impl DiagnosticsContext,
 ) -> ParsedProject {
     let mut source_manager = SourceManager::default();
     let mut sources: IndexVec<SourceId, String> = IndexVec::new();
     let mut csts: IndexVec<SourceId, ConcreteSyntaxTree> = IndexVec::new();
     let mut imports: ListOfLists<SourceId, FileImport> = ListOfLists::new();
-    let mut errors: ListOfLists<SourceId, ParserError> = ListOfLists::new();
     let mut path_to_source: HashMap<PathBuf, SourceId> = HashMap::new();
     let mut pending: VecDeque<SourceId> = VecDeque::new();
     let mut segment_buf: Vec<StrId> = Vec::new();
-    let mut collector = ErrorCollector::default();
 
     let entry_path = entry_path.canonicalize().expect("failed to canonicalize entry path");
     let entry = source_manager.add_source(entry_path.clone());
@@ -54,7 +52,7 @@ pub fn parse_project(
     while let Some(source_id) = pending.pop_front() {
         let source = std::fs::read_to_string(&source_manager[source_id].path)
             .expect("failed to read source file");
-        let cst = parse(&Lexed::lex(&source), interner, &mut collector);
+        let cst = parse(&Lexed::lex(&source), interner, diagnostics);
 
         imports.push_with(|mut list| {
             for def in File::new(cst.file_view()).expect("failed to init file from CST").iter_defs()
@@ -103,10 +101,10 @@ pub fn parse_project(
             }
         });
 
-        errors.push_iter(collector.errors.drain(..));
+        diagnostics.finish_source(source_id);
         sources.push(source);
         csts.push(cst);
     }
 
-    ParsedProject { source_manager, sources, csts, imports, errors, entry }
+    ParsedProject { source_manager, sources, csts, imports, entry }
 }

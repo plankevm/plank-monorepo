@@ -1,4 +1,7 @@
-use crate::lexer::{SourceSpan, Token, TokenIdx};
+use crate::{
+    lexer::{SourceSpan, Token, TokenIdx},
+    source::SourceId,
+};
 
 pub trait DiagnosticsContext {
     fn emit_lexer_error(&mut self, token: Token, index: TokenIdx, src_span: SourceSpan);
@@ -11,4 +14,5 @@ pub trait DiagnosticsContext {
         open_span: SourceSpan,
         found_span: SourceSpan,
     );
+    fn finish_source(&mut self, source_id: SourceId);
 }
