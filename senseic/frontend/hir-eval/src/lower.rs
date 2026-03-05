@@ -84,13 +84,15 @@ impl LocalState {
     }
 
     fn set_mir_type(&mut self, mir_local: mir::LocalId, ty: TypeId) -> Result<(), TypeId> {
-        if ty == TypeId::NEVER {
-            return Ok(());
-        }
         let prev = self.mir_type[mir_local].replace(ty);
         match prev {
-            None | Some(TypeId::NEVER) => Ok(()),
+            None => Ok(()),
             Some(prev_ty) if prev_ty == ty => Ok(()),
+            Some(TypeId::NEVER) => Ok(()),
+            _ if ty == TypeId::NEVER => {
+                self.mir_type[mir_local] = prev;
+                Ok(())
+            }
             Some(prev_ty) => Err(prev_ty),
         }
     }

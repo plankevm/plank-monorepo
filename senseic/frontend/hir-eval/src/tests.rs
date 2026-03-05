@@ -150,3 +150,21 @@ fn test_init_with_never_fn() {
     );
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_if_mixed_never_and_value_branches() {
+    let result = try_lower(
+        r#"
+        init {
+            let c = calldataload(0);
+            let x = if iszero(c) {
+                evm_stop()
+            } else {
+                42
+            };
+            evm_stop();
+        }
+        "#,
+    );
+    assert!(result.is_ok());
+}
