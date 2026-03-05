@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use sensei_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use sensei_parser::{
-    StrId,
+    ROOT_SOURCE, StrId,
     ast::{self, Statement, TopLevelDef},
     cst::{ConcreteSyntaxTree, NodeIdx, NumLitId},
     lexer::TokenIdx,
@@ -549,7 +549,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
 
     let mut lowerer = BlockLowerer {
         consts: HashMap::new(),
-        num_lit_limbs: &project.csts[SourceId::ZERO].num_lit_limbs,
+        num_lit_limbs: &project.csts[ROOT_SOURCE].num_lit_limbs,
 
         big_nums,
         builder: &mut builder,
