@@ -122,7 +122,7 @@ fn test_run_missing_termination() {
 }
 
 #[test]
-#[should_panic(expected = "function with never return type must end with a terminating expression")]
+#[should_panic(expected = "return type mismatch")]
 fn test_never_fn_missing_termination() {
     let _ = try_lower(
         "
@@ -137,8 +137,8 @@ fn test_never_fn_missing_termination() {
 }
 
 #[test]
-fn test_init_with_never_fn() {
-    let result = try_lower(
+fn test_init_run_with_never_fn() {
+    assert_lowers_to(
         "
             init {
                 let halt = fn() never {
@@ -146,14 +146,91 @@ fn test_init_with_never_fn() {
                 };
                 halt();
             }
+            run {
+                let abort = fn() never {
+                    invalid();
+                };
+                abort();
+            }
+        ",
+        "
+        ==== Functions ====
+        @fn0() -> never {
+            %0 : never = evm_stop()
+        }
+
+        ; init
+        @fn1() -> void {
+            %0 : never = call @fn0()
+        }
+
+        @fn2() -> never {
+            %0 : never = invalid()
+        }
+
+        ; run
+        @fn3() -> void {
+            %0 : never = call @fn2()
+        }
         ",
     );
-    assert!(result.is_ok());
+}
+
+#[test]
+fn test_diverging_block_middle() {
+    assert_lowers_to(
+        r#"
+        init {
+            evm_stop();
+            let x = 42;
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> void {
+            %0 : never = evm_stop()
+            %1 : u256 = 42
+            %2 : u256 = %1
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_builtin_call_with_never_arg() {
+    assert_lowers_to(
+        r#"
+        init {
+            let halt = fn() never {
+                evm_stop();
+            };
+            mstore32(malloc_uninit(0x20), halt());
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> never {
+            %0 : never = evm_stop()
+        }
+
+        ; init
+        @fn1() -> void {
+            %0 : u256 = 32
+            %1 : u256 = %0
+            %2 : memptr = malloc_uninit(%1)
+            %3 : memptr = %2
+            %4 : never = call @fn0()
+            %5 : never = %4
+            %6 : void = mstore32(%3, %5)
+        }
+        "#,
+    );
 }
 
 #[test]
 fn test_if_mixed_never_and_value_branches() {
-    let result = try_lower(
+    assert_lowers_to(
         r#"
         init {
             let c = calldataload(0);
@@ -165,6 +242,27 @@ fn test_if_mixed_never_and_value_branches() {
             evm_stop();
         }
         "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> void {
+            %0 : u256 = 0
+            %1 : u256 = %0
+            %2 : u256 = calldataload(%1)
+            %3 : u256 = %2
+            %4 : u256 = %3
+            %5 : bool = iszero(%4)
+            %6 : bool = %5
+            if %6 {
+                %8 : never = evm_stop()
+                %7 : u256 = %8
+            } else {
+                %9 : u256 = 42
+                %7 : u256 = %9
+            }
+            %10 : u256 = %7
+            %11 : never = evm_stop()
+        }
+        "#,
     );
-    assert!(result.is_ok());
 }

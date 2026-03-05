@@ -105,6 +105,10 @@ impl TypeId {
     pub const fn is_struct(self) -> bool {
         self.0.get() > Self::LAST_FIXED_ID.0.get()
     }
+
+    pub fn is_assignable_to(self, target: TypeId) -> Result<(), TypeId> {
+        if self == target || self == TypeId::NEVER { Ok(()) } else { Err(self) }
+    }
 }
 
 impl From<StructIdx> for TypeId {

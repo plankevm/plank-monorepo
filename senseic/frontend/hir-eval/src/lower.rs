@@ -89,7 +89,7 @@ impl LocalState {
             None => Ok(()),
             Some(prev_ty) if prev_ty == ty => Ok(()),
             Some(TypeId::NEVER) => Ok(()),
-            _ if ty == TypeId::NEVER => {
+            Some(_) if ty == TypeId::NEVER => {
                 self.mir_type[mir_local] = prev;
                 Ok(())
             }
@@ -258,7 +258,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     &self.eval.mir_fn_locals[mir_fn_id][..fn_def.param_count as usize];
                 for (&arg_local, &expected_ty) in arg_locals.iter().zip(param_types) {
                     let actual_ty = self.locals.get_type(arg_local, &self.eval.values);
-                    if actual_ty != expected_ty {
+                    if actual_ty.is_assignable_to(expected_ty).is_err() {
                         todo!("diagnostic: function call argument type mismatch");
                     }
                 }
@@ -281,7 +281,14 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
 
                 let return_type = signatures
                     .iter()
-                    .find_map(|(inputs, output)| (*inputs == actual_types).then_some(*output))
+                    .find_map(|(inputs, output)| {
+                        (inputs.len() == actual_types.len()
+                            && inputs
+                                .iter()
+                                .zip(actual_types)
+                                .all(|(expected, actual)| actual.is_assignable_to(*expected).is_ok()))
+                        .then_some(*output)
+                    })
                     .unwrap_or_else(|| {
                         todo!("diagnostic: no matching builtin signature for {builtin} (sigs: {signatures:?}, actual: {actual_types:?})")
                     });
@@ -529,12 +536,22 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
 
     fn walk_block(&mut self, block_id: hir::BlockId) -> Option<TypeId> {
         let mut last_ty = None;
+        let mut diverged = false;
         for &instr in &self.eval.hir.blocks[block_id] {
+            // HIR auto-inserts Return for all function bodies, but it is
+            // dead code when the block has diverged.
+            if matches!(instr, hir::Instruction::Return(_)) {
+                if !diverged {
+                    self.walk_instruction(instr);
+                }
+                continue;
+            }
             let ty = self.walk_instruction(instr);
-            // Return is auto-inserted by the HIR for function bodies, so it
-            // doesn't reflect the "last meaningful expression" of the block.
-            if !matches!(instr, hir::Instruction::Return(_)) {
+            if !diverged {
                 last_ty = ty;
+                if ty == Some(TypeId::NEVER) {
+                    diverged = true;
+                }
             }
         }
         last_ty
@@ -578,7 +595,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     todo!("diagnostic: AssertType of_type must be Type");
                 };
                 let actual = self.locals.get_type(value, &self.eval.values);
-                if actual != expected {
+                if actual.is_assignable_to(expected).is_err() {
                     todo!("diagnostic: type mismatch in AssertType")
                 }
                 None
@@ -613,7 +630,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
 
                         // Verify condition is bool
                         let cond_ty = self.locals.get_mir_type(condition);
-                        if cond_ty != Some(TypeId::BOOL) {
+                        if cond_ty.is_none_or(|ty| ty.is_assignable_to(TypeId::BOOL).is_err()) {
                             todo!("diagnostic: if condition must be bool, got {cond_ty:?}");
                         }
 
@@ -659,7 +676,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     }
                 };
 
-                if target_ty != rhs_ty {
+                if rhs_ty.is_assignable_to(target_ty).is_err() {
                     todo!(
                         "diagnostic: assign type mismatch: expected {target_ty:?}, got {rhs_ty:?}"
                     );
@@ -734,14 +751,11 @@ fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::Fn
     }
 
     let last_ty = lowerer.walk_block(fn_def.body);
-    if return_type == TypeId::NEVER {
-        if last_ty != Some(TypeId::NEVER) {
-            todo!(
-                "diagnostic: function with never return type must end with a terminating expression"
-            )
-        }
-    } else if let Some(actual) = lowerer.return_type
-        && actual != return_type
+    if last_ty == Some(TypeId::NEVER) {
+        lowerer.return_type = None;
+    }
+    if let Some(actual) = lowerer.return_type
+        && let Err(_) = actual.is_assignable_to(return_type)
     {
         todo!("diagnostic: return type mismatch: declared {return_type:?}, actual {actual:?}")
     }
