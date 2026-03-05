@@ -1,5 +1,5 @@
 use crate::{
-    StrId,
+    ROOT_SOURCE, StrId,
     ast::{File, ImportKind, TopLevelDef},
     cst::ConcreteSyntaxTree,
     diagnostics::DiagnosticsContext,
@@ -11,10 +11,7 @@ use crate::{
 };
 use hashbrown::HashMap;
 use sensei_core::{IndexVec, list_of_lists::ListOfLists};
-use std::{
-    collections::VecDeque,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 pub struct FileImport {
     pub local_name: Option<StrId>,
@@ -41,20 +38,21 @@ pub fn parse_project(
     let mut csts: IndexVec<SourceId, ConcreteSyntaxTree> = IndexVec::new();
     let mut imports: ListOfLists<SourceId, FileImport> = ListOfLists::new();
     let mut path_to_source: HashMap<PathBuf, SourceId> = HashMap::new();
-    let mut pending: VecDeque<SourceId> = VecDeque::new();
+    let mut pending: Vec<SourceId> = Vec::new();
     let mut segment_buf: Vec<StrId> = Vec::new();
 
     let entry_path = entry_path.canonicalize().expect("failed to canonicalize entry path");
     let entry = source_manager.add_source(entry_path.clone());
+    assert_eq!(entry, ROOT_SOURCE, "entry must be the first source added");
     path_to_source.insert(entry_path, entry);
-    pending.push_back(entry);
+    pending.push(entry);
 
-    while let Some(source_id) = pending.pop_front() {
+    while let Some(source_id) = pending.pop() {
         let source = std::fs::read_to_string(&source_manager[source_id].path)
             .expect("failed to read source file");
         let cst = parse(&Lexed::lex(&source), interner, diagnostics);
 
-        imports.push_with(|mut list| {
+        imports.push_with(|mut file_imports| {
             for def in File::new(cst.file_view()).expect("failed to init file from CST").iter_defs()
             {
                 let TopLevelDef::Import(import) = def else { continue };
@@ -69,20 +67,20 @@ pub fn parse_project(
                 let target_source =
                     *path_to_source.entry(target_path.clone()).or_insert_with(|| {
                         let id = source_manager.add_source(target_path);
-                        pending.push_back(id);
+                        pending.push(id);
                         id
                     });
 
                 match import.kind {
                     Some(ImportKind::As(alias)) => {
-                        list.push(FileImport {
+                        file_imports.push(FileImport {
                             local_name: Some(alias),
                             target_source,
                             target_const: resolved.const_name,
                         });
                     }
                     Some(ImportKind::All) => {
-                        list.push(FileImport {
+                        file_imports.push(FileImport {
                             local_name: None,
                             target_source,
                             target_const: None,
@@ -91,7 +89,7 @@ pub fn parse_project(
                     None => {
                         let const_name =
                             resolved.const_name.expect("non-glob import has const name");
-                        list.push(FileImport {
+                        file_imports.push(FileImport {
                             local_name: Some(const_name),
                             target_source,
                             target_const: Some(const_name),

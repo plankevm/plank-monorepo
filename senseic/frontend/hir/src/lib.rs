@@ -593,13 +593,19 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
                 }
                 TopLevelDef::Init(init_def) => {
                     if source_id != project.entry {
-                        panic!("init only allowed in entry file");
+                        todo!("diagnostic: init only allowed in entry file");
+                    }
+                    if init.is_some() {
+                        todo!("diagnostic: multiple init blocks");
                     }
                     init = Some(lowerer.lower_body_to_block(init_def.body()));
                 }
                 TopLevelDef::Run(run_def) => {
                     if source_id != project.entry {
-                        panic!("run only allowed in entry file");
+                        todo!("diagnostic: run only allowed in entry file");
+                    }
+                    if run.is_some() {
+                        todo!("diagnostic: multiple run blocks");
                     }
                     run = Some(lowerer.lower_body_to_block(run_def.body()));
                 }
@@ -645,7 +651,7 @@ fn register_consts(
                     result: LocalId::ZERO,
                 });
                 if seen.insert(const_def.name, const_id).is_some() {
-                    panic!("duplicate const def");
+                    todo!("diagnostic: duplicate const def");
                 }
                 list.push((const_def.name, const_id));
             }
@@ -668,19 +674,19 @@ fn build_file_scope(
     for import in &imports[source_id] {
         match import.target_const {
             Some(const_name) => {
-                let &(_, const_id) = source_consts[import.target_source]
+                let const_id = source_consts[import.target_source]
                     .iter()
-                    .find(|(name, _)| *name == const_name)
+                    .find_map(|&(name, const_id)| (name == const_name).then_some(const_id))
                     .expect("imported const not found");
                 let local_name = import.local_name.expect("named import has local_name");
                 if scope.insert(local_name, const_id).is_some() {
-                    panic!("name collision on import");
+                    todo!("diagnostic: name collision on import");
                 }
             }
             None => {
                 for &(name, const_id) in &source_consts[import.target_source] {
                     if scope.insert(name, const_id).is_some() {
-                        panic!("name collision on glob import");
+                        todo!("diagnostic: name collision on glob import");
                     }
                 }
             }
