@@ -1636,6 +1636,7 @@ name = "sensei-parser"
 version = "0.1.0"
 dependencies = [
  "allocator-api2",
+ "hashbrown 0.16.1",
  "logos",
  "pretty_assertions",
  "sensei-core",

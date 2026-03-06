@@ -72,12 +72,12 @@ impl<D: DiagnosticsContext> ProjectParser<'_, D> {
 
         let mut file_imports = Vec::new();
         for i in import_start..self.import_buf.len() {
-            let (ref target_path, kind, const_name) = self.import_buf[i];
+            // Take ownership to reuse the PathBuf; safe because this range is truncated below.
+            let (target_path, kind, const_name) = std::mem::take(&mut self.import_buf[i]);
 
-            let target_source = if let Some(&id) = self.path_to_source.get(target_path) {
-                id
-            } else {
-                self.parse_source(target_path.clone())
+            let target_source = match self.path_to_source.get(&target_path) {
+                Some(&id) => id,
+                None => self.parse_source(target_path),
             };
 
             file_imports.push(match kind {
@@ -127,6 +127,7 @@ pub fn parse_project(
     };
 
     let entry = parser.parse_source(entry_path);
+    assert_eq!(entry, crate::source::ROOT_SOURCE);
 
     let mut imports = ListOfLists::new();
     for file_imports in parser.file_imports.raw {
