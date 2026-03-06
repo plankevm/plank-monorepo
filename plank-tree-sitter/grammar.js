@@ -1,6 +1,6 @@
 /**
- * @file A tree-sitter parser for sensei
- * @author Philogy <philogy@senseilang.org>
+ * @file A tree-sitter parser for plank
+ * @author Philogy
  * @license MIT
  */
 
@@ -21,7 +21,7 @@ const PREC = {
 }
 
 module.exports = grammar({
-  name: "sensei",
+  name: "plank",
 
   extras: ($) => [/\s/, $.line_comment],
   conflicts: ($) => [
