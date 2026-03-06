@@ -5,10 +5,9 @@
  (#match? @constant "^[A-Z][A-Z\\d_]+$"))
 
 ; Type definitions (const assigned to a struct def)
-
-(const_def
-  (identifier) @type.definition
-  (struct_def))
+; (const_def
+;   (identifier) @type.definition
+;   (struct_def))
 
 ; Builtin types
 
