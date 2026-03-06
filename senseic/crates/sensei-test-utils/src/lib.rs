@@ -1,6 +1,6 @@
 use sensei_core::{IndexVec, list_of_lists::ListOfLists};
 use sensei_parser::{
-    PlankInterner,
+    FILE_EXTENSION, PlankInterner,
     error_report::ErrorCollector,
     lexer::Lexed,
     parser::parse,
@@ -49,12 +49,13 @@ pub fn dedent(s: &str) -> String {
 
 /// Builder for creating in-memory test projects without file system access.
 pub struct TestProject {
-    files: Vec<(&'static str, String)>,
+    files: Vec<(String, String)>,
 }
 
 impl TestProject {
     pub fn single(source: &str) -> Self {
-        Self { files: vec![("main.sei", dedent_preserve_indent(source))] }
+        let entry_name = format!("main{FILE_EXTENSION}");
+        Self { files: vec![(entry_name, dedent_preserve_indent(source))] }
     }
 
     pub fn build(self, interner: &mut PlankInterner) -> Result<ParsedProject, ErrorCollector> {

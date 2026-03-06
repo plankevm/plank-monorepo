@@ -44,6 +44,7 @@ pub fn parse_project(
     let mut path_to_source: HashMap<PathBuf, SourceId> = HashMap::new();
     let mut pending: VecDeque<SourceId> = VecDeque::new();
     let mut segment_buf: Vec<StrId> = Vec::new();
+    let mut resolve_buf: PathBuf = PathBuf::new();
 
     path_to_source.insert(entry_path, ROOT_SOURCE);
     pending.push_back(ROOT_SOURCE);
@@ -60,11 +61,11 @@ pub fn parse_project(
 
                 import.collect_path_segments(&mut segment_buf);
                 let resolved = module_manager
-                    .resolve(&segment_buf, import.is_glob(), interner)
+                    .resolve(&segment_buf, import.is_glob(), interner, &mut resolve_buf)
                     .expect("failed to resolve import");
 
                 let target_path =
-                    resolved.file_path.canonicalize().expect("failed to canonicalize import path");
+                    resolve_buf.canonicalize().expect("failed to canonicalize import path");
                 let target_source =
                     *path_to_source.entry(target_path.clone()).or_insert_with(|| {
                         let id = source_manager.add_source(target_path);

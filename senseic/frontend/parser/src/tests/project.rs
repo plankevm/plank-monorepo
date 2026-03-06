@@ -1,11 +1,15 @@
 use crate::{
-    error_report::ErrorCollector, interner::PlankInterner, module::ModuleManager,
+    FILE_EXTENSION, error_report::ErrorCollector, interner::PlankInterner, module::ModuleManager,
     project::parse_project,
 };
 
+fn source_file(name: &str) -> String {
+    format!("{name}{FILE_EXTENSION}")
+}
+
 fn write_files(dir: &std::path::Path, files: &[(&str, &str)]) {
     for &(name, content) in files {
-        std::fs::write(dir.join(name), content).unwrap();
+        std::fs::write(dir.join(source_file(name)), content).unwrap();
     }
 }
 
@@ -17,9 +21,9 @@ fn source_content_matches_source_manager_path() {
     write_files(
         dir.path(),
         &[
-            ("main.plk", "import m::a::A;\nimport m::b::B;\n\ninit {}\n"),
-            ("a.plk", "const A = 1;\n"),
-            ("b.plk", "const B = 2;\n"),
+            ("main", "import m::a::A;\nimport m::b::B;\n\ninit {}\n"),
+            ("a", "const A = 1;\n"),
+            ("b", "const B = 2;\n"),
         ],
     );
 
@@ -28,8 +32,12 @@ fn source_content_matches_source_manager_path() {
     modules.register(interner.intern("m"), dir.path().to_path_buf());
 
     let mut collector = ErrorCollector::default();
-    let project =
-        parse_project(&dir.path().join("main.plk"), &modules, &mut interner, &mut collector);
+    let project = parse_project(
+        &dir.path().join(source_file("main")),
+        &modules,
+        &mut interner,
+        &mut collector,
+    );
     assert!(collector.errors.is_empty(), "parse errors: {:?}", collector.errors);
 
     for (id, content) in project.sources.enumerate_idx() {

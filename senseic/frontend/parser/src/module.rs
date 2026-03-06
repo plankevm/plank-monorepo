@@ -2,12 +2,12 @@ use crate::{FILE_EXTENSION, StrId, interner::PlankInterner};
 use hashbrown::HashMap;
 use std::path::PathBuf;
 
+#[derive(Default)]
 pub struct ModuleManager {
     modules: HashMap<StrId, PathBuf>,
 }
 
 pub struct ResolvedImport {
-    pub file_path: PathBuf,
     pub const_name: Option<StrId>,
 }
 
@@ -15,12 +15,6 @@ pub struct ResolvedImport {
 pub enum ModuleResolveError {
     UnknownModule(StrId),
     NotEnoughSegments,
-}
-
-impl Default for ModuleManager {
-    fn default() -> Self {
-        Self { modules: HashMap::new() }
-    }
 }
 
 impl ModuleManager {
@@ -34,11 +28,14 @@ impl ModuleManager {
     ///
     /// Regular: `[module, file_seg..., const_name]` — min 3 segments
     /// Glob:    `[module, file_seg...]` — min 2 segments
+    ///
+    /// The resolved file path is written into `path_buf`.
     pub fn resolve(
         &self,
         segments: &[StrId],
         is_glob: bool,
         interner: &PlankInterner,
+        path_buf: &mut PathBuf,
     ) -> Result<ResolvedImport, ModuleResolveError> {
         let Some((&module_name, remaining)) = segments.split_first() else {
             return Err(ModuleResolveError::NotEnoughSegments);
@@ -55,15 +52,17 @@ impl ModuleManager {
             (rest, Some(last))
         };
 
-        let mut path = root.clone();
         let Some((&last_seg, dirs)) = file_segments.split_last() else {
             return Err(ModuleResolveError::NotEnoughSegments);
         };
-        for &seg in dirs {
-            path.push(&interner[seg]);
-        }
-        path.push(format!("{}{FILE_EXTENSION}", &interner[last_seg]));
 
-        Ok(ResolvedImport { file_path: path, const_name })
+        path_buf.clone_from(root);
+        for &seg in dirs {
+            path_buf.push(&interner[seg]);
+        }
+        path_buf.push(&interner[last_seg]);
+        path_buf.set_extension(&FILE_EXTENSION[1..]);
+
+        Ok(ResolvedImport { const_name })
     }
 }
