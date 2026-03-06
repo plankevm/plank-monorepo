@@ -5,6 +5,7 @@ use crate::{
     interner::PlankInterner,
     lexer::*,
     parser::token_item_iter::TokenItems,
+    source::SourceId,
 };
 use allocator_api2::vec::Vec;
 use sensei_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
@@ -95,6 +96,7 @@ struct Parser<'a, D: DiagnosticsContext> {
     tokens: TokenItems<'a>,
     interner: &'a mut PlankInterner,
     diagnostics: &'a mut D,
+    source_id: SourceId,
     last_src_span: SourceSpan,
     last_unexpected: Option<TokenIdx>,
 }
@@ -110,7 +112,12 @@ where
     const FN_CALL_PRIORITY: OpPriority = OpPriority(21);
     const STRUCT_LITERAL_PRIORITY: OpPriority = OpPriority(21);
 
-    fn new(lexed: &'a Lexed, interner: &'a mut PlankInterner, diagnostics: &'a mut D) -> Self {
+    fn new(
+        lexed: &'a Lexed,
+        interner: &'a mut PlankInterner,
+        diagnostics: &'a mut D,
+        source_id: SourceId,
+    ) -> Self {
         Parser {
             tokens: TokenItems::new(lexed),
             nodes: IndexVec::with_capacity(lexed.len().get() as usize / LEN_TO_NODE_CAPACITY),
@@ -118,6 +125,7 @@ where
             expected: Vec::with_capacity(8),
             interner,
             diagnostics,
+            source_id,
             last_src_span: Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO),
             last_unexpected: None,
         }
@@ -140,7 +148,7 @@ where
         let (token, src_span) = self.tokens.next();
         self.last_src_span = src_span;
         if token.is_lex_error() {
-            self.diagnostics.emit_lexer_error(token, ti, src_span);
+            self.diagnostics.emit_lexer_error(self.source_id, token, ti, src_span);
         }
     }
 
@@ -181,7 +189,7 @@ where
         }
         let (found, span) = self.tokens.peek();
         self.last_unexpected = Some(self.tokens.current());
-        self.diagnostics.emit_unexpected_token(found, &self.expected, span);
+        self.diagnostics.emit_unexpected_token(self.source_id, found, &self.expected, span);
         self.expected.clear();
     }
 
@@ -874,8 +882,9 @@ pub fn parse<D: DiagnosticsContext>(
     lexed: &Lexed,
     interner: &mut PlankInterner,
     diagnostics: &mut D,
+    source_id: SourceId,
 ) -> ConcreteSyntaxTree {
-    let mut parser = Parser::new(lexed, interner, diagnostics);
+    let mut parser = Parser::new(lexed, interner, diagnostics, source_id);
 
     let file = parser.parse_file();
     assert_eq!(file, ConcreteSyntaxTree::FILE_IDX);

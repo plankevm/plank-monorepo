@@ -3,7 +3,7 @@ use crate::{
     lexer::{SourceByteOffset, SourceSpan, Token, TokenIdx},
     source::SourceId,
 };
-use sensei_core::{Idx, list_of_lists::ListOfLists};
+use sensei_core::Idx;
 
 #[derive(Debug, Clone)]
 pub enum ParserError {
@@ -15,44 +15,46 @@ pub enum ParserError {
 
 #[derive(Debug, Default)]
 pub struct ErrorCollector {
-    current: Vec<ParserError>,
-    pub errors: ListOfLists<SourceId, ParserError>,
-}
-
-impl ErrorCollector {
-    pub fn has_errors(&self) -> bool {
-        self.errors.iter().any(|errs| !errs.is_empty())
-    }
+    pub errors: Vec<(SourceId, ParserError)>,
 }
 
 impl DiagnosticsContext for ErrorCollector {
-    fn emit_lexer_error(&mut self, token: Token, _index: TokenIdx, src_span: SourceSpan) {
-        self.current.push(ParserError::LexerError { token, span: src_span });
+    fn emit_lexer_error(
+        &mut self,
+        source_id: SourceId,
+        token: Token,
+        _index: TokenIdx,
+        src_span: SourceSpan,
+    ) {
+        self.errors.push((source_id, ParserError::LexerError { token, span: src_span }));
     }
 
-    fn emit_unexpected_token(&mut self, found: Token, expected: &[Token], src_span: SourceSpan) {
-        self.current.push(ParserError::UnexpectedToken {
-            found,
-            expected: expected.to_vec(),
-            span: src_span,
-        });
+    fn emit_unexpected_token(
+        &mut self,
+        source_id: SourceId,
+        found: Token,
+        expected: &[Token],
+        src_span: SourceSpan,
+    ) {
+        self.errors.push((
+            source_id,
+            ParserError::UnexpectedToken { found, expected: expected.to_vec(), span: src_span },
+        ));
     }
 
-    fn emit_missing_token(&mut self, expected: Token, at_span: SourceSpan) {
-        self.current.push(ParserError::MissingToken { expected, at_span });
+    fn emit_missing_token(&mut self, source_id: SourceId, expected: Token, at_span: SourceSpan) {
+        self.errors.push((source_id, ParserError::MissingToken { expected, at_span }));
     }
 
     fn emit_unclosed_delimiter(
         &mut self,
+        source_id: SourceId,
         opener: Token,
         open_span: SourceSpan,
         found_span: SourceSpan,
     ) {
-        self.current.push(ParserError::UnclosedDelimiter { opener, open_span, found_span });
-    }
-
-    fn finish_source(&mut self, _source_id: SourceId) {
-        self.errors.push_iter(self.current.drain(..));
+        self.errors
+            .push((source_id, ParserError::UnclosedDelimiter { opener, open_span, found_span }));
     }
 }
 

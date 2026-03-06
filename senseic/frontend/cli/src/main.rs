@@ -89,17 +89,12 @@ fn main() {
         println!("{}", display);
     }
 
-    for (source_id, errors) in collector.errors.enumerate_idx() {
-        if errors.is_empty() {
-            continue;
-        }
-        let source = &project.sources[source_id];
-        let line_index = LineIndex::new(source);
-        for error in errors {
+    if !collector.errors.is_empty() {
+        for (source_id, error) in &collector.errors {
+            let source = &project.sources[*source_id];
+            let line_index = LineIndex::new(source);
             eprintln!("{}\n", format_error(error, source, &line_index));
         }
-    }
-    if collector.has_errors() {
         std::process::exit(1);
     }
 

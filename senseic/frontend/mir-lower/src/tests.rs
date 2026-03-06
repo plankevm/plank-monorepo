@@ -4,9 +4,9 @@ use sensei_values::BigNumInterner;
 
 fn try_lower(source: &str) -> Result<sir_data::EthIRProgram, Vec<ParserError>> {
     let mut interner = PlankInterner::default();
-    let project = TestProject::single(source).build(&mut interner).map_err(|errors| {
-        errors.iter().flat_map(|errs| errs.iter().cloned()).collect::<Vec<_>>()
-    })?;
+    let project = TestProject::single(source)
+        .build(&mut interner)
+        .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
 
     let mut big_nums = BigNumInterner::default();
     let hir = sensei_hir::lower(&project, &mut big_nums);

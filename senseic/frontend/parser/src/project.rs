@@ -1,5 +1,5 @@
 use crate::{
-    ROOT_SOURCE, StrId,
+    StrId,
     ast::{File, ImportKind, TopLevelDef},
     cst::ConcreteSyntaxTree,
     diagnostics::DiagnosticsContext,
@@ -7,7 +7,7 @@ use crate::{
     lexer::Lexed,
     module::ModuleManager,
     parser::parse,
-    source::{SourceId, SourceManager},
+    source::{ROOT_SOURCE, SourceId, SourceManager},
 };
 use hashbrown::HashMap;
 use sensei_core::{IndexVec, list_of_lists::ListOfLists};
@@ -33,7 +33,8 @@ pub fn parse_project(
     interner: &mut PlankInterner,
     diagnostics: &mut impl DiagnosticsContext,
 ) -> ParsedProject {
-    let mut source_manager = SourceManager::default();
+    let entry_path = entry_path.canonicalize().expect("failed to canonicalize entry path");
+    let mut source_manager = SourceManager::new(entry_path.clone());
     let mut sources: IndexVec<SourceId, String> = IndexVec::new();
     let mut csts: IndexVec<SourceId, ConcreteSyntaxTree> = IndexVec::new();
     let mut imports: ListOfLists<SourceId, FileImport> = ListOfLists::new();
@@ -41,16 +42,13 @@ pub fn parse_project(
     let mut pending: Vec<SourceId> = Vec::new();
     let mut segment_buf: Vec<StrId> = Vec::new();
 
-    let entry_path = entry_path.canonicalize().expect("failed to canonicalize entry path");
-    let entry = source_manager.add_source(entry_path.clone());
-    assert_eq!(entry, ROOT_SOURCE, "entry must be the first source added");
-    path_to_source.insert(entry_path, entry);
-    pending.push(entry);
+    path_to_source.insert(entry_path, ROOT_SOURCE);
+    pending.push(ROOT_SOURCE);
 
     while let Some(source_id) = pending.pop() {
         let source = std::fs::read_to_string(&source_manager[source_id].path)
             .expect("failed to read source file");
-        let cst = parse(&Lexed::lex(&source), interner, diagnostics);
+        let cst = parse(&Lexed::lex(&source), interner, diagnostics, source_id);
 
         imports.push_with(|mut file_imports| {
             for def in File::new(cst.file_view()).expect("failed to init file from CST").iter_defs()
@@ -99,10 +97,9 @@ pub fn parse_project(
             }
         });
 
-        diagnostics.finish_source(source_id);
         sources.push(source);
         csts.push(cst);
     }
 
-    ParsedProject { source_manager, sources, csts, imports, entry }
+    ParsedProject { source_manager, sources, csts, imports, entry: ROOT_SOURCE }
 }

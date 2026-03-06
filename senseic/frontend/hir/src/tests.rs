@@ -4,9 +4,9 @@ use sensei_test_utils::{TestProject, dedent_preserve_blank_lines};
 
 fn try_lower(source: &str) -> Result<(Hir, BigNumInterner, PlankInterner), Vec<ParserError>> {
     let mut interner = PlankInterner::default();
-    let project = TestProject::single(source).build(&mut interner).map_err(|errors| {
-        errors.iter().flat_map(|errs| errs.iter().cloned()).collect::<Vec<_>>()
-    })?;
+    let project = TestProject::single(source)
+        .build(&mut interner)
+        .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
 
     let mut big_nums = BigNumInterner::default();
     let hir = crate::lower(&project, &mut big_nums);

@@ -1,7 +1,6 @@
 use crate::{
     ROOT_SOURCE,
     cst::display::DisplayCST,
-    diagnostics::DiagnosticsContext,
     error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
     lexer::Lexed,
@@ -18,8 +17,7 @@ fn parse_single_source(
 ) -> (ErrorCollector, crate::cst::ConcreteSyntaxTree) {
     let lexed = Lexed::lex(source);
     let mut collector = ErrorCollector::default();
-    let cst = parse(&lexed, interner, &mut collector);
-    collector.finish_source(ROOT_SOURCE);
+    let cst = parse(&lexed, interner, &mut collector, ROOT_SOURCE);
     (collector, cst)
 }
 
@@ -28,10 +26,9 @@ pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let mut interner = PlankInterner::default();
     let (collector, _) = parse_single_source(&source, &mut interner);
 
-    let errors = &collector.errors[ROOT_SOURCE];
     let line_index = LineIndex::new(&source);
     let actual: Vec<String> =
-        errors.iter().map(|e| format_error(e, &source, &line_index)).collect();
+        collector.errors.iter().map(|(_, e)| format_error(e, &source, &line_index)).collect();
 
     let expected: Vec<String> = expected_errors.iter().map(|s| dedent(s)).collect();
 
@@ -44,14 +41,13 @@ pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {
     let mut interner = PlankInterner::default();
     let (collector, cst) = parse_single_source(source, &mut interner);
 
-    let errors = &collector.errors[ROOT_SOURCE];
-    if !errors.is_empty() {
+    if !collector.errors.is_empty() {
         let line_index = LineIndex::new(source);
         let formatted: Vec<String> =
-            errors.iter().map(|e| format_error(e, source, &line_index)).collect();
+            collector.errors.iter().map(|(_, e)| format_error(e, source, &line_index)).collect();
         panic!(
             "Expected no parser errors, but found {}:\n\n{}",
-            errors.len(),
+            collector.errors.len(),
             formatted.join("\n\n---\n\n")
         );
     }

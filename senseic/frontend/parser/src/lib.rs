@@ -10,13 +10,10 @@ pub mod parser;
 pub mod project;
 pub mod source;
 
-use sensei_core::Idx;
-
 pub use interner::{PlankInterner, StrId};
-pub use source::SourceId;
+pub use source::{ROOT_SOURCE, SourceId};
 
 pub const FILE_EXTENSION: &str = ".plk";
-pub const ROOT_SOURCE: SourceId = SourceId::ZERO;
 
 pub mod const_print;
 
