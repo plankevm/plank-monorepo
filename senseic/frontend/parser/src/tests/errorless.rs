@@ -895,9 +895,9 @@ fn test_fn_def_zero_params() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
-                    ")"
+                        "("
+                        ")"
                     " "
                     Identifier
                         "void"
@@ -927,8 +927,8 @@ fn test_fn_def_one_param() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
+                        "("
                         Parameter
                             Identifier
                                 "x"
@@ -936,7 +936,47 @@ fn test_fn_def_one_param() {
                             " "
                             Identifier
                                 "T"
-                    ")"
+                        ")"
+                    " "
+                    Identifier
+                        "void"
+                    " "
+                    Block
+                        "{"
+                        StatementsList
+                        "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_fn_def_trailing_comma() {
+    assert_parses_to_cst_no_errors_dedented(
+        "const f = fn(x: S,) void {};",
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "f"
+                " "
+                "="
+                " "
+                FnDef
+                    "fn"
+                    ParamList
+                        "("
+                        Parameter
+                            Identifier
+                                "x"
+                            ":"
+                            " "
+                            Identifier
+                                "S"
+                        ","
+                        ")"
                     " "
                     Identifier
                         "void"
@@ -966,8 +1006,8 @@ fn test_fn_def_two_params() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
+                        "("
                         Parameter
                             Identifier
                                 "x"
@@ -989,7 +1029,7 @@ fn test_fn_def_two_params() {
                             " "
                             Identifier
                                 "U"
-                    ")"
+                        ")"
                     " "
                     Identifier
                         "void"
@@ -1019,9 +1059,9 @@ fn test_fn_def_with_return_type() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
-                    ")"
+                        "("
+                        ")"
                     CallExpr
                         " "
                         Identifier
@@ -1056,8 +1096,8 @@ fn test_fn_def_full() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
+                        "("
                         Parameter
                             Identifier
                                 "x"
@@ -1065,7 +1105,7 @@ fn test_fn_def_full() {
                             " "
                             Identifier
                                 "T"
-                    ")"
+                        ")"
                     " "
                     Identifier
                         "U"
@@ -1100,8 +1140,8 @@ fn test_fn_def_one_comptime_param() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
+                        "("
                         ComptimeParameter
                             "comptime"
                             " "
@@ -1111,7 +1151,7 @@ fn test_fn_def_one_comptime_param() {
                             " "
                             Identifier
                                 "type"
-                    ")"
+                        ")"
                     " "
                     Identifier
                         "void"
@@ -1141,8 +1181,8 @@ fn test_fn_def_two_comptime_params() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
+                        "("
                         ComptimeParameter
                             "comptime"
                             " "
@@ -1163,7 +1203,7 @@ fn test_fn_def_two_comptime_params() {
                             " "
                             Identifier
                                 "type"
-                    ")"
+                        ")"
                     " "
                     Identifier
                         "void"
@@ -1193,8 +1233,8 @@ fn test_fn_def_mixed_comptime_and_runtime_params() {
                 " "
                 FnDef
                     "fn"
-                    "("
                     ParamList
+                        "("
                         ComptimeParameter
                             "comptime"
                             " "
@@ -1213,7 +1253,7 @@ fn test_fn_def_mixed_comptime_and_runtime_params() {
                             " "
                             Identifier
                                 "T"
-                    ")"
+                        ")"
                     " "
                     Identifier
                         "T"

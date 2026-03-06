@@ -31,7 +31,7 @@ pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let actual: Vec<String> =
         collector.errors.iter().map(|(_, e)| format_error(e, &source, &line_index)).collect();
 
-    let expected: Vec<String> = expected_errors.iter().map(|s| dedent(s)).collect();
+    let expected: Vec<String> = expected_errors.iter().map(|s| dedent_preserve_indent(s)).collect();
 
     let actual_joined = actual.join("\n\n---\n\n");
     let expected_joined = expected.join("\n\n---\n\n");

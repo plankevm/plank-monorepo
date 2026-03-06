@@ -197,12 +197,27 @@ where
         self.at(Token::Eof)
     }
 
+    fn skip_until_decl_start(&mut self) {
+        self.advance();
+        while !self.eof() {
+            self.skip_trivia();
+            match self.current_token() {
+                Token::Init | Token::Run | Token::Const | Token::Import => return,
+                _ => self.advance(),
+            }
+        }
+    }
+
+    /// `parse_fn` returns `true` if it successfully parsed an element, `false` if the
+    /// current token cannot start an element (must populate `expected` via check/eat).
     fn parse_delimited(
         &mut self,
+        opener: Token,
         terminator: Token,
         delimiter: Token,
         mut parse_fn: impl FnMut(&mut Self) -> bool,
     ) {
+        self.expect(opener);
         let mut error_emitted = false;
         loop {
             let expected_checkpoint = self.expected.len();
@@ -227,6 +242,7 @@ where
                 }
             }
         }
+        self.expect(terminator);
     }
 
     fn expect(&mut self, token: Token) -> bool {
@@ -499,10 +515,8 @@ where
 
     fn parse_function_def(&mut self, start: TokenIdx) -> NodeIdx {
         let mut function = self.alloc_node_from(start, NodeKind::FnDef);
-        self.expect(Token::LeftRound);
-
         let mut parameter_list = self.alloc_node(NodeKind::ParamList);
-        self.parse_delimited(Token::RightRound, Token::Comma, |parser| {
+        self.parse_delimited(Token::LeftRound, Token::RightRound, Token::Comma, |parser| {
             let parameter_start = parser.tokens.current();
             let mut parameter = if parser.eat(Token::Comptime) {
                 let mut parameter =
@@ -531,8 +545,6 @@ where
         let parameter_list = self.close_node(parameter_list);
         self.push_child(&mut function, parameter_list);
 
-        self.expect(Token::RightRound);
-
         let return_type = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
         self.push_child(&mut function, return_type);
 
@@ -550,9 +562,7 @@ where
             self.push_child(&mut struct_def, type_index);
         }
 
-        self.expect(Token::LeftCurly);
-
-        self.parse_delimited(Token::RightCurly, Token::Comma, |parser| {
+        self.parse_delimited(Token::LeftCurly, Token::RightCurly, Token::Comma, |parser| {
             if !parser.check(Token::Identifier) {
                 return false;
             }
@@ -571,8 +581,6 @@ where
             parser.push_child(&mut struct_def, field);
             true
         });
-
-        self.expect(Token::RightCurly);
 
         self.close_node(struct_def)
     }
@@ -632,29 +640,28 @@ where
                 continue;
             }
 
-            if Self::FN_CALL_PRIORITY > min_bp && self.eat(Token::LeftRound) {
+            if Self::FN_CALL_PRIORITY > min_bp && self.check(Token::LeftRound) {
                 let mut call = self.alloc_node_from(start, NodeKind::CallExpr);
                 self.push_child(&mut call, expr);
-                self.parse_delimited(Token::RightRound, Token::Comma, |parser| {
+                self.parse_delimited(Token::LeftRound, Token::RightRound, Token::Comma, |parser| {
                     let Some(argument) = parser.try_parse_expr(ParseExprMode::AllowAll) else {
                         return false;
                     };
                     parser.push_child(&mut call, argument);
                     true
                 });
-                self.expect(Token::RightRound);
                 expr = self.close_node(call);
                 continue;
             }
 
             if mode.allows_struct_literal()
                 && Self::STRUCT_LITERAL_PRIORITY > min_bp
-                && self.eat(Token::LeftCurly)
+                && self.check(Token::LeftCurly)
             {
                 let mut struct_literal = self.alloc_node_from(start, NodeKind::StructLit);
                 self.push_child(&mut struct_literal, expr);
 
-                self.parse_delimited(Token::RightCurly, Token::Comma, |parser| {
+                self.parse_delimited(Token::LeftCurly, Token::RightCurly, Token::Comma, |parser| {
                     if !parser.check(Token::Identifier) {
                         return false;
                     }
@@ -670,8 +677,6 @@ where
                     parser.push_child(&mut struct_literal, field);
                     true
                 });
-
-                self.expect(Token::RightCurly);
                 expr = self.close_node(struct_literal);
                 continue;
             }
@@ -725,6 +730,7 @@ where
 
     fn try_parse_stmt(&mut self) -> Option<StmtResult> {
         let stmt_start = self.tokens.current();
+        let expected_checkpoint = self.expected.len();
 
         self.skip_trivia();
 
@@ -766,7 +772,12 @@ where
             return Some(StmtResult::Statement(r#let));
         }
 
-        let expr = self.try_parse_expr(ParseExprMode::AllowAll)?;
+        let Some(expr) = self.try_parse_expr(ParseExprMode::AllowAll) else {
+            // Undo tokens added to `expected` by our check/eat calls (while, return, let, etc.)
+            // so the caller's emit_unexpected reports its own expected tokens, not ours.
+            self.expected.truncate(expected_checkpoint);
+            return None;
+        };
 
         if self.eat(Token::Equals) {
             let mut assign = self.alloc_node_from(stmt_start, NodeKind::AssignStmt);
@@ -802,9 +813,7 @@ where
         let mut end_expr = None;
 
         while !self.check(Token::RightCurly) {
-            let checkpoint = self.expected.len();
             let Some(result) = self.try_parse_stmt() else {
-                self.expected.truncate(checkpoint);
                 self.emit_unexpected();
                 break;
             };
@@ -819,9 +828,11 @@ where
                 StmtResult::EndExprOrStmt(expr) => end_expr = Some(expr),
                 StmtResult::EndExpr(expr) => {
                     if self.check(Token::RightCurly) || self.eof() {
+                        // Expression without semicolon is the block's tail expression.
                         end_expr = Some(expr);
                         break;
                     } else {
+                        // Otherwise the `;` is missing.
                         self.diagnostics.emit_missing_token(Token::Semicolon, self.last_src_span);
                         self.push_child(&mut statements_list, expr);
                     }
@@ -866,8 +877,9 @@ where
             self.parse_import_decl(start)
         } else {
             self.emit_unexpected();
-            self.advance();
-            self.alloc_last_token_as_node(NodeKind::Error)
+            self.skip_until_decl_start();
+            let node = self.alloc_node_from(start, NodeKind::Error);
+            self.close_node(node)
         }
     }
 
