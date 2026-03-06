@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 sensei-core.workspace = true
 sensei-hir.workspace = true
@@ -12,7 +15,6 @@ sensei-parser.workspace = true
 sensei-values.workspace = true
 
 hashbrown.workspace = true
-alloy-primitives.workspace = true
 
 [dev-dependencies]
 sensei-test-utils.workspace = true

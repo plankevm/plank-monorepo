@@ -8,3 +8,6 @@ license.workspace = true
 sensei-core.workspace = true
 sensei-hir.workspace = true
 sensei-values.workspace = true
+
+[lints]
+workspace = true

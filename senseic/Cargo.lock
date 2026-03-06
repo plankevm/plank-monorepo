@@ -1339,18 +1339,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "regex"
-version = "1.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843bc0191f75f3e22651ae5f1e72939ab2f72a4bc30fa80a066bd66edefc24d4"
-dependencies = [
- "aho-corasick",
- "memchr",
- "regex-automata 0.4.13",
- "regex-syntax 0.8.8",
-]
-
-[[package]]
 name = "regex-automata"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1500,12 +1488,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ryu"
-version = "1.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
-
-[[package]]
 name = "sec1"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1549,7 +1531,6 @@ version = "0.1.0"
 dependencies = [
  "allocator-api2",
  "alloy-primitives",
- "bumpalo",
  "hashbrown 0.16.0",
 ]
 
@@ -1557,10 +1538,7 @@ dependencies = [
 name = "sensei-hir"
 version = "0.1.0"
 dependencies = [
- "allocator-api2",
- "alloy-primitives",
  "hashbrown 0.16.0",
- "plank-diagnostics",
  "pretty_assertions",
  "sensei-core",
  "sensei-parser",
@@ -1572,7 +1550,6 @@ dependencies = [
 name = "sensei-hir-eval"
 version = "0.1.0"
 dependencies = [
- "alloy-primitives",
  "hashbrown 0.16.0",
  "pretty_assertions",
  "sensei-core",
@@ -1613,14 +1590,10 @@ name = "sensei-parser"
 version = "0.1.0"
 dependencies = [
  "allocator-api2",
- "hashbrown 0.16.0",
  "logos",
  "pretty_assertions",
  "sensei-core",
  "sensei-test-utils",
- "smallvec",
- "tree-sitter",
- "tree-sitter-sensei",
 ]
 
 [[package]]
@@ -1648,7 +1621,6 @@ dependencies = [
  "sensei-mir-lower",
  "sensei-parser",
  "sir-analyses",
- "sir-data",
  "sir-debug-backend",
  "sir-optimizations",
  "sir-transforms",
@@ -1682,20 +1654,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.108",
-]
-
-[[package]]
-name = "serde_json"
-version = "1.0.145"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "402a6f66d8c709116cf22f558eab210f5a50187f702eb4d7e5ef38d9a7f1c79c"
-dependencies = [
- "indexmap",
- "itoa",
- "memchr",
- "ryu",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -1750,7 +1708,6 @@ name = "sir-analyses"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
- "bumpalo",
  "hashbrown 0.16.0",
  "sensei-core",
  "sir-data",
@@ -1764,8 +1721,6 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "sensei-core",
- "sir-data",
- "thiserror",
 ]
 
 [[package]]
@@ -1773,7 +1728,6 @@ name = "sir-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "sir-data",
  "sir-debug-backend",
  "sir-optimizations",
  "sir-parser",
@@ -1793,11 +1747,9 @@ dependencies = [
 name = "sir-debug-backend"
 version = "0.1.0"
 dependencies = [
- "alloy-primitives",
  "sensei-core",
  "sir-assembler",
  "sir-data",
- "smallvec",
 ]
 
 [[package]]
@@ -1810,7 +1762,6 @@ dependencies = [
  "sir-data",
  "sir-parser",
  "sir-test-utils",
- "smallvec",
 ]
 
 [[package]]
@@ -1825,21 +1776,13 @@ dependencies = [
  "sir-data",
  "sir-test-utils",
  "smallvec",
- "thiserror",
 ]
 
 [[package]]
 name = "sir-test-utils"
 version = "0.1.0"
 dependencies = [
- "alloy-primitives",
- "bumpalo",
- "chumsky",
- "logos",
  "pretty_assertions",
- "sir-analyses",
- "sir-data",
- "smallvec",
 ]
 
 [[package]]
@@ -1887,12 +1830,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "streaming-iterator"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
 
 [[package]]
 name = "strsim"
@@ -2004,34 +1941,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3198b4b0a8e11f09dd03e133c0280504d0801269e9afa46362ffde1cbeebf44"
 dependencies = [
  "winnow",
-]
-
-[[package]]
-name = "tree-sitter"
-version = "0.25.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78f873475d258561b06f1c595d93308a7ed124d9977cb26b148c2084a4a3cc87"
-dependencies = [
- "cc",
- "regex",
- "regex-syntax 0.8.8",
- "serde_json",
- "streaming-iterator",
- "tree-sitter-language",
-]
-
-[[package]]
-name = "tree-sitter-language"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4013970217383f67b18aef68f6fb2e8d409bc5755227092d32efb0422ba24b8"
-
-[[package]]
-name = "tree-sitter-sensei"
-version = "0.1.0"
-dependencies = [
- "cc",
- "tree-sitter-language",
 ]
 
 [[package]]

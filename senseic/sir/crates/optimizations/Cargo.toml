@@ -4,12 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 sir-analyses.workspace = true
 sir-data.workspace = true
 sensei-core.workspace = true
 alloy-primitives.workspace = true
-smallvec.workspace = true
 
 [dev-dependencies]
 sir-parser.workspace = true
