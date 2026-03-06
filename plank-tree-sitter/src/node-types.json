@@ -485,6 +485,11 @@
     }
   },
   {
+    "type": "block_comment",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "bool_literal",
     "named": true,
     "fields": {}
@@ -1982,6 +1987,10 @@
     "named": false
   },
   {
+    "type": "*/",
+    "named": false
+  },
+  {
     "type": "+",
     "named": false
   },
@@ -2007,6 +2016,10 @@
   },
   {
     "type": "/",
+    "named": false
+  },
+  {
+    "type": "/*",
     "named": false
   },
   {

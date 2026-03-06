@@ -45,3 +45,5 @@ zig-out/
 *.tar.gz
 *.tgz
 *.zip
+
+pnpm-lock.yaml

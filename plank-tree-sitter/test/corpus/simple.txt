@@ -369,3 +369,27 @@ const Values = struct {
       (field_def
         (identifier)
         (identifier)))))
+
+================================================================================
+Comments
+================================================================================
+// hello
+
+/* multiline
+*/
+
+/* nested /* multiline
+     /* comment */ */
+
+  */
+
+/**/
+
+--------------------------------------------------------------------------------
+
+
+(source_file
+  (line_comment)
+  (block_comment)
+  (block_comment)
+  (block_comment))

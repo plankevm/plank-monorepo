@@ -1487,6 +1487,23 @@
       "type": "PATTERN",
       "value": "-?[0-9][0-9_]*"
     },
+    "block_comment": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "/*"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_block_comment_content"
+        },
+        {
+          "type": "STRING",
+          "value": "*/"
+        }
+      ]
+    },
     "line_comment": {
       "type": "PATTERN",
       "value": "\\/\\/[^\\n]*"
@@ -1504,6 +1521,10 @@
     {
       "type": "SYMBOL",
       "name": "line_comment"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "block_comment"
     }
   ],
   "conflicts": [
@@ -1529,7 +1550,16 @@
     ]
   ],
   "precedences": [],
-  "externals": [],
+  "externals": [
+    {
+      "type": "SYMBOL",
+      "name": "_block_comment_content"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "error_sentinel"
+    }
+  ],
   "inline": [],
   "supertypes": [],
   "reserved": {}

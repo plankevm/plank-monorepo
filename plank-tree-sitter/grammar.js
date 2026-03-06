@@ -23,7 +23,8 @@ const PREC = {
 module.exports = grammar({
   name: "plank",
 
-  extras: ($) => [/\s/, $.line_comment],
+  externals: $ => [$._block_comment_content, $.error_sentinel],
+  extras: ($) => [/\s/, $.line_comment, $.block_comment],
   conflicts: ($) => [
     [$._expr, $._stmt],
     [$.block, $.struct_lit],
@@ -157,6 +158,7 @@ module.exports = grammar({
     dec_literal: (_) => /-?[0-9][0-9_]*/,
 
     // Helpers
+    block_comment: ($) => seq('/*', $._block_comment_content, '*/'),
     line_comment: (_) => /\/\/[^\n]*/,
     identifier: (_) => /[a-zA-Z_][a-zA-Z0-9_]*/,
   },
