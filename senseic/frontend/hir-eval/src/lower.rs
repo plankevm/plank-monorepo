@@ -10,6 +10,12 @@ use crate::{
     value::{Value, ValueInterner},
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExitBlock {
+    Return,
+    Never,
+}
+
 /// Result of evaluating an HIR expression.
 enum ExprResult {
     /// No MIR representation (types, closures).
@@ -258,7 +264,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     &self.eval.mir_fn_locals[mir_fn_id][..fn_def.param_count as usize];
                 for (&arg_local, &expected_ty) in arg_locals.iter().zip(param_types) {
                     let actual_ty = self.locals.get_type(arg_local, &self.eval.values);
-                    if actual_ty.is_assignable_to(expected_ty).is_err() {
+                    if !actual_ty.is_assignable_to(expected_ty) {
                         todo!("diagnostic: function call argument type mismatch");
                     }
                 }
@@ -282,12 +288,14 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                 let return_type = signatures
                     .iter()
                     .find_map(|(inputs, output)| {
-                        (inputs.len() == actual_types.len()
-                            && inputs
-                                .iter()
-                                .zip(actual_types)
-                                .all(|(expected, actual)| actual.is_assignable_to(*expected).is_ok()))
-                        .then_some(*output)
+                        if inputs.len() != actual_types.len() {
+                            return None;
+                        }
+                        inputs
+                            .iter()
+                            .zip(actual_types)
+                            .all(|(expected, actual)| actual.is_assignable_to(*expected))
+                            .then_some(*output)
                     })
                     .unwrap_or_else(|| {
                         todo!("diagnostic: no matching builtin signature for {builtin} (sigs: {signatures:?}, actual: {actual_types:?})")
@@ -534,38 +542,29 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
         self.eval.mir_blocks.push_iter(instructions)
     }
 
-    fn walk_block(&mut self, block_id: hir::BlockId) -> Option<TypeId> {
-        let mut last_ty = None;
-        let mut diverged = false;
+    fn walk_block(&mut self, block_id: hir::BlockId) -> ExitBlock {
+        let mut exit = ExitBlock::Return;
         for &instr in &self.eval.hir.blocks[block_id] {
-            // HIR auto-inserts Return for all function bodies. We skip it
-            // for last_ty because Return always yields `never`, which would
-            // make every function body appear diverged. The return type is
-            // tracked separately via self.return_type, set inside walk_instruction.
+            // Skip HIR's auto-inserted Return at the end of a block that never returns.
             if matches!(instr, hir::Instruction::Return(_)) {
-                if !diverged {
+                if exit == ExitBlock::Return {
                     self.walk_instruction(instr);
                 }
                 continue;
             }
-            let ty = self.walk_instruction(instr);
-            if !diverged {
-                last_ty = ty;
-                if ty == Some(TypeId::NEVER) {
-                    diverged = true;
-                }
+            if self.walk_instruction(instr) == ExitBlock::Never && exit == ExitBlock::Return {
+                exit = ExitBlock::Never;
             }
         }
-        last_ty
+        exit
     }
 
-    fn walk_instruction(&mut self, instr: hir::Instruction) -> Option<TypeId> {
+    fn walk_instruction(&mut self, instr: hir::Instruction) -> ExitBlock {
         match instr {
             hir::Instruction::Set { local, expr } => {
                 match self.translate_expr(expr) {
                     ExprResult::ComptimeOnly(value_id) => {
                         self.locals.set_comptime(local, value_id);
-                        None
                     }
                     ExprResult::Runtime { mir_local: src_mir, ty, comptime_value } => {
                         let Ok(dst_mir) = self.locals.assign_or_define(local, ty) else {
@@ -581,14 +580,21 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                         if let Some(vid) = comptime_value {
                             self.locals.set_comptime(local, vid);
                         }
-                        Some(ty)
+
+                        if ty == TypeId::NEVER {
+                            return ExitBlock::Never;
+                        }
                     }
                 }
+                ExitBlock::Return
             }
-            hir::Instruction::Eval(expr) => match self.translate_expr(expr) {
-                ExprResult::ComptimeOnly(_) => None,
-                ExprResult::Runtime { ty, .. } => Some(ty),
-            },
+            hir::Instruction::Eval(expr) => {
+                let ty = match self.translate_expr(expr) {
+                    ExprResult::ComptimeOnly(_) => return ExitBlock::Return,
+                    ExprResult::Runtime { ty, .. } => ty,
+                };
+                if ty == TypeId::NEVER { ExitBlock::Never } else { ExitBlock::Return }
+            }
             hir::Instruction::AssertType { value, of_type } => {
                 let Some(type_value) = self.locals.get_comptime(of_type) else {
                     todo!("diagnostic: AssertType of_type must be comptime")
@@ -597,10 +603,10 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     todo!("diagnostic: AssertType of_type must be Type");
                 };
                 let actual = self.locals.get_type(value, &self.eval.values);
-                if actual.is_assignable_to(expected).is_err() {
+                if !actual.is_assignable_to(expected) {
                     todo!("diagnostic: type mismatch in AssertType")
                 }
-                None
+                ExitBlock::Return
             }
             hir::Instruction::Return(expr) => {
                 let result = self.translate_expr(expr);
@@ -614,7 +620,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     }
                 };
                 self.instructions_buf.push(mir::Instruction::Return(mir_local));
-                Some(TypeId::NEVER)
+                ExitBlock::Never
             }
             hir::Instruction::If { condition, then_block, else_block, result } => {
                 let cond_comptime = self.locals.get_comptime(condition);
@@ -632,7 +638,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
 
                         // Verify condition is bool
                         let cond_ty = self.locals.get_mir_type(condition);
-                        if cond_ty.is_none_or(|ty| ty.is_assignable_to(TypeId::BOOL).is_err()) {
+                        if cond_ty.is_none_or(|ty| !ty.is_assignable_to(TypeId::BOOL)) {
                             todo!("diagnostic: if condition must be bool, got {cond_ty:?}");
                         }
 
@@ -648,7 +654,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                             else_block,
                         });
 
-                        self.locals.get_mir(result).and_then(|mir| self.locals.get_mir_type(mir))
+                        ExitBlock::Return
                     }
                 }
             }
@@ -662,7 +668,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     condition: mir_condition,
                     body: mir_body,
                 });
-                None
+                ExitBlock::Return
             }
             hir::Instruction::Assign { target, value } => {
                 let target_mir =
@@ -678,7 +684,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     }
                 };
 
-                if rhs_ty.is_assignable_to(target_ty).is_err() {
+                if !rhs_ty.is_assignable_to(target_ty) {
                     todo!(
                         "diagnostic: assign type mismatch: expected {target_ty:?}, got {rhs_ty:?}"
                     );
@@ -691,7 +697,7 @@ impl<'a, 'hir> BodyLowerer<'a, 'hir> {
                     target: target_mir,
                     value: mir::Expr::LocalRef(rhs_mir),
                 });
-                None
+                ExitBlock::Return
             }
         }
     }
@@ -745,12 +751,11 @@ fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::Fn
         lowerer.locals.assign_or_define(param.value, ty).expect("overwriting via params?");
     }
 
-    let last_ty = lowerer.walk_block(fn_def.body);
-    if last_ty == Some(TypeId::NEVER) {
+    if lowerer.walk_block(fn_def.body) == ExitBlock::Never {
         lowerer.return_type = None;
     }
     if let Some(actual) = lowerer.return_type
-        && let Err(_) = actual.is_assignable_to(return_type)
+        && !actual.is_assignable_to(return_type)
     {
         todo!("diagnostic: return type mismatch: declared {return_type:?}, actual {actual:?}")
     }
@@ -759,8 +764,7 @@ fn lower_fn_body(eval: &mut Evaluator<'_>, closure_value_id: ValueId) -> mir::Fn
 
 pub(crate) fn lower_block_as_fn(eval: &mut Evaluator<'_>, hir_block: hir::BlockId) -> mir::FnId {
     let mut lowerer = BodyLowerer::new(eval);
-    let last_ty = lowerer.walk_block(hir_block);
-    if last_ty != Some(TypeId::NEVER) {
+    if lowerer.walk_block(hir_block) != ExitBlock::Never {
         todo!(
             "diagnostic: init/run block must end with a terminating expression (stop, revert, return, etc.)"
         )

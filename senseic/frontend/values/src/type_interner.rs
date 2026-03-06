@@ -106,8 +106,8 @@ impl TypeId {
         self.0.get() > Self::LAST_FIXED_ID.0.get()
     }
 
-    pub fn is_assignable_to(self, target: TypeId) -> Result<(), TypeId> {
-        if self == target || self == TypeId::NEVER { Ok(()) } else { Err(self) }
+    pub fn is_assignable_to(self, target: TypeId) -> bool {
+        self == target || self == TypeId::NEVER
     }
 }
 
