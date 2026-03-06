@@ -11,7 +11,10 @@ use crate::{
 };
 use hashbrown::HashMap;
 use sensei_core::{IndexVec, list_of_lists::ListOfLists};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::VecDeque,
+    path::{Path, PathBuf},
+};
 
 pub struct FileImport {
     pub local_name: Option<StrId>,
@@ -39,13 +42,13 @@ pub fn parse_project(
     let mut csts: IndexVec<SourceId, ConcreteSyntaxTree> = IndexVec::new();
     let mut imports: ListOfLists<SourceId, FileImport> = ListOfLists::new();
     let mut path_to_source: HashMap<PathBuf, SourceId> = HashMap::new();
-    let mut pending: Vec<SourceId> = Vec::new();
+    let mut pending: VecDeque<SourceId> = VecDeque::new();
     let mut segment_buf: Vec<StrId> = Vec::new();
 
     path_to_source.insert(entry_path, ROOT_SOURCE);
-    pending.push(ROOT_SOURCE);
+    pending.push_back(ROOT_SOURCE);
 
-    while let Some(source_id) = pending.pop() {
+    while let Some(source_id) = pending.pop_front() {
         let source = std::fs::read_to_string(&source_manager[source_id].path)
             .expect("failed to read source file");
         let cst = parse(&Lexed::lex(&source), interner, diagnostics, source_id);
@@ -65,7 +68,7 @@ pub fn parse_project(
                 let target_source =
                     *path_to_source.entry(target_path.clone()).or_insert_with(|| {
                         let id = source_manager.add_source(target_path);
-                        pending.push(id);
+                        pending.push_back(id);
                         id
                     });
 

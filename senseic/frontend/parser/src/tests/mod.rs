@@ -10,6 +10,7 @@ use sensei_test_utils::{dedent, dedent_preserve_indent};
 
 // mod resiliency;
 mod errorless;
+mod project;
 
 fn parse_single_source(
     source: &str,
