@@ -11,6 +11,7 @@ pub struct SourceInfo {
     pub path: PathBuf,
 }
 
+#[derive(Default)]
 pub struct SourceManager {
     sources: IndexVec<SourceId, SourceInfo>,
 }

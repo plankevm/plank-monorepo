@@ -3,7 +3,7 @@ use hashbrown::HashMap;
 use std::path::PathBuf;
 
 #[derive(Default)]
-pub struct ModuleManager {
+pub struct ModuleResolver {
     modules: HashMap<StrId, PathBuf>,
 }
 
@@ -17,7 +17,7 @@ pub enum ModuleResolveError {
     NotEnoughSegments,
 }
 
-impl ModuleManager {
+impl ModuleResolver {
     pub fn register(&mut self, name: StrId, root: PathBuf) {
         if self.modules.insert(name, root).is_some() {
             todo!("diagnostic: duplicate module");

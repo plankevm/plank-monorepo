@@ -1,5 +1,5 @@
 use crate::{
-    FILE_EXTENSION, error_report::ErrorCollector, interner::PlankInterner, module::ModuleManager,
+    FILE_EXTENSION, error_report::ErrorCollector, interner::PlankInterner, module::ModuleResolver,
     project::parse_project,
 };
 
@@ -28,7 +28,7 @@ fn source_content_matches_source_manager_path() {
     );
 
     let mut interner = PlankInterner::default();
-    let mut modules = ModuleManager::default();
+    let mut modules = ModuleResolver::default();
     modules.register(interner.intern("m"), dir.path().to_path_buf());
 
     let mut collector = ErrorCollector::default();

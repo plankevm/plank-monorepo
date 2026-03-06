@@ -6,7 +6,7 @@ use sensei_parser::{
     error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
     lexer::Lexed,
-    module::ModuleManager,
+    module::ModuleResolver,
     project::parse_project,
 };
 use sir_optimizations::{Optimizer, parse_passes_string};
@@ -60,7 +60,7 @@ fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {
 fn main() {
     let args = Args::parse();
     let mut interner = PlankInterner::default();
-    let mut module_manager = ModuleManager::default();
+    let mut module_resolver = ModuleResolver::default();
     if let Some(name) = &args.module_name {
         let name_id = interner.intern(name);
         let root = match &args.module_root {
@@ -70,16 +70,16 @@ fn main() {
                 .expect("file path has no parent directory")
                 .to_path_buf(),
         };
-        module_manager.register(name_id, root);
+        module_resolver.register(name_id, root);
     }
     for (name, path) in &args.deps {
         let name_id = interner.intern(name);
-        module_manager.register(name_id, path.clone());
+        module_resolver.register(name_id, path.clone());
     }
 
     let mut collector = ErrorCollector::default();
     let project =
-        parse_project(Path::new(&args.file_path), &module_manager, &mut interner, &mut collector);
+        parse_project(Path::new(&args.file_path), &module_resolver, &mut interner, &mut collector);
 
     if args.show_cst {
         let source = &project.sources[project.entry];
