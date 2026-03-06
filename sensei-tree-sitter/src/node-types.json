@@ -1090,6 +1090,50 @@
     }
   },
   {
+    "type": "import",
+    "named": true,
+    "fields": {
+      "path": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "::",
+            "named": false
+          },
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "root": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "suffix": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "suffix_import_all",
+            "named": true
+          },
+          {
+            "type": "suffix_import_as",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "init",
     "named": true,
     "fields": {},
@@ -1519,6 +1563,10 @@
           "named": true
         },
         {
+          "type": "import",
+          "named": true
+        },
+        {
           "type": "init",
           "named": true
         },
@@ -1543,9 +1591,9 @@
           }
         ]
       },
-      "size": {
+      "type_index": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "bin_literal",
@@ -1699,6 +1747,26 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "suffix_import_all",
+    "named": true,
+    "fields": {}
+  },
+  {
+    "type": "suffix_import_as",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1962,6 +2030,10 @@
     "named": false
   },
   {
+    "type": "::",
+    "named": false
+  },
+  {
     "type": ";",
     "named": false
   },
@@ -2006,6 +2078,10 @@
     "named": false
   },
   {
+    "type": "as",
+    "named": false
+  },
+  {
     "type": "bin_literal",
     "named": true
   },
@@ -2043,6 +2119,10 @@
   },
   {
     "type": "if",
+    "named": false
+  },
+  {
+    "type": "import",
     "named": false
   },
   {

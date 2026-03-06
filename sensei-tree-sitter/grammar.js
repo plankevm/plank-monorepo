@@ -29,16 +29,26 @@ module.exports = grammar({
     [$.block, $.struct_lit],
     [$.struct_def, $.struct_lit],
     [$.field_def, $.field_init],
+    [$.block, $.struct_def]
   ],
 
   rules: {
     source_file: ($) => repeat($._decl),
 
-    _decl: ($) => choice($.init, $.run, $.const_def),
+    _decl: ($) => choice($.init, $.run, $.const_def, $.import),
 
     init: ($) => seq("init", $.block),
     run: ($) => seq("run", $.block),
     const_def: ($) => seq("const", $.identifier, optional(seq(":", $._expr)), "=", $._expr, ";"),
+    import: ($) => seq(
+      "import",
+      field("root", $.identifier),
+      field("path", repeat(seq("::", $.identifier))),
+      field("suffix", optional(choice($.suffix_import_all, $.suffix_import_as))),
+      ";"
+    ),
+    suffix_import_all: _ => seq("::", "*"),
+    suffix_import_as: $ => seq("as", $.identifier),
 
     // Expressions
     _expr: ($) => choice($.comptime_block, $.block, $.if_expr, $._expr_no_block),
@@ -127,7 +137,13 @@ module.exports = grammar({
       field("type", $._expr)
     ),
 
-    struct_def: ($) => seq("struct", field("size", $._expr), "{", commaSeparated($.field_def, "fields"), "}"),
+    struct_def: ($) => seq(
+      "struct",
+      field("type_index", optional($._expr)),
+      "{",
+      commaSeparated($.field_def, "fields"),
+      "}"
+    ),
     field_def: ($) => seq(field("name", $.identifier), ":", field("type", $._expr)),
 
     struct_lit: ($) => seq(field("type", $._expr), "{", commaSeparated($.field_init, "fields"), "}"),
