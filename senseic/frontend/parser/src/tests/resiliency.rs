@@ -303,3 +303,17 @@ fn test_paren_expr_empty() {
         "#],
     );
 }
+
+#[test]
+fn test_missing_semicolon_after_fn_const() {
+    assert_parser_errors(
+        "const to_addr = fn (raw: u256) u256 { raw }\ninit { }",
+        &["
+            error: unexpected `init`, expected `;`
+              --> line 2:1
+               |
+              2| init { }
+               | ^^^^
+        "],
+    );
+}
