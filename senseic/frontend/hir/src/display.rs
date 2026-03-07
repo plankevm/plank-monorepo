@@ -234,20 +234,20 @@ impl<'a> DisplayHir<'a> {
 impl Display for DisplayHir<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         writeln!(f, "==== Constants ====")?;
-        for (const_id, _) in self.hir.consts.enumerate_idx() {
+        for const_id in self.hir.consts.iter_idx() {
             self.fmt_const(f, const_id)?;
         }
 
         if !self.hir.fns.is_empty() {
             writeln!(f, "\n==== Functions ====")?;
-            for (fn_def_id, _) in self.hir.fns.enumerate_idx() {
+            for fn_def_id in self.hir.fns.iter_idx() {
                 self.fmt_fn_def(f, fn_def_id)?;
             }
         }
 
         if !self.hir.struct_defs.is_empty() {
             writeln!(f, "\n==== Structs ====")?;
-            for (struct_def_id, _) in self.hir.struct_defs.enumerate_idx() {
+            for struct_def_id in self.hir.struct_defs.iter_idx() {
                 self.fmt_struct_def(f, struct_def_id)?;
             }
         }
