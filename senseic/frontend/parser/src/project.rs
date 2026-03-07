@@ -121,7 +121,8 @@ pub fn parse_project(
     diagnostics: &mut impl DiagnosticsContext,
     fs: &impl SourceFs,
 ) -> ParsedProject {
-    let entry_path = fs.canonicalize(entry_path).expect("failed to canonicalize entry path");
+    let entry_path =
+        fs.canonicalize(entry_path).expect("todo-diagnostic: failed to canonicalize entry path");
 
     let mut parser = ProjectParser {
         interner,
