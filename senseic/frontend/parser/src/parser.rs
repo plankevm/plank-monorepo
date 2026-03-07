@@ -833,7 +833,11 @@ where
                         break;
                     } else {
                         // Otherwise the `;` is missing.
-                        self.diagnostics.emit_missing_token(Token::Semicolon, self.last_src_span);
+                        self.diagnostics.emit_missing_token(
+                            self.source_id,
+                            Token::Semicolon,
+                            self.last_src_span,
+                        );
                         self.push_child(&mut statements_list, expr);
                     }
                 }
