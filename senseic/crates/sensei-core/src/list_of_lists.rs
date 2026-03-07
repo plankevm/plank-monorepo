@@ -85,6 +85,10 @@ impl<I: Idx, T> ListOfLists<I, T> {
         self.starts.len()
     }
 
+    pub fn total_values(&self) -> usize {
+        self.values.len()
+    }
+
     pub fn len_idx(&self) -> I {
         self.starts.len_idx()
     }

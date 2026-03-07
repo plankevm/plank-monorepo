@@ -1,104 +1,126 @@
 use crate::{
     StrId,
-    ast::{File, ImportKind, TopLevelDef},
+    ast::{ImportSuffix, TopLevelDef},
     cst::ConcreteSyntaxTree,
     diagnostics::DiagnosticsContext,
     interner::PlankInterner,
     lexer::Lexed,
-    module::ModuleResolver,
+    module::{ImportTarget, ModuleResolver},
     parser::parse,
     source::{SourceId, SourceManager},
 };
 use hashbrown::HashMap;
-use sensei_core::{IndexVec, list_of_lists::ListOfLists};
+use sensei_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
 use std::path::{Path, PathBuf};
 
+newtype_index! {
+    pub struct ImportIdx;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ImportKind {
+    Specific { selected_name: StrId, imported_as: StrId },
+    All,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct FileImport {
-    pub local_name: Option<StrId>,
+    pub kind: ImportKind,
     pub target_source: SourceId,
-    pub target_const: Option<StrId>,
+}
+
+#[derive(Debug)]
+pub struct Source {
+    pub path: PathBuf,
+    pub content: String,
+    pub cst: ConcreteSyntaxTree,
 }
 
 pub struct ParsedProject {
-    pub source_manager: SourceManager,
-    pub sources: IndexVec<SourceId, String>,
-    pub csts: IndexVec<SourceId, ConcreteSyntaxTree>,
+    pub sources: IndexVec<SourceId, Source>,
     pub imports: ListOfLists<SourceId, FileImport>,
-    pub entry: SourceId,
 }
 
 struct ProjectParser<'a, D: DiagnosticsContext> {
-    source_manager: SourceManager,
-    sources: IndexVec<SourceId, String>,
-    csts: IndexVec<SourceId, ConcreteSyntaxTree>,
-    file_imports: IndexVec<SourceId, Vec<FileImport>>,
-    path_to_source: HashMap<PathBuf, SourceId>,
-    segment_buf: Vec<StrId>,
-    resolve_buf: PathBuf,
-    import_buf: Vec<(PathBuf, Option<ImportKind>, Option<StrId>)>,
-    module_resolver: &'a ModuleResolver,
     interner: &'a mut PlankInterner,
     diagnostics: &'a mut D,
+
+    module_resolver: &'a ModuleResolver,
+
+    // Need `cst` borrowed for the duration of the loop, so we use `None` until we can set it.
+    sources: IndexVec<SourceId, (PathBuf, String, Option<ConcreteSyntaxTree>)>,
+    file_imports: ListOfLists<SourceId, Option<FileImport>>,
+    path_to_source: HashMap<PathBuf, SourceId>,
+
+    segment_buf: Vec<StrId>,
+    import_resolved_path: PathBuf,
 }
 
 impl<D: DiagnosticsContext> ProjectParser<'_, D> {
     fn parse_source(&mut self, path: PathBuf) -> SourceId {
-        let source = std::fs::read_to_string(&path).expect("failed to read source file");
+        let content = std::fs::read_to_string(&path).expect("failed to read source file");
         let source_id = self.sources.next_idx();
-        let cst = parse(&Lexed::lex(&source), self.interner, self.diagnostics, source_id);
-
+        let cst = parse(&Lexed::lex(&content), self.interner, self.diagnostics, source_id);
         self.path_to_source.insert(path.clone(), source_id);
 
-        let import_start = self.import_buf.len();
-        for def in File::new(cst.file_view()).expect("failed to init file from CST").iter_defs() {
-            let TopLevelDef::Import(import) = def else { continue };
+        assert_eq!(self.sources.push((path, content, None)), source_id);
+        let file = cst.as_file();
 
-            import.collect_path_segments(&mut self.segment_buf);
-            let resolved = self
-                .module_resolver
-                .resolve(&self.segment_buf, import.is_glob(), self.interner, &mut self.resolve_buf)
-                .expect("failed to resolve import");
-
-            let target_path =
-                self.resolve_buf.canonicalize().expect("failed to canonicalize import path");
-
-            self.import_buf.push((target_path, import.kind, resolved.const_name));
+        {
+            let alt_source_id = self.file_imports.push_with(|mut imports| {
+                for def in file.iter_defs() {
+                    if let TopLevelDef::Import(_) = def {
+                        imports.push(None);
+                    }
+                }
+            });
+            assert_eq!(source_id, alt_source_id);
         }
 
-        assert_eq!(self.source_manager.add_source(path), source_id);
-        assert_eq!(self.sources.push(source), source_id);
-        assert_eq!(self.csts.push(cst), source_id);
-        assert_eq!(self.file_imports.push(Vec::new()), source_id);
+        let imports = file.iter_defs().filter_map(|def| match def {
+            TopLevelDef::Import(import) => Some(import),
+            _ => None,
+        });
+        for (i, import) in imports.enumerate() {
+            self.segment_buf.clear();
+            import.collect_path_segments(&mut self.segment_buf);
+            let ImportTarget(import_target) = self
+                .module_resolver
+                .resolve(
+                    &self.segment_buf,
+                    import.is_glob(),
+                    self.interner,
+                    &mut self.import_resolved_path,
+                )
+                .expect("todo-diagnostic: failed to resolve import");
 
-        let mut file_imports = Vec::new();
-        for i in import_start..self.import_buf.len() {
-            // Take ownership to reuse the PathBuf; safe because this range is truncated below.
-            let (target_path, kind, const_name) = std::mem::take(&mut self.import_buf[i]);
+            let target_path = self
+                .import_resolved_path
+                .canonicalize()
+                .expect("todo-diagnostic: failed to canonicalize import path");
 
             let target_source = match self.path_to_source.get(&target_path) {
                 Some(&id) => id,
                 None => self.parse_source(target_path),
             };
-
-            file_imports.push(match kind {
-                Some(ImportKind::As(alias)) => {
-                    FileImport { local_name: Some(alias), target_source, target_const: const_name }
-                }
-                Some(ImportKind::All) => {
-                    FileImport { local_name: None, target_source, target_const: None }
-                }
+            let kind = match import.suffix {
                 None => {
-                    let const_name = const_name.expect("non-glob import has const name");
-                    FileImport {
-                        local_name: Some(const_name),
-                        target_source,
-                        target_const: Some(const_name),
-                    }
+                    let target = import_target.expect("not glob but no target");
+                    ImportKind::Specific { selected_name: target, imported_as: target }
                 }
-            });
+                Some(ImportSuffix::As(imported_as)) => {
+                    let target = import_target.expect("not glob but no target");
+                    ImportKind::Specific { selected_name: target, imported_as }
+                }
+                Some(ImportSuffix::All) => ImportKind::All,
+            };
+
+            let prev = self.file_imports[source_id][i].replace(FileImport { kind, target_source });
+            assert!(prev.is_none());
         }
-        self.import_buf.truncate(import_start);
-        self.file_imports[source_id] = file_imports;
+
+        let prev = self.sources[source_id].2.replace(cst);
+        assert!(prev.is_none());
 
         source_id
     }
@@ -113,32 +135,41 @@ pub fn parse_project(
     let entry_path = entry_path.canonicalize().expect("failed to canonicalize entry path");
 
     let mut parser = ProjectParser {
-        source_manager: SourceManager::default(),
-        sources: IndexVec::new(),
-        csts: IndexVec::new(),
-        file_imports: IndexVec::new(),
-        path_to_source: HashMap::new(),
-        segment_buf: Vec::new(),
-        resolve_buf: PathBuf::new(),
-        import_buf: Vec::new(),
-        module_resolver,
         interner,
         diagnostics,
+        module_resolver,
+        sources: IndexVec::new(),
+        file_imports: ListOfLists::new(),
+        path_to_source: HashMap::new(),
+
+        segment_buf: Vec::with_capacity(16),
+        import_resolved_path: PathBuf::with_capacity(256),
     };
 
     let entry = parser.parse_source(entry_path);
-    assert_eq!(entry, crate::source::ROOT_SOURCE);
-
-    let mut imports = ListOfLists::new();
-    for file_imports in parser.file_imports.raw {
-        imports.push_iter(file_imports.into_iter());
-    }
+    assert_eq!(entry, SourceId::ROOT);
 
     ParsedProject {
-        source_manager: parser.source_manager,
-        sources: parser.sources,
-        csts: parser.csts,
-        imports,
-        entry,
+        sources: parser
+            .sources
+            .raw
+            .into_iter()
+            .map(|(path, content, cst)| Source {
+                path,
+                content,
+                cst: cst.expect("not set in `parse_source`"),
+            })
+            .collect(),
+        imports: {
+            let mut imports = ListOfLists::with_capacities(
+                parser.file_imports.len(),
+                parser.file_imports.total_values(),
+            );
+            for file_imports in parser.file_imports.iter() {
+                imports
+                    .push_iter(file_imports.iter().map(|&i| i.expect("not set in `parse_source`")));
+            }
+            imports
+        },
     }
 }

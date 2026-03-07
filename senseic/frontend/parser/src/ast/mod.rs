@@ -83,7 +83,7 @@ impl<'cst> ConstDecl<'cst> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum ImportKind {
+pub enum ImportSuffix {
     As(StrId),
     All,
 }
@@ -91,7 +91,7 @@ pub enum ImportKind {
 #[derive(Debug, Clone, Copy)]
 pub struct Import<'cst> {
     path_node: NodeView<'cst>,
-    pub kind: Option<ImportKind>,
+    pub suffix: Option<ImportSuffix>,
     view: NodeView<'cst>,
 }
 
@@ -102,12 +102,12 @@ impl<'cst> Import<'cst> {
                 let mut children = view.children();
                 let path = children.next()?;
                 let as_name = children.next()?.kind().as_ident()?;
-                (path, Some(ImportKind::As(as_name)))
+                (path, Some(ImportSuffix::As(as_name)))
             }
-            NodeKind::ImportDecl { glob } => (view, glob.then_some(ImportKind::All)),
+            NodeKind::ImportDecl { glob } => (view, glob.then_some(ImportSuffix::All)),
             _ => return None,
         };
-        Some(Self { path_node, kind, view })
+        Some(Self { path_node, suffix: kind, view })
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -115,11 +115,10 @@ impl<'cst> Import<'cst> {
     }
 
     pub fn is_glob(&self) -> bool {
-        matches!(self.kind, Some(ImportKind::All))
+        matches!(self.suffix, Some(ImportSuffix::All))
     }
 
     pub fn collect_path_segments(&self, buf: &mut Vec<StrId>) {
-        buf.clear();
         for child in self.path_node.children() {
             if let Some(ident) = child.ident() {
                 buf.push(ident);

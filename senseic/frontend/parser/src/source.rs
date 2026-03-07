@@ -5,7 +5,9 @@ newtype_index! {
     pub struct SourceId;
 }
 
-pub const ROOT_SOURCE: SourceId = SourceId::ZERO;
+impl SourceId {
+    pub const ROOT: SourceId = SourceId::ZERO;
+}
 
 pub struct SourceInfo {
     pub path: PathBuf,

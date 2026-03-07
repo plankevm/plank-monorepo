@@ -11,9 +11,9 @@ pub mod project;
 pub mod source;
 
 pub use interner::{PlankInterner, StrId};
-pub use source::{ROOT_SOURCE, SourceId};
+pub use source::SourceId;
 
-pub const FILE_EXTENSION: &str = ".plk";
+pub const FILE_EXTENSION: &str = "plk";
 
 pub mod const_print;
 

@@ -4,7 +4,7 @@ use crate::{
 };
 
 fn source_file(name: &str) -> String {
-    format!("{name}{FILE_EXTENSION}")
+    format!("{name}.{FILE_EXTENSION}")
 }
 
 fn write_files(dir: &std::path::Path, files: &[(&str, &str)]) {

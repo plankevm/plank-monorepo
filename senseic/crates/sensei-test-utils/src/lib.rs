@@ -54,7 +54,7 @@ pub struct TestProject {
 
 impl TestProject {
     pub fn single(source: &str) -> Self {
-        let entry_name = format!("main{FILE_EXTENSION}");
+        let entry_name = format!("main.{FILE_EXTENSION}");
         Self { files: vec![(entry_name, dedent_preserve_indent(source))] }
     }
 

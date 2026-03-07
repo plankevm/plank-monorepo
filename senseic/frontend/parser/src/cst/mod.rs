@@ -1,4 +1,4 @@
-use crate::{StrId, const_print::const_assert_eq, lexer::TokenIdx};
+use crate::{StrId, ast::File, const_print::const_assert_eq, lexer::TokenIdx};
 use sensei_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 
 pub mod display;
@@ -239,6 +239,11 @@ impl<'cst> NodeView<'cst> {
 
 impl ConcreteSyntaxTree {
     pub const FILE_IDX: NodeIdx = NodeIdx::ZERO;
+
+    pub fn as_file(&self) -> File<'_> {
+        let view = NodeView::new(self, Self::FILE_IDX);
+        File::new(view).expect("invalid cst")
+    }
 
     pub fn file_view(&self) -> NodeView<'_> {
         NodeView::new(self, Self::FILE_IDX)
