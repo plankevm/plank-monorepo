@@ -1,12 +1,11 @@
 use hashbrown::HashMap;
 use sensei_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use sensei_parser::{
-    StrId,
+    SourceId, StrId,
     ast::{self, Statement, TopLevelDef},
-    cst::{ConcreteSyntaxTree, NodeIdx, NumLitId},
+    cst::{NodeIdx, NumLitId},
     lexer::TokenIdx,
-    project::{FileImport, ParsedProject},
-    source::SourceId,
+    project::{FileImport, ImportKind, ParsedProject, Source},
 };
 
 pub use sensei_values;
@@ -541,7 +540,7 @@ impl<'a> BlockLowerer<'a> {
 }
 
 pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
-    let (mut consts, source_consts) = register_consts(&project.csts);
+    let (mut consts, source_consts) = register_consts(&project.sources);
 
     let mut builder = HirBuilder::new();
     let mut init = None;
@@ -549,7 +548,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
 
     let mut lowerer = BlockLowerer {
         consts: HashMap::new(),
-        num_lit_limbs: &project.csts[project.entry].num_lit_limbs,
+        num_lit_limbs: &project.sources[SourceId::ROOT].cst.num_lit_limbs,
 
         big_nums,
         builder: &mut builder,
@@ -564,11 +563,11 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
         captures_buf: Vec::new(),
     };
 
-    for (source_id, cst) in project.csts.enumerate_idx() {
+    for (source_id, source) in project.sources.enumerate_idx() {
         build_file_scope(source_id, &source_consts, &project.imports, &mut lowerer.consts);
-        lowerer.num_lit_limbs = &cst.num_lit_limbs;
+        lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
 
-        let file = ast::File::new(cst.file_view()).expect("failed to init file from CST");
+        let file = source.cst.as_file();
         for def in file.iter_defs() {
             lowerer.reset();
             match def {
@@ -592,7 +591,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
                     });
                 }
                 TopLevelDef::Init(init_def) => {
-                    if source_id != project.entry {
+                    if source_id != SourceId::ROOT {
                         todo!("diagnostic: init only allowed in entry file");
                     }
                     if init.is_some() {
@@ -601,7 +600,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
                     init = Some(lowerer.lower_body_to_block(init_def.body()));
                 }
                 TopLevelDef::Run(run_def) => {
-                    if source_id != project.entry {
+                    if source_id != SourceId::ROOT {
                         todo!("diagnostic: run only allowed in entry file");
                     }
                     if run.is_some() {
@@ -632,14 +631,14 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
 }
 
 fn register_consts(
-    csts: &IndexVec<SourceId, ConcreteSyntaxTree>,
+    sources: &IndexVec<SourceId, Source>,
 ) -> (IndexVec<ConstId, ConstDef>, ListOfLists<SourceId, (StrId, ConstId)>) {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
     let mut source_consts: ListOfLists<SourceId, (StrId, ConstId)> = ListOfLists::new();
 
     let mut seen = HashMap::new();
-    for cst in csts.iter() {
-        let file = ast::File::new(cst.file_view()).expect("failed to init file from CST");
+    for source in sources.iter() {
+        let file = source.cst.as_file();
         seen.clear();
         source_consts.push_with(|mut list| {
             for def in file.iter_defs() {
@@ -672,18 +671,17 @@ fn build_file_scope(
         scope.insert(name, const_id);
     }
     for import in &imports[source_id] {
-        match import.target_const {
-            Some(const_name) => {
+        match import.kind {
+            ImportKind::Specific { selected_name, imported_as } => {
                 let const_id = source_consts[import.target_source]
                     .iter()
-                    .find_map(|&(name, const_id)| (name == const_name).then_some(const_id))
+                    .find_map(|&(name, const_id)| (name == selected_name).then_some(const_id))
                     .expect("imported const not found");
-                let local_name = import.local_name.expect("named import has local_name");
-                if scope.insert(local_name, const_id).is_some() {
+                if scope.insert(imported_as, const_id).is_some() {
                     todo!("diagnostic: name collision on import");
                 }
             }
-            None => {
+            ImportKind::All => {
                 for &(name, const_id) in &source_consts[import.target_source] {
                     if scope.insert(name, const_id).is_some() {
                         todo!("diagnostic: name collision on glob import");

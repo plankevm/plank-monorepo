@@ -1,11 +1,10 @@
 use crate::{
-    StrId,
+    SourceId, StrId,
     cst::{self, *},
     diagnostics::DiagnosticsContext,
     interner::PlankInterner,
     lexer::*,
     parser::token_item_iter::TokenItems,
-    source::SourceId,
 };
 use allocator_api2::vec::Vec;
 use sensei_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};

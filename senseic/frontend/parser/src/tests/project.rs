@@ -1,6 +1,6 @@
 use crate::{
     FILE_EXTENSION, error_report::ErrorCollector, interner::PlankInterner, module::ModuleResolver,
-    project::parse_project,
+    project::parse_project, source_fs::RealFs,
 };
 
 fn source_file(name: &str) -> String {
@@ -37,12 +37,17 @@ fn source_content_matches_source_manager_path() {
         &modules,
         &mut interner,
         &mut collector,
+        &RealFs,
     );
     assert!(collector.errors.is_empty(), "parse errors: {:?}", collector.errors);
 
-    for (id, content) in project.sources.enumerate_idx() {
-        let path = &project.source_manager[id].path;
-        let expected = std::fs::read_to_string(path).unwrap();
-        assert_eq!(content, &expected, "sources[{id:?}] does not match {}", path.display());
+    for (id, source) in project.sources.enumerate_idx() {
+        let expected = std::fs::read_to_string(&source.path).unwrap();
+        assert_eq!(
+            source.content,
+            expected,
+            "sources[{id:?}] does not match {}",
+            source.path.display()
+        );
     }
 }

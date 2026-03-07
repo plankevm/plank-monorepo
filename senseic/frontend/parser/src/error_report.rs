@@ -1,7 +1,7 @@
 use crate::{
+    SourceId,
     diagnostics::DiagnosticsContext,
     lexer::{SourceByteOffset, SourceSpan, Token, TokenIdx},
-    source::SourceId,
 };
 use sensei_core::Idx;
 

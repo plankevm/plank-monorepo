@@ -7,14 +7,19 @@ use crate::{
     lexer::Lexed,
     module::{ImportTarget, ModuleResolver},
     parser::parse,
-    source::{SourceId, SourceManager},
+    source_fs::SourceFs,
 };
 use hashbrown::HashMap;
-use sensei_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use sensei_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use std::path::{Path, PathBuf};
 
 newtype_index! {
     pub struct ImportIdx;
+    pub struct SourceId;
+}
+
+impl SourceId {
+    pub const ROOT: SourceId = SourceId::ZERO;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -41,9 +46,10 @@ pub struct ParsedProject {
     pub imports: ListOfLists<SourceId, FileImport>,
 }
 
-struct ProjectParser<'a, D: DiagnosticsContext> {
+struct ProjectParser<'a, D: DiagnosticsContext, F: SourceFs> {
     interner: &'a mut PlankInterner,
     diagnostics: &'a mut D,
+    fs: &'a F,
 
     module_resolver: &'a ModuleResolver,
 
@@ -56,9 +62,9 @@ struct ProjectParser<'a, D: DiagnosticsContext> {
     import_resolved_path: PathBuf,
 }
 
-impl<D: DiagnosticsContext> ProjectParser<'_, D> {
+impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
     fn parse_source(&mut self, path: PathBuf) -> SourceId {
-        let content = std::fs::read_to_string(&path).expect("failed to read source file");
+        let content = self.fs.read_to_string(&path).expect("failed to read source file");
         let source_id = self.sources.next_idx();
         let cst = parse(&Lexed::lex(&content), self.interner, self.diagnostics, source_id);
         self.path_to_source.insert(path.clone(), source_id);
@@ -95,8 +101,8 @@ impl<D: DiagnosticsContext> ProjectParser<'_, D> {
                 .expect("todo-diagnostic: failed to resolve import");
 
             let target_path = self
-                .import_resolved_path
-                .canonicalize()
+                .fs
+                .canonicalize(&self.import_resolved_path)
                 .expect("todo-diagnostic: failed to canonicalize import path");
 
             let target_source = match self.path_to_source.get(&target_path) {
@@ -131,12 +137,14 @@ pub fn parse_project(
     module_resolver: &ModuleResolver,
     interner: &mut PlankInterner,
     diagnostics: &mut impl DiagnosticsContext,
+    fs: &impl SourceFs,
 ) -> ParsedProject {
-    let entry_path = entry_path.canonicalize().expect("failed to canonicalize entry path");
+    let entry_path = fs.canonicalize(entry_path).expect("failed to canonicalize entry path");
 
     let mut parser = ProjectParser {
         interner,
         diagnostics,
+        fs,
         module_resolver,
         sources: IndexVec::new(),
         file_imports: ListOfLists::new(),

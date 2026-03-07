@@ -8,10 +8,10 @@ pub mod lexer;
 pub mod module;
 pub mod parser;
 pub mod project;
-pub mod source;
+pub mod source_fs;
 
 pub use interner::{PlankInterner, StrId};
-pub use source::SourceId;
+pub use project::SourceId;
 
 pub const FILE_EXTENSION: &str = "plk";
 

@@ -1,6 +1,6 @@
 use crate::{
+    SourceId,
     lexer::{SourceSpan, Token, TokenIdx},
-    source::SourceId,
 };
 
 pub trait DiagnosticsContext {

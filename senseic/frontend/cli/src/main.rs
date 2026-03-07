@@ -2,12 +2,14 @@ use clap::Parser;
 use sensei_hir::{BigNumInterner, display::DisplayHir, lower};
 use sensei_mir::display::DisplayMir;
 use sensei_parser::{
+    SourceId,
     cst::display::DisplayCST,
     error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
     lexer::Lexed,
     module::ModuleResolver,
     project::parse_project,
+    source_fs::RealFs,
 };
 use sir_optimizations::{Optimizer, parse_passes_string};
 use std::path::{Path, PathBuf};
@@ -78,22 +80,27 @@ fn main() {
     }
 
     let mut collector = ErrorCollector::default();
-    let project =
-        parse_project(Path::new(&args.file_path), &module_resolver, &mut interner, &mut collector);
+    let project = parse_project(
+        Path::new(&args.file_path),
+        &module_resolver,
+        &mut interner,
+        &mut collector,
+        &RealFs,
+    );
 
     if args.show_cst {
-        let source = &project.sources[project.entry];
-        let lexed = Lexed::lex(source);
-        let display = DisplayCST::new(&project.csts[project.entry], source, &lexed)
-            .show_line(args.show_lines);
+        let entry = &project.sources[SourceId::ROOT];
+        let lexed = Lexed::lex(&entry.content);
+        let display =
+            DisplayCST::new(&entry.cst, &entry.content, &lexed).show_line(args.show_lines);
         println!("{}", display);
     }
 
     if !collector.errors.is_empty() {
         for (source_id, error) in &collector.errors {
             let source = &project.sources[*source_id];
-            let line_index = LineIndex::new(source);
-            eprintln!("{}\n", format_error(error, source, &line_index));
+            let line_index = LineIndex::new(&source.content);
+            eprintln!("{}\n", format_error(error, &source.content, &line_index));
         }
         std::process::exit(1);
     }

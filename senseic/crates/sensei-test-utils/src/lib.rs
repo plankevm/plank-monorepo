@@ -1,11 +1,9 @@
-use sensei_core::{IndexVec, list_of_lists::ListOfLists};
 use sensei_parser::{
     FILE_EXTENSION, PlankInterner,
     error_report::ErrorCollector,
-    lexer::Lexed,
-    parser::parse,
-    project::{FileImport, ParsedProject},
-    source::{ROOT_SOURCE, SourceId, SourceManager},
+    module::ModuleResolver,
+    project::{ParsedProject, parse_project},
+    source_fs::InMemoryFs,
 };
 use std::path::PathBuf;
 
@@ -49,47 +47,28 @@ pub fn dedent(s: &str) -> String {
 
 /// Builder for creating in-memory test projects without file system access.
 pub struct TestProject {
-    files: Vec<(String, String)>,
+    entry_path: PathBuf,
+    fs: InMemoryFs,
 }
 
 impl TestProject {
     pub fn single(source: &str) -> Self {
         let entry_name = format!("main.{FILE_EXTENSION}");
-        Self { files: vec![(entry_name, dedent_preserve_indent(source))] }
+        let mut fs = InMemoryFs::new();
+        fs.add_file(&entry_name, dedent_preserve_indent(source));
+        Self { entry_path: PathBuf::from(entry_name), fs }
     }
 
     pub fn build(self, interner: &mut PlankInterner) -> Result<ParsedProject, ErrorCollector> {
-        let mut files = self.files.into_iter();
-        let (entry_name, entry_content) =
-            files.next().expect("test project must have at least one file");
-        let mut source_manager = SourceManager::new(PathBuf::from(entry_name));
-        let mut sources: IndexVec<SourceId, String> = IndexVec::new();
-        let mut csts: IndexVec<SourceId, _> = IndexVec::new();
-        let mut imports: ListOfLists<SourceId, FileImport> = ListOfLists::new();
+        let module_resolver = ModuleResolver::default();
         let mut collector = ErrorCollector::default();
 
-        let lexed = Lexed::lex(&entry_content);
-
-        let cst = parse(&lexed, interner, &mut collector, ROOT_SOURCE);
-        imports.push_iter(std::iter::empty());
-        sources.push(entry_content);
-        csts.push(cst);
-
-        for (filename, content) in files {
-            let source_id = source_manager.add_source(PathBuf::from(filename));
-            let lexed = Lexed::lex(&content);
-
-            let cst = parse(&lexed, interner, &mut collector, source_id);
-            imports.push_iter(std::iter::empty());
-
-            sources.push(content);
-            csts.push(cst);
-        }
+        let project =
+            parse_project(&self.entry_path, &module_resolver, interner, &mut collector, &self.fs);
 
         if !collector.errors.is_empty() {
             return Err(collector);
         }
-
-        Ok(ParsedProject { source_manager, sources, csts, imports, entry: ROOT_SOURCE })
+        Ok(project)
     }
 }

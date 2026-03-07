@@ -1,5 +1,5 @@
 use crate::{
-    ROOT_SOURCE,
+    SourceId,
     cst::display::DisplayCST,
     error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
@@ -18,7 +18,7 @@ fn parse_single_source(
 ) -> (ErrorCollector, crate::cst::ConcreteSyntaxTree) {
     let lexed = Lexed::lex(source);
     let mut collector = ErrorCollector::default();
-    let cst = parse(&lexed, interner, &mut collector, ROOT_SOURCE);
+    let cst = parse(&lexed, interner, &mut collector, SourceId::ROOT);
     (collector, cst)
 }
 

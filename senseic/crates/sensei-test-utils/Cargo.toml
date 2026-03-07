@@ -8,5 +8,4 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-sensei-core.workspace = true
 sensei-parser.workspace = true
