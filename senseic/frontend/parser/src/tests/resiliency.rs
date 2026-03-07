@@ -92,17 +92,17 @@ fn test_unexpected_token_at_top_level() {
 }
 
 #[test]
-fn test_unexpcted_token_post_const_decl() {
+fn test_unexpected_token_post_const_decl() {
     assert_parser_errors(
         r#"
             const name run {}
         "#,
         &[r#"
-            error: unexpected `run`, expected one of `:`, `=`
-              --> line 1:12
+            error: missing `=`, expected one of `:`, `=`
+              --> line 1:11
                |
               1| const name run {}
-               |            ^^^
+               |           ^
         "#],
     );
 }
@@ -307,13 +307,34 @@ fn test_paren_expr_empty() {
 #[test]
 fn test_missing_semicolon_after_fn_const() {
     assert_parser_errors(
-        "const to_addr = fn (raw: u256) u256 { raw }\ninit { }",
+        "
+        const to_addr = fn (raw: u256) u256 { raw }
+        init { }
+        ",
         &["
-            error: unexpected `init`, expected `;`
-              --> line 2:1
+            error: missing `;`
+              --> line 1:44
                |
-              2| init { }
-               | ^^^^
+              1| const to_addr = fn (raw: u256) u256 { raw }
+               |                                            ^
+        "],
+    );
+}
+
+#[test]
+fn test_missing_semicolon_unexpected_garbage() {
+    assert_parser_errors(
+        "
+        const to_addr = {}
+        bob
+        init { }
+        ",
+        &["
+        error: unexpected identifier, expected `;`
+          --> line 2:1
+           |
+          2| bob
+           | ^^^
         "],
     );
 }

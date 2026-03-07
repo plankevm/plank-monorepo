@@ -19,7 +19,15 @@ pub trait DiagnosticsContext {
         expected: &[Token],
         src_span: SourceSpan,
     );
-    fn emit_missing_token(&mut self, source_id: SourceId, expected: Token, at_span: SourceSpan);
+
+    fn emit_missing_token(
+        &mut self,
+        source_id: SourceId,
+        expected_main: Token,
+        at_span: SourceSpan,
+        expected: &[Token],
+    );
+
     fn emit_unclosed_delimiter(
         &mut self,
         source_id: SourceId,

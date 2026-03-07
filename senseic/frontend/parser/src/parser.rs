@@ -9,6 +9,8 @@ use crate::{
 use allocator_api2::vec::Vec;
 use sensei_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
 
+const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Import];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct OpPriority(u8);
 
@@ -67,6 +69,10 @@ mod token_item_iter {
 
         pub(super) fn lexed(&self) -> &'a Lexed<'a> {
             self.lexed
+        }
+
+        pub(super) fn get_prev(&self) -> Option<(Token, SourceSpan)> {
+            (self.current > TokenIdx::ZERO).then(|| self.lexed.get(self.current - 1))
         }
 
         pub(super) fn current(&self) -> TokenIdx {
@@ -183,7 +189,7 @@ where
     }
 
     fn emit_unexpected(&mut self) {
-        if self.last_unexpected.is_some_and(|ti| ti == self.tokens.current()) {
+        if self.at_last_unexpected() {
             return;
         }
         let (found, span) = self.tokens.peek();
@@ -243,6 +249,36 @@ where
             }
         }
         self.expect(terminator);
+    }
+
+    fn at_last_unexpected(&self) -> bool {
+        self.last_unexpected.is_some_and(|ti| ti == self.tokens.current())
+    }
+
+    fn expect_check_recovery(&mut self, expected: Token, recovery_tokens: &[Token]) -> bool {
+        if self.eat(expected) {
+            return true;
+        }
+
+        if self.at_last_unexpected() {
+            return false;
+        }
+        let (next, _) = self.tokens.peek();
+        if recovery_tokens.contains(&next)
+            && let Some((_, prev_span)) = self.tokens.get_prev()
+        {
+            self.diagnostics.emit_missing_token(
+                self.source_id,
+                expected,
+                prev_span,
+                &self.expected,
+            );
+            self.last_unexpected = Some(self.tokens.current());
+            self.expected.clear();
+        } else {
+            self.emit_unexpected();
+        }
+        false
     }
 
     fn expect(&mut self, token: Token) -> bool {
@@ -842,6 +878,7 @@ where
                             self.source_id,
                             Token::Semicolon,
                             self.last_src_span,
+                            &[Token::Semicolon],
                         );
                         self.push_child(&mut statements_list, expr);
                     }
@@ -938,12 +975,12 @@ where
         }
 
         // = value
-        self.expect(Token::Equals);
+        self.expect_check_recovery(Token::Equals, CONST_DEF_EXPR_RECOVERY);
 
         let expr = self.parse_expr(ParseExprMode::AllowAll);
         self.push_child(&mut r#const, expr);
 
-        self.expect(Token::Semicolon);
+        self.expect_check_recovery(Token::Semicolon, CONST_DEF_EXPR_RECOVERY);
 
         self.close_node(r#const)
     }

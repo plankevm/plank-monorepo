@@ -9,7 +9,7 @@ use sensei_core::Idx;
 pub enum ParserError {
     LexerError { token: Token, span: SourceSpan },
     UnexpectedToken { found: Token, expected: Vec<Token>, span: SourceSpan },
-    MissingToken { expected: Token, at_span: SourceSpan },
+    MissingToken { expected_main: Token, expected: Vec<Token>, at_span: SourceSpan },
     UnclosedDelimiter { opener: Token, open_span: SourceSpan, found_span: SourceSpan },
 }
 
@@ -42,8 +42,17 @@ impl DiagnosticsContext for ErrorCollector {
         ));
     }
 
-    fn emit_missing_token(&mut self, source_id: SourceId, expected: Token, at_span: SourceSpan) {
-        self.errors.push((source_id, ParserError::MissingToken { expected, at_span }));
+    fn emit_missing_token(
+        &mut self,
+        source_id: SourceId,
+        expected_main: Token,
+        at_span: SourceSpan,
+        expected: &[Token],
+    ) {
+        self.errors.push((
+            source_id,
+            ParserError::MissingToken { expected_main, expected: expected.to_vec(), at_span },
+        ));
     }
 
     fn emit_unclosed_delimiter(
@@ -113,8 +122,8 @@ pub fn format_error(error: &ParserError, source: &str, line_index: &LineIndex) -
         ParserError::UnexpectedToken { found, expected, span } => {
             format_unexpected_token(*found, expected, *span, source, line_index)
         }
-        ParserError::MissingToken { expected, at_span } => {
-            format_missing_token(*expected, *at_span, source, line_index)
+        ParserError::MissingToken { expected_main, expected, at_span } => {
+            format_missing_token(*expected_main, expected, *at_span, source, line_index)
         }
         ParserError::UnclosedDelimiter { opener, open_span, found_span } => {
             format_unclosed_delimiter(*opener, *open_span, *found_span, source, line_index)
@@ -151,6 +160,17 @@ fn format_lexer_error(
     )
 }
 
+fn expected_list_to_string(tokens: &[Token]) -> String {
+    match tokens {
+        &[] => "nothing".to_string(),
+        &[token] => token.name().to_string(),
+        expected => {
+            let names: Vec<_> = expected.iter().map(|t| t.name()).collect();
+            format!("one of {}", names.join(", "))
+        }
+    }
+}
+
 fn format_unexpected_token(
     found: Token,
     expected: &[Token],
@@ -162,19 +182,10 @@ fn format_unexpected_token(
     let (_, col_end) = line_index.line_col(span.end);
     let line_text = line_index.line_text(source, line);
 
-    let expected_str = match expected.len() {
-        0 => "nothing".to_string(),
-        1 => expected[0].name().to_string(),
-        _ => {
-            let names: Vec<_> = expected.iter().map(|t| t.name()).collect();
-            format!("one of {}", names.join(", "))
-        }
-    };
-
     format!(
         "error: unexpected {}, expected {}\n  --> line {}:{}\n   |\n{:>3}| {}\n   | {}",
         found,
-        expected_str,
+        expected_list_to_string(expected),
         line,
         col_start,
         line,
@@ -184,7 +195,8 @@ fn format_unexpected_token(
 }
 
 fn format_missing_token(
-    expected: Token,
+    expected_main: Token,
+    expected: &[Token],
     at_span: SourceSpan,
     source: &str,
     line_index: &LineIndex,
@@ -193,8 +205,14 @@ fn format_missing_token(
     let line_text = line_index.line_text(source, line);
 
     format!(
-        "error: missing {}\n  --> line {}:{}\n   |\n{:>3}| {}\n   | {}",
-        expected,
+        "error: missing {}{}\n  --> line {}:{}\n   |\n{:>3}| {}\n   | {}",
+        expected_main,
+        if let &[single] = expected {
+            assert!(single == expected_main);
+            "".to_string()
+        } else {
+            format!(", expected {}", expected_list_to_string(expected))
+        },
         line,
         col,
         line,
