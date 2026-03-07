@@ -67,16 +67,18 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
         assert_eq!(self.sources.push((path, content, None)), source_id);
         let file = cst.as_file();
 
-        {
-            let alt_source_id = self.file_imports.push_with(|mut imports| {
+        assert_eq!(
+            source_id,
+            // Reserve space for imports up front and access later via indices to avoid borrow
+            // conflicts and have imports nicely ordered in memory.
+            self.file_imports.push_with(|mut imports| {
                 for def in file.iter_defs() {
                     if let TopLevelDef::Import(_) = def {
                         imports.push(None);
                     }
                 }
-            });
-            assert_eq!(source_id, alt_source_id);
-        }
+            })
+        );
 
         let imports = file.iter_defs().filter_map(|def| match def {
             TopLevelDef::Import(import) => Some(import),
