@@ -90,17 +90,12 @@ impl LocalState {
     }
 
     fn set_mir_type(&mut self, mir_local: mir::LocalId, ty: TypeId) -> Result<(), TypeId> {
-        let prev = self.mir_type[mir_local].replace(ty);
-        match prev {
-            None => Ok(()),
-            Some(prev_ty) if prev_ty == ty => Ok(()),
-            Some(TypeId::NEVER) => Ok(()),
-            Some(_) if ty == TypeId::NEVER => {
-                self.mir_type[mir_local] = prev;
-                Ok(())
-            }
-            Some(prev_ty) => Err(prev_ty),
+        match (self.mir_type[mir_local], ty) {
+            (None | Some(TypeId::NEVER), ty) => self.mir_type[mir_local] = Some(ty),
+            (Some(prev), ty) if ty.is_assignable_to(prev) => { /* leave as is */ }
+            (Some(prev), _) => return Err(prev),
         }
+        Ok(())
     }
 
     fn get_mir(&self, hir_local: hir::LocalId) -> Option<mir::LocalId> {
