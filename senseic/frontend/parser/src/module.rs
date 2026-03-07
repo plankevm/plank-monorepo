@@ -45,14 +45,15 @@ impl ModuleResolver {
             return Err(ModuleResolveError::UnknownModule(module_name));
         };
 
-        let kind = if let ImportSuffix::As(alias) = import.suffix {
-            let Some((&last, rest)) = import_path_segments.split_last() else {
-                return Err(ModuleResolveError::NotEnoughSegments);
-            };
-            import_path_segments = rest;
-            ImportKind::Specific { selected_name: last, imported_as: alias.unwrap_or(last) }
-        } else {
-            ImportKind::All
+        let kind = match import.suffix {
+            ImportSuffix::As(alias) => {
+                let Some((&last, rest)) = import_path_segments.split_last() else {
+                    return Err(ModuleResolveError::NotEnoughSegments);
+                };
+                import_path_segments = rest;
+                ImportKind::Specific { selected_name: last, imported_as: alias.unwrap_or(last) }
+            }
+            ImportSuffix::All => ImportKind::All,
         };
 
         import_file_path.clone_from(module_root);
