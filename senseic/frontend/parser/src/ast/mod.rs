@@ -82,40 +82,37 @@ impl<'cst> ConstDecl<'cst> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportSuffix {
-    As(StrId),
+    As(Option<StrId>),
     All,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Import<'cst> {
     path_node: NodeView<'cst>,
-    pub suffix: Option<ImportSuffix>,
+    pub suffix: ImportSuffix,
     view: NodeView<'cst>,
 }
 
 impl<'cst> Import<'cst> {
     fn new(view: NodeView<'cst>) -> Option<Self> {
-        let (path_node, kind) = match view.kind() {
+        let (path_node, suffix) = match view.kind() {
             NodeKind::ImportAsDecl => {
                 let mut children = view.children();
                 let path = children.next()?;
                 let as_name = children.next()?.kind().as_ident()?;
-                (path, Some(ImportSuffix::As(as_name)))
+                (path, ImportSuffix::As(Some(as_name)))
             }
-            NodeKind::ImportDecl { glob } => (view, glob.then_some(ImportSuffix::All)),
+            NodeKind::ImportDecl { glob: false } => (view, ImportSuffix::As(None)),
+            NodeKind::ImportDecl { glob: true } => (view, ImportSuffix::All),
             _ => return None,
         };
-        Some(Self { path_node, suffix: kind, view })
+        Some(Self { path_node, suffix, view })
     }
 
     pub fn node(&self) -> NodeView<'cst> {
         self.view
-    }
-
-    pub fn is_glob(&self) -> bool {
-        matches!(self.suffix, Some(ImportSuffix::All))
     }
 
     pub fn collect_path_segments(&self, buf: &mut Vec<StrId>) {

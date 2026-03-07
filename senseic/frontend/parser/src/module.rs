@@ -1,4 +1,9 @@
-use crate::{FILE_EXTENSION, StrId, interner::PlankInterner};
+use crate::{
+    FILE_EXTENSION, StrId,
+    ast::{Import, ImportSuffix},
+    interner::PlankInterner,
+    project::ImportKind,
+};
 use hashbrown::HashMap;
 use std::path::PathBuf;
 
@@ -6,8 +11,6 @@ use std::path::PathBuf;
 pub struct ModuleResolver {
     modules: HashMap<StrId, PathBuf>,
 }
-
-pub struct ImportTarget(pub Option<StrId>);
 
 #[derive(Debug)]
 pub enum ModuleResolveError {
@@ -31,10 +34,10 @@ impl ModuleResolver {
     pub fn resolve(
         &self,
         segments: &[StrId],
-        is_glob: bool,
+        import: Import<'_>,
         interner: &PlankInterner,
         import_file_path: &mut PathBuf,
-    ) -> Result<ImportTarget, ModuleResolveError> {
+    ) -> Result<ImportKind, ModuleResolveError> {
         let Some((&module_name, mut import_path_segments)) = segments.split_first() else {
             return Err(ModuleResolveError::NotEnoughSegments);
         };
@@ -42,14 +45,15 @@ impl ModuleResolver {
             return Err(ModuleResolveError::UnknownModule(module_name));
         };
 
-        let mut import_target_name = None;
-        if !is_glob {
+        let kind = if let ImportSuffix::As(alias) = import.suffix {
             let Some((&last, rest)) = import_path_segments.split_last() else {
                 return Err(ModuleResolveError::NotEnoughSegments);
             };
-            import_target_name = Some(last);
             import_path_segments = rest;
-        }
+            ImportKind::Specific { selected_name: last, imported_as: alias.unwrap_or(last) }
+        } else {
+            ImportKind::All
+        };
 
         import_file_path.clone_from(module_root);
         for &seg in import_path_segments {
@@ -57,6 +61,6 @@ impl ModuleResolver {
         }
         import_file_path.set_extension(FILE_EXTENSION);
 
-        Ok(ImportTarget(import_target_name))
+        Ok(kind)
     }
 }

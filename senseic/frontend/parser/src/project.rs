@@ -1,12 +1,6 @@
 use crate::{
-    StrId,
-    ast::{ImportSuffix, TopLevelDef},
-    cst::ConcreteSyntaxTree,
-    diagnostics::DiagnosticsContext,
-    interner::PlankInterner,
-    lexer::Lexed,
-    module::{ImportTarget, ModuleResolver},
-    parser::parse,
+    StrId, ast::TopLevelDef, cst::ConcreteSyntaxTree, diagnostics::DiagnosticsContext,
+    interner::PlankInterner, lexer::Lexed, module::ModuleResolver, parser::parse,
     source_fs::SourceFs,
 };
 use hashbrown::HashMap;
@@ -91,14 +85,9 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
         for (i, import) in imports.enumerate() {
             self.segment_buf.clear();
             import.collect_path_segments(&mut self.segment_buf);
-            let ImportTarget(import_target) = self
+            let import_kind = self
                 .module_resolver
-                .resolve(
-                    &self.segment_buf,
-                    import.is_glob(),
-                    self.interner,
-                    &mut self.import_resolved_path,
-                )
+                .resolve(&self.segment_buf, import, self.interner, &mut self.import_resolved_path)
                 .expect("todo-diagnostic: failed to resolve import");
 
             let target_path = self
@@ -110,19 +99,9 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
                 Some(&id) => id,
                 None => self.parse_source(target_path),
             };
-            let kind = match import.suffix {
-                None => {
-                    let target = import_target.expect("not glob but no target");
-                    ImportKind::Specific { selected_name: target, imported_as: target }
-                }
-                Some(ImportSuffix::As(imported_as)) => {
-                    let target = import_target.expect("not glob but no target");
-                    ImportKind::Specific { selected_name: target, imported_as }
-                }
-                Some(ImportSuffix::All) => ImportKind::All,
-            };
 
-            let prev = self.file_imports[source_id][i].replace(FileImport { kind, target_source });
+            let prev = self.file_imports[source_id][i]
+                .replace(FileImport { kind: import_kind, target_source });
             assert!(prev.is_none());
         }
 
