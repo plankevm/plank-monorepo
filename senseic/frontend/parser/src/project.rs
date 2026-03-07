@@ -67,7 +67,8 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
         let content = self.fs.read_to_string(&path).expect("failed to read source file");
         let source_id = self.sources.next_idx();
         let cst = parse(&Lexed::lex(&content), self.interner, self.diagnostics, source_id);
-        self.path_to_source.insert(path.clone(), source_id);
+        let prev = self.path_to_source.insert(path.clone(), source_id);
+        assert!(prev.is_none());
 
         assert_eq!(self.sources.push((path, content, None)), source_id);
         let file = cst.as_file();
