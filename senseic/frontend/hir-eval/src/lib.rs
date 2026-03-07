@@ -8,6 +8,7 @@ use comptime::ComptimeInterpreter;
 
 mod comptime;
 mod lower;
+mod old_lower;
 mod value;
 
 #[cfg(test)]
@@ -72,8 +73,8 @@ pub fn evaluate(hir: &Hir) -> Mir {
         eval.ensure_const_evaluated(const_id);
     }
 
-    let init = lower::lower_block_as_fn(&mut eval, hir.init);
-    let run = hir.run.map(|block| lower::lower_block_as_fn(&mut eval, block));
+    let init = lower::lower_entry_point_as_fn(&mut eval, hir.init);
+    let run = hir.run.map(|block| lower::lower_entry_point_as_fn(&mut eval, block));
 
     Mir {
         blocks: eval.mir_blocks,
