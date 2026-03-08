@@ -30,16 +30,32 @@ struct LocalState {
 }
 
 impl LocalState {
+    fn alloc_anonymous_mir(&mut self, ty: TypeId) -> mir::LocalId {
+        self.mir_type.push(Some(ty))
+    }
+
+    fn comptime(&self, hir: hir::LocalId) -> Option<ValueId> {
+        self.comptime.get(hir).copied()
+    }
+
     fn mir_type(&self, mir: mir::LocalId) -> TypeId {
         self.mir_type[mir].expect("mapped mir local without type")
     }
 
-    fn set_hir_to_mir(
-        &mut self,
-        hir: hir::LocalId,
-        ty: TypeId,
-        comptime: Option<ValueId>,
-    ) -> mir::LocalId {
+    fn alloc_unset(&mut self, hir: hir::LocalId) {
+        let mir = self.mir_type.push(None);
+        let prev = self.hir_to_mir.insert(hir, mir);
+        assert!(prev.is_none());
+    }
+
+    fn define(&mut self, hir: hir::LocalId, ty: TypeId) {
+        let mir = self.mir_type.push(Some(ty));
+        let prev = self.hir_to_mir.insert(hir, mir);
+        assert!(prev.is_none());
+    }
+
+    /// Process local set, allows type unification for sets in different branches..
+    fn set(&mut self, hir: hir::LocalId, ty: TypeId, comptime: Option<ValueId>) -> mir::LocalId {
         if let Some(&mir_local) = self.hir_to_mir.get(hir) {
             // Not first set, value not guaranteed to be comptime known.
             self.comptime.remove(hir);
@@ -48,7 +64,7 @@ impl LocalState {
                 // Value was set to `never` in another branch, save more concrete type.
                 self.mir_type[mir_local] = Some(ty);
             } else if !ty.is_assignable_to(existing_ty) {
-                todo!("diagnostic: set type mismatch");
+                todo!("diagnostic: type mismatch on set");
             } else {
                 // `existing_ty` is not `never` and is compatible with `ty`, do nothing.
             }
@@ -62,6 +78,15 @@ impl LocalState {
             self.hir_to_mir.insert(hir, mir);
             mir
         }
+    }
+
+    fn assign(&mut self, hir: hir::LocalId, ty: TypeId) -> mir::LocalId {
+        let mir = self.hir_to_mir[hir];
+        self.comptime.remove(hir);
+        if !ty.is_assignable_to(self.mir_type(mir)) {
+            todo!("diagnostic: assign type mismatch")
+        }
+        mir
     }
 
     fn get_type(&self, hir_local: hir::LocalId, values: &ValueInterner) -> TypeId {
@@ -89,25 +114,21 @@ enum ExprResult {
     ComptimeOnly(ValueId),
 }
 
-enum BlockControlFlow {
-    /// Signals that control flow diverges, either via a `return` or a halting builtin or
-    /// function.
-    Diverges,
-    /// Normal control flow that continues through.
-    Continues,
-}
+struct BlockControlFlowDiverges;
 
 impl FunctionLowerScope {
     fn translate_expr(&mut self, eval: &mut Evaluator<'_>, expr: hir::Expr) -> ExprResult {
         match expr {
-            hir::Expr::Bool(b) => {
-                let value = if b { ValueId::TRUE } else { ValueId::FALSE };
-                ExprResult::Runtime {
-                    expr: mir::Expr::Bool(b),
-                    ty: TypeId::BOOL,
-                    comptime: Some(value),
-                }
-            }
+            hir::Expr::Void => ExprResult::Runtime {
+                expr: mir::Expr::Void,
+                ty: TypeId::VOID,
+                comptime: Some(ValueId::VOID),
+            },
+            hir::Expr::Bool(b) => ExprResult::Runtime {
+                expr: mir::Expr::Bool(b),
+                ty: TypeId::BOOL,
+                comptime: Some(if b { ValueId::TRUE } else { ValueId::FALSE }),
+            },
             hir::Expr::BigNum(big_num_id) => ExprResult::Runtime {
                 expr: mir::Expr::BigNum(big_num_id),
                 ty: TypeId::U256,
@@ -147,7 +168,7 @@ impl FunctionLowerScope {
                         comptime,
                     },
                     (None, Some(value)) => ExprResult::ComptimeOnly(value),
-                    (None, None) => unreachable!("invalid hir"),
+                    (None, None) => unreachable!("invalid hir {hir:?}"),
                 }
             }
             hir::Expr::Type(ty) => ExprResult::ComptimeOnly(eval.values.intern_type(ty)),
@@ -221,6 +242,8 @@ impl FunctionLowerScope {
         for (capture_info, &value) in hir_captures.iter().zip(captures) {
             let prev = self.interpreter.bindings.insert(capture_info.inner_local, value);
             assert!(prev.is_none(), "invalid hir");
+            let prev = self.locals.comptime.insert(capture_info.inner_local, value);
+            assert!(prev.is_none(), "invalid hir");
         }
         // Interpret type premable to determine types.
         self.interpreter
@@ -237,7 +260,7 @@ impl FunctionLowerScope {
             let Value::Type(ty) = eval.values.lookup(ty) else {
                 todo!("diagnostic: param type must be Type")
             };
-            self.locals.set_hir_to_mir(param.value, ty, None);
+            self.locals.define(param.value, ty);
         }
 
         let (body, _) = self.translate_block(eval, func.body);
@@ -259,15 +282,15 @@ impl FunctionLowerScope {
         &mut self,
         eval: &mut Evaluator<'_>,
         block: hir::BlockId,
-    ) -> BlockControlFlow {
+    ) -> Result<(), BlockControlFlowDiverges> {
         for &instr in &eval.hir.blocks[block] {
             match instr {
                 hir::Instruction::Set { local, expr } => match self.translate_expr(eval, expr) {
                     ExprResult::Runtime { expr, ty, comptime } => {
-                        let target = self.locals.set_hir_to_mir(local, ty, comptime);
+                        let target = self.locals.set(local, ty, comptime);
                         self.instructions_buf.push(mir::Instruction::Set { target, expr });
                         if ty == TypeId::NEVER {
-                            return BlockControlFlow::Diverges;
+                            return Err(BlockControlFlowDiverges);
                         }
                     }
                     ExprResult::ComptimeOnly(value) => {
@@ -290,24 +313,67 @@ impl FunctionLowerScope {
                     ExprResult::ComptimeOnly(_) => { /* No MIR equivalent, do nothing */ }
                     ExprResult::Runtime { expr, ty, comptime: _ } => {
                         // MIR doesn't have `Eval` so we use `Set`.
-                        let target = self.locals.mir_type.push(Some(ty));
+                        let target = self.locals.alloc_anonymous_mir(ty);
                         self.instructions_buf.push(mir::Instruction::Set { target, expr });
                         if ty == TypeId::NEVER {
-                            return BlockControlFlow::Diverges;
+                            return Err(BlockControlFlowDiverges);
                         }
                     }
                 },
+                hir::Instruction::Return(expr) => match self.translate_expr(eval, expr) {
+                    ExprResult::ComptimeOnly(_) => {
+                        todo!("diagnostic: returning comptime-only in runtime ctx")
+                    }
+                    ExprResult::Runtime { expr, ty, comptime: _ } => {
+                        let temp_store = self.locals.alloc_anonymous_mir(ty);
+                        self.instructions_buf
+                            .push(mir::Instruction::Set { target: temp_store, expr });
+                        if !ty.is_assignable_to(self.expected_return_type) {
+                            todo!("diagnostic: return type mismatch");
+                        }
+                        if ty == TypeId::NEVER {
+                            return Err(BlockControlFlowDiverges);
+                        }
+                        self.instructions_buf.push(mir::Instruction::Return(temp_store));
+                        return Err(BlockControlFlowDiverges);
+                    }
+                },
+                hir::Instruction::If { condition, then_block, else_block } => {
+                    match self.locals.comptime(condition) {
+                        Some(ValueId::TRUE) => self.translate_block_inner(eval, then_block)?,
+                        Some(ValueId::FALSE) => self.translate_block_inner(eval, else_block)?,
+                        Some(_) => todo!("diagnostic: type mismatch, if condition not bool"),
+                        None => {
+                            let ty = self.locals.get_type(condition, &eval.values);
+                            if !ty.is_assignable_to(TypeId::BOOL) {
+                                todo!("diagnostic: type mismatch, if condition not bool");
+                            }
+                            let (then_block, then_control) = self.translate_block(eval, then_block);
+                            let (else_block, else_control) = self.translate_block(eval, else_block);
+                            let condition = self.locals.hir_to_mir[condition];
+                            self.instructions_buf.push(mir::Instruction::If {
+                                condition,
+                                then_block,
+                                else_block,
+                            });
+                            if then_control.is_err() && else_control.is_err() {
+                                return Err(BlockControlFlowDiverges);
+                            }
+                        }
+                    }
+                }
+
                 other => todo!("{other:?}"),
             }
         }
-        BlockControlFlow::Continues
+        Ok(())
     }
 
     fn translate_block(
         &mut self,
         eval: &mut Evaluator<'_>,
         block: hir::BlockId,
-    ) -> (mir::BlockId, BlockControlFlow) {
+    ) -> (mir::BlockId, Result<(), BlockControlFlowDiverges>) {
         let instr_start = self.instructions_buf.len();
         let control_flow = self.translate_block_inner(eval, block);
         let id = eval.mir_blocks.push_iter(self.instructions_buf.drain(instr_start..));
@@ -328,7 +394,10 @@ pub(crate) fn lower_entry_point_as_fn(
         values_buf: Vec::with_capacity(VALUES_BUF_CAPACITY),
     };
 
-    let (body, _) = scope.translate_block(eval, hir_block);
+    let (body, control_flow) = scope.translate_block(eval, hir_block);
+    if !matches!(control_flow, Err(BlockControlFlowDiverges)) {
+        todo!("diagnostic: entry point must have an explicit terminator");
+    }
 
     let fn_id1 = eval
         .mir_fn_locals

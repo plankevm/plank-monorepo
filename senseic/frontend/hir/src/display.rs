@@ -123,8 +123,7 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
-            Instruction::If { condition, then_block, else_block, result } => {
-                self.fmt_local(f, result)?;
+            Instruction::If { condition, then_block, else_block } => {
                 write!(f, "{pad}if ")?;
                 self.fmt_local(f, condition)?;
                 writeln!(f, " {{")?;
@@ -190,7 +189,7 @@ impl<'a> DisplayHir<'a> {
         writeln!(f, " {{")?;
 
         if !captures.is_empty() {
-            write!(f, "  captures: [")?;
+            write!(f, "    captures: [")?;
             for (i, capture) in captures.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;

@@ -64,6 +64,68 @@ fn test_basic_init_builtin_calls() {
 }
 
 #[test]
+fn test_inline_closure_lowering() {
+    assert_lowers_to(
+        r#"
+        init {
+            let halt = fn() never {
+                evm_stop();
+            };
+            halt();
+        }
+        run {
+            let halt = fn() never {
+                invalid();
+            };
+            let abort = fn() never {
+                halt();
+            };
+            abort();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Functions ====
+        @fn0() -> %0 {
+            preamble:
+                %0 = type#6
+            body:
+                eval evm_stop()
+                ret void
+        }
+        @fn1() -> %0 {
+            preamble:
+                %0 = type#6
+            body:
+                eval invalid()
+                ret void
+        }
+        @fn2() -> %0 {
+            captures: [%0 -> %1]
+            preamble:
+                %0 = type#6
+            body:
+                %2 = %1
+                eval call %2()
+                ret void
+        }
+
+        ==== Init ====
+        %0 = @fn0
+        %1 = %0
+        eval call %1()
+
+        ==== Run ====
+        %0 = @fn1
+        %1 = @fn2
+        %2 = %1
+        eval call %2()
+        "#,
+    );
+}
+
+#[test]
 #[should_panic(expected = "unresolved assignment target")]
 fn test_set_undefined() {
     let _ = try_lower(

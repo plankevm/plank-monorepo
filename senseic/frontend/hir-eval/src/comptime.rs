@@ -91,7 +91,7 @@ impl ComptimeInterpreter {
                     todo!("diagnostic: assign type mismatch");
                 }
             }
-            hir::Instruction::If { condition, then_block, else_block, result: _ } => {
+            hir::Instruction::If { condition, then_block, else_block } => {
                 let cond_vid = self.bindings[condition];
                 match eval.values.lookup(cond_vid) {
                     Value::Bool(true) => self.interpret_block(eval, then_block)?,

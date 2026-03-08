@@ -103,7 +103,9 @@ fn test_if_type_mismatch() {
 }
 
 #[test]
-#[should_panic(expected = "init/run block must end with a terminating expression")]
+#[should_panic(
+    expected = "not yet implemented: diagnostic: entry point must have an explicit terminator"
+)]
 fn test_run_missing_termination() {
     let _ = try_lower(
         "
@@ -136,21 +138,21 @@ fn test_never_fn_missing_termination() {
 fn test_init_run_with_never_fn() {
     assert_lowers_to(
         "
-            init {
-                let halt = fn() never {
-                    evm_stop();
-                };
+        init {
+            let halt = fn() never {
+                evm_stop();
+            };
+            halt();
+        }
+        run {
+            let halt = fn() never {
+                invalid();
+            };
+            let abort = fn() never {
                 halt();
-            }
-            run {
-                let halt = fn() never {
-                    invalid();
-                };
-                let abort = fn() never {
-                    halt();
-                };
-                abort();
-            }
+            };
+            abort();
+        }
         ",
         "
         ==== Functions ====
@@ -159,7 +161,7 @@ fn test_init_run_with_never_fn() {
         }
 
         ; init
-        @fn1() -> void {
+        @fn1() -> never {
             %0 : never = call @fn0()
         }
 
@@ -172,7 +174,7 @@ fn test_init_run_with_never_fn() {
         }
 
         ; run
-        @fn4() -> void {
+        @fn4() -> never {
             %0 : never = call @fn3()
         }
         ",
@@ -191,10 +193,8 @@ fn test_diverging_block_middle() {
         r#"
         ==== Functions ====
         ; init
-        @fn0() -> void {
+        @fn0() -> never {
             %0 : never = evm_stop()
-            %1 : u256 = 42
-            %2 : u256 = %1
         }
         "#,
     );
@@ -244,23 +244,18 @@ fn test_if_mixed_never_and_value_branches() {
         r#"
         ==== Functions ====
         ; init
-        @fn0() -> void {
+        @fn0() -> never {
             %0 : u256 = 0
-            %1 : u256 = %0
-            %2 : u256 = calldataload(%1)
-            %3 : u256 = %2
-            %4 : u256 = %3
-            %5 : bool = iszero(%4)
-            %6 : bool = %5
-            if %6 {
-                %8 : never = evm_stop()
-                %7 : u256 = %8
+            %1 : u256 = calldataload(%0)
+            %2 : u256 = %1
+            %3 : bool = iszero(%2)
+            if %3 {
+                %4 : u256 = evm_stop()
             } else {
-                %9 : u256 = 42
-                %7 : u256 = %9
+                %4 : u256 = 42
             }
-            %10 : u256 = %7
-            %11 : never = evm_stop()
+            %5 : u256 = %4
+            %6 : never = evm_stop()
         }
         "#,
     );

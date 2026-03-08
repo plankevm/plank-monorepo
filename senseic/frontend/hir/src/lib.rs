@@ -49,18 +49,34 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Instruction {
-    // Define local
-    Set { local: LocalId, expr: Expr },
-    // Mutate local
-    Assign { target: LocalId, value: Expr },
-    AssertType { value: LocalId, of_type: LocalId },
+    /// Define local, can be present on multiple branches. Indicates type unification is
+    /// allowed.
+    Set {
+        local: LocalId,
+        expr: Expr,
+    },
+    /// Mutate local. Must adhere to existing type.
+    Assign {
+        target: LocalId,
+        value: Expr,
+    },
+    AssertType {
+        value: LocalId,
+        of_type: LocalId,
+    },
     Eval(Expr),
     Return(Expr),
-    If { condition: LocalId, then_block: BlockId, else_block: BlockId, result: LocalId },
-    While { condition_block: BlockId, condition: LocalId, body: BlockId },
+    If {
+        condition: LocalId,
+        then_block: BlockId,
+        else_block: BlockId,
+    },
+    While {
+        condition_block: BlockId,
+        condition: LocalId,
+        body: BlockId,
+    },
 }
-
-const _INSTR_SIZE: () = const { assert!(std::mem::size_of::<Instruction>() == 20) };
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParamInfo {
@@ -391,7 +407,7 @@ impl<'a> BlockLowerer<'a> {
                 let then_block = self.lower_body_to_block_with_result(if_expr.body(), result);
                 let else_block =
                     self.lower_else_chain(result, if_expr.else_if_branches(), if_expr.else_body());
-                self.emit(Instruction::If { condition, then_block, else_block, result });
+                self.emit(Instruction::If { condition, then_block, else_block });
                 Expr::LocalRef(result)
             }
             ast::Expr::ComptimeBlock(_) => {
@@ -487,7 +503,7 @@ impl<'a> BlockLowerer<'a> {
                 let condition = lowerer.lower_expr_to_local(first.condition());
                 let then_block = lowerer.lower_body_to_block_with_result(first.body(), result);
                 let else_block = lowerer.lower_else_chain(result, branches, else_body);
-                lowerer.emit(Instruction::If { condition, then_block, else_block, result });
+                lowerer.emit(Instruction::If { condition, then_block, else_block });
             })
         } else if let Some(body) = else_body {
             self.lower_body_to_block_with_result(body, result)
