@@ -42,19 +42,15 @@ fn test_simple_malloc_mstore_return() {
         r#"
         ==== Functions ====
         ; init
-        @fn0() -> void {
+        @fn0() -> never {
             %0 : u256 = 32
-            %1 : u256 = %0
-            %2 : memptr = malloc_uninit(%1)
-            %3 : memptr = %2
-            %4 : memptr = %3
-            %5 : u256 = 5
-            %6 : u256 = %5
-            %7 : void = mstore32(%4, %6)
-            %8 : memptr = %3
-            %9 : u256 = 32
-            %10 : u256 = %9
-            %11 : never = evm_return(%8, %10)
+            %1 : memptr = malloc_uninit(%0)
+            %2 : memptr = %1
+            %3 : u256 = 5
+            %4 : void = mstore32(%2, %3)
+            %5 : memptr = %1
+            %6 : u256 = 32
+            %7 : never = evm_return(%5, %6)
         }
         "#,
     );

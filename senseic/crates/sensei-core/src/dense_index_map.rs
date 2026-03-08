@@ -19,10 +19,19 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         Self { inner: Vec::new(), _marker: PhantomData }
     }
 
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
     /// Creates a new `DenseIndexMap` with capacity for at least `capacity` index slots.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self { inner: Vec::with_capacity(capacity), _marker: PhantomData }
+    }
+
+    #[inline]
+    pub fn contains(&self, key: I) -> bool {
+        self.get(key).is_some()
     }
 
     /// Returns a reference to the value associated with `key`, or `None` if absent.
@@ -31,17 +40,51 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         self.inner.get(key.idx())?.as_ref()
     }
 
-    /// Inserts a value at `key`, returning the previous value if one was present.
-    ///
-    /// Auto-grows the backing storage to fit `key` if necessary.
-    pub fn insert(&mut self, key: I, value: V) -> Option<V> {
+    /// Returns a reference to the value associated with `key`, or `None` if absent.
+    #[inline]
+    pub fn get_mut(&mut self, key: I) -> Option<&mut V> {
+        self.inner.get_mut(key.idx())?.as_mut()
+    }
+
+    #[inline]
+    fn ensure_size(&mut self, key: I) {
         let idx = key.idx();
         if idx >= self.inner.len() {
             let new_len = idx.checked_add(1).expect("index overflow");
             self.inner.resize_with(new_len, || None);
         }
+    }
+
+    /// Returns a reference to the value associated with `key`, or `None` if absent.
+    #[inline]
+    pub fn get_or_insert_with(&mut self, key: I, insert: impl FnOnce() -> V) -> &mut V {
+        self.ensure_size(key);
+        // SAFETY: `ensure_size` above ensures `idx < self.inner.len()`.
+        let entry = unsafe { self.inner.get_unchecked_mut(key.idx()) };
+        match entry {
+            Some(entry) => entry,
+            entry @ None => entry.insert(insert()),
+        }
+    }
+
+    /// Inserts a value at `key`, returning the previous value if one was present.
+    ///
+    /// Auto-grows the backing storage to fit `key` if necessary.
+    pub fn insert(&mut self, key: I, value: V) -> Option<V> {
+        self.ensure_size(key);
+        // SAFETY: `ensure_size` above ensures `idx < self.inner.len()`.
+        unsafe { self.inner.get_unchecked_mut(key.idx()) }.replace(value)
+    }
+
+    /// Removes a value at `key`, returning the value if one was present.
+    pub fn remove(&mut self, key: I) -> Option<V> {
+        let idx = key.idx();
+        if idx >= self.inner.len() {
+            return None;
+        }
         // SAFETY: `resize_with` above ensures `idx < self.inner.len()`.
-        unsafe { self.inner.get_unchecked_mut(idx) }.replace(value)
+        let entry = unsafe { self.inner.get_unchecked_mut(idx) };
+        std::mem::replace(entry, None)
     }
 }
 

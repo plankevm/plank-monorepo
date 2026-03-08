@@ -1,5 +1,5 @@
-use sensei_core::{Idx, IndexVec, vec_buf::VecBuf};
-use sensei_hir::{self as hir, ConstDef};
+use sensei_core::{DenseIndexMap, Idx, IndexVec, vec_buf::VecBuf};
+use sensei_hir::{self as hir, CaptureInfo, ConstDef};
 use sensei_parser::StrId;
 use sensei_values::{TypeId, ValueId};
 
@@ -8,66 +8,45 @@ use crate::{Evaluator, value::Value};
 #[derive(Debug)]
 struct ReturnValue(ValueId);
 
-#[derive(Default)]
-pub(crate) struct Bindings(IndexVec<hir::LocalId, Option<ValueId>>);
-
-impl Bindings {
-    pub(crate) fn set(&mut self, local: hir::LocalId, value: ValueId) -> Option<ValueId> {
-        if local.get() as usize >= self.0.len() {
-            self.0.raw.resize(local.idx() + 1, None);
-        }
-        self.0[local].replace(value)
-    }
-
-    pub(crate) fn get(&self, local: hir::LocalId) -> ValueId {
-        self.0[local].expect("hir: unbound local")
-    }
-
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (hir::LocalId, ValueId)> + '_ {
-        self.0.enumerate_idx().filter_map(|(id, opt)| opt.map(|vid| (id, vid)))
-    }
-}
-
-pub(crate) struct ComptimeInterpreter<'e, 'hir> {
-    eval: &'e mut Evaluator<'hir>,
-    bindings: Bindings,
+pub(crate) struct ComptimeInterpreter {
+    pub(crate) bindings: DenseIndexMap<hir::LocalId, ValueId>,
 
     value_buf: VecBuf<ValueId>,
     type_buf: VecBuf<TypeId>,
     name_buf: VecBuf<StrId>,
 }
 
-impl<'e, 'hir> ComptimeInterpreter<'e, 'hir> {
-    fn new(eval: &'e mut Evaluator<'hir>) -> Self {
+impl ComptimeInterpreter {
+    pub fn new() -> Self {
         const EST_MAX_FIELD_COUNT: usize = 64;
         Self {
-            eval,
-            bindings: Bindings::default(),
+            bindings: DenseIndexMap::default(),
             value_buf: VecBuf::default(),
             type_buf: VecBuf::with_capacity(EST_MAX_FIELD_COUNT),
             name_buf: VecBuf::with_capacity(EST_MAX_FIELD_COUNT),
         }
     }
 
-    pub fn eval_const(eval: &mut Evaluator<'hir>, const_def: ConstDef) -> ValueId {
-        let mut comptime = ComptimeInterpreter::new(eval);
-        comptime.interpret_block(const_def.body).expect("hir: const expr shouldn't have `return`");
-        comptime.bindings.get(const_def.result)
+    pub fn reset(&mut self) {
+        self.bindings.clear();
     }
 
-    pub fn eval_preamble_block(
-        eval: &'e mut Evaluator<'hir>,
-        bindings: Bindings,
+    pub fn eval_const(&mut self, eval: &mut Evaluator<'_>, const_def: ConstDef) -> ValueId {
+        self.interpret_block(eval, const_def.body)
+            .expect("hir: const expr shouldn't have `return`");
+        self.bindings[const_def.result]
+    }
+
+    pub fn eval_preamble_block(&mut self, eval: &mut Evaluator<'_>, block_id: hir::BlockId) {
+        self.interpret_block(eval, block_id).expect("hir: preamble shouldn't have `return`");
+    }
+
+    pub fn interpret_block(
+        &mut self,
+        eval: &mut Evaluator<'_>,
         block_id: hir::BlockId,
-    ) -> Bindings {
-        let mut comptime = ComptimeInterpreter::new(eval);
-        comptime.bindings = bindings;
-        comptime.interpret_block(block_id).expect("hir: preamble shouldn't have `return`");
-        comptime.bindings
-    }
-
-    fn interpret_block(&mut self, block_id: hir::BlockId) -> Result<(), ReturnValue> {
-        for &instr in &self.eval.hir.blocks[block_id] {
+    ) -> Result<(), ReturnValue> {
+        for &instr in &eval.hir.blocks[block_id] {
             self.interpret_instruction(instr)?;
         }
         Ok(())

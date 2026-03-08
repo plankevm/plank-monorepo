@@ -48,3 +48,4 @@ tempfile = "3"
 
 [workspace.lints.rust]
 unused_crate_dependencies = "deny"
+unreachable_patterns = "deny"

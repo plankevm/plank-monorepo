@@ -160,7 +160,7 @@ fn lower_basic_block(
 
     for &instr in &ctx.mir.blocks[block] {
         match instr {
-            Instruction::Set { target, value } | Instruction::Assign { target, value } => {
+            Instruction::Set { target, expr: value } | Instruction::Assign { target, value } => {
                 match value {
                     Expr::Void => {}
                     Expr::Bool(b) => {
@@ -418,7 +418,7 @@ fn ensure_block_func_deps_lowered(
 ) {
     for &instr in &ctx.mir.blocks[block] {
         match instr {
-            Instruction::Set { target: _, value: expr } => {
+            Instruction::Set { target: _, expr } => {
                 ensure_expr_func_deps_lowered(ctx, builder, expr);
             }
             Instruction::Assign { target: _, value } => {
