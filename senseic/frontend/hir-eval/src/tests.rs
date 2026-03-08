@@ -218,14 +218,10 @@ fn test_builtin_call_with_never_arg() {
         }
 
         ; init
-        @fn1() -> void {
+        @fn1() -> never {
             %0 : u256 = 32
-            %1 : u256 = %0
-            %2 : memptr = malloc_uninit(%1)
-            %3 : memptr = %2
-            %4 : never = call @fn0()
-            %5 : never = %4
-            %6 : void = mstore32(%3, %5)
+            %1 : memptr = malloc_uninit(%0)
+            %2 : never = call @fn0()
         }
         "#,
     );

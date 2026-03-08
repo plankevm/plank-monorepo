@@ -240,7 +240,19 @@ impl FunctionLowerScope {
             self.locals.set_hir_to_mir(param.value, ty, None);
         }
 
-        todo!()
+        let (body, _) = self.translate_block(eval, func.body);
+
+        let fn_id1 = eval
+            .mir_fn_locals
+            .push_iter(self.locals.mir_type.iter().map(|&ty| ty.expect("local left unset")));
+        let fn_id2 =
+            eval.mir_fns.push(mir::FnDef { body, param_count: params.len() as u32, return_type });
+        assert_eq!(fn_id1, fn_id2);
+
+        self.locals = saved_locals;
+        self.expected_return_type = saved_return_type;
+
+        fn_id1
     }
 
     fn translate_block_inner(

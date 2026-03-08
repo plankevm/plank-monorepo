@@ -8,7 +8,7 @@ use comptime::ComptimeInterpreter;
 
 mod comptime;
 mod lower;
-mod old_lower;
+// mod old_lower;
 mod value;
 
 #[cfg(test)]
@@ -51,14 +51,18 @@ impl<'hir> Evaluator<'hir> {
         }
     }
 
-    pub fn ensure_const_evaluated(&mut self, const_id: ConstId) -> ValueId {
+    pub fn ensure_const_evaluated(
+        &mut self,
+        interpreter: &mut ComptimeInterpreter,
+        const_id: ConstId,
+    ) -> ValueId {
         match self.const_states[const_id] {
             ConstState::Evaluated(value_id) => value_id,
             ConstState::InProgress => todo!("diagnostic: cyclical const dependency"),
             ConstState::NotEvaluated => {
                 self.const_states[const_id] = ConstState::InProgress;
                 let const_def = self.hir.consts[const_id];
-                let value_id = ComptimeInterpreter::eval_const(self, const_def);
+                let value_id = interpreter.eval_const(self, const_def);
                 self.const_states[const_id] = ConstState::Evaluated(value_id);
                 value_id
             }
@@ -68,9 +72,10 @@ impl<'hir> Evaluator<'hir> {
 
 pub fn evaluate(hir: &Hir) -> Mir {
     let mut eval = Evaluator::new(hir);
+    let mut interpreter = ComptimeInterpreter::new();
 
     for const_id in hir.consts.iter_idx() {
-        eval.ensure_const_evaluated(const_id);
+        eval.ensure_const_evaluated(&mut interpreter, const_id);
     }
 
     let init = lower::lower_entry_point_as_fn(&mut eval, hir.init);
