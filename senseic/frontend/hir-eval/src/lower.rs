@@ -1,18 +1,19 @@
-use hashbrown::HashMap;
-use sensei_core::{DenseIndexMap, Idx, IndexVec};
+use sensei_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use sensei_hir::{self as hir};
 use sensei_mir::{self as mir};
 use sensei_parser::StrId;
-use sensei_values::{TypeId, ValueId};
+use sensei_values::{StructInfo, Type, TypeId, TypeInterner, ValueId};
 
 use crate::{
     Evaluator,
-    comptime::{self, ComptimeInterpreter},
+    comptime::ComptimeInterpreter,
     value::{Value, ValueInterner},
 };
 
 const INSTRUCTION_BUF_CAPACITY: usize = 1024;
 const VALUES_BUF_CAPACITY: usize = 32;
+const MIR_LOCALS_BUF_CAPACITY: usize = 32;
+const FIELDS_BUF_CAPACITY: usize = 128;
 
 #[derive(Default)]
 struct LocalState {
@@ -40,12 +41,6 @@ impl LocalState {
 
     fn mir_type(&self, mir: mir::LocalId) -> TypeId {
         self.mir_type[mir].expect("mapped mir local without type")
-    }
-
-    fn alloc_unset(&mut self, hir: hir::LocalId) {
-        let mir = self.mir_type.push(None);
-        let prev = self.hir_to_mir.insert(hir, mir);
-        assert!(prev.is_none());
     }
 
     fn define(&mut self, hir: hir::LocalId, ty: TypeId) {
@@ -104,8 +99,11 @@ struct FunctionLowerScope {
     locals: LocalState,
     interpreter: ComptimeInterpreter,
 
-    instructions_buf: Vec<mir::Instruction>,
+    instr_buf_stack: Vec<mir::Instruction>,
+    mir_buf_stack: Vec<mir::LocalId>,
     values_buf: Vec<ValueId>,
+    field_types_buf: Vec<TypeId>,
+    field_names_buf: Vec<StrId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,6 +115,121 @@ enum ExprResult {
 struct BlockControlFlowDiverges;
 
 impl FunctionLowerScope {
+    fn materialize(
+        &mut self,
+        values: &ValueInterner,
+        types: &TypeInterner,
+        mir_args: &mut ListOfLists<mir::ArgsId, mir::LocalId>,
+        value: ValueId,
+    ) -> Option<(mir::Expr, TypeId)> {
+        let (ty, fields) = match values.lookup(value) {
+            Value::Void => return Some((mir::Expr::Void, TypeId::VOID)),
+            Value::Bool(b) => return Some((mir::Expr::Bool(b), TypeId::BOOL)),
+            Value::BigNum(x) => return Some((mir::Expr::BigNum(x), TypeId::U256)),
+            Value::Type(_) | Value::Closure { .. } => return None,
+            Value::StructVal { ty, fields } => {
+                if types.comptime_only(ty) {
+                    return None;
+                }
+                (ty, fields)
+            }
+        };
+        let mir_buf_start = self.mir_buf_stack.len();
+        for &field in fields {
+            let (expr, ty) = self
+                .materialize(values, types, mir_args, field)
+                .expect("struct has comptime-only fields");
+            let target = match expr {
+                mir::Expr::LocalRef(local) => local,
+                expr => {
+                    let target = self.locals.alloc_anonymous_mir(ty);
+                    self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
+                    target
+                }
+            };
+            self.mir_buf_stack.push(target);
+        }
+        let fields = mir_args.push_iter(self.mir_buf_stack.drain(mir_buf_start..));
+        Some((mir::Expr::StructLit { ty, fields }, ty))
+    }
+
+    fn translate_struct_literal(
+        &mut self,
+        eval: &mut Evaluator<'_>,
+        ty: hir::LocalId,
+        fields: hir::FieldsId,
+    ) -> ExprResult {
+        let Some(ty) = self.locals.comptime(ty) else {
+            todo!("diagnostic: struct type not comptime known");
+        };
+        let Value::Type(ty) = eval.values.lookup(ty) else {
+            todo!("diagnostic: struct type not type");
+        };
+        let Type::Struct(r#struct) = eval.types.lookup(ty) else {
+            todo!("diagnostic: struct type not struct");
+        };
+
+        for (i, field) in eval.hir.fields[fields].iter().enumerate() {
+            let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
+            else {
+                todo!("diagnostic: struct _ has no field named _");
+            };
+            if eval.hir.fields[fields][..i].iter().any(|f| f.name == field.name) {
+                todo!("diagnostic: duplicate struct field assignment");
+            }
+            let field_value_ty = self.locals.get_type(field.value, &eval.values);
+            if !field_value_ty.is_assignable_to(r#struct.field_types[field_pos]) {
+                todo!("diagnostic: field type mismatch");
+            }
+        }
+
+        assert!(self.values_buf.is_empty());
+
+        if eval.types.comptime_only(ty) {
+            for &field_name in r#struct.field_names {
+                let Some(&field) =
+                    eval.hir.fields[fields].iter().find(|field| field.name == field_name)
+                else {
+                    todo!("diagnostic: literal missing struct field");
+                };
+                let Some(value) = self.locals.comptime(field.value) else {
+                    todo!("diagnostic: non-comptime field in struct with comptime-only fields");
+                };
+                self.values_buf.push(value);
+            }
+            let struct_value =
+                eval.values.intern(Value::StructVal { ty, fields: &self.values_buf });
+            self.values_buf.clear();
+            return ExprResult::ComptimeOnly(struct_value);
+        }
+
+        let mir_start = self.mir_buf_stack.len();
+        let mut comptime_known = true;
+        for &field_name in r#struct.field_names {
+            let Some(&field) =
+                eval.hir.fields[fields].iter().find(|field| field.name == field_name)
+            else {
+                todo!("diagnostic: literal missing struct field");
+            };
+            if comptime_known {
+                if let Some(value) = self.locals.comptime(field.value) {
+                    self.values_buf.push(value);
+                } else {
+                    comptime_known = false;
+                }
+            }
+            // Only comptime only values may have value but no hir local.
+            self.mir_buf_stack.push(self.locals.hir_to_mir[field.value]);
+        }
+        let fields = eval.mir_args.push_iter(self.mir_buf_stack.drain(mir_start..));
+        let comptime = comptime_known.then(|| {
+            assert_eq!(self.values_buf.len(), r#struct.field_types.len());
+            eval.values.intern(Value::StructVal { ty, fields: &self.values_buf })
+        });
+        self.values_buf.clear();
+        ExprResult::Runtime { expr: mir::Expr::StructLit { ty, fields }, ty, comptime }
+    }
+
     fn translate_expr(&mut self, eval: &mut Evaluator<'_>, expr: hir::Expr) -> ExprResult {
         match expr {
             hir::Expr::Void => ExprResult::Runtime {
@@ -171,9 +284,17 @@ impl FunctionLowerScope {
                     (None, None) => unreachable!("invalid hir {hir:?}"),
                 }
             }
+            hir::Expr::ConstRef(id) => {
+                let value = eval.ensure_const_evaluated(&mut self.interpreter, id);
+                match self.materialize(&eval.values, &eval.types, &mut eval.mir_args, value) {
+                    None => ExprResult::ComptimeOnly(value),
+                    Some((expr, ty)) => ExprResult::Runtime { expr, ty, comptime: Some(value) },
+                }
+            }
             hir::Expr::Type(ty) => ExprResult::ComptimeOnly(eval.values.intern_type(ty)),
             hir::Expr::FnDef(fn_def) => {
                 let captures = &eval.hir.fn_captures[fn_def];
+                assert!(self.values_buf.is_empty());
                 for capture in captures {
                     let vid = self
                         .locals
@@ -184,6 +305,7 @@ impl FunctionLowerScope {
                 }
                 let value_id =
                     eval.values.intern(Value::Closure { fn_def, captures: &self.values_buf });
+                self.values_buf.clear();
                 ExprResult::ComptimeOnly(value_id)
             }
             hir::Expr::Call { callee, args } => {
@@ -222,7 +344,62 @@ impl FunctionLowerScope {
                     comptime: None,
                 }
             }
-            other => todo!("expr: {other:?}"),
+            hir::Expr::StructDef(struct_def_id) => {
+                let struct_def = eval.hir.struct_defs[struct_def_id];
+                let Some(type_index) = self.locals.comptime(struct_def.type_index) else {
+                    todo!("diagnostic: `type_index` not comptime known");
+                };
+                let fields = &eval.hir.fields[struct_def.fields];
+                assert!(self.field_types_buf.is_empty());
+                assert!(self.field_names_buf.is_empty());
+                for field in fields {
+                    let Some(value) = self.locals.comptime(field.value) else {
+                        todo!("diagnostic: field type not comptime known");
+                    };
+                    let Value::Type(r#type) = eval.values.lookup(value) else {
+                        todo!("diagnostic: field type not type");
+                    };
+                    self.field_types_buf.push(r#type);
+                    self.field_names_buf.push(field.name);
+                }
+                let ty = eval.types.intern(Type::Struct(StructInfo {
+                    source: struct_def.source,
+                    type_index,
+                    field_names: &self.field_names_buf,
+                    field_types: &self.field_types_buf,
+                }));
+                self.field_names_buf.clear();
+                self.field_types_buf.clear();
+                ExprResult::ComptimeOnly(eval.values.intern(Value::Type(ty)))
+            }
+            hir::Expr::StructLit { ty, fields } => self.translate_struct_literal(eval, ty, fields),
+            hir::Expr::Member { object, member } => {
+                let ty = self.locals.get_type(object, &eval.values);
+                let Type::Struct(r#struct) = eval.types.lookup(ty) else {
+                    todo!("diagnostic: member target obj not a struct");
+                };
+                let Some(field_index) =
+                    r#struct.field_names.iter().position(|&name| name == member)
+                else {
+                    todo!("diagnostic: access undefined attribute");
+                };
+                let value = self.locals.comptime(object).map(|object| {
+                    let Value::StructVal { ty: _, fields } = eval.values.lookup(object) else {
+                        unreachable!("invalid hir: type soundness");
+                    };
+                    fields[field_index]
+                });
+                let mir = self.locals.hir_to_mir.get(object).copied();
+                match (mir, value) {
+                    (Some(object), comptime) => ExprResult::Runtime {
+                        expr: mir::Expr::FieldAccess { object, field_index: field_index as u32 },
+                        ty,
+                        comptime,
+                    },
+                    (None, Some(value)) => ExprResult::ComptimeOnly(value),
+                    (None, None) => unreachable!("invalid hir"),
+                }
+            }
         }
     }
 
@@ -288,7 +465,7 @@ impl FunctionLowerScope {
                 hir::Instruction::Set { local, expr } => match self.translate_expr(eval, expr) {
                     ExprResult::Runtime { expr, ty, comptime } => {
                         let target = self.locals.set(local, ty, comptime);
-                        self.instructions_buf.push(mir::Instruction::Set { target, expr });
+                        self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
                         if ty == TypeId::NEVER {
                             return Err(BlockControlFlowDiverges);
                         }
@@ -297,6 +474,17 @@ impl FunctionLowerScope {
                         self.locals.comptime.insert(local, value);
                     }
                 },
+                hir::Instruction::Assign { target, value } => {
+                    match self.translate_expr(eval, value) {
+                        ExprResult::Runtime { expr, ty, comptime: _ } => {
+                            let target = self.locals.assign(target, ty);
+                            self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
+                        }
+                        ExprResult::ComptimeOnly(_) => {
+                            todo!("diagnostic: assigning comptime only value in runtime ctx")
+                        }
+                    }
+                }
                 hir::Instruction::AssertType { value, of_type } => {
                     let Some(&type_value) = self.locals.comptime.get(of_type) else {
                         todo!("diagnostic: AssertType of_type must be comptime")
@@ -314,7 +502,7 @@ impl FunctionLowerScope {
                     ExprResult::Runtime { expr, ty, comptime: _ } => {
                         // MIR doesn't have `Eval` so we use `Set`.
                         let target = self.locals.alloc_anonymous_mir(ty);
-                        self.instructions_buf.push(mir::Instruction::Set { target, expr });
+                        self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
                         if ty == TypeId::NEVER {
                             return Err(BlockControlFlowDiverges);
                         }
@@ -326,7 +514,7 @@ impl FunctionLowerScope {
                     }
                     ExprResult::Runtime { expr, ty, comptime: _ } => {
                         let temp_store = self.locals.alloc_anonymous_mir(ty);
-                        self.instructions_buf
+                        self.instr_buf_stack
                             .push(mir::Instruction::Set { target: temp_store, expr });
                         if !ty.is_assignable_to(self.expected_return_type) {
                             todo!("diagnostic: return type mismatch");
@@ -334,7 +522,7 @@ impl FunctionLowerScope {
                         if ty == TypeId::NEVER {
                             return Err(BlockControlFlowDiverges);
                         }
-                        self.instructions_buf.push(mir::Instruction::Return(temp_store));
+                        self.instr_buf_stack.push(mir::Instruction::Return(temp_store));
                         return Err(BlockControlFlowDiverges);
                     }
                 },
@@ -351,7 +539,7 @@ impl FunctionLowerScope {
                             let (then_block, then_control) = self.translate_block(eval, then_block);
                             let (else_block, else_control) = self.translate_block(eval, else_block);
                             let condition = self.locals.hir_to_mir[condition];
-                            self.instructions_buf.push(mir::Instruction::If {
+                            self.instr_buf_stack.push(mir::Instruction::If {
                                 condition,
                                 then_block,
                                 else_block,
@@ -362,7 +550,6 @@ impl FunctionLowerScope {
                         }
                     }
                 }
-
                 other => todo!("{other:?}"),
             }
         }
@@ -374,9 +561,9 @@ impl FunctionLowerScope {
         eval: &mut Evaluator<'_>,
         block: hir::BlockId,
     ) -> (mir::BlockId, Result<(), BlockControlFlowDiverges>) {
-        let instr_start = self.instructions_buf.len();
+        let instr_start = self.instr_buf_stack.len();
         let control_flow = self.translate_block_inner(eval, block);
-        let id = eval.mir_blocks.push_iter(self.instructions_buf.drain(instr_start..));
+        let id = eval.mir_blocks.push_iter(self.instr_buf_stack.drain(instr_start..));
         (id, control_flow)
     }
 }
@@ -390,8 +577,11 @@ pub(crate) fn lower_entry_point_as_fn(
         locals: LocalState::default(),
         interpreter: ComptimeInterpreter::new(),
 
-        instructions_buf: Vec::with_capacity(INSTRUCTION_BUF_CAPACITY),
+        instr_buf_stack: Vec::with_capacity(INSTRUCTION_BUF_CAPACITY),
         values_buf: Vec::with_capacity(VALUES_BUF_CAPACITY),
+        mir_buf_stack: Vec::with_capacity(MIR_LOCALS_BUF_CAPACITY),
+        field_types_buf: Vec::with_capacity(FIELDS_BUF_CAPACITY),
+        field_names_buf: Vec::with_capacity(FIELDS_BUF_CAPACITY),
     };
 
     let (body, control_flow) = scope.translate_block(eval, hir_block);

@@ -51,13 +51,11 @@ fn test_simple_set() {
         Basic Blocks:
             @0 {
                 $0 = const 0x3
-                $1 = copy $0
                 stop
             }
 
             @1 {
-                $2 = const 0x0
-                $3 = copy $2
+                $1 = const 0x0
                 stop
             }
         "#,
@@ -87,31 +85,20 @@ fn test_evm_builtins() {
         Basic Blocks:
             @0 {
                 $0 = const 0x3
-                $1 = copy $0
-                $2 = const 0x4
-                $3 = copy $2
-                $4 = const 0x3
-                $5 = copy $4
+                $1 = const 0x4
+                $2 = const 0x3
+                $3 = const 0x4
+                $4 = add $2 $3
+                $5 = const 0x3
                 $6 = const 0x4
-                $7 = copy $6
-                $8 = add $5 $7
-                $9 = copy $8
-                $10 = const 0x3
-                $11 = copy $10
-                $12 = const 0x4
-                $13 = copy $12
-                $14 = add $11 $13
-                $15 = callvalue
-                $16 = copy $15
-                $17 = const 0x22
-                $18 = copy $17
-                $19 = calldataload $18
-                $20 = copy $19
-                $21 = mallocany $20
-                $22 = copy $21
-                $23 = copy $1
-                $24 = copy $9
-                sstore $23 $24
+                $7 = add $5 $6
+                $8 = callvalue
+                $9 = const 0x22
+                $10 = calldataload $9
+                $11 = mallocany $10
+                $12 = copy $0
+                $13 = copy $4
+                sstore $12 $13
                 stop
             }
         "#,
@@ -136,9 +123,7 @@ fn test_assign() {
         Basic Blocks:
             @0 {
                 $0 = const 0x3
-                $1 = copy $0
-                $2 = const 0x22
-                $1 = copy $2
+                $0 = const 0x22
                 stop
             }
         "#,
@@ -162,13 +147,10 @@ fn test_explicit_terminator() {
         Basic Blocks:
             @0 {
                 $0 = const 0x0
-                $1 = copy $0
-                $2 = mallocany $1
-                $3 = copy $2
-                $4 = copy $3
-                $5 = const 0x0
-                $6 = copy $5
-                return $4 $6
+                $1 = mallocany $0
+                $2 = copy $1
+                $3 = const 0x0
+                return $2 $3
             }
         "#,
     );
@@ -194,20 +176,17 @@ fn test_simple_call() {
             fn @1 -> entry @1  (outputs: 0)
 
         Basic Blocks:
-            @0 -> $2 {
+            @0 -> $1 {
                 $0 = const 0x0
-                $1 = copy $0
-                $2 = mallocany $1
+                $1 = mallocany $0
                 iret
             }
 
             @1 {
-                $3 = icall @0
-                $4 = copy $3
-                $5 = copy $4
-                $6 = const 0x0
-                $7 = copy $6
-                return $5 $7
+                $2 = icall @0
+                $3 = copy $2
+                $4 = const 0x0
+                return $3 $4
             }
         "#,
     );
@@ -244,11 +223,8 @@ fn test_call_with_args() {
 
             @1 {
                 $6 = const 0x3
-                $7 = copy $6
-                $8 = const 0x4
-                $9 = copy $8
-                $10 = icall @0 $7 $9
-                $11 = copy $10
+                $7 = const 0x4
+                $8 = icall @0 $6 $7
                 stop
             }
         "#,
@@ -275,25 +251,18 @@ fn test_simple_if() {
         Basic Blocks:
             @0 {
                 $0 = const 0x0
-                $1 = copy $0
-                $2 = calldataload $1
-                $3 = copy $2
-                $4 = copy $3
-                $5 = const 0x0
-                $6 = copy $5
-                $7 = slt $4 $6
-                $8 = copy $7
-                => $8 ? @1 : @2
+                $1 = calldataload $0
+                $2 = copy $1
+                $3 = const 0x0
+                $4 = slt $2 $3
+                => $4 ? @1 : @2
             }
 
             @1 {
-                $9 = const 0x0
-                $10 = copy $9
-                $11 = mallocany $10
-                $12 = copy $11
-                $13 = const 0x0
-                $14 = copy $13
-                revert $12 $14
+                $5 = const 0x0
+                $6 = mallocany $5
+                $7 = const 0x0
+                revert $6 $7
             }
 
             @2 {
@@ -331,41 +300,32 @@ fn test_nested_if_assign() {
         Basic Blocks:
             @0 {
                 $0 = const 0x0
-                $1 = copy $0
-                $2 = calldataload $1
-                $3 = copy $2
-                $4 = copy $3
-                $5 = const 0x0
-                $6 = copy $5
-                $7 = slt $4 $6
-                $8 = copy $7
-                => $8 ? @1 : @2
+                $1 = calldataload $0
+                $2 = copy $1
+                $3 = const 0x0
+                $4 = slt $2 $3
+                => $4 ? @1 : @2
             }
 
             @1 {
-                $9 = const 0x0
-                $10 = copy $9
+                $5 = const 0x0
                 => @6
             }
 
             @2 {
-                $11 = copy $3
-                $12 = const 0xed
-                $13 = copy $12
-                $14 = lt $11 $13
-                $15 = copy $14
-                => $15 ? @3 : @4
+                $6 = copy $1
+                $7 = const 0xed
+                $8 = lt $6 $7
+                => $8 ? @3 : @4
             }
 
             @3 {
-                $16 = const 0x1
-                $10 = copy $16
+                $5 = const 0x1
                 => @5
             }
 
             @4 {
-                $17 = const 0x2
-                $10 = copy $17
+                $5 = const 0x2
                 => @5
             }
 
@@ -374,7 +334,7 @@ fn test_nested_if_assign() {
             }
 
             @6 {
-                $18 = copy $10
+                $9 = copy $5
                 stop
             }
         "#,

@@ -62,6 +62,7 @@ impl<'hir> Evaluator<'hir> {
             ConstState::NotEvaluated => {
                 self.const_states[const_id] = ConstState::InProgress;
                 let const_def = self.hir.consts[const_id];
+                interpreter.reset();
                 let value_id = interpreter.eval_const(self, const_def);
                 self.const_states[const_id] = ConstState::Evaluated(value_id);
                 value_id

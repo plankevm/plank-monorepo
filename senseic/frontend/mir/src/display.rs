@@ -99,13 +99,6 @@ impl<'a> DisplayMir<'a> {
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
-            Instruction::Assign { target, value } => {
-                write!(f, "{pad}")?;
-                self.fmt_local(f, target)?;
-                write!(f, " := ")?;
-                self.fmt_expr(f, value)?;
-                writeln!(f)
-            }
             Instruction::Return(value) => {
                 write!(f, "{pad}ret ")?;
                 self.fmt_local(f, value)?;

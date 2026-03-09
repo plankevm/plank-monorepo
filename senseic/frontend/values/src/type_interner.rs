@@ -1,5 +1,5 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
-use sensei_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use sensei_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use sensei_parser::{StrId, cst, interner::PlankInterner};
 use std::hash::BuildHasher;
 
@@ -45,6 +45,7 @@ pub struct TypeInterner {
 
 #[derive(Debug)]
 struct StructStorage {
+    comptime_only: DenseIndexSet<StructIdx>,
     struct_fields: ListOfLists<StructIdx, TypeId>,
     struct_field_names: ListOfLists<StructIdx, StrId>,
     index_to_struct: IndexVec<StructIdx, StructExtraInfo>,
@@ -89,6 +90,14 @@ impl TypeId {
         }
     }
 
+    const fn comptime_only(self) -> Result<bool, StructIdx> {
+        match self {
+            Self::VOID | Self::U256 | Self::BOOL | Self::NEVER | Self::MEMORY_POINTER => Ok(false),
+            Self::TYPE | Self::FUNCTION => Ok(true),
+            _ => Err(StructIdx::new(self.const_get() - Self::STRUCT_IDS_OFFSET)),
+        }
+    }
+
     const fn as_type(self) -> Result<Type<'static>, StructIdx> {
         match self {
             Self::VOID => Ok(Type::Void),
@@ -127,6 +136,7 @@ impl TypeInterner {
     pub fn new() -> Self {
         Self {
             storage: StructStorage {
+                comptime_only: DenseIndexSet::new(),
                 struct_fields: Default::default(),
                 struct_field_names: Default::default(),
                 index_to_struct: Default::default(),
@@ -139,6 +149,7 @@ impl TypeInterner {
     pub fn with_capacity(structs: usize, fields: usize) -> Self {
         Self {
             storage: StructStorage {
+                comptime_only: DenseIndexSet::with_capacity_in_bits(structs),
                 struct_fields: ListOfLists::with_capacities(structs, fields),
                 struct_field_names: ListOfLists::with_capacities(structs, fields),
                 index_to_struct: IndexVec::with_capacity(structs),
@@ -146,6 +157,10 @@ impl TypeInterner {
             },
             info_to_struct: HashTable::with_capacity(structs),
         }
+    }
+
+    pub fn comptime_only(&self, ty: TypeId) -> bool {
+        self.storage.comptime_only(ty)
     }
 
     pub fn intern(&mut self, ty: Type<'_>) -> TypeId {
@@ -169,6 +184,14 @@ impl TypeInterner {
                     source: r#struct.source,
                     type_index: r#struct.type_index,
                 });
+
+                for &ty in r#struct.field_types {
+                    if self.storage.comptime_only(ty) {
+                        self.storage.comptime_only.add(new_struct_idx);
+                        break;
+                    }
+                }
+
                 debug_assert_eq!(new_struct_idx, field_struct_idx);
                 debug_assert_eq!(new_struct_idx, name_struct_idx);
                 vacant.insert(new_struct_idx);
@@ -215,5 +238,13 @@ impl StructStorage {
 
     fn hash_struct_info(&self, r#struct: StructInfo) -> u64 {
         self.hasher.hash_one(r#struct)
+    }
+
+    pub fn comptime_only(&self, ty: TypeId) -> bool {
+        let struct_idx = match ty.comptime_only() {
+            Ok(comptime_only) => return comptime_only,
+            Err(struct_idx) => struct_idx,
+        };
+        self.comptime_only.contains(struct_idx)
     }
 }

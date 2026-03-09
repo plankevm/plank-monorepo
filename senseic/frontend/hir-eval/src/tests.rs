@@ -260,3 +260,37 @@ fn test_if_mixed_never_and_value_branches() {
         "#,
     );
 }
+
+#[test]
+fn test_fn_struct_return() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        const swap = fn (x: u256, y: u256) Pair {
+            Pair { a: y, b: x }
+        };
+
+        init {
+            let x = swap(3, 4);
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256, %1: u256) -> struct#0 {
+            %2 : u256 = %1
+            %3 : u256 = %0
+            %4 : struct#0 = struct#0 { %2, %3 }
+            ret %4
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 3
+            %1 : u256 = 4
+            %2 : struct#0 = call @fn0(%0, %1)
+            %3 : never = evm_stop()
+        }
+        "#,
+    );
+}

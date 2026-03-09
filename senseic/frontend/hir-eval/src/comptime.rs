@@ -37,10 +37,6 @@ impl ComptimeInterpreter {
         self.bindings[const_def.result]
     }
 
-    pub fn eval_preamble_block(&mut self, eval: &mut Evaluator<'_>, block_id: hir::BlockId) {
-        self.interpret_block(eval, block_id).expect("hir: preamble shouldn't have `return`");
-    }
-
     pub fn interpret_block(
         &mut self,
         eval: &mut Evaluator<'_>,
@@ -60,7 +56,7 @@ impl ComptimeInterpreter {
         match instr {
             hir::Instruction::Set { local, expr } => {
                 let value = self.eval_expr(eval, expr)?;
-                if self.bindings.insert(local, value).is_some() {
+                if let Some(_) = self.bindings.insert(local, value) {
                     unreachable!("hir: overwriting with set");
                 }
             }

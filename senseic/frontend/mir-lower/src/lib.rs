@@ -160,107 +160,92 @@ fn lower_basic_block(
 
     for &instr in &ctx.mir.blocks[block] {
         match instr {
-            Instruction::Set { target, expr: value } | Instruction::Assign { target, value } => {
-                match value {
-                    Expr::Void => {}
-                    Expr::Bool(b) => {
-                        let value = if b { 1u32 } else { 0u32 };
-                        let sets =
-                            ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
-                        current_bb.add_operation(Operation::SetSmallConst(SetSmallConstData {
-                            sets,
-                            value,
+            Instruction::Set { target, expr } => match expr {
+                Expr::Void => {}
+                Expr::Bool(b) => {
+                    let value = if b { 1u32 } else { 0u32 };
+                    let sets =
+                        ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
+                    current_bb
+                        .add_operation(Operation::SetSmallConst(SetSmallConstData { sets, value }));
+                }
+                Expr::BigNum(id) => {
+                    let sets =
+                        ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
+                    let value = ctx.big_nums.lookup(id);
+                    current_bb.add_set_const_op(sets, value);
+                }
+                Expr::LocalRef(mir_src) => {
+                    let ty = ctx.mir.fn_locals[mir_func][mir_src.idx()];
+                    if ctx.size_in_locals(ty) == 0 {
+                        continue;
+                    }
+                    let src_sir_locals = ctx.locals_map.get(mir_src).len();
+                    ctx.locals_map.ensure_many(target, || current_bb.new_local(), src_sir_locals);
+                    for (src, dst) in
+                        ctx.locals_map.get(mir_src).iter().zip(ctx.locals_map.get(target))
+                    {
+                        current_bb.add_operation(Operation::SetCopy(InlineOperands {
+                            outs: [*dst],
+                            ins: [*src],
                         }));
                     }
-                    Expr::BigNum(id) => {
-                        let sets =
-                            ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
-                        let value = ctx.big_nums.lookup(id);
-                        current_bb.add_set_const_op(sets, value);
-                    }
-                    Expr::LocalRef(mir_src) => {
-                        let ty = ctx.mir.fn_locals[mir_func][mir_src.idx()];
-                        if ctx.size_in_locals(ty) == 0 {
-                            continue;
-                        }
-                        let src_sir_locals = ctx.locals_map.get(mir_src).len();
-                        ctx.locals_map.ensure_many(
-                            target,
-                            || current_bb.new_local(),
-                            src_sir_locals,
-                        );
-                        for (src, dst) in
-                            ctx.locals_map.get(mir_src).iter().zip(ctx.locals_map.get(target))
-                        {
-                            current_bb.add_operation(Operation::SetCopy(InlineOperands {
-                                outs: [*dst],
-                                ins: [*src],
-                            }));
-                        }
-                    }
-                    Expr::BuiltinCall { builtin, args } => {
-                        let ty = ctx.mir.fn_locals[mir_func][target.idx()];
-                        let output = (ctx.size_in_locals(ty) > 0).then(|| {
-                            ctx.locals_map.get_or_create_single(target, || current_bb.new_local())
-                        });
+                }
+                Expr::BuiltinCall { builtin, args } => {
+                    let ty = ctx.mir.fn_locals[mir_func][target.idx()];
+                    let output = (ctx.size_in_locals(ty) > 0).then(|| {
+                        ctx.locals_map.get_or_create_single(target, || current_bb.new_local())
+                    });
 
-                        ctx.locals_buf.clear();
-                        for &arg in &ctx.mir.args[args] {
-                            let inputs = ctx.locals_map.get(arg);
-                            ctx.locals_buf.extend(inputs);
-                        }
+                    ctx.locals_buf.clear();
+                    for &arg in &ctx.mir.args[args] {
+                        let inputs = ctx.locals_map.get(arg);
+                        ctx.locals_buf.extend(inputs);
+                    }
 
-                        let operation =
-                            builtins::add_as_op(builtin, &ctx.locals_buf, output, &mut current_bb)
-                                .expect("mistyped MIR");
+                    let operation =
+                        builtins::add_as_op(builtin, &ctx.locals_buf, output, &mut current_bb)
+                            .expect("mistyped MIR");
 
-                        if operation.is_terminating() {
-                            let end_id = current_bb
-                                .finish_terminating()
-                                .expect("error dispite `is_terminating` check");
-                            return CFGSegment {
-                                bb_in: bb_in.unwrap_or(end_id),
-                                bb_out: end_id,
-                                end_loose: false,
-                            };
-                        }
-                    }
-                    Expr::Call { callee, args } => {
-                        let ret_type = ctx.mir.fns[callee].return_type;
-                        ctx.locals_map.ensure_many(
-                            target,
-                            || current_bb.new_local(),
-                            ctx.size_in_locals(ret_type) as usize,
-                        );
-                        ctx.locals_buf.clear();
-                        for &arg in &ctx.mir.args[args] {
-                            let inputs = ctx.locals_map.get(arg);
-                            ctx.locals_buf.extend(inputs);
-                        }
-                        current_bb
-                            .try_add_op(
-                                OperationKind::InternalCall,
-                                &ctx.locals_buf,
-                                ctx.locals_map.get(target),
-                                OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
-                            )
-                            .expect("mir should guarantee valid construction");
-                    }
-                    Expr::StructLit { ty, fields } => {
-                        lower_struct_literal(ctx, &mut current_bb, target, ty, fields);
-                    }
-                    Expr::FieldAccess { object, field_index } => {
-                        lower_field_access(
-                            ctx,
-                            &mut current_bb,
-                            target,
-                            mir_func,
-                            object,
-                            field_index,
-                        );
+                    if operation.is_terminating() {
+                        let end_id = current_bb
+                            .finish_terminating()
+                            .expect("error dispite `is_terminating` check");
+                        return CFGSegment {
+                            bb_in: bb_in.unwrap_or(end_id),
+                            bb_out: end_id,
+                            end_loose: false,
+                        };
                     }
                 }
-            }
+                Expr::Call { callee, args } => {
+                    let ret_type = ctx.mir.fns[callee].return_type;
+                    ctx.locals_map.ensure_many(
+                        target,
+                        || current_bb.new_local(),
+                        ctx.size_in_locals(ret_type) as usize,
+                    );
+                    ctx.locals_buf.clear();
+                    for &arg in &ctx.mir.args[args] {
+                        let inputs = ctx.locals_map.get(arg);
+                        ctx.locals_buf.extend(inputs);
+                    }
+                    current_bb
+                        .try_add_op(
+                            OperationKind::InternalCall,
+                            &ctx.locals_buf,
+                            ctx.locals_map.get(target),
+                            OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
+                        )
+                        .expect("mir should guarantee valid construction");
+                }
+                Expr::StructLit { ty, fields } => {
+                    lower_struct_literal(ctx, &mut current_bb, target, ty, fields);
+                }
+                Expr::FieldAccess { object, field_index } => {
+                    lower_field_access(ctx, &mut current_bb, target, mir_func, object, field_index);
+                }
+            },
             Instruction::Return(local) => {
                 current_bb.set_outputs(ctx.locals_map.get(local));
                 let end_id = current_bb.finish_with_internal_return().expect("invalid MIR");
@@ -420,9 +405,6 @@ fn ensure_block_func_deps_lowered(
         match instr {
             Instruction::Set { target: _, expr } => {
                 ensure_expr_func_deps_lowered(ctx, builder, expr);
-            }
-            Instruction::Assign { target: _, value } => {
-                ensure_expr_func_deps_lowered(ctx, builder, value);
             }
             Instruction::Return(_) => {}
             Instruction::If { condition: _, then_block, else_block } => {

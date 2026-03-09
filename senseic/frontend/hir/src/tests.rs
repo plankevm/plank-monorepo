@@ -136,3 +136,55 @@ fn test_set_undefined() {
         ",
     );
 }
+
+#[test]
+fn test_fn_struct_return() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        const swap = fn (x: u256, y: u256) Pair {
+            Pair { a: y, b: x }
+        };
+
+        init {
+            let x = swap(3, 4);
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("Pair") result=LocalId(0) {
+            %1 = void
+            %2 = type#1
+            %3 = type#1
+            %0 = @struct0
+        }
+        ConstId(1) ("swap") result=LocalId(0) {
+            %0 = @fn0
+        }
+
+        ==== Functions ====
+        @fn0(%1: %0, %3: %2) -> %4 {
+            preamble:
+                %0 = type#1
+                %2 = type#1
+                %4 = $0
+            body:
+                %5 = $0
+                %6 = %3
+                %7 = %1
+                ret %5 { a: %6, b: %7 }
+        }
+
+        ==== Structs ====
+        @struct0[index: %1] { a: %2, b: %3 }
+
+        ==== Init ====
+        %0 = $1
+        %1 = 3
+        %2 = 4
+        %3 = call %0(%1, %2)
+        eval evm_stop()
+        "#,
+    );
+}
