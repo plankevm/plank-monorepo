@@ -8,7 +8,6 @@ use comptime::ComptimeInterpreter;
 
 mod comptime;
 mod lower;
-// mod old_lower;
 mod value;
 
 #[cfg(test)]
