@@ -1,5 +1,7 @@
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, Idx, IndexVec, LocalId, OperationIdx};
 
+use crate::Analysis;
+
 #[derive(Clone)]
 pub struct UseLocation {
     pub block_id: BasicBlockId,
@@ -23,36 +25,67 @@ impl std::fmt::Display for UseKind {
     }
 }
 
-pub type DefUse = IndexVec<LocalId, Vec<UseLocation>>;
+pub struct DefUse {
+    inner: IndexVec<LocalId, Vec<UseLocation>>,
+}
+
+impl DefUse {
+    pub fn new() -> Self {
+        Self { inner: IndexVec::new() }
+    }
+}
+
+impl std::ops::Index<LocalId> for DefUse {
+    type Output = Vec<UseLocation>;
+    fn index(&self, id: LocalId) -> &Vec<UseLocation> {
+        &self.inner[id]
+    }
+}
+
+impl std::ops::IndexMut<LocalId> for DefUse {
+    fn index_mut(&mut self, id: LocalId) -> &mut Vec<UseLocation> {
+        &mut self.inner[id]
+    }
+}
 
 pub fn compute_def_use(program: &EthIRProgram, uses: &mut DefUse) {
-    let num_locals = program.next_free_local_id.idx();
-    for vec in uses.iter_mut() {
-        vec.clear();
-    }
-    uses.resize_with(num_locals, Vec::new);
+    uses.compute(program);
+}
 
-    for block in program.blocks() {
-        for op in block.operations() {
-            for &input in op.inputs() {
-                uses[input]
-                    .push(UseLocation { block_id: block.id(), kind: UseKind::Operation(op.id()) });
-            }
+impl Analysis for DefUse {
+    fn compute(&mut self, program: &EthIRProgram) {
+        let num_locals = program.next_free_local_id.idx();
+        for vec in self.inner.iter_mut() {
+            vec.clear();
         }
+        self.inner.resize_with(num_locals, Vec::new);
 
-        match block.control() {
-            ControlView::Branches { condition, .. } => {
-                uses[condition].push(UseLocation { block_id: block.id(), kind: UseKind::Control });
+        for block in program.blocks() {
+            for op in block.operations() {
+                for &input in op.inputs() {
+                    self.inner[input].push(UseLocation {
+                        block_id: block.id(),
+                        kind: UseKind::Operation(op.id()),
+                    });
+                }
             }
-            ControlView::Switch(switch) => {
-                uses[switch.condition()]
-                    .push(UseLocation { block_id: block.id(), kind: UseKind::Control });
-            }
-            _ => {}
-        }
 
-        for &local in block.outputs() {
-            uses[local].push(UseLocation { block_id: block.id(), kind: UseKind::BlockOutput });
+            match block.control() {
+                ControlView::Branches { condition, .. } => {
+                    self.inner[condition]
+                        .push(UseLocation { block_id: block.id(), kind: UseKind::Control });
+                }
+                ControlView::Switch(switch) => {
+                    self.inner[switch.condition()]
+                        .push(UseLocation { block_id: block.id(), kind: UseKind::Control });
+                }
+                _ => {}
+            }
+
+            for &local in block.outputs() {
+                self.inner[local]
+                    .push(UseLocation { block_id: block.id(), kind: UseKind::BlockOutput });
+            }
         }
     }
 }
