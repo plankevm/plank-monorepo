@@ -1,16 +1,12 @@
 use crate::{DefUse, Predecessors};
 use sir_data::EthIRProgram;
 
-pub trait Analysis {
-    fn compute(&mut self, program: &EthIRProgram);
-}
-
-pub struct Cached<T: Analysis> {
+pub struct Cached<T> {
     inner: T,
     valid: bool,
 }
 
-impl<T: Analysis> Cached<T> {
+impl<T> Cached<T> {
     pub fn new(inner: T) -> Self {
         Self { inner, valid: false }
     }
@@ -34,13 +30,6 @@ impl<T: Analysis> Cached<T> {
 
     pub fn mark_valid(&mut self) {
         self.valid = true;
-    }
-
-    pub fn ensure(&mut self, program: &EthIRProgram) {
-        if !self.valid {
-            self.inner.compute(program);
-            self.valid = true;
-        }
     }
 }
 
@@ -74,4 +63,23 @@ macro_rules! define_analyses {
 define_analyses! {
     DefUse => def_use: DefUse,
     Predecessors => predecessors: Predecessors,
+}
+
+impl AnalysesStore {
+    pub fn ensure(&mut self, kind: AnalysisKind, program: &EthIRProgram) {
+        match kind {
+            AnalysisKind::DefUse => {
+                if !self.def_use.valid {
+                    self.def_use.inner.compute(program);
+                    self.def_use.valid = true;
+                }
+            }
+            AnalysisKind::Predecessors => {
+                if !self.predecessors.valid {
+                    self.predecessors.inner.compute(program);
+                    self.predecessors.valid = true;
+                }
+            }
+        }
+    }
 }

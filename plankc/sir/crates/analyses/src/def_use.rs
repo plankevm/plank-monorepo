@@ -1,7 +1,5 @@
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, Idx, IndexVec, LocalId, OperationIdx};
 
-use crate::Analysis;
-
 #[derive(Clone)]
 pub struct UseLocation {
     pub block_id: BasicBlockId,
@@ -52,8 +50,8 @@ pub fn compute_def_use(program: &EthIRProgram, uses: &mut DefUse) {
     uses.compute(program);
 }
 
-impl Analysis for DefUse {
-    fn compute(&mut self, program: &EthIRProgram) {
+impl DefUse {
+    pub fn compute(&mut self, program: &EthIRProgram) {
         let num_locals = program.next_free_local_id.idx();
         for vec in self.inner.iter_mut() {
             vec.clear();

@@ -1,7 +1,5 @@
 use sir_data::{BasicBlockId, EthIRProgram, IndexVec};
 
-use crate::Analysis;
-
 pub struct Predecessors {
     inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
 }
@@ -25,8 +23,8 @@ impl std::ops::IndexMut<BasicBlockId> for Predecessors {
     }
 }
 
-impl Analysis for Predecessors {
-    fn compute(&mut self, program: &EthIRProgram) {
+impl Predecessors {
+    pub fn compute(&mut self, program: &EthIRProgram) {
         for pred in self.inner.iter_mut() {
             pred.clear();
         }
