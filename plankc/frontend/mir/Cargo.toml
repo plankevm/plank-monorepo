@@ -1,0 +1,13 @@
+[package]
+name = "plank-mir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plank-core.workspace = true
+plank-hir.workspace = true
+plank-values.workspace = true
+
+[lints]
+workspace = true

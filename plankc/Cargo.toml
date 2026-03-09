@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "frontend/*", "sir/crates/*", "sir/test-utils"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+# Core
+plank-core = { path = "crates/plank-core" }
+plank-test-utils = { path = "crates/plank-test-utils" }
+
+# Frontend Sub Crates
+plank-parser = { path = "frontend/parser" }
+plank-values = { path = "frontend/values" }
+plank-hir = { path = "frontend/hir" }
+plank-mir = { path = "frontend/mir" }
+plank-mir-lower = { path = "frontend/mir-lower" }
+plank-hir-eval = { path = "frontend/hir-eval" }
+plank-diagnostics = { path = "frontend/diagnostics" }
+
+# Sensei IR Sub Crates
+sir-data = { path = "sir/crates/data" }
+sir-analyses = { path = "sir/crates/analyses" }
+sir-parser = { path = "sir/crates/parser" }
+sir-assembler = { path = "sir/crates/assembler" }
+sir-debug-backend = { path = "sir/crates/debug-backend" }
+sir-optimizations = { path = "sir/crates/optimizations" }
+sir-transforms = { path = "sir/crates/transforms" }
+
+# Shared Dependencies
+bumpalo = { version = "3.19.0", features = ["allocator-api2", "collections"] }
+allocator-api2 = "0.2"
+hashbrown = { version = "0.16.0", features = ["allocator-api2"] }
+smallvec = "1.15.1"
+alloy-primitives = "1.1.2"
+thiserror = "2.0.17"
+logos = "0.16.0"
+chumsky = "0.11.1"
+index_vec = "0.1.4"
+clap = { version = "4.5", features = ["derive"] }
+
+# Testing
+pretty_assertions = "1.4.1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unused_crate_dependencies = "deny"
+unreachable_patterns = "deny"

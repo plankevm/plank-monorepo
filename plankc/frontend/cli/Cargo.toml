@@ -1,0 +1,20 @@
+[package]
+name = "plank"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+plank-parser.workspace = true
+plank-hir.workspace = true
+plank-hir-eval.workspace = true
+plank-mir.workspace = true
+plank-mir-lower.workspace = true
+sir-debug-backend.workspace = true
+sir-optimizations.workspace = true
+sir-analyses.workspace = true
+sir-transforms.workspace = true
+clap.workspace = true

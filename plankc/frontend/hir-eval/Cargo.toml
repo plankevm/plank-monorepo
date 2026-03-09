@@ -1,0 +1,21 @@
+[package]
+name = "plank-hir-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+plank-core.workspace = true
+plank-hir.workspace = true
+plank-mir.workspace = true
+plank-parser.workspace = true
+plank-values.workspace = true
+
+hashbrown.workspace = true
+
+[dev-dependencies]
+plank-test-utils.workspace = true
+pretty_assertions.workspace = true

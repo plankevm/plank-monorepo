@@ -1,0 +1,56 @@
+pub mod display;
+
+use plank_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_hir::builtins::Builtin;
+use plank_values::{BigNumId, TypeId, TypeInterner};
+
+newtype_index! {
+    pub struct FnId;
+    pub struct BlockId;
+    pub struct LocalId;
+    pub struct ArgsId;
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Expr {
+    LocalRef(LocalId),
+    Bool(bool),
+    Void,
+    BigNum(BigNumId),
+    Call { callee: FnId, args: ArgsId },
+    BuiltinCall { builtin: Builtin, args: ArgsId },
+    FieldAccess { object: LocalId, field_index: u32 },
+    StructLit { ty: TypeId, fields: ArgsId },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Instruction {
+    Set { target: LocalId, expr: Expr },
+    Return(LocalId),
+    If { condition: LocalId, then_block: BlockId, else_block: BlockId },
+    While { condition_block: BlockId, condition: LocalId, body: BlockId },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FnDef {
+    pub body: BlockId,
+    pub param_count: u32,
+    pub return_type: TypeId,
+}
+
+impl FnDef {
+    pub fn iter_params(&self) -> impl Iterator<Item = LocalId> {
+        Span::new(LocalId::ZERO, LocalId::new(self.param_count)).iter()
+    }
+}
+
+#[derive(Debug)]
+pub struct Mir {
+    pub blocks: ListOfLists<BlockId, Instruction>,
+    pub args: ListOfLists<ArgsId, LocalId>,
+    pub fns: IndexVec<FnId, FnDef>,
+    pub fn_locals: ListOfLists<FnId, TypeId>,
+    pub types: TypeInterner,
+    pub init: FnId,
+    pub run: Option<FnId>,
+}

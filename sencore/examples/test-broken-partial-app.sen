@@ -1,7 +1,0 @@
-(block
-    (comptime make_adder fn (funcdef comptime n i32
-        (funcdef x i32 (add x n))))
-    (comptime my_adder fn (make_adder 5))
-
-    (funcdef _ void (my_adder 10))
-)

@@ -1,0 +1,13 @@
+[package]
+name = "sir-debug-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+plank-core.workspace = true
+sir-data.workspace = true
+sir-assembler.workspace = true
