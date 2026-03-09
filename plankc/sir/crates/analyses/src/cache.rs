@@ -1,4 +1,4 @@
-use crate::{DefUse, Predecessors};
+use crate::{DefUse, DominanceFrontiers, Dominators, Predecessors};
 use sir_data::EthIRProgram;
 
 pub struct Cached<T> {
@@ -63,6 +63,8 @@ macro_rules! define_analyses {
 define_analyses! {
     DefUse => def_use: DefUse,
     Predecessors => predecessors: Predecessors,
+    Dominators => dominators: Dominators,
+    DominanceFrontiers => dominance_frontiers: DominanceFrontiers,
 }
 
 impl AnalysesStore {
@@ -78,6 +80,22 @@ impl AnalysesStore {
                 if !self.predecessors.valid {
                     self.predecessors.inner.compute(program);
                     self.predecessors.valid = true;
+                }
+            }
+            AnalysisKind::Dominators => {
+                if !self.dominators.valid {
+                    self.ensure(AnalysisKind::Predecessors, program);
+                    self.dominators.inner.compute(program, self.predecessors.get());
+                    self.dominators.valid = true;
+                }
+            }
+            AnalysisKind::DominanceFrontiers => {
+                if !self.dominance_frontiers.valid {
+                    self.ensure(AnalysisKind::Dominators, program);
+                    self.dominance_frontiers
+                        .inner
+                        .compute(self.dominators.get(), self.predecessors.get());
+                    self.dominance_frontiers.valid = true;
                 }
             }
         }

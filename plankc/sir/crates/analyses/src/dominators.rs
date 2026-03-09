@@ -1,7 +1,80 @@
 use hashbrown::HashSet;
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram, IndexVec, index_vec};
 
-use crate::compute_predecessors;
+use crate::{Predecessors, compute_predecessors};
+
+pub struct Dominators {
+    pub(crate) inner: IndexVec<BasicBlockId, Option<BasicBlockId>>,
+}
+
+impl Dominators {
+    pub fn new() -> Self {
+        Self { inner: IndexVec::new() }
+    }
+
+    pub fn compute(&mut self, program: &EthIRProgram, predecessors: &Predecessors) {
+        self.inner.clear();
+        self.inner.resize(program.basic_blocks.len(), None);
+        for func in program.functions_iter() {
+            compute_function_dominators(
+                program,
+                func.entry().id(),
+                &predecessors.inner,
+                &mut self.inner,
+            );
+        }
+    }
+}
+
+impl std::ops::Index<BasicBlockId> for Dominators {
+    type Output = Option<BasicBlockId>;
+    fn index(&self, id: BasicBlockId) -> &Option<BasicBlockId> {
+        &self.inner[id]
+    }
+}
+
+pub struct DominanceFrontiers {
+    inner: IndexVec<BasicBlockId, HashSet<BasicBlockId>>,
+}
+
+impl DominanceFrontiers {
+    pub fn new() -> Self {
+        Self { inner: IndexVec::new() }
+    }
+
+    pub fn compute(&mut self, dominators: &Dominators, predecessors: &Predecessors) {
+        for set in self.inner.iter_mut() {
+            set.clear();
+        }
+        self.inner.resize_with(dominators.inner.len(), HashSet::new);
+
+        for (b, preds) in predecessors.inner.enumerate_idx() {
+            if preds.len() < 2 {
+                continue;
+            }
+            let Some(idom) = dominators.inner[b] else {
+                continue;
+            };
+            for &p in preds {
+                if dominators.inner[p].is_none() {
+                    continue;
+                }
+                let mut runner = p;
+                while runner != idom {
+                    self.inner[runner].insert(b);
+                    runner = dominators.inner[runner].expect("reachable path");
+                }
+            }
+        }
+    }
+}
+
+impl std::ops::Index<BasicBlockId> for DominanceFrontiers {
+    type Output = HashSet<BasicBlockId>;
+    fn index(&self, id: BasicBlockId) -> &HashSet<BasicBlockId> {
+        &self.inner[id]
+    }
+}
 
 pub fn compute_dominance_frontiers(
     dominators: &IndexVec<BasicBlockId, Option<BasicBlockId>>,

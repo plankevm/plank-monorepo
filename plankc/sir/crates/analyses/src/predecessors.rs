@@ -1,7 +1,7 @@
 use sir_data::{BasicBlockId, EthIRProgram, IndexVec};
 
 pub struct Predecessors {
-    inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    pub(crate) inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
 }
 
 impl Predecessors {
