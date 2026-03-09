@@ -74,7 +74,7 @@ impl ComptimeInterpreter {
                 };
                 let value_vid = self.bindings[value];
                 let actual_type = eval.values.type_of_value(value_vid);
-                if actual_type != expected_type {
+                if !actual_type.is_assignable_to(expected_type) {
                     todo!("diagnostic: hir-ty-assert type mismatch");
                 }
             }
@@ -83,7 +83,9 @@ impl ComptimeInterpreter {
                 let Some(prev_value) = self.bindings.insert(target, new_value) else {
                     unreachable!("hir: init with assign")
                 };
-                if eval.values.type_of_value(new_value) != eval.values.type_of_value(prev_value) {
+                let new_type = eval.values.type_of_value(new_value);
+                let prev_type = eval.values.type_of_value(prev_value);
+                if !new_type.is_assignable_to(prev_type) {
                     todo!("diagnostic: assign type mismatch");
                 }
             }
@@ -185,11 +187,32 @@ impl ComptimeInterpreter {
         let Value::Type(struct_type_id) = eval.values.lookup(type_vid) else {
             todo!("diagnostic: struct literal type must be Type")
         };
+        let sensei_values::Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else {
+            todo!("diagnostic: struct type not struct");
+        };
 
         let fields_info = &eval.hir.fields[fields_id];
 
+        for (i, field) in fields_info.iter().enumerate() {
+            let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
+            else {
+                todo!("diagnostic: struct _ has no field named _");
+            };
+            if fields_info[..i].iter().any(|f| f.name == field.name) {
+                todo!("diagnostic: duplicate struct field assignment");
+            }
+            let field_value_vid = self.bindings[field.value];
+            let field_value_ty = eval.values.type_of_value(field_value_vid);
+            if !field_value_ty.is_assignable_to(r#struct.field_types[field_pos]) {
+                todo!("diagnostic: field type mismatch");
+            }
+        }
+
         self.value_buf.use_as(|fields| {
-            for field in fields_info {
+            for &field_name in r#struct.field_names {
+                let Some(&field) = fields_info.iter().find(|field| field.name == field_name) else {
+                    todo!("diagnostic: literal missing struct field");
+                };
                 fields.push(self.bindings[field.value]);
             }
             Ok(eval.values.intern(Value::StructVal { ty: struct_type_id, fields }))

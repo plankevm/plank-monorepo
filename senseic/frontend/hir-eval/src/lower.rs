@@ -255,7 +255,7 @@ impl FunctionLowerScope {
                     }
 
                     for (&input, &arg) in input_types.iter().zip(args) {
-                        if input != self.locals.get_type(arg, &eval.values) {
+                        if !input.is_assignable_to(self.locals.get_type(arg, &eval.values)) {
                             continue 'sig;
                         }
                     }

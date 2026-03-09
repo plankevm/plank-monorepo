@@ -352,3 +352,75 @@ fn test_invalid_field_access() {
         "#,
     );
 }
+
+#[test]
+fn test_comptime_struct_field_ordering() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const my_pair = Pair { b: true, a: 42 };
+        const a_val = my_pair.a;
+        const b_val = my_pair.b;
+
+        init {
+            let x: u256 = a_val;
+            let y: bool = b_val;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 42
+            %1 : bool = true
+            %2 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: literal missing struct field")]
+fn test_comptime_struct_missing_field() {
+    let _ = try_lower(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const my_pair = Pair { a: 42 };
+        
+        init {
+            evm_stop();
+        }
+        "#,
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: duplicate struct field assignment")]
+fn test_comptime_struct_duplicate_field() {
+    let _ = try_lower(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const my_pair = Pair { a: 42, a: 99, b: false };
+        
+        init {
+            evm_stop();
+        }
+        "#,
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: field type mismatch")]
+fn test_comptime_struct_field_type_mismatch() {
+    let _ = try_lower(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const my_pair = Pair { a: false, b: false };
+        
+        init {
+            evm_stop();
+        }
+        "#,
+    );
+}
