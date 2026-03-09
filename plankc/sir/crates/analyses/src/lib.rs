@@ -14,4 +14,4 @@ pub use dominators::{
     compute_dominance_frontiers, compute_dominators, compute_dominators_from_predecessors,
 };
 pub use legalizer::legalize;
-pub use predecessors::compute_predecessors;
+pub use predecessors::{Predecessors, compute_predecessors};

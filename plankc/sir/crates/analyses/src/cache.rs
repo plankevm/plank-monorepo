@@ -1,4 +1,4 @@
-use crate::DefUse;
+use crate::{DefUse, Predecessors};
 use sir_data::EthIRProgram;
 
 pub trait Analysis {
@@ -73,4 +73,5 @@ macro_rules! define_analyses {
 
 define_analyses! {
     DefUse => def_use: DefUse,
+    Predecessors => predecessors: Predecessors,
 }
