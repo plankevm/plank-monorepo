@@ -361,25 +361,20 @@ fn test_while() {
         Basic Blocks:
             @0 {
                 $0 = const 0x0
-                $1 = copy $0
                 => @1
             }
 
             @1 {
-                $2 = copy $1
-                $3 = const 0xa
-                $4 = copy $3
-                $5 = lt $2 $4
-                $6 = copy $5
-                => $6 ? @2 : @3
+                $1 = copy $0
+                $2 = const 0xa
+                $3 = lt $1 $2
+                => $3 ? @2 : @3
             }
 
             @2 {
-                $7 = copy $1
-                $8 = const 0x1
-                $9 = copy $8
-                $10 = add $7 $9
-                $1 = copy $10
+                $4 = copy $0
+                $5 = const 0x1
+                $0 = add $4 $5
                 => @1
             }
 
@@ -409,21 +404,13 @@ fn test_struct_lit() {
         Basic Blocks:
             @0 {
                 $0 = const 0x3
-                $1 = copy $0
-                $2 = const 0x0
-                $3 = copy $2
-                $4 = copy $1
-                $5 = copy $3
-                $6 = copy $4
-                $7 = copy $5
-                $8 = const 0x2
-                $9 = copy $8
-                $10 = const 0x1
-                $11 = copy $10
-                $12 = copy $9
-                $13 = copy $11
-                $6 = copy $12
-                $7 = copy $13
+                $1 = const 0x0
+                $2 = copy $0
+                $3 = copy $1
+                $4 = const 0x2
+                $5 = const 0x1
+                $2 = copy $4
+                $3 = copy $5
                 stop
             }
         "#,
@@ -437,9 +424,9 @@ fn test_struct_field_access() {
         const A = struct { a: u256, wow: void,  b: bool };
         init {
             let a = A { a: 3, wow: {}, b: false };
-            let x = a.a;
-
-            evm_stop();
+            let buf = malloc_uninit(32);
+            mstore32(buf, a.a);
+            evm_return(buf, 32);
         }
         "#,
         r#"
@@ -450,18 +437,19 @@ fn test_struct_field_access() {
         Basic Blocks:
             @0 {
                 $0 = const 0x3
-                $1 = copy $0
-                $2 = const 0x0
-                $3 = copy $2
-                $4 = copy $1
-                $5 = copy $3
-                $6 = copy $4
-                $7 = copy $5
-                $8 = copy $6
+                $1 = const 0x0
+                $2 = copy $0
+                $3 = copy $1
+                $4 = const 0x20
+                $5 = mallocany $4
+                $6 = copy $5
+                $7 = copy $2
+                $8 = copy $3
                 $9 = copy $7
-                $10 = copy $8
-                $11 = copy $10
-                stop
+                mstore256 $6 $9
+                $10 = copy $5
+                $11 = const 0x20
+                return $10 $11
             }
         "#,
     );
@@ -498,12 +486,8 @@ fn test_fn_struct_return() {
 
             @1 {
                 $6 = const 0x3
-                $7 = copy $6
-                $8 = const 0x4
-                $9 = copy $8
-                $10 $11 = icall @0 $7 $9
-                $12 = copy $10
-                $13 = copy $11
+                $7 = const 0x4
+                $8 $9 = icall @0 $6 $7
                 stop
             }
         "#,
@@ -514,7 +498,7 @@ fn test_fn_struct_return() {
 fn test_weird_error() {
     assert_lowers_to(
         r#"
-        const return_runtime = fn() void {
+        const return_runtime = fn() never {
             let runtime: memptr = malloc_uninit(runtime_length());
             codecopy(runtime, runtime_start_offset(), runtime_length());
             evm_return(runtime, runtime_length());
@@ -532,8 +516,6 @@ fn test_weird_error() {
             let bal_slot = get_balance_slot(owner);
 
             return_runtime();
-
-            evm_stop();
         }
 
 
@@ -551,46 +533,36 @@ fn test_weird_error() {
             fn @3 -> entry @3  (outputs: 0)
 
         Basic Blocks:
-            @0 $0 -> $10 {
+            @0 $0 -> $7 {
                 $1 = const 0x20
-                $2 = copy $1
-                $3 = mallocany $2
-                $4 = copy $3
-                $5 = copy $4
-                $6 = copy $0
-                mstore256 $5 $6
-                $7 = copy $4
-                $8 = const 0x20
-                $9 = copy $8
-                $10 = keccak256 $7 $9
+                $2 = mallocany $1
+                $3 = copy $2
+                $4 = copy $0
+                mstore256 $3 $4
+                $5 = copy $2
+                $6 = const 0x20
+                $7 = keccak256 $5 $6
                 iret
             }
 
             @1 {
-                $11 = runtime_length
-                $12 = copy $11
-                $13 = mallocany $12
-                $14 = copy $13
-                $15 = copy $14
-                $16 = runtime_start_offset
-                $17 = copy $16
-                $18 = runtime_length
-                $19 = copy $18
-                codecopy $15 $17 $19
-                $20 = copy $14
-                $21 = runtime_length
-                $22 = copy $21
-                return $20 $22
+                $8 = runtime_length
+                $9 = mallocany $8
+                $10 = copy $9
+                $11 = runtime_start_offset
+                $12 = runtime_length
+                codecopy $10 $11 $12
+                $13 = copy $9
+                $14 = runtime_length
+                return $13 $14
             }
 
             @2 {
-                $23 = const 0x22
-                $24 = copy $23
-                $25 = copy $24
-                $26 = icall @0 $25
-                $27 = copy $26
+                $15 = const 0x22
+                $16 = copy $15
+                $17 = icall @0 $16
                 icall @1
-                stop
+                invalid
             }
 
             @3 {

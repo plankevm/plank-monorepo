@@ -84,7 +84,7 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         }
         // SAFETY: `resize_with` above ensures `idx < self.inner.len()`.
         let entry = unsafe { self.inner.get_unchecked_mut(idx) };
-        std::mem::replace(entry, None)
+        entry.take()
     }
 }
 

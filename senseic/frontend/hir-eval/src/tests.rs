@@ -294,3 +294,61 @@ fn test_fn_struct_return() {
         "#,
     );
 }
+
+#[test]
+fn test_struct_field_access() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+
+        init {
+            let x = Pair { b: false, a : 34 };
+            let y: u256 = x.a;
+            let z: bool = x.b;
+
+            let p = Pair { a: 49, b: true };
+            let pa = p.a;
+            let pb = p.b;
+
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : u256 = 34
+            %2 : struct#0 = struct#0 { %1, %0 }
+            %3 : struct#0 = %2
+            %4 : u256 = %3.0
+            %5 : struct#0 = %2
+            %6 : bool = %5.1
+            %7 : u256 = 49
+            %8 : bool = true
+            %9 : struct#0 = struct#0 { %7, %8 }
+            %10 : struct#0 = %9
+            %11 : u256 = %10.0
+            %12 : struct#0 = %9
+            %13 : bool = %12.1
+            %14 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: access undefined attribute")]
+fn test_invalid_field_access() {
+    let _ = try_lower(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+
+        init {
+            let x = Pair { b: false, a : 34 };
+            let y: u256 = x.hey;
+            evm_stop();
+        }
+        "#,
+    );
+}

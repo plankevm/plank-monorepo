@@ -1,5 +1,5 @@
-use sensei_core::{DenseIndexMap, Idx, IndexVec, vec_buf::VecBuf};
-use sensei_hir::{self as hir, CaptureInfo, ConstDef};
+use sensei_core::{DenseIndexMap, vec_buf::VecBuf};
+use sensei_hir::{self as hir, ConstDef};
 use sensei_parser::StrId;
 use sensei_values::{TypeId, ValueId};
 
@@ -56,7 +56,7 @@ impl ComptimeInterpreter {
         match instr {
             hir::Instruction::Set { local, expr } => {
                 let value = self.eval_expr(eval, expr)?;
-                if let Some(_) = self.bindings.insert(local, value) {
+                if self.bindings.insert(local, value).is_some() {
                     unreachable!("hir: overwriting with set");
                 }
             }

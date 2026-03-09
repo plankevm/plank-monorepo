@@ -210,7 +210,7 @@ fn lower_basic_block(
                     if operation.is_terminating() {
                         let end_id = current_bb
                             .finish_terminating()
-                            .expect("error dispite `is_terminating` check");
+                            .expect("error despite `is_terminating` check");
                         return CFGSegment {
                             bb_in: bb_in.unwrap_or(end_id),
                             bb_out: end_id,
@@ -238,6 +238,16 @@ fn lower_basic_block(
                             OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
                         )
                         .expect("mir should guarantee valid construction");
+                    if ret_type == TypeId::NEVER {
+                        current_bb.add_operation(Operation::Invalid(()));
+                        let end_id =
+                            current_bb.finish_terminating().expect("error dispite invalid");
+                        return CFGSegment {
+                            bb_in: bb_in.unwrap_or(end_id),
+                            bb_out: end_id,
+                            end_loose: false,
+                        };
+                    }
                 }
                 Expr::StructLit { ty, fields } => {
                     lower_struct_literal(ctx, &mut current_bb, target, ty, fields);

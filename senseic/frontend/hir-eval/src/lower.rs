@@ -393,7 +393,7 @@ impl FunctionLowerScope {
                 match (mir, value) {
                     (Some(object), comptime) => ExprResult::Runtime {
                         expr: mir::Expr::FieldAccess { object, field_index: field_index as u32 },
-                        ty,
+                        ty: r#struct.field_types[field_index],
                         comptime,
                     },
                     (None, Some(value)) => ExprResult::ComptimeOnly(value),
@@ -550,7 +550,23 @@ impl FunctionLowerScope {
                         }
                     }
                 }
-                other => todo!("{other:?}"),
+                hir::Instruction::While { condition_block, condition, body } => {
+                    let (condition_block, cond_control) =
+                        self.translate_block(eval, condition_block);
+                    let () = cond_control?;
+
+                    let ty = self.locals.get_type(condition, &eval.values);
+                    if !ty.is_assignable_to(TypeId::BOOL) {
+                        todo!("diagnostic: while condition not bool");
+                    }
+                    let condition = self.locals.hir_to_mir[condition];
+                    let (body, _) = self.translate_block(eval, body);
+                    self.instr_buf_stack.push(mir::Instruction::While {
+                        condition_block,
+                        condition,
+                        body,
+                    })
+                }
             }
         }
         Ok(())
