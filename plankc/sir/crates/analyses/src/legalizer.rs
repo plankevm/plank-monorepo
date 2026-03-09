@@ -3,7 +3,7 @@ use sir_data::{
     IndexVec, LargeConstId, LocalId, LocalIdx, Operation, OperationIdx, StaticAllocId, index_vec,
 };
 
-use crate::{UseKind, compute_dominators};
+use crate::{AnalysesStore, UseKind};
 
 /// Identifies which IR construct a tracked span belongs to, used in span overlap diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,12 +71,13 @@ pub enum LegalizerError {
     LocalNotInScope { block: BasicBlockId, local: LocalId, use_kind: UseKind },
 }
 
-pub fn legalize(program: &EthIRProgram) -> Result<(), LegalizerError> {
-    Legalizer::new(program).legalize()
+pub fn legalize(program: &EthIRProgram, store: &mut AnalysesStore) -> Result<(), LegalizerError> {
+    Legalizer::new(program, store).legalize()
 }
 
 struct Legalizer<'a> {
     program: &'a EthIRProgram,
+    store: &'a mut AnalysesStore,
     locals_spans: Vec<TrackedSpan<LocalIdx>>,
     operations_spans: Vec<TrackedSpan<OperationIdx>>,
     block_owner: IndexVec<BasicBlockId, Option<FunctionId>>,
@@ -84,10 +85,11 @@ struct Legalizer<'a> {
 }
 
 impl<'a> Legalizer<'a> {
-    fn new(program: &'a EthIRProgram) -> Self {
+    fn new(program: &'a EthIRProgram, store: &'a mut AnalysesStore) -> Self {
         let block_owner = index_vec![None; program.basic_blocks.len()];
         Self {
             program,
+            store,
             locals_spans: Vec::new(),
             operations_spans: Vec::new(),
             block_owner,
@@ -375,7 +377,7 @@ impl<'a> Legalizer<'a> {
         Ok(())
     }
 
-    fn validate_local_ids(&self) -> Result<(), LegalizerError> {
+    fn validate_local_ids(&mut self) -> Result<(), LegalizerError> {
         self.validate_single_assignment()?;
         self.validate_scope()
     }
@@ -399,13 +401,13 @@ impl<'a> Legalizer<'a> {
         Ok(())
     }
 
-    fn validate_scope(&self) -> Result<(), LegalizerError> {
-        let dominators = compute_dominators(self.program);
+    fn validate_scope(&mut self) -> Result<(), LegalizerError> {
+        let dominators = self.store.dominators(self.program);
 
         let mut dom_children: IndexVec<BasicBlockId, Vec<BasicBlockId>> =
             index_vec![Vec::new(); self.program.basic_blocks.len()];
 
-        for (bb_id, &idom) in dominators.enumerate_idx() {
+        for (bb_id, &idom) in dominators.inner.enumerate_idx() {
             if let Some(parent) = idom
                 && parent != bb_id
             {
@@ -534,6 +536,10 @@ mod tests {
     };
     use sir_parser::{EmitConfig, parse_without_legalization};
 
+    fn run_legalize(program: &EthIRProgram) -> Result<(), LegalizerError> {
+        legalize(program, &mut crate::AnalysesStore::default())
+    }
+
     // Note: WrongOutputCount cannot be triggered via the builder because the builder
     // catches conflicting function outputs (ConflictingFunctionOutputs error).
     // This check exists for malformed IR constructed outside the builder.
@@ -553,7 +559,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -576,7 +582,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -597,7 +603,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -619,7 +625,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -639,7 +645,7 @@ mod tests {
         bb.operations = Span::new(bb.operations.start, bb.operations.end - 1);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::MissingTerminator(BasicBlockId::new(0))
         );
     }
@@ -660,7 +666,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::IncompatibleEdge {
                 from: BasicBlockId::new(0),
                 to: BasicBlockId::new(1)
@@ -687,7 +693,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -717,7 +723,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -742,7 +748,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(legalize(&program).is_ok());
+        assert!(run_legalize(&program).is_ok());
     }
 
     #[test]
@@ -767,7 +773,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(1),
                 local: LocalId::new(0),
@@ -817,7 +823,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::IncompatibleEdge { from: right_id, to: merge_id }
         );
     }
@@ -836,7 +842,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::InvalidBasicBlockId(invalid_bb)
         );
     }
@@ -858,7 +864,10 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(legalize(&program).unwrap_err(), LegalizerError::InvalidFunctionId(invalid_id));
+        assert_eq!(
+            run_legalize(&program).unwrap_err(),
+            LegalizerError::InvalidFunctionId(invalid_id)
+        );
     }
 
     #[test]
@@ -891,7 +900,7 @@ mod tests {
         }
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::WrongCallInputCount { op: icall_idx, expected: 1, actual: 0 }
         );
     }
@@ -915,7 +924,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::RecursiveCall(func_id, func_id)
         );
     }
@@ -952,7 +961,7 @@ mod tests {
         let program = builder.build(func_a_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::RecursiveCall(func_b_id, func_a_id)
         );
     }
@@ -973,7 +982,7 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(legalize(&program).unwrap_err(), LegalizerError::DoubleDefinition(local));
+        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::DoubleDefinition(local));
     }
 
     #[test]
@@ -1004,7 +1013,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(4),
                 local: LocalId::new(2),
@@ -1036,7 +1045,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(2),
                 local: LocalId::new(1),
@@ -1059,7 +1068,7 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(legalize(&program).unwrap_err(), LegalizerError::InitHasInputs(1));
+        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::InitHasInputs(1));
     }
 
     #[test]
@@ -1084,7 +1093,7 @@ mod tests {
 
         let program = builder.build(init_func_id, Some(main_func_id));
 
-        assert_eq!(legalize(&program).unwrap_err(), LegalizerError::RuntimeHasInputs(3));
+        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::RuntimeHasInputs(3));
     }
 
     #[test]
@@ -1101,7 +1110,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::TerminatorNotLast(bb_id, OperationIdx::new(0))
         );
     }
@@ -1126,7 +1135,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::TerminatorControlMismatch(bb_id, OperationIdx::new(0))
         );
     }
@@ -1153,7 +1162,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::InvalidLargeConstId(invalid_id)
         );
     }
@@ -1179,7 +1188,10 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(legalize(&program).unwrap_err(), LegalizerError::InvalidSegmentId(invalid_id));
+        assert_eq!(
+            run_legalize(&program).unwrap_err(),
+            LegalizerError::InvalidSegmentId(invalid_id)
+        );
     }
 
     #[test]
@@ -1202,7 +1214,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::InvalidStaticAllocId(invalid_id)
         );
     }
@@ -1224,7 +1236,7 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(legalize(&program).unwrap_err(), LegalizerError::InvalidLocalId(invalid_id));
+        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::InvalidLocalId(invalid_id));
     }
 
     #[test]
@@ -1242,7 +1254,7 @@ mod tests {
         let func_b_id = program.functions.push(sir_data::Function::new(bb_shared_id, 0));
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::SharedBasicBlock(bb_shared_id, func_a_id, func_b_id)
         );
     }
@@ -1272,7 +1284,7 @@ mod tests {
         program.basic_blocks[bb2_id].inputs = program.basic_blocks[bb1_id].outputs;
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::OverlappingSpans(
                 SpanSource::Outputs(bb1_id),
                 SpanSource::Inputs(bb2_id)
@@ -1300,7 +1312,7 @@ mod tests {
         program.basic_blocks[bb2_id].operations = program.basic_blocks[bb1_id].operations;
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::OverlappingSpans(
                 SpanSource::Operations(bb1_id),
                 SpanSource::Operations(bb2_id)
@@ -1326,7 +1338,7 @@ mod tests {
         program.locals.truncate(0);
 
         assert_eq!(
-            legalize(&program).unwrap_err(),
+            run_legalize(&program).unwrap_err(),
             LegalizerError::SpanOutOfBounds(SpanSource::Outputs(bb_id))
         );
     }

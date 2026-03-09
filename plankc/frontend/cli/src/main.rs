@@ -129,11 +129,12 @@ fn main() {
     }
 
     let mut program = plank_mir_lower::lower(&mir, &big_nums);
+    let mut store = sir_analyses::AnalysesStore::default();
     if args.already_ssa {
-        sir_analyses::legalize(&program).expect("illegal IR pre-ssa");
+        sir_analyses::legalize(&program, &mut store).expect("illegal IR pre-ssa");
     }
-    sir_transforms::ssa_transform(&mut program);
-    sir_analyses::legalize(&program).expect("illegal IR post ssa transform");
+    sir_transforms::ssa_transform(&mut program, &mut store);
+    sir_analyses::legalize(&program, &mut store).expect("illegal IR post ssa transform");
 
     if let Some(passes) = args.optimize {
         let mut optimizer = Optimizer::new(program);

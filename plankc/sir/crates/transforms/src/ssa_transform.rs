@@ -1,60 +1,46 @@
 use hashbrown::HashSet;
 use plank_core::IncIterable;
-use sir_analyses::{
-    compute_dominance_frontiers, compute_dominators_from_predecessors, compute_predecessors,
-};
+use sir_analyses::{AnalysesStore, AnalysisKind, DominanceFrontiers, Predecessors};
 use sir_data::{
     BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, Idx, IndexVec, LocalId, LocalIdx,
     Span, Switch, index_vec,
 };
 
-pub fn ssa_transform(program: &mut EthIRProgram) {
-    let mut predecessors = IndexVec::new();
-    compute_predecessors(program, &mut predecessors);
-    split_critical_edges(program, &predecessors);
-    compute_predecessors(program, &mut predecessors);
-    SsaTransform::new(program, predecessors).run(program);
+pub fn ssa_transform(program: &mut EthIRProgram, store: &mut AnalysesStore) {
+    split_critical_edges(program, store.predecessors(program));
+    store.invalidate(AnalysisKind::Predecessors);
+    SsaTransform::new(program, store).run(program, store.dominance_frontiers(program));
 }
 
 struct SsaTransform {
     def_sites: IndexVec<LocalId, HashSet<BasicBlockId>>,
     dominators: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
     phi_locations: IndexVec<BasicBlockId, Vec<LocalId>>,
-    dominance_frontiers: IndexVec<BasicBlockId, HashSet<BasicBlockId>>,
 }
 
 impl SsaTransform {
-    fn new(
-        program: &EthIRProgram,
-        predecessors: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-    ) -> Self {
-        let dominators_child_to_parent =
-            compute_dominators_from_predecessors(program, &predecessors);
-        let mut dominators_parent_to_child =
-            index_vec![Vec::new(); dominators_child_to_parent.len()];
-        for (bb, &idom) in dominators_child_to_parent.enumerate_idx() {
-            if let Some(parent) = idom
+    fn new(program: &EthIRProgram, store: &mut AnalysesStore) -> Self {
+        let dominators_child_to_parent = store.dominators(program);
+        let mut dominators_parent_to_child = index_vec![Vec::new(); program.basic_blocks.len()];
+        for bb in program.basic_blocks.iter_idx() {
+            if let Some(parent) = dominators_child_to_parent[bb]
                 && parent != bb
             {
                 dominators_parent_to_child[parent].push(bb);
             }
         }
 
-        let dominance_frontiers =
-            compute_dominance_frontiers(&dominators_child_to_parent, &predecessors);
-
         let def_sites = Self::collect_definition_sites(program);
 
         Self {
             def_sites,
             dominators: dominators_parent_to_child,
-            dominance_frontiers,
             phi_locations: index_vec![Vec::new(); program.basic_blocks.len()],
         }
     }
 
-    fn run(&mut self, program: &mut EthIRProgram) {
-        self.compute_phi_locations();
+    fn run(&mut self, program: &mut EthIRProgram, dominance_frontiers: &DominanceFrontiers) {
+        self.compute_phi_locations(dominance_frontiers);
         self.rename(program);
     }
 
@@ -75,7 +61,7 @@ impl SsaTransform {
         def_sites
     }
 
-    fn compute_phi_locations(&mut self) {
+    fn compute_phi_locations(&mut self, dominance_frontiers: &DominanceFrontiers) {
         let mut worklist = Vec::new();
         for (local, def_blocks) in self.def_sites.enumerate_idx() {
             if def_blocks.len() <= 1 {
@@ -85,7 +71,7 @@ impl SsaTransform {
                 worklist.push(*bb);
             }
             while let Some(bb) = worklist.pop() {
-                for &frontier_block in &self.dominance_frontiers[bb] {
+                for &frontier_block in &dominance_frontiers[bb] {
                     if !self.phi_locations[frontier_block].contains(&local) {
                         self.phi_locations[frontier_block].push(local);
                         worklist.push(frontier_block);
@@ -228,10 +214,7 @@ fn rename_def(
     new_version
 }
 
-fn split_critical_edges(
-    program: &mut EthIRProgram,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-) {
+fn split_critical_edges(program: &mut EthIRProgram, predecessors: &Predecessors) {
     for bb in program.basic_blocks.iter_idx() {
         match program.basic_blocks[bb].control {
             Control::Branches(Branch { condition, non_zero_target, zero_target }) => {
@@ -263,7 +246,7 @@ fn split_critical_edges(
 
 fn split_edge(
     program: &mut EthIRProgram,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    predecessors: &Predecessors,
     source: BasicBlockId,
     target: BasicBlockId,
 ) -> BasicBlockId {
@@ -317,10 +300,10 @@ mod tests {
         sir_parser::parse_without_legalization(source, config)
     }
 
-    fn transform_and_legalize(program: &mut EthIRProgram) {
-        ssa_transform(program);
+    fn transform_and_legalize(program: &mut EthIRProgram, store: &mut sir_analyses::AnalysesStore) {
+        ssa_transform(program, store);
         let ir = display_program(program);
-        sir_analyses::legalize(program).unwrap_or_else(|e| panic!("{e}\n{ir}"));
+        sir_analyses::legalize(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
     }
 
     #[test]
@@ -356,7 +339,7 @@ mod tests {
         let d = BasicBlockId::new(3);
         let original_v = program.block(d).inputs()[0];
 
-        transform_and_legalize(&mut program);
+        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let d_inputs = program.block(d).inputs();
@@ -400,7 +383,7 @@ mod tests {
         let d = BasicBlockId::new(3);
         let original_v = program.block(d).inputs()[0];
 
-        transform_and_legalize(&mut program);
+        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let d_inputs = program.block(d).inputs();
@@ -445,7 +428,7 @@ mod tests {
         let b = BasicBlockId::new(1);
         let original_v = program.block(b).inputs()[0];
 
-        transform_and_legalize(&mut program);
+        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let b_inputs = program.block(b).inputs();
@@ -492,7 +475,7 @@ mod tests {
         let original_x = program.block(d).inputs()[0];
         let original_y = program.block(d).inputs()[1];
 
-        transform_and_legalize(&mut program);
+        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let d_inputs = program.block(d).inputs();
@@ -544,7 +527,7 @@ mod tests {
         let original_block_count = program.basic_blocks.len();
         let original_v = program.block(d).inputs()[0];
 
-        transform_and_legalize(&mut program);
+        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
         let post_ir = display_program(&program);
 
         assert!(
@@ -603,7 +586,7 @@ mod tests {
         let helper_id = program.functions.iter_idx().find(|&id| id != program.init_entry).unwrap();
         let helper_entry = program.functions[helper_id].entry();
 
-        transform_and_legalize(&mut program);
+        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let init_inputs = program.block(init_entry).inputs();

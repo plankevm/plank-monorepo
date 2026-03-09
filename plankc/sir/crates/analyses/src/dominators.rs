@@ -1,23 +1,15 @@
 use hashbrown::HashSet;
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram, IndexVec, index_vec};
 
-use crate::{Predecessors, compute_predecessors};
+use crate::Predecessors;
 
+#[derive(Default)]
 pub struct Dominators {
     pub(crate) inner: IndexVec<BasicBlockId, Option<BasicBlockId>>,
 }
 
-impl Default for Dominators {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Dominators {
-    pub fn new() -> Self {
-        Self { inner: IndexVec::new() }
-    }
-
+    // iterative dominator algorithm using RPO
     pub fn compute(&mut self, program: &EthIRProgram, predecessors: &Predecessors) {
         self.inner.clear();
         self.inner.resize(program.basic_blocks.len(), None);
@@ -39,21 +31,12 @@ impl std::ops::Index<BasicBlockId> for Dominators {
     }
 }
 
+#[derive(Default)]
 pub struct DominanceFrontiers {
     inner: IndexVec<BasicBlockId, HashSet<BasicBlockId>>,
 }
 
-impl Default for DominanceFrontiers {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DominanceFrontiers {
-    pub fn new() -> Self {
-        Self { inner: IndexVec::new() }
-    }
-
     pub fn compute(&mut self, dominators: &Dominators, predecessors: &Predecessors) {
         for set in self.inner.iter_mut() {
             set.clear();
@@ -86,54 +69,6 @@ impl std::ops::Index<BasicBlockId> for DominanceFrontiers {
     fn index(&self, id: BasicBlockId) -> &HashSet<BasicBlockId> {
         &self.inner[id]
     }
-}
-
-pub fn compute_dominance_frontiers(
-    dominators: &IndexVec<BasicBlockId, Option<BasicBlockId>>,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-) -> IndexVec<BasicBlockId, HashSet<BasicBlockId>> {
-    let mut frontiers = index_vec![HashSet::new(); dominators.len()];
-
-    for (b, preds) in predecessors.enumerate_idx() {
-        if preds.len() < 2 {
-            continue;
-        }
-        let Some(idom) = dominators[b] else {
-            continue;
-        };
-        for &p in preds {
-            if dominators[p].is_none() {
-                continue;
-            }
-            let mut runner = p;
-            while runner != idom {
-                frontiers[runner].insert(b);
-                runner = dominators[runner].expect("reachable path");
-            }
-        }
-    }
-
-    frontiers
-}
-
-// iterative dominator algorithm using RPO
-pub fn compute_dominators(program: &EthIRProgram) -> IndexVec<BasicBlockId, Option<BasicBlockId>> {
-    let mut predecessors = IndexVec::new();
-    compute_predecessors(program, &mut predecessors);
-    compute_dominators_from_predecessors(program, &predecessors)
-}
-
-pub fn compute_dominators_from_predecessors(
-    program: &EthIRProgram,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-) -> IndexVec<BasicBlockId, Option<BasicBlockId>> {
-    let mut dominators = index_vec![None; program.basic_blocks.len()];
-
-    for func in program.functions_iter() {
-        compute_function_dominators(program, func.entry().id(), predecessors, &mut dominators);
-    }
-
-    dominators
 }
 
 fn compute_function_dominators(
@@ -227,13 +162,10 @@ mod tests {
         v
     }
 
-    fn frontiers(
-        program: &EthIRProgram,
-        dominators: &IndexVec<BasicBlockId, Option<BasicBlockId>>,
-    ) -> IndexVec<BasicBlockId, HashSet<BasicBlockId>> {
-        let mut predecessors = IndexVec::new();
-        compute_predecessors(program, &mut predecessors);
-        compute_dominance_frontiers(dominators, &predecessors)
+    fn make_store(program: &EthIRProgram) -> crate::AnalysesStore {
+        let mut store = crate::AnalysesStore::default();
+        store.dominance_frontiers(program);
+        store
     }
 
     #[test]
@@ -261,14 +193,13 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(1))); // idom(C) = B
         assert_eq!(dominators[bb(3)], Some(bb(1))); // idom(D) = B
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(1)]); // DF(B) = {B}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(1)]); // DF(C) = {B}
@@ -294,13 +225,12 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(1))); // idom(C) = B
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![]); // DF(B) = {}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![]); // DF(C) = {}
@@ -333,14 +263,13 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
         assert_eq!(dominators[bb(3)], Some(bb(0))); // idom(D) = A (not B or C)
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(3)]); // DF(B) = {D}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(3)]); // DF(C) = {D}
@@ -382,16 +311,15 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
         assert_eq!(dominators[bb(3)], Some(bb(1))); // idom(D) = B
         assert_eq!(dominators[bb(4)], Some(bb(0))); // idom(E) = A (common dominator of C and D)
         assert_eq!(dominators[bb(5)], Some(bb(4))); // idom(F) = E
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(4)]); // DF(B) = {E}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(4)]); // DF(C) = {E}
@@ -433,16 +361,15 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(1))); // idom(C) = B
         assert_eq!(dominators[bb(3)], Some(bb(2))); // idom(D) = C
         assert_eq!(dominators[bb(4)], Some(bb(3))); // idom(E) = D
         assert_eq!(dominators[bb(5)], Some(bb(4))); // idom(F) = E
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(1)]); // DF(B) = {B}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(1), bb(2)]); // DF(C) = {B, C}
@@ -470,13 +397,12 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], None); // C is unreachable
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![]); // DF(B) = {}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![]); // DF(C) = {}
@@ -505,14 +431,13 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(2))); // idom(C) = C (entry of other)
         assert_eq!(dominators[bb(3)], Some(bb(2))); // idom(D) = C
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![]); // DF(B) = {}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![]); // DF(C) = {}
@@ -560,9 +485,8 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
@@ -570,7 +494,7 @@ mod tests {
         assert_eq!(dominators[bb(4)], Some(bb(3))); // idom(E) = D
         assert_eq!(dominators[bb(5)], Some(bb(3))); // idom(F) = D
         assert_eq!(dominators[bb(6)], Some(bb(3))); // idom(G) = D
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(3)]); // DF(B) = {D}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(3)]); // DF(C) = {D}
@@ -610,14 +534,13 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let dominators = compute_dominators(&program);
-        let df = frontiers(&program, &dominators);
-
+        let mut store = make_store(&program);
+        let dominators = store.dominators(&program);
         assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
         assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
         assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
         assert_eq!(dominators[bb(3)], Some(bb(0))); // idom(D) = A (common dominator of B and C paths)
-
+        let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
         assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(2), bb(3)]); // DF(B) = {C, D}
         assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(1), bb(3)]); // DF(C) = {B, D}

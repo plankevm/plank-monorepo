@@ -1,19 +1,8 @@
 use sir_data::{BasicBlockId, EthIRProgram, IndexVec};
 
+#[derive(Default)]
 pub struct Predecessors {
     pub(crate) inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-}
-
-impl Default for Predecessors {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Predecessors {
-    pub fn new() -> Self {
-        Self { inner: IndexVec::new() }
-    }
 }
 
 impl std::ops::Index<BasicBlockId> for Predecessors {
@@ -40,22 +29,6 @@ impl Predecessors {
             for successor in block.successors() {
                 self.inner[successor].push(block.id());
             }
-        }
-    }
-}
-
-pub fn compute_predecessors(
-    program: &EthIRProgram,
-    predecessors: &mut IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-) {
-    for pred in predecessors.iter_mut() {
-        pred.clear();
-    }
-    predecessors.resize(program.basic_blocks.len(), Vec::new());
-
-    for block in program.blocks() {
-        for successor in block.successors() {
-            predecessors[successor].push(block.id());
         }
     }
 }

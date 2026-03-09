@@ -18,7 +18,14 @@ pub struct OptimizationStore {
 
 impl OptimizationStore {
     pub fn new() -> Self {
-        Self { analyses: AnalysesStore::new(), sccp_reachable: Cached::new(DenseIndexSet::new()) }
+        Self {
+            analyses: AnalysesStore::default(),
+            sccp_reachable: Cached::new(DenseIndexSet::new()),
+        }
+    }
+
+    pub fn sccp_reachable(&self) -> Option<&DenseIndexSet<BasicBlockId>> {
+        self.sccp_reachable.get_if_valid()
     }
 }
 
@@ -79,7 +86,11 @@ impl Optimizer {
         }
     }
 
-    pub fn finish(self) -> EthIRProgram {
+    pub fn finish(mut self) -> EthIRProgram {
+        debug_assert!(
+            sir_analyses::legalize(&self.src, &mut self.store.analyses).is_ok(),
+            "optimized IR is illegal"
+        );
         self.src
     }
 
@@ -114,7 +125,6 @@ pub(crate) fn run_pass(source: &str, opt: &mut impl Optimization) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sir_analyses::legalize;
     use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
@@ -123,7 +133,6 @@ mod tests {
         let mut optimizer = Optimizer::new(program);
         optimizer.run_passes(passes);
         let program = optimizer.finish();
-        legalize(&program).expect("optimized IR should be legal");
         sir_data::display_program(&program)
     }
 

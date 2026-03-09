@@ -488,10 +488,10 @@ impl SCCPAnalysis {
 impl Optimization for SCCPAnalysis {
     fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
         let uses = store.analyses.def_use(program);
-        let reachable = store.sccp_reachable.inner_mut();
-        self.analysis(program, uses, reachable);
-        self.apply(program, reachable);
-        store.sccp_reachable.mark_valid();
+        store.sccp_reachable.update(|reachable| {
+            self.analysis(program, uses, reachable);
+            self.apply(program, reachable);
+        });
     }
 
     fn invalidates(&self) -> &[AnalysisKind] {
@@ -1264,7 +1264,7 @@ Basic Blocks:
         let mut sccp = SCCPAnalysis::new();
         sccp.run(&mut ir, &mut store);
 
-        let reachable = store.sccp_reachable.get();
+        let reachable = store.sccp_reachable().expect("sccp did not populate reachable");
         assert!(reachable.contains(BasicBlockId::new(1)));
         assert!(!reachable.contains(BasicBlockId::new(2)));
     }
@@ -1383,7 +1383,7 @@ Basic Blocks:
         let mut sccp = SCCPAnalysis::new();
         sccp.run(&mut ir, &mut store);
 
-        let reachable = store.sccp_reachable.get();
+        let reachable = store.sccp_reachable().expect("sccp did not populate reachable");
         assert!(reachable.contains(BasicBlockId::new(5)), "true_target (@5) should be reachable");
         assert!(reachable.contains(BasicBlockId::new(6)), "false_target (@6) should be reachable");
     }

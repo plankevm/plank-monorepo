@@ -1,36 +1,18 @@
 use sir_data::{BasicBlockId, EthIRProgram, FunctionId, IndexVec};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BasicBlockOwnershipAndReachability {
     ownership: IndexVec<BasicBlockId, Option<FunctionId>>,
 }
 
-impl Default for BasicBlockOwnershipAndReachability {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl BasicBlockOwnershipAndReachability {
-    pub fn new() -> Self {
-        Self { ownership: IndexVec::new() }
-    }
-
     pub fn compute(&mut self, program: &EthIRProgram) {
-        for owner in self.ownership.iter_mut() {
-            *owner = None;
-        }
+        self.ownership.clear();
         self.ownership.resize(program.basic_blocks.len(), None);
 
         for func in program.functions_iter() {
             Self::mark_reachable_blocks(&mut self.ownership, program, func.entry().id(), func.id());
         }
-    }
-
-    pub fn analyze(program: &EthIRProgram) -> Self {
-        let mut result = Self::new();
-        result.compute(program);
-        result
     }
 
     fn mark_reachable_blocks(
@@ -112,7 +94,7 @@ impl BasicBlockOwnershipAndReachability {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::AnalysesStore;
     use sir_data::{Branch, Control, builder::EthIRBuilder, operation::*};
 
     #[test]
@@ -133,7 +115,8 @@ mod tests {
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);
 
-        let analysis = BasicBlockOwnershipAndReachability::analyze(&program);
+        let mut store = AnalysesStore::default();
+        let analysis = store.basic_block_ownership(&program);
 
         assert_eq!(analysis.get_owner(bb0_id), Some(func_id));
         assert_eq!(analysis.get_owner(bb1_id), Some(func_id));
@@ -161,7 +144,8 @@ mod tests {
 
         let program = builder.build(func_id, None);
 
-        let analysis = BasicBlockOwnershipAndReachability::analyze(&program);
+        let mut store = AnalysesStore::default();
+        let analysis = store.basic_block_ownership(&program);
 
         assert!(analysis.is_reachable(bb0_id));
         assert!(!analysis.is_reachable(bb1_id));
@@ -195,7 +179,8 @@ mod tests {
 
         let program = builder.build(func0_id, None);
 
-        let analysis = BasicBlockOwnershipAndReachability::analyze(&program);
+        let mut store = AnalysesStore::default();
+        let analysis = store.basic_block_ownership(&program);
 
         assert_eq!(analysis.get_owner(bb0_id), Some(func0_id));
         assert_eq!(analysis.get_owner(bb1_id), Some(func0_id));
@@ -233,7 +218,8 @@ mod tests {
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);
 
-        let analysis = BasicBlockOwnershipAndReachability::analyze(&program);
+        let mut store = AnalysesStore::default();
+        let analysis = store.basic_block_ownership(&program);
 
         assert_eq!(analysis.get_owner(bb0_id), Some(func_id));
         assert_eq!(analysis.get_owner(bb1_id), Some(func_id));

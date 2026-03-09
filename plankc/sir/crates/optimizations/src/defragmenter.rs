@@ -71,7 +71,7 @@ impl Optimization for Defragmenter {
         self.state.clear();
         self.scratch.clear();
         {
-            let live_blocks = store.sccp_reachable.get_if_valid();
+            let live_blocks = store.sccp_reachable();
             Rewriter { state: &mut self.state, src: program, dst: &mut self.scratch, live_blocks }
                 .rewrite();
         }
@@ -538,7 +538,7 @@ Basic Blocks:
     }
         "#;
         assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
-        assert_eq!(sir_analyses::legalize(&ir), Ok(()));
+        assert_eq!(sir_analyses::legalize(&ir, &mut store.analyses), Ok(()));
     }
 
     #[test]

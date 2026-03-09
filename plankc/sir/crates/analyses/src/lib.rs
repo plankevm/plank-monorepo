@@ -9,10 +9,7 @@ mod predecessors;
 pub use basic_block_ownership::BasicBlockOwnershipAndReachability;
 pub use cache::{AnalysesStore, AnalysisKind, Cached};
 pub use cfg_in_out_bundling::{ControlFlowGraphInOutBundling, InOutGroupId};
-pub use def_use::{DefUse, UseKind, UseLocation, compute_def_use};
-pub use dominators::{
-    DominanceFrontiers, Dominators, compute_dominance_frontiers, compute_dominators,
-    compute_dominators_from_predecessors,
-};
+pub use def_use::{DefUse, UseKind, UseLocation};
+pub use dominators::{DominanceFrontiers, Dominators};
 pub use legalizer::legalize;
-pub use predecessors::{Predecessors, compute_predecessors};
+pub use predecessors::Predecessors;

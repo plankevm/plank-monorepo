@@ -4,6 +4,7 @@ use crate::{
 };
 use sir_data::EthIRProgram;
 
+#[derive(Default)]
 pub struct Cached<T> {
     inner: T,
     valid: bool,
@@ -14,7 +15,7 @@ impl<T> Cached<T> {
         Self { inner, valid: false }
     }
 
-    pub fn get(&self) -> &T {
+    fn get(&self) -> &T {
         assert!(self.valid, "analysis not valid");
         &self.inner
     }
@@ -27,11 +28,8 @@ impl<T> Cached<T> {
         self.valid = false;
     }
 
-    pub fn inner_mut(&mut self) -> &mut T {
-        &mut self.inner
-    }
-
-    pub fn mark_valid(&mut self) {
+    pub fn update(&mut self, f: impl FnOnce(&mut T)) {
+        f(&mut self.inner);
         self.valid = true;
     }
 }
@@ -51,23 +49,12 @@ macro_rules! define_analyses {
             }
         }
 
+        #[derive(Default)]
         pub struct AnalysesStore {
-            $(pub $field: Cached<$ty>),*
-        }
-
-        impl Default for AnalysesStore {
-            fn default() -> Self {
-                Self::new()
-            }
+            $($field: Cached<$ty>),*
         }
 
         impl AnalysesStore {
-            pub fn new() -> Self {
-                Self {
-                    $($field: Cached::new(<$ty>::new())),*
-                }
-            }
-
             pub fn invalidate(&mut self, kind: AnalysisKind) {
                 match kind {
                     $(AnalysisKind::$variant => self.$field.invalidate()),*
@@ -103,8 +90,8 @@ impl AnalysesStore {
     pub fn def_use_mut(&mut self, program: &EthIRProgram) -> &mut DefUse {
         if !self.def_use.valid {
             self.def_use.inner.compute(program);
-            self.def_use.valid = true;
         }
+        self.def_use.valid = false;
         &mut self.def_use.inner
     }
 

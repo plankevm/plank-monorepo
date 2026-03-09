@@ -23,20 +23,9 @@ impl std::fmt::Display for UseKind {
     }
 }
 
+#[derive(Default)]
 pub struct DefUse {
     inner: IndexVec<LocalId, Vec<UseLocation>>,
-}
-
-impl Default for DefUse {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DefUse {
-    pub fn new() -> Self {
-        Self { inner: IndexVec::new() }
-    }
 }
 
 impl std::ops::Index<LocalId> for DefUse {
@@ -50,10 +39,6 @@ impl std::ops::IndexMut<LocalId> for DefUse {
     fn index_mut(&mut self, id: LocalId) -> &mut Vec<UseLocation> {
         &mut self.inner[id]
     }
-}
-
-pub fn compute_def_use(program: &EthIRProgram, uses: &mut DefUse) {
-    uses.compute(program);
 }
 
 impl DefUse {
