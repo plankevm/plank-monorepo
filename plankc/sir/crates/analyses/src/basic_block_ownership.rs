@@ -1,4 +1,4 @@
-use sir_data::{BasicBlockId, EthIRProgram, FunctionId, IndexVec, index_vec};
+use sir_data::{BasicBlockId, EthIRProgram, FunctionId, IndexVec};
 
 #[derive(Debug, Clone)]
 pub struct BasicBlockOwnershipAndReachability {
@@ -6,14 +6,25 @@ pub struct BasicBlockOwnershipAndReachability {
 }
 
 impl BasicBlockOwnershipAndReachability {
-    pub fn analyze(program: &EthIRProgram) -> Self {
-        let mut ownership = index_vec![None; program.basic_blocks.len()];
+    pub fn new() -> Self {
+        Self { ownership: IndexVec::new() }
+    }
+
+    pub fn compute(&mut self, program: &EthIRProgram) {
+        for owner in self.ownership.iter_mut() {
+            *owner = None;
+        }
+        self.ownership.resize(program.basic_blocks.len(), None);
 
         for func in program.functions_iter() {
-            Self::mark_reachable_blocks(&mut ownership, program, func.entry().id(), func.id());
+            Self::mark_reachable_blocks(&mut self.ownership, program, func.entry().id(), func.id());
         }
+    }
 
-        Self { ownership }
+    pub fn analyze(program: &EthIRProgram) -> Self {
+        let mut result = Self::new();
+        result.compute(program);
+        result
     }
 
     fn mark_reachable_blocks(

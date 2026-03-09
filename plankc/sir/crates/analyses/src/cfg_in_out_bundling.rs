@@ -1,5 +1,5 @@
 use plank_core::{newtype_index, span::IncIterable};
-use sir_data::{BasicBlockId, EthIRProgram, IndexVec, index_vec};
+use sir_data::{BasicBlockId, EthIRProgram, IndexVec};
 
 newtype_index! {
     pub struct InOutGroupId;
@@ -13,21 +13,39 @@ pub struct ControlFlowGraphInOutBundling {
 }
 
 impl ControlFlowGraphInOutBundling {
-    pub fn analyze(ir: &EthIRProgram) -> Self {
-        let mut out_group = index_vec![None; ir.basic_blocks.len()];
-        let mut in_group = index_vec![None; ir.basic_blocks.len()];
-        let mut next_group_id = InOutGroupId::default();
+    pub fn new() -> Self {
+        Self {
+            out_group: IndexVec::new(),
+            in_group: IndexVec::new(),
+            next_group_id: InOutGroupId::default(),
+        }
+    }
 
-        for block in ir.blocks() {
-            let existing_group_id = block.successors().find_map(|to| in_group[to]);
-            let group_id = existing_group_id.unwrap_or_else(|| next_group_id.get_and_inc());
-            out_group[block.id()] = Some(group_id);
+    pub fn compute(&mut self, program: &EthIRProgram) {
+        for g in self.out_group.iter_mut() {
+            *g = None;
+        }
+        for g in self.in_group.iter_mut() {
+            *g = None;
+        }
+        self.out_group.resize(program.basic_blocks.len(), None);
+        self.in_group.resize(program.basic_blocks.len(), None);
+        self.next_group_id = InOutGroupId::default();
+
+        for block in program.blocks() {
+            let existing_group_id = block.successors().find_map(|to| self.in_group[to]);
+            let group_id = existing_group_id.unwrap_or_else(|| self.next_group_id.get_and_inc());
+            self.out_group[block.id()] = Some(group_id);
             for to in block.successors() {
-                in_group[to] = Some(group_id);
+                self.in_group[to] = Some(group_id);
             }
         }
+    }
 
-        Self { out_group, in_group, next_group_id }
+    pub fn analyze(ir: &EthIRProgram) -> Self {
+        let mut result = Self::new();
+        result.compute(ir);
+        result
     }
 
     pub fn get_out_group(&self, bb_id: BasicBlockId) -> Option<InOutGroupId> {
