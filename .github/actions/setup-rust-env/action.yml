@@ -7,5 +7,5 @@ runs:
     - uses: foundry-rs/foundry-toolchain@v1
     - uses: Swatinem/rust-cache@v2
       with:
-        workspaces: senseic -> target
+        workspaces: plankc -> target
     - uses: extractions/setup-just@v3
