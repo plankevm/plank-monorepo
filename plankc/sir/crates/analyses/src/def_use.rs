@@ -27,6 +27,12 @@ pub struct DefUse {
     inner: IndexVec<LocalId, Vec<UseLocation>>,
 }
 
+impl Default for DefUse {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DefUse {
     pub fn new() -> Self {
         Self { inner: IndexVec::new() }

@@ -37,14 +37,28 @@ impl<T> Cached<T> {
 }
 
 macro_rules! define_analyses {
-    ($($variant:ident => $field:ident : $ty:ty),* $(,)?) => {
+    ($($variant:ident => $field:ident : $ty:ty [used_by: $($dep:ident),*]),* $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum AnalysisKind {
             $($variant),*
         }
 
+        impl AnalysisKind {
+            fn used_by(&self) -> &[AnalysisKind] {
+                match self {
+                    $(AnalysisKind::$variant => &[$(AnalysisKind::$dep),*]),*
+                }
+            }
+        }
+
         pub struct AnalysesStore {
             $(pub $field: Cached<$ty>),*
+        }
+
+        impl Default for AnalysesStore {
+            fn default() -> Self {
+                Self::new()
+            }
         }
 
         impl AnalysesStore {
@@ -58,63 +72,87 @@ macro_rules! define_analyses {
                 match kind {
                     $(AnalysisKind::$variant => self.$field.invalidate()),*
                 }
+                for dependent in kind.used_by() {
+                    self.invalidate(*dependent);
+                }
             }
         }
     };
 }
 
 define_analyses! {
-    DefUse => def_use: DefUse,
-    Predecessors => predecessors: Predecessors,
-    Dominators => dominators: Dominators,
-    DominanceFrontiers => dominance_frontiers: DominanceFrontiers,
-    BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability,
-    CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling,
+    DefUse => def_use: DefUse [used_by:],
+    // DominanceFrontiers also depends on Predecessors but is transitively
+    // invalidated via Dominators.
+    Predecessors => predecessors: Predecessors [used_by: Dominators],
+    Dominators => dominators: Dominators [used_by: DominanceFrontiers],
+    DominanceFrontiers => dominance_frontiers: DominanceFrontiers [used_by:],
+    BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability [used_by:],
+    CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling [used_by:],
 }
 
 impl AnalysesStore {
-    pub fn ensure(&mut self, kind: AnalysisKind, program: &EthIRProgram) {
-        match kind {
-            AnalysisKind::DefUse => {
-                if !self.def_use.valid {
-                    self.def_use.inner.compute(program);
-                    self.def_use.valid = true;
-                }
-            }
-            AnalysisKind::Predecessors => {
-                if !self.predecessors.valid {
-                    self.predecessors.inner.compute(program);
-                    self.predecessors.valid = true;
-                }
-            }
-            AnalysisKind::Dominators => {
-                if !self.dominators.valid {
-                    self.ensure(AnalysisKind::Predecessors, program);
-                    self.dominators.inner.compute(program, self.predecessors.get());
-                    self.dominators.valid = true;
-                }
-            }
-            AnalysisKind::DominanceFrontiers => {
-                if !self.dominance_frontiers.valid {
-                    self.ensure(AnalysisKind::Dominators, program);
-                    self.dominance_frontiers
-                        .inner
-                        .compute(self.dominators.get(), self.predecessors.get());
-                    self.dominance_frontiers.valid = true;
-                }
-            }
-            AnalysisKind::BasicBlockOwnership => {
-                if !self.basic_block_ownership.valid {
-                    self.basic_block_ownership.inner.compute(program);
-                    self.basic_block_ownership.valid = true;
-                }
-            }
-            AnalysisKind::CfgInOutBundling => {
-                if !self.cfg_in_out_bundling.valid {
-                    self.cfg_in_out_bundling.inner.compute(program);
-                    self.cfg_in_out_bundling.valid = true;
-                }
-            }
+    pub fn def_use(&mut self, program: &EthIRProgram) -> &DefUse {
+        if !self.def_use.valid {
+            self.def_use.inner.compute(program);
+            self.def_use.valid = true;
         }
+        &self.def_use.inner
+    }
+
+    pub fn def_use_mut(&mut self, program: &EthIRProgram) -> &mut DefUse {
+        if !self.def_use.valid {
+            self.def_use.inner.compute(program);
+            self.def_use.valid = true;
+        }
+        &mut self.def_use.inner
+    }
+
+    pub fn predecessors(&mut self, program: &EthIRProgram) -> &Predecessors {
+        if !self.predecessors.valid {
+            self.predecessors.inner.compute(program);
+            self.predecessors.valid = true;
+        }
+        &self.predecessors.inner
+    }
+
+    pub fn dominators(&mut self, program: &EthIRProgram) -> &Dominators {
+        self.predecessors(program);
+        if !self.dominators.valid {
+            self.dominators.inner.compute(program, self.predecessors.get());
+            self.dominators.valid = true;
+        }
+        &self.dominators.inner
+    }
+
+    pub fn dominance_frontiers(&mut self, program: &EthIRProgram) -> &DominanceFrontiers {
+        self.dominators(program);
+        if !self.dominance_frontiers.valid {
+            self.dominance_frontiers.inner.compute(self.dominators.get(), self.predecessors.get());
+            self.dominance_frontiers.valid = true;
+        }
+        &self.dominance_frontiers.inner
+    }
+
+    pub fn basic_block_ownership(
+        &mut self,
+        program: &EthIRProgram,
+    ) -> &BasicBlockOwnershipAndReachability {
+        if !self.basic_block_ownership.valid {
+            self.basic_block_ownership.inner.compute(program);
+            self.basic_block_ownership.valid = true;
+        }
+        &self.basic_block_ownership.inner
+    }
+
+    pub fn cfg_in_out_bundling(
+        &mut self,
+        program: &EthIRProgram,
+    ) -> &ControlFlowGraphInOutBundling {
+        if !self.cfg_in_out_bundling.valid {
+            self.cfg_in_out_bundling.inner.compute(program);
+            self.cfg_in_out_bundling.valid = true;
+        }
+        &self.cfg_in_out_bundling.inner
     }
 }

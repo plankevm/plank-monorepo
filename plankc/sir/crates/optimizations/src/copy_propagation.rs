@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
+use sir_analyses::AnalysisKind;
 use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOperands};
+
+use crate::optimizer::{Optimization, OptimizationStore};
 
 pub struct CopyPropagation {
     copy_map: HashMap<LocalId, LocalId>,
@@ -10,8 +13,10 @@ impl CopyPropagation {
     pub fn new() -> Self {
         Self { copy_map: HashMap::new() }
     }
+}
 
-    pub fn run(&mut self, program: &mut EthIRProgram) {
+impl Optimization for CopyPropagation {
+    fn run(&mut self, program: &mut EthIRProgram, _store: &mut OptimizationStore) {
         for bb in program.basic_blocks.iter_mut() {
             self.copy_map.clear();
 
@@ -47,6 +52,10 @@ impl CopyPropagation {
             }
         }
     }
+
+    fn invalidates(&self) -> &[AnalysisKind] {
+        &[AnalysisKind::DefUse]
+    }
 }
 
 fn replace_if_copied(input: &mut LocalId, copy_map: &HashMap<LocalId, LocalId>) {
@@ -58,13 +67,10 @@ fn replace_if_copied(input: &mut LocalId, copy_map: &HashMap<LocalId, LocalId>) 
 #[cfg(test)]
 mod tests {
     use super::CopyPropagation;
-    use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
-    fn run_copy_prop(source: &str) -> String {
-        let mut ir = parse_or_panic(source, EmitConfig::init_only());
-        CopyPropagation::new().run(&mut ir);
-        sir_data::display_program(&ir)
+    fn run_pass(source: &str) -> String {
+        crate::optimizer::run_pass(source, &mut CopyPropagation::new())
     }
 
     #[test]
@@ -106,7 +112,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_copy_prop(input);
+        let actual = run_pass(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "copy chains and inline operands");
     }
 
@@ -152,7 +158,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_copy_prop(input);
+        let actual = run_pass(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "phi nodes block propagation");
     }
 
@@ -201,7 +207,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_copy_prop(input);
+        let actual = run_pass(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "branch condition propagation");
     }
 
@@ -257,7 +263,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_copy_prop(input);
+        let actual = run_pass(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "switch condition propagation");
     }
 
@@ -305,7 +311,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_copy_prop(input);
+        let actual = run_pass(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "icall argument propagation");
     }
 
@@ -349,7 +355,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_copy_prop(input);
+        let actual = run_pass(input);
         assert_trim_strings_eq_with_diff(
             &actual,
             expected,

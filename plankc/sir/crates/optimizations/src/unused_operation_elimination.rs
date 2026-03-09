@@ -1,5 +1,7 @@
-use sir_analyses::{DefUse, UseKind, compute_def_use};
+use sir_analyses::{AnalysisKind, DefUse, UseKind};
 use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
+
+use crate::optimizer::{Optimization, OptimizationStore};
 
 pub struct UnusedOperationElimination {
     def_sites: IndexVec<LocalId, Option<OperationIdx>>,
@@ -10,13 +12,15 @@ impl UnusedOperationElimination {
     pub fn new() -> Self {
         Self { def_sites: IndexVec::new(), pending_removals: Vec::new() }
     }
+}
 
-    pub fn run(&mut self, program: &mut EthIRProgram, uses: &mut DefUse) {
+impl Optimization for UnusedOperationElimination {
+    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
+        let uses = store.analyses.def_use_mut(program);
+
         self.def_sites.clear();
         self.def_sites.resize(program.next_free_local_id.idx(), None);
         self.pending_removals.clear();
-
-        compute_def_use(program, uses);
 
         for op in program.operations() {
             for out in op.outputs() {
@@ -53,6 +57,10 @@ impl UnusedOperationElimination {
             program.operations[op_idx] = Operation::Noop(());
         }
     }
+
+    fn invalidates(&self) -> &[AnalysisKind] {
+        &[AnalysisKind::DefUse]
+    }
 }
 
 fn is_removable(op: &Operation, program: &EthIRProgram, uses: &DefUse) -> bool {
@@ -63,14 +71,10 @@ fn is_removable(op: &Operation, program: &EthIRProgram, uses: &DefUse) -> bool {
 #[cfg(test)]
 mod tests {
     use super::UnusedOperationElimination;
-    use sir_analyses::DefUse;
-    use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        let mut ir = parse_or_panic(source, EmitConfig::init_only());
-        UnusedOperationElimination::new().run(&mut ir, &mut DefUse::new());
-        sir_data::display_program(&ir)
+        crate::optimizer::run_pass(source, &mut UnusedOperationElimination::new())
     }
 
     // Note: block outputs count as uses, even if the successor never uses the input.

@@ -7,6 +7,12 @@ pub struct Dominators {
     pub(crate) inner: IndexVec<BasicBlockId, Option<BasicBlockId>>,
 }
 
+impl Default for Dominators {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dominators {
     pub fn new() -> Self {
         Self { inner: IndexVec::new() }
@@ -35,6 +41,12 @@ impl std::ops::Index<BasicBlockId> for Dominators {
 
 pub struct DominanceFrontiers {
     inner: IndexVec<BasicBlockId, HashSet<BasicBlockId>>,
+}
+
+impl Default for DominanceFrontiers {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DominanceFrontiers {

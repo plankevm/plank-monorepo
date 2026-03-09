@@ -1,4 +1,5 @@
 use plank_core::span::IncIterable;
+use sir_analyses::AnalysisKind;
 use sir_data::{
     BasicBlock, BasicBlockId, BlockView, Branch, Cases, CasesId, Control, ControlView, DataId,
     DenseIndexSet, EthIRProgram, Function, FunctionId, Idx, LargeConstId, LocalId, LocalIdx,
@@ -6,7 +7,9 @@ use sir_data::{
 };
 use std::collections::{HashMap, hash_map::Entry};
 
-pub struct Defragmenter {
+use crate::optimizer::{Optimization, OptimizationStore};
+
+struct DefragmenterState {
     func_worklist: Vec<FunctionId>,
     block_worklist: Vec<BasicBlockId>,
     local_map: HashMap<LocalId, LocalId>,
@@ -18,14 +21,8 @@ pub struct Defragmenter {
     cases_map: HashMap<CasesId, CasesId>,
 }
 
-impl Default for Defragmenter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Defragmenter {
-    pub fn new() -> Self {
+impl DefragmenterState {
+    fn new() -> Self {
         Self {
             func_worklist: Vec::new(),
             block_worklist: Vec::new(),
@@ -39,7 +36,7 @@ impl Defragmenter {
         }
     }
 
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.func_worklist.clear();
         self.block_worklist.clear();
         self.local_map.clear();
@@ -50,21 +47,50 @@ impl Defragmenter {
         self.block_map.clear();
         self.cases_map.clear();
     }
+}
 
-    pub fn run(
-        &mut self,
-        src: &EthIRProgram,
-        dst: &mut EthIRProgram,
-        live_blocks: Option<&DenseIndexSet<BasicBlockId>>,
-    ) {
-        self.clear();
-        dst.clear();
-        Rewriter { state: self, src, dst, live_blocks }.rewrite();
+pub struct Defragmenter {
+    state: DefragmenterState,
+    scratch: EthIRProgram,
+}
+
+impl Default for Defragmenter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Defragmenter {
+    pub fn new() -> Self {
+        Self { state: DefragmenterState::new(), scratch: EthIRProgram::default() }
+    }
+}
+
+impl Optimization for Defragmenter {
+    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
+        self.state.clear();
+        self.scratch.clear();
+        {
+            let live_blocks = store.sccp_reachable.get_if_valid();
+            Rewriter { state: &mut self.state, src: program, dst: &mut self.scratch, live_blocks }
+                .rewrite();
+        }
+        std::mem::swap(program, &mut self.scratch);
+        store.sccp_reachable.invalidate();
+    }
+
+    fn invalidates(&self) -> &[AnalysisKind] {
+        &[
+            AnalysisKind::DefUse,
+            AnalysisKind::Predecessors,
+            AnalysisKind::BasicBlockOwnership,
+            AnalysisKind::CfgInOutBundling,
+        ]
     }
 }
 
 struct Rewriter<'a> {
-    state: &'a mut Defragmenter,
+    state: &'a mut DefragmenterState,
     src: &'a EthIRProgram,
     dst: &'a mut EthIRProgram,
     live_blocks: Option<&'a DenseIndexSet<BasicBlockId>>,
@@ -378,10 +404,9 @@ impl<'a> OpVisitorMut<'_, ()> for &mut Rewriter<'a> {
 mod tests {
     use super::*;
     use crate::{
-        constant_propagation::SCCPAnalysis,
+        constant_propagation::SCCPAnalysis, optimizer::OptimizationStore,
         unused_operation_elimination::UnusedOperationElimination,
     };
-    use sir_analyses::DefUse;
     use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
@@ -427,13 +452,14 @@ mod tests {
         "#;
 
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
+        let mut store = OptimizationStore::new();
 
-        let mut uses = DefUse::new();
-        let mut sccp = SCCPAnalysis::new();
-        sccp.analysis(&ir, &mut uses);
-        sccp.apply(&mut ir);
-
-        UnusedOperationElimination::new().run(&mut ir, &mut uses);
+        crate::optimizer::run_optimization(&mut SCCPAnalysis::new(), &mut ir, &mut store);
+        crate::optimizer::run_optimization(
+            &mut UnusedOperationElimination::new(),
+            &mut ir,
+            &mut store,
+        );
 
         let src_str = sir_data::display_program(&ir);
         let expected_src = r#"
@@ -483,11 +509,9 @@ data .0 0xcafebabe
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
 
-        let mut dst = EthIRProgram::default();
-        let mut defragmenter = Defragmenter::new();
-        defragmenter.run(&ir, &mut dst, Some(&sccp.reachable));
+        crate::optimizer::run_optimization(&mut Defragmenter::new(), &mut ir, &mut store);
 
-        let dst_str = sir_data::display_program(&dst);
+        let dst_str = sir_data::display_program(&ir);
         let expected_dst = r#"
 Init: @0
 Functions:
@@ -514,7 +538,7 @@ Basic Blocks:
     }
         "#;
         assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
-        assert_eq!(sir_analyses::legalize(&dst), Ok(()));
+        assert_eq!(sir_analyses::legalize(&ir), Ok(()));
     }
 
     #[test]
@@ -557,7 +581,7 @@ Basic Blocks:
             data dead_data 0x5678
         "#;
 
-        let ir = parse_or_panic(input, EmitConfig::init_only());
+        let mut ir = parse_or_panic(input, EmitConfig::init_only());
 
         let src_str = sir_data::display_program(&ir);
         let expected_src = r#"
@@ -624,12 +648,11 @@ data .1 0x5678
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
-        let mut dst = EthIRProgram::default();
-        let mut defragmenter = Defragmenter::new();
-        defragmenter.run(&ir, &mut dst, None);
+        let mut store = OptimizationStore::new();
+        crate::optimizer::run_optimization(&mut Defragmenter::new(), &mut ir, &mut store);
 
-        let dst_str = sir_data::display_program(&dst);
-        let expected_dst = r#"
+        let actual = sir_data::display_program(&ir);
+        let expected = r#"
 Init: @0
 Functions:
     fn @0 -> entry @0  (outputs: 0)
@@ -664,7 +687,6 @@ Basic Blocks:
 
 data .0 0x1234
         "#;
-        assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
-        assert_eq!(sir_analyses::legalize(&dst), Ok(()));
+        assert_trim_strings_eq_with_diff(&actual, expected, "defragment dead function data");
     }
 }

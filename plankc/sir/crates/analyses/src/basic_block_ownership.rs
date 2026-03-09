@@ -5,6 +5,12 @@ pub struct BasicBlockOwnershipAndReachability {
     ownership: IndexVec<BasicBlockId, Option<FunctionId>>,
 }
 
+impl Default for BasicBlockOwnershipAndReachability {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BasicBlockOwnershipAndReachability {
     pub fn new() -> Self {
         Self { ownership: IndexVec::new() }

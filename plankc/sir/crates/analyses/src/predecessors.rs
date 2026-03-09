@@ -4,6 +4,12 @@ pub struct Predecessors {
     pub(crate) inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
 }
 
+impl Default for Predecessors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Predecessors {
     pub fn new() -> Self {
         Self { inner: IndexVec::new() }

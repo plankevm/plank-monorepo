@@ -12,6 +12,12 @@ pub struct ControlFlowGraphInOutBundling {
     next_group_id: InOutGroupId,
 }
 
+impl Default for ControlFlowGraphInOutBundling {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ControlFlowGraphInOutBundling {
     pub fn new() -> Self {
         Self {
