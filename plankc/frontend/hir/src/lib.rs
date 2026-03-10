@@ -278,22 +278,17 @@ impl<'a> BlockLowerer<'a> {
         })
     }
 
-    fn lookup_scope(scope: &[ScopedLocal], name: StrId) -> Option<LocalId> {
-        for entry in scope.iter().rev() {
-            if entry.name == name {
-                return Some(entry.id);
-            }
-        }
-        None
+    fn find_in_scope(scope: &[ScopedLocal], name: StrId) -> Option<ScopedLocal> {
+        scope.iter().rev().find(|entry| entry.name == name).copied()
     }
 
-    fn lookup_local(&self, name: StrId) -> Option<LocalId> {
-        Self::lookup_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
+    fn find_local(&self, name: StrId) -> Option<ScopedLocal> {
+        Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
     }
 
     fn lookup_capture(&mut self, name: StrId) -> Option<LocalId> {
         let outer_local =
-            Self::lookup_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?;
+            Self::find_in_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?.id;
 
         for capture in &self.captures_buf[self.fn_captures_start..] {
             if capture.outer_local == outer_local {
@@ -323,8 +318,8 @@ impl<'a> BlockLowerer<'a> {
             todo!("diagnostic: non-call reference to builtin");
         }
 
-        if let Some(local_id) = self.lookup_local(name) {
-            return Expr::LocalRef(local_id);
+        if let Some(entry) = self.find_local(name) {
+            return Expr::LocalRef(entry.id);
         }
 
         if let Some(capture_local) = self.lookup_capture(name) {
@@ -544,12 +539,7 @@ impl<'a> BlockLowerer<'a> {
                 let ast::Expr::Ident(name) = assign_stmt.target() else {
                     panic!("complex assignment targets not yet supported")
                 };
-                let scope = &self.scoped_locals_stack[self.fn_scope_start..];
-                let entry = scope
-                    .iter()
-                    .rev()
-                    .find(|e| e.name == name)
-                    .expect("unresolved assignment target");
+                let entry = self.find_local(name).expect("unresolved assignment target");
                 if !entry.mutable {
                     todo!("diagnostic: assignment to immutable variable");
                 }
