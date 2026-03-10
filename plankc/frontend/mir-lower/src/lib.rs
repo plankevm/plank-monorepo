@@ -344,7 +344,9 @@ fn lower_basic_block(
     }
 
     if is_entry {
-        unreachable!("malformed MIR, missing explicit terminator");
+        current_bb.add_operation(Operation::Invalid(()));
+        let bb_out = current_bb.finish_terminating().expect("error despite invalid");
+        return CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: false };
     }
 
     // For non entry segments the parent is responsible for hooking up control flow.

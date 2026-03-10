@@ -1,6 +1,6 @@
 const dangling = fn() memptr { malloc_uninit(0) };
 
-const revert_empty = fn() void {
+const revert_empty = fn() never {
     revert(dangling(), 0);
 };
 
@@ -68,6 +68,4 @@ run {
     } else {
         revert_empty();
     }
-
-    invalid();
 }
