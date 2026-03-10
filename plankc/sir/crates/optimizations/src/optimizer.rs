@@ -109,7 +109,7 @@ impl Optimizer {
     }
 
     fn run_defragment(&mut self) {
-        let defragmenter = self.defragmenter.get_or_insert_with(Defragmenter::new);
+        let defragmenter = self.defragmenter.get_or_insert_with(Defragmenter::default);
         run_optimization(defragmenter, &mut self.src, &mut self.store);
     }
 }

@@ -9,6 +9,34 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use crate::optimizer::{Optimization, OptimizationStore};
 
+#[derive(Default)]
+pub struct Defragmenter {
+    state: DefragmenterState,
+    scratch: EthIRProgram,
+}
+
+impl Optimization for Defragmenter {
+    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
+        self.state.clear();
+        self.scratch.clear();
+        let live_blocks = store.sccp_reachable();
+        Rewriter { state: &mut self.state, src: program, dst: &mut self.scratch, live_blocks }
+            .rewrite();
+        std::mem::swap(program, &mut self.scratch);
+        store.sccp_reachable.invalidate();
+    }
+
+    fn invalidates(&self) -> &[AnalysisKind] {
+        &[
+            AnalysisKind::DefUse,
+            AnalysisKind::Predecessors,
+            AnalysisKind::BasicBlockOwnership,
+            AnalysisKind::CfgInOutBundling,
+        ]
+    }
+}
+
+#[derive(Default)]
 struct DefragmenterState {
     func_worklist: Vec<FunctionId>,
     block_worklist: Vec<BasicBlockId>,
@@ -22,20 +50,6 @@ struct DefragmenterState {
 }
 
 impl DefragmenterState {
-    fn new() -> Self {
-        Self {
-            func_worklist: Vec::new(),
-            block_worklist: Vec::new(),
-            local_map: HashMap::new(),
-            static_alloc_map: HashMap::new(),
-            large_const_map: HashMap::new(),
-            data_map: HashMap::new(),
-            function_map: HashMap::new(),
-            block_map: HashMap::new(),
-            cases_map: HashMap::new(),
-        }
-    }
-
     fn clear(&mut self) {
         self.func_worklist.clear();
         self.block_worklist.clear();
@@ -46,46 +60,6 @@ impl DefragmenterState {
         self.function_map.clear();
         self.block_map.clear();
         self.cases_map.clear();
-    }
-}
-
-pub struct Defragmenter {
-    state: DefragmenterState,
-    scratch: EthIRProgram,
-}
-
-impl Default for Defragmenter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Defragmenter {
-    pub fn new() -> Self {
-        Self { state: DefragmenterState::new(), scratch: EthIRProgram::default() }
-    }
-}
-
-impl Optimization for Defragmenter {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
-        self.state.clear();
-        self.scratch.clear();
-        {
-            let live_blocks = store.sccp_reachable();
-            Rewriter { state: &mut self.state, src: program, dst: &mut self.scratch, live_blocks }
-                .rewrite();
-        }
-        std::mem::swap(program, &mut self.scratch);
-        store.sccp_reachable.invalidate();
-    }
-
-    fn invalidates(&self) -> &[AnalysisKind] {
-        &[
-            AnalysisKind::DefUse,
-            AnalysisKind::Predecessors,
-            AnalysisKind::BasicBlockOwnership,
-            AnalysisKind::CfgInOutBundling,
-        ]
     }
 }
 
@@ -509,7 +483,7 @@ data .0 0xcafebabe
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
 
-        crate::optimizer::run_optimization(&mut Defragmenter::new(), &mut ir, &mut store);
+        crate::optimizer::run_optimization(&mut Defragmenter::default(), &mut ir, &mut store);
 
         let dst_str = sir_data::display_program(&ir);
         let expected_dst = r#"
@@ -649,7 +623,7 @@ data .1 0x5678
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
         let mut store = OptimizationStore::new();
-        crate::optimizer::run_optimization(&mut Defragmenter::new(), &mut ir, &mut store);
+        crate::optimizer::run_optimization(&mut Defragmenter::default(), &mut ir, &mut store);
 
         let actual = sir_data::display_program(&ir);
         let expected = r#"
