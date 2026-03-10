@@ -11,7 +11,7 @@ pub mod project;
 pub mod source_fs;
 
 pub use interner::{PlankInterner, StrId};
-pub use project::SourceId;
+pub use plank_core::{SourceByteOffset, SourceId, SourceSpan};
 
 pub const FILE_EXTENSION: &str = "plk";
 

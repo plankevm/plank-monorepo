@@ -1,5 +1,5 @@
 use crate::{
-    SourceId, StrId,
+    SourceByteOffset, SourceId, SourceSpan, StrId,
     cst::{self, *},
     diagnostics::DiagnosticsContext,
     interner::PlankInterner,
@@ -46,11 +46,14 @@ struct UnfinishedNode {
 }
 
 mod token_item_iter {
-    use crate::lexer::{Lexed, SourceSpan, Token, TokenIdx};
+    use crate::{
+        SourceSpan,
+        lexer::{Lexed, Token, TokenIdx},
+    };
     use plank_core::Idx;
 
     pub(super) struct TokenItems<'a> {
-        lexed: &'a Lexed<'a>,
+        lexed: &'a Lexed,
         current: TokenIdx,
         fuel: u32,
     }
@@ -67,7 +70,7 @@ mod token_item_iter {
             self.fuel
         }
 
-        pub(super) fn lexed(&self) -> &'a Lexed<'a> {
+        pub(super) fn lexed(&self) -> &'a Lexed {
             self.lexed
         }
 
@@ -95,6 +98,7 @@ mod token_item_iter {
 }
 
 struct Parser<'a, D: DiagnosticsContext> {
+    source: &'a str,
     nodes: IndexVec<cst::NodeIdx, cst::Node>,
     num_lit_limbs: ListOfLists<NumLitId, u32>,
     expected: Vec<Token>,
@@ -118,12 +122,14 @@ where
     const STRUCT_LITERAL_PRIORITY: OpPriority = OpPriority(21);
 
     fn new(
+        source: &'a str,
         lexed: &'a Lexed,
         interner: &'a mut PlankInterner,
         diagnostics: &'a mut D,
         source_id: SourceId,
     ) -> Self {
         Parser {
+            source,
             tokens: TokenItems::new(lexed),
             nodes: IndexVec::with_capacity(lexed.len().get() as usize / LEN_TO_NODE_CAPACITY),
             num_lit_limbs: ListOfLists::new(),
@@ -134,6 +140,10 @@ where
             last_src_span: Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO),
             last_unexpected: None,
         }
+    }
+
+    fn token_src(&self, token: TokenIdx) -> &'a str {
+        &self.source[self.tokens.lexed().token_src_span(token).usize_range()]
     }
     fn assert_complete(&mut self) {
         assert!(self.eof());
@@ -358,7 +368,7 @@ where
 
         self.advance();
 
-        let src = self.tokens.lexed().token_src(token_idx);
+        let src = self.token_src(token_idx);
         let (negative, digits) = if let Some(rest) = src.strip_prefix('-') {
             (true, &rest[prefix_len..])
         } else {
@@ -428,7 +438,7 @@ where
 
     fn intern(&mut self, ti: TokenIdx) -> StrId {
         debug_assert!(self.tokens.lexed().get(ti).0 == Token::Identifier);
-        self.interner.intern(self.tokens.lexed().token_src(ti))
+        self.interner.intern(self.token_src(ti))
     }
 
     fn try_parse_ident(&mut self) -> Option<NodeIdx> {
@@ -987,12 +997,13 @@ where
 }
 
 pub fn parse<D: DiagnosticsContext>(
+    source: &str,
     lexed: &Lexed,
     interner: &mut PlankInterner,
     diagnostics: &mut D,
     source_id: SourceId,
 ) -> ConcreteSyntaxTree {
-    let mut parser = Parser::new(lexed, interner, diagnostics, source_id);
+    let mut parser = Parser::new(source, lexed, interner, diagnostics, source_id);
 
     let file = parser.parse_file();
     assert_eq!(file, ConcreteSyntaxTree::FILE_IDX);

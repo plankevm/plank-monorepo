@@ -1,7 +1,7 @@
 use crate::{
-    SourceId,
+    SourceByteOffset, SourceId, SourceSpan,
     diagnostics::DiagnosticsContext,
-    lexer::{SourceByteOffset, SourceSpan, Token, TokenIdx},
+    lexer::{Token, TokenIdx},
 };
 use plank_core::Idx;
 

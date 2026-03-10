@@ -1,5 +1,5 @@
 use logos::{Lexer as LogosLexer, Logos};
-use plank_core::{Idx, IndexVec, Span, newtype_index};
+use plank_core::{Idx, IndexVec, SourceByteOffset, SourceSpan, Span, newtype_index};
 
 type CharsPeekable<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
 
@@ -309,22 +309,18 @@ impl Token {
 
 newtype_index! {
     pub struct TokenIdx;
-    pub struct SourceByteOffset;
 }
 
-pub type SourceSpan = Span<SourceByteOffset>;
-
 #[derive(Debug, Clone)]
-pub struct Lexed<'src> {
-    source: &'src str,
+pub struct Lexed {
     tokens: IndexVec<TokenIdx, Token>,
     source_ends: IndexVec<TokenIdx, SourceByteOffset>,
 }
 
 const LEN_TO_TOKEN_CAPACITY: usize = 4;
 
-impl<'src> Lexed<'src> {
-    pub fn lex(source: &'src str) -> Self {
+impl Lexed {
+    pub fn lex(source: &str) -> Self {
         let mut tokens = IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
         let mut source_ends = IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
         let mut last_end = SourceByteOffset::ZERO;
@@ -341,23 +337,11 @@ impl<'src> Lexed<'src> {
             }
         }
 
-        Self { source, tokens, source_ends }
+        Self { tokens, source_ends }
     }
 
     fn token_src_start(&self, token: TokenIdx) -> SourceByteOffset {
         if token == TokenIdx::ZERO { SourceByteOffset::ZERO } else { self.source_ends[token - 1] }
-    }
-
-    pub fn source(&self) -> &str {
-        self.source
-    }
-
-    pub fn token_src(&self, token: TokenIdx) -> &str {
-        &self.source[self.token_src_span(token).usize_range()]
-    }
-
-    pub fn tokens_src(&self, tokens: Span<TokenIdx>) -> &str {
-        &self.source[self.tokens_src_span(tokens).usize_range()]
     }
 
     pub fn tokens_src_span(&self, tokens: Span<TokenIdx>) -> Span<SourceByteOffset> {

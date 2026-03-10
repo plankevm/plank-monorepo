@@ -1,7 +1,8 @@
 use crate::{
+    SourceSpan,
     cst::NodeIdx,
     error_report::LineIndex,
-    lexer::{Lexed, SourceSpan, TokenIdx},
+    lexer::{Lexed, TokenIdx},
 };
 use plank_core::{Idx, Span};
 
@@ -10,7 +11,7 @@ use crate::cst::ConcreteSyntaxTree;
 #[derive(Debug)]
 pub struct DisplayCST<'src, 'lexed, 'ast> {
     line_index: LineIndex,
-    lexed: &'lexed Lexed<'src>,
+    lexed: &'lexed Lexed,
     source: &'src str,
     cst: &'ast ConcreteSyntaxTree,
     show_line: bool,
@@ -19,11 +20,7 @@ pub struct DisplayCST<'src, 'lexed, 'ast> {
 }
 
 impl<'src, 'lexed, 'ast> DisplayCST<'src, 'lexed, 'ast> {
-    pub fn new(
-        cst: &'ast ConcreteSyntaxTree,
-        source: &'src str,
-        lexed: &'lexed Lexed<'src>,
-    ) -> Self {
+    pub fn new(cst: &'ast ConcreteSyntaxTree, source: &'src str, lexed: &'lexed Lexed) -> Self {
         DisplayCST {
             line_index: LineIndex::new(source),
             lexed,

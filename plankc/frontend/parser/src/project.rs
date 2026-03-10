@@ -4,16 +4,11 @@ use crate::{
     source_fs::SourceFs,
 };
 use hashbrown::HashMap;
-use plank_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexVec, SourceId, list_of_lists::ListOfLists, newtype_index};
 use std::path::{Path, PathBuf};
 
 newtype_index! {
     pub struct ImportIdx;
-    pub struct SourceId;
-}
-
-impl SourceId {
-    pub const ROOT: SourceId = SourceId::ZERO;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,7 +55,8 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
     fn parse_source(&mut self, path: PathBuf) -> SourceId {
         let content = self.fs.read_to_string(&path).expect("failed to read source file");
         let source_id = self.sources.next_idx();
-        let cst = parse(&Lexed::lex(&content), self.interner, self.diagnostics, source_id);
+        let cst =
+            parse(&content, &Lexed::lex(&content), self.interner, self.diagnostics, source_id);
         let prev = self.path_to_source.insert(path.clone(), source_id);
         assert!(prev.is_none());
 

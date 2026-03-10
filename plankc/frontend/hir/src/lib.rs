@@ -1,7 +1,9 @@
 use hashbrown::HashMap;
-use plank_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{
+    Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index,
+};
 use plank_parser::{
-    SourceId, StrId,
+    StrId,
     ast::{self, Statement, TopLevelDef},
     cst::{NodeIdx, NumLitId},
     lexer::TokenIdx,
