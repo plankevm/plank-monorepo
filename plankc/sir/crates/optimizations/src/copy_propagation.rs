@@ -5,14 +5,9 @@ use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOpera
 
 use crate::optimizer::{Optimization, OptimizationStore};
 
+#[derive(Default)]
 pub struct CopyPropagation {
     copy_map: HashMap<LocalId, LocalId>,
-}
-
-impl CopyPropagation {
-    pub fn new() -> Self {
-        Self { copy_map: HashMap::new() }
-    }
 }
 
 impl Optimization for CopyPropagation {
@@ -70,7 +65,7 @@ mod tests {
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        crate::optimizer::run_pass(source, &mut CopyPropagation::new())
+        crate::optimizer::run_pass_and_display(source, &mut CopyPropagation::default())
     }
 
     #[test]

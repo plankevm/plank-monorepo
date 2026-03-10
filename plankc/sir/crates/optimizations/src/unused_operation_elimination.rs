@@ -3,15 +3,10 @@ use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
 
 use crate::optimizer::{Optimization, OptimizationStore};
 
+#[derive(Default)]
 pub struct UnusedOperationElimination {
     def_sites: IndexVec<LocalId, Option<OperationIdx>>,
     pending_removals: Vec<OperationIdx>,
-}
-
-impl UnusedOperationElimination {
-    pub fn new() -> Self {
-        Self { def_sites: IndexVec::new(), pending_removals: Vec::new() }
-    }
 }
 
 impl Optimization for UnusedOperationElimination {
@@ -74,7 +69,7 @@ mod tests {
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        crate::optimizer::run_pass(source, &mut UnusedOperationElimination::new())
+        crate::optimizer::run_pass_and_display(source, &mut UnusedOperationElimination::default())
     }
 
     // Note: block outputs count as uses, even if the successor never uses the input.

@@ -6,6 +6,61 @@ use crate::{
     defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
 };
 
+pub struct Optimizer {
+    src: EthIRProgram,
+    store: OptimizationStore,
+
+    sccp: Option<SCCPAnalysis>,
+    copy_prop: Option<CopyPropagation>,
+    unused_elim: Option<UnusedOperationElimination>,
+    defragmenter: Option<Defragmenter>,
+}
+
+impl Optimizer {
+    pub fn new(program: EthIRProgram) -> Self {
+        Self {
+            src: program,
+            store: OptimizationStore::new(),
+            sccp: None,
+            copy_prop: None,
+            unused_elim: None,
+            defragmenter: None,
+        }
+    }
+
+    pub fn run_passes(&mut self, passes: &str) {
+        for c in passes.chars() {
+            match c {
+                's' => run_optimization(&mut self.sccp, &mut self.src, &mut self.store),
+                'c' => run_optimization(&mut self.copy_prop, &mut self.src, &mut self.store),
+                'u' => run_optimization(&mut self.unused_elim, &mut self.src, &mut self.store),
+                'd' => run_optimization(&mut self.defragmenter, &mut self.src, &mut self.store),
+                _ => unreachable!("should've been validated"),
+            }
+        }
+    }
+
+    pub fn finish(mut self) -> EthIRProgram {
+        debug_assert!(
+            sir_analyses::legalize(&self.src, &mut self.store.analyses).is_ok(),
+            "optimized IR is illegal"
+        );
+        self.src
+    }
+}
+
+pub(crate) fn run_optimization<T: Optimization + Default>(
+    optimization: &mut Option<T>,
+    program: &mut EthIRProgram,
+    store: &mut OptimizationStore,
+) {
+    let optimization = optimization.get_or_insert_with(T::default);
+    optimization.run(program, store);
+    for kind in optimization.invalidates() {
+        store.analyses.invalidate(*kind);
+    }
+}
+
 pub trait Optimization {
     fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore);
     fn invalidates(&self) -> &[AnalysisKind];
@@ -29,17 +84,6 @@ impl OptimizationStore {
     }
 }
 
-pub(crate) fn run_optimization(
-    opt: &mut impl Optimization,
-    program: &mut EthIRProgram,
-    store: &mut OptimizationStore,
-) {
-    opt.run(program, store);
-    for kind in opt.invalidates() {
-        store.analyses.invalidate(*kind);
-    }
-}
-
 pub fn parse_passes_string(s: &str) -> Result<String, String> {
     for c in s.chars() {
         if !matches!(c, 's' | 'c' | 'u' | 'd') {
@@ -52,70 +96,8 @@ pub fn parse_passes_string(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
-pub struct Optimizer {
-    src: EthIRProgram,
-    store: OptimizationStore,
-
-    sccp: Option<SCCPAnalysis>,
-    copy_prop: Option<CopyPropagation>,
-    unused_elim: UnusedOperationElimination,
-    defragmenter: Option<Defragmenter>,
-}
-
-impl Optimizer {
-    pub fn new(program: EthIRProgram) -> Self {
-        Self {
-            src: program,
-            store: OptimizationStore::new(),
-            sccp: None,
-            copy_prop: None,
-            unused_elim: UnusedOperationElimination::new(),
-            defragmenter: None,
-        }
-    }
-
-    pub fn run_passes(&mut self, passes: &str) {
-        for c in passes.chars() {
-            match c {
-                's' => self.run_sccp(),
-                'c' => self.run_copy_prop(),
-                'u' => self.run_unused_elim(),
-                'd' => self.run_defragment(),
-                _ => unreachable!("should've been validated"),
-            }
-        }
-    }
-
-    pub fn finish(mut self) -> EthIRProgram {
-        debug_assert!(
-            sir_analyses::legalize(&self.src, &mut self.store.analyses).is_ok(),
-            "optimized IR is illegal"
-        );
-        self.src
-    }
-
-    fn run_sccp(&mut self) {
-        let sccp = self.sccp.get_or_insert_with(SCCPAnalysis::new);
-        run_optimization(sccp, &mut self.src, &mut self.store);
-    }
-
-    fn run_copy_prop(&mut self) {
-        let copy_prop = self.copy_prop.get_or_insert_with(CopyPropagation::new);
-        run_optimization(copy_prop, &mut self.src, &mut self.store);
-    }
-
-    fn run_unused_elim(&mut self) {
-        run_optimization(&mut self.unused_elim, &mut self.src, &mut self.store);
-    }
-
-    fn run_defragment(&mut self) {
-        let defragmenter = self.defragmenter.get_or_insert_with(Defragmenter::default);
-        run_optimization(defragmenter, &mut self.src, &mut self.store);
-    }
-}
-
 #[cfg(test)]
-pub(crate) fn run_pass(source: &str, opt: &mut impl Optimization) -> String {
+pub(crate) fn run_pass_and_display(source: &str, opt: &mut impl Optimization) -> String {
     let mut ir = sir_parser::parse_or_panic(source, sir_parser::EmitConfig::init_only());
     let mut store = OptimizationStore::new();
     opt.run(&mut ir, &mut store);

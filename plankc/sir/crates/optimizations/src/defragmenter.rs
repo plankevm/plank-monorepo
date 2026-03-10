@@ -428,11 +428,9 @@ mod tests {
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
         let mut store = OptimizationStore::new();
 
-        crate::optimizer::run_optimization(&mut SCCPAnalysis::new(), &mut ir, &mut store);
-        crate::optimizer::run_optimization(
-            &mut UnusedOperationElimination::new(),
-            &mut ir,
-            &mut store,
+        crate::optimizer::run_optimization::<SCCPAnalysis>(&mut None, &mut ir, &mut store);
+        crate::optimizer::run_optimization::<UnusedOperationElimination>(
+            &mut None, &mut ir, &mut store,
         );
 
         let src_str = sir_data::display_program(&ir);
@@ -483,7 +481,7 @@ data .0 0xcafebabe
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
 
-        crate::optimizer::run_optimization(&mut Defragmenter::default(), &mut ir, &mut store);
+        crate::optimizer::run_optimization::<Defragmenter>(&mut None, &mut ir, &mut store);
 
         let dst_str = sir_data::display_program(&ir);
         let expected_dst = r#"
@@ -623,7 +621,7 @@ data .1 0x5678
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
         let mut store = OptimizationStore::new();
-        crate::optimizer::run_optimization(&mut Defragmenter::default(), &mut ir, &mut store);
+        crate::optimizer::run_optimization::<Defragmenter>(&mut None, &mut ir, &mut store);
 
         let actual = sir_data::display_program(&ir);
         let expected = r#"

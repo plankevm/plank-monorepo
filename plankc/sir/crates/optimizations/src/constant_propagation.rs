@@ -5,6 +5,7 @@ use crate::optimizer::{Optimization, OptimizationStore};
 use sir_data::{operation::*, *};
 use std::cmp::{Ordering, PartialOrd};
 
+#[derive(Default)]
 pub struct SCCPAnalysis {
     lattice: IndexVec<LocalId, LatticeValue>,
     cfg_worklist: Vec<BasicBlockId>,
@@ -12,10 +13,6 @@ pub struct SCCPAnalysis {
 }
 
 impl SCCPAnalysis {
-    pub fn new() -> Self {
-        Self { lattice: IndexVec::new(), cfg_worklist: Vec::new(), values_worklist: Vec::new() }
-    }
-
     fn reset(&mut self, program: &EthIRProgram, reachable: &mut DenseIndexSet<BasicBlockId>) {
         self.lattice.clear();
         self.lattice.resize(program.next_free_local_id.idx(), LatticeValue::Unknown);
@@ -593,7 +590,7 @@ mod tests {
         let ir = parse_or_panic(source, EmitConfig::init_only());
         let mut store = sir_analyses::AnalysesStore::default();
         let defuse = store.def_use(&ir);
-        let mut sccp = SCCPAnalysis::new();
+        let mut sccp = SCCPAnalysis::default();
         let mut reachable = DenseIndexSet::new();
         sccp.analysis(&ir, defuse, &mut reachable);
         (sccp, reachable)
@@ -602,7 +599,7 @@ mod tests {
     fn run_const_prop(source: &str) -> (String, SCCPAnalysis) {
         let mut ir = parse_or_panic(source, EmitConfig::init_only());
         let mut store = OptimizationStore::new();
-        let mut sccp = SCCPAnalysis::new();
+        let mut sccp = SCCPAnalysis::default();
         sccp.run(&mut ir, &mut store);
         (sir_data::display_program(&ir), sccp)
     }
@@ -712,7 +709,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
+        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
         assert_trim_strings_eq_with_diff(&actual, expected, "branch zero takes false");
     }
 
@@ -748,7 +745,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
+        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
         assert_trim_strings_eq_with_diff(&actual, expected, "branch nonzero takes true");
     }
 
@@ -791,7 +788,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
+        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
         assert_trim_strings_eq_with_diff(&actual, expected, "switch with folded condition");
     }
 
@@ -834,7 +831,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
+        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
         assert_trim_strings_eq_with_diff(&actual, expected, "switch no match takes default");
     }
 
@@ -1377,7 +1374,7 @@ Basic Blocks:
         );
 
         let mut store = OptimizationStore::new();
-        let mut sccp = SCCPAnalysis::new();
+        let mut sccp = SCCPAnalysis::default();
         sccp.run(&mut ir, &mut store);
 
         let reachable = store.sccp_reachable().expect("sccp did not populate reachable");
@@ -1454,7 +1451,7 @@ Basic Blocks:
         );
 
         let mut store = OptimizationStore::new();
-        let mut sccp = SCCPAnalysis::new();
+        let mut sccp = SCCPAnalysis::default();
         sccp.run(&mut ir, &mut store);
 
         assert_eq!(
@@ -1496,15 +1493,17 @@ Basic Blocks:
         );
 
         let mut store = OptimizationStore::new();
-        let mut sccp = SCCPAnalysis::new();
+        let mut sccp = Some(SCCPAnalysis::default());
         crate::optimizer::run_optimization(&mut sccp, &mut large_ir, &mut store);
-        assert_eq!(sccp.lattice[LocalId::new(0)], LatticeValue::Const(U256::from(10)));
-        assert_eq!(sccp.lattice[LocalId::new(1)], LatticeValue::Const(U256::from(20)));
-        assert_eq!(sccp.lattice[LocalId::new(2)], LatticeValue::Const(U256::from(30)));
+        let sccp_ref = sccp.as_ref().unwrap();
+        assert_eq!(sccp_ref.lattice[LocalId::new(0)], LatticeValue::Const(U256::from(10)));
+        assert_eq!(sccp_ref.lattice[LocalId::new(1)], LatticeValue::Const(U256::from(20)));
+        assert_eq!(sccp_ref.lattice[LocalId::new(2)], LatticeValue::Const(U256::from(30)));
 
         crate::optimizer::run_optimization(&mut sccp, &mut small_ir, &mut store);
 
-        assert_eq!(sccp.lattice.len(), 1);
-        assert_eq!(sccp.lattice[LocalId::new(0)], LatticeValue::Const(U256::from(5)));
+        let sccp_ref = sccp.as_ref().unwrap();
+        assert_eq!(sccp_ref.lattice.len(), 1);
+        assert_eq!(sccp_ref.lattice[LocalId::new(0)], LatticeValue::Const(U256::from(5)));
     }
 }
