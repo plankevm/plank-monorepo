@@ -1211,6 +1211,9 @@ dependencies = [
 [[package]]
 name = "plank-diagnostics"
 version = "0.1.0"
+dependencies = [
+ "plank-core",
+]
 
 [[package]]
 name = "plank-hir"

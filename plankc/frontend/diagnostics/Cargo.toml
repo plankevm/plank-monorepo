@@ -8,3 +8,4 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+plank-core.workspace = true
