@@ -20,6 +20,10 @@ impl<T> Cached<T> {
         &self.inner
     }
 
+    pub fn is_valid(&self) -> bool {
+        self.valid
+    }
+
     pub fn get_if_valid(&self) -> Option<&T> {
         self.valid.then_some(&self.inner)
     }
@@ -55,6 +59,12 @@ macro_rules! define_analyses {
         }
 
         impl AnalysesStore {
+            pub fn is_valid(&self, kind: AnalysisKind) -> bool {
+                match kind {
+                    $(AnalysisKind::$variant => self.$field.is_valid()),*
+                }
+            }
+
             pub fn invalidate(&mut self, kind: AnalysisKind) {
                 match kind {
                     $(AnalysisKind::$variant => self.$field.invalidate()),*

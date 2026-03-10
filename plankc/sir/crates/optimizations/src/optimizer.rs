@@ -238,6 +238,59 @@ Basic Blocks:
     }
 
     #[test]
+    fn test_store_invalidation_and_recomputation() {
+        use crate::{
+            constant_propagation::SCCPAnalysis, copy_propagation::CopyPropagation,
+            defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
+        };
+        use sir_analyses::AnalysisKind;
+
+        let mut program = parse_or_panic(SWITCH_ON_COPY_WITH_DEAD_CODE, EmitConfig::init_only());
+        let mut store = OptimizationStore::new();
+
+        // Computing dominance_frontiers transitively computes predecessors and dominators
+        store.analyses.dominance_frontiers(&program);
+        assert!(store.analyses.is_valid(AnalysisKind::Predecessors));
+        assert!(store.analyses.is_valid(AnalysisKind::Dominators));
+        assert!(store.analyses.is_valid(AnalysisKind::DominanceFrontiers));
+
+        // SCCP invalidates DefUse, Predecessors (cascades to Dominators, DominanceFrontiers),
+        // BasicBlockOwnership, CfgInOutBundling — and populates sccp_reachable
+        let mut sccp: Option<SCCPAnalysis> = None;
+        run_optimization(&mut sccp, &mut program, &mut store);
+        assert!(!store.analyses.is_valid(AnalysisKind::DefUse));
+        assert!(!store.analyses.is_valid(AnalysisKind::Predecessors));
+        assert!(!store.analyses.is_valid(AnalysisKind::Dominators));
+        assert!(!store.analyses.is_valid(AnalysisKind::DominanceFrontiers));
+        assert!(!store.analyses.is_valid(AnalysisKind::BasicBlockOwnership));
+        assert!(!store.analyses.is_valid(AnalysisKind::CfgInOutBundling));
+        assert!(store.sccp_reachable.is_valid());
+
+        // Defragmenter consumes sccp_reachable and invalidates it
+        let mut defrag: Option<Defragmenter> = None;
+        run_optimization(&mut defrag, &mut program, &mut store);
+        assert!(!store.sccp_reachable.is_valid());
+
+        // Copy prop invalidates DefUse
+        let mut copy_prop: Option<CopyPropagation> = None;
+        run_optimization(&mut copy_prop, &mut program, &mut store);
+        assert!(!store.analyses.is_valid(AnalysisKind::DefUse));
+
+        // def_use recomputes lazily and marks valid
+        store.analyses.def_use(&program);
+        assert!(store.analyses.is_valid(AnalysisKind::DefUse));
+
+        // Unused elim uses def_use_mut: computes DefUse then marks it invalid
+        let mut unused_elim: Option<UnusedOperationElimination> = None;
+        run_optimization(&mut unused_elim, &mut program, &mut store);
+        assert!(!store.analyses.is_valid(AnalysisKind::DefUse));
+
+        // Defragmenter works without sccp_reachable
+        assert!(!store.sccp_reachable.is_valid());
+        run_optimization(&mut defrag, &mut program, &mut store);
+    }
+
+    #[test]
     fn test_scsud() {
         let expected = r#"
 Init: @0
