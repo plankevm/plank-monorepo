@@ -1,4 +1,4 @@
-# Sensei Grammar
+# Plank Grammar
 
 ```ebnf
 program = decl*
