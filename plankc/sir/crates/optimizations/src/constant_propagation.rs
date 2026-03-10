@@ -6,7 +6,7 @@ use sir_data::{operation::*, *};
 use std::cmp::{Ordering, PartialOrd};
 
 pub struct SCCPAnalysis {
-    pub(crate) lattice: IndexVec<LocalId, LatticeValue>,
+    lattice: IndexVec<LocalId, LatticeValue>,
     cfg_worklist: Vec<BasicBlockId>,
     values_worklist: Vec<LocalId>,
 }
@@ -36,7 +36,7 @@ impl SCCPAnalysis {
         }
     }
 
-    pub(crate) fn analysis(
+    fn analysis(
         &mut self,
         program: &EthIRProgram,
         defuse: &DefUse,
@@ -48,11 +48,7 @@ impl SCCPAnalysis {
         }
     }
 
-    pub(crate) fn apply(
-        &self,
-        program: &mut EthIRProgram,
-        reachable: &DenseIndexSet<BasicBlockId>,
-    ) {
+    fn apply(&self, program: &mut EthIRProgram, reachable: &DenseIndexSet<BasicBlockId>) {
         for bb_id in program.basic_blocks.iter_idx() {
             if reachable.contains(bb_id) {
                 self.rewrite_constants(program, bb_id);
@@ -505,7 +501,7 @@ impl Optimization for SCCPAnalysis {
 }
 
 #[derive(Clone, Eq, PartialEq, Copy, Debug)]
-pub(crate) enum LatticeValue {
+enum LatticeValue {
     Unknown,
     Const(U256),
     EvmConst(EvmConstKind),
@@ -542,7 +538,7 @@ impl LatticeValue {
 macro_rules! define_consts {
     ($($name:ident),* $(,)?) => {
         #[derive(PartialEq, Clone, Eq, Hash, Copy, Debug)]
-        pub(crate) enum EvmConstKind {
+        enum EvmConstKind {
             $($name),*
         }
 
@@ -592,6 +588,16 @@ mod tests {
     use crate::optimizer::{Optimization, OptimizationStore};
     use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
+
+    fn run_analysis(source: &str) -> (SCCPAnalysis, DenseIndexSet<BasicBlockId>) {
+        let ir = parse_or_panic(source, EmitConfig::init_only());
+        let mut store = sir_analyses::AnalysesStore::default();
+        let defuse = store.def_use(&ir);
+        let mut sccp = SCCPAnalysis::new();
+        let mut reachable = DenseIndexSet::new();
+        sccp.analysis(&ir, defuse, &mut reachable);
+        (sccp, reachable)
+    }
 
     fn run_const_prop(source: &str) -> (String, SCCPAnalysis) {
         let mut ir = parse_or_panic(source, EmitConfig::init_only());
@@ -706,7 +712,7 @@ Basic Blocks:
     }
         "#;
 
-        let (actual, _) = run_const_prop(input);
+        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
         assert_trim_strings_eq_with_diff(&actual, expected, "branch zero takes false");
     }
 
@@ -742,7 +748,7 @@ Basic Blocks:
     }
         "#;
 
-        let (actual, _) = run_const_prop(input);
+        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
         assert_trim_strings_eq_with_diff(&actual, expected, "branch nonzero takes true");
     }
 
@@ -785,7 +791,7 @@ Basic Blocks:
     }
         "#;
 
-        let (actual, _) = run_const_prop(input);
+        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
         assert_trim_strings_eq_with_diff(&actual, expected, "switch with folded condition");
     }
 
@@ -828,7 +834,7 @@ Basic Blocks:
     }
         "#;
 
-        let (actual, _) = run_const_prop(input);
+        let actual = crate::optimizer::run_pass(input, &mut SCCPAnalysis::new());
         assert_trim_strings_eq_with_diff(&actual, expected, "switch no match takes default");
     }
 
@@ -1172,7 +1178,7 @@ Basic Blocks:
                 }
         "#;
 
-        let (_, sccp) = run_const_prop(input);
+        let (sccp, _) = run_analysis(input);
 
         let neg2 = U256::from_str_radix(
             "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
@@ -1259,12 +1265,7 @@ Basic Blocks:
                 if_false { stop }                   // @2
         "#;
 
-        let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        let mut store = OptimizationStore::new();
-        let mut sccp = SCCPAnalysis::new();
-        sccp.run(&mut ir, &mut store);
-
-        let reachable = store.sccp_reachable().expect("sccp did not populate reachable");
+        let (_, reachable) = run_analysis(input);
         assert!(reachable.contains(BasicBlockId::new(1)));
         assert!(!reachable.contains(BasicBlockId::new(2)));
     }
@@ -1298,11 +1299,7 @@ Basic Blocks:
                 }
         "#;
 
-        let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        let mut store = OptimizationStore::new();
-        let mut sccp = SCCPAnalysis::new();
-        sccp.run(&mut ir, &mut store);
-
+        let (sccp, _) = run_analysis(input);
         assert_eq!(sccp.lattice[LocalId::new(5)], LatticeValue::EvmConst(EvmConstKind::Address));
         assert_eq!(sccp.lattice[LocalId::new(6)], LatticeValue::Overdefined);
         assert_eq!(sccp.lattice[LocalId::new(7)], LatticeValue::Overdefined);
