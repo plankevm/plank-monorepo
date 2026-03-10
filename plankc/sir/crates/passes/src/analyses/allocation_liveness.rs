@@ -1,8 +1,8 @@
 use hashbrown::HashMap;
 use smallvec::{SmallVec, smallvec};
 
-use crate::{DefUse, UseKind, compute_predecessors, dfs_postorder};
-use sensei_core::{DenseIndexSet, Idx};
+use crate::analyses::{AnalysesStore, DefUse, Predecessors, UseKind, dfs_postorder};
+use plank_core::{DenseIndexSet, Idx};
 use sir_data::{
     BasicBlock, BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Operation, OperationIdx,
     StaticAllocId, index_vec, newtype_index,
@@ -67,8 +67,8 @@ pub fn compute_allocation_liveness(program: &EthIRProgram, def_use: &DefUse) -> 
         dfs_postorder(program, func.entry().id(), &mut visited, &mut blocks_postorder);
     }
 
-    let mut predecessors = IndexVec::new();
-    compute_predecessors(program, &mut predecessors);
+    let store = AnalysesStore::default();
+    let predecessors = store.predecessors(program);
 
     let block_exit_alloc_liveness = compute_block_exit_alloc_liveness(
         program,
@@ -152,7 +152,7 @@ fn propagate_pointers_and_mark_escapes(
     let mut worklist = vec![ptr_local];
 
     while let Some(local) = worklist.pop() {
-        for use_loc in &def_use[local] {
+        for use_loc in def_use.uses_of(local) {
             match use_loc.kind {
                 UseKind::Operation(op_idx) => {
                     let op = program.operations[op_idx];
@@ -253,7 +253,7 @@ fn propagate_block_input_origins(
     }
 
     while let Some((local, input_site)) = worklist.pop() {
-        for use_loc in &def_use[local] {
+        for use_loc in def_use.uses_of(local) {
             let UseKind::Operation(op_idx) = use_loc.kind else { continue };
             let op = program.operations[op_idx];
             if !can_derive_pointer(op) {
@@ -278,7 +278,7 @@ fn compute_block_exit_alloc_liveness(
     allocations: &IndexVec<AllocId, AllocData>,
     local_to_alloc: &IndexVec<LocalId, Option<AllocId>>,
     local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    predecessors: &Predecessors,
     blocks_postorder: &[BasicBlockId],
 ) -> IndexVec<BasicBlockId, DenseIndexSet<AllocId>> {
     let mut block_exit_alloc_liveness: IndexVec<BasicBlockId, DenseIndexSet<AllocId>> =
@@ -308,7 +308,7 @@ fn compute_block_exit_alloc_liveness(
                 allocations,
                 local_to_alloc,
                 &mut block_exit_alloc_liveness,
-                &predecessors[bb_id],
+                predecessors.of(bb_id),
                 &exit_liveness,
                 &input_live_flags,
             );
@@ -421,7 +421,7 @@ fn populate_allocation_intervals(
     program: &EthIRProgram,
     liveness: &mut AllocationLiveness,
     local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    predecessors: &Predecessors,
     block_exit_alloc_liveness: &IndexVec<BasicBlockId, DenseIndexSet<AllocId>>,
 ) {
     let AllocationLiveness { allocations, local_to_alloc } = liveness;
@@ -444,7 +444,7 @@ fn populate_allocation_intervals(
             local_to_input_origins,
             bb_id,
             &block_exit_alloc_liveness[bb_id],
-            &predecessors[bb_id],
+            predecessors.of(bb_id),
         );
     }
 
@@ -559,12 +559,11 @@ fn build_input_intervals(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compute_def_use;
     use sir_parser::{EmitConfig, parse_or_panic};
 
     fn compute_test_liveness(ir: &EthIRProgram) -> AllocationLiveness {
-        let mut def_use = IndexVec::new();
-        compute_def_use(ir, &mut def_use);
+        let store = AnalysesStore::default();
+        let def_use = store.def_use(ir);
         compute_allocation_liveness(ir, &def_use)
     }
 
