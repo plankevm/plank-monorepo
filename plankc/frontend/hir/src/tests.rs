@@ -138,6 +138,19 @@ fn test_set_undefined() {
 }
 
 #[test]
+#[should_panic(expected = "assignment to immutable variable")]
+fn test_assign_to_immutable_let() {
+    let _ = try_lower(
+        "
+        init {
+            let x = 1;
+            x = 2;
+        }
+        ",
+    );
+}
+
+#[test]
 fn test_fn_struct_return() {
     assert_lowers_to(
         r#"
@@ -185,6 +198,25 @@ fn test_fn_struct_return() {
         %2 = 4
         %3 = call %0(%1, %2)
         eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_assign_to_mutable_let() {
+    assert_lowers_to(
+        r#"
+        init {
+            let mut x = 1;
+            x = 2;
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 1
+        %0 := 2
         "#,
     );
 }

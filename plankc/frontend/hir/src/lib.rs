@@ -167,13 +167,20 @@ impl HirBuilder {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ScopedLocal {
+    name: StrId,
+    id: LocalId,
+    mutable: bool,
+}
+
 struct BlockLowerer<'a> {
     consts: HashMap<StrId, ConstId>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
 
     big_nums: &'a mut BigNumInterner,
     builder: &'a mut HirBuilder,
-    scoped_locals_stack: Vec<(StrId, LocalId)>,
+    scoped_locals_stack: Vec<ScopedLocal>,
     fn_scope_start: usize,
     fn_captures_start: usize,
     next_local_id: LocalId,
@@ -198,7 +205,7 @@ impl<'a> BlockLowerer<'a> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId) -> LocalId {
+    fn alloc_local(&mut self, name: StrId, mutable: bool) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             todo!("diagnostic: shadowing primitive type");
         }
@@ -208,7 +215,7 @@ impl<'a> BlockLowerer<'a> {
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push((name, id));
+        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable });
         id
     }
 
@@ -271,10 +278,10 @@ impl<'a> BlockLowerer<'a> {
         })
     }
 
-    fn lookup_scope(scope: &[(StrId, LocalId)], name: StrId) -> Option<LocalId> {
-        for &(bound_name, id) in scope.iter().rev() {
-            if bound_name == name {
-                return Some(id);
+    fn lookup_scope(scope: &[ScopedLocal], name: StrId) -> Option<LocalId> {
+        for entry in scope.iter().rev() {
+            if entry.name == name {
+                return Some(entry.id);
             }
         }
         None
@@ -294,7 +301,7 @@ impl<'a> BlockLowerer<'a> {
             }
         }
 
-        let inner_local = self.alloc_local(name);
+        let inner_local = self.alloc_local(name, false);
         self.captures_buf.push(CaptureInfo { outer_local, inner_local });
         Some(inner_local)
     }
@@ -423,7 +430,7 @@ impl<'a> BlockLowerer<'a> {
     }
 
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
-        self.alloc_local(param.name)
+        self.alloc_local(param.name, false)
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
@@ -519,7 +526,7 @@ impl<'a> BlockLowerer<'a> {
             Statement::Let(let_stmt) => {
                 let type_local = let_stmt.type_expr().map(|t| self.lower_expr_to_local(t));
                 let value = self.lower_expr(let_stmt.value());
-                let local_id = self.alloc_local(let_stmt.name);
+                let local_id = self.alloc_local(let_stmt.name, let_stmt.mutable);
                 self.emit(Instruction::Set { local: local_id, expr: value });
                 if let Some(type_local) = type_local {
                     self.emit(Instruction::AssertType { value: local_id, of_type: type_local });
@@ -537,7 +544,16 @@ impl<'a> BlockLowerer<'a> {
                 let ast::Expr::Ident(name) = assign_stmt.target() else {
                     panic!("complex assignment targets not yet supported")
                 };
-                let target = self.lookup_local(name).expect("unresolved assignment target");
+                let scope = &self.scoped_locals_stack[self.fn_scope_start..];
+                let entry = scope
+                    .iter()
+                    .rev()
+                    .find(|e| e.name == name)
+                    .expect("unresolved assignment target");
+                if !entry.mutable {
+                    todo!("diagnostic: assignment to immutable variable");
+                }
+                let target = entry.id;
                 let value = self.lower_expr(assign_stmt.value());
                 self.emit(Instruction::Assign { target, value });
             }
@@ -590,7 +606,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
                 TopLevelDef::Const(const_def) => {
                     let id = lowerer.consts[&const_def.name];
                     let hir_def = &mut consts[id];
-                    hir_def.result = lowerer.alloc_local(const_def.name);
+                    hir_def.result = lowerer.alloc_local(const_def.name, false);
                     hir_def.body = lowerer.create_sub_block(|l| {
                         if let Some(type_expr) = const_def.r#type {
                             let type_local = l.lower_expr_to_local(type_expr);
