@@ -39,7 +39,7 @@ impl Optimization for UnusedOperationElimination {
             }
 
             for &input in op.inputs(program) {
-                uses[input].retain(|u| u.kind != UseKind::Operation(op_idx));
+                uses.retain(input, |u| u.kind != UseKind::Operation(op_idx));
 
                 if let Some(def_idx) = self.def_sites[input] {
                     let defining_op = &program.operations[def_idx];
@@ -63,9 +63,9 @@ impl Optimization for UnusedOperationElimination {
     }
 }
 
-fn is_removable(op: &Operation, program: &EthIRProgram, uses: &DefUse) -> bool {
+fn is_removable(op: &Operation, program: &EthIRProgram, defuse: &DefUse) -> bool {
     op.kind().is_removable_when_unused()
-        && op.outputs(program).iter().all(|out| uses[*out].is_empty())
+        && op.outputs(program).iter().all(|out| defuse.uses_of(*out).is_empty())
 }
 
 #[cfg(test)]

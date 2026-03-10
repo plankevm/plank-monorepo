@@ -22,12 +22,9 @@ impl Dominators {
             );
         }
     }
-}
 
-impl std::ops::Index<BasicBlockId> for Dominators {
-    type Output = Option<BasicBlockId>;
-    fn index(&self, id: BasicBlockId) -> &Option<BasicBlockId> {
-        &self.inner[id]
+    pub fn of(&self, bb: BasicBlockId) -> Option<BasicBlockId> {
+        self.inner[bb]
     }
 }
 
@@ -37,6 +34,10 @@ pub struct DominanceFrontiers {
 }
 
 impl DominanceFrontiers {
+    pub fn of(&self, bb: BasicBlockId) -> &HashSet<BasicBlockId> {
+        &self.inner[bb]
+    }
+
     pub fn compute(&mut self, dominators: &Dominators, predecessors: &Predecessors) {
         for set in self.inner.iter_mut() {
             set.clear();
@@ -61,13 +62,6 @@ impl DominanceFrontiers {
                 }
             }
         }
-    }
-}
-
-impl std::ops::Index<BasicBlockId> for DominanceFrontiers {
-    type Output = HashSet<BasicBlockId>;
-    fn index(&self, id: BasicBlockId) -> &HashSet<BasicBlockId> {
-        &self.inner[id]
     }
 }
 
@@ -195,15 +189,15 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(1))); // idom(C) = B
-        assert_eq!(dominators[bb(3)], Some(bb(1))); // idom(D) = B
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(1))); // idom(C) = B
+        assert_eq!(dominators.of(bb(3)), Some(bb(1))); // idom(D) = B
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(1)]); // DF(B) = {B}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(1)]); // DF(C) = {B}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![]); // DF(D) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![bb(1)]); // DF(B) = {B}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![bb(1)]); // DF(C) = {B}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![]); // DF(D) = {}
     }
 
     #[test]
@@ -227,13 +221,13 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(1))); // idom(C) = B
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(1))); // idom(C) = B
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![]); // DF(B) = {}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![]); // DF(C) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![]); // DF(B) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![]); // DF(C) = {}
     }
 
     #[test]
@@ -265,15 +259,15 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
-        assert_eq!(dominators[bb(3)], Some(bb(0))); // idom(D) = A (not B or C)
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(0))); // idom(C) = A
+        assert_eq!(dominators.of(bb(3)), Some(bb(0))); // idom(D) = A (not B or C)
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(3)]); // DF(B) = {D}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(3)]); // DF(C) = {D}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![]); // DF(D) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![bb(3)]); // DF(B) = {D}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![bb(3)]); // DF(C) = {D}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![]); // DF(D) = {}
     }
 
     #[test]
@@ -313,19 +307,19 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
-        assert_eq!(dominators[bb(3)], Some(bb(1))); // idom(D) = B
-        assert_eq!(dominators[bb(4)], Some(bb(0))); // idom(E) = A (common dominator of C and D)
-        assert_eq!(dominators[bb(5)], Some(bb(4))); // idom(F) = E
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(0))); // idom(C) = A
+        assert_eq!(dominators.of(bb(3)), Some(bb(1))); // idom(D) = B
+        assert_eq!(dominators.of(bb(4)), Some(bb(0))); // idom(E) = A (common dominator of C and D)
+        assert_eq!(dominators.of(bb(5)), Some(bb(4))); // idom(F) = E
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(4)]); // DF(B) = {E}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(4)]); // DF(C) = {E}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![bb(4)]); // DF(D) = {E}
-        assert_eq!(frontier_to_vec(&df[bb(4)]), vec![]); // DF(E) = {}
-        assert_eq!(frontier_to_vec(&df[bb(5)]), vec![]); // DF(F) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![bb(4)]); // DF(B) = {E}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![bb(4)]); // DF(C) = {E}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![bb(4)]); // DF(D) = {E}
+        assert_eq!(frontier_to_vec(df.of(bb(4))), vec![]); // DF(E) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(5))), vec![]); // DF(F) = {}
     }
 
     #[test]
@@ -363,19 +357,19 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(1))); // idom(C) = B
-        assert_eq!(dominators[bb(3)], Some(bb(2))); // idom(D) = C
-        assert_eq!(dominators[bb(4)], Some(bb(3))); // idom(E) = D
-        assert_eq!(dominators[bb(5)], Some(bb(4))); // idom(F) = E
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(1))); // idom(C) = B
+        assert_eq!(dominators.of(bb(3)), Some(bb(2))); // idom(D) = C
+        assert_eq!(dominators.of(bb(4)), Some(bb(3))); // idom(E) = D
+        assert_eq!(dominators.of(bb(5)), Some(bb(4))); // idom(F) = E
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(1)]); // DF(B) = {B}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(1), bb(2)]); // DF(C) = {B, C}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![bb(1), bb(2)]); // DF(D) = {B, C}
-        assert_eq!(frontier_to_vec(&df[bb(4)]), vec![bb(1)]); // DF(E) = {B}
-        assert_eq!(frontier_to_vec(&df[bb(5)]), vec![]); // DF(F) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![bb(1)]); // DF(B) = {B}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![bb(1), bb(2)]); // DF(C) = {B, C}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![bb(1), bb(2)]); // DF(D) = {B, C}
+        assert_eq!(frontier_to_vec(df.of(bb(4))), vec![bb(1)]); // DF(E) = {B}
+        assert_eq!(frontier_to_vec(df.of(bb(5))), vec![]); // DF(F) = {}
     }
 
     #[test]
@@ -399,13 +393,13 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], None); // C is unreachable
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), None); // C is unreachable
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![]); // DF(B) = {}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![]); // DF(C) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![]); // DF(B) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![]); // DF(C) = {}
     }
 
     #[test]
@@ -433,15 +427,15 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(2))); // idom(C) = C (entry of other)
-        assert_eq!(dominators[bb(3)], Some(bb(2))); // idom(D) = C
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(2))); // idom(C) = C (entry of other)
+        assert_eq!(dominators.of(bb(3)), Some(bb(2))); // idom(D) = C
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![]); // DF(B) = {}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![]); // DF(C) = {}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![]); // DF(D) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![]); // DF(B) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![]); // DF(C) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![]); // DF(D) = {}
     }
 
     #[test]
@@ -487,21 +481,21 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
-        assert_eq!(dominators[bb(3)], Some(bb(0))); // idom(D) = A
-        assert_eq!(dominators[bb(4)], Some(bb(3))); // idom(E) = D
-        assert_eq!(dominators[bb(5)], Some(bb(3))); // idom(F) = D
-        assert_eq!(dominators[bb(6)], Some(bb(3))); // idom(G) = D
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(0))); // idom(C) = A
+        assert_eq!(dominators.of(bb(3)), Some(bb(0))); // idom(D) = A
+        assert_eq!(dominators.of(bb(4)), Some(bb(3))); // idom(E) = D
+        assert_eq!(dominators.of(bb(5)), Some(bb(3))); // idom(F) = D
+        assert_eq!(dominators.of(bb(6)), Some(bb(3))); // idom(G) = D
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(3)]); // DF(B) = {D}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(3)]); // DF(C) = {D}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![]); // DF(D) = {}
-        assert_eq!(frontier_to_vec(&df[bb(4)]), vec![bb(6)]); // DF(E) = {G}
-        assert_eq!(frontier_to_vec(&df[bb(5)]), vec![bb(6)]); // DF(F) = {G}
-        assert_eq!(frontier_to_vec(&df[bb(6)]), vec![]); // DF(G) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![bb(3)]); // DF(B) = {D}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![bb(3)]); // DF(C) = {D}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![]); // DF(D) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(4))), vec![bb(6)]); // DF(E) = {G}
+        assert_eq!(frontier_to_vec(df.of(bb(5))), vec![bb(6)]); // DF(F) = {G}
+        assert_eq!(frontier_to_vec(df.of(bb(6))), vec![]); // DF(G) = {}
     }
 
     #[test]
@@ -536,14 +530,14 @@ mod tests {
 
         let mut store = make_store(&program);
         let dominators = store.dominators(&program);
-        assert_eq!(dominators[bb(0)], Some(bb(0))); // idom(A) = A
-        assert_eq!(dominators[bb(1)], Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators[bb(2)], Some(bb(0))); // idom(C) = A
-        assert_eq!(dominators[bb(3)], Some(bb(0))); // idom(D) = A (common dominator of B and C paths)
+        assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
+        assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
+        assert_eq!(dominators.of(bb(2)), Some(bb(0))); // idom(C) = A
+        assert_eq!(dominators.of(bb(3)), Some(bb(0))); // idom(D) = A (common dominator of B and C paths)
         let df = store.dominance_frontiers(&program);
-        assert_eq!(frontier_to_vec(&df[bb(0)]), vec![]); // DF(A) = {}
-        assert_eq!(frontier_to_vec(&df[bb(1)]), vec![bb(2), bb(3)]); // DF(B) = {C, D}
-        assert_eq!(frontier_to_vec(&df[bb(2)]), vec![bb(1), bb(3)]); // DF(C) = {B, D}
-        assert_eq!(frontier_to_vec(&df[bb(3)]), vec![]); // DF(D) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}
+        assert_eq!(frontier_to_vec(df.of(bb(1))), vec![bb(2), bb(3)]); // DF(B) = {C, D}
+        assert_eq!(frontier_to_vec(df.of(bb(2))), vec![bb(1), bb(3)]); // DF(C) = {B, D}
+        assert_eq!(frontier_to_vec(df.of(bb(3))), vec![]); // DF(D) = {}
     }
 }

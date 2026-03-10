@@ -28,19 +28,6 @@ pub struct DefUse {
     inner: IndexVec<LocalId, Vec<UseLocation>>,
 }
 
-impl std::ops::Index<LocalId> for DefUse {
-    type Output = Vec<UseLocation>;
-    fn index(&self, id: LocalId) -> &Vec<UseLocation> {
-        &self.inner[id]
-    }
-}
-
-impl std::ops::IndexMut<LocalId> for DefUse {
-    fn index_mut(&mut self, id: LocalId) -> &mut Vec<UseLocation> {
-        &mut self.inner[id]
-    }
-}
-
 impl DefUse {
     pub fn compute(&mut self, program: &EthIRProgram) {
         let num_locals = program.next_free_local_id.idx();
@@ -76,5 +63,13 @@ impl DefUse {
                     .push(UseLocation { block_id: block.id(), kind: UseKind::BlockOutput });
             }
         }
+    }
+
+    pub fn uses_of(&self, local: LocalId) -> &[UseLocation] {
+        &self.inner[local]
+    }
+
+    pub fn retain(&mut self, local: LocalId, f: impl FnMut(&UseLocation) -> bool) {
+        self.inner[local].retain(f);
     }
 }

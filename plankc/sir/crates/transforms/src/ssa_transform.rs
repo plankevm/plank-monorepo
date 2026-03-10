@@ -23,7 +23,7 @@ impl SsaTransform {
         let dominators_child_to_parent = store.dominators(program);
         let mut dominators_parent_to_child = index_vec![Vec::new(); program.basic_blocks.len()];
         for bb in program.basic_blocks.iter_idx() {
-            if let Some(parent) = dominators_child_to_parent[bb]
+            if let Some(parent) = dominators_child_to_parent.of(bb)
                 && parent != bb
             {
                 dominators_parent_to_child[parent].push(bb);
@@ -71,7 +71,7 @@ impl SsaTransform {
                 worklist.push(*bb);
             }
             while let Some(bb) = worklist.pop() {
-                for &frontier_block in &dominance_frontiers[bb] {
+                for &frontier_block in dominance_frontiers.of(bb) {
                     if !self.phi_locations[frontier_block].contains(&local) {
                         self.phi_locations[frontier_block].push(local);
                         worklist.push(frontier_block);
@@ -250,7 +250,7 @@ fn split_edge(
     source: BasicBlockId,
     target: BasicBlockId,
 ) -> BasicBlockId {
-    if predecessors[target].len() > 1 {
+    if predecessors.of(target).len() > 1 {
         insert_forwarding_block(program, source, target)
     } else {
         target

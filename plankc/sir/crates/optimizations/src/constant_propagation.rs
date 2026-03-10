@@ -39,12 +39,12 @@ impl SCCPAnalysis {
     pub(crate) fn analysis(
         &mut self,
         program: &EthIRProgram,
-        uses: &DefUse,
+        defuse: &DefUse,
         reachable: &mut DenseIndexSet<BasicBlockId>,
     ) {
         self.reset(program, reachable);
         while let Some(bb_id) = self.cfg_worklist.pop() {
-            self.process_block(program, bb_id, uses, reachable);
+            self.process_block(program, bb_id, defuse, reachable);
         }
     }
 
@@ -198,11 +198,11 @@ impl SCCPAnalysis {
     fn process_values(
         &mut self,
         program: &EthIRProgram,
-        uses: &DefUse,
+        defuse: &DefUse,
         reachable: &mut DenseIndexSet<BasicBlockId>,
     ) {
         while let Some(value) = self.values_worklist.pop() {
-            for use_loc in &uses[value] {
+            for use_loc in defuse.uses_of(value) {
                 if !reachable.contains(use_loc.block_id) {
                     continue;
                 }
@@ -262,12 +262,12 @@ impl SCCPAnalysis {
         &mut self,
         program: &EthIRProgram,
         bb_id: BasicBlockId,
-        uses: &DefUse,
+        defuse: &DefUse,
         reachable: &mut DenseIndexSet<BasicBlockId>,
     ) {
         self.process_operations(program, bb_id);
         self.process_control(program, bb_id, reachable);
-        self.process_values(program, uses, reachable);
+        self.process_values(program, defuse, reachable);
     }
 
     fn mark_reachable(
