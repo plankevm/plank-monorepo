@@ -12,7 +12,7 @@
 ; Builtin types
 
 ((identifier) @type.builtin
- (#any-of? @type.builtin "void" "u256" "bool" "memptr" "type" "function"))
+ (#any-of? @type.builtin "void" "u256" "bool" "memptr" "type" "function" "never"))
 
 ; Builtin functions
 
