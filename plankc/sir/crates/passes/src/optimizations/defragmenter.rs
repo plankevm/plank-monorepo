@@ -1,4 +1,4 @@
-use crate::analyses::AnalysisKind;
+use crate::analyses::AnalysesMask;
 use plank_core::span::IncIterable;
 use sir_data::{
     BasicBlock, BasicBlockId, BlockView, Branch, Cases, CasesId, Control, ControlView, DataId,
@@ -30,8 +30,8 @@ impl Pass for Defragmenter {
         std::mem::swap(program, &mut self.scratch);
     }
 
-    fn preserves(&self) -> &[AnalysisKind] {
-        &[]
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::empty()
     }
 }
 

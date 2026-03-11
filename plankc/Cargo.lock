@@ -1839,6 +1839,7 @@ name = "sir-passes"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "bitflags",
  "hashbrown 0.16.1",
  "plank-core",
  "sir-data",

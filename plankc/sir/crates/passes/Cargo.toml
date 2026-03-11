@@ -13,6 +13,7 @@ plank-core.workspace = true
 hashbrown.workspace = true
 thiserror.workspace = true
 alloy-primitives.workspace = true
+bitflags.workspace = true
 
 [dev-dependencies]
 sir-parser.workspace = true

@@ -63,7 +63,7 @@ impl<T> Cached<T> {
 }
 
 macro_rules! define_analyses {
-    ($($variant:ident => $field:ident : $ty:ty [used_by: $($dep:ident),*]),* $(,)?) => {
+    ($($variant:ident => $field:ident : $ty:ty),* $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum AnalysisKind {
             $($variant),*
@@ -71,11 +71,12 @@ macro_rules! define_analyses {
 
         impl AnalysisKind {
             pub const ALL: &[AnalysisKind] = &[$(AnalysisKind::$variant),*];
+        }
 
-            fn used_by(&self) -> &[AnalysisKind] {
-                match self {
-                    $(AnalysisKind::$variant => &[$(AnalysisKind::$dep),*]),*
-                }
+        bitflags::bitflags! {
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+            pub struct AnalysesMask: u8 {
+                $(const $variant = 1 << (AnalysisKind::$variant as u8);)*
             }
         }
 
@@ -91,45 +92,23 @@ macro_rules! define_analyses {
                 }
             }
 
-            pub fn invalidate(&self, kind: AnalysisKind) {
-                match kind {
-                    $(AnalysisKind::$variant => self.$field.invalidate()),*
-                }
-                for dependent in kind.used_by() {
-                    self.invalidate(*dependent);
-                }
-            }
-
-            pub fn invalidate_all_except(&self, preserved: &[AnalysisKind]) {
-                for &kind in AnalysisKind::ALL {
-                    if preserved.contains(&kind) {
-                        continue;
-                    }
-                    for dependent in kind.used_by() {
-                        debug_assert!(
-                            !preserved.contains(dependent),
-                            "{dependent:?} is preserved but its dependency {kind:?} is not"
-                        );
-                    }
-                    match kind {
-                        $(AnalysisKind::$variant => self.$field.invalidate()),*
-                    }
-                }
+            pub fn invalidate_all_except(&self, preserved: AnalysesMask) {
+                $(if !preserved.contains(AnalysesMask::$variant) {
+                    self.$field.invalidate();
+                })*
             }
         }
     };
 }
 
 define_analyses! {
-    DefUse => def_use: DefUse [used_by:],
-    // DominanceFrontiers also depends on Predecessors but is transitively
-    // invalidated via Dominators.
-    Predecessors => predecessors: Predecessors [used_by: Dominators],
-    Dominators => dominators: Dominators [used_by: DominanceFrontiers],
-    DominanceFrontiers => dominance_frontiers: DominanceFrontiers [used_by:],
-    BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability [used_by:],
-    CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling [used_by:],
-    SccpReachable => sccp_reachable: DenseIndexSet<BasicBlockId> [used_by:],
+    DefUse => def_use: DefUse,
+    Predecessors => predecessors: Predecessors,
+    Dominators => dominators: Dominators,
+    DominanceFrontiers => dominance_frontiers: DominanceFrontiers,
+    BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability,
+    CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling,
+    SccpReachable => sccp_reachable: DenseIndexSet<BasicBlockId>,
 }
 
 impl AnalysesStore {

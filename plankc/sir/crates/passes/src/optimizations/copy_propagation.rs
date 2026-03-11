@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::analyses::AnalysisKind;
+use crate::analyses::AnalysesMask;
 use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOperands};
 
 use crate::{AnalysesStore, Pass};
@@ -48,15 +48,13 @@ impl Pass for CopyPropagation {
         }
     }
 
-    fn preserves(&self) -> &[AnalysisKind] {
-        &[
-            AnalysisKind::Predecessors,
-            AnalysisKind::Dominators,
-            AnalysisKind::DominanceFrontiers,
-            AnalysisKind::BasicBlockOwnership,
-            AnalysisKind::CfgInOutBundling,
-            AnalysisKind::SccpReachable,
-        ]
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::Predecessors
+            | AnalysesMask::Dominators
+            | AnalysesMask::DominanceFrontiers
+            | AnalysesMask::BasicBlockOwnership
+            | AnalysesMask::CfgInOutBundling
+            | AnalysesMask::SccpReachable
     }
 }
 

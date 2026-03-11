@@ -1,4 +1,4 @@
-use crate::analyses::{AnalysisKind, DefUse, UseKind};
+use crate::analyses::{AnalysesMask, DefUse, UseKind};
 use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
 
 use crate::{AnalysesStore, Pass};
@@ -53,15 +53,13 @@ impl Pass for UnusedOperationElimination {
         }
     }
 
-    fn preserves(&self) -> &[AnalysisKind] {
-        &[
-            AnalysisKind::Predecessors,
-            AnalysisKind::Dominators,
-            AnalysisKind::DominanceFrontiers,
-            AnalysisKind::BasicBlockOwnership,
-            AnalysisKind::CfgInOutBundling,
-            AnalysisKind::SccpReachable,
-        ]
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::Predecessors
+            | AnalysesMask::Dominators
+            | AnalysesMask::DominanceFrontiers
+            | AnalysesMask::BasicBlockOwnership
+            | AnalysesMask::CfgInOutBundling
+            | AnalysesMask::SccpReachable
     }
 }
 

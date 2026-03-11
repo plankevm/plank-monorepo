@@ -1,4 +1,4 @@
-use crate::analyses::{AnalysisKind, DefUse, UseKind};
+use crate::analyses::{AnalysesMask, DefUse, UseKind};
 use alloy_primitives::{I256, U256, U512};
 
 use crate::{AnalysesStore, Pass};
@@ -488,8 +488,8 @@ impl Pass for SCCPAnalysis {
         store.sccp_reachable.mark_valid();
     }
 
-    fn preserves(&self) -> &[AnalysisKind] {
-        &[AnalysisKind::SccpReachable]
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::SccpReachable
     }
 }
 

@@ -10,15 +10,15 @@ use sir_data::EthIRProgram;
 use transforms::ssa_transform::SsaTransform;
 
 pub use analyses::{
-    AnalysesStore, AnalysisKind, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling,
-    DefUse, DominanceFrontiers, Dominators, InOutGroupId, Predecessors, UseKind, UseLocation,
-    legalize,
+    AnalysesMask, AnalysesStore, AnalysisKind, BasicBlockOwnershipAndReachability,
+    ControlFlowGraphInOutBundling, DefUse, DominanceFrontiers, Dominators, InOutGroupId,
+    Predecessors, UseKind, UseLocation, legalize,
 };
 pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
 
 pub trait Pass {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);
-    fn preserves(&self) -> &[AnalysisKind];
+    fn preserves(&self) -> AnalysesMask;
 }
 
 pub fn run_pass<T: Pass + Default>(
