@@ -4,13 +4,12 @@ use hashbrown::HashMap;
 use plank_core::{
     Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index,
 };
-use plank_diagnostics::DiagnosticContext;
+use plank_diagnostics::DiagnosticsContext;
 use plank_parser::{
     StrId,
     ast::{self, Statement, TopLevelDef},
     cst::{NodeIdx, NumLitId},
     lexer::TokenIdx,
-    project::{FileImport, ImportKind, ParsedProject, Source},
 };
 use plank_source::{
     ParsedProject, Source,
@@ -184,7 +183,7 @@ struct ScopedLocal {
     mutable: bool,
 }
 
-struct BlockLowerer<'a, D: DiagnosticContext> {
+struct BlockLowerer<'a, D: DiagnosticsContext> {
     consts: HashMap<StrId, ConstId>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
     diag_ctx: RefCell<&'a mut D>,
@@ -204,7 +203,7 @@ struct BlockLowerer<'a, D: DiagnosticContext> {
 
 impl<'a, D> BlockLowerer<'a, D>
 where
-    D: DiagnosticContext,
+    D: DiagnosticsContext,
 {
     fn reset_scope(&mut self) {
         self.next_local_id = LocalId::ZERO;
@@ -578,7 +577,7 @@ where
 pub fn lower(
     project: &ParsedProject,
     big_nums: &mut BigNumInterner,
-    diag_ctx: &mut impl DiagnosticContext,
+    diag_ctx: &mut impl DiagnosticsContext,
 ) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.sources);
 
