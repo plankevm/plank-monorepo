@@ -8,7 +8,7 @@ use plank_parser::{
     interner::PlankInterner,
     lexer::Lexed,
 };
-use plank_source::{module::ModuleResolver, project::parse_project, source_fs::RealFs};
+use plank_source::{ModuleResolver, parse_project, source_fs::RealFs};
 use sir_optimizations::{Optimizer, parse_passes_string};
 use std::path::{Path, PathBuf};
 

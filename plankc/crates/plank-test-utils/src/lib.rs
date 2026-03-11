@@ -1,9 +1,6 @@
 use plank_parser::{PlankInterner, error_report::ErrorCollector};
 use plank_source::{
-    FILE_EXTENSION,
-    module::ModuleResolver,
-    project::{ParsedProject, parse_project},
-    source_fs::InMemoryFs,
+    FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project, source_fs::InMemoryFs,
 };
 use std::path::PathBuf;
 

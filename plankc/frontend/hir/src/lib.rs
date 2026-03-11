@@ -12,6 +12,10 @@ use plank_parser::{
     lexer::TokenIdx,
     project::{FileImport, ImportKind, ParsedProject, Source},
 };
+use plank_source::{
+    ParsedProject, Source,
+    project::{FileImport, ImportKind},
+};
 
 pub use plank_values;
 use plank_values::TypeId;
