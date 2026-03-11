@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct ModuleResolver {
+    /// Maps between module name and its path.
     modules: HashMap<StrId, PathBuf>,
 }
 

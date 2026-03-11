@@ -14,4 +14,4 @@ impl ValueId {
 }
 
 pub use bignum_interner::{BigNumId, BigNumInterner};
-pub use type_interner::{StructExtraInfo, StructInfo, Type, TypeId, TypeInterner};
+pub use type_interner::{StructInfo, Type, TypeId, TypeInterner};

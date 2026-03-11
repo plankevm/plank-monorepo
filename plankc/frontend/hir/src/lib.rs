@@ -4,6 +4,7 @@ use hashbrown::HashMap;
 use plank_core::{
     Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index,
 };
+use plank_diagnostics::DiagnosticContext;
 use plank_parser::{
     StrId,
     ast::{self, Statement, TopLevelDef},
@@ -16,6 +17,7 @@ pub use plank_values;
 use plank_values::TypeId;
 
 pub mod builtins;
+mod diagnostics;
 pub mod display;
 
 pub use plank_values::{BigNumId, BigNumInterner};
@@ -178,9 +180,10 @@ struct ScopedLocal {
     mutable: bool,
 }
 
-struct BlockLowerer<'a> {
+struct BlockLowerer<'a, D: DiagnosticContext> {
     consts: HashMap<StrId, ConstId>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
+    diag_ctx: RefCell<&'a mut D>,
 
     big_nums: &'a mut BigNumInterner,
     builder: &'a mut HirBuilder,
@@ -195,8 +198,11 @@ struct BlockLowerer<'a> {
     captures_buf: Vec<CaptureInfo>,
 }
 
-impl<'a> BlockLowerer<'a> {
-    fn reset(&mut self) {
+impl<'a, D> BlockLowerer<'a, D>
+where
+    D: DiagnosticContext,
+{
+    fn reset_scope(&mut self) {
         self.next_local_id = LocalId::ZERO;
         self.scoped_locals_stack.clear();
 
@@ -553,7 +559,7 @@ impl<'a> BlockLowerer<'a> {
             }
             Statement::While(while_stmt) => {
                 if while_stmt.inline {
-                    panic!("inline while not yet supported");
+                    todo!("inline while not yet supported");
                 }
                 let (condition_block, condition) = self.create_sub_block_with(|lowerer| {
                     lowerer.lower_expr_to_local(while_stmt.condition())
@@ -565,7 +571,11 @@ impl<'a> BlockLowerer<'a> {
     }
 }
 
-pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
+pub fn lower(
+    project: &ParsedProject,
+    big_nums: &mut BigNumInterner,
+    diag_ctx: &mut impl DiagnosticContext,
+) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.sources);
 
     let mut builder = HirBuilder::new();
@@ -575,6 +585,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
     let mut lowerer = BlockLowerer {
         consts: HashMap::new(),
         num_lit_limbs: &project.sources[SourceId::ROOT].cst.num_lit_limbs,
+        diag_ctx: RefCell::new(diag_ctx),
 
         big_nums,
         builder: &mut builder,
@@ -595,7 +606,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner) -> Hir {
 
         let file = source.cst.as_file();
         for def in file.iter_defs() {
-            lowerer.reset();
+            lowerer.reset_scope();
             match def {
                 TopLevelDef::Const(const_def) => {
                     let id = lowerer.consts[&const_def.name];

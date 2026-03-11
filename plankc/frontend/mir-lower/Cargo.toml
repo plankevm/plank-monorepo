@@ -20,3 +20,4 @@ plank-parser.workspace = true
 plank-hir-eval.workspace = true
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
+plank-diagnostics.workspace = true

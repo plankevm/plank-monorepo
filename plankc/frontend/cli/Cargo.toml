@@ -13,6 +13,7 @@ plank-hir.workspace = true
 plank-hir-eval.workspace = true
 plank-mir.workspace = true
 plank-mir-lower.workspace = true
+plank-diagnostics.workspace = true
 sir-debug-backend.workspace = true
 sir-optimizations.workspace = true
 sir-analyses.workspace = true

@@ -11,6 +11,7 @@ workspace = true
 plank-core.workspace = true
 plank-parser.workspace = true
 plank-values.workspace = true
+plank-diagnostics.workspace = true
 
 hashbrown.workspace = true
 

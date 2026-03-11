@@ -10,7 +10,11 @@ fn try_lower(source: &str) -> Result<(Mir, BigNumInterner, PlankInterner), Vec<P
         .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
 
     let mut big_nums = BigNumInterner::default();
-    let hir = plank_hir::lower(&project, &mut big_nums);
+    let hir = plank_hir::lower(
+        &project,
+        &mut big_nums,
+        &mut plank_diagnostics::SimpleCollector::default(),
+    );
     let mir = crate::evaluate(&hir);
 
     Ok((mir, big_nums, interner))

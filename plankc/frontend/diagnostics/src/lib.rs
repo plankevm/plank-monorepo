@@ -1,7 +1,5 @@
 use plank_core::{SourceId, SourceSpan};
 
-// ── Core Types ──────────────────────────────────────────────────────────────
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Error,
@@ -34,6 +32,17 @@ pub struct Footer {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SimpleCollector {
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl DiagnosticContext for SimpleCollector {
+    fn emit(&mut self, diagnostic: Diagnostic) {
+        self.diagnostics.push(diagnostic);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: Severity,
@@ -43,49 +52,29 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn error(message: impl Into<String>) -> Self {
-        Self {
-            severity: Severity::Error,
-            message: message.into(),
-            annotations: Vec::new(),
-            footers: Vec::new(),
-        }
+    pub fn error(message: String) -> Self {
+        Self { severity: Severity::Error, message, annotations: Vec::new(), footers: Vec::new() }
     }
 
-    pub fn warning(message: impl Into<String>) -> Self {
-        Self {
-            severity: Severity::Warning,
-            message: message.into(),
-            annotations: Vec::new(),
-            footers: Vec::new(),
-        }
+    pub fn warning(message: String) -> Self {
+        Self { severity: Severity::Warning, message, annotations: Vec::new(), footers: Vec::new() }
     }
 
-    pub fn primary(
-        mut self,
-        source_id: SourceId,
-        span: SourceSpan,
-        label: impl Into<String>,
-    ) -> Self {
+    pub fn primary(mut self, source_id: SourceId, span: SourceSpan, label: String) -> Self {
         self.annotations.push(Annotation {
             source_id,
             span,
-            label: Some(label.into()),
+            label: Some(label),
             style: AnnotationStyle::Primary,
         });
         self
     }
 
-    pub fn secondary(
-        mut self,
-        source_id: SourceId,
-        span: SourceSpan,
-        label: impl Into<String>,
-    ) -> Self {
+    pub fn secondary(mut self, source_id: SourceId, span: SourceSpan, label: String) -> Self {
         self.annotations.push(Annotation {
             source_id,
             span,
-            label: Some(label.into()),
+            label: Some(label),
             style: AnnotationStyle::Secondary,
         });
         self
@@ -96,23 +85,17 @@ impl Diagnostic {
         self
     }
 
-    pub fn note(mut self, message: impl Into<String>) -> Self {
-        self.footers.push(Footer { kind: FooterKind::Note, message: message.into() });
+    pub fn note(mut self, message: String) -> Self {
+        self.footers.push(Footer { kind: FooterKind::Note, message });
         self
     }
 
-    pub fn help(mut self, message: impl Into<String>) -> Self {
-        self.footers.push(Footer { kind: FooterKind::Help, message: message.into() });
+    pub fn help(mut self, message: String) -> Self {
+        self.footers.push(Footer { kind: FooterKind::Help, message });
         self
     }
 }
 
-pub trait DiagnosticSink {
+pub trait DiagnosticContext {
     fn emit(&mut self, diagnostic: Diagnostic);
-}
-
-impl DiagnosticSink for Vec<Diagnostic> {
-    fn emit(&mut self, diagnostic: Diagnostic) {
-        self.push(diagnostic);
-    }
 }
