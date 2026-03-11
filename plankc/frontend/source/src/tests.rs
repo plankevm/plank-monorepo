@@ -1,7 +1,5 @@
-use crate::{
-    FILE_EXTENSION, error_report::ErrorCollector, interner::PlankInterner, module::ModuleResolver,
-    project::parse_project, source_fs::RealFs,
-};
+use crate::{FILE_EXTENSION, module::ModuleResolver, project::parse_project, source_fs::RealFs};
+use plank_parser::{error_report::ErrorCollector, interner::PlankInterner};
 
 fn source_file(name: &str) -> String {
     format!("{name}.{FILE_EXTENSION}")

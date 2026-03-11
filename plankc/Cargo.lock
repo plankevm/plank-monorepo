@@ -1194,6 +1194,7 @@ dependencies = [
  "plank-mir",
  "plank-mir-lower",
  "plank-parser",
+ "plank-source",
  "sir-analyses",
  "sir-debug-backend",
  "sir-optimizations",
@@ -1224,6 +1225,7 @@ dependencies = [
  "plank-core",
  "plank-diagnostics",
  "plank-parser",
+ "plank-source",
  "plank-test-utils",
  "plank-values",
  "pretty_assertions",
@@ -1275,11 +1277,19 @@ name = "plank-parser"
 version = "0.1.0"
 dependencies = [
  "allocator-api2",
- "hashbrown 0.16.1",
  "logos",
  "plank-core",
  "plank-test-utils",
  "pretty_assertions",
+]
+
+[[package]]
+name = "plank-source"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "plank-core",
+ "plank-parser",
  "tempfile",
 ]
 
@@ -1288,6 +1298,7 @@ name = "plank-test-utils"
 version = "0.1.0"
 dependencies = [
  "plank-parser",
+ "plank-source",
 ]
 
 [[package]]

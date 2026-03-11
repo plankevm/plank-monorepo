@@ -10,8 +10,8 @@ use plank_parser::{
     ast::{self, Statement, TopLevelDef},
     cst::{NodeIdx, NumLitId},
     lexer::TokenIdx,
-    project::{FileImport, ImportKind, ParsedProject, Source},
 };
+use plank_source::project::{FileImport, ImportKind, ParsedProject, Source};
 
 pub use plank_values;
 use plank_values::TypeId;

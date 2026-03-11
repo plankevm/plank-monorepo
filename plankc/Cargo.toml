@@ -14,6 +14,7 @@ plank-test-utils = { path = "crates/plank-test-utils" }
 
 # Frontend Sub Crates
 plank-parser = { path = "frontend/parser" }
+plank-source = { path = "frontend/source" }
 plank-values = { path = "frontend/values" }
 plank-hir = { path = "frontend/hir" }
 plank-mir = { path = "frontend/mir" }

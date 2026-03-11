@@ -5,15 +5,10 @@ pub mod diagnostics;
 pub mod error_report;
 pub mod interner;
 pub mod lexer;
-pub mod module;
 pub mod parser;
-pub mod project;
-pub mod source_fs;
 
 pub use interner::{PlankInterner, StrId};
 pub use plank_core::{SourceByteOffset, SourceId, SourceSpan};
-
-pub const FILE_EXTENSION: &str = "plk";
 
 pub mod const_print;
 

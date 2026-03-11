@@ -1,10 +1,10 @@
-use crate::{
-    StrId, ast::TopLevelDef, cst::ConcreteSyntaxTree, diagnostics::DiagnosticsContext,
-    interner::PlankInterner, lexer::Lexed, module::ModuleResolver, parser::parse,
-    source_fs::SourceFs,
-};
+use crate::{module::ModuleResolver, source_fs::SourceFs};
 use hashbrown::HashMap;
 use plank_core::{IndexVec, SourceId, list_of_lists::ListOfLists, newtype_index};
+use plank_parser::{
+    StrId, ast::TopLevelDef, cst::ConcreteSyntaxTree, diagnostics::DiagnosticsContext,
+    interner::PlankInterner, lexer::Lexed, parser::parse,
+};
 use std::path::{Path, PathBuf};
 
 newtype_index! {

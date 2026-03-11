@@ -7,10 +7,8 @@ use plank_parser::{
     error_report::{ErrorCollector, LineIndex, format_error},
     interner::PlankInterner,
     lexer::Lexed,
-    module::ModuleResolver,
-    project::parse_project,
-    source_fs::RealFs,
 };
+use plank_source::{module::ModuleResolver, project::parse_project, source_fs::RealFs};
 use sir_optimizations::{Optimizer, parse_passes_string};
 use std::path::{Path, PathBuf};
 

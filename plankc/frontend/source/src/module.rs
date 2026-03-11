@@ -1,10 +1,10 @@
-use crate::{
-    FILE_EXTENSION, StrId,
+use crate::{FILE_EXTENSION, project::ImportKind};
+use hashbrown::HashMap;
+use plank_parser::{
+    StrId,
     ast::{Import, ImportSuffix},
     interner::PlankInterner,
-    project::ImportKind,
 };
-use hashbrown::HashMap;
 use std::path::PathBuf;
 
 #[derive(Default)]

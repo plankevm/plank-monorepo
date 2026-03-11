@@ -9,7 +9,6 @@ use crate::{
 use plank_test_utils::{dedent, dedent_preserve_indent};
 
 mod errorless;
-mod project;
 mod resiliency;
 
 fn parse_single_source(

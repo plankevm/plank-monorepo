@@ -1,6 +1,6 @@
-use plank_parser::{
-    FILE_EXTENSION, PlankInterner,
-    error_report::ErrorCollector,
+use plank_parser::{PlankInterner, error_report::ErrorCollector};
+use plank_source::{
+    FILE_EXTENSION,
     module::ModuleResolver,
     project::{ParsedProject, parse_project},
     source_fs::InMemoryFs,

@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 plank-core.workspace = true
 plank-parser.workspace = true
+plank-source.workspace = true
 plank-values.workspace = true
 plank-diagnostics.workspace = true
 
