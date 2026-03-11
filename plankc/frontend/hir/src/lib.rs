@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use hashbrown::HashMap;
 use plank_core::{
     Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index,
@@ -454,13 +456,13 @@ impl<'a> BlockLowerer<'a> {
         let body = self.lower_fn_body_block(fn_def.body());
         let fn_def_id = self.builder.fns.push(FnDef { type_preamble, body, return_type });
 
+        let (type_value_pairs, []) = self.locals_buf[param_locals_start..].as_chunks() else {
+            unreachable!("not only pairs?")
+        };
         let fn_params_id = self.builder.fn_params.push_iter(
-            self.locals_buf[param_locals_start..].chunks(2).zip(fn_def.params()).map(
-                |(local_type_value_chunk, param)| {
-                    let &[r#type, value] = local_type_value_chunk else { unreachable!() };
-                    ParamInfo { is_comptime: param.is_comptime, value, r#type }
-                },
-            ),
+            type_value_pairs.iter().zip(fn_def.params()).map(|(&[r#type, value], param)| {
+                ParamInfo { is_comptime: param.is_comptime, value, r#type }
+            }),
         );
         self.locals_buf.truncate(param_locals_start);
         let fn_captures_id =
