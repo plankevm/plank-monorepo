@@ -7,7 +7,7 @@ use sir_data::{
 };
 use std::collections::{HashMap, hash_map::Entry};
 
-use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
+use crate::{AnalysesStore, Pass};
 
 #[derive(Default)]
 pub struct Defragmenter {
@@ -15,7 +15,7 @@ pub struct Defragmenter {
     scratch: EthIRProgram,
 }
 
-impl Optimization for Defragmenter {
+impl Pass for Defragmenter {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         self.state.clear();
         self.scratch.clear();
@@ -431,12 +431,8 @@ mod tests {
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
         let store = AnalysesStore::default();
 
-        crate::optimizations::optimizer::run_optimization::<SCCPAnalysis>(
-            &mut None, &mut ir, &store,
-        );
-        crate::optimizations::optimizer::run_optimization::<UnusedOperationElimination>(
-            &mut None, &mut ir, &store,
-        );
+        crate::run_pass::<SCCPAnalysis>(&mut None, &mut ir, &store);
+        crate::run_pass::<UnusedOperationElimination>(&mut None, &mut ir, &store);
 
         let src_str = sir_data::display_program(&ir);
         let expected_src = r#"
@@ -486,9 +482,7 @@ data .0 0xcafebabe
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
 
-        crate::optimizations::optimizer::run_optimization::<Defragmenter>(
-            &mut None, &mut ir, &store,
-        );
+        crate::run_pass::<Defragmenter>(&mut None, &mut ir, &store);
 
         let dst_str = sir_data::display_program(&ir);
         let expected_dst = r#"
@@ -628,9 +622,7 @@ data .1 0x5678
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
         let store = AnalysesStore::default();
-        crate::optimizations::optimizer::run_optimization::<Defragmenter>(
-            &mut None, &mut ir, &store,
-        );
+        crate::run_pass::<Defragmenter>(&mut None, &mut ir, &store);
 
         let actual = sir_data::display_program(&ir);
         let expected = r#"

@@ -9,7 +9,7 @@ use plank_parser::{
     lexer::Lexed,
 };
 use plank_source::{ModuleResolver, parse_project, source_fs::RealFs};
-use sir_passes::{Optimizer, parse_passes_string};
+use sir_passes::{PassManager, parse_optimizations_string};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -35,7 +35,7 @@ struct Args {
     /// u = unused operation elimination,
     /// d = defragment.
     /// Example: -O csud
-    #[arg(short = 'O', long = "optimize", value_parser = parse_passes_string)]
+    #[arg(short = 'O', long = "optimize", value_parser = parse_optimizations_string)]
     optimize: Option<String>,
 
     #[arg(long = "already-ssa")]
@@ -129,17 +129,14 @@ fn main() {
     }
 
     let mut program = plank_mir_lower::lower(&mir, &big_nums);
-    let store = sir_passes::AnalysesStore::default();
+    let mut pass_manager = PassManager::new(&mut program);
     if args.already_ssa {
-        sir_passes::legalize(&program, &store).expect("illegal IR pre-ssa");
+        pass_manager.run_legalize().expect("illegal IR pre-ssa");
+    } else {
+        pass_manager.run_ssa_transform();
     }
-    run_optimization(&mut Some(SsaTransform::default()), &mut program, &store);
-    sir_passes::legalize(&program, &store).expect("illegal IR post ssa transform");
-
     if let Some(passes) = args.optimize {
-        let mut optimizer = Optimizer::new(program);
-        optimizer.run_passes(&passes);
-        program = optimizer.finish();
+        pass_manager.run_optimizations(&passes);
     }
 
     let mut bytecode = Vec::with_capacity(0x6000);

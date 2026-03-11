@@ -1,14 +1,11 @@
-use crate::{
-    analyses::{AnalysesStore, AnalysisKind, Predecessors},
-    optimizations::optimizer::Optimization,
-};
+use crate::{AnalysesStore, AnalysisKind, Pass, analyses::Predecessors};
 use plank_core::IncIterable;
 use sir_data::{BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, LocalIdx, Span, Switch};
 
 #[derive(Default)]
 pub struct CriticalEdgeSplitting;
 
-impl Optimization for CriticalEdgeSplitting {
+impl Pass for CriticalEdgeSplitting {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let predecessors = store.predecessors(program);
 
@@ -94,7 +91,7 @@ fn copy_span(program: &mut EthIRProgram, span: Span<LocalIdx>) -> Span<LocalIdx>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimizations::optimizer::run_optimization;
+    use crate::run_pass;
     use sir_parser::EmitConfig;
 
     #[test]
@@ -136,7 +133,7 @@ mod tests {
 
         let original_block_count = program.basic_blocks.len();
         let store = AnalysesStore::default();
-        run_optimization(&mut Some(CriticalEdgeSplitting), &mut program, &store);
+        run_pass(&mut Some(CriticalEdgeSplitting), &mut program, &store);
 
         assert!(
             program.basic_blocks.len() > original_block_count,

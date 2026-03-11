@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use crate::analyses::AnalysisKind;
 use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOperands};
 
-use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
+use crate::{AnalysesStore, Pass};
 
 #[derive(Default)]
 pub struct CopyPropagation {
     copy_map: HashMap<LocalId, LocalId>,
 }
 
-impl Optimization for CopyPropagation {
+impl Pass for CopyPropagation {
     fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
         for bb in program.basic_blocks.iter_mut() {
             self.copy_map.clear();
@@ -72,10 +72,7 @@ mod tests {
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        crate::optimizations::optimizer::run_pass_and_display(
-            source,
-            &mut CopyPropagation::default(),
-        )
+        crate::run_pass_and_display(source, &mut CopyPropagation::default())
     }
 
     #[test]

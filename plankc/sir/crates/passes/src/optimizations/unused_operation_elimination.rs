@@ -1,7 +1,7 @@
 use crate::analyses::{AnalysisKind, DefUse, UseKind};
 use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
 
-use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
+use crate::{AnalysesStore, Pass};
 
 #[derive(Default)]
 pub struct UnusedOperationElimination {
@@ -9,7 +9,7 @@ pub struct UnusedOperationElimination {
     pending_removals: Vec<OperationIdx>,
 }
 
-impl Optimization for UnusedOperationElimination {
+impl Pass for UnusedOperationElimination {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let mut uses = store.def_use_mut(program);
 
@@ -76,10 +76,7 @@ mod tests {
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        crate::optimizations::optimizer::run_pass_and_display(
-            source,
-            &mut UnusedOperationElimination::default(),
-        )
+        crate::run_pass_and_display(source, &mut UnusedOperationElimination::default())
     }
 
     // Note: block outputs count as uses, even if the successor never uses the input.

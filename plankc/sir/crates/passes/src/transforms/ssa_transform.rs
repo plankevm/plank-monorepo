@@ -1,7 +1,5 @@
 use crate::{
-    analyses::{AnalysesStore, DominanceFrontiers},
-    optimizations::{Optimization, optimizer::run_optimization},
-    transforms::CriticalEdgeSplitting,
+    AnalysesStore, Pass, analyses::DominanceFrontiers, run_pass, transforms::CriticalEdgeSplitting,
 };
 use hashbrown::HashSet;
 use plank_core::IncIterable;
@@ -15,9 +13,9 @@ pub struct SsaTransform {
     worklist: Vec<BasicBlockId>,
 }
 
-impl Optimization for SsaTransform {
+impl Pass for SsaTransform {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
-        run_optimization(&mut Some(CriticalEdgeSplitting), program, store);
+        run_pass(&mut Some(CriticalEdgeSplitting), program, store);
 
         for parent in self.dominators.iter_mut() {
             parent.clear();
@@ -229,7 +227,7 @@ mod tests {
     }
 
     fn transform_and_legalize(program: &mut EthIRProgram, store: &AnalysesStore) {
-        run_optimization(&mut Some(SsaTransform::default()), program, store);
+        run_pass(&mut Some(SsaTransform::default()), program, store);
         let ir = display_program(program);
         legalize(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
     }

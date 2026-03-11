@@ -11,5 +11,5 @@ pub use cache::{AnalysesStore, AnalysisKind};
 pub use cfg_in_out_bundling::{ControlFlowGraphInOutBundling, InOutGroupId};
 pub use def_use::{DefUse, UseKind, UseLocation};
 pub use dominators::{DominanceFrontiers, Dominators};
-pub use legalizer::legalize;
+pub use legalizer::{LegalizerError, legalize};
 pub use predecessors::Predecessors;
