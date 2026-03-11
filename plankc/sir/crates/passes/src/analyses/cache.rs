@@ -2,39 +2,30 @@ use crate::{
     BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling, DefUse, DominanceFrontiers,
     Dominators, Predecessors,
 };
-use sir_data::EthIRProgram;
+use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram};
 
 #[derive(Default)]
-pub struct Cached<T> {
+struct Cached<T> {
     inner: T,
     valid: bool,
 }
 
 impl<T> Cached<T> {
-    pub fn new(inner: T) -> Self {
-        Self { inner, valid: false }
-    }
-
     fn get(&self) -> &T {
         assert!(self.valid, "analysis not valid");
         &self.inner
     }
 
-    pub fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.valid
     }
 
-    pub fn get_if_valid(&self) -> Option<&T> {
+    fn get_if_valid(&self) -> Option<&T> {
         self.valid.then_some(&self.inner)
     }
 
-    pub fn invalidate(&mut self) {
+    fn invalidate(&mut self) {
         self.valid = false;
-    }
-
-    pub fn update(&mut self, f: impl FnOnce(&mut T)) {
-        f(&mut self.inner);
-        self.valid = true;
     }
 }
 
@@ -86,6 +77,7 @@ define_analyses! {
     DominanceFrontiers => dominance_frontiers: DominanceFrontiers [used_by:],
     BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability [used_by:],
     CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling [used_by:],
+    SccpReachable => sccp_reachable: DenseIndexSet<BasicBlockId> [used_by:],
 }
 
 impl AnalysesStore {
@@ -151,5 +143,21 @@ impl AnalysesStore {
             self.cfg_in_out_bundling.valid = true;
         }
         &self.cfg_in_out_bundling.inner
+    }
+
+    pub fn sccp_reachable(&self) -> Option<&DenseIndexSet<BasicBlockId>> {
+        self.sccp_reachable.get_if_valid()
+    }
+
+    pub fn def_use_and_sccp_reachable(
+        &mut self,
+        program: &EthIRProgram,
+    ) -> (&DefUse, &mut DenseIndexSet<BasicBlockId>) {
+        if !self.def_use.valid {
+            self.def_use.inner.compute(program);
+            self.def_use.valid = true;
+        }
+        self.sccp_reachable.valid = true;
+        (&self.def_use.inner, &mut self.sccp_reachable.inner)
     }
 }

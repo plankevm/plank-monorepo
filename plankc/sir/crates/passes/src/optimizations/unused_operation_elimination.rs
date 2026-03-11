@@ -1,7 +1,7 @@
 use crate::analyses::{AnalysisKind, DefUse, UseKind};
 use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
 
-use crate::optimizations::optimizer::{Optimization, OptimizationStore};
+use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
 
 #[derive(Default)]
 pub struct UnusedOperationElimination {
@@ -10,8 +10,8 @@ pub struct UnusedOperationElimination {
 }
 
 impl Optimization for UnusedOperationElimination {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
-        let uses = store.analyses.def_use_mut(program);
+    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore) {
+        let uses = store.def_use_mut(program);
 
         self.def_sites.clear();
         self.def_sites.resize(program.next_free_local_id.idx(), None);

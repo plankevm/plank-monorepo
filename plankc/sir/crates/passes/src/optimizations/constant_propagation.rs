@@ -1,7 +1,7 @@
 use crate::analyses::{AnalysisKind, DefUse, UseKind};
 use alloy_primitives::{I256, U256, U512};
 
-use crate::optimizations::optimizer::{Optimization, OptimizationStore};
+use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
 use sir_data::{operation::*, *};
 use std::cmp::{Ordering, PartialOrd};
 
@@ -479,12 +479,10 @@ impl SCCPAnalysis {
 }
 
 impl Optimization for SCCPAnalysis {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
-        let uses = store.analyses.def_use(program);
-        store.sccp_reachable.update(|reachable| {
-            self.analysis(program, uses, reachable);
-            self.apply(program, reachable);
-        });
+    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore) {
+        let (uses, reachable) = store.def_use_and_sccp_reachable(program);
+        self.analysis(program, uses, reachable);
+        self.apply(program, reachable);
     }
 
     fn invalidates(&self) -> &[AnalysisKind] {
@@ -582,10 +580,7 @@ define_consts!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        analyses::AnalysesStore,
-        optimizations::optimizer::{Optimization, OptimizationStore},
-    };
+    use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
     use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
@@ -601,7 +596,7 @@ mod tests {
 
     fn run_const_prop(source: &str) -> (String, SCCPAnalysis) {
         let mut ir = parse_or_panic(source, EmitConfig::init_only());
-        let mut store = OptimizationStore::new();
+        let mut store = AnalysesStore::default();
         let mut sccp = SCCPAnalysis::default();
         sccp.run(&mut ir, &mut store);
         (sir_data::display_program(&ir), sccp)
@@ -1388,7 +1383,7 @@ Basic Blocks:
             "overdefined input makes both branch targets reachable",
         );
 
-        let mut store = OptimizationStore::new();
+        let mut store = AnalysesStore::default();
         let mut sccp = SCCPAnalysis::default();
         sccp.run(&mut ir, &mut store);
 
@@ -1465,7 +1460,7 @@ Basic Blocks:
             "block output use propagates overdefined to successor",
         );
 
-        let mut store = OptimizationStore::new();
+        let mut store = AnalysesStore::default();
         let mut sccp = SCCPAnalysis::default();
         sccp.run(&mut ir, &mut store);
 
@@ -1507,7 +1502,7 @@ Basic Blocks:
             EmitConfig::init_only(),
         );
 
-        let mut store = OptimizationStore::new();
+        let mut store = AnalysesStore::default();
         let mut sccp = Some(SCCPAnalysis::default());
         crate::optimizations::optimizer::run_optimization(&mut sccp, &mut large_ir, &mut store);
         let sccp_ref = sccp.as_ref().unwrap();

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::analyses::AnalysisKind;
 use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOperands};
 
-use crate::optimizations::optimizer::{Optimization, OptimizationStore};
+use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
 
 #[derive(Default)]
 pub struct CopyPropagation {
@@ -11,7 +11,7 @@ pub struct CopyPropagation {
 }
 
 impl Optimization for CopyPropagation {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &mut OptimizationStore) {
+    fn run(&mut self, program: &mut EthIRProgram, _store: &mut AnalysesStore) {
         for bb in program.basic_blocks.iter_mut() {
             self.copy_map.clear();
 

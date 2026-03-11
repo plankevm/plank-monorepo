@@ -7,7 +7,7 @@ use sir_data::{
 };
 use std::collections::{HashMap, hash_map::Entry};
 
-use crate::optimizations::optimizer::{Optimization, OptimizationStore};
+use crate::{analyses::AnalysesStore, optimizations::optimizer::Optimization};
 
 #[derive(Default)]
 pub struct Defragmenter {
@@ -16,14 +16,13 @@ pub struct Defragmenter {
 }
 
 impl Optimization for Defragmenter {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut OptimizationStore) {
+    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore) {
         self.state.clear();
         self.scratch.clear();
         let live_blocks = store.sccp_reachable();
         Rewriter { state: &mut self.state, src: program, dst: &mut self.scratch, live_blocks }
             .rewrite();
         std::mem::swap(program, &mut self.scratch);
-        store.sccp_reachable.invalidate();
     }
 
     fn invalidates(&self) -> &[AnalysisKind] {
@@ -32,6 +31,7 @@ impl Optimization for Defragmenter {
             AnalysisKind::Predecessors,
             AnalysisKind::BasicBlockOwnership,
             AnalysisKind::CfgInOutBundling,
+            AnalysisKind::SccpReachable,
         ]
     }
 }
@@ -378,9 +378,10 @@ impl<'a> OpVisitorMut<'_, ()> for &mut Rewriter<'a> {
 mod tests {
     use super::*;
     use crate::{
+        analyses::AnalysesStore,
         legalize,
         optimizations::{
-            constant_propagation::SCCPAnalysis, optimizer::OptimizationStore,
+            constant_propagation::SCCPAnalysis,
             unused_operation_elimination::UnusedOperationElimination,
         },
     };
@@ -429,7 +430,7 @@ mod tests {
         "#;
 
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        let mut store = OptimizationStore::new();
+        let mut store = AnalysesStore::default();
 
         crate::optimizations::optimizer::run_optimization::<SCCPAnalysis>(
             &mut None, &mut ir, &mut store,
@@ -517,7 +518,7 @@ Basic Blocks:
     }
         "#;
         assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
-        assert_eq!(legalize(&ir, &mut store.analyses), Ok(()));
+        assert_eq!(legalize(&ir, &mut store), Ok(()));
     }
 
     #[test]
@@ -627,7 +628,7 @@ data .1 0x5678
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
-        let mut store = OptimizationStore::new();
+        let mut store = AnalysesStore::default();
         crate::optimizations::optimizer::run_optimization::<Defragmenter>(
             &mut None, &mut ir, &mut store,
         );
