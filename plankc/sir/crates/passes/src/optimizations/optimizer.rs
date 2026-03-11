@@ -46,7 +46,7 @@ impl Optimizer {
     }
 }
 
-pub(crate) fn run_optimization<T: Optimization + Default>(
+pub fn run_optimization<T: Optimization + Default>(
     optimization: &mut Option<T>,
     program: &mut EthIRProgram,
     store: &AnalysesStore,

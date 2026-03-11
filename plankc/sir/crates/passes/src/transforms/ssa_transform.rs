@@ -1,89 +1,88 @@
 use crate::{
     analyses::{AnalysesStore, DominanceFrontiers},
-    optimizations::optimizer::run_optimization,
+    optimizations::{Optimization, optimizer::run_optimization},
     transforms::CriticalEdgeSplitting,
 };
 use hashbrown::HashSet;
 use plank_core::IncIterable;
 use sir_data::{BasicBlockId, Control, EthIRProgram, Idx, IndexVec, LocalId, Span, index_vec};
 
-pub fn ssa_transform(program: &mut EthIRProgram, store: &AnalysesStore) {
-    run_optimization(&mut Some(CriticalEdgeSplitting), program, store);
-    let mut transform = SsaTransform::new(program, store);
-    let dom_frontiers = store.dominance_frontiers(program);
-    transform.run(program, &dom_frontiers);
-}
-
-struct SsaTransform {
+#[derive(Default)]
+pub struct SsaTransform {
     def_sites: IndexVec<LocalId, HashSet<BasicBlockId>>,
     dominators: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
     phi_locations: IndexVec<BasicBlockId, Vec<LocalId>>,
+    worklist: Vec<BasicBlockId>,
 }
 
-impl SsaTransform {
-    fn new(program: &EthIRProgram, store: &AnalysesStore) -> Self {
+impl Optimization for SsaTransform {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        run_optimization(&mut Some(CriticalEdgeSplitting), program, store);
+
+        for parent in self.dominators.iter_mut() {
+            parent.clear();
+        }
+        self.dominators.resize(program.basic_blocks.len(), Vec::new());
+
         let dominators_child_to_parent = store.dominators(program);
-        let mut dominators_parent_to_child = index_vec![Vec::new(); program.basic_blocks.len()];
         for bb in program.basic_blocks.iter_idx() {
             if let Some(parent) = dominators_child_to_parent.of(bb)
                 && parent != bb
             {
-                dominators_parent_to_child[parent].push(bb);
+                self.dominators[parent].push(bb);
             }
         }
 
-        let def_sites = Self::collect_definition_sites(program);
+        self.collect_definition_sites(program);
 
-        Self {
-            def_sites,
-            dominators: dominators_parent_to_child,
-            phi_locations: index_vec![Vec::new(); program.basic_blocks.len()],
-        }
-    }
+        self.phi_locations.clear();
+        self.phi_locations.resize(program.basic_blocks.len(), Vec::new());
+        self.compute_phi_locations(&store.dominance_frontiers(program));
 
-    fn run(&mut self, program: &mut EthIRProgram, dominance_frontiers: &DominanceFrontiers) {
-        self.compute_phi_locations(dominance_frontiers);
         self.rename(program);
     }
 
-    fn collect_definition_sites(
-        program: &EthIRProgram,
-    ) -> IndexVec<LocalId, HashSet<BasicBlockId>> {
-        let mut def_sites = index_vec![HashSet::new(); program.next_free_local_id.idx()];
+    fn preserves(&self) -> &[crate::AnalysisKind] {
+        &[]
+    }
+}
+
+impl SsaTransform {
+    fn collect_definition_sites(&mut self, program: &EthIRProgram) {
+        self.def_sites.clear();
+        self.def_sites.resize(program.next_free_local_id.idx(), HashSet::new());
         for block in program.blocks() {
             for &local in block.inputs() {
-                def_sites[local].insert(block.id());
+                self.def_sites[local].insert(block.id());
             }
             for op in block.operations() {
                 for &local in op.outputs() {
-                    def_sites[local].insert(block.id());
+                    self.def_sites[local].insert(block.id());
                 }
             }
         }
-        def_sites
     }
 
     fn compute_phi_locations(&mut self, dominance_frontiers: &DominanceFrontiers) {
-        let mut worklist = Vec::new();
         for (local, def_blocks) in self.def_sites.enumerate_idx() {
             if def_blocks.len() <= 1 {
                 continue;
             }
             for bb in def_blocks {
-                worklist.push(*bb);
+                self.worklist.push(*bb);
             }
-            while let Some(bb) = worklist.pop() {
+            while let Some(bb) = self.worklist.pop() {
                 for &frontier_block in dominance_frontiers.of(bb) {
                     if !self.phi_locations[frontier_block].contains(&local) {
                         self.phi_locations[frontier_block].push(local);
-                        worklist.push(frontier_block);
+                        self.worklist.push(frontier_block);
                     }
                 }
             }
         }
     }
 
-    fn rename(&mut self, program: &mut EthIRProgram) {
+    fn rename(&self, program: &mut EthIRProgram) {
         let num_locals = program.next_free_local_id.idx();
         let mut local_versions = index_vec![Vec::new(); num_locals];
         let mut rename_trail = Vec::new();
@@ -98,7 +97,7 @@ impl SsaTransform {
     }
 
     fn rename_block(
-        &mut self,
+        &self,
         program: &mut EthIRProgram,
         bb: BasicBlockId,
         local_versions: &mut IndexVec<LocalId, Vec<LocalId>>,
@@ -230,7 +229,7 @@ mod tests {
     }
 
     fn transform_and_legalize(program: &mut EthIRProgram, store: &AnalysesStore) {
-        ssa_transform(program, store);
+        run_optimization(&mut Some(SsaTransform::default()), program, store);
         let ir = display_program(program);
         legalize(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
     }

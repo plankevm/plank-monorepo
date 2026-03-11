@@ -133,7 +133,7 @@ fn main() {
     if args.already_ssa {
         sir_passes::legalize(&program, &store).expect("illegal IR pre-ssa");
     }
-    sir_passes::ssa_transform(&mut program, &store);
+    run_optimization(&mut Some(SsaTransform::default()), &mut program, &store);
     sir_passes::legalize(&program, &store).expect("illegal IR post ssa transform");
 
     if let Some(passes) = args.optimize {
