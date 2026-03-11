@@ -1,7 +1,7 @@
-use sir_analyses::{AnalysesStore, AnalysisKind, Cached};
+use crate::analyses::{AnalysesStore, AnalysisKind, Cached, legalize};
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram};
 
-use crate::{
+use crate::optimizations::{
     constant_propagation::SCCPAnalysis, copy_propagation::CopyPropagation,
     defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
 };
@@ -42,7 +42,7 @@ impl Optimizer {
 
     pub fn finish(mut self) -> EthIRProgram {
         debug_assert!(
-            sir_analyses::legalize(&self.src, &mut self.store.analyses).is_ok(),
+            legalize(&self.src, &mut self.store.analyses).is_ok(),
             "optimized IR is illegal"
         );
         self.src
@@ -239,11 +239,10 @@ Basic Blocks:
 
     #[test]
     fn test_store_invalidation_and_recomputation() {
-        use crate::{
+        use crate::optimizations::{
             constant_propagation::SCCPAnalysis, copy_propagation::CopyPropagation,
             defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
         };
-        use sir_analyses::AnalysisKind;
 
         let mut program = parse_or_panic(SWITCH_ON_COPY_WITH_DEAD_CODE, EmitConfig::init_only());
         let mut store = OptimizationStore::new();

@@ -1,7 +1,7 @@
-use sir_analyses::{AnalysisKind, DefUse, UseKind};
+use crate::analyses::{AnalysisKind, DefUse, UseKind};
 use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
 
-use crate::optimizer::{Optimization, OptimizationStore};
+use crate::optimizations::optimizer::{Optimization, OptimizationStore};
 
 #[derive(Default)]
 pub struct UnusedOperationElimination {
@@ -69,7 +69,10 @@ mod tests {
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        crate::optimizer::run_pass_and_display(source, &mut UnusedOperationElimination::default())
+        crate::optimizations::optimizer::run_pass_and_display(
+            source,
+            &mut UnusedOperationElimination::default(),
+        )
     }
 
     // Note: block outputs count as uses, even if the successor never uses the input.

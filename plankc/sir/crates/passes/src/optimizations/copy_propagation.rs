@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use sir_analyses::AnalysisKind;
+use crate::analyses::AnalysisKind;
 use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOperands};
 
-use crate::optimizer::{Optimization, OptimizationStore};
+use crate::optimizations::optimizer::{Optimization, OptimizationStore};
 
 #[derive(Default)]
 pub struct CopyPropagation {
@@ -65,7 +65,10 @@ mod tests {
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_pass(source: &str) -> String {
-        crate::optimizer::run_pass_and_display(source, &mut CopyPropagation::default())
+        crate::optimizations::optimizer::run_pass_and_display(
+            source,
+            &mut CopyPropagation::default(),
+        )
     }
 
     #[test]

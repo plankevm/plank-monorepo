@@ -1,6 +1,6 @@
 use clap::Parser;
-use sir_optimizations::{Optimizer, parse_passes_string};
 use sir_parser::{EmitConfig, parse_or_panic};
+use sir_passes::{Optimizer, parse_passes_string};
 use std::{
     fs,
     io::{self, Read},

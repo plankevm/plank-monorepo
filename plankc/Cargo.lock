@@ -1195,10 +1195,8 @@ dependencies = [
  "plank-mir-lower",
  "plank-parser",
  "plank-source",
- "sir-analyses",
  "sir-debug-backend",
- "sir-optimizations",
- "sir-transforms",
+ "sir-passes",
 ]
 
 [[package]]
@@ -1786,18 +1784,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sir-analyses"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "hashbrown 0.16.1",
- "plank-core",
- "sir-data",
- "sir-parser",
- "thiserror",
-]
-
-[[package]]
 name = "sir-assembler"
 version = "0.1.0"
 dependencies = [
@@ -1811,8 +1797,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "sir-debug-backend",
- "sir-optimizations",
  "sir-parser",
+ "sir-passes",
 ]
 
 [[package]]
@@ -1835,18 +1821,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sir-optimizations"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "plank-core",
- "sir-analyses",
- "sir-data",
- "sir-parser",
- "sir-test-utils",
-]
-
-[[package]]
 name = "sir-parser"
 version = "0.1.0"
 dependencies = [
@@ -1854,10 +1828,23 @@ dependencies = [
  "bumpalo",
  "chumsky",
  "logos",
- "sir-analyses",
  "sir-data",
+ "sir-passes",
  "sir-test-utils",
  "smallvec",
+]
+
+[[package]]
+name = "sir-passes"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "hashbrown 0.16.1",
+ "plank-core",
+ "sir-data",
+ "sir-parser",
+ "sir-test-utils",
+ "thiserror",
 ]
 
 [[package]]
@@ -1865,17 +1852,6 @@ name = "sir-test-utils"
 version = "0.1.0"
 dependencies = [
  "pretty_assertions",
-]
-
-[[package]]
-name = "sir-transforms"
-version = "0.1.0"
-dependencies = [
- "hashbrown 0.16.1",
- "plank-core",
- "sir-analyses",
- "sir-data",
- "sir-parser",
 ]
 
 [[package]]

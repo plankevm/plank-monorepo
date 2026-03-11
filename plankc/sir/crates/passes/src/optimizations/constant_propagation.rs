@@ -1,7 +1,7 @@
+use crate::analyses::{AnalysisKind, DefUse, UseKind};
 use alloy_primitives::{I256, U256, U512};
-use sir_analyses::{AnalysisKind, DefUse, UseKind};
 
-use crate::optimizer::{Optimization, OptimizationStore};
+use crate::optimizations::optimizer::{Optimization, OptimizationStore};
 use sir_data::{operation::*, *};
 use std::cmp::{Ordering, PartialOrd};
 
@@ -582,13 +582,16 @@ define_consts!(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optimizer::{Optimization, OptimizationStore};
+    use crate::{
+        analyses::AnalysesStore,
+        optimizations::optimizer::{Optimization, OptimizationStore},
+    };
     use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_analysis(source: &str) -> (SCCPAnalysis, DenseIndexSet<BasicBlockId>) {
         let ir = parse_or_panic(source, EmitConfig::init_only());
-        let mut store = sir_analyses::AnalysesStore::default();
+        let mut store = AnalysesStore::default();
         let defuse = store.def_use(&ir);
         let mut sccp = SCCPAnalysis::default();
         let mut reachable = DenseIndexSet::new();
@@ -709,7 +712,10 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
+        let actual = crate::optimizations::optimizer::run_pass_and_display(
+            input,
+            &mut SCCPAnalysis::default(),
+        );
         assert_trim_strings_eq_with_diff(&actual, expected, "branch zero takes false");
     }
 
@@ -745,7 +751,10 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
+        let actual = crate::optimizations::optimizer::run_pass_and_display(
+            input,
+            &mut SCCPAnalysis::default(),
+        );
         assert_trim_strings_eq_with_diff(&actual, expected, "branch nonzero takes true");
     }
 
@@ -788,7 +797,10 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
+        let actual = crate::optimizations::optimizer::run_pass_and_display(
+            input,
+            &mut SCCPAnalysis::default(),
+        );
         assert_trim_strings_eq_with_diff(&actual, expected, "switch with folded condition");
     }
 
@@ -831,7 +843,10 @@ Basic Blocks:
     }
         "#;
 
-        let actual = crate::optimizer::run_pass_and_display(input, &mut SCCPAnalysis::default());
+        let actual = crate::optimizations::optimizer::run_pass_and_display(
+            input,
+            &mut SCCPAnalysis::default(),
+        );
         assert_trim_strings_eq_with_diff(&actual, expected, "switch no match takes default");
     }
 
@@ -1494,13 +1509,13 @@ Basic Blocks:
 
         let mut store = OptimizationStore::new();
         let mut sccp = Some(SCCPAnalysis::default());
-        crate::optimizer::run_optimization(&mut sccp, &mut large_ir, &mut store);
+        crate::optimizations::optimizer::run_optimization(&mut sccp, &mut large_ir, &mut store);
         let sccp_ref = sccp.as_ref().unwrap();
         assert_eq!(sccp_ref.lattice[LocalId::new(0)], LatticeValue::Const(U256::from(10)));
         assert_eq!(sccp_ref.lattice[LocalId::new(1)], LatticeValue::Const(U256::from(20)));
         assert_eq!(sccp_ref.lattice[LocalId::new(2)], LatticeValue::Const(U256::from(30)));
 
-        crate::optimizer::run_optimization(&mut sccp, &mut small_ir, &mut store);
+        crate::optimizations::optimizer::run_optimization(&mut sccp, &mut small_ir, &mut store);
 
         let sccp_ref = sccp.as_ref().unwrap();
         assert_eq!(sccp_ref.lattice.len(), 1);

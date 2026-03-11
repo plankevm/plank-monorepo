@@ -9,7 +9,7 @@ use plank_parser::{
     lexer::Lexed,
 };
 use plank_source::{ModuleResolver, parse_project, source_fs::RealFs};
-use sir_optimizations::{Optimizer, parse_passes_string};
+use sir_passes::{Optimizer, parse_passes_string};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -129,12 +129,12 @@ fn main() {
     }
 
     let mut program = plank_mir_lower::lower(&mir, &big_nums);
-    let mut store = sir_analyses::AnalysesStore::default();
+    let mut store = sir_passes::AnalysesStore::default();
     if args.already_ssa {
-        sir_analyses::legalize(&program, &mut store).expect("illegal IR pre-ssa");
+        sir_passes::legalize(&program, &mut store).expect("illegal IR pre-ssa");
     }
-    sir_transforms::ssa_transform(&mut program, &mut store);
-    sir_analyses::legalize(&program, &mut store).expect("illegal IR post ssa transform");
+    sir_passes::ssa_transform(&mut program, &mut store);
+    sir_passes::legalize(&program, &mut store).expect("illegal IR post ssa transform");
 
     if let Some(passes) = args.optimize {
         let mut optimizer = Optimizer::new(program);

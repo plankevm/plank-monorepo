@@ -1,6 +1,6 @@
+use crate::analyses::{AnalysesStore, AnalysisKind, DominanceFrontiers, Predecessors};
 use hashbrown::HashSet;
 use plank_core::IncIterable;
-use sir_analyses::{AnalysesStore, AnalysisKind, DominanceFrontiers, Predecessors};
 use sir_data::{
     BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, Idx, IndexVec, LocalId, LocalIdx,
     Span, Switch, index_vec,
@@ -291,6 +291,7 @@ fn copy_span(program: &mut EthIRProgram, span: Span<LocalIdx>) -> Span<LocalIdx>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::legalize;
     use sir_data::display_program;
     use sir_parser::EmitConfig;
 
@@ -300,10 +301,10 @@ mod tests {
         sir_parser::parse_without_legalization(source, config)
     }
 
-    fn transform_and_legalize(program: &mut EthIRProgram, store: &mut sir_analyses::AnalysesStore) {
+    fn transform_and_legalize(program: &mut EthIRProgram, store: &mut AnalysesStore) {
         ssa_transform(program, store);
         let ir = display_program(program);
-        sir_analyses::legalize(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
+        legalize(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
     }
 
     #[test]
@@ -339,7 +340,7 @@ mod tests {
         let d = BasicBlockId::new(3);
         let original_v = program.block(d).inputs()[0];
 
-        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
+        transform_and_legalize(&mut program, &mut AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let d_inputs = program.block(d).inputs();
@@ -383,7 +384,7 @@ mod tests {
         let d = BasicBlockId::new(3);
         let original_v = program.block(d).inputs()[0];
 
-        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
+        transform_and_legalize(&mut program, &mut AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let d_inputs = program.block(d).inputs();
@@ -428,7 +429,7 @@ mod tests {
         let b = BasicBlockId::new(1);
         let original_v = program.block(b).inputs()[0];
 
-        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
+        transform_and_legalize(&mut program, &mut AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let b_inputs = program.block(b).inputs();
@@ -475,7 +476,7 @@ mod tests {
         let original_x = program.block(d).inputs()[0];
         let original_y = program.block(d).inputs()[1];
 
-        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
+        transform_and_legalize(&mut program, &mut AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let d_inputs = program.block(d).inputs();
@@ -527,7 +528,7 @@ mod tests {
         let original_block_count = program.basic_blocks.len();
         let original_v = program.block(d).inputs()[0];
 
-        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
+        transform_and_legalize(&mut program, &mut AnalysesStore::default());
         let post_ir = display_program(&program);
 
         assert!(
@@ -586,7 +587,7 @@ mod tests {
         let helper_id = program.functions.iter_idx().find(|&id| id != program.init_entry).unwrap();
         let helper_entry = program.functions[helper_id].entry();
 
-        transform_and_legalize(&mut program, &mut sir_analyses::AnalysesStore::default());
+        transform_and_legalize(&mut program, &mut AnalysesStore::default());
         let post_ir = display_program(&program);
 
         let init_inputs = program.block(init_entry).inputs();

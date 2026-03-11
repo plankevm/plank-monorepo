@@ -1,5 +1,5 @@
 [package]
-name = "sir-optimizations"
+name = "sir-passes"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,9 +8,10 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-sir-analyses.workspace = true
 sir-data.workspace = true
 plank-core.workspace = true
+hashbrown.workspace = true
+thiserror.workspace = true
 alloy-primitives.workspace = true
 
 [dev-dependencies]
