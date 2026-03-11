@@ -9,7 +9,7 @@ use plank_parser::{
     lexer::Lexed,
 };
 use plank_source::{ModuleResolver, parse_project, source_fs::RealFs};
-use sir_passes::{PassManager, parse_optimizations_string};
+use sir_passes::{OPTIMIZE_HELP, PassManager, parse_optimizations_string};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -29,13 +29,7 @@ struct Args {
     #[arg(short = 'm', long = "show-mir", help = "show MIR")]
     show_mir: bool,
 
-    /// Optimization passes to run in order. Each character is a pass:
-    /// s = SCCP (constant propagation),
-    /// c = copy propagation,
-    /// u = unused operation elimination,
-    /// d = defragment.
-    /// Example: -O csud
-    #[arg(short = 'O', long = "optimize", value_parser = parse_optimizations_string)]
+    #[arg(short = 'O', long = "optimize", help = OPTIMIZE_HELP, value_parser = parse_optimizations_string)]
     optimize: Option<String>,
 
     #[arg(long = "already-ssa")]

@@ -5,6 +5,13 @@ pub(crate) mod unused_operation_elimination;
 
 pub use defragmenter::Defragmenter;
 
+pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each character is a pass:\n\
+    s = SCCP (constant propagation),\n\
+    c = copy propagation,\n\
+    u = unused operation elimination,\n\
+    d = defragment.\n\
+    Example: -O csud";
+
 pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
     for c in s.chars() {
         if !matches!(c, 's' | 'c' | 'u' | 'd') {
