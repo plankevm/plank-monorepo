@@ -455,10 +455,11 @@ impl<'a> BlockLowerer<'a> {
         let fn_def_id = self.builder.fns.push(FnDef { type_preamble, body, return_type });
 
         let fn_params_id = self.builder.fn_params.push_iter(
-            self.locals_buf[param_locals_start..].chunks(2).zip(fn_def.params()).map(
-                |(type_value_chunk, param)| {
-                    let &[r#type, value] = type_value_chunk else { unreachable!() };
-                    ParamInfo { is_comptime: param.is_comptime, value, r#type }
+            self.locals_buf[param_locals_start..].array_windows().zip(fn_def.params()).map(
+                |(&[r#type, value], param)| ParamInfo {
+                    is_comptime: param.is_comptime,
+                    value,
+                    r#type,
                 },
             ),
         );
