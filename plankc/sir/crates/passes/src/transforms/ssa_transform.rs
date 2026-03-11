@@ -1,17 +1,14 @@
-use crate::analyses::{AnalysesStore, AnalysisKind, DominanceFrontiers, Predecessors};
+use crate::{
+    analyses::{AnalysesStore, DominanceFrontiers},
+    optimizations::optimizer::run_optimization,
+    transforms::CriticalEdgeSplitting,
+};
 use hashbrown::HashSet;
 use plank_core::IncIterable;
-use sir_data::{
-    BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, Idx, IndexVec, LocalId, LocalIdx,
-    Span, Switch, index_vec,
-};
+use sir_data::{BasicBlockId, Control, EthIRProgram, Idx, IndexVec, LocalId, Span, index_vec};
 
 pub fn ssa_transform(program: &mut EthIRProgram, store: &AnalysesStore) {
-    {
-        let predecessors = store.predecessors(program);
-        split_critical_edges(program, &predecessors);
-    }
-    store.invalidate(AnalysisKind::Predecessors);
+    run_optimization(&mut Some(CriticalEdgeSplitting), program, store);
     let mut transform = SsaTransform::new(program, store);
     let dom_frontiers = store.dominance_frontiers(program);
     transform.run(program, &dom_frontiers);
@@ -219,80 +216,6 @@ fn rename_def(
     new_version
 }
 
-fn split_critical_edges(program: &mut EthIRProgram, predecessors: &Predecessors) {
-    for bb in program.basic_blocks.iter_idx() {
-        match program.basic_blocks[bb].control {
-            Control::Branches(Branch { condition, non_zero_target, zero_target }) => {
-                program.basic_blocks[bb].control = Control::Branches(Branch {
-                    condition,
-                    non_zero_target: split_edge(program, predecessors, bb, non_zero_target),
-                    zero_target: split_edge(program, predecessors, bb, zero_target),
-                });
-            }
-            Control::Switch(Switch { cases, fallback, .. }) => {
-                let cases_data = program.cases[cases];
-                for target_idx in cases_data.target_indices().iter() {
-                    let target = program.cases_bb_ids[target_idx];
-                    program.cases_bb_ids[target_idx] =
-                        split_edge(program, predecessors, bb, target);
-                }
-                if let Some(fallback) = fallback {
-                    let new_fallback = split_edge(program, predecessors, bb, fallback);
-                    let Control::Switch(ref mut switch) = program.basic_blocks[bb].control else {
-                        unreachable!()
-                    };
-                    switch.fallback = Some(new_fallback);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn split_edge(
-    program: &mut EthIRProgram,
-    predecessors: &Predecessors,
-    source: BasicBlockId,
-    target: BasicBlockId,
-) -> BasicBlockId {
-    if predecessors.of(target).len() > 1 {
-        insert_forwarding_block(program, source, target)
-    } else {
-        target
-    }
-}
-
-fn insert_forwarding_block(
-    program: &mut EthIRProgram,
-    source: BasicBlockId,
-    target: BasicBlockId,
-) -> BasicBlockId {
-    let source_outputs = program.basic_blocks[source].outputs;
-    let empty_ops = Span::new(program.operations.next_idx(), program.operations.next_idx());
-
-    let inputs_start = program.locals.next_idx();
-    for _ in source_outputs.iter() {
-        program.locals.push(program.next_free_local_id.get_and_inc());
-    }
-    let inputs = Span::new(inputs_start, program.locals.next_idx());
-    let outputs = copy_span(program, inputs);
-
-    program.basic_blocks.push(BasicBlock {
-        inputs,
-        outputs,
-        operations: empty_ops,
-        control: Control::ContinuesTo(target),
-    })
-}
-
-fn copy_span(program: &mut EthIRProgram, span: Span<LocalIdx>) -> Span<LocalIdx> {
-    let start = program.locals.next_idx();
-    for idx in span.iter() {
-        program.locals.push(program.locals[idx]);
-    }
-    Span::new(start, program.locals.next_idx())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -490,63 +413,6 @@ mod tests {
             assert_ne!(input, original_x, "x should be renamed\n{post_ir}");
             assert_ne!(input, original_y, "y should be renamed\n{post_ir}");
         }
-    }
-
-    #[test]
-    fn test_critical_edge_and_switch_phi() {
-        //     A
-        //    / \
-        //   B   C
-        //  / \  |
-        // E   D-+
-        //
-        // v defined in A and B. B uses a switch, so B→D is a critical edge.
-        let mut program = parse_without_ssa(
-            r#"
-            fn init:
-                a -> v {
-                    v = const 1
-                    cond = const 0
-                    => cond ? @b : @c
-                }
-                b v -> v {
-                    v = const 2
-                    sel = const 0
-                    switch sel {
-                        0 => @d
-                        default => @e
-                    }
-                }
-                c v -> v {
-                    => @d
-                }
-                d v {
-                    stop
-                }
-                e v {
-                    stop
-                }
-            "#,
-        );
-
-        let d = BasicBlockId::new(3);
-        let original_block_count = program.basic_blocks.len();
-        let original_v = program.block(d).inputs()[0];
-
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-        let post_ir = display_program(&program);
-
-        assert!(
-            program.basic_blocks.len() > original_block_count,
-            "critical edge splitting should insert forwarding blocks\n{post_ir}"
-        );
-
-        let d_inputs = program.block(d).inputs();
-        assert_eq!(d_inputs.len(), 2, "D should have original input + phi\n{post_ir}");
-        for &input in d_inputs {
-            assert_ne!(input, original_v, "phi input should be renamed\n{post_ir}");
-        }
-        assert_ne!(d_inputs[0], d_inputs[1], "phi inputs should be distinct\n{post_ir}");
     }
 
     #[test]
