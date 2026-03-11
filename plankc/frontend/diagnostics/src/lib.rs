@@ -37,7 +37,7 @@ pub struct SimpleCollector {
     diagnostics: Vec<Diagnostic>,
 }
 
-impl DiagnosticContext for SimpleCollector {
+impl DiagnosticsContext for SimpleCollector {
     fn emit(&mut self, diagnostic: Diagnostic) {
         self.diagnostics.push(diagnostic);
     }
@@ -96,6 +96,6 @@ impl Diagnostic {
     }
 }
 
-pub trait DiagnosticContext {
+pub trait DiagnosticsContext {
     fn emit(&mut self, diagnostic: Diagnostic);
 }
