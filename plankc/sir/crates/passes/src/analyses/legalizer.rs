@@ -71,13 +71,13 @@ pub enum LegalizerError {
     LocalNotInScope { block: BasicBlockId, local: LocalId, use_kind: UseKind },
 }
 
-pub fn legalize(program: &EthIRProgram, store: &mut AnalysesStore) -> Result<(), LegalizerError> {
+pub fn legalize(program: &EthIRProgram, store: &AnalysesStore) -> Result<(), LegalizerError> {
     Legalizer::new(program, store).legalize()
 }
 
 struct Legalizer<'a> {
     program: &'a EthIRProgram,
-    store: &'a mut AnalysesStore,
+    store: &'a AnalysesStore,
     locals_spans: Vec<TrackedSpan<LocalIdx>>,
     operations_spans: Vec<TrackedSpan<OperationIdx>>,
     block_owner: IndexVec<BasicBlockId, Option<FunctionId>>,
@@ -85,7 +85,7 @@ struct Legalizer<'a> {
 }
 
 impl<'a> Legalizer<'a> {
-    fn new(program: &'a EthIRProgram, store: &'a mut AnalysesStore) -> Self {
+    fn new(program: &'a EthIRProgram, store: &'a AnalysesStore) -> Self {
         let block_owner = index_vec![None; program.basic_blocks.len()];
         Self {
             program,
@@ -537,7 +537,7 @@ mod tests {
     use sir_parser::{EmitConfig, parse_without_legalization};
 
     fn run_legalize(program: &EthIRProgram) -> Result<(), LegalizerError> {
-        legalize(program, &mut crate::AnalysesStore::default())
+        legalize(program, &crate::AnalysesStore::default())
     }
 
     // Note: WrongOutputCount cannot be triggered via the builder because the builder

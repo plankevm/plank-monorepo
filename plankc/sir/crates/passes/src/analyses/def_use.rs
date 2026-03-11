@@ -1,3 +1,4 @@
+use crate::analyses::{AnalysesStore, cache::Analysis};
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, Idx, IndexVec, LocalId, OperationIdx};
 
 #[derive(Clone)]
@@ -25,21 +26,21 @@ impl std::fmt::Display for UseKind {
 
 #[derive(Default)]
 pub struct DefUse {
-    inner: IndexVec<LocalId, Vec<UseLocation>>,
+    uses: IndexVec<LocalId, Vec<UseLocation>>,
 }
 
-impl DefUse {
-    pub fn compute(&mut self, program: &EthIRProgram) {
+impl Analysis for DefUse {
+    fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
         let num_locals = program.next_free_local_id.idx();
-        for vec in self.inner.iter_mut() {
+        for vec in self.uses.iter_mut() {
             vec.clear();
         }
-        self.inner.resize_with(num_locals, Vec::new);
+        self.uses.resize_with(num_locals, Vec::new);
 
         for block in program.blocks() {
             for op in block.operations() {
                 for &input in op.inputs() {
-                    self.inner[input].push(UseLocation {
+                    self.uses[input].push(UseLocation {
                         block_id: block.id(),
                         kind: UseKind::Operation(op.id()),
                     });
@@ -48,28 +49,30 @@ impl DefUse {
 
             match block.control() {
                 ControlView::Branches { condition, .. } => {
-                    self.inner[condition]
+                    self.uses[condition]
                         .push(UseLocation { block_id: block.id(), kind: UseKind::Control });
                 }
                 ControlView::Switch(switch) => {
-                    self.inner[switch.condition()]
+                    self.uses[switch.condition()]
                         .push(UseLocation { block_id: block.id(), kind: UseKind::Control });
                 }
                 _ => {}
             }
 
             for &local in block.outputs() {
-                self.inner[local]
+                self.uses[local]
                     .push(UseLocation { block_id: block.id(), kind: UseKind::BlockOutput });
             }
         }
     }
+}
 
+impl DefUse {
     pub fn uses_of(&self, local: LocalId) -> &[UseLocation] {
-        &self.inner[local]
+        &self.uses[local]
     }
 
     pub fn retain(&mut self, local: LocalId, f: impl FnMut(&UseLocation) -> bool) {
-        self.inner[local].retain(f);
+        self.uses[local].retain(f);
     }
 }

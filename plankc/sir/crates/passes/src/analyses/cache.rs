@@ -3,29 +3,62 @@ use crate::{
     Dominators, Predecessors,
 };
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram};
+use std::cell::{Ref, RefCell, RefMut};
 
 #[derive(Default)]
-struct Cached<T> {
-    inner: T,
-    valid: bool,
+pub(crate) struct Cached<T> {
+    state: RefCell<CachedState<T>>,
+}
+
+#[derive(Default)]
+pub(crate) struct CachedState<T> {
+    pub(crate) analysis: T,
+    pub(crate) valid: bool,
+}
+
+pub(crate) trait Analysis {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore);
+}
+
+impl<T: Analysis> Cached<T> {
+    fn get(&self, program: &EthIRProgram, store: &AnalysesStore) -> Ref<'_, T> {
+        if !self.is_valid() {
+            let mut cached = self.state.borrow_mut();
+            cached.analysis.compute(program, store);
+            cached.valid = true;
+        }
+        Ref::map(self.state.borrow(), |s| &s.analysis)
+    }
+
+    fn get_mut(&self, program: &EthIRProgram, store: &AnalysesStore) -> RefMut<'_, T> {
+        let mut cached = self.state.borrow_mut();
+        if !cached.valid {
+            cached.analysis.compute(program, store);
+        }
+        cached.valid = false;
+        RefMut::map(cached, |s| &mut s.analysis)
+    }
 }
 
 impl<T> Cached<T> {
-    fn get(&self) -> &T {
-        assert!(self.valid, "analysis not valid");
-        &self.inner
+    pub(crate) fn get_if_valid(&self) -> Option<Ref<'_, T>> {
+        if self.is_valid() { Some(Ref::map(self.state.borrow(), |s| &s.analysis)) } else { None }
     }
 
-    fn is_valid(&self) -> bool {
-        self.valid
+    pub(crate) fn get_buffer(&self) -> RefMut<'_, T> {
+        RefMut::map(self.state.borrow_mut(), |s| &mut s.analysis)
     }
 
-    fn get_if_valid(&self) -> Option<&T> {
-        self.valid.then_some(&self.inner)
+    pub(crate) fn mark_valid(&self) {
+        self.state.borrow_mut().valid = true;
     }
 
-    fn invalidate(&mut self) {
-        self.valid = false;
+    pub(crate) fn is_valid(&self) -> bool {
+        self.state.borrow().valid
+    }
+
+    pub(crate) fn invalidate(&self) {
+        self.state.borrow_mut().valid = false;
     }
 }
 
@@ -37,6 +70,8 @@ macro_rules! define_analyses {
         }
 
         impl AnalysisKind {
+            pub const ALL: &[AnalysisKind] = &[$(AnalysisKind::$variant),*];
+
             fn used_by(&self) -> &[AnalysisKind] {
                 match self {
                     $(AnalysisKind::$variant => &[$(AnalysisKind::$dep),*]),*
@@ -46,7 +81,7 @@ macro_rules! define_analyses {
 
         #[derive(Default)]
         pub struct AnalysesStore {
-            $($field: Cached<$ty>),*
+            $(pub(crate) $field: Cached<$ty>),*
         }
 
         impl AnalysesStore {
@@ -56,12 +91,29 @@ macro_rules! define_analyses {
                 }
             }
 
-            pub fn invalidate(&mut self, kind: AnalysisKind) {
+            pub fn invalidate(&self, kind: AnalysisKind) {
                 match kind {
                     $(AnalysisKind::$variant => self.$field.invalidate()),*
                 }
                 for dependent in kind.used_by() {
                     self.invalidate(*dependent);
+                }
+            }
+
+            pub fn invalidate_all_except(&self, preserved: &[AnalysisKind]) {
+                for &kind in AnalysisKind::ALL {
+                    if preserved.contains(&kind) {
+                        continue;
+                    }
+                    for dependent in kind.used_by() {
+                        debug_assert!(
+                            !preserved.contains(dependent),
+                            "{dependent:?} is preserved but its dependency {kind:?} is not"
+                        );
+                    }
+                    match kind {
+                        $(AnalysisKind::$variant => self.$field.invalidate()),*
+                    }
                 }
             }
         }
@@ -81,83 +133,37 @@ define_analyses! {
 }
 
 impl AnalysesStore {
-    pub fn def_use(&mut self, program: &EthIRProgram) -> &DefUse {
-        if !self.def_use.valid {
-            self.def_use.inner.compute(program);
-            self.def_use.valid = true;
-        }
-        &self.def_use.inner
+    pub fn def_use(&self, program: &EthIRProgram) -> Ref<'_, DefUse> {
+        self.def_use.get(program, self)
     }
 
-    pub fn def_use_mut(&mut self, program: &EthIRProgram) -> &mut DefUse {
-        if !self.def_use.valid {
-            self.def_use.inner.compute(program);
-        }
-        self.def_use.valid = false;
-        &mut self.def_use.inner
+    pub fn def_use_mut(&self, program: &EthIRProgram) -> RefMut<'_, DefUse> {
+        self.def_use.get_mut(program, self)
     }
 
-    pub fn predecessors(&mut self, program: &EthIRProgram) -> &Predecessors {
-        if !self.predecessors.valid {
-            self.predecessors.inner.compute(program);
-            self.predecessors.valid = true;
-        }
-        &self.predecessors.inner
+    pub fn predecessors(&self, program: &EthIRProgram) -> Ref<'_, Predecessors> {
+        self.predecessors.get(program, self)
     }
 
-    pub fn dominators(&mut self, program: &EthIRProgram) -> &Dominators {
-        self.predecessors(program);
-        if !self.dominators.valid {
-            self.dominators.inner.compute(program, self.predecessors.get());
-            self.dominators.valid = true;
-        }
-        &self.dominators.inner
+    pub fn dominators(&self, program: &EthIRProgram) -> Ref<'_, Dominators> {
+        self.dominators.get(program, self)
     }
 
-    pub fn dominance_frontiers(&mut self, program: &EthIRProgram) -> &DominanceFrontiers {
-        self.dominators(program);
-        if !self.dominance_frontiers.valid {
-            self.dominance_frontiers.inner.compute(self.dominators.get(), self.predecessors.get());
-            self.dominance_frontiers.valid = true;
-        }
-        &self.dominance_frontiers.inner
+    pub fn dominance_frontiers(&self, program: &EthIRProgram) -> Ref<'_, DominanceFrontiers> {
+        self.dominance_frontiers.get(program, self)
     }
 
     pub fn basic_block_ownership(
-        &mut self,
+        &self,
         program: &EthIRProgram,
-    ) -> &BasicBlockOwnershipAndReachability {
-        if !self.basic_block_ownership.valid {
-            self.basic_block_ownership.inner.compute(program);
-            self.basic_block_ownership.valid = true;
-        }
-        &self.basic_block_ownership.inner
+    ) -> Ref<'_, BasicBlockOwnershipAndReachability> {
+        self.basic_block_ownership.get(program, self)
     }
 
     pub fn cfg_in_out_bundling(
-        &mut self,
+        &self,
         program: &EthIRProgram,
-    ) -> &ControlFlowGraphInOutBundling {
-        if !self.cfg_in_out_bundling.valid {
-            self.cfg_in_out_bundling.inner.compute(program);
-            self.cfg_in_out_bundling.valid = true;
-        }
-        &self.cfg_in_out_bundling.inner
-    }
-
-    pub fn sccp_reachable(&self) -> Option<&DenseIndexSet<BasicBlockId>> {
-        self.sccp_reachable.get_if_valid()
-    }
-
-    pub fn def_use_and_sccp_reachable(
-        &mut self,
-        program: &EthIRProgram,
-    ) -> (&DefUse, &mut DenseIndexSet<BasicBlockId>) {
-        if !self.def_use.valid {
-            self.def_use.inner.compute(program);
-            self.def_use.valid = true;
-        }
-        self.sccp_reachable.valid = true;
-        (&self.def_use.inner, &mut self.sccp_reachable.inner)
+    ) -> Ref<'_, ControlFlowGraphInOutBundling> {
+        self.cfg_in_out_bundling.get(program, self)
     }
 }

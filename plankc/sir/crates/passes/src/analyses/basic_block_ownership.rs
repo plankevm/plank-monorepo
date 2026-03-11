@@ -1,3 +1,4 @@
+use crate::analyses::{AnalysesStore, cache::Analysis};
 use sir_data::{BasicBlockId, EthIRProgram, FunctionId, IndexVec};
 
 #[derive(Debug, Clone, Default)]
@@ -5,8 +6,8 @@ pub struct BasicBlockOwnershipAndReachability {
     ownership: IndexVec<BasicBlockId, Option<FunctionId>>,
 }
 
-impl BasicBlockOwnershipAndReachability {
-    pub fn compute(&mut self, program: &EthIRProgram) {
+impl Analysis for BasicBlockOwnershipAndReachability {
+    fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
         self.ownership.clear();
         self.ownership.resize(program.basic_blocks.len(), None);
 
@@ -14,7 +15,9 @@ impl BasicBlockOwnershipAndReachability {
             Self::mark_reachable_blocks(&mut self.ownership, program, func.entry().id(), func.id());
         }
     }
+}
 
+impl BasicBlockOwnershipAndReachability {
     fn mark_reachable_blocks(
         ownership: &mut IndexVec<BasicBlockId, Option<FunctionId>>,
         program: &EthIRProgram,
@@ -115,7 +118,7 @@ mod tests {
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
         assert_eq!(analysis.get_owner(bb0_id), Some(func_id));
@@ -144,7 +147,7 @@ mod tests {
 
         let program = builder.build(func_id, None);
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
         assert!(analysis.is_reachable(bb0_id));
@@ -179,7 +182,7 @@ mod tests {
 
         let program = builder.build(func0_id, None);
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
         assert_eq!(analysis.get_owner(bb0_id), Some(func0_id));
@@ -218,7 +221,7 @@ mod tests {
         let func_id = func.finish(bb0_id);
         let program = builder.build(func_id, None);
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
         assert_eq!(analysis.get_owner(bb0_id), Some(func_id));

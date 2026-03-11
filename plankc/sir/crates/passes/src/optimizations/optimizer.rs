@@ -31,17 +31,17 @@ impl Optimizer {
     pub fn run_passes(&mut self, passes: &str) {
         for c in passes.chars() {
             match c {
-                's' => run_optimization(&mut self.sccp, &mut self.src, &mut self.store),
-                'c' => run_optimization(&mut self.copy_prop, &mut self.src, &mut self.store),
-                'u' => run_optimization(&mut self.unused_elim, &mut self.src, &mut self.store),
-                'd' => run_optimization(&mut self.defragmenter, &mut self.src, &mut self.store),
+                's' => run_optimization(&mut self.sccp, &mut self.src, &self.store),
+                'c' => run_optimization(&mut self.copy_prop, &mut self.src, &self.store),
+                'u' => run_optimization(&mut self.unused_elim, &mut self.src, &self.store),
+                'd' => run_optimization(&mut self.defragmenter, &mut self.src, &self.store),
                 _ => unreachable!("should've been validated"),
             }
         }
     }
 
-    pub fn finish(mut self) -> EthIRProgram {
-        debug_assert!(legalize(&self.src, &mut self.store).is_ok(), "optimized IR is illegal");
+    pub fn finish(self) -> EthIRProgram {
+        debug_assert!(legalize(&self.src, &self.store).is_ok(), "optimized IR is illegal");
         self.src
     }
 }
@@ -49,18 +49,16 @@ impl Optimizer {
 pub(crate) fn run_optimization<T: Optimization + Default>(
     optimization: &mut Option<T>,
     program: &mut EthIRProgram,
-    store: &mut AnalysesStore,
+    store: &AnalysesStore,
 ) {
     let optimization = optimization.get_or_insert_with(T::default);
     optimization.run(program, store);
-    for kind in optimization.invalidates() {
-        store.invalidate(*kind);
-    }
+    store.invalidate_all_except(optimization.preserves());
 }
 
 pub trait Optimization {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore);
-    fn invalidates(&self) -> &[AnalysisKind];
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);
+    fn preserves(&self) -> &[AnalysisKind];
 }
 
 pub fn parse_passes_string(s: &str) -> Result<String, String> {
@@ -78,8 +76,8 @@ pub fn parse_passes_string(s: &str) -> Result<String, String> {
 #[cfg(test)]
 pub(crate) fn run_pass_and_display(source: &str, opt: &mut impl Optimization) -> String {
     let mut ir = sir_parser::parse_or_panic(source, sir_parser::EmitConfig::init_only());
-    let mut store = AnalysesStore::default();
-    opt.run(&mut ir, &mut store);
+    let store = AnalysesStore::default();
+    opt.run(&mut ir, &store);
     sir_data::display_program(&ir)
 }
 
@@ -224,7 +222,7 @@ Basic Blocks:
         };
 
         let mut program = parse_or_panic(SWITCH_ON_COPY_WITH_DEAD_CODE, EmitConfig::init_only());
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
 
         // Computing dominance_frontiers transitively computes predecessors and dominators
         store.dominance_frontiers(&program);
@@ -235,7 +233,7 @@ Basic Blocks:
         // SCCP invalidates DefUse, Predecessors (cascades to Dominators, DominanceFrontiers),
         // BasicBlockOwnership, CfgInOutBundling — and populates sccp_reachable
         let mut sccp: Option<SCCPAnalysis> = None;
-        run_optimization(&mut sccp, &mut program, &mut store);
+        run_optimization(&mut sccp, &mut program, &store);
         assert!(!store.is_valid(AnalysisKind::DefUse));
         assert!(!store.is_valid(AnalysisKind::Predecessors));
         assert!(!store.is_valid(AnalysisKind::Dominators));
@@ -246,12 +244,12 @@ Basic Blocks:
 
         // Defragmenter consumes sccp_reachable and invalidates it
         let mut defrag: Option<Defragmenter> = None;
-        run_optimization(&mut defrag, &mut program, &mut store);
+        run_optimization(&mut defrag, &mut program, &store);
         assert!(!store.is_valid(AnalysisKind::SccpReachable));
 
         // Copy prop invalidates DefUse
         let mut copy_prop: Option<CopyPropagation> = None;
-        run_optimization(&mut copy_prop, &mut program, &mut store);
+        run_optimization(&mut copy_prop, &mut program, &store);
         assert!(!store.is_valid(AnalysisKind::DefUse));
 
         // def_use recomputes lazily and marks valid
@@ -260,12 +258,12 @@ Basic Blocks:
 
         // Unused elim uses def_use_mut: computes DefUse then marks it invalid
         let mut unused_elim: Option<UnusedOperationElimination> = None;
-        run_optimization(&mut unused_elim, &mut program, &mut store);
+        run_optimization(&mut unused_elim, &mut program, &store);
         assert!(!store.is_valid(AnalysisKind::DefUse));
 
         // Defragmenter works without sccp_reachable
         assert!(!store.is_valid(AnalysisKind::SccpReachable));
-        run_optimization(&mut defrag, &mut program, &mut store);
+        run_optimization(&mut defrag, &mut program, &store);
     }
 
     #[test]

@@ -1,16 +1,17 @@
 use hashbrown::HashSet;
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram, IndexVec, index_vec};
 
-use crate::Predecessors;
+use crate::analyses::{AnalysesStore, cache::Analysis};
 
 #[derive(Default)]
 pub struct Dominators {
     pub(crate) inner: IndexVec<BasicBlockId, Option<BasicBlockId>>,
 }
 
-impl Dominators {
+impl Analysis for Dominators {
     // iterative dominator algorithm using RPO
-    pub fn compute(&mut self, program: &EthIRProgram, predecessors: &Predecessors) {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
+        let predecessors = store.predecessors(program);
         self.inner.clear();
         self.inner.resize(program.basic_blocks.len(), None);
         for func in program.functions_iter() {
@@ -22,7 +23,9 @@ impl Dominators {
             );
         }
     }
+}
 
+impl Dominators {
     pub fn of(&self, bb: BasicBlockId) -> Option<BasicBlockId> {
         self.inner[bb]
     }
@@ -33,12 +36,10 @@ pub struct DominanceFrontiers {
     inner: IndexVec<BasicBlockId, HashSet<BasicBlockId>>,
 }
 
-impl DominanceFrontiers {
-    pub fn of(&self, bb: BasicBlockId) -> &HashSet<BasicBlockId> {
-        &self.inner[bb]
-    }
-
-    pub fn compute(&mut self, dominators: &Dominators, predecessors: &Predecessors) {
+impl Analysis for DominanceFrontiers {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
+        let dominators = store.dominators(program);
+        let predecessors = store.predecessors(program);
         for set in self.inner.iter_mut() {
             set.clear();
         }
@@ -62,6 +63,12 @@ impl DominanceFrontiers {
                 }
             }
         }
+    }
+}
+
+impl DominanceFrontiers {
+    pub fn of(&self, bb: BasicBlockId) -> &HashSet<BasicBlockId> {
+        &self.inner[bb]
     }
 }
 
@@ -157,7 +164,7 @@ mod tests {
     }
 
     fn make_store(program: &EthIRProgram) -> crate::AnalysesStore {
-        let mut store = crate::AnalysesStore::default();
+        let store = crate::AnalysesStore::default();
         store.dominance_frontiers(program);
         store
     }
@@ -187,7 +194,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -219,7 +226,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -257,7 +264,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -305,7 +312,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -355,7 +362,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -391,7 +398,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -425,7 +432,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -479,7 +486,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
@@ -528,7 +535,7 @@ mod tests {
             EmitConfig::init_only(),
         );
 
-        let mut store = make_store(&program);
+        let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A

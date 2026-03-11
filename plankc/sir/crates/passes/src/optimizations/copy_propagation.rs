@@ -11,7 +11,7 @@ pub struct CopyPropagation {
 }
 
 impl Optimization for CopyPropagation {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &mut AnalysesStore) {
+    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
         for bb in program.basic_blocks.iter_mut() {
             self.copy_map.clear();
 
@@ -48,8 +48,15 @@ impl Optimization for CopyPropagation {
         }
     }
 
-    fn invalidates(&self) -> &[AnalysisKind] {
-        &[AnalysisKind::DefUse]
+    fn preserves(&self) -> &[AnalysisKind] {
+        &[
+            AnalysisKind::Predecessors,
+            AnalysisKind::Dominators,
+            AnalysisKind::DominanceFrontiers,
+            AnalysisKind::BasicBlockOwnership,
+            AnalysisKind::CfgInOutBundling,
+            AnalysisKind::SccpReachable,
+        ]
     }
 }
 

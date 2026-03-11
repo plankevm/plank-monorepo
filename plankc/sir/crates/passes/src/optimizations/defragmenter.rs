@@ -16,23 +16,22 @@ pub struct Defragmenter {
 }
 
 impl Optimization for Defragmenter {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore) {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         self.state.clear();
         self.scratch.clear();
-        let live_blocks = store.sccp_reachable();
-        Rewriter { state: &mut self.state, src: program, dst: &mut self.scratch, live_blocks }
-            .rewrite();
+        let live_blocks = store.sccp_reachable.get_if_valid();
+        Rewriter {
+            state: &mut self.state,
+            src: program,
+            dst: &mut self.scratch,
+            live_blocks: live_blocks.as_deref(),
+        }
+        .rewrite();
         std::mem::swap(program, &mut self.scratch);
     }
 
-    fn invalidates(&self) -> &[AnalysisKind] {
-        &[
-            AnalysisKind::DefUse,
-            AnalysisKind::Predecessors,
-            AnalysisKind::BasicBlockOwnership,
-            AnalysisKind::CfgInOutBundling,
-            AnalysisKind::SccpReachable,
-        ]
+    fn preserves(&self) -> &[AnalysisKind] {
+        &[]
     }
 }
 
@@ -430,13 +429,13 @@ mod tests {
         "#;
 
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
 
         crate::optimizations::optimizer::run_optimization::<SCCPAnalysis>(
-            &mut None, &mut ir, &mut store,
+            &mut None, &mut ir, &store,
         );
         crate::optimizations::optimizer::run_optimization::<UnusedOperationElimination>(
-            &mut None, &mut ir, &mut store,
+            &mut None, &mut ir, &store,
         );
 
         let src_str = sir_data::display_program(&ir);
@@ -488,7 +487,7 @@ data .0 0xcafebabe
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
 
         crate::optimizations::optimizer::run_optimization::<Defragmenter>(
-            &mut None, &mut ir, &mut store,
+            &mut None, &mut ir, &store,
         );
 
         let dst_str = sir_data::display_program(&ir);
@@ -518,7 +517,7 @@ Basic Blocks:
     }
         "#;
         assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
-        assert_eq!(legalize(&ir, &mut store), Ok(()));
+        assert_eq!(legalize(&ir, &store), Ok(()));
     }
 
     #[test]
@@ -628,9 +627,9 @@ data .1 0x5678
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         crate::optimizations::optimizer::run_optimization::<Defragmenter>(
-            &mut None, &mut ir, &mut store,
+            &mut None, &mut ir, &store,
         );
 
         let actual = sir_data::display_program(&ir);

@@ -479,19 +479,17 @@ impl SCCPAnalysis {
 }
 
 impl Optimization for SCCPAnalysis {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore) {
-        let (uses, reachable) = store.def_use_and_sccp_reachable(program);
-        self.analysis(program, uses, reachable);
-        self.apply(program, reachable);
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let uses = store.def_use(program);
+        let mut reachable = store.sccp_reachable.get_buffer();
+        self.analysis(program, &uses, &mut reachable);
+        self.apply(program, &reachable);
+        drop(reachable);
+        store.sccp_reachable.mark_valid();
     }
 
-    fn invalidates(&self) -> &[AnalysisKind] {
-        &[
-            AnalysisKind::DefUse,
-            AnalysisKind::Predecessors,
-            AnalysisKind::BasicBlockOwnership,
-            AnalysisKind::CfgInOutBundling,
-        ]
+    fn preserves(&self) -> &[AnalysisKind] {
+        &[AnalysisKind::SccpReachable]
     }
 }
 
@@ -586,19 +584,19 @@ mod tests {
 
     fn run_analysis(source: &str) -> (SCCPAnalysis, DenseIndexSet<BasicBlockId>) {
         let ir = parse_or_panic(source, EmitConfig::init_only());
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let defuse = store.def_use(&ir);
         let mut sccp = SCCPAnalysis::default();
         let mut reachable = DenseIndexSet::new();
-        sccp.analysis(&ir, defuse, &mut reachable);
+        sccp.analysis(&ir, &defuse, &mut reachable);
         (sccp, reachable)
     }
 
     fn run_const_prop(source: &str) -> (String, SCCPAnalysis) {
         let mut ir = parse_or_panic(source, EmitConfig::init_only());
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let mut sccp = SCCPAnalysis::default();
-        sccp.run(&mut ir, &mut store);
+        sccp.run(&mut ir, &store);
         (sir_data::display_program(&ir), sccp)
     }
 
@@ -1383,11 +1381,12 @@ Basic Blocks:
             "overdefined input makes both branch targets reachable",
         );
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let mut sccp = SCCPAnalysis::default();
-        sccp.run(&mut ir, &mut store);
+        sccp.run(&mut ir, &store);
 
-        let reachable = store.sccp_reachable().expect("sccp did not populate reachable");
+        let reachable =
+            store.sccp_reachable.get_if_valid().expect("sccp did not populate reachable");
         assert!(reachable.contains(BasicBlockId::new(5)), "true_target (@5) should be reachable");
         assert!(reachable.contains(BasicBlockId::new(6)), "false_target (@6) should be reachable");
     }
@@ -1460,9 +1459,9 @@ Basic Blocks:
             "block output use propagates overdefined to successor",
         );
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let mut sccp = SCCPAnalysis::default();
-        sccp.run(&mut ir, &mut store);
+        sccp.run(&mut ir, &store);
 
         assert_eq!(
             sccp.lattice[LocalId::new(3)],
@@ -1502,15 +1501,15 @@ Basic Blocks:
             EmitConfig::init_only(),
         );
 
-        let mut store = AnalysesStore::default();
+        let store = AnalysesStore::default();
         let mut sccp = Some(SCCPAnalysis::default());
-        crate::optimizations::optimizer::run_optimization(&mut sccp, &mut large_ir, &mut store);
+        crate::optimizations::optimizer::run_optimization(&mut sccp, &mut large_ir, &store);
         let sccp_ref = sccp.as_ref().unwrap();
         assert_eq!(sccp_ref.lattice[LocalId::new(0)], LatticeValue::Const(U256::from(10)));
         assert_eq!(sccp_ref.lattice[LocalId::new(1)], LatticeValue::Const(U256::from(20)));
         assert_eq!(sccp_ref.lattice[LocalId::new(2)], LatticeValue::Const(U256::from(30)));
 
-        crate::optimizations::optimizer::run_optimization(&mut sccp, &mut small_ir, &mut store);
+        crate::optimizations::optimizer::run_optimization(&mut sccp, &mut small_ir, &store);
 
         let sccp_ref = sccp.as_ref().unwrap();
         assert_eq!(sccp_ref.lattice.len(), 1);

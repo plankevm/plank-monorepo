@@ -10,8 +10,8 @@ pub struct UnusedOperationElimination {
 }
 
 impl Optimization for UnusedOperationElimination {
-    fn run(&mut self, program: &mut EthIRProgram, store: &mut AnalysesStore) {
-        let uses = store.def_use_mut(program);
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let mut uses = store.def_use_mut(program);
 
         self.def_sites.clear();
         self.def_sites.resize(program.next_free_local_id.idx(), None);
@@ -22,7 +22,7 @@ impl Optimization for UnusedOperationElimination {
                 self.def_sites[*out] = Some(op.id());
             }
 
-            if is_removable(&op.op(), program, uses) {
+            if is_removable(&op.op(), program, &uses) {
                 self.pending_removals.push(op.id());
             }
         }
@@ -39,7 +39,7 @@ impl Optimization for UnusedOperationElimination {
                 if let Some(def_idx) = self.def_sites[input] {
                     let defining_op = &program.operations[def_idx];
                     if !matches!(defining_op, Operation::Noop(()))
-                        && is_removable(defining_op, program, uses)
+                        && is_removable(defining_op, program, &uses)
                     {
                         self.pending_removals.push(def_idx);
                     }
@@ -53,8 +53,15 @@ impl Optimization for UnusedOperationElimination {
         }
     }
 
-    fn invalidates(&self) -> &[AnalysisKind] {
-        &[AnalysisKind::DefUse]
+    fn preserves(&self) -> &[AnalysisKind] {
+        &[
+            AnalysisKind::Predecessors,
+            AnalysisKind::Dominators,
+            AnalysisKind::DominanceFrontiers,
+            AnalysisKind::BasicBlockOwnership,
+            AnalysisKind::CfgInOutBundling,
+            AnalysisKind::SccpReachable,
+        ]
     }
 }
 
