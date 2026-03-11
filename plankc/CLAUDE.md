@@ -33,7 +33,7 @@ Cargo workspace with general-purpose crates in `crates/` and frontend crates in 
     - `lexer.rs`: Token lexer using the `logos` crate
     - `cst/`: Homogeneous syntax tree that stores well-formed nodes & errors
     - `parser.rs`: Main parser implementation
-    - `ast.rs`: AST definitions
+    - `ast/`: AST wrappers for easier access to CST nodes.
     - `diagnostics.rs`: Diagnostic context trait
 - **plank-hir** (`frontend/hir`): High-level IR
 - **plank** (`frontend/cli`): CLI frontend
