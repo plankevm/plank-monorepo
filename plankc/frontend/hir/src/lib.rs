@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 use plank_core::{
     Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index,
 };
-use plank_diagnostics::DiagnosticsContext;
+use plank_diagnostics::{Diagnostic, DiagnosticsContext};
 use plank_parser::{
     PlankInterner, StrId,
     ast::{self, Statement, TopLevelDef},
@@ -591,7 +591,7 @@ pub fn lower(
     interner: &PlankInterner,
     diag_ctx: &mut impl DiagnosticsContext,
 ) -> Hir {
-    let (mut consts, source_consts) = register_consts(&project.sources);
+    let (mut consts, source_consts) = register_consts(&project.sources, interner, diag_ctx);
 
     let mut builder = HirBuilder::new();
     let mut init = None;
@@ -690,12 +690,14 @@ pub fn lower(
 
 fn register_consts(
     sources: &IndexVec<SourceId, Source>,
+    interner: &PlankInterner,
+    diag_ctx: &mut impl DiagnosticsContext,
 ) -> (IndexVec<ConstId, ConstDef>, ListOfLists<SourceId, (StrId, ConstId)>) {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
     let mut source_consts: ListOfLists<SourceId, (StrId, ConstId)> = ListOfLists::new();
 
     let mut seen = HashMap::new();
-    for source in sources.iter() {
+    for (id, source) in sources.enumerate_idx() {
         let file = source.cst.as_file();
         seen.clear();
         source_consts.push_with(|mut list| {
@@ -707,10 +709,25 @@ fn register_consts(
                     body: BlockId::ZERO,
                     result: LocalId::ZERO,
                 });
-                if seen.insert(const_def.name, const_id).is_some() {
-                    todo!("diagnostic: duplicate const def");
+                if let Some(prev) = seen.insert(const_def.name, const_id) {
+                    let diagnostic = Diagnostic::error(format!(
+                        "duplicate definition of {}",
+                        &interner[const_def.name]
+                    ))
+                    .primary(
+                        id,
+                        source.lexed.tokens_src_span(const_def.span()),
+                        format!("{} redefined here", &interner[const_def.name]),
+                    )
+                    .secondary(
+                        id,
+                        source.lexed.tokens_src_span(consts[prev].source),
+                        "previously defined here",
+                    );
+                    diag_ctx.emit(diagnostic);
+                } else {
+                    list.push((const_def.name, const_id));
                 }
-                list.push((const_def.name, const_id));
             }
         });
     }

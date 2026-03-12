@@ -234,3 +234,13 @@ fn test_unresolved_identifier_diagnostic() {
     assert_eq!(annotation.source_id, SourceId::ROOT);
     assert_eq!(annotation.span, Span::new(SourceByteOffset::new(7), SourceByteOffset::new(8)));
 }
+
+#[test]
+fn test_duplicate_const_def() {
+    let (_hir, _big_nums, _interner, collector) =
+        try_lower("const x = 1; const x = 2; init {}").expect("should not have parse errors");
+
+    let diagnostics = collector.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].message, "duplicate definition of x");
+}
