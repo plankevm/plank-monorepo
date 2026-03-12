@@ -1,6 +1,9 @@
+use plank_core::Span;
+
 use crate::{
     StrId,
     cst::{BinaryOp, NodeKind, NodeView, NumLitId, UnaryOp},
+    lexer::TokenIdx,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -17,7 +20,7 @@ pub enum Expr<'cst> {
     ComptimeBlock(BlockExpr<'cst>),
     BoolLiteral(bool),
     NumLiteral { negative: bool, id: NumLitId },
-    Ident(StrId),
+    Ident { name: StrId, span: Span<TokenIdx> },
 }
 
 impl<'cst> Expr<'cst> {
@@ -49,7 +52,7 @@ impl<'cst> Expr<'cst> {
                 NodeKind::ComptimeBlock => Expr::ComptimeBlock(BlockExpr { view }),
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral(value),
                 NodeKind::NumLiteral { negative, id } => Expr::NumLiteral { negative, id },
-                NodeKind::Identifier { ident } => Expr::Ident(ident),
+                NodeKind::Identifier { ident } => Expr::Ident { name: ident, span: view.span() },
                 _ => return None,
             };
             return Some(expr);

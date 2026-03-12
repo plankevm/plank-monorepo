@@ -6,10 +6,10 @@ use plank_core::{
 };
 use plank_diagnostics::DiagnosticsContext;
 use plank_parser::{
-    StrId,
+    PlankInterner, StrId,
     ast::{self, Statement, TopLevelDef},
     cst::{NodeIdx, NumLitId},
-    lexer::TokenIdx,
+    lexer::{Lexed, TokenIdx},
 };
 use plank_source::{
     ParsedProject, Source,
@@ -54,6 +54,8 @@ pub enum Expr {
     Member { object: LocalId, member: StrId },
     StructLit { ty: LocalId, fields: FieldsId },
     StructDef(StructDefId),
+    // Error
+    Error,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -199,6 +201,10 @@ struct BlockLowerer<'a, D: DiagnosticsContext> {
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
     captures_buf: Vec<CaptureInfo>,
+
+    lexed: &'a Lexed,
+    source_id: SourceId,
+    interner: &'a PlankInterner,
 }
 
 impl<'a, D> BlockLowerer<'a, D>
@@ -322,7 +328,7 @@ where
         self.builder.blocks.push_iter(self.instructions_buf.drain(start..))
     }
 
-    fn resolve_name(&mut self, name: StrId) -> Expr {
+    fn resolve_name(&mut self, name: StrId, span: Span<TokenIdx>) -> Expr {
         if let Some(ty) = TypeId::resolve_primitive(name) {
             return Expr::Type(ty);
         }
@@ -343,12 +349,13 @@ where
             return Expr::ConstRef(const_id);
         }
 
-        todo!("diagnostic: unresolved identifier");
+        self.emit_unresolved_identifier(name, span);
+        Expr::Error
     }
 
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         match expr {
-            ast::Expr::Ident(name) => self.resolve_name(name),
+            ast::Expr::Ident { name, span } => self.resolve_name(name, span),
             ast::Expr::Block(block) => self.lower_scope(block),
             ast::Expr::BoolLiteral(b) => Expr::Bool(b),
             ast::Expr::NumLiteral { negative, id } => {
@@ -364,7 +371,7 @@ where
             }
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
-                if let ast::Expr::Ident(name) = callee
+                if let ast::Expr::Ident { name, span: _ } = callee
                     && let Some(builtin) = Builtin::from_str_id(name)
                 {
                     let buf_start = self.locals_buf.len();
@@ -549,7 +556,7 @@ where
                 self.emit(Instruction::Return(value));
             }
             Statement::Assign(assign_stmt) => {
-                let ast::Expr::Ident(name) = assign_stmt.target() else {
+                let ast::Expr::Ident { name, span: _ } = assign_stmt.target() else {
                     panic!("complex assignment targets not yet supported")
                 };
                 let entry = self.find_local(name).expect("unresolved assignment target");
@@ -577,6 +584,7 @@ where
 pub fn lower(
     project: &ParsedProject,
     big_nums: &mut BigNumInterner,
+    interner: &PlankInterner,
     diag_ctx: &mut impl DiagnosticsContext,
 ) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.sources);
@@ -601,11 +609,17 @@ pub fn lower(
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
         captures_buf: Vec::new(),
+
+        lexed: &project.sources[SourceId::ROOT].lexed,
+        source_id: SourceId::ROOT,
+        interner,
     };
 
     for (source_id, source) in project.sources.enumerate_idx() {
         build_file_scope(source_id, &source_consts, &project.imports, &mut lowerer.consts);
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
+        lowerer.source_id = source_id;
+        lowerer.lexed = &source.lexed;
 
         let file = source.cst.as_file();
         for def in file.iter_defs() {

@@ -86,6 +86,7 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "}}")
             }
             Expr::StructDef(id) => self.fmt_struct_ref(f, id),
+            Expr::Error => write!(f, "<error>"),
         }
     }
 

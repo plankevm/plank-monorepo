@@ -1,22 +1,26 @@
 use crate::{BigNumInterner, Hir, display::DisplayHir};
+use plank_core::{SourceByteOffset, SourceId, Span};
+use plank_diagnostics::SimpleCollector;
 use plank_parser::{PlankInterner, error_report::ParserError};
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 
-fn try_lower(source: &str) -> Result<(Hir, BigNumInterner, PlankInterner), Vec<ParserError>> {
+fn try_lower(
+    source: &str,
+) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector), Vec<ParserError>> {
     let mut interner = PlankInterner::default();
     let project = TestProject::single(source)
         .build(&mut interner)
         .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
 
     let mut big_nums = BigNumInterner::default();
-    let hir =
-        crate::lower(&project, &mut big_nums, &mut plank_diagnostics::SimpleCollector::default());
+    let mut collector = SimpleCollector::default();
+    let hir = crate::lower(&project, &mut big_nums, &interner, &mut collector);
 
-    Ok((hir, big_nums, interner))
+    Ok((hir, big_nums, interner, collector))
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (hir, big_nums, interner) = match try_lower(source) {
+    let (hir, big_nums, interner, _collector) = match try_lower(source) {
         Ok(values) => values,
         Err(errors) => {
             panic!("Expected no parse errors, got: {}\n{:#?}", errors.len(), errors);
@@ -220,4 +224,18 @@ fn test_assign_to_mutable_let() {
         %0 := 2
         "#,
     );
+}
+
+#[test]
+fn test_unresolved_identifier_diagnostic() {
+    let (_hir, _big_nums, _interner, collector) =
+        try_lower("init { x; }").expect("should not have parse errors");
+
+    let diagnostics = collector.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].message, "unresolved identifier 'x'");
+
+    let annotation = &diagnostics[0].annotations[0];
+    assert_eq!(annotation.source_id, SourceId::ROOT);
+    assert_eq!(annotation.span, Span::new(SourceByteOffset::new(7), SourceByteOffset::new(8)));
 }

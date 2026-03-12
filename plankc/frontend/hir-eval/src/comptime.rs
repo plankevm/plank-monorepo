@@ -123,6 +123,7 @@ impl ComptimeInterpreter {
             hir::Expr::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
             hir::Expr::Member { object, member } => self.eval_member(eval, object, member)?,
             hir::Expr::BuiltinCall { .. } => todo!("comptime builtin eval not yet implemented"),
+            hir::Expr::Error => unreachable!("error expression reached hir-eval"),
         };
         Ok(value)
     }

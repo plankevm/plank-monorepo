@@ -13,6 +13,7 @@ fn try_lower(source: &str) -> Result<(Mir, BigNumInterner, PlankInterner), Vec<P
     let hir = plank_hir::lower(
         &project,
         &mut big_nums,
+        &interner,
         &mut plank_diagnostics::SimpleCollector::default(),
     );
     let mir = crate::evaluate(&hir);

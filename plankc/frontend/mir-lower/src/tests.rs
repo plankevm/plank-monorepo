@@ -10,7 +10,7 @@ fn try_lower(source: &str) -> Result<sir_data::EthIRProgram, Vec<ParserError>> {
         .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
 
     let mut big_nums = BigNumInterner::default();
-    let hir = plank_hir::lower(&project, &mut big_nums, &mut SimpleCollector::default());
+    let hir = plank_hir::lower(&project, &mut big_nums, &interner, &mut SimpleCollector::default());
     let mir = plank_hir_eval::evaluate(&hir);
     let sir = crate::lower(&mir, &big_nums);
     Ok(sir)

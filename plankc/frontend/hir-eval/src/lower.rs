@@ -400,6 +400,7 @@ impl FunctionLowerScope {
                     (None, None) => unreachable!("invalid hir"),
                 }
             }
+            hir::Expr::Error => unreachable!("error expression reached hir-eval"),
         }
     }
 
