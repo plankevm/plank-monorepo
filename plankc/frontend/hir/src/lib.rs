@@ -652,8 +652,7 @@ pub fn lower(
                     let span = init_def.node().span();
                     if source_id != SourceId::ROOT {
                         lowerer.error_init_outside_entry(span);
-                    }
-                    if let Some((_, prev_span)) = init {
+                    } else if let Some((_, prev_span)) = init {
                         lowerer.error_multiple_init_blocks(span, prev_span);
                     } else {
                         init = Some((lowerer.lower_body_to_block(init_def.body()), span));
@@ -663,8 +662,7 @@ pub fn lower(
                     let span = run_def.node().span();
                     if source_id != SourceId::ROOT {
                         lowerer.error_run_outside_entry(span);
-                    }
-                    if let Some((_, prev_span)) = run {
+                    } else if let Some((_, prev_span)) = run {
                         lowerer.error_multiple_run_blocks(span, prev_span);
                     } else {
                         run = Some((lowerer.lower_body_to_block(run_def.body()), span));

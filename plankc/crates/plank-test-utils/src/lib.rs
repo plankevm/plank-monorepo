@@ -46,6 +46,7 @@ pub fn dedent(s: &str) -> String {
 pub struct TestProject {
     entry_path: PathBuf,
     fs: InMemoryFs,
+    modules: Vec<(String, PathBuf)>,
 }
 
 impl TestProject {
@@ -53,11 +54,25 @@ impl TestProject {
         let entry_name = format!("main.{FILE_EXTENSION}");
         let mut fs = InMemoryFs::new();
         fs.add_file(&entry_name, dedent_preserve_indent(source));
-        Self { entry_path: PathBuf::from(entry_name), fs }
+        Self { entry_path: PathBuf::from(entry_name), fs, modules: Vec::new() }
+    }
+
+    pub fn add_file(mut self, name: &str, source: &str) -> Self {
+        let path = format!("{name}.{FILE_EXTENSION}");
+        self.fs.add_file(&path, dedent_preserve_indent(source));
+        self
+    }
+
+    pub fn add_module(mut self, name: &str, root: impl Into<PathBuf>) -> Self {
+        self.modules.push((name.to_string(), root.into()));
+        self
     }
 
     pub fn build(self, interner: &mut PlankInterner) -> Result<ParsedProject, ErrorCollector> {
-        let module_resolver = ModuleResolver::default();
+        let mut module_resolver = ModuleResolver::default();
+        for (name, root) in self.modules {
+            module_resolver.register(interner.intern(&name), root);
+        }
         let mut collector = ErrorCollector::default();
 
         let project =

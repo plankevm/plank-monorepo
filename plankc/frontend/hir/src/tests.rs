@@ -8,8 +8,15 @@ fn try_lower(
     source: &str,
 ) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector, ParsedProject), Vec<ParserError>>
 {
+    try_lower_project(TestProject::single(source))
+}
+
+fn try_lower_project(
+    project: TestProject,
+) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector, ParsedProject), Vec<ParserError>>
+{
     let mut interner = PlankInterner::default();
-    let project = TestProject::single(source)
+    let project = project
         .build(&mut interner)
         .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
 
@@ -34,13 +41,20 @@ fn assert_lowers_to(source: &str, expected: &str) {
 }
 
 fn render_diagnostics(source: &str) -> String {
+    render_project_diagnostics(TestProject::single(source))
+}
+
+fn render_project_diagnostics(project: TestProject) -> String {
     let (_hir, _big_nums, _interner, collector, project) =
-        try_lower(source).expect("should not have parse errors");
-    let root = &project.sources[plank_core::SourceId::ROOT];
+        try_lower_project(project).expect("should not have parse errors");
     collector
         .diagnostics()
         .iter()
-        .map(|d| d.render(&root.content, &root.path))
+        .map(|diagnostic| {
+            let source_id = diagnostic.annotations[0].source_id;
+            let source = &project.sources[source_id];
+            diagnostic.render(&source.content, &source.path)
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -307,6 +321,42 @@ fn test_duplicate_const_def() {
           | ------------ previously defined here
         2 | const x = 2;
           | ^^^^^^^^^^^^ x redefined here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_init_outside_entry() {
+    let project = TestProject::single("import m::other::*;\ninit {}")
+        .add_file("other", "init {}")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: init not allowed here
+         --> other.plk:1:1
+          |
+        1 | init {}
+          | ^^^^^^^ only the entry file may contain init
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_run_outside_entry() {
+    let project = TestProject::single("import m::other::*;\ninit {}")
+        .add_file("other", "run {}")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: run not allowed here
+         --> other.plk:1:1
+          |
+        1 | run {}
+          | ^^^^^^ only the entry file may contain run
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
