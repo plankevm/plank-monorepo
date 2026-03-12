@@ -2,7 +2,7 @@ use crate::analyses::AnalysesMask;
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::span::IncIterable;
 use sir_data::{
-    BasicBlock, BasicBlockId, BlockView, Branch, Cases, CasesId, Control, ControlView, DataId,
+    BasicBlock, BasicBlockId, BlockView, Branch, Cases, Control, ControlView, DataId,
     DenseIndexSet, EthIRProgram, Function, FunctionId, Idx, LargeConstId, LocalId, LocalIdx,
     Operation, OperationIdx, Span, StaticAllocId, Switch, operation::OpVisitorMut,
 };
@@ -45,7 +45,6 @@ struct DefragmenterState {
     data_map: HashMap<DataId, DataId>,
     function_map: HashMap<FunctionId, FunctionId>,
     block_map: HashMap<BasicBlockId, BasicBlockId>,
-    cases_map: HashMap<CasesId, CasesId>,
 }
 
 impl DefragmenterState {
@@ -58,7 +57,6 @@ impl DefragmenterState {
         self.data_map.clear();
         self.function_map.clear();
         self.block_map.clear();
-        self.cases_map.clear();
     }
 }
 
@@ -220,8 +218,6 @@ impl<'a> Rewriter<'a> {
         let block_map = &self.state.block_map;
         let local_map = &self.state.local_map;
         let large_const_map = &self.state.large_const_map;
-        let cases_map = &mut self.state.cases_map;
-
         for (old_id, new_id) in block_map {
             let new_control = match self.src.block(*old_id).control() {
                 ControlView::LastOpTerminates => Control::LastOpTerminates,
@@ -255,8 +251,6 @@ impl<'a> Rewriter<'a> {
                         targets_start_id: new_targets_start,
                         cases_count: old_cases.cases_count,
                     });
-                    let prev = cases_map.insert(switch.cases_id(), cases_id);
-                    debug_assert!(prev.is_none());
                     Control::Switch(Switch {
                         condition: local_map[&switch.condition()],
                         fallback: switch.fallback().map(|fb| block_map[&fb]),
