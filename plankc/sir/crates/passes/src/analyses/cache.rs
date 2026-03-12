@@ -53,11 +53,11 @@ impl<T> Cached<T> {
         self.state.borrow_mut().valid = true;
     }
 
-    pub(crate) fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.state.borrow().valid
     }
 
-    pub(crate) fn invalidate(&self) {
+    fn invalidate(&self) {
         self.state.borrow_mut().valid = false;
     }
 }
@@ -67,10 +67,6 @@ macro_rules! define_analyses {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum AnalysisKind {
             $($variant),*
-        }
-
-        impl AnalysisKind {
-            pub const ALL: &[AnalysisKind] = &[$(AnalysisKind::$variant),*];
         }
 
         bitflags::bitflags! {
@@ -86,12 +82,6 @@ macro_rules! define_analyses {
         }
 
         impl AnalysesStore {
-            pub fn is_valid(&self, kind: AnalysisKind) -> bool {
-                match kind {
-                    $(AnalysisKind::$variant => self.$field.is_valid()),*
-                }
-            }
-
             pub fn invalidate_all_except(&self, preserved: AnalysesMask) {
                 $(if !preserved.contains(AnalysesMask::$variant) {
                     self.$field.invalidate();
@@ -145,5 +135,83 @@ impl AnalysesStore {
         program: &EthIRProgram,
     ) -> Ref<'_, ControlFlowGraphInOutBundling> {
         self.cfg_in_out_bundling.get(program, self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        optimizations::{
+            constant_propagation::SCCP, copy_propagation::CopyPropagation,
+            defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
+        },
+        run_pass,
+    };
+    use sir_parser::{EmitConfig, parse_or_panic};
+
+    #[test]
+    fn test_store_invalidation_and_recomputation() {
+        let source = r#"
+            fn init:
+                entry {
+                    x = const 1
+                    y = copy x
+                    switch y {
+                        1 => @one
+                        default => @other
+                    }
+                }
+                one {
+                    dead = const 42
+                    stop
+                }
+                other {
+                    cond = const 0
+                    => cond ? @other_yes : @one
+                }
+                other_yes { stop }
+        "#;
+
+        let mut program = parse_or_panic(source, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+
+        // Computing dominance_frontiers transitively computes predecessors and dominators
+        store.dominance_frontiers(&program);
+        assert!(store.predecessors.is_valid());
+        assert!(store.dominators.is_valid());
+        assert!(store.dominance_frontiers.is_valid());
+
+        // SCCP invalidates DefUse, Predecessors (cascades to Dominators, DominanceFrontiers),
+        // BasicBlockOwnership, CfgInOutBundling — and populates sccp_reachable
+        run_pass(&mut SCCP::default(), &mut program, &store);
+        assert!(!store.def_use.is_valid());
+        assert!(!store.predecessors.is_valid());
+        assert!(!store.dominators.is_valid());
+        assert!(!store.dominance_frontiers.is_valid());
+        assert!(!store.basic_block_ownership.is_valid());
+        assert!(!store.cfg_in_out_bundling.is_valid());
+        assert!(store.sccp_reachable.is_valid());
+
+        // Defragmenter consumes sccp_reachable and invalidates it
+        let mut defrag = Defragmenter::default();
+        run_pass(&mut defrag, &mut program, &store);
+        assert!(!store.sccp_reachable.is_valid());
+
+        // Copy prop invalidates DefUse
+        run_pass(&mut CopyPropagation::default(), &mut program, &store);
+        assert!(!store.def_use.is_valid());
+
+        // def_use recomputes lazily and marks valid
+        store.def_use(&program);
+        assert!(store.def_use.is_valid());
+
+        // Unused elim uses def_use_mut: computes DefUse then marks it invalid
+        run_pass(&mut UnusedOperationElimination::default(), &mut program, &store);
+        assert!(!store.def_use.is_valid());
+
+        // Defragmenter works without sccp_reachable
+        assert!(!store.sccp_reachable.is_valid());
+        run_pass(&mut defrag, &mut program, &store);
     }
 }

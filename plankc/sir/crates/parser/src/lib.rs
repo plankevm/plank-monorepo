@@ -38,7 +38,8 @@ pub fn highlight_span(out: &mut impl std::fmt::Write, source: &str, span: Span, 
 
 pub fn parse_or_panic<'a>(source: &str, config: EmitConfig<'a>) -> EthIRProgram {
     let program = parse_without_legalization(source, config);
-    sir_passes::legalize(&program, &sir_passes::AnalysesStore::default())
+    sir_passes::Legalizer::default()
+        .run(&program, &sir_passes::AnalysesStore::default())
         .unwrap_or_else(|e| panic!("{e}"));
     program
 }

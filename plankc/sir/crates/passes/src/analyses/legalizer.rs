@@ -71,54 +71,46 @@ pub enum LegalizerError {
     LocalNotInScope { block: BasicBlockId, local: LocalId, use_kind: UseKind },
 }
 
-pub fn legalize(program: &EthIRProgram, store: &AnalysesStore) -> Result<(), LegalizerError> {
-    Legalizer::new(program, store).legalize()
-}
-
-struct Legalizer<'a> {
-    program: &'a EthIRProgram,
-    store: &'a AnalysesStore,
+#[derive(Default)]
+pub struct Legalizer {
     locals_spans: Vec<TrackedSpan<LocalIdx>>,
     operations_spans: Vec<TrackedSpan<OperationIdx>>,
     block_owner: IndexVec<BasicBlockId, Option<FunctionId>>,
     call_edges: Vec<(FunctionId, FunctionId)>,
 }
 
-impl<'a> Legalizer<'a> {
-    fn new(program: &'a EthIRProgram, store: &'a AnalysesStore) -> Self {
-        let block_owner = index_vec![None; program.basic_blocks.len()];
-        Self {
-            program,
-            store,
-            locals_spans: Vec::new(),
-            operations_spans: Vec::new(),
-            block_owner,
-            call_edges: Vec::new(),
-        }
+impl Legalizer {
+    pub fn run(
+        &mut self,
+        program: &EthIRProgram,
+        store: &AnalysesStore,
+    ) -> Result<(), LegalizerError> {
+        self.locals_spans.clear();
+        self.operations_spans.clear();
+        self.block_owner.clear();
+        self.block_owner.resize(program.basic_blocks.len(), None);
+        self.call_edges.clear();
+
+        self.validate_entry_points(program)?;
+        self.validate_blocks(program)?;
+        self.validate_cfg(program)?;
+        self.validate_local_ids(program, store)
     }
 
-    fn legalize(&mut self) -> Result<(), LegalizerError> {
-        self.validate_entry_points()?;
-        self.validate_blocks()?;
-        self.validate_cfg()?;
-        self.validate_local_ids()
-    }
-
-    fn validate_entry_points(&self) -> Result<(), LegalizerError> {
-        if self.program.functions.get(self.program.init_entry).is_none() {
-            return Err(LegalizerError::InvalidFunctionId(self.program.init_entry));
+    fn validate_entry_points(&self, program: &EthIRProgram) -> Result<(), LegalizerError> {
+        if program.functions.get(program.init_entry).is_none() {
+            return Err(LegalizerError::InvalidFunctionId(program.init_entry));
         }
-        let entry_bb =
-            &self.program.basic_blocks[self.program.functions[self.program.init_entry].entry()];
+        let entry_bb = &program.basic_blocks[program.functions[program.init_entry].entry()];
         if !entry_bb.inputs.is_empty() {
             return Err(LegalizerError::InitHasInputs(entry_bb.inputs.len()));
         }
 
-        if let Some(main_entry) = self.program.main_entry {
-            if self.program.functions.get(main_entry).is_none() {
+        if let Some(main_entry) = program.main_entry {
+            if program.functions.get(main_entry).is_none() {
                 return Err(LegalizerError::InvalidFunctionId(main_entry));
             }
-            let main_bb = &self.program.basic_blocks[self.program.functions[main_entry].entry()];
+            let main_bb = &program.basic_blocks[program.functions[main_entry].entry()];
             if !main_bb.inputs.is_empty() {
                 return Err(LegalizerError::RuntimeHasInputs(main_bb.inputs.len()));
             }
@@ -126,37 +118,28 @@ impl<'a> Legalizer<'a> {
         Ok(())
     }
 
-    fn validate_basic_block_id(&self, bb_id: BasicBlockId) -> Result<(), LegalizerError> {
-        if self.program.basic_blocks.get(bb_id).is_none() {
-            return Err(LegalizerError::InvalidBasicBlockId(bb_id));
-        }
-        Ok(())
-    }
-
-    fn validate_blocks(&mut self) -> Result<(), LegalizerError> {
-        for (bb_id, bb) in self.program.basic_blocks.enumerate_idx() {
-            self.validate_block_terminators(bb_id, bb)?;
-            self.validate_block_indices(bb_id, bb)?;
+    fn validate_blocks(&mut self, program: &EthIRProgram) -> Result<(), LegalizerError> {
+        for (bb_id, bb) in program.basic_blocks.enumerate_idx() {
+            Self::validate_block_terminators(program, bb_id, bb)?;
+            self.validate_block_indices(program, bb_id, bb)?;
         }
 
-        validate_spans(&mut self.locals_spans, self.program.locals.len())?;
-        validate_spans(&mut self.operations_spans, self.program.operations.len())
+        validate_spans(&mut self.locals_spans, program.locals.len())?;
+        validate_spans(&mut self.operations_spans, program.operations.len())
     }
 
     fn validate_block_terminators(
-        &self,
+        program: &EthIRProgram,
         bb_id: BasicBlockId,
         bb: &BasicBlock,
     ) -> Result<(), LegalizerError> {
         if matches!(bb.control, Control::LastOpTerminates)
-            && self.program.operations[bb.operations]
-                .last()
-                .is_none_or(|op| !op.kind().is_terminating())
+            && program.operations[bb.operations].last().is_none_or(|op| !op.kind().is_terminating())
         {
             return Err(LegalizerError::MissingTerminator(bb_id));
         }
         for op_id in bb.operations.iter() {
-            let op = &self.program.operations[op_id];
+            let op = &program.operations[op_id];
             if op.kind().is_terminating() {
                 if op_id != bb.operations.end - 1 {
                     return Err(LegalizerError::TerminatorNotLast(bb_id, op_id));
@@ -171,6 +154,7 @@ impl<'a> Legalizer<'a> {
 
     fn validate_block_indices(
         &mut self,
+        program: &EthIRProgram,
         bb_id: BasicBlockId,
         bb: &BasicBlock,
     ) -> Result<(), LegalizerError> {
@@ -198,63 +182,61 @@ impl<'a> Legalizer<'a> {
 
         match &bb.control {
             Control::Branches(branch) => {
-                if branch.condition >= self.program.next_free_local_id {
+                if branch.condition >= program.next_free_local_id {
                     return Err(LegalizerError::InvalidLocalId(branch.condition));
                 }
-                self.validate_basic_block_id(branch.non_zero_target)?;
-                self.validate_basic_block_id(branch.zero_target)?;
+                validate_basic_block_id(program, branch.non_zero_target)?;
+                validate_basic_block_id(program, branch.zero_target)?;
             }
             Control::Switch(switch) => {
-                if switch.condition >= self.program.next_free_local_id {
+                if switch.condition >= program.next_free_local_id {
                     return Err(LegalizerError::InvalidLocalId(switch.condition));
                 }
                 if let Some(fallback) = switch.fallback {
-                    self.validate_basic_block_id(fallback)?;
+                    validate_basic_block_id(program, fallback)?;
                 }
-                for &target in self.program.cases[switch.cases].get_bb_ids(self.program).iter() {
-                    self.validate_basic_block_id(target)?;
+                for &target in program.cases[switch.cases].get_bb_ids(program).iter() {
+                    validate_basic_block_id(program, target)?;
                 }
             }
             Control::ContinuesTo(target) => {
-                self.validate_basic_block_id(*target)?;
+                validate_basic_block_id(program, *target)?;
             }
             Control::LastOpTerminates | Control::InternalReturn => {}
         }
 
         for op_id in bb.operations.iter() {
-            let op = &self.program.operations[op_id];
+            let op = &program.operations[op_id];
 
             match op {
                 Operation::SetLargeConst(data)
-                    if self.program.large_consts.get(data.value).is_none() =>
+                    if program.large_consts.get(data.value).is_none() =>
                 {
                     return Err(LegalizerError::InvalidLargeConstId(data.value));
                 }
                 Operation::SetDataOffset(data)
-                    if self.program.data_segments.get(data.segment_id).is_none() =>
+                    if program.data_segments.get(data.segment_id).is_none() =>
                 {
                     return Err(LegalizerError::InvalidSegmentId(data.segment_id));
                 }
                 Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data)
-                    if data.alloc_id >= self.program.next_static_alloc_id =>
+                    if data.alloc_id >= program.next_static_alloc_id =>
                 {
                     return Err(LegalizerError::InvalidStaticAllocId(data.alloc_id));
                 }
-                Operation::InternalCall(data)
-                    if self.program.functions.get(data.function).is_none() =>
-                {
+                Operation::InternalCall(data) if program.functions.get(data.function).is_none() => {
                     return Err(LegalizerError::InvalidFunctionId(data.function));
                 }
                 _ => {}
             }
 
-            for local_id in op.inputs(self.program).iter().chain(op.outputs(self.program)) {
-                if *local_id >= self.program.next_free_local_id {
+            for local_id in op.inputs(program).iter().chain(op.outputs(program)) {
+                if *local_id >= program.next_free_local_id {
                     return Err(LegalizerError::InvalidLocalId(*local_id));
                 }
             }
 
-            let spans = op.allocated_spans(self.program);
+            let spans = op.allocated_spans(program);
             if let Some(span) = spans.input {
                 self.locals_spans.push(TrackedSpan {
                     start: span.start,
@@ -273,18 +255,18 @@ impl<'a> Legalizer<'a> {
         Ok(())
     }
 
-    fn validate_cfg(&mut self) -> Result<(), LegalizerError> {
+    fn validate_cfg(&mut self, program: &EthIRProgram) -> Result<(), LegalizerError> {
         let mut visited = DenseIndexSet::new();
-        for (fn_id, function) in self.program.functions.enumerate_idx() {
+        for (fn_id, function) in program.functions.enumerate_idx() {
             visited.clear();
-            self.validate_cfg_visit_block(fn_id, function.entry(), &mut visited)?;
+            self.validate_cfg_visit_block(program, fn_id, function.entry(), &mut visited)?;
         }
-        self.validate_call_graph()
+        self.validate_call_graph(program)
     }
 
-    fn validate_call_graph(&self) -> Result<(), LegalizerError> {
+    fn validate_call_graph(&self, program: &EthIRProgram) -> Result<(), LegalizerError> {
         let mut callees: IndexVec<FunctionId, Vec<FunctionId>> =
-            index_vec![Vec::new(); self.program.functions.len()];
+            index_vec![Vec::new(); program.functions.len()];
         for (caller, callee) in &self.call_edges {
             callees[*caller].push(*callee);
         }
@@ -314,8 +296,8 @@ impl<'a> Legalizer<'a> {
             Ok(())
         }
 
-        let mut visit_state = index_vec![VisitState::Unvisited; self.program.functions.len()];
-        for fn_id in self.program.functions.iter_idx() {
+        let mut visit_state = index_vec![VisitState::Unvisited; program.functions.len()];
+        for fn_id in program.functions.iter_idx() {
             if visit_state[fn_id] == VisitState::Unvisited {
                 detect_cycle(fn_id, &callees, &mut visit_state)?;
             }
@@ -325,6 +307,7 @@ impl<'a> Legalizer<'a> {
 
     fn validate_cfg_visit_block(
         &mut self,
+        program: &EthIRProgram,
         fn_id: FunctionId,
         bb: BasicBlockId,
         visited: &mut DenseIndexSet<BasicBlockId>,
@@ -334,14 +317,13 @@ impl<'a> Legalizer<'a> {
         }
         visited.add(bb);
 
-        if matches!(self.program.basic_blocks[bb].control, Control::InternalReturn)
-            && self.program.basic_blocks[bb].outputs.len()
-                != self.program.functions[fn_id].get_outputs()
+        if matches!(program.basic_blocks[bb].control, Control::InternalReturn)
+            && program.basic_blocks[bb].outputs.len() != program.functions[fn_id].get_outputs()
         {
             return Err(LegalizerError::WrongOutputCount {
                 block: bb,
-                expected: self.program.functions[fn_id].get_outputs(),
-                actual: self.program.basic_blocks[bb].outputs.len(),
+                expected: program.functions[fn_id].get_outputs(),
+                actual: program.basic_blocks[bb].outputs.len(),
             });
         }
 
@@ -350,11 +332,10 @@ impl<'a> Legalizer<'a> {
         }
         self.block_owner[bb] = Some(fn_id);
 
-        for op_id in self.program.basic_blocks[bb].operations.iter() {
-            let op = &self.program.operations[op_id];
+        for op_id in program.basic_blocks[bb].operations.iter() {
+            let op = &program.operations[op_id];
             let Operation::InternalCall(data) = op else { continue };
-            let expected_ins =
-                self.program.functions[data.function].get_inputs(&self.program.basic_blocks);
+            let expected_ins = program.functions[data.function].get_inputs(&program.basic_blocks);
             let actual_ins = data.outs_start - data.ins_start;
             if actual_ins != expected_ins {
                 return Err(LegalizerError::WrongCallInputCount {
@@ -366,32 +347,34 @@ impl<'a> Legalizer<'a> {
             self.call_edges.push((fn_id, data.function));
         }
 
-        for succ in self.program.basic_blocks[bb].control.iter_outgoing(self.program) {
-            if self.program.basic_blocks[bb].outputs.len()
-                != self.program.basic_blocks[succ].inputs.len()
-            {
+        for succ in program.basic_blocks[bb].control.iter_outgoing(program) {
+            if program.basic_blocks[bb].outputs.len() != program.basic_blocks[succ].inputs.len() {
                 return Err(LegalizerError::IncompatibleEdge { from: bb, to: succ });
             }
-            self.validate_cfg_visit_block(fn_id, succ, visited)?;
+            self.validate_cfg_visit_block(program, fn_id, succ, visited)?;
         }
         Ok(())
     }
 
-    fn validate_local_ids(&mut self) -> Result<(), LegalizerError> {
-        self.validate_single_assignment()?;
-        self.validate_scope()
+    fn validate_local_ids(
+        &self,
+        program: &EthIRProgram,
+        store: &AnalysesStore,
+    ) -> Result<(), LegalizerError> {
+        Self::validate_single_assignment(program)?;
+        self.validate_scope(program, store)
     }
 
-    fn validate_single_assignment(&self) -> Result<(), LegalizerError> {
+    fn validate_single_assignment(program: &EthIRProgram) -> Result<(), LegalizerError> {
         let mut defs = DenseIndexSet::new();
-        for bb in self.program.basic_blocks.iter() {
-            for local in self.program.locals[bb.inputs].iter() {
+        for bb in program.basic_blocks.iter() {
+            for local in program.locals[bb.inputs].iter() {
                 if !defs.add(*local) {
                     return Err(LegalizerError::DoubleDefinition(*local));
                 }
             }
             for op_idx in bb.operations.iter() {
-                for local in self.program.operations[op_idx].outputs(self.program) {
+                for local in program.operations[op_idx].outputs(program) {
                     if !defs.add(*local) {
                         return Err(LegalizerError::DoubleDefinition(*local));
                     }
@@ -401,11 +384,15 @@ impl<'a> Legalizer<'a> {
         Ok(())
     }
 
-    fn validate_scope(&mut self) -> Result<(), LegalizerError> {
-        let dominators = self.store.dominators(self.program);
+    fn validate_scope(
+        &self,
+        program: &EthIRProgram,
+        store: &AnalysesStore,
+    ) -> Result<(), LegalizerError> {
+        let dominators = store.dominators(program);
 
         let mut dom_children: IndexVec<BasicBlockId, Vec<BasicBlockId>> =
-            index_vec![Vec::new(); self.program.basic_blocks.len()];
+            index_vec![Vec::new(); program.basic_blocks.len()];
 
         for (bb_id, &idom) in dominators.inner.enumerate_idx() {
             if let Some(parent) = idom
@@ -417,30 +404,36 @@ impl<'a> Legalizer<'a> {
 
         let mut in_scope = DenseIndexSet::new();
         let mut added = Vec::new();
-        for function in self.program.functions.iter() {
+        for function in program.functions.iter() {
             in_scope.clear();
-            self.validate_block_scope(function.entry(), &mut in_scope, &mut added, &dom_children)?;
+            Self::validate_block_scope(
+                program,
+                function.entry(),
+                &mut in_scope,
+                &mut added,
+                &dom_children,
+            )?;
         }
         Ok(())
     }
 
     fn validate_block_scope(
-        &self,
+        program: &EthIRProgram,
         bb_id: BasicBlockId,
         in_scope: &mut DenseIndexSet<LocalId>,
         added: &mut Vec<LocalId>,
         dom_children: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
     ) -> Result<(), LegalizerError> {
-        let bb = &self.program.basic_blocks[bb_id];
+        let bb = &program.basic_blocks[bb_id];
         let prev_len = added.len();
 
-        for &local in &self.program.locals[bb.inputs] {
+        for &local in &program.locals[bb.inputs] {
             added.push(local);
             in_scope.add(local);
         }
 
         for op_idx in bb.operations.iter() {
-            for local_id in self.program.operations[op_idx].inputs(self.program) {
+            for local_id in program.operations[op_idx].inputs(program) {
                 if !in_scope.contains(*local_id) {
                     return Err(LegalizerError::LocalNotInScope {
                         block: bb_id,
@@ -450,13 +443,13 @@ impl<'a> Legalizer<'a> {
                 }
             }
 
-            for &local_id in self.program.operations[op_idx].outputs(self.program) {
+            for &local_id in program.operations[op_idx].outputs(program) {
                 added.push(local_id);
                 in_scope.add(local_id);
             }
         }
 
-        for &local_id in &self.program.locals[bb.outputs] {
+        for &local_id in &program.locals[bb.outputs] {
             if !in_scope.contains(local_id) {
                 return Err(LegalizerError::LocalNotInScope {
                     block: bb_id,
@@ -485,7 +478,7 @@ impl<'a> Legalizer<'a> {
         }
 
         for &child in &dom_children[bb_id] {
-            self.validate_block_scope(child, in_scope, added, dom_children)?;
+            Self::validate_block_scope(program, child, in_scope, added, dom_children)?;
         }
 
         for &local in &added[prev_len..] {
@@ -495,6 +488,16 @@ impl<'a> Legalizer<'a> {
 
         Ok(())
     }
+}
+
+fn validate_basic_block_id(
+    program: &EthIRProgram,
+    bb_id: BasicBlockId,
+) -> Result<(), LegalizerError> {
+    if program.basic_blocks.get(bb_id).is_none() {
+        return Err(LegalizerError::InvalidBasicBlockId(bb_id));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -536,10 +539,6 @@ mod tests {
     };
     use sir_parser::{EmitConfig, parse_without_legalization};
 
-    fn run_legalize(program: &EthIRProgram) -> Result<(), LegalizerError> {
-        legalize(program, &crate::AnalysesStore::default())
-    }
-
     // Note: WrongOutputCount cannot be triggered via the builder because the builder
     // catches conflicting function outputs (ConflictingFunctionOutputs error).
     // This check exists for malformed IR constructed outside the builder.
@@ -559,7 +558,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -582,7 +581,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -603,7 +602,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -625,7 +624,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -645,7 +644,7 @@ mod tests {
         bb.operations = Span::new(bb.operations.start, bb.operations.end - 1);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::MissingTerminator(BasicBlockId::new(0))
         );
     }
@@ -666,7 +665,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::IncompatibleEdge {
                 from: BasicBlockId::new(0),
                 to: BasicBlockId::new(1)
@@ -693,7 +692,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -723,7 +722,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -748,7 +747,7 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
-        assert!(run_legalize(&program).is_ok());
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
     #[test]
@@ -773,7 +772,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(1),
                 local: LocalId::new(0),
@@ -823,7 +822,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::IncompatibleEdge { from: right_id, to: merge_id }
         );
     }
@@ -842,7 +841,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::InvalidBasicBlockId(invalid_bb)
         );
     }
@@ -865,7 +864,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::InvalidFunctionId(invalid_id)
         );
     }
@@ -900,7 +899,7 @@ mod tests {
         }
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::WrongCallInputCount { op: icall_idx, expected: 1, actual: 0 }
         );
     }
@@ -924,7 +923,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::RecursiveCall(func_id, func_id)
         );
     }
@@ -961,7 +960,7 @@ mod tests {
         let program = builder.build(func_a_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::RecursiveCall(func_b_id, func_a_id)
         );
     }
@@ -982,7 +981,10 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::DoubleDefinition(local));
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::DoubleDefinition(local)
+        );
     }
 
     #[test]
@@ -1013,7 +1015,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(4),
                 local: LocalId::new(2),
@@ -1045,7 +1047,7 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(2),
                 local: LocalId::new(1),
@@ -1068,7 +1070,10 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::InitHasInputs(1));
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::InitHasInputs(1)
+        );
     }
 
     #[test]
@@ -1093,7 +1098,10 @@ mod tests {
 
         let program = builder.build(init_func_id, Some(main_func_id));
 
-        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::RuntimeHasInputs(3));
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::RuntimeHasInputs(3)
+        );
     }
 
     #[test]
@@ -1110,7 +1118,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::TerminatorNotLast(bb_id, OperationIdx::new(0))
         );
     }
@@ -1135,7 +1143,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::TerminatorControlMismatch(bb_id, OperationIdx::new(0))
         );
     }
@@ -1162,7 +1170,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::InvalidLargeConstId(invalid_id)
         );
     }
@@ -1189,7 +1197,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::InvalidSegmentId(invalid_id)
         );
     }
@@ -1214,7 +1222,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::InvalidStaticAllocId(invalid_id)
         );
     }
@@ -1236,7 +1244,10 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        assert_eq!(run_legalize(&program).unwrap_err(), LegalizerError::InvalidLocalId(invalid_id));
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::InvalidLocalId(invalid_id)
+        );
     }
 
     #[test]
@@ -1254,7 +1265,7 @@ mod tests {
         let func_b_id = program.functions.push(sir_data::Function::new(bb_shared_id, 0));
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::SharedBasicBlock(bb_shared_id, func_a_id, func_b_id)
         );
     }
@@ -1284,7 +1295,7 @@ mod tests {
         program.basic_blocks[bb2_id].inputs = program.basic_blocks[bb1_id].outputs;
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::OverlappingSpans(
                 SpanSource::Outputs(bb1_id),
                 SpanSource::Inputs(bb2_id)
@@ -1312,7 +1323,7 @@ mod tests {
         program.basic_blocks[bb2_id].operations = program.basic_blocks[bb1_id].operations;
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::OverlappingSpans(
                 SpanSource::Operations(bb1_id),
                 SpanSource::Operations(bb2_id)
@@ -1338,7 +1349,7 @@ mod tests {
         program.locals.truncate(0);
 
         assert_eq!(
-            run_legalize(&program).unwrap_err(),
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::SpanOutOfBounds(SpanSource::Outputs(bb_id))
         );
     }

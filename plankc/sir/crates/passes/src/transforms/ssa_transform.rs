@@ -15,8 +15,10 @@ pub struct SsaTransform {
 
 impl Pass for SsaTransform {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
-        run_pass(&mut Some(CriticalEdgeSplitting), program, store);
+        // CriticalEdgeSplitting is stateless, no benefit from reuse
+        run_pass(&mut CriticalEdgeSplitting, program, store);
 
+        debug_assert!(self.worklist.is_empty());
         for parent in self.dominators.iter_mut() {
             parent.clear();
         }
@@ -119,9 +121,8 @@ impl SsaTransform {
 
         self.rename_block_outputs(program, bb, local_versions);
 
-        for i in 0..self.dominators[bb].len() {
-            let child = self.dominators[bb][i];
-            self.rename_block(program, child, local_versions, rename_trail);
+        for child in &self.dominators[bb] {
+            self.rename_block(program, *child, local_versions, rename_trail);
         }
 
         for local in &rename_trail[checkpoint..] {
@@ -216,7 +217,7 @@ fn rename_def(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::legalize;
+    use crate::Legalizer;
     use sir_data::display_program;
     use sir_parser::EmitConfig;
 
@@ -227,9 +228,9 @@ mod tests {
     }
 
     fn transform_and_legalize(program: &mut EthIRProgram, store: &AnalysesStore) {
-        run_pass(&mut Some(SsaTransform::default()), program, store);
+        run_pass(&mut SsaTransform::default(), program, store);
         let ir = display_program(program);
-        legalize(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
+        Legalizer::default().run(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
     }
 
     #[test]

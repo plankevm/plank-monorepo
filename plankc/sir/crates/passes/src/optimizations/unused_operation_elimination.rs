@@ -71,11 +71,8 @@ fn is_removable(op: &Operation, program: &EthIRProgram, defuse: &DefUse) -> bool
 #[cfg(test)]
 mod tests {
     use super::UnusedOperationElimination;
+    use crate::run_pass_and_display;
     use sir_test_utils::assert_trim_strings_eq_with_diff;
-
-    fn run_pass(source: &str) -> String {
-        crate::run_pass_and_display(source, &mut UnusedOperationElimination::default())
-    }
 
     // Note: block outputs count as uses, even if the successor never uses the input.
     #[test]
@@ -127,7 +124,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<UnusedOperationElimination>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "block outputs count as uses");
     }
 
@@ -164,7 +161,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<UnusedOperationElimination>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "cross block chain eliminated");
     }
 
@@ -211,7 +208,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<UnusedOperationElimination>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "side effecting ops preserved");
     }
 
@@ -251,7 +248,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<UnusedOperationElimination>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "control flow vars preserved");
     }
 
@@ -285,7 +282,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<UnusedOperationElimination>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "mixed live dead chains");
     }
 }

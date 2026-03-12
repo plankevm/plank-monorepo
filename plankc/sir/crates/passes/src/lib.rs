@@ -3,16 +3,16 @@ pub mod optimizations;
 pub mod transforms;
 
 use optimizations::{
-    constant_propagation::SCCPAnalysis, copy_propagation::CopyPropagation,
+    constant_propagation::SCCP, copy_propagation::CopyPropagation,
     unused_operation_elimination::UnusedOperationElimination,
 };
 use sir_data::EthIRProgram;
 use transforms::ssa_transform::SsaTransform;
 
 pub use analyses::{
-    AnalysesMask, AnalysesStore, AnalysisKind, BasicBlockOwnershipAndReachability,
-    ControlFlowGraphInOutBundling, DefUse, DominanceFrontiers, Dominators, InOutGroupId,
-    Predecessors, UseKind, UseLocation, legalize,
+    AnalysesMask, AnalysesStore, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling,
+    DefUse, DominanceFrontiers, Dominators, InOutGroupId, Legalizer, Predecessors, UseKind,
+    UseLocation,
 };
 pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
 
@@ -21,12 +21,7 @@ pub trait Pass {
     fn preserves(&self) -> AnalysesMask;
 }
 
-pub fn run_pass<T: Pass + Default>(
-    pass: &mut Option<T>,
-    program: &mut EthIRProgram,
-    store: &AnalysesStore,
-) {
-    let pass = pass.get_or_insert_with(T::default);
+pub fn run_pass<T: Pass>(pass: &mut T, program: &mut EthIRProgram, store: &AnalysesStore) {
     pass.run(program, store);
     store.invalidate_all_except(pass.preserves());
 }
@@ -35,8 +30,9 @@ pub struct PassManager<'a> {
     program: &'a mut EthIRProgram,
     store: AnalysesStore,
 
+    legalizer: Option<Legalizer>,
     ssa_transform: Option<SsaTransform>,
-    sccp: Option<SCCPAnalysis>,
+    sccp: Option<SCCP>,
     copy_prop: Option<CopyPropagation>,
     unused_elim: Option<UnusedOperationElimination>,
     defragmenter: Option<Defragmenter>,
@@ -47,6 +43,7 @@ impl<'a> PassManager<'a> {
         Self {
             program,
             store: AnalysesStore::default(),
+            legalizer: None,
             ssa_transform: None,
             sccp: None,
             copy_prop: None,
@@ -55,12 +52,13 @@ impl<'a> PassManager<'a> {
         }
     }
 
-    pub fn run_legalize(&self) -> Result<(), analyses::LegalizerError> {
-        legalize(self.program, &self.store)
+    pub fn run_legalize(&mut self) -> Result<(), analyses::LegalizerError> {
+        self.legalizer.get_or_insert_with(Legalizer::default).run(self.program, &self.store)
     }
 
     pub fn run_ssa_transform(&mut self) {
-        run_pass(&mut self.ssa_transform, self.program, &self.store);
+        let pass = self.ssa_transform.get_or_insert_with(SsaTransform::default);
+        run_pass(pass, self.program, &self.store);
         self.run_legalize().expect("IR is illegal after SSA transform");
     }
 
@@ -68,21 +66,35 @@ impl<'a> PassManager<'a> {
         for c in passes.chars() {
             // Keep in sync with OPTIMIZE_HELP
             match c {
-                's' => run_pass(&mut self.sccp, self.program, &self.store),
-                'c' => run_pass(&mut self.copy_prop, self.program, &self.store),
-                'u' => run_pass(&mut self.unused_elim, self.program, &self.store),
-                'd' => run_pass(&mut self.defragmenter, self.program, &self.store),
+                's' => {
+                    run_pass(self.sccp.get_or_insert_with(SCCP::default), self.program, &self.store)
+                }
+                'c' => run_pass(
+                    self.copy_prop.get_or_insert_with(CopyPropagation::default),
+                    self.program,
+                    &self.store,
+                ),
+                'u' => run_pass(
+                    self.unused_elim.get_or_insert_with(UnusedOperationElimination::default),
+                    self.program,
+                    &self.store,
+                ),
+                'd' => run_pass(
+                    self.defragmenter.get_or_insert_with(Defragmenter::default),
+                    self.program,
+                    &self.store,
+                ),
                 _ => unreachable!("should've been validated"),
             }
         }
-        debug_assert!(legalize(self.program, &self.store).is_ok(), "optimized IR is illegal");
+        debug_assert!(self.run_legalize().is_ok(), "optimized IR is illegal");
     }
 }
 
 #[cfg(test)]
-pub(crate) fn run_pass_and_display(source: &str, pass: &mut impl Pass) -> String {
+pub(crate) fn run_pass_and_display<T: Pass + Default>(source: &str) -> String {
     let mut ir = sir_parser::parse_or_panic(source, sir_parser::EmitConfig::init_only());
     let store = AnalysesStore::default();
-    pass.run(&mut ir, &store);
+    run_pass(&mut T::default(), &mut ir, &store);
     sir_data::display_program(&ir)
 }

@@ -371,12 +371,12 @@ impl<'a> OpVisitorMut<'_, ()> for &mut Rewriter<'a> {
 mod tests {
     use super::*;
     use crate::{
+        Legalizer,
         analyses::AnalysesStore,
-        legalize,
         optimizations::{
-            constant_propagation::SCCPAnalysis,
-            unused_operation_elimination::UnusedOperationElimination,
+            constant_propagation::SCCP, unused_operation_elimination::UnusedOperationElimination,
         },
+        run_pass,
     };
     use sir_parser::{EmitConfig, parse_or_panic};
     use sir_test_utils::assert_trim_strings_eq_with_diff;
@@ -425,8 +425,8 @@ mod tests {
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
         let store = AnalysesStore::default();
 
-        crate::run_pass::<SCCPAnalysis>(&mut None, &mut ir, &store);
-        crate::run_pass::<UnusedOperationElimination>(&mut None, &mut ir, &store);
+        run_pass(&mut SCCP::default(), &mut ir, &store);
+        run_pass(&mut UnusedOperationElimination::default(), &mut ir, &store);
 
         let src_str = sir_data::display_program(&ir);
         let expected_src = r#"
@@ -476,7 +476,7 @@ data .0 0xcafebabe
         "#;
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
 
-        crate::run_pass::<Defragmenter>(&mut None, &mut ir, &store);
+        run_pass(&mut Defragmenter::default(), &mut ir, &store);
 
         let dst_str = sir_data::display_program(&ir);
         let expected_dst = r#"
@@ -505,7 +505,7 @@ Basic Blocks:
     }
         "#;
         assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
-        assert_eq!(legalize(&ir, &store), Ok(()));
+        assert_eq!(Legalizer::default().run(&ir, &store), Ok(()));
     }
 
     #[test]
@@ -616,7 +616,7 @@ data .1 0x5678
         assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
 
         let store = AnalysesStore::default();
-        crate::run_pass::<Defragmenter>(&mut None, &mut ir, &store);
+        run_pass(&mut Defragmenter::default(), &mut ir, &store);
 
         let actual = sir_data::display_program(&ir);
         let expected = r#"

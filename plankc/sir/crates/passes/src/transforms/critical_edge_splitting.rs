@@ -133,7 +133,7 @@ mod tests {
 
         let original_block_count = program.basic_blocks.len();
         let store = AnalysesStore::default();
-        run_pass(&mut Some(CriticalEdgeSplitting), &mut program, &store);
+        run_pass(&mut CriticalEdgeSplitting, &mut program, &store);
 
         assert!(
             program.basic_blocks.len() > original_block_count,

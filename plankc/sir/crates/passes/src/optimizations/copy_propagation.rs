@@ -67,11 +67,8 @@ fn replace_if_copied(input: &mut LocalId, copy_map: &HashMap<LocalId, LocalId>) 
 #[cfg(test)]
 mod tests {
     use super::CopyPropagation;
+    use crate::run_pass_and_display;
     use sir_test_utils::assert_trim_strings_eq_with_diff;
-
-    fn run_pass(source: &str) -> String {
-        crate::run_pass_and_display(source, &mut CopyPropagation::default())
-    }
 
     #[test]
     fn test_copy_chains_and_inline_operands() {
@@ -112,7 +109,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<CopyPropagation>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "copy chains and inline operands");
     }
 
@@ -158,7 +155,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<CopyPropagation>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "phi nodes block propagation");
     }
 
@@ -207,7 +204,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<CopyPropagation>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "branch condition propagation");
     }
 
@@ -263,7 +260,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<CopyPropagation>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "switch condition propagation");
     }
 
@@ -311,7 +308,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<CopyPropagation>(input);
         assert_trim_strings_eq_with_diff(&actual, expected, "icall argument propagation");
     }
 
@@ -355,7 +352,7 @@ Basic Blocks:
     }
         "#;
 
-        let actual = run_pass(input);
+        let actual = run_pass_and_display::<CopyPropagation>(input);
         assert_trim_strings_eq_with_diff(
             &actual,
             expected,
