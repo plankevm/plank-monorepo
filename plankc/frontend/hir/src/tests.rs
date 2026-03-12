@@ -262,17 +262,51 @@ fn test_unresolved_identifier_diagnostic() {
 }
 
 #[test]
+fn test_multiple_init_blocks() {
+    let rendered = render_diagnostics("init {}\ninit {}");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: multiple init blocks
+         --> main.plk:2:1
+          |
+        1 | init {}
+          | ------- previous init block
+        2 | init {}
+          | ^^^^^^^ duplicate init block
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_multiple_run_blocks() {
+    let rendered = render_diagnostics("init {}\nrun {}\nrun {}");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: multiple run blocks
+         --> main.plk:3:1
+          |
+        2 | run {}
+          | ------ previous run block
+        3 | run {}
+          | ^^^^^^ duplicate run block
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_duplicate_const_def() {
-    let rendered = render_diagnostics("const x = 1; const x = 2; init {}");
+    let rendered = render_diagnostics("const x = 1;\nconst x = 2;\ninit {}");
     let expected = dedent_preserve_blank_lines(
         r#"
         error: duplicate definition of x
-         --> main.plk:1:14
+         --> main.plk:2:1
           |
-        1 | const x = 1; const x = 2; init {}
-          | ------------ ^^^^^^^^^^^^ x redefined here
-          | |
-          | previously defined here
+        1 | const x = 1;
+          | ------------ previously defined here
+        2 | const x = 2;
+          | ^^^^^^^^^^^^ x redefined here
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

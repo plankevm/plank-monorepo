@@ -349,7 +349,7 @@ where
             return Expr::ConstRef(const_id);
         }
 
-        self.emit_unresolved_identifier(name, span);
+        self.error_unresolved_identifier(name, span);
         Expr::Error
     }
 
@@ -560,11 +560,11 @@ where
                     panic!("complex assignment targets not yet supported")
                 };
                 let Some(entry) = self.find_local(name) else {
-                    self.emit_unresolved_identifier(name, span);
+                    self.error_unresolved_identifier(name, span);
                     return;
                 };
                 if !entry.mutable {
-                    self.emit_assignment_to_immutable(name, span);
+                    self.error_assignment_to_immutable(name, span);
                     return;
                 }
                 let target = entry.id;
@@ -649,22 +649,26 @@ pub fn lower(
                     });
                 }
                 TopLevelDef::Init(init_def) => {
+                    let span = init_def.node().span();
                     if source_id != SourceId::ROOT {
-                        todo!("diagnostic: init only allowed in entry file");
+                        lowerer.error_init_outside_entry(span);
                     }
-                    if init.is_some() {
-                        todo!("diagnostic: multiple init blocks");
+                    if let Some((_, prev_span)) = init {
+                        lowerer.error_multiple_init_blocks(span, prev_span);
+                    } else {
+                        init = Some((lowerer.lower_body_to_block(init_def.body()), span));
                     }
-                    init = Some(lowerer.lower_body_to_block(init_def.body()));
                 }
                 TopLevelDef::Run(run_def) => {
+                    let span = run_def.node().span();
                     if source_id != SourceId::ROOT {
-                        todo!("diagnostic: run only allowed in entry file");
+                        lowerer.error_run_outside_entry(span);
                     }
-                    if run.is_some() {
-                        todo!("diagnostic: multiple run blocks");
+                    if let Some((_, prev_span)) = run {
+                        lowerer.error_multiple_run_blocks(span, prev_span);
+                    } else {
+                        run = Some((lowerer.lower_body_to_block(run_def.body()), span));
                     }
-                    run = Some(lowerer.lower_body_to_block(run_def.body()));
                 }
                 TopLevelDef::Import(_) => {}
             }
@@ -672,7 +676,7 @@ pub fn lower(
     }
 
     // TODO: Diagnostic for missing init block
-    let init = init.expect("missing init block");
+    let (init, _) = init.expect("missing init block");
 
     Hir {
         blocks: builder.blocks,
@@ -684,7 +688,7 @@ pub fn lower(
         fn_captures: builder.fn_captures,
         struct_defs: builder.struct_defs,
         init,
-        run,
+        run: run.map(|(id, _)| id),
     }
 }
 
