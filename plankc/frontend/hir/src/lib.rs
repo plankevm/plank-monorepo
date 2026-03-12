@@ -556,12 +556,16 @@ where
                 self.emit(Instruction::Return(value));
             }
             Statement::Assign(assign_stmt) => {
-                let ast::Expr::Ident { name, span: _ } = assign_stmt.target() else {
+                let ast::Expr::Ident { name, span } = assign_stmt.target() else {
                     panic!("complex assignment targets not yet supported")
                 };
-                let entry = self.find_local(name).expect("unresolved assignment target");
+                let Some(entry) = self.find_local(name) else {
+                    self.emit_unresolved_identifier(name, span);
+                    return;
+                };
                 if !entry.mutable {
-                    todo!("diagnostic: assignment to immutable variable");
+                    self.emit_assignment_to_immutable(name, span);
+                    return;
                 }
                 let target = entry.id;
                 let value = self.lower_expr(assign_stmt.value());

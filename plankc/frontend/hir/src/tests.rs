@@ -131,28 +131,23 @@ fn test_inline_closure_lowering() {
 }
 
 #[test]
-#[should_panic(expected = "unresolved assignment target")]
 fn test_set_undefined() {
-    let _ = try_lower(
-        "
-        init {
-            y = 4;
-        }
-        ",
-    );
+    let (_hir, _big_nums, _interner, collector) =
+        try_lower("init { y = 4; }").expect("should not have parse errors");
+
+    let diagnostics = collector.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].message, "unresolved identifier 'y'");
 }
 
 #[test]
-#[should_panic(expected = "assignment to immutable variable")]
 fn test_assign_to_immutable_let() {
-    let _ = try_lower(
-        "
-        init {
-            let x = 1;
-            x = 2;
-        }
-        ",
-    );
+    let (_hir, _big_nums, _interner, collector) =
+        try_lower("init { let x = 1; x = 2; }").expect("should not have parse errors");
+
+    let diagnostics = collector.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].message, "variable 'x' was not declared mutable");
 }
 
 #[test]
