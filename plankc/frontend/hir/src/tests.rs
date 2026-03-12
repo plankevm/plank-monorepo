@@ -1,12 +1,13 @@
 use crate::{BigNumInterner, Hir, display::DisplayHir};
-use plank_core::{SourceByteOffset, SourceId, Span};
 use plank_diagnostics::SimpleCollector;
 use plank_parser::{PlankInterner, error_report::ParserError};
+use plank_source::ParsedProject;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 
 fn try_lower(
     source: &str,
-) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector), Vec<ParserError>> {
+) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector, ParsedProject), Vec<ParserError>>
+{
     let mut interner = PlankInterner::default();
     let project = TestProject::single(source)
         .build(&mut interner)
@@ -16,11 +17,11 @@ fn try_lower(
     let mut collector = SimpleCollector::default();
     let hir = crate::lower(&project, &mut big_nums, &interner, &mut collector);
 
-    Ok((hir, big_nums, interner, collector))
+    Ok((hir, big_nums, interner, collector, project))
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (hir, big_nums, interner, _collector) = match try_lower(source) {
+    let (hir, big_nums, interner, _collector, _project) = match try_lower(source) {
         Ok(values) => values,
         Err(errors) => {
             panic!("Expected no parse errors, got: {}\n{:#?}", errors.len(), errors);
@@ -30,6 +31,18 @@ fn assert_lowers_to(source: &str, expected: &str) {
     let expected = dedent_preserve_blank_lines(expected);
 
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
+}
+
+fn render_diagnostics(source: &str) -> String {
+    let (_hir, _big_nums, _interner, collector, project) =
+        try_lower(source).expect("should not have parse errors");
+    let root = &project.sources[plank_core::SourceId::ROOT];
+    collector
+        .diagnostics()
+        .iter()
+        .map(|d| d.render(&root.content, &root.path))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -132,22 +145,34 @@ fn test_inline_closure_lowering() {
 
 #[test]
 fn test_set_undefined() {
-    let (_hir, _big_nums, _interner, collector) =
-        try_lower("init { y = 4; }").expect("should not have parse errors");
-
-    let diagnostics = collector.diagnostics();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].message, "unresolved identifier 'y'");
+    let rendered = render_diagnostics("init { y = 4; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved identifier 'y'
+         --> main.plk:1:8
+          |
+        1 | init { y = 4; }
+          |        ^ not found in this scope
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
 
 #[test]
 fn test_assign_to_immutable_let() {
-    let (_hir, _big_nums, _interner, collector) =
-        try_lower("init { let x = 1; x = 2; }").expect("should not have parse errors");
-
-    let diagnostics = collector.diagnostics();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].message, "variable 'x' was not declared mutable");
+    let rendered = render_diagnostics("init { let x = 1; x = 2; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: variable 'x' was not declared mutable
+         --> main.plk:1:19
+          |
+        1 | init { let x = 1; x = 2; }
+          |                   ^ assignment to immutable variable
+          |
+          = help: consider declaring it with `let mut`
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
 
 #[test]
@@ -223,24 +248,32 @@ fn test_assign_to_mutable_let() {
 
 #[test]
 fn test_unresolved_identifier_diagnostic() {
-    let (_hir, _big_nums, _interner, collector) =
-        try_lower("init { x; }").expect("should not have parse errors");
-
-    let diagnostics = collector.diagnostics();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].message, "unresolved identifier 'x'");
-
-    let annotation = &diagnostics[0].annotations[0];
-    assert_eq!(annotation.source_id, SourceId::ROOT);
-    assert_eq!(annotation.span, Span::new(SourceByteOffset::new(7), SourceByteOffset::new(8)));
+    let rendered = render_diagnostics("init { x; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved identifier 'x'
+         --> main.plk:1:8
+          |
+        1 | init { x; }
+          |        ^ not found in this scope
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
 
 #[test]
 fn test_duplicate_const_def() {
-    let (_hir, _big_nums, _interner, collector) =
-        try_lower("const x = 1; const x = 2; init {}").expect("should not have parse errors");
-
-    let diagnostics = collector.diagnostics();
-    assert_eq!(diagnostics.len(), 1);
-    assert_eq!(diagnostics[0].message, "duplicate definition of x");
+    let rendered = render_diagnostics("const x = 1; const x = 2; init {}");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: duplicate definition of x
+         --> main.plk:1:14
+          |
+        1 | const x = 1; const x = 2; init {}
+          | ------------ ^^^^^^^^^^^^ x redefined here
+          | |
+          | previously defined here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }

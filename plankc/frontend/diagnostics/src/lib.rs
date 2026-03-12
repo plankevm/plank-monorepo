@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
 use plank_core::{SourceId, SourceSpan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,10 +23,37 @@ pub struct Annotation {
     pub style: AnnotationStyle,
 }
 
+impl From<Severity> for Level<'static> {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Error => Level::ERROR,
+            Severity::Warning => Level::WARNING,
+        }
+    }
+}
+
+impl From<AnnotationStyle> for AnnotationKind {
+    fn from(style: AnnotationStyle) -> Self {
+        match style {
+            AnnotationStyle::Primary => AnnotationKind::Primary,
+            AnnotationStyle::Secondary => AnnotationKind::Context,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FooterKind {
     Note,
     Help,
+}
+
+impl From<FooterKind> for Level<'static> {
+    fn from(kind: FooterKind) -> Self {
+        match kind {
+            FooterKind::Note => Level::NOTE,
+            FooterKind::Help => Level::HELP,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -111,6 +141,34 @@ impl Diagnostic {
     pub fn help(mut self, message: impl Into<String>) -> Self {
         self.footers.push(Footer { kind: FooterKind::Help, message: message.into() });
         self
+    }
+
+    pub fn render(&self, source: &str, path: &Path) -> String {
+        self.render_with(source, path, Renderer::plain())
+    }
+
+    pub fn render_styled(&self, source: &str, path: &Path) -> String {
+        self.render_with(source, path, Renderer::styled())
+    }
+
+    fn render_with(&self, source: &str, path: &Path, renderer: Renderer) -> String {
+        let path = path.to_str().expect("source path is not valid UTF-8");
+        let mut snippet = Snippet::source(source).path(path);
+        for ann in &self.annotations {
+            let marker = AnnotationKind::from(ann.style).span(ann.span.usize_range());
+            snippet = snippet.annotation(match &ann.label {
+                Some(label) => marker.label(label),
+                None => marker,
+            });
+        }
+
+        let mut group = Level::from(self.severity).primary_title(&self.message).element(snippet);
+
+        for footer in &self.footers {
+            group = group.element(Level::from(footer.kind).message(&footer.message));
+        }
+
+        renderer.render(&[group])
     }
 }
 
