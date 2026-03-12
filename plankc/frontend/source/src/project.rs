@@ -1,9 +1,14 @@
 use crate::{module::ModuleResolver, source_fs::SourceFs};
 use hashbrown::HashMap;
-use plank_core::{IndexVec, SourceId, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{
-    StrId, ast::TopLevelDef, cst::ConcreteSyntaxTree, diagnostics::DiagnosticsContext,
-    interner::PlankInterner, lexer::Lexed, parser::parse,
+    StrId,
+    ast::TopLevelDef,
+    cst::ConcreteSyntaxTree,
+    diagnostics::DiagnosticsContext,
+    interner::PlankInterner,
+    lexer::{Lexed, TokenIdx},
+    parser::parse,
 };
 use std::path::{Path, PathBuf};
 
@@ -21,6 +26,7 @@ pub enum ImportKind {
 pub struct FileImport {
     pub kind: ImportKind,
     pub target_source: SourceId,
+    pub span: Span<TokenIdx>,
 }
 
 #[derive(Debug)]
@@ -99,8 +105,11 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
                 None => self.parse_source(target_path),
             };
 
-            let prev = self.file_imports[source_id][i]
-                .replace(FileImport { kind: import_kind, target_source });
+            let prev = self.file_imports[source_id][i].replace(FileImport {
+                kind: import_kind,
+                target_source,
+                span: import.node().span(),
+            });
             assert!(prev.is_none());
         }
 

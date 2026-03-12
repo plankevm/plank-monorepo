@@ -1,4 +1,4 @@
-use plank_core::Span;
+use plank_core::{SourceId, SourceSpan, Span};
 use plank_diagnostics::{Diagnostic, DiagnosticsContext};
 use plank_parser::lexer::TokenIdx;
 
@@ -75,6 +75,32 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
             self.lexed.tokens_src_span(span),
             format!("only the entry file may contain {kind}"),
         );
+        self.emit_diagnostic(diagnostic);
+    }
+
+    pub(crate) fn error_unresolved_import(&self, name: StrId, span: Span<TokenIdx>) {
+        let diagnostic = Diagnostic::error(format!("unresolved import '{}'", &self.interner[name]))
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(span),
+                "not found in target module",
+            );
+        self.emit_diagnostic(diagnostic);
+    }
+
+    pub(crate) fn error_import_collision(
+        &self,
+        name: StrId,
+        import_span: Span<TokenIdx>,
+        prev_source_id: SourceId,
+        prev_source_span: SourceSpan,
+    ) {
+        let diagnostic = Diagnostic::error(format!(
+            "import of '{}' conflicts with existing definition",
+            &self.interner[name]
+        ))
+        .primary(self.source_id, self.lexed.tokens_src_span(import_span), "conflicting import")
+        .secondary(prev_source_id, prev_source_span, "previously defined here");
         self.emit_diagnostic(diagnostic);
     }
 }

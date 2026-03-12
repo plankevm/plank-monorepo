@@ -2,7 +2,8 @@ use std::cell::RefCell;
 
 use hashbrown::HashMap;
 use plank_core::{
-    Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index,
+    Idx, IncIterable, IndexVec, SourceId, SourceSpan, Span, list_of_lists::ListOfLists,
+    newtype_index,
 };
 use plank_diagnostics::{Diagnostic, DiagnosticsContext};
 use plank_parser::{
@@ -128,7 +129,8 @@ pub struct StructDef {
 #[derive(Debug, Clone, Copy)]
 pub struct ConstDef {
     pub name: StrId,
-    pub source: Span<TokenIdx>,
+    pub source_id: SourceId,
+    pub source_span: SourceSpan,
     pub body: BlockId,
     pub result: LocalId,
 }
@@ -211,6 +213,51 @@ impl<'a, D> BlockLowerer<'a, D>
 where
     D: DiagnosticsContext,
 {
+    fn build_file_scope(
+        &mut self,
+        source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
+        imports: &ListOfLists<SourceId, FileImport>,
+        const_defs: &IndexVec<ConstId, ConstDef>,
+    ) {
+        self.consts.clear();
+        for &(name, const_id) in &source_consts[self.source_id] {
+            self.consts.insert(name, const_id);
+        }
+        for import in &imports[self.source_id] {
+            match import.kind {
+                ImportKind::Specific { selected_name, imported_as } => {
+                    let Some(const_id) = source_consts[import.target_source]
+                        .iter()
+                        .find_map(|&(name, const_id)| (name == selected_name).then_some(const_id))
+                    else {
+                        self.error_unresolved_import(selected_name, import.span);
+                        continue;
+                    };
+                    let Some(prev) = self.consts.insert(imported_as, const_id) else { continue };
+                    let prev_def = &const_defs[prev];
+                    self.error_import_collision(
+                        imported_as,
+                        import.span,
+                        prev_def.source_id,
+                        prev_def.source_span,
+                    );
+                }
+                ImportKind::All => {
+                    for &(name, const_id) in &source_consts[import.target_source] {
+                        let Some(prev) = self.consts.insert(name, const_id) else { continue };
+                        let prev_def = &const_defs[prev];
+                        self.error_import_collision(
+                            name,
+                            import.span,
+                            prev_def.source_id,
+                            prev_def.source_span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     fn reset_scope(&mut self) {
         self.next_local_id = LocalId::ZERO;
         self.scoped_locals_stack.clear();
@@ -620,10 +667,10 @@ pub fn lower(
     };
 
     for (source_id, source) in project.sources.enumerate_idx() {
-        build_file_scope(source_id, &source_consts, &project.imports, &mut lowerer.consts);
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
         lowerer.source_id = source_id;
         lowerer.lexed = &source.lexed;
+        lowerer.build_file_scope(&source_consts, &project.imports, &consts);
 
         let file = source.cst.as_file();
         for def in file.iter_defs() {
@@ -705,9 +752,11 @@ fn register_consts(
         source_consts.push_with(|mut list| {
             for def in file.iter_defs() {
                 let TopLevelDef::Const(const_def) = def else { continue };
+                let source_span = source.lexed.tokens_src_span(const_def.span());
                 let const_id = consts.push(ConstDef {
                     name: const_def.name,
-                    source: const_def.span(),
+                    source_id: id,
+                    source_span,
                     body: BlockId::ZERO,
                     result: LocalId::ZERO,
                 });
@@ -718,12 +767,12 @@ fn register_consts(
                     ))
                     .primary(
                         id,
-                        source.lexed.tokens_src_span(const_def.span()),
+                        source_span,
                         format!("{} redefined here", &interner[const_def.name]),
                     )
                     .secondary(
-                        id,
-                        source.lexed.tokens_src_span(consts[prev].source),
+                        consts[prev].source_id,
+                        consts[prev].source_span,
                         "previously defined here",
                     );
                     diag_ctx.emit(diagnostic);
@@ -735,38 +784,6 @@ fn register_consts(
     }
 
     (consts, source_consts)
-}
-
-fn build_file_scope(
-    source_id: SourceId,
-    source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
-    imports: &ListOfLists<SourceId, FileImport>,
-    scope: &mut HashMap<StrId, ConstId>,
-) {
-    scope.clear();
-    for &(name, const_id) in &source_consts[source_id] {
-        scope.insert(name, const_id);
-    }
-    for import in &imports[source_id] {
-        match import.kind {
-            ImportKind::Specific { selected_name, imported_as } => {
-                let const_id = source_consts[import.target_source]
-                    .iter()
-                    .find_map(|&(name, const_id)| (name == selected_name).then_some(const_id))
-                    .expect("imported const not found");
-                if scope.insert(imported_as, const_id).is_some() {
-                    todo!("diagnostic: name collision on import");
-                }
-            }
-            ImportKind::All => {
-                for &(name, const_id) in &source_consts[import.target_source] {
-                    if scope.insert(name, const_id).is_some() {
-                        todo!("diagnostic: name collision on glob import");
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]

@@ -361,3 +361,61 @@ fn test_run_outside_entry() {
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
+
+#[test]
+fn test_import_name_collision() {
+    let project = TestProject::single("const x = 1;\nimport m::other::x;\ninit {}")
+        .add_file("other", "const x = 2;")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: import of 'x' conflicts with existing definition
+         --> main.plk:2:1
+          |
+        1 | const x = 1;
+          | ------------ previously defined here
+        2 | import m::other::x;
+          | ^^^^^^^^^^^^^^^^^^^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_glob_import_name_collision() {
+    let project = TestProject::single("const x = 1;\nimport m::other::*;\ninit {}")
+        .add_file("other", "const x = 2;")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: import of 'x' conflicts with existing definition
+         --> main.plk:2:1
+          |
+        1 | const x = 1;
+          | ------------ previously defined here
+        2 | import m::other::*;
+          | ^^^^^^^^^^^^^^^^^^^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_unresolved_import() {
+    let project = TestProject::single("import m::other::y;\ninit {}")
+        .add_file("other", "const x = 1;")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved import 'y'
+         --> main.plk:1:1
+          |
+        1 | import m::other::y;
+          | ^^^^^^^^^^^^^^^^^^^ not found in target module
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
