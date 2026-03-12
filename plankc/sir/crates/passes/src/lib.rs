@@ -66,6 +66,7 @@ impl<'a> PassManager<'a> {
 
     pub fn run_optimizations(&mut self, passes: &str) {
         for c in passes.chars() {
+            // Keep in sync with OPTIMIZE_HELP
             match c {
                 's' => run_pass(&mut self.sccp, self.program, &self.store),
                 'c' => run_pass(&mut self.copy_prop, self.program, &self.store),

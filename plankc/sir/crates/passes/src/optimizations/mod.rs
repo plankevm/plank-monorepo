@@ -14,6 +14,7 @@ pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each chara
 
 pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
     for c in s.chars() {
+        // Keep in sync with OPTIMIZE_HELP
         if !matches!(c, 's' | 'c' | 'u' | 'd') {
             return Err(format!(
                 "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment)",

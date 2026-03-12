@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
 use crate::analyses::AnalysesMask;
 use sir_data::{Control, EthIRProgram, LocalId, Operation, operation::InlineOperands};

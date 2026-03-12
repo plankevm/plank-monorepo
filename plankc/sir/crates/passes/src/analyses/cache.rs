@@ -108,6 +108,7 @@ define_analyses! {
     DominanceFrontiers => dominance_frontiers: DominanceFrontiers,
     BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability,
     CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling,
+    // Produced by SCCP, not computed on-demand. Use get_buffer() + mark_valid().
     SccpReachable => sccp_reachable: DenseIndexSet<BasicBlockId>,
 }
 

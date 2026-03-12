@@ -1,11 +1,11 @@
 use crate::analyses::AnalysesMask;
+use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::span::IncIterable;
 use sir_data::{
     BasicBlock, BasicBlockId, BlockView, Branch, Cases, CasesId, Control, ControlView, DataId,
     DenseIndexSet, EthIRProgram, Function, FunctionId, Idx, LargeConstId, LocalId, LocalIdx,
     Operation, OperationIdx, Span, StaticAllocId, Switch, operation::OpVisitorMut,
 };
-use std::collections::{HashMap, hash_map::Entry};
 
 use crate::{AnalysesStore, Pass};
 
