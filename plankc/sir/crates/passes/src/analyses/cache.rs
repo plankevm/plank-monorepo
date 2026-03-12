@@ -45,7 +45,7 @@ impl<T> Cached<T> {
         if self.is_valid() { Some(Ref::map(self.state.borrow(), |s| &s.analysis)) } else { None }
     }
 
-    pub(crate) fn get_buffer(&self) -> RefMut<'_, T> {
+    pub(crate) fn get_mut_maybe_invalid(&self) -> RefMut<'_, T> {
         RefMut::map(self.state.borrow_mut(), |s| &mut s.analysis)
     }
 
@@ -71,7 +71,7 @@ macro_rules! define_analyses {
 
         bitflags::bitflags! {
             #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-            pub struct AnalysesMask: u8 {
+            pub struct AnalysesMask: u32 {
                 $(const $variant = 1 << (AnalysisKind::$variant as u8);)*
             }
         }

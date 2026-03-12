@@ -3,7 +3,7 @@ use sir_data::{BasicBlockId, EthIRProgram, IndexVec};
 
 #[derive(Default)]
 pub struct Predecessors {
-    pub(crate) inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    inner: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
 }
 
 impl Analysis for Predecessors {
@@ -24,5 +24,9 @@ impl Analysis for Predecessors {
 impl Predecessors {
     pub fn of(&self, bb: BasicBlockId) -> &[BasicBlockId] {
         &self.inner[bb]
+    }
+
+    pub fn enumerate(&self) -> impl Iterator<Item = (BasicBlockId, &[BasicBlockId])> {
+        self.inner.enumerate_idx().map(|(bb, preds)| (bb, preds.as_slice()))
     }
 }

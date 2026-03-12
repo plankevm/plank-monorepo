@@ -41,10 +41,6 @@ impl Pass for SsaTransform {
 
         self.rename(program);
     }
-
-    fn preserves(&self) -> crate::AnalysesMask {
-        crate::AnalysesMask::empty()
-    }
 }
 
 impl SsaTransform {

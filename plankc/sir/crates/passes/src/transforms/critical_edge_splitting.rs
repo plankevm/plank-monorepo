@@ -1,4 +1,4 @@
-use crate::{AnalysesMask, AnalysesStore, Pass, analyses::Predecessors};
+use crate::{AnalysesStore, Pass, analyses::Predecessors};
 use plank_core::IncIterable;
 use sir_data::{BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, LocalIdx, Span, Switch};
 
@@ -37,10 +37,6 @@ impl Pass for CriticalEdgeSplitting {
                 _ => {}
             }
         }
-    }
-
-    fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::empty()
     }
 }
 

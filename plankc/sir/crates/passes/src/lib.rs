@@ -18,7 +18,10 @@ pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string}
 
 pub trait Pass {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);
-    fn preserves(&self) -> AnalysesMask;
+
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::empty()
+    }
 }
 
 pub fn run_pass<T: Pass>(pass: &mut T, program: &mut EthIRProgram, store: &AnalysesStore) {
@@ -53,38 +56,31 @@ impl<'a> PassManager<'a> {
     }
 
     pub fn run_legalize(&mut self) -> Result<(), analyses::LegalizerError> {
-        self.legalizer.get_or_insert_with(Legalizer::default).run(self.program, &self.store)
+        self.legalizer.get_or_insert_default().run(self.program, &self.store)
     }
 
     pub fn run_ssa_transform(&mut self) {
-        let pass = self.ssa_transform.get_or_insert_with(SsaTransform::default);
+        let pass = self.ssa_transform.get_or_insert_default();
         run_pass(pass, self.program, &self.store);
         self.run_legalize().expect("IR is illegal after SSA transform");
     }
 
     pub fn run_optimizations(&mut self, passes: &str) {
+        use optimizations::OptimizationPass;
         for c in passes.chars() {
-            // Keep in sync with OPTIMIZE_HELP
-            match c {
-                's' => {
-                    run_pass(self.sccp.get_or_insert_with(SCCP::default), self.program, &self.store)
+            match OptimizationPass::from_char(c).expect("validated") {
+                OptimizationPass::Sccp => {
+                    run_pass(self.sccp.get_or_insert_default(), self.program, &self.store)
                 }
-                'c' => run_pass(
-                    self.copy_prop.get_or_insert_with(CopyPropagation::default),
-                    self.program,
-                    &self.store,
-                ),
-                'u' => run_pass(
-                    self.unused_elim.get_or_insert_with(UnusedOperationElimination::default),
-                    self.program,
-                    &self.store,
-                ),
-                'd' => run_pass(
-                    self.defragmenter.get_or_insert_with(Defragmenter::default),
-                    self.program,
-                    &self.store,
-                ),
-                _ => unreachable!("should've been validated"),
+                OptimizationPass::CopyPropagation => {
+                    run_pass(self.copy_prop.get_or_insert_default(), self.program, &self.store)
+                }
+                OptimizationPass::UnusedElimination => {
+                    run_pass(self.unused_elim.get_or_insert_default(), self.program, &self.store)
+                }
+                OptimizationPass::Defragment => {
+                    run_pass(self.defragmenter.get_or_insert_default(), self.program, &self.store)
+                }
             }
         }
         debug_assert!(self.run_legalize().is_ok(), "optimized IR is illegal");

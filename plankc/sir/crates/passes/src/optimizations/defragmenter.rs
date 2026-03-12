@@ -1,4 +1,3 @@
-use crate::analyses::AnalysesMask;
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::span::IncIterable;
 use sir_data::{
@@ -28,10 +27,6 @@ impl Pass for Defragmenter {
         }
         .rewrite();
         std::mem::swap(program, &mut self.scratch);
-    }
-
-    fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::empty()
     }
 }
 

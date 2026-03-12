@@ -1,11 +1,11 @@
 use hashbrown::HashSet;
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram, IndexVec, index_vec};
 
-use crate::analyses::{AnalysesStore, cache::Analysis};
+use crate::analyses::{AnalysesStore, Predecessors, cache::Analysis};
 
 #[derive(Default)]
 pub struct Dominators {
-    pub(crate) inner: IndexVec<BasicBlockId, Option<BasicBlockId>>,
+    inner: IndexVec<BasicBlockId, Option<BasicBlockId>>,
 }
 
 impl Analysis for Dominators {
@@ -15,12 +15,7 @@ impl Analysis for Dominators {
         self.inner.clear();
         self.inner.resize(program.basic_blocks.len(), None);
         for func in program.functions_iter() {
-            compute_function_dominators(
-                program,
-                func.entry().id(),
-                &predecessors.inner,
-                &mut self.inner,
-            );
+            compute_function_dominators(program, func.entry().id(), &predecessors, &mut self.inner);
         }
     }
 }
@@ -28,6 +23,18 @@ impl Analysis for Dominators {
 impl Dominators {
     pub fn of(&self, bb: BasicBlockId) -> Option<BasicBlockId> {
         self.inner[bb]
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn enumerate(&self) -> impl Iterator<Item = (BasicBlockId, Option<BasicBlockId>)> + '_ {
+        self.inner.enumerate_idx().map(|(bb, &dominator)| (bb, dominator))
     }
 }
 
@@ -43,23 +50,23 @@ impl Analysis for DominanceFrontiers {
         for set in self.inner.iter_mut() {
             set.clear();
         }
-        self.inner.resize_with(dominators.inner.len(), HashSet::new);
+        self.inner.resize_with(dominators.len(), HashSet::new);
 
-        for (b, preds) in predecessors.inner.enumerate_idx() {
+        for (b, preds) in predecessors.enumerate() {
             if preds.len() < 2 {
                 continue;
             }
-            let Some(idom) = dominators.inner[b] else {
+            let Some(idom) = dominators.of(b) else {
                 continue;
             };
             for &p in preds {
-                if dominators.inner[p].is_none() {
+                if dominators.of(p).is_none() {
                     continue;
                 }
                 let mut runner = p;
                 while runner != idom {
                     self.inner[runner].insert(b);
-                    runner = dominators.inner[runner].expect("reachable path");
+                    runner = dominators.of(runner).expect("reachable path");
                 }
             }
         }
@@ -75,7 +82,7 @@ impl DominanceFrontiers {
 fn compute_function_dominators(
     program: &EthIRProgram,
     entry: BasicBlockId,
-    predecessors: &IndexVec<BasicBlockId, Vec<BasicBlockId>>,
+    predecessors: &Predecessors,
     dominators: &mut IndexVec<BasicBlockId, Option<BasicBlockId>>,
 ) {
     dominators[entry] = Some(entry);
@@ -93,12 +100,10 @@ fn compute_function_dominators(
     while changed {
         changed = false;
         for bb in reverse_post_order[1..].iter() {
-            debug_assert!(
-                !predecessors[*bb].is_empty(),
-                "non-entry block in RPO has no predecessors"
-            );
-            let mut new_idom = predecessors[*bb][0];
-            for pred in predecessors[*bb][1..].iter() {
+            let preds = predecessors.of(*bb);
+            debug_assert!(!preds.is_empty(), "non-entry block in RPO has no predecessors");
+            let mut new_idom = preds[0];
+            for pred in preds[1..].iter() {
                 if dominators[*pred].is_some() {
                     new_idom = intersect(*pred, new_idom, dominators, &bb_to_rpo_pos);
                 }

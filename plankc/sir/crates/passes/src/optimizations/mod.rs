@@ -5,6 +5,26 @@ pub(crate) mod unused_operation_elimination;
 
 pub use defragmenter::Defragmenter;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizationPass {
+    Sccp,
+    CopyPropagation,
+    UnusedElimination,
+    Defragment,
+}
+
+impl OptimizationPass {
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            's' => Some(Self::Sccp),
+            'c' => Some(Self::CopyPropagation),
+            'u' => Some(Self::UnusedElimination),
+            'd' => Some(Self::Defragment),
+            _ => None,
+        }
+    }
+}
+
 pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each character is a pass:\n\
     s = SCCP (constant propagation),\n\
     c = copy propagation,\n\
@@ -14,8 +34,7 @@ pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each chara
 
 pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
     for c in s.chars() {
-        // Keep in sync with OPTIMIZE_HELP
-        if !matches!(c, 's' | 'c' | 'u' | 'd') {
+        if OptimizationPass::from_char(c).is_none() {
             return Err(format!(
                 "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment)",
                 c

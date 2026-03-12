@@ -16,7 +16,7 @@ pub struct SCCP {
 impl Pass for SCCP {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let uses = store.def_use(program);
-        let mut reachable = store.sccp_reachable.get_buffer();
+        let mut reachable = store.sccp_reachable.get_mut_maybe_invalid();
         self.analysis(program, &uses, &mut reachable);
         self.apply(program, &reachable);
         drop(reachable);
