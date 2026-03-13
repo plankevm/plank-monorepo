@@ -1,4 +1,5 @@
 use crate::{BigNumInterner, Hir, display::DisplayHir};
+use plank_core::SourceId;
 use plank_diagnostics::SimpleCollector;
 use plank_parser::{PlankInterner, error_report::ParserError};
 use plank_source::ParsedProject;
@@ -56,11 +57,16 @@ fn render_project_diagnostics(project: TestProject) -> String {
         .diagnostics()
         .iter()
         .map(|diagnostic| {
-            let source_id = diagnostic.annotations[0].source_id;
-            assert!(
-                diagnostic.annotations.iter().all(|a| a.source_id == source_id),
-                "we currently don't support rendering a diagnostic with annotations spanning multiple files"
-            );
+            let source_id = match diagnostic.annotations.first() {
+                Some(ann) => {
+                    assert!(
+                        diagnostic.annotations.iter().all(|a| a.source_id == ann.source_id),
+                        "we currently don't support rendering a diagnostic with annotations spanning multiple files"
+                    );
+                    ann.source_id
+                }
+                None => SourceId::ROOT,
+            };
             let source = &project.sources[source_id];
             diagnostic.render(&source.content, &source.path)
         })
@@ -464,6 +470,21 @@ fn test_shadow_builtin() {
           |
         1 | init { let add = 1; }
           |            ^^^ is a built-in function
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_missing_init_block() {
+    let rendered = render_diagnostics("const x = 1;");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: missing init block
+         --> main.plk
+          |
+          |
+          = note: the entry file must contain an init block
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

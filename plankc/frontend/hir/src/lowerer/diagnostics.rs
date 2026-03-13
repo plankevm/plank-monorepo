@@ -118,6 +118,12 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
         self.emit_diagnostic(diagnostic);
     }
 
+    pub(crate) fn error_missing_init_block(&self) {
+        let diagnostic = Diagnostic::error("missing init block")
+            .note("the entry file must contain an init block");
+        self.emit_diagnostic(diagnostic);
+    }
+
     pub(crate) fn error_import_collision(
         &self,
         name: StrId,

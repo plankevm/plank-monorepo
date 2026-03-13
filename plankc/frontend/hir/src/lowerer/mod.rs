@@ -598,8 +598,13 @@ pub fn lower(
         }
     }
 
-    // TODO: Diagnostic for missing init block
-    let (init, _) = init.expect("missing init block");
+    let init = match init {
+        Some((id, _)) => id,
+        None => {
+            lowerer.error_missing_init_block();
+            builder.blocks.push_iter(std::iter::empty())
+        }
+    };
 
     Hir {
         blocks: builder.blocks,
