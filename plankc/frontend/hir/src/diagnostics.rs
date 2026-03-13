@@ -78,6 +78,34 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
         self.emit_diagnostic(diagnostic);
     }
 
+    pub(crate) fn error_shadowing_primitive_type(&self, name: StrId, span: Span<TokenIdx>) {
+        self.error_shadowing("primitive type", name, span);
+    }
+
+    pub(crate) fn error_shadowing_builtin(&self, name: StrId, span: Span<TokenIdx>) {
+        self.error_shadowing("built-in function", name, span);
+    }
+
+    fn error_shadowing(&self, kind: &str, name: StrId, span: Span<TokenIdx>) {
+        let source_span = self.lexed.tokens_src_span(span);
+        let diagnostic = Diagnostic::error(format!(
+            "cannot shadow {kind} '{}'",
+            &self.interner[name]
+        ))
+        .primary(self.source_id, source_span, format!("is a {kind}"));
+        self.emit_diagnostic(diagnostic);
+    }
+
+    pub(crate) fn error_non_call_reference_to_builtin(&self, name: StrId, span: Span<TokenIdx>) {
+        let source_span = self.lexed.tokens_src_span(span);
+        let diagnostic = Diagnostic::error(format!(
+            "cannot reference built-in function '{}' as a value",
+            &self.interner[name]
+        ))
+        .primary(self.source_id, source_span, "must be called directly");
+        self.emit_diagnostic(diagnostic);
+    }
+
     pub(crate) fn error_unresolved_import(&self, name: StrId, span: Span<TokenIdx>) {
         let diagnostic = Diagnostic::error(format!("unresolved import '{}'", &self.interner[name]))
             .primary(

@@ -271,13 +271,18 @@ where
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, mutable: bool) -> LocalId {
-        if TypeId::resolve_primitive(name).is_some() {
-            todo!("diagnostic: shadowing primitive type");
-        }
-
-        if Builtin::from_str_id(name).is_some() {
-            todo!("diagnostic: shadowing builtin");
+    fn alloc_local(
+        &mut self,
+        name: StrId,
+        mutable: bool,
+        shadow_check: Option<Span<TokenIdx>>,
+    ) -> LocalId {
+        if let Some(span) = shadow_check {
+            if TypeId::resolve_primitive(name).is_some() {
+                self.error_shadowing_primitive_type(name, span);
+            } else if Builtin::from_str_id(name).is_some() {
+                self.error_shadowing_builtin(name, span);
+            }
         }
 
         let id = self.next_local_id.get_and_inc();
@@ -362,7 +367,7 @@ where
             }
         }
 
-        let inner_local = self.alloc_local(name, false);
+        let inner_local = self.alloc_local(name, false, None);
         self.captures_buf.push(CaptureInfo { outer_local, inner_local });
         Some(inner_local)
     }
@@ -381,7 +386,8 @@ where
         }
 
         if Builtin::from_str_id(name).is_some() {
-            todo!("diagnostic: non-call reference to builtin");
+            self.error_non_call_reference_to_builtin(name, span);
+            return Expr::Error;
         }
 
         if let Some(entry) = self.find_local(name) {
@@ -492,7 +498,7 @@ where
     }
 
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
-        self.alloc_local(param.name, false)
+        self.alloc_local(param.name, false, Some(param.name_span()))
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
@@ -588,7 +594,8 @@ where
             Statement::Let(let_stmt) => {
                 let type_local = let_stmt.type_expr().map(|t| self.lower_expr_to_local(t));
                 let value = self.lower_expr(let_stmt.value());
-                let local_id = self.alloc_local(let_stmt.name, let_stmt.mutable);
+                let local_id =
+                    self.alloc_local(let_stmt.name, let_stmt.mutable, Some(let_stmt.name_span));
                 self.emit(Instruction::Set { local: local_id, expr: value });
                 if let Some(type_local) = type_local {
                     self.emit(Instruction::AssertType { value: local_id, of_type: type_local });
@@ -679,7 +686,8 @@ pub fn lower(
                 TopLevelDef::Const(const_def) => {
                     let id = lowerer.consts[&const_def.name];
                     let hir_def = &mut consts[id];
-                    hir_def.result = lowerer.alloc_local(const_def.name, false);
+                    hir_def.result =
+                        lowerer.alloc_local(const_def.name, false, Some(const_def.name_span()));
                     hir_def.body = lowerer.create_sub_block(|l| {
                         if let Some(type_expr) = const_def.r#type {
                             let type_local = l.lower_expr_to_local(type_expr);

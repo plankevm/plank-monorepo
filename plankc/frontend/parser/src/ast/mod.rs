@@ -80,6 +80,10 @@ impl<'cst> ConstDecl<'cst> {
     pub fn span(&self) -> Span<TokenIdx> {
         self.view.span()
     }
+
+    pub fn name_span(&self) -> Span<TokenIdx> {
+        self.view.child(0).expect("ConstDecl must have name child").span()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

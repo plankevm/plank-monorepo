@@ -277,7 +277,12 @@ fn test_unresolved_identifier_diagnostic() {
 
 #[test]
 fn test_multiple_init_blocks() {
-    let rendered = render_diagnostics("init {}\ninit {}");
+    let rendered = render_diagnostics(
+        r#"
+        init {}
+        init {}
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: multiple init blocks
@@ -294,7 +299,13 @@ fn test_multiple_init_blocks() {
 
 #[test]
 fn test_multiple_run_blocks() {
-    let rendered = render_diagnostics("init {}\nrun {}\nrun {}");
+    let rendered = render_diagnostics(
+        r#"
+        init {}
+        run {}
+        run {}
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: multiple run blocks
@@ -311,7 +322,13 @@ fn test_multiple_run_blocks() {
 
 #[test]
 fn test_duplicate_const_def() {
-    let rendered = render_diagnostics("const x = 1;\nconst x = 2;\ninit {}");
+    let rendered = render_diagnostics(
+        r#"
+        const x = 1;
+        const x = 2;
+        init {}
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: duplicate definition of x
@@ -415,6 +432,58 @@ fn test_unresolved_import() {
           |
         1 | import m::other::y;
           | ^^^^^^^^^^^^^^^^^^^ not found in target module
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_shadow_primitive_type() {
+    let rendered = render_diagnostics("init { let u256 = 1; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: cannot shadow primitive type 'u256'
+         --> main.plk:1:12
+          |
+        1 | init { let u256 = 1; }
+          |            ^^^^ is a primitive type
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_shadow_builtin() {
+    let rendered = render_diagnostics("init { let add = 1; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: cannot shadow built-in function 'add'
+         --> main.plk:1:12
+          |
+        1 | init { let add = 1; }
+          |            ^^^ is a built-in function
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_non_call_reference_to_builtin() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let mut x = 0;
+            x = add;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: cannot reference built-in function 'add' as a value
+         --> main.plk:3:9
+          |
+        3 |     x = add;
+          |         ^^^ must be called directly
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
