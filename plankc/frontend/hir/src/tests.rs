@@ -28,12 +28,17 @@ fn try_lower_project(
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (hir, big_nums, interner, _collector, _project) = match try_lower(source) {
+    let (hir, big_nums, interner, collector, _project) = match try_lower(source) {
         Ok(values) => values,
         Err(errors) => {
             panic!("Expected no parse errors, got: {}\n{:#?}", errors.len(), errors);
         }
     };
+    assert!(
+        collector.diagnostics().is_empty(),
+        "Expected no diagnostics for valid source, got:\n{:#?}",
+        collector.diagnostics()
+    );
     let actual = format!("{}", DisplayHir::new(&hir, &big_nums, &interner));
     let expected = dedent_preserve_blank_lines(expected);
 
@@ -52,6 +57,10 @@ fn render_project_diagnostics(project: TestProject) -> String {
         .iter()
         .map(|diagnostic| {
             let source_id = diagnostic.annotations[0].source_id;
+            assert!(
+                diagnostic.annotations.iter().all(|a| a.source_id == source_id),
+                "we currently don't support rendering a diagnostic with annotations spanning multiple files"
+            );
             let source = &project.sources[source_id];
             diagnostic.render(&source.content, &source.path)
         })
@@ -344,9 +353,15 @@ fn test_duplicate_const_def() {
 }
 
 #[test]
-fn test_init_outside_entry() {
+fn test_init_and_run_outside_entry() {
     let project = TestProject::single("import m::other::*;\ninit {}")
-        .add_file("other", "init {}")
+        .add_file(
+            "other",
+            "
+            init {}
+            run {}
+            ",
+        )
         .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
@@ -356,23 +371,10 @@ fn test_init_outside_entry() {
           |
         1 | init {}
           | ^^^^^^^ only the entry file may contain init
-        "#,
-    );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
-}
-
-#[test]
-fn test_run_outside_entry() {
-    let project = TestProject::single("import m::other::*;\ninit {}")
-        .add_file("other", "run {}")
-        .add_module("m", "");
-    let rendered = render_project_diagnostics(project);
-    let expected = dedent_preserve_blank_lines(
-        r#"
         error: run not allowed here
-         --> other.plk:1:1
+         --> other.plk:2:1
           |
-        1 | run {}
+        2 | run {}
           | ^^^^^^ only the entry file may contain run
         "#,
     );
