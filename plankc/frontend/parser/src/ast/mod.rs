@@ -126,6 +126,15 @@ impl<'cst> Import<'cst> {
             }
         }
     }
+
+    pub fn last_path_segment_span(&self) -> Span<TokenIdx> {
+        self.path_node
+            .children()
+            .filter(|c| c.ident().is_some())
+            .last()
+            .expect("import must have at least one path segment")
+            .span()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

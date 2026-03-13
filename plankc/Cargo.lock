@@ -1227,6 +1227,7 @@ version = "0.1.0"
 dependencies = [
  "annotate-snippets",
  "plank-core",
+ "plank-source",
 ]
 
 [[package]]

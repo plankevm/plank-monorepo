@@ -1,7 +1,6 @@
-use std::path::Path;
-
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
-use plank_core::{SourceId, SourceSpan};
+use plank_core::{IndexVec, SourceId, SourceSpan};
+use plank_source::project::Source;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -143,26 +142,40 @@ impl Diagnostic {
         self
     }
 
-    pub fn render(&self, source: &str, path: &Path) -> String {
-        self.render_with(source, path, Renderer::plain())
+    pub fn render(&self, sources: &IndexVec<SourceId, Source>) -> String {
+        self.render_with(sources, Renderer::plain())
     }
 
-    pub fn render_styled(&self, source: &str, path: &Path) -> String {
-        self.render_with(source, path, Renderer::styled())
+    pub fn render_styled(&self, sources: &IndexVec<SourceId, Source>) -> String {
+        self.render_with(sources, Renderer::styled())
     }
 
-    fn render_with(&self, source: &str, path: &Path, renderer: Renderer) -> String {
-        let path = path.to_str().expect("source path is not valid UTF-8");
-        let mut snippet = Snippet::source(source).path(path);
+    fn render_with(&self, sources: &IndexVec<SourceId, Source>, renderer: Renderer) -> String {
+        let title = Level::from(self.severity).primary_title(&self.message);
+
+        let mut seen_sources: Vec<SourceId> = Vec::new();
         for ann in &self.annotations {
-            let marker = AnnotationKind::from(ann.style).span(ann.span.usize_range());
-            snippet = snippet.annotation(match &ann.label {
-                Some(label) => marker.label(label),
-                None => marker,
-            });
+            if !seen_sources.contains(&ann.source_id) {
+                seen_sources.push(ann.source_id);
+            }
         }
 
-        let mut group = Level::from(self.severity).primary_title(&self.message).element(snippet);
+        let mut snippets: Vec<Snippet<'_, annotate_snippets::Annotation<'_>>> = Vec::new();
+        for &source_id in &seen_sources {
+            let source = &sources[source_id];
+            let path = source.path.to_str().expect("source path is not valid UTF-8");
+            let mut snippet = Snippet::source(&source.content).path(path);
+            for ann in self.annotations.iter().filter(|a| a.source_id == source_id) {
+                let marker = AnnotationKind::from(ann.style).span(ann.span.usize_range());
+                snippet = snippet.annotation(match &ann.label {
+                    Some(label) => marker.label(label),
+                    None => marker,
+                });
+            }
+            snippets.push(snippet);
+        }
+
+        let mut group = title.elements(snippets);
 
         for footer in &self.footers {
             group = group.element(Level::from(footer.kind).message(&footer.message));

@@ -52,7 +52,11 @@ impl ModuleResolver {
                     return Err(ModuleResolveError::NotEnoughSegments);
                 };
                 import_path_segments = rest;
-                ImportKind::Specific { selected_name: last, imported_as: alias.unwrap_or(last) }
+                ImportKind::Specific {
+                    selected_name: last,
+                    imported_as: alias.unwrap_or(last),
+                    name_span: import.last_path_segment_span(),
+                }
             }
             ImportSuffix::All => ImportKind::All,
         };

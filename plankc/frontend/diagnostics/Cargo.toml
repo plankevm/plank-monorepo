@@ -9,4 +9,5 @@ workspace = true
 
 [dependencies]
 plank-core.workspace = true
+plank-source.workspace = true
 annotate-snippets.workspace = true

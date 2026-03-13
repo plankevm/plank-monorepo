@@ -18,7 +18,7 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ImportKind {
-    Specific { selected_name: StrId, imported_as: StrId },
+    Specific { selected_name: StrId, imported_as: StrId, name_span: Span<TokenIdx> },
     All,
 }
 

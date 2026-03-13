@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use plank_core::{Idx, IncIterable, IndexVec, SourceId, Span, list_of_lists::ListOfLists};
-use plank_diagnostics::{Diagnostic, DiagnosticsContext};
+use plank_core::{
+    Idx, IncIterable, IndexVec, SourceId, SourceSpan, Span, list_of_lists::ListOfLists,
+};
+use plank_diagnostics::DiagnosticsContext;
 use plank_parser::{
     PlankInterner, StrId,
     ast::{self, Statement, TopLevelDef},
@@ -29,6 +31,7 @@ struct ScopedLocal {
     name: StrId,
     id: LocalId,
     mutable: bool,
+    span: Option<Span<TokenIdx>>,
 }
 
 struct HirBuilder {
@@ -57,8 +60,16 @@ impl HirBuilder {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ScopedConst {
+    const_id: ConstId,
+    source_id: SourceId,
+    span: SourceSpan,
+    imported: bool,
+}
+
 struct BlockLowerer<'a, D: DiagnosticsContext> {
-    consts: HashMap<StrId, ConstId>,
+    consts: HashMap<StrId, ScopedConst>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
     diag_ctx: RefCell<&'a mut D>,
 
@@ -91,36 +102,63 @@ where
     ) {
         self.consts.clear();
         for &(name, const_id) in &source_consts[self.source_id] {
-            self.consts.insert(name, const_id);
+            let def = &const_defs[const_id];
+            self.consts.insert(
+                name,
+                ScopedConst {
+                    const_id,
+                    source_id: def.source_id,
+                    span: def.source_span,
+                    imported: false,
+                },
+            );
         }
         for import in &imports[self.source_id] {
+            let import_source_id = self.source_id;
+            let import_source_span = self.lexed.tokens_src_span(import.span);
             match import.kind {
-                ImportKind::Specific { selected_name, imported_as } => {
+                ImportKind::Specific { selected_name, imported_as, name_span } => {
                     let Some(const_id) = source_consts[import.target_source]
                         .iter()
                         .find_map(|&(name, const_id)| (name == selected_name).then_some(const_id))
                     else {
-                        self.error_unresolved_import(selected_name, import.span);
+                        self.error_unresolved_import(
+                            selected_name,
+                            name_span,
+                            import.target_source,
+                        );
                         continue;
                     };
-                    let Some(prev) = self.consts.insert(imported_as, const_id) else { continue };
-                    let prev_def = &const_defs[prev];
+                    let entry = ScopedConst {
+                        const_id,
+                        source_id: import_source_id,
+                        span: self.lexed.tokens_src_span(name_span),
+                        imported: true,
+                    };
+                    let Some(prev) = self.consts.insert(imported_as, entry) else { continue };
                     self.error_import_collision(
                         imported_as,
-                        import.span,
-                        prev_def.source_id,
-                        prev_def.source_span,
+                        name_span,
+                        prev.source_id,
+                        prev.span,
+                        prev.imported,
                     );
                 }
                 ImportKind::All => {
                     for &(name, const_id) in &source_consts[import.target_source] {
-                        let Some(prev) = self.consts.insert(name, const_id) else { continue };
-                        let prev_def = &const_defs[prev];
+                        let entry = ScopedConst {
+                            const_id,
+                            source_id: import_source_id,
+                            span: import_source_span,
+                            imported: true,
+                        };
+                        let Some(prev) = self.consts.insert(name, entry) else { continue };
                         self.error_import_collision(
                             name,
                             import.span,
-                            prev_def.source_id,
-                            prev_def.source_span,
+                            prev.source_id,
+                            prev.span,
+                            prev.imported,
                         );
                     }
                 }
@@ -141,22 +179,21 @@ where
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(
-        &mut self,
-        name: StrId,
-        mutable: bool,
-        shadow_check: Option<Span<TokenIdx>>,
-    ) -> LocalId {
-        if let Some(span) = shadow_check {
-            if TypeId::resolve_primitive(name).is_some() {
-                self.error_shadowing_primitive_type(name, span);
-            } else if Builtin::from_str_id(name).is_some() {
-                self.error_shadowing_builtin(name, span);
-            }
+    fn alloc_local(&mut self, name: StrId, mutable: bool, span: Span<TokenIdx>) -> LocalId {
+        if TypeId::resolve_primitive(name).is_some() {
+            self.error_shadowing_primitive_type(name, span);
+        } else if Builtin::from_str_id(name).is_some() {
+            self.error_shadowing_builtin(name, span);
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable });
+        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable, span: Some(span) });
+        id
+    }
+
+    fn alloc_anonymous_local(&mut self, name: StrId) -> LocalId {
+        let id = self.next_local_id.get_and_inc();
+        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable: false, span: None });
         id
     }
 
@@ -237,7 +274,7 @@ where
             }
         }
 
-        let inner_local = self.alloc_local(name, false, None);
+        let inner_local = self.alloc_anonymous_local(name);
         self.captures_buf.push(CaptureInfo { outer_local, inner_local });
         Some(inner_local)
     }
@@ -268,8 +305,8 @@ where
             return Expr::LocalRef(capture_local);
         }
 
-        if let Some(&const_id) = self.consts.get(&name) {
-            return Expr::ConstRef(const_id);
+        if let Some(entry) = self.consts.get(&name) {
+            return Expr::ConstRef(entry.const_id);
         }
 
         self.error_unresolved_identifier(name, span);
@@ -281,12 +318,18 @@ where
             ast::Expr::Ident { name, span } => self.resolve_name(name, span),
             ast::Expr::Block(block) => self.lower_scope(block),
             ast::Expr::BoolLiteral(b) => Expr::Bool(b),
-            ast::Expr::NumLiteral { negative, id } => {
+            ast::Expr::NumLiteral { negative, id, span } => {
                 let limbs = &self.num_lit_limbs[id];
-                let value = plank_core::bigint::limbs_to_u256(limbs, negative)
-                    .expect("number literal out of range");
-                let big_num_id = self.big_nums.intern(value);
-                Expr::BigNum(big_num_id)
+                match plank_core::bigint::limbs_to_u256(limbs, negative) {
+                    Some(value) => {
+                        let big_num_id = self.big_nums.intern(value);
+                        Expr::BigNum(big_num_id)
+                    }
+                    None => {
+                        self.error_number_out_of_range(span);
+                        Expr::Error
+                    }
+                }
             }
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
@@ -368,7 +411,7 @@ where
     }
 
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
-        self.alloc_local(param.name, false, Some(param.name_span()))
+        self.alloc_local(param.name, false, param.name_span())
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
@@ -465,7 +508,7 @@ where
                 let type_local = let_stmt.type_expr().map(|t| self.lower_expr_to_local(t));
                 let value = self.lower_expr(let_stmt.value());
                 let local_id =
-                    self.alloc_local(let_stmt.name, let_stmt.mutable, Some(let_stmt.name_span));
+                    self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
                 self.emit(Instruction::Set { local: local_id, expr: value });
                 if let Some(type_local) = type_local {
                     self.emit(Instruction::AssertType { value: local_id, of_type: type_local });
@@ -488,7 +531,11 @@ where
                     return;
                 };
                 if !entry.mutable {
-                    self.error_assignment_to_immutable(name, span);
+                    self.error_assignment_to_immutable(
+                        name,
+                        span,
+                        entry.span.expect("named locals always have a span"),
+                    );
                     return;
                 }
                 let target = entry.id;
@@ -497,7 +544,8 @@ where
             }
             Statement::While(while_stmt) => {
                 if while_stmt.inline {
-                    todo!("inline while not yet supported");
+                    self.error_not_yet_implemented("inline while", while_stmt.node().span());
+                    return;
                 }
                 let (condition_block, condition) = self.create_sub_block_with(|lowerer| {
                     lowerer.lower_expr_to_local(while_stmt.condition())
@@ -554,10 +602,10 @@ pub fn lower(
             lowerer.reset_scope();
             match def {
                 TopLevelDef::Const(const_def) => {
-                    let id = lowerer.consts[&const_def.name];
+                    let id = lowerer.consts[&const_def.name].const_id;
                     let hir_def = &mut consts[id];
                     hir_def.result =
-                        lowerer.alloc_local(const_def.name, false, Some(const_def.name_span()));
+                        lowerer.alloc_local(const_def.name, false, const_def.name_span());
                     hir_def.body = lowerer.create_sub_block(|l| {
                         if let Some(type_expr) = const_def.r#type {
                             let type_local = l.lower_expr_to_local(type_expr);
@@ -593,6 +641,7 @@ pub fn lower(
                         run = Some((lowerer.lower_body_to_block(run_def.body()), span));
                     }
                 }
+                // already handled in build_file_scope
                 TopLevelDef::Import(_) => {}
             }
         }
@@ -644,21 +693,13 @@ fn register_consts(
                     result: LocalId::ZERO,
                 });
                 if let Some(prev) = seen.insert(const_def.name, const_id) {
-                    let diagnostic = Diagnostic::error(format!(
-                        "duplicate definition of {}",
-                        &interner[const_def.name]
-                    ))
-                    .primary(
+                    diagnostics::error_duplicate_const(
+                        &interner[const_def.name],
                         id,
                         source_span,
-                        format!("{} redefined here", &interner[const_def.name]),
-                    )
-                    .secondary(
-                        consts[prev].source_id,
-                        consts[prev].source_span,
-                        "previously defined here",
+                        &consts[prev],
+                        diag_ctx,
                     );
-                    diag_ctx.emit(diagnostic);
                 } else {
                     list.push((const_def.name, const_id));
                 }

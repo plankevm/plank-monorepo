@@ -25,22 +25,21 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Expr {
-    // References
     ConstRef(ConstId),
     LocalRef(LocalId),
     FnDef(FnDefId),
-    // Literals
+
     Bool(bool),
     Void,
     BigNum(BigNumId),
     Type(TypeId),
-    // Compound expressions
+
     Call { callee: LocalId, args: CallArgsId },
     BuiltinCall { builtin: Builtin, args: CallArgsId },
     Member { object: LocalId, member: StrId },
     StructLit { ty: LocalId, fields: FieldsId },
     StructDef(StructDefId),
-    // Error
+
     Error,
 }
 

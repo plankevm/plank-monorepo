@@ -19,7 +19,7 @@ pub enum Expr<'cst> {
     Block(BlockExpr<'cst>),
     ComptimeBlock(BlockExpr<'cst>),
     BoolLiteral(bool),
-    NumLiteral { negative: bool, id: NumLitId },
+    NumLiteral { negative: bool, id: NumLitId, span: Span<TokenIdx> },
     Ident { name: StrId, span: Span<TokenIdx> },
 }
 
@@ -51,7 +51,9 @@ impl<'cst> Expr<'cst> {
                 NodeKind::Block => Expr::Block(BlockExpr { view }),
                 NodeKind::ComptimeBlock => Expr::ComptimeBlock(BlockExpr { view }),
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral(value),
-                NodeKind::NumLiteral { negative, id } => Expr::NumLiteral { negative, id },
+                NodeKind::NumLiteral { negative, id } => {
+                    Expr::NumLiteral { negative, id, span: view.span() }
+                }
                 NodeKind::Identifier { ident } => Expr::Ident { name: ident, span: view.span() },
                 _ => return None,
             };
