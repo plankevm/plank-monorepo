@@ -87,6 +87,22 @@ impl<I: Idx> DenseIndexSet<I> {
         added
     }
 
+    /// Adds all elements from `other` into this set.
+    ///
+    /// Returns `true` if any elements were added.
+    pub fn union_with(&mut self, other: &Self) -> bool {
+        if other.inner.len() > self.inner.len() {
+            self.inner.resize(other.inner.len(), 0);
+        }
+        let mut changed = false;
+        for i in 0..other.inner.len() {
+            let old = self.inner[i];
+            self.inner[i] |= other.inner[i];
+            changed |= self.inner[i] != old;
+        }
+        changed
+    }
+
     /// Removes an index from the set.
     ///
     /// Returns `true` if the index was present and removed, or `false` if it wasn't in the set.
@@ -251,5 +267,23 @@ mod tests {
         assert_eq!(set.len(), indices.len());
         let collected: Vec<u32> = set.iter().map(|i| i.get()).collect();
         assert_eq!(collected, indices);
+    }
+
+    #[test]
+    fn test_union_with() {
+        let mut a: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        a.add(TestIdx::new(1));
+        a.add(TestIdx::new(3));
+
+        let mut b: DenseIndexSet<TestIdx> = DenseIndexSet::new();
+        b.add(TestIdx::new(2));
+        b.add(TestIdx::new(3));
+        b.add(TestIdx::new(1000));
+
+        assert!(a.union_with(&b));
+        let collected: Vec<u32> = a.iter().map(|i| i.get()).collect();
+        assert_eq!(collected, [1, 2, 3, 1000]);
+
+        assert!(!a.union_with(&b));
     }
 }
