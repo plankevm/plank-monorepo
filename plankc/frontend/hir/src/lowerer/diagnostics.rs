@@ -2,7 +2,9 @@ use plank_core::{SourceId, SourceSpan, Span};
 use plank_diagnostics::{Diagnostic, DiagnosticsContext};
 use plank_parser::lexer::TokenIdx;
 
-use crate::{BlockLowerer, StrId};
+use crate::StrId;
+
+use super::BlockLowerer;
 
 impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
     pub(crate) fn emit_diagnostic(&self, diagnostic: Diagnostic) {
