@@ -1,23 +1,18 @@
-const fn const_slice_end<T>(s: &mut [T], end: usize) -> &mut [T] {
-    assert!(end <= s.len());
-    unsafe { core::slice::from_raw_parts_mut(s.as_mut_ptr(), end) }
-}
+pub const fn const_num_to_str(buf: &mut [u8; 20], mut x: u64) -> &str {
+    // Safety: 10^20 > 2^64
+    unsafe {
+        let mut i = 19;
+        buf[i] = b'0';
 
-pub const fn num_to_str(buf: &mut [u8], x: u16) -> &str {
-    if x < 10 {
-        buf[0] = (x % 10) as u8 + b'0';
-        unsafe { str::from_utf8_unchecked(const_slice_end(buf, 1)) }
-    } else if x < 100 {
-        buf[0] = (x / 10) as u8 + b'0';
-        buf[1] = (x % 10) as u8 + b'0';
-        unsafe { str::from_utf8_unchecked(const_slice_end(buf, 2)) }
-    } else if x < 1000 {
-        buf[0] = (x / 100) as u8 + b'0';
-        buf[1] = ((x / 10) % 10) as u8 + b'0';
-        buf[2] = (x % 10) as u8 + b'0';
-        unsafe { str::from_utf8_unchecked(const_slice_end(buf, 3)) }
-    } else {
-        todo!()
+        while x > 0 {
+            buf[i] = (x % 10) as u8 + b'0';
+            x /= 10;
+            i -= 1;
+        }
+
+        let ptr: *mut u8 = buf.as_mut_ptr();
+        let bytes = core::slice::from_raw_parts_mut(ptr.add(i), 20 - i);
+        str::from_utf8_unchecked(bytes)
     }
 }
 
@@ -25,8 +20,7 @@ pub const fn const_assert_eq(x: usize, y: usize) {
     if x == y {
         return;
     }
-    let mut xbuf = [0u8; 5];
-    assert!(x <= u16::MAX as usize, "not equal and left hand side not u16");
-    let xs = num_to_str(&mut xbuf, x as u16);
+    let mut xbuf = [0u8; 20];
+    let xs = const_num_to_str(&mut xbuf, x as u64);
     panic!("{}", xs);
 }

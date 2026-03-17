@@ -1,17 +1,14 @@
-use plank_core::{IndexVec, SourceId, SourceSpan, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{StrId, cst::NodeIdx};
+use plank_session::{Builtin, SourceId, SourceSpan, TypeId};
 
 pub use plank_values;
-use plank_values::TypeId;
 
-pub mod builtins;
 pub mod display;
 mod lowerer;
 
 pub use lowerer::lower;
 pub use plank_values::{BigNumId, BigNumInterner};
-
-use crate::builtins::Builtin;
 
 newtype_index! {
     pub struct ConstId;
@@ -45,33 +42,13 @@ pub enum Expr {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Instruction {
-    /// Define local, can be present on multiple branches. Indicates type unification is
-    /// allowed.
-    Set {
-        local: LocalId,
-        expr: Expr,
-    },
-    /// Mutate local. Must adhere to existing type.
-    Assign {
-        target: LocalId,
-        value: Expr,
-    },
-    AssertType {
-        value: LocalId,
-        of_type: LocalId,
-    },
+    Set { local: LocalId, expr: Expr },
+    Assign { target: LocalId, value: Expr },
+    AssertType { value: LocalId, of_type: LocalId },
     Eval(Expr),
     Return(Expr),
-    If {
-        condition: LocalId,
-        then_block: BlockId,
-        else_block: BlockId,
-    },
-    While {
-        condition_block: BlockId,
-        condition: LocalId,
-        body: BlockId,
-    },
+    If { condition: LocalId, then_block: BlockId, else_block: BlockId },
+    While { condition_block: BlockId, condition: LocalId, body: BlockId },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,11 +72,8 @@ pub struct FieldInfo {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FnDef {
-    /// Parameters & return type comptime type expressions.
     pub type_preamble: BlockId,
-    /// Function body.
     pub body: BlockId,
-    /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
 }
 
@@ -121,7 +95,6 @@ pub struct ConstDef {
 
 #[derive(Debug, Clone)]
 pub struct Hir {
-    // Entry points
     pub init: BlockId,
     pub run: Option<BlockId>,
 
@@ -132,7 +105,6 @@ pub struct Hir {
     pub fields: ListOfLists<FieldsId, FieldInfo>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
 
-    // Function definition data
     pub fns: IndexVec<FnDefId, FnDef>,
     pub fn_params: ListOfLists<FnDefId, ParamInfo>,
     pub fn_captures: ListOfLists<FnDefId, CaptureInfo>,

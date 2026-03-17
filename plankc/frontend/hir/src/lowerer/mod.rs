@@ -1,21 +1,16 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use plank_core::{
-    Idx, IncIterable, IndexVec, SourceId, SourceSpan, Span, list_of_lists::ListOfLists,
-};
-use plank_diagnostics::DiagnosticsContext;
+use plank_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists};
 use plank_parser::{
-    PlankInterner, StrId,
+    StrId,
     ast::{self, Statement, TopLevelDef},
     cst::NumLitId,
     lexer::{Lexed, TokenIdx},
 };
-use plank_source::{
-    Source,
-    project::{FileImport, ImportKind},
-};
-use plank_values::{BigNumInterner, TypeId};
+use plank_session::{Builtin, Session, SourceId, SourceSpan, TypeId};
+use plank_source::project::{FileImport, ImportKind};
+use plank_values::BigNumInterner;
 
 mod diagnostics;
 
@@ -23,7 +18,7 @@ use plank_source::ParsedProject;
 
 use crate::{
     BlockId, CallArgsId, CaptureInfo, ConstDef, ConstId, Expr, FieldInfo, FieldsId, FnDef, FnDefId,
-    Hir, Instruction, LocalId, ParamInfo, StructDef, StructDefId, builtins::Builtin,
+    Hir, Instruction, LocalId, ParamInfo, StructDef, StructDefId,
 };
 
 #[derive(Clone, Copy)]
@@ -68,10 +63,10 @@ struct ScopedConst {
     imported: bool,
 }
 
-struct BlockLowerer<'a, D: DiagnosticsContext> {
+struct BlockLowerer<'a> {
     consts: HashMap<StrId, ScopedConst>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
-    diag_ctx: RefCell<&'a mut D>,
+    session: RefCell<&'a mut Session>,
 
     big_nums: &'a mut BigNumInterner,
     builder: &'a mut HirBuilder,
@@ -87,13 +82,9 @@ struct BlockLowerer<'a, D: DiagnosticsContext> {
 
     lexed: &'a Lexed,
     source_id: SourceId,
-    interner: &'a PlankInterner,
 }
 
-impl<'a, D> BlockLowerer<'a, D>
-where
-    D: DiagnosticsContext,
-{
+impl BlockLowerer<'_> {
     fn build_file_scope(
         &mut self,
         source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
@@ -557,13 +548,8 @@ where
     }
 }
 
-pub fn lower(
-    project: &ParsedProject,
-    big_nums: &mut BigNumInterner,
-    interner: &PlankInterner,
-    diag_ctx: &mut impl DiagnosticsContext,
-) -> Hir {
-    let (mut consts, source_consts) = register_consts(&project.sources, interner, diag_ctx);
+pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &mut Session) -> Hir {
+    let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
 
     let mut builder = HirBuilder::new();
     let mut init = None;
@@ -571,8 +557,8 @@ pub fn lower(
 
     let mut lowerer = BlockLowerer {
         consts: HashMap::new(),
-        num_lit_limbs: &project.sources[SourceId::ROOT].cst.num_lit_limbs,
-        diag_ctx: RefCell::new(diag_ctx),
+        num_lit_limbs: &project.parsed_sources[SourceId::ROOT].cst.num_lit_limbs,
+        session: RefCell::new(session),
 
         big_nums,
         builder: &mut builder,
@@ -586,12 +572,11 @@ pub fn lower(
         field_buf: Vec::new(),
         captures_buf: Vec::new(),
 
-        lexed: &project.sources[SourceId::ROOT].lexed,
+        lexed: &project.parsed_sources[SourceId::ROOT].lexed,
         source_id: SourceId::ROOT,
-        interner,
     };
 
-    for (source_id, source) in project.sources.enumerate_idx() {
+    for (source_id, source) in project.parsed_sources.enumerate_idx() {
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
         lowerer.source_id = source_id;
         lowerer.lexed = &source.lexed;
@@ -641,7 +626,6 @@ pub fn lower(
                         run = Some((lowerer.lower_body_to_block(run_def.body()), span));
                     }
                 }
-                // already handled in build_file_scope
                 TopLevelDef::Import(_) => {}
             }
         }
@@ -670,9 +654,8 @@ pub fn lower(
 }
 
 fn register_consts(
-    sources: &IndexVec<SourceId, Source>,
-    interner: &PlankInterner,
-    diag_ctx: &mut impl DiagnosticsContext,
+    sources: &IndexVec<SourceId, plank_source::project::ParsedSource>,
+    session: &mut Session,
 ) -> (IndexVec<ConstId, ConstDef>, ListOfLists<SourceId, (StrId, ConstId)>) {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
     let mut source_consts: ListOfLists<SourceId, (StrId, ConstId)> = ListOfLists::new();
@@ -693,12 +676,13 @@ fn register_consts(
                     result: LocalId::ZERO,
                 });
                 if let Some(prev) = seen.insert(const_def.name, const_id) {
+                    let name = session.lookup_name(const_def.name).to_string();
                     diagnostics::error_duplicate_const(
-                        &interner[const_def.name],
+                        &name,
                         id,
                         source_span,
                         &consts[prev],
-                        diag_ctx,
+                        session,
                     );
                 } else {
                     list.push((const_def.name, const_id));

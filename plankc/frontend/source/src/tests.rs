@@ -1,5 +1,5 @@
 use crate::{FILE_EXTENSION, ModuleResolver, parse_project, source_fs::RealFs};
-use plank_parser::{error_report::ErrorCollector, interner::PlankInterner};
+use plank_session::Session;
 
 fn source_file(name: &str) -> String {
     format!("{name}.{FILE_EXTENSION}")
@@ -11,8 +11,6 @@ fn write_files(dir: &std::path::Path, files: &[(&str, &str)]) {
     }
 }
 
-/// `sources[id]` must contain the content of the file at `source_manager[id].path`
-/// for every source in the project — even when a single file imports multiple others.
 #[test]
 fn source_content_matches_source_manager_path() {
     let dir = tempfile::tempdir().unwrap();
@@ -25,21 +23,16 @@ fn source_content_matches_source_manager_path() {
         ],
     );
 
-    let mut interner = PlankInterner::default();
+    let mut session = Session::new();
     let mut modules = ModuleResolver::default();
-    modules.register(interner.intern("m"), dir.path().to_path_buf());
+    modules.register(session.intern("m"), dir.path().to_path_buf());
 
-    let mut collector = ErrorCollector::default();
-    let project = parse_project(
-        &dir.path().join(source_file("main")),
-        &modules,
-        &mut interner,
-        &mut collector,
-        &RealFs,
-    );
-    assert!(collector.errors.is_empty(), "parse errors: {:?}", collector.errors);
+    let project =
+        parse_project(&dir.path().join(source_file("main")), &modules, &mut session, &RealFs);
+    assert!(!session.has_errors(), "parse errors: {:?}", session.diagnostics());
 
-    for (id, source) in project.sources.enumerate_idx() {
+    for (id, _parsed_source) in project.parsed_sources.enumerate_idx() {
+        let source = session.get_source(id);
         let expected = std::fs::read_to_string(&source.path).unwrap();
         assert_eq!(
             source.content,

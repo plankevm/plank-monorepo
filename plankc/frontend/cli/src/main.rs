@@ -1,14 +1,10 @@
 use clap::Parser;
-use plank_hir::{BigNumInterner, display::DisplayHir, lower};
+use plank_hir::{display::DisplayHir, lower};
 use plank_mir::display::DisplayMir;
-use plank_parser::{
-    SourceId,
-    cst::display::DisplayCST,
-    error_report::{ErrorCollector, LineIndex, format_error},
-    interner::PlankInterner,
-    lexer::Lexed,
-};
+use plank_parser::cst::display::DisplayCST;
+use plank_session::{Session, SourceId};
 use plank_source::{ModuleResolver, parse_project, source_fs::RealFs};
+use plank_values::BigNumInterner;
 use sir_passes::{OPTIMIZE_HELP, PassManager, parse_optimizations_string};
 use std::path::{Path, PathBuf};
 
@@ -16,9 +12,6 @@ use std::path::{Path, PathBuf};
 #[command(name = "plank", about = "Plank compiler frontend")]
 struct Args {
     file_path: String,
-
-    #[arg(short = 'l', long = "show-lines", help = "enables line numbers in the CST output")]
-    show_lines: bool,
 
     #[arg(short = 'c', long = "show-cst", help = "show CST")]
     show_cst: bool,
@@ -53,10 +46,10 @@ fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {
 
 fn main() {
     let args = Args::parse();
-    let mut interner = PlankInterner::default();
+    let mut session = Session::new();
     let mut module_resolver = ModuleResolver::default();
     if let Some(name) = &args.module_name {
-        let name_id = interner.intern(name);
+        let name_id = session.intern(name);
         let root = match &args.module_root {
             Some(root) => PathBuf::from(root),
             None => Path::new(&args.file_path)
@@ -67,39 +60,29 @@ fn main() {
         module_resolver.register(name_id, root);
     }
     for (name, path) in &args.deps {
-        let name_id = interner.intern(name);
+        let name_id = session.intern(name);
         module_resolver.register(name_id, path.clone());
     }
 
-    let mut collector = ErrorCollector::default();
-    let project = parse_project(
-        Path::new(&args.file_path),
-        &module_resolver,
-        &mut interner,
-        &mut collector,
-        &RealFs,
-    );
+    let project =
+        parse_project(Path::new(&args.file_path), &module_resolver, &mut session, &RealFs);
 
     if args.show_cst {
-        let entry = &project.sources[SourceId::ROOT];
-        let lexed = Lexed::lex(&entry.content);
-        let display =
-            DisplayCST::new(&entry.cst, &entry.content, &lexed).show_line(args.show_lines);
+        let parsed = &project.parsed_sources[SourceId::ROOT];
+        let source = session.get_source(SourceId::ROOT);
+        let display = DisplayCST::new(&parsed.cst, &source.content, &parsed.lexed);
         println!("{}", display);
     }
 
-    if !collector.errors.is_empty() {
-        for (source_id, error) in &collector.errors {
-            let source = &project.sources[*source_id];
-            let line_index = LineIndex::new(&source.content);
-            eprintln!("{}\n", format_error(error, &source.content, &line_index));
+    if session.has_errors() {
+        for diagnostic in session.diagnostics() {
+            eprintln!("{}\n", diagnostic.render(&session));
         }
         std::process::exit(1);
     }
 
     let mut big_nums = BigNumInterner::new();
-    let mut collector = plank_diagnostics::SimpleCollector::default();
-    let hir = lower(&project, &mut big_nums, &interner, &mut collector);
+    let hir = lower(&project, &mut big_nums, &mut session);
 
     if args.show_hir {
         if args.show_mir {
@@ -107,7 +90,7 @@ fn main() {
             println!("//                            HIR                             //");
             println!("////////////////////////////////////////////////////////////////");
         }
-        print!("{}", DisplayHir::new(&hir, &big_nums, &interner));
+        print!("{}", DisplayHir::new(&hir, &big_nums, &session));
         if args.show_mir {
             println!("\n");
             println!("////////////////////////////////////////////////////////////////");
@@ -136,7 +119,6 @@ fn main() {
     let mut bytecode = Vec::with_capacity(0x6000);
     sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
 
-    // Format and print output
     print!("0x");
     for byte in bytecode {
         print!("{:02x}", byte);

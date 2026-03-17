@@ -3,13 +3,12 @@ use hashbrown::HashMap;
 use plank_parser::{
     StrId,
     ast::{Import, ImportSuffix},
-    interner::PlankInterner,
 };
+use plank_session::Session;
 use std::path::PathBuf;
 
 #[derive(Default)]
 pub struct ModuleResolver {
-    /// Maps between module name and its path.
     modules: HashMap<StrId, PathBuf>,
 }
 
@@ -26,17 +25,11 @@ impl ModuleResolver {
         }
     }
 
-    /// Resolves an import path to a file path and optional const name.
-    ///
-    /// Regular: `[module, file_seg..., const_name]` — min 3 segments
-    /// Glob:    `[module, file_seg...]` — min 2 segments
-    ///
-    /// The resolved file path is written into `path_buf`.
     pub fn resolve(
         &self,
         segments: &[StrId],
         import: Import<'_>,
-        interner: &PlankInterner,
+        session: &Session,
         import_file_path: &mut PathBuf,
     ) -> Result<ImportKind, ModuleResolveError> {
         let Some((&module_name, mut import_path_segments)) = segments.split_first() else {
@@ -63,7 +56,7 @@ impl ModuleResolver {
 
         import_file_path.clone_from(module_root);
         for &seg in import_path_segments {
-            import_file_path.push(&interner[seg]);
+            import_file_path.push(session.lookup_name(seg));
         }
         import_file_path.set_extension(FILE_EXTENSION);
 

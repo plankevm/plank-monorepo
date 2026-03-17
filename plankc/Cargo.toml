@@ -13,6 +13,7 @@ plank-core = { path = "crates/plank-core" }
 plank-test-utils = { path = "crates/plank-test-utils" }
 
 # Frontend Sub Crates
+plank-session = { path = "frontend/session" }
 plank-parser = { path = "frontend/parser" }
 plank-source = { path = "frontend/source" }
 plank-values = { path = "frontend/values" }
@@ -20,7 +21,6 @@ plank-hir = { path = "frontend/hir" }
 plank-mir = { path = "frontend/mir" }
 plank-mir-lower = { path = "frontend/mir-lower" }
 plank-hir-eval = { path = "frontend/hir-eval" }
-plank-diagnostics = { path = "frontend/diagnostics" }
 
 # Sensei IR Sub Crates
 sir-data = { path = "sir/crates/data" }

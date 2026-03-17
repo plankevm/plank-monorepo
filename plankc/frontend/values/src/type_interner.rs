@@ -1,12 +1,12 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_parser::{StrId, cst, interner::PlankInterner};
+use plank_parser::cst;
+use plank_session::{StrId, TypeId};
 use std::hash::BuildHasher;
 
 use crate::ValueId;
 
 newtype_index! {
-    pub struct TypeId;
     struct StructIdx;
 }
 
@@ -36,10 +36,51 @@ pub enum Type<'fields> {
     Struct(StructInfo<'fields>),
 }
 
+fn get_primitive_id(ty: Type<'_>) -> Result<TypeId, StructInfo<'_>> {
+    match ty {
+        Type::Void => Ok(TypeId::VOID),
+        Type::Int => Ok(TypeId::U256),
+        Type::Bool => Ok(TypeId::BOOL),
+        Type::MemoryPointer => Ok(TypeId::MEMORY_POINTER),
+        Type::Type => Ok(TypeId::TYPE),
+        Type::Function => Ok(TypeId::FUNCTION),
+        Type::Never => Ok(TypeId::NEVER),
+        Type::Struct(r#struct) => Err(r#struct),
+    }
+}
+
+const fn comptime_only_primitive(ty: TypeId) -> Result<bool, StructIdx> {
+    match ty {
+        TypeId::VOID | TypeId::U256 | TypeId::BOOL | TypeId::NEVER | TypeId::MEMORY_POINTER => {
+            Ok(false)
+        }
+        TypeId::TYPE | TypeId::FUNCTION => Ok(true),
+        _ => Err(StructIdx::new(ty.const_get() - TypeId::STRUCT_IDS_OFFSET)),
+    }
+}
+
+const fn as_type(ty: TypeId) -> Result<Type<'static>, StructIdx> {
+    match ty {
+        TypeId::VOID => Ok(Type::Void),
+        TypeId::U256 => Ok(Type::Int),
+        TypeId::BOOL => Ok(Type::Bool),
+        TypeId::MEMORY_POINTER => Ok(Type::MemoryPointer),
+        TypeId::TYPE => Ok(Type::Type),
+        TypeId::FUNCTION => Ok(Type::Function),
+        TypeId::NEVER => Ok(Type::Never),
+        _ => Err(StructIdx::new(ty.const_get() - TypeId::STRUCT_IDS_OFFSET)),
+    }
+}
+
+impl From<StructIdx> for TypeId {
+    fn from(value: StructIdx) -> Self {
+        Self::new(value.get().wrapping_add(Self::STRUCT_IDS_OFFSET))
+    }
+}
+
 #[derive(Debug)]
 pub struct TypeInterner {
     info_to_struct: HashTable<StructIdx>,
-    /// Separate struct that holds struct lookup information for ownership reason.
     storage: StructStorage,
 }
 
@@ -50,80 +91,6 @@ struct StructStorage {
     struct_field_names: ListOfLists<StructIdx, StrId>,
     index_to_struct: IndexVec<StructIdx, StructExtraInfo>,
     hasher: DefaultHashBuilder,
-}
-
-impl TypeId {
-    pub const VOID: TypeId = TypeId::new(0);
-    pub const U256: TypeId = TypeId::new(1);
-    pub const BOOL: TypeId = TypeId::new(2);
-    pub const MEMORY_POINTER: TypeId = TypeId::new(3);
-    pub const TYPE: TypeId = TypeId::new(4);
-    pub const FUNCTION: TypeId = TypeId::new(5);
-    pub const NEVER: TypeId = TypeId::new(6);
-
-    const LAST_FIXED_ID: TypeId = Self::NEVER;
-    const STRUCT_IDS_OFFSET: u32 = Self::LAST_FIXED_ID.const_get() + 1;
-
-    pub fn resolve_primitive(name: StrId) -> Option<TypeId> {
-        match name {
-            PlankInterner::VOID_TYPE_NAME => Some(TypeId::VOID),
-            PlankInterner::U256_TYPE_NAME => Some(TypeId::U256),
-            PlankInterner::BOOL_TYPE_NAME => Some(TypeId::BOOL),
-            PlankInterner::MEMPTR_TYPE_NAME => Some(TypeId::MEMORY_POINTER),
-            PlankInterner::TYPE_TYPE_NAME => Some(TypeId::TYPE),
-            PlankInterner::FUNCTION_TYPE_NAME => Some(TypeId::FUNCTION),
-            PlankInterner::NEVER_TYPE_NAME => Some(TypeId::NEVER),
-            _ => None,
-        }
-    }
-
-    fn get_primitive_id(ty: Type<'_>) -> Result<TypeId, StructInfo<'_>> {
-        match ty {
-            Type::Void => Ok(Self::VOID),
-            Type::Int => Ok(Self::U256),
-            Type::Bool => Ok(Self::BOOL),
-            Type::MemoryPointer => Ok(Self::MEMORY_POINTER),
-            Type::Type => Ok(Self::TYPE),
-            Type::Function => Ok(Self::FUNCTION),
-            Type::Never => Ok(Self::NEVER),
-            Type::Struct(r#struct) => Err(r#struct),
-        }
-    }
-
-    const fn comptime_only(self) -> Result<bool, StructIdx> {
-        match self {
-            Self::VOID | Self::U256 | Self::BOOL | Self::NEVER | Self::MEMORY_POINTER => Ok(false),
-            Self::TYPE | Self::FUNCTION => Ok(true),
-            _ => Err(StructIdx::new(self.const_get() - Self::STRUCT_IDS_OFFSET)),
-        }
-    }
-
-    const fn as_type(self) -> Result<Type<'static>, StructIdx> {
-        match self {
-            Self::VOID => Ok(Type::Void),
-            Self::U256 => Ok(Type::Int),
-            Self::BOOL => Ok(Type::Bool),
-            Self::MEMORY_POINTER => Ok(Type::MemoryPointer),
-            Self::TYPE => Ok(Type::Type),
-            Self::FUNCTION => Ok(Type::Function),
-            Self::NEVER => Ok(Type::Never),
-            _ => Err(StructIdx::new(self.const_get() - Self::STRUCT_IDS_OFFSET)),
-        }
-    }
-
-    pub const fn is_struct(self) -> bool {
-        self.0.get() > Self::LAST_FIXED_ID.0.get()
-    }
-
-    pub fn is_assignable_to(self, target: TypeId) -> bool {
-        self == target || self == TypeId::NEVER
-    }
-}
-
-impl From<StructIdx> for TypeId {
-    fn from(value: StructIdx) -> Self {
-        Self::new(value.get().wrapping_add(Self::STRUCT_IDS_OFFSET))
-    }
 }
 
 impl Default for TypeInterner {
@@ -164,7 +131,7 @@ impl TypeInterner {
     }
 
     pub fn intern(&mut self, ty: Type<'_>) -> TypeId {
-        let r#struct = match TypeId::get_primitive_id(ty) {
+        let r#struct = match get_primitive_id(ty) {
             Ok(ty) => return ty,
             Err(type_info) => type_info,
         };
@@ -201,7 +168,7 @@ impl TypeInterner {
     }
 
     pub fn lookup(&self, type_id: TypeId) -> Type<'_> {
-        let struct_idx = match type_id.as_type() {
+        let struct_idx = match as_type(type_id) {
             Ok(ty) => return ty,
             Err(struct_idx) => struct_idx,
         };
@@ -215,7 +182,7 @@ impl TypeInterner {
     }
 
     pub fn field_index_by_name(&self, type_id: TypeId, name: StrId) -> Option<u32> {
-        let struct_idx = type_id.as_type().err()?;
+        let struct_idx = as_type(type_id).err()?;
         self.storage.struct_field_names[struct_idx]
             .iter()
             .position(|&n| n == name)
@@ -241,7 +208,7 @@ impl StructStorage {
     }
 
     pub fn comptime_only(&self, ty: TypeId) -> bool {
-        let struct_idx = match ty.comptime_only() {
+        let struct_idx = match comptime_only_primitive(ty) {
             Ok(comptime_only) => return comptime_only,
             Err(struct_idx) => struct_idx,
         };

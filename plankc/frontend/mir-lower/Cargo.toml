@@ -9,15 +9,14 @@ workspace = true
 
 [dependencies]
 plank-core.workspace = true
-plank-hir.workspace = true
+plank-session.workspace = true
 plank-mir.workspace = true
 plank-values.workspace = true
 sir-data.workspace = true
 alloy-primitives.workspace = true
 
 [dev-dependencies]
-plank-parser.workspace = true
+plank-hir.workspace = true
 plank-hir-eval.workspace = true
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
-plank-diagnostics.workspace = true

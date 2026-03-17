@@ -1,7 +1,7 @@
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir};
 use plank_mir::{self as mir};
-use plank_parser::StrId;
+use plank_session::StrId;
 use plank_values::{StructInfo, Type, TypeId, TypeInterner, ValueId};
 
 use crate::{

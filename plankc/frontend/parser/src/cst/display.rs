@@ -1,7 +1,6 @@
 use crate::{
     SourceSpan,
     cst::NodeIdx,
-    error_report::LineIndex,
     lexer::{Lexed, TokenIdx},
 };
 use plank_core::{Idx, Span};
@@ -10,31 +9,16 @@ use crate::cst::ConcreteSyntaxTree;
 
 #[derive(Debug)]
 pub struct DisplayCST<'src, 'lexed, 'ast> {
-    line_index: LineIndex,
     lexed: &'lexed Lexed,
     source: &'src str,
     cst: &'ast ConcreteSyntaxTree,
-    show_line: bool,
     show_node_index: bool,
     show_token_spans: bool,
 }
 
 impl<'src, 'lexed, 'ast> DisplayCST<'src, 'lexed, 'ast> {
     pub fn new(cst: &'ast ConcreteSyntaxTree, source: &'src str, lexed: &'lexed Lexed) -> Self {
-        DisplayCST {
-            line_index: LineIndex::new(source),
-            lexed,
-            source,
-            cst,
-            show_line: false,
-            show_node_index: false,
-            show_token_spans: false,
-        }
-    }
-
-    pub fn show_line(mut self, show: bool) -> Self {
-        self.show_line = show;
-        self
+        DisplayCST { lexed, source, cst, show_node_index: false, show_token_spans: false }
     }
 
     pub fn show_node_index(mut self, show: bool) -> Self {
@@ -68,15 +52,8 @@ impl<'src, 'lexed, 'ast> DisplayCST<'src, 'lexed, 'ast> {
         indent_level: u32,
     ) -> std::fmt::Result {
         for ti in tokens.iter() {
-            let src_span = self.token_src_span(ti);
-
             Self::write_indent(f, indent_level)?;
             write!(f, "{:?}", self.token_src(ti),)?;
-            if self.show_line {
-                let (start_line, start_col) = self.line_index.line_col(src_span.start);
-                let (end_line, end_col) = self.line_index.line_col(src_span.end - 1);
-                write!(f, " {}:{}-{}:{}", start_line, start_col, end_line, end_col)?
-            }
             writeln!(f)?;
         }
         Ok(())

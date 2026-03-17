@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 plank-core.workspace = true
+plank-session.workspace = true
 plank-parser.workspace = true
 hashbrown.workspace = true
 alloy-primitives.workspace = true

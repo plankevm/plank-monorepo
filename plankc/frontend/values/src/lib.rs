@@ -14,4 +14,5 @@ impl ValueId {
 }
 
 pub use bignum_interner::{BigNumId, BigNumInterner};
-pub use type_interner::{StructInfo, Type, TypeId, TypeInterner};
+pub use plank_session::TypeId;
+pub use type_interner::{StructInfo, Type, TypeInterner};

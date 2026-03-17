@@ -1,5 +1,5 @@
 use alloy_primitives::U256;
-use plank_hir::builtins::Builtin;
+use plank_session::Builtin;
 use sir_data::{
     self as sir,
     builder::BasicBlockBuilder,

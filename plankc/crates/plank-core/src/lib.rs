@@ -6,7 +6,6 @@ pub mod index_vec;
 pub mod intern;
 pub mod list_of_lists;
 pub mod must_use;
-pub mod source;
 pub mod span;
 pub mod vec_buf;
 
@@ -15,7 +14,6 @@ pub use crate::{
     dense_index_set::DenseIndexSet,
     index::Idx,
     index_vec::{IndexVec, RelSlice, RelSliceMut},
-    source::{SourceByteOffset, SourceId, SourceSpan},
     span::{IncIterable, Span},
 };
 

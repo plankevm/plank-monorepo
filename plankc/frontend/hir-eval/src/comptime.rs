@@ -1,6 +1,6 @@
 use plank_core::{DenseIndexMap, vec_buf::VecBuf};
 use plank_hir::{self as hir, ConstDef};
-use plank_parser::StrId;
+use plank_session::StrId;
 use plank_values::{TypeId, ValueId};
 
 use crate::{Evaluator, value::Value};
@@ -224,7 +224,7 @@ impl ComptimeInterpreter {
         &mut self,
         eval: &mut Evaluator<'_>,
         object: hir::LocalId,
-        member: plank_parser::StrId,
+        member: StrId,
     ) -> Result<ValueId, ReturnValue> {
         let obj_vid = self.bindings[object];
         match eval.values.lookup(obj_vid) {

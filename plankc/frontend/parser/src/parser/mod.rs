@@ -1,13 +1,14 @@
+mod errors;
+mod token_items;
+
 use crate::{
     SourceByteOffset, SourceId, SourceSpan, StrId,
     cst::{self, *},
-    diagnostics::DiagnosticsContext,
-    interner::PlankInterner,
     lexer::*,
-    parser::token_item_iter::TokenItems,
 };
 use allocator_api2::vec::Vec;
 use plank_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
+use plank_session::Session;
 
 const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Import];
 
@@ -45,106 +46,45 @@ struct UnfinishedNode {
     last_child: Option<NodeIdx>,
 }
 
-mod token_item_iter {
-    use crate::{
-        SourceSpan,
-        lexer::{Lexed, Token, TokenIdx},
-    };
-    use plank_core::Idx;
-
-    pub(super) struct TokenItems<'a> {
-        lexed: &'a Lexed,
-        current: TokenIdx,
-        fuel: u32,
-    }
-
-    impl<'a> TokenItems<'a> {
-        const DEFAULT_FUEL: u32 = 1024;
-
-        pub(crate) fn new(lexed: &'a Lexed) -> Self {
-            TokenItems { lexed, current: TokenIdx::ZERO, fuel: Self::DEFAULT_FUEL }
-        }
-
-        #[allow(unused)]
-        pub(super) fn fuel(&self) -> u32 {
-            self.fuel
-        }
-
-        pub(super) fn lexed(&self) -> &'a Lexed {
-            self.lexed
-        }
-
-        pub(super) fn get_prev(&self) -> Option<(Token, SourceSpan)> {
-            (self.current > TokenIdx::ZERO).then(|| self.lexed.get(self.current - 1))
-        }
-
-        pub(super) fn current(&self) -> TokenIdx {
-            self.current
-        }
-
-        pub(super) fn peek(&mut self) -> (Token, SourceSpan) {
-            self.fuel =
-                self.fuel.checked_sub(1).expect("out of fuel: likely caused by infinite loop");
-            self.lexed.get(self.current)
-        }
-
-        pub(super) fn next(&mut self) -> (Token, SourceSpan) {
-            self.fuel = Self::DEFAULT_FUEL;
-            let result = self.lexed.get(self.current);
-            self.current += 1;
-            result
-        }
-    }
-}
-
-struct Parser<'a, D: DiagnosticsContext> {
-    source: &'a str,
-    nodes: IndexVec<cst::NodeIdx, cst::Node>,
-    num_lit_limbs: ListOfLists<NumLitId, u32>,
-    expected: Vec<Token>,
-    tokens: TokenItems<'a>,
-    interner: &'a mut PlankInterner,
-    diagnostics: &'a mut D,
-    source_id: SourceId,
-    last_src_span: SourceSpan,
-    last_unexpected: Option<TokenIdx>,
+pub(crate) struct Parser<'a> {
+    pub(crate) session: &'a mut Session,
+    pub(crate) source: &'a str,
+    pub(crate) nodes: IndexVec<cst::NodeIdx, cst::Node>,
+    pub(crate) num_lit_limbs: ListOfLists<NumLitId, u32>,
+    pub(crate) expected: Vec<Token>,
+    pub(crate) tokens: token_items::TokenItems<'a>,
+    pub(crate) source_id: SourceId,
+    pub(crate) last_src_span: SourceSpan,
+    pub(crate) last_unexpected: Option<TokenIdx>,
 }
 
 const LEN_TO_NODE_CAPACITY: usize = 4;
 
-impl<'a, D> Parser<'a, D>
-where
-    D: DiagnosticsContext,
-{
+impl<'a> Parser<'a> {
     const UNARY_PRIORITY: OpPriority = OpPriority(19);
     const MEMBER_PRIORITY: OpPriority = OpPriority(21);
     const FN_CALL_PRIORITY: OpPriority = OpPriority(21);
     const STRUCT_LITERAL_PRIORITY: OpPriority = OpPriority(21);
 
     fn new(
-        source: &'a str,
+        session: &'a mut Session,
         lexed: &'a Lexed,
-        interner: &'a mut PlankInterner,
-        diagnostics: &'a mut D,
+        source: &'a str,
         source_id: SourceId,
     ) -> Self {
         Parser {
+            session,
             source,
-            tokens: TokenItems::new(lexed),
+            tokens: token_items::TokenItems::new(lexed),
             nodes: IndexVec::with_capacity(lexed.len().get() as usize / LEN_TO_NODE_CAPACITY),
             num_lit_limbs: ListOfLists::new(),
             expected: Vec::with_capacity(8),
-            interner,
-            diagnostics,
             source_id,
             last_src_span: Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO),
             last_unexpected: None,
         }
     }
 
-    fn token_src(&self, token: TokenIdx) -> &'a str {
-        &self.source[self.tokens.lexed().token_src_span(token).usize_range()]
-    }
     fn assert_complete(&mut self) {
         assert!(self.eof());
         for (i, node) in self.nodes.enumerate_idx() {
@@ -162,8 +102,8 @@ where
         let ti = self.tokens.current();
         let (token, src_span) = self.tokens.next();
         self.last_src_span = src_span;
-        if token.is_lex_error() {
-            self.diagnostics.emit_lexer_error(self.source_id, token, ti, src_span);
+        if let Some(error) = token.lex_error() {
+            self.emit_lexer_error(error, ti);
         }
     }
 
@@ -173,7 +113,7 @@ where
 
     fn skip_trivia(&mut self) {
         while let token = self.current_token()
-            && (token.is_trivia() || token.is_lex_error())
+            && token.is_trivia()
         {
             self.advance();
         }
@@ -204,7 +144,7 @@ where
         }
         let (found, span) = self.tokens.peek();
         self.last_unexpected = Some(self.tokens.current());
-        self.diagnostics.emit_unexpected_token(self.source_id, found, &self.expected, span);
+        self.emit_unexpected_token(found, span);
         self.expected.clear();
     }
 
@@ -277,12 +217,7 @@ where
         if recovery_tokens.contains(&next)
             && let Some((_, prev_span)) = self.tokens.get_prev()
         {
-            self.diagnostics.emit_missing_token(
-                self.source_id,
-                expected,
-                prev_span,
-                &self.expected,
-            );
+            self.emit_missing_token(expected, prev_span);
             self.last_unexpected = Some(self.tokens.current());
             self.expected.clear();
         } else {
@@ -368,7 +303,8 @@ where
 
         self.advance();
 
-        let src = self.token_src(token_idx);
+        let span = self.tokens.token_src_span(token_idx);
+        let src = &self.source[span.usize_range()];
         let (negative, digits) = if let Some(rest) = src.strip_prefix('-') {
             (true, &rest[prefix_len..])
         } else {
@@ -437,8 +373,12 @@ where
     }
 
     fn intern(&mut self, ti: TokenIdx) -> StrId {
-        debug_assert!(self.tokens.lexed().get(ti).0 == Token::Identifier);
-        self.interner.intern(self.token_src(ti))
+        let span = self.tokens.token_src_span(ti);
+        debug_assert!(
+            matches!(self.tokens.get_prev(), Some((Token::Identifier, p_span)) if p_span == span)
+        );
+        let source = &self.source[span.usize_range()];
+        self.session.intern(source)
     }
 
     fn try_parse_ident(&mut self) -> Option<NodeIdx> {
@@ -884,12 +824,7 @@ where
                         break;
                     } else {
                         // Otherwise the `;` is missing.
-                        self.diagnostics.emit_missing_token(
-                            self.source_id,
-                            Token::Semicolon,
-                            self.last_src_span,
-                            &[Token::Semicolon],
-                        );
+                        self.emit_missing_specific(Token::Semicolon, self.last_src_span);
                         self.push_child(&mut statements_list, expr);
                     }
                 }
@@ -996,14 +931,13 @@ where
     }
 }
 
-pub fn parse<D: DiagnosticsContext>(
-    source: &str,
+pub fn parse(
+    session: &mut Session,
     lexed: &Lexed,
-    interner: &mut PlankInterner,
-    diagnostics: &mut D,
+    source: &str,
     source_id: SourceId,
 ) -> ConcreteSyntaxTree {
-    let mut parser = Parser::new(source, lexed, interner, diagnostics, source_id);
+    let mut parser = Parser::new(session, lexed, source, source_id);
 
     let file = parser.parse_file();
     assert_eq!(file, ConcreteSyntaxTree::FILE_IDX);

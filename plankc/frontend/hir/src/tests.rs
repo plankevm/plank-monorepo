@@ -1,45 +1,30 @@
 use crate::{BigNumInterner, Hir, display::DisplayHir};
-use plank_diagnostics::SimpleCollector;
-use plank_parser::{PlankInterner, error_report::ParserError};
+use plank_session::Session;
 use plank_source::ParsedProject;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 
-fn try_lower(
-    source: &str,
-) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector, ParsedProject), Vec<ParserError>>
-{
+fn try_lower(source: &str) -> (Hir, BigNumInterner, Session, ParsedProject) {
     try_lower_project(TestProject::single(source))
 }
 
-fn try_lower_project(
-    project: TestProject,
-) -> Result<(Hir, BigNumInterner, PlankInterner, SimpleCollector, ParsedProject), Vec<ParserError>>
-{
-    let mut interner = PlankInterner::default();
-    let project = project
-        .build(&mut interner)
-        .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
+fn try_lower_project(project: TestProject) -> (Hir, BigNumInterner, Session, ParsedProject) {
+    let mut session = Session::new();
+    let project = project.build(&mut session);
 
     let mut big_nums = BigNumInterner::default();
-    let mut collector = SimpleCollector::default();
-    let hir = crate::lower(&project, &mut big_nums, &interner, &mut collector);
+    let hir = crate::lower(&project, &mut big_nums, &mut session);
 
-    Ok((hir, big_nums, interner, collector, project))
+    (hir, big_nums, session, project)
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (hir, big_nums, interner, collector, _project) = match try_lower(source) {
-        Ok(values) => values,
-        Err(errors) => {
-            panic!("Expected no parse errors, got: {}\n{:#?}", errors.len(), errors);
-        }
-    };
+    let (hir, big_nums, session, _project) = try_lower(source);
     assert!(
-        collector.diagnostics().is_empty(),
+        session.diagnostics().is_empty(),
         "Expected no diagnostics for valid source, got:\n{:#?}",
-        collector.diagnostics()
+        session.diagnostics()
     );
-    let actual = format!("{}", DisplayHir::new(&hir, &big_nums, &interner));
+    let actual = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
     let expected = dedent_preserve_blank_lines(expected);
 
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
@@ -50,12 +35,11 @@ fn render_diagnostics(source: &str) -> String {
 }
 
 fn render_project_diagnostics(project: TestProject) -> String {
-    let (_hir, _big_nums, _interner, collector, project) =
-        try_lower_project(project).expect("should not have parse errors");
-    collector
+    let (_hir, _big_nums, session, _project) = try_lower_project(project);
+    session
         .diagnostics()
         .iter()
-        .map(|diagnostic| diagnostic.render(&project.sources))
+        .map(|diagnostic| diagnostic.render(&session))
         .collect::<Vec<_>>()
         .join("\n")
 }

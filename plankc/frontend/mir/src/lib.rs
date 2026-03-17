@@ -1,7 +1,7 @@
 pub mod display;
 
 use plank_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
-use plank_hir::builtins::Builtin;
+use plank_session::Builtin;
 use plank_values::{BigNumId, TypeId, TypeInterner};
 
 newtype_index! {

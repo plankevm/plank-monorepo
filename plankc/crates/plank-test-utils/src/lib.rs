@@ -1,4 +1,4 @@
-use plank_parser::{PlankInterner, error_report::ErrorCollector};
+use plank_session::Session;
 use plank_source::{
     FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project, source_fs::InMemoryFs,
 };
@@ -68,19 +68,11 @@ impl TestProject {
         self
     }
 
-    pub fn build(self, interner: &mut PlankInterner) -> Result<ParsedProject, ErrorCollector> {
+    pub fn build(self, session: &mut Session) -> ParsedProject {
         let mut module_resolver = ModuleResolver::default();
         for (name, root) in self.modules {
-            module_resolver.register(interner.intern(&name), root);
+            module_resolver.register(session.intern(&name), root);
         }
-        let mut collector = ErrorCollector::default();
-
-        let project =
-            parse_project(&self.entry_path, &module_resolver, interner, &mut collector, &self.fs);
-
-        if !collector.errors.is_empty() {
-            return Err(collector);
-        }
-        Ok(project)
+        parse_project(&self.entry_path, &module_resolver, session, &self.fs)
     }
 }

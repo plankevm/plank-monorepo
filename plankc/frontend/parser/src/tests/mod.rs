@@ -1,34 +1,23 @@
-use crate::{
-    SourceId,
-    cst::display::DisplayCST,
-    error_report::{ErrorCollector, LineIndex, format_error},
-    interner::PlankInterner,
-    lexer::Lexed,
-    parser::parse,
-};
+use crate::{cst::display::DisplayCST, lexer::Lexed, parser::parse};
+use plank_session::{Session, Source};
 use plank_test_utils::{dedent, dedent_preserve_indent};
 
 mod errorless;
 mod resiliency;
 
-fn parse_single_source(
-    source: &str,
-    interner: &mut PlankInterner,
-) -> (ErrorCollector, crate::cst::ConcreteSyntaxTree) {
+fn parse_single_source(source: &str, session: &mut Session) -> crate::cst::ConcreteSyntaxTree {
+    let source_id =
+        session.register_source(Source { path: "test.plk".into(), content: source.to_string() });
     let lexed = Lexed::lex(source);
-    let mut collector = ErrorCollector::default();
-    let cst = parse(source, &lexed, interner, &mut collector, SourceId::ROOT);
-    (collector, cst)
+    parse(session, &lexed, source, source_id)
 }
 
 pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let source = dedent(source);
-    let mut interner = PlankInterner::default();
-    let (collector, _) = parse_single_source(&source, &mut interner);
+    let mut session = Session::new();
+    let _cst = parse_single_source(&source, &mut session);
 
-    let line_index = LineIndex::new(&source);
-    let actual: Vec<String> =
-        collector.errors.iter().map(|(_, e)| format_error(e, &source, &line_index)).collect();
+    let actual: Vec<String> = session.diagnostics().iter().map(|d| d.render(&session)).collect();
 
     let expected: Vec<String> = expected_errors.iter().map(|s| dedent_preserve_indent(s)).collect();
 
@@ -38,16 +27,15 @@ pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
 }
 
 pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {
-    let mut interner = PlankInterner::default();
-    let (collector, cst) = parse_single_source(source, &mut interner);
+    let mut session = Session::new();
+    let cst = parse_single_source(source, &mut session);
 
-    if !collector.errors.is_empty() {
-        let line_index = LineIndex::new(source);
+    if session.has_errors() {
         let formatted: Vec<String> =
-            collector.errors.iter().map(|(_, e)| format_error(e, source, &line_index)).collect();
+            session.diagnostics().iter().map(|d| d.render(&session)).collect();
         panic!(
             "Expected no parser errors, but found {}:\n\n{}",
-            collector.errors.len(),
+            session.diagnostics().len(),
             formatted.join("\n\n---\n\n")
         );
     }

@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 plank-core.workspace = true
-plank-hir.workspace = true
+plank-session.workspace = true
 plank-values.workspace = true
 
 [lints]

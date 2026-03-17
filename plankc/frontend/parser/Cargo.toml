@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 plank-core.workspace = true
+plank-session.workspace = true
 
 # bumpalo = {workspace = true, features = ["allocator-api2", "collections"]}
 allocator-api2.workspace = true

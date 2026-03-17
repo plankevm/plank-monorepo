@@ -1,14 +1,16 @@
-use plank_core::{Idx, SourceByteOffset, SourceId, SourceSpan, Span};
-use plank_diagnostics::{Diagnostic, DiagnosticsContext};
+use plank_core::{Idx, Span};
 use plank_parser::lexer::TokenIdx;
-
-use crate::StrId;
+use plank_session::{Diagnostic, Session, SourceByteOffset, SourceId, SourceSpan, StrId};
 
 use super::BlockLowerer;
 
-impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
+impl BlockLowerer<'_> {
     pub(crate) fn emit_diagnostic(&self, diagnostic: Diagnostic) {
-        self.diag_ctx.borrow_mut().emit(diagnostic);
+        self.session.borrow_mut().emit_diagnostic(diagnostic);
+    }
+
+    fn lookup_name(&self, name: StrId) -> String {
+        self.session.borrow().lookup_name(name).to_string()
     }
 
     pub(crate) fn error_not_yet_implemented(&self, feature: &str, span: Span<TokenIdx>) {
@@ -23,11 +25,12 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
 
     pub(crate) fn error_unresolved_identifier(&self, name: StrId, span: Span<TokenIdx>) {
         let source_span = self.lexed.tokens_src_span(span);
-        let diagnostic = Diagnostic::error(format!(
-            "unresolved identifier '{}'",
-            &self.interner[name]
-        ))
-        .primary(self.source_id, source_span, "not found in this scope");
+        let name_str = self.lookup_name(name);
+        let diagnostic = Diagnostic::error(format!("unresolved identifier '{name_str}'")).primary(
+            self.source_id,
+            source_span,
+            "not found in this scope",
+        );
         self.emit_diagnostic(diagnostic);
     }
 
@@ -39,13 +42,12 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
     ) {
         let source_span = self.lexed.tokens_src_span(span);
         let decl_source_span = self.lexed.tokens_src_span(decl_span);
-        let diagnostic = Diagnostic::error(format!(
-            "variable '{}' was not declared mutable",
-            &self.interner[name]
-        ))
-        .primary(self.source_id, source_span, "assignment to immutable variable")
-        .secondary(self.source_id, decl_source_span, "declared here")
-        .help("consider declaring it with `let mut`");
+        let name_str = self.lookup_name(name);
+        let diagnostic =
+            Diagnostic::error(format!("variable '{name_str}' was not declared mutable"))
+                .primary(self.source_id, source_span, "assignment to immutable variable")
+                .secondary(self.source_id, decl_source_span, "declared here")
+                .help("consider declaring it with `let mut`");
         self.emit_diagnostic(diagnostic);
     }
 
@@ -107,11 +109,12 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
 
     fn error_shadowing(&self, kind: &str, name: StrId, span: Span<TokenIdx>) {
         let source_span = self.lexed.tokens_src_span(span);
-        let diagnostic = Diagnostic::error(format!(
-            "cannot shadow {kind} '{}'",
-            &self.interner[name]
-        ))
-        .primary(self.source_id, source_span, format!("is a {kind}"));
+        let name_str = self.lookup_name(name);
+        let diagnostic = Diagnostic::error(format!("cannot shadow {kind} '{name_str}'")).primary(
+            self.source_id,
+            source_span,
+            format!("is a {kind}"),
+        );
         self.emit_diagnostic(diagnostic);
     }
 
@@ -127,9 +130,9 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
 
     pub(crate) fn error_non_call_reference_to_builtin(&self, name: StrId, span: Span<TokenIdx>) {
         let source_span = self.lexed.tokens_src_span(span);
+        let name_str = self.lookup_name(name);
         let diagnostic = Diagnostic::error(format!(
-            "cannot reference built-in function '{}' as a value",
-            &self.interner[name]
+            "cannot reference built-in function '{name_str}' as a value"
         ))
         .primary(self.source_id, source_span, "must be called directly");
         self.emit_diagnostic(diagnostic);
@@ -141,7 +144,8 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
         span: Span<TokenIdx>,
         target_source: SourceId,
     ) {
-        let diagnostic = Diagnostic::error(format!("unresolved import '{}'", &self.interner[name]))
+        let name_str = self.lookup_name(name);
+        let diagnostic = Diagnostic::error(format!("unresolved import '{name_str}'"))
             .primary(self.source_id, self.lexed.tokens_src_span(span), "not found in target module")
             .secondary(
                 target_source,
@@ -168,12 +172,11 @@ impl<'a, D: DiagnosticsContext> BlockLowerer<'a, D> {
         let prev_label =
             if prev_imported { "previously imported here" } else { "previously defined here" };
         let source_span = self.lexed.tokens_src_span(import_span);
-        let diagnostic = Diagnostic::error(format!(
-            "import of '{}' conflicts with existing definition",
-            &self.interner[name]
-        ))
-        .primary(self.source_id, source_span, "conflicting import")
-        .secondary(prev_source_id, prev_source_span, prev_label);
+        let name_str = self.lookup_name(name);
+        let diagnostic =
+            Diagnostic::error(format!("import of '{name_str}' conflicts with existing definition"))
+                .primary(self.source_id, source_span, "conflicting import")
+                .secondary(prev_source_id, prev_source_span, prev_label);
         self.emit_diagnostic(diagnostic);
     }
 }
@@ -183,10 +186,10 @@ pub(super) fn error_duplicate_const(
     source_id: SourceId,
     source_span: SourceSpan,
     prev: &crate::ConstDef,
-    diag_ctx: &mut impl DiagnosticsContext,
+    session: &mut Session,
 ) {
     let diagnostic = Diagnostic::error(format!("duplicate definition of '{name}'"))
         .primary(source_id, source_span, format!("'{name}' redefined here"))
         .secondary(prev.source_id, prev.source_span, "previously defined here");
-    diag_ctx.emit(diagnostic);
+    session.emit_diagnostic(diagnostic);
 }

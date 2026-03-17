@@ -3,18 +3,18 @@ use crate::{
     StructDefId,
 };
 use plank_core::Idx;
-use plank_parser::PlankInterner;
+use plank_session::Session;
 use std::fmt::{self, Display, Formatter};
 
 pub struct DisplayHir<'a> {
     hir: &'a Hir,
     big_nums: &'a BigNumInterner,
-    interner: &'a PlankInterner,
+    session: &'a Session,
 }
 
 impl<'a> DisplayHir<'a> {
-    pub fn new(hir: &'a Hir, big_nums: &'a BigNumInterner, interner: &'a PlankInterner) -> Self {
-        Self { hir, big_nums, interner }
+    pub fn new(hir: &'a Hir, big_nums: &'a BigNumInterner, session: &'a Session) -> Self {
+        Self { hir, big_nums, session }
     }
 
     fn fmt_local(&self, f: &mut Formatter<'_>, local: LocalId) -> fmt::Result {
@@ -65,7 +65,7 @@ impl<'a> DisplayHir<'a> {
             }
             Expr::Member { object, member } => {
                 self.fmt_local(f, object)?;
-                let name = &self.interner[member];
+                let name = &self.session.lookup_name(member);
                 write!(f, ".{name}")
             }
             Expr::StructLit { ty, fields } => {
@@ -76,7 +76,7 @@ impl<'a> DisplayHir<'a> {
                     if i > 0 {
                         write!(f, ",")?;
                     }
-                    let name = &self.interner[field.name];
+                    let name = self.session.lookup_name(field.name);
                     write!(f, " {name}: ")?;
                     self.fmt_local(f, field.value)?;
                 }
@@ -133,11 +133,6 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
-            // Instruction::Comptime(block) => {
-            //     writeln!(f, "{pad}comptime {{")?;
-            //     self.fmt_block(f, block, indent + 1)?;
-            //     writeln!(f, "{pad}}}")
-            // }
             Instruction::While { condition_block, condition, body } => {
                 writeln!(f, "{pad}while {{")?;
                 writeln!(f, "{pad}    cond:")?;
@@ -162,7 +157,7 @@ impl<'a> DisplayHir<'a> {
 
     fn fmt_const(&self, f: &mut Formatter<'_>, const_id: ConstId) -> fmt::Result {
         let const_def = &self.hir.consts[const_id];
-        let const_name = &self.interner[const_def.name];
+        let const_name = self.session.lookup_name(const_def.name);
         writeln!(f, "{const_id:?} ({const_name:?}) result={:?} {{", const_def.result)?;
         self.fmt_block(f, const_def.body, 1)?;
         writeln!(f, "}}")
@@ -220,7 +215,7 @@ impl<'a> DisplayHir<'a> {
             if i > 0 {
                 write!(f, ",")?;
             }
-            let name = &self.interner[field.name];
+            let name = self.session.lookup_name(field.name);
             write!(f, " {name}: ")?;
             self.fmt_local(f, field.value)?;
         }

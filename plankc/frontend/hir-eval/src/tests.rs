@@ -1,33 +1,21 @@
-use plank_hir::BigNumInterner;
 use plank_mir::{Mir, display::DisplayMir};
-use plank_parser::{PlankInterner, error_report::ParserError};
+use plank_session::Session;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
+use plank_values::BigNumInterner;
 
-fn try_lower(source: &str) -> Result<(Mir, BigNumInterner, PlankInterner), Vec<ParserError>> {
-    let mut interner = PlankInterner::default();
-    let project = TestProject::single(source)
-        .build(&mut interner)
-        .map_err(|collector| collector.errors.into_iter().map(|(_, e)| e).collect::<Vec<_>>())?;
+fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
+    let mut session = Session::new();
+    let project = TestProject::single(source).build(&mut session);
 
     let mut big_nums = BigNumInterner::default();
-    let hir = plank_hir::lower(
-        &project,
-        &mut big_nums,
-        &interner,
-        &mut plank_diagnostics::SimpleCollector::default(),
-    );
+    let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
     let mir = crate::evaluate(&hir);
 
-    Ok((mir, big_nums, interner))
+    (mir, big_nums, session)
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (mir, big_nums, _interner) = match try_lower(source) {
-        Ok(values) => values,
-        Err(errors) => {
-            panic!("Expected no parse errors, got: {}\n{:#?}", errors.len(), errors);
-        }
-    };
+    let (mir, big_nums, _session) = try_lower(source);
     let actual = format!("{}", DisplayMir::new(&mir, &big_nums));
     let expected = dedent_preserve_blank_lines(expected);
 

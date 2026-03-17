@@ -4,9 +4,8 @@ mod builtins;
 mod tests;
 
 use plank_core::{DenseIndexMap, DenseIndexSet, Idx};
-use plank_hir::BigNumInterner;
 use plank_mir::{self as mir, Expr, Instruction, Mir};
-use plank_values::{Type, TypeId};
+use plank_values::{BigNumInterner, Type, TypeId};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},

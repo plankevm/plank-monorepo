@@ -1,6 +1,6 @@
 use annotate_snippets::{AnnotationKind, Level, Renderer, Snippet};
-use plank_core::{IndexVec, SourceId, SourceSpan};
-use plank_source::project::Source;
+
+use crate::{Session, SourceId, SourceSpan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
@@ -59,23 +59,6 @@ impl From<FooterKind> for Level<'static> {
 pub struct Footer {
     pub kind: FooterKind,
     pub message: String,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SimpleCollector {
-    diagnostics: Vec<Diagnostic>,
-}
-
-impl SimpleCollector {
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
-    }
-}
-
-impl DiagnosticsContext for SimpleCollector {
-    fn emit(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics.push(diagnostic);
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -142,15 +125,15 @@ impl Diagnostic {
         self
     }
 
-    pub fn render(&self, sources: &IndexVec<SourceId, Source>) -> String {
-        self.render_with(sources, Renderer::plain())
+    pub fn render(&self, session: &Session) -> String {
+        self.render_with(session, Renderer::plain())
     }
 
-    pub fn render_styled(&self, sources: &IndexVec<SourceId, Source>) -> String {
-        self.render_with(sources, Renderer::styled())
+    pub fn render_styled(&self, session: &Session) -> String {
+        self.render_with(session, Renderer::styled())
     }
 
-    fn render_with(&self, sources: &IndexVec<SourceId, Source>, renderer: Renderer) -> String {
+    fn render_with(&self, session: &Session, renderer: Renderer) -> String {
         let title = Level::from(self.severity).primary_title(&self.message);
 
         let mut seen_sources: Vec<SourceId> = Vec::new();
@@ -162,7 +145,7 @@ impl Diagnostic {
 
         let mut snippets: Vec<Snippet<'_, annotate_snippets::Annotation<'_>>> = Vec::new();
         for &source_id in &seen_sources {
-            let source = &sources[source_id];
+            let source = session.get_source(source_id);
             let path = source.path.to_str().expect("source path is not valid UTF-8");
             let mut snippet = Snippet::source(&source.content).path(path);
             for ann in self.annotations.iter().filter(|a| a.source_id == source_id) {
@@ -183,8 +166,4 @@ impl Diagnostic {
 
         renderer.render(&[group])
     }
-}
-
-pub trait DiagnosticsContext {
-    fn emit(&mut self, diagnostic: Diagnostic);
 }

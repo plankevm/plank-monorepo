@@ -1,15 +1,9 @@
 pub mod ast;
-pub mod builtin_names;
 pub mod cst;
-pub mod diagnostics;
-pub mod error_report;
-pub mod interner;
 pub mod lexer;
 pub mod parser;
 
-pub use interner::{PlankInterner, StrId};
-pub use plank_core::{SourceByteOffset, SourceId, SourceSpan};
-
+pub use plank_session::{SourceByteOffset, SourceId, SourceSpan, StrId};
 pub mod const_print;
 
 #[cfg(test)]

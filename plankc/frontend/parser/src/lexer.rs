@@ -1,5 +1,6 @@
+use crate::{SourceByteOffset, SourceSpan};
 use logos::{Lexer as LogosLexer, Logos};
-use plank_core::{Idx, IndexVec, SourceByteOffset, SourceSpan, Span, newtype_index};
+use plank_core::{Idx, IndexVec, Span, newtype_index};
 
 type CharsPeekable<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
 
@@ -214,6 +215,13 @@ pub enum Token {
     Eof,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ErrorToken {
+    InvalidChar,
+    MalformedIdent,
+    UnclosedBlockComment,
+}
+
 impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())
@@ -222,14 +230,22 @@ impl std::fmt::Display for Token {
 
 impl Token {
     pub const fn is_trivia(&self) -> bool {
-        matches!(self, Token::Whitespace | Token::LineComment | Token::BlockComment)
-    }
-
-    pub const fn is_lex_error(&self) -> bool {
         matches!(
             self,
-            Token::InvalidCharError | Token::MalformedIdentError | Token::UnclosedBlockCommentError
+            Token::Whitespace
+                | Token::LineComment
+                | Token::BlockComment
+                | Token::UnclosedBlockCommentError
         )
+    }
+
+    pub const fn lex_error(&self) -> Option<ErrorToken> {
+        match self {
+            Token::InvalidCharError => Some(ErrorToken::InvalidChar),
+            Token::MalformedIdentError => Some(ErrorToken::MalformedIdent),
+            Token::UnclosedBlockCommentError => Some(ErrorToken::UnclosedBlockComment),
+            _ => None,
+        }
     }
 
     pub const fn name(self) -> &'static str {

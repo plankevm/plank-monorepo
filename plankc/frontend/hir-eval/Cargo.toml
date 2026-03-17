@@ -9,9 +9,9 @@ workspace = true
 
 [dependencies]
 plank-core.workspace = true
+plank-session.workspace = true
 plank-hir.workspace = true
 plank-mir.workspace = true
-plank-parser.workspace = true
 plank-values.workspace = true
 
 hashbrown.workspace = true
@@ -19,4 +19,3 @@ hashbrown.workspace = true
 [dev-dependencies]
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
-plank-diagnostics.workspace = true

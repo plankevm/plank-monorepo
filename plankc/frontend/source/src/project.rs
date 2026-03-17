@@ -1,15 +1,14 @@
 use crate::{module::ModuleResolver, source_fs::SourceFs};
 use hashbrown::HashMap;
-use plank_core::{IndexVec, SourceId, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{
     StrId,
     ast::TopLevelDef,
     cst::ConcreteSyntaxTree,
-    diagnostics::DiagnosticsContext,
-    interner::PlankInterner,
     lexer::{Lexed, TokenIdx},
     parser::parse,
 };
+use plank_session::{Session, Source, SourceId};
 use std::path::{Path, PathBuf};
 
 newtype_index! {
@@ -30,27 +29,23 @@ pub struct FileImport {
 }
 
 #[derive(Debug)]
-pub struct Source {
-    pub path: PathBuf,
-    pub content: String,
+pub struct ParsedSource {
     pub lexed: Lexed,
     pub cst: ConcreteSyntaxTree,
 }
 
 pub struct ParsedProject {
-    pub sources: IndexVec<SourceId, Source>,
+    pub parsed_sources: IndexVec<SourceId, ParsedSource>,
     pub imports: ListOfLists<SourceId, FileImport>,
 }
 
-struct ProjectParser<'a, D: DiagnosticsContext, F: SourceFs> {
-    interner: &'a mut PlankInterner,
-    diagnostics: &'a mut D,
+struct ProjectParser<'a, F: SourceFs> {
+    session: &'a mut Session,
     fs: &'a F,
 
     module_resolver: &'a ModuleResolver,
 
-    // Need `cst` borrowed for the duration of the loop, so we use `None` until we can set it.
-    sources: IndexVec<SourceId, (PathBuf, String, Lexed, Option<ConcreteSyntaxTree>)>,
+    parsed_sources: IndexVec<SourceId, (Lexed, Option<ConcreteSyntaxTree>)>,
     file_imports: ListOfLists<SourceId, Option<FileImport>>,
     path_to_source: HashMap<PathBuf, SourceId>,
 
@@ -58,22 +53,21 @@ struct ProjectParser<'a, D: DiagnosticsContext, F: SourceFs> {
     import_resolved_path: PathBuf,
 }
 
-impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
+impl<F: SourceFs> ProjectParser<'_, F> {
     fn parse_source(&mut self, path: PathBuf) -> SourceId {
         let content = self.fs.read_to_string(&path).expect("failed to read source file");
-        let source_id = self.sources.next_idx();
+        let source_id = self.session.next_source();
         let lexed = Lexed::lex(&content);
-        let cst = parse(&content, &lexed, self.interner, self.diagnostics, source_id);
+        let cst = parse(self.session, &lexed, &content, source_id);
         let prev = self.path_to_source.insert(path.clone(), source_id);
         assert!(prev.is_none());
+        assert_eq!(self.session.register_source(Source { path, content }), source_id);
 
-        assert_eq!(self.sources.push((path, content, lexed, None)), source_id);
+        assert_eq!(self.parsed_sources.push((lexed, None)), source_id);
         let file = cst.as_file();
 
         assert_eq!(
             source_id,
-            // Reserve space for imports up front and access later via indices to avoid borrow
-            // conflicts and have imports nicely ordered in memory.
             self.file_imports.push_with(|mut imports| {
                 for def in file.iter_defs() {
                     if let TopLevelDef::Import(_) = def {
@@ -92,7 +86,7 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
             import.collect_path_segments(&mut self.segment_buf);
             let import_kind = self
                 .module_resolver
-                .resolve(&self.segment_buf, import, self.interner, &mut self.import_resolved_path)
+                .resolve(&self.segment_buf, import, self.session, &mut self.import_resolved_path)
                 .expect("todo-diagnostic: failed to resolve import");
 
             let target_path = self
@@ -113,8 +107,7 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
             assert!(prev.is_none());
         }
 
-        let prev = self.sources[source_id].3.replace(cst);
-        assert!(prev.is_none());
+        assert!(self.parsed_sources[source_id].1.replace(cst).is_none());
 
         source_id
     }
@@ -123,19 +116,17 @@ impl<D: DiagnosticsContext, F: SourceFs> ProjectParser<'_, D, F> {
 pub fn parse_project(
     entry_path: &Path,
     module_resolver: &ModuleResolver,
-    interner: &mut PlankInterner,
-    diagnostics: &mut impl DiagnosticsContext,
+    session: &mut Session,
     fs: &impl SourceFs,
 ) -> ParsedProject {
     let entry_path =
         fs.canonicalize(entry_path).expect("todo-diagnostic: failed to canonicalize entry path");
 
     let mut parser = ProjectParser {
-        interner,
-        diagnostics,
+        session,
         fs,
         module_resolver,
-        sources: IndexVec::new(),
+        parsed_sources: IndexVec::new(),
         file_imports: ListOfLists::new(),
         path_to_source: HashMap::new(),
 
@@ -143,17 +134,14 @@ pub fn parse_project(
         import_resolved_path: PathBuf::with_capacity(256),
     };
 
-    let entry = parser.parse_source(entry_path);
-    assert_eq!(entry, SourceId::ROOT);
+    assert_eq!(parser.parse_source(entry_path), SourceId::ROOT);
 
     ParsedProject {
-        sources: parser
-            .sources
+        parsed_sources: parser
+            .parsed_sources
             .raw
             .into_iter()
-            .map(|(path, content, lexed, cst)| Source {
-                path,
-                content,
+            .map(|(lexed, cst)| ParsedSource {
                 lexed,
                 cst: cst.expect("not set in `parse_source`"),
             })

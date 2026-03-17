@@ -8,13 +8,14 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+plank-session.workspace = true
 plank-parser.workspace = true
 plank-source.workspace = true
 plank-hir.workspace = true
 plank-hir-eval.workspace = true
 plank-mir.workspace = true
 plank-mir-lower.workspace = true
-plank-diagnostics.workspace = true
+plank-values.workspace = true
 sir-debug-backend.workspace = true
 sir-passes.workspace = true
 clap.workspace = true

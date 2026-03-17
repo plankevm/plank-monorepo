@@ -1,13 +1,12 @@
 [package]
-name = "plank-diagnostics"
+name = "plank-session"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
-
 [dependencies]
 plank-core.workspace = true
-plank-source.workspace = true
 annotate-snippets.workspace = true
+
+[lints]
+workspace = true
