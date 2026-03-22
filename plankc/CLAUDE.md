@@ -51,6 +51,9 @@ Do NOT add inline comments that describe *what* the code does
 (e.g., "// Parse next element"). The code should be self-documenting.
 Only add comments for non-obvious *why* decisions.
 
+Never remove existing comments unless they are made out of date by your new
+changes.
+
 ### Type Driven Development
 - Always prefer a compile-time, type-level check over a runtime check
 - Liberally use panic-triggering asserts (`assert!`, `assert_eq!`, `.unwrap()`,

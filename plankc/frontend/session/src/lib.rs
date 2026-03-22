@@ -3,10 +3,10 @@ pub mod diagnostic;
 pub mod types;
 
 pub use builtins::Builtin;
-pub use diagnostic::Diagnostic;
+pub use diagnostic::{AnnotationKind, Annotations, Claim, Diagnostic, Element, Level};
 pub use types::TypeId;
 
-use plank_core::{IndexVec, Span, intern::StringInterner, newtype_index};
+use plank_core::{Idx, IndexVec, Span, intern::StringInterner, newtype_index};
 use std::path::PathBuf;
 
 newtype_index! {
@@ -20,6 +20,7 @@ impl SourceId {
 }
 
 pub type SourceSpan = Span<SourceByteOffset>;
+pub const ZERO_SPAN: SourceSpan = Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO);
 
 #[derive(Debug, Clone)]
 pub struct Source {
@@ -73,7 +74,7 @@ impl Session {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.severity == diagnostic::Severity::Error)
+        self.diagnostics.iter().any(|d| d.is_error())
     }
 
     pub fn interner(&self) -> &plank_core::intern::StringInterner<StrId> {

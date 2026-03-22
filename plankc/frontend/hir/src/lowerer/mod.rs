@@ -123,16 +123,17 @@ impl BlockLowerer<'_> {
                     let entry = ScopedConst {
                         const_id,
                         source_id: import_source_id,
-                        span: self.lexed.tokens_src_span(name_span),
+                        span: import_source_span,
                         imported: true,
                     };
                     let Some(prev) = self.consts.insert(imported_as, entry) else { continue };
                     self.error_import_collision(
                         imported_as,
-                        name_span,
+                        import.span,
                         prev.source_id,
                         prev.span,
                         prev.imported,
+                        None,
                     );
                 }
                 ImportKind::All => {
@@ -144,12 +145,14 @@ impl BlockLowerer<'_> {
                             imported: true,
                         };
                         let Some(prev) = self.consts.insert(name, entry) else { continue };
+                        let def = &const_defs[const_id];
                         self.error_import_collision(
                             name,
                             import.span,
                             prev.source_id,
                             prev.span,
                             prev.imported,
+                            Some((def.source_id, def.source_span)),
                         );
                     }
                 }
@@ -676,13 +679,12 @@ fn register_consts(
                     result: LocalId::ZERO,
                 });
                 if let Some(prev) = seen.insert(const_def.name, const_id) {
-                    let name = session.lookup_name(const_def.name).to_string();
                     diagnostics::error_duplicate_const(
-                        &name,
+                        session,
                         id,
+                        const_def.name,
                         source_span,
                         &consts[prev],
-                        session,
                     );
                 } else {
                     list.push((const_def.name, const_id));

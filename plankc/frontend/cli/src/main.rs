@@ -76,7 +76,7 @@ fn main() {
 
     if session.has_errors() {
         for diagnostic in session.diagnostics() {
-            eprintln!("{}\n", diagnostic.render(&session));
+            eprintln!("{}\n", diagnostic.render_plain(&session));
         }
         std::process::exit(1);
     }

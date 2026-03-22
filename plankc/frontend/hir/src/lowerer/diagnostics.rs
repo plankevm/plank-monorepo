@@ -1,6 +1,8 @@
-use plank_core::{Idx, Span};
+use plank_core::Span;
 use plank_parser::lexer::TokenIdx;
-use plank_session::{Diagnostic, Session, SourceByteOffset, SourceId, SourceSpan, StrId};
+use plank_session::{
+    Annotations, Claim, Diagnostic, Element, Level, Session, SourceId, SourceSpan, StrId,
+};
 
 use super::BlockLowerer;
 
@@ -45,8 +47,11 @@ impl BlockLowerer<'_> {
         let name_str = self.lookup_name(name);
         let diagnostic =
             Diagnostic::error(format!("variable '{name_str}' was not declared mutable"))
-                .primary(self.source_id, source_span, "assignment to immutable variable")
-                .secondary(self.source_id, decl_source_span, "declared here")
+                .element(
+                    Annotations::new(self.source_id)
+                        .primary(source_span, "assignment to immutable variable")
+                        .secondary(decl_source_span, "declared here"),
+                )
                 .help("consider declaring it with `let mut`");
         self.emit_diagnostic(diagnostic);
     }
@@ -68,17 +73,11 @@ impl BlockLowerer<'_> {
     }
 
     fn error_multiple_blocks(&self, kind: &str, current: Span<TokenIdx>, previous: Span<TokenIdx>) {
-        let diagnostic = Diagnostic::error(format!("multiple {kind} blocks"))
-            .primary(
-                self.source_id,
-                self.lexed.tokens_src_span(current),
-                format!("duplicate {kind} block"),
-            )
-            .secondary(
-                self.source_id,
-                self.lexed.tokens_src_span(previous),
-                format!("previous {kind} block"),
-            );
+        let diagnostic = Diagnostic::error(format!("multiple {kind} blocks")).element(
+            Annotations::new(self.source_id)
+                .primary(self.lexed.tokens_src_span(current), format!("duplicate {kind} block"))
+                .secondary(self.lexed.tokens_src_span(previous), format!("previous {kind} block")),
+        );
         self.emit_diagnostic(diagnostic);
     }
 
@@ -91,11 +90,16 @@ impl BlockLowerer<'_> {
     }
 
     fn error_outside_entry(&self, kind: &str, span: Span<TokenIdx>) {
-        let diagnostic = Diagnostic::error(format!("{kind} not allowed here")).primary(
-            self.source_id,
-            self.lexed.tokens_src_span(span),
-            format!("only the entry file may contain {kind}"),
-        );
+        let diagnostic = Diagnostic::error(format!("`{kind}` not allowed here"))
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(span),
+                format!("only the entry file may contain `{kind}`"),
+            )
+            .add_claim(
+                Claim::new(Level::Note, "entry file")
+                    .element(Element::Origin { path: SourceId::ROOT }),
+            );
         self.emit_diagnostic(diagnostic);
     }
 
@@ -110,10 +114,10 @@ impl BlockLowerer<'_> {
     fn error_shadowing(&self, kind: &str, name: StrId, span: Span<TokenIdx>) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
-        let diagnostic = Diagnostic::error(format!("cannot shadow {kind} '{name_str}'")).primary(
+        let diagnostic = Diagnostic::error(format!("shadowing {kind}")).primary(
             self.source_id,
             source_span,
-            format!("is a {kind}"),
+            format!("'{name_str}' is a {kind}"),
         );
         self.emit_diagnostic(diagnostic);
     }
@@ -131,10 +135,9 @@ impl BlockLowerer<'_> {
     pub(crate) fn error_non_call_reference_to_builtin(&self, name: StrId, span: Span<TokenIdx>) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
-        let diagnostic = Diagnostic::error(format!(
-            "cannot reference built-in function '{name_str}' as a value"
-        ))
-        .primary(self.source_id, source_span, "must be called directly");
+        let diagnostic = Diagnostic::error("referencing built-in function as a value")
+            .primary(self.source_id, source_span, format!("'{name_str}' is a built-in function"))
+            .help("built-in functions must be called directly, wrap in a function if you wish to use it as a first-class value");
         self.emit_diagnostic(diagnostic);
     }
 
@@ -145,51 +148,85 @@ impl BlockLowerer<'_> {
         target_source: SourceId,
     ) {
         let name_str = self.lookup_name(name);
-        let diagnostic = Diagnostic::error(format!("unresolved import '{name_str}'"))
-            .primary(self.source_id, self.lexed.tokens_src_span(span), "not found in target module")
-            .secondary(
-                target_source,
-                SourceSpan::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO),
-                "target module",
+        let diagnostic = Diagnostic::error("unresolved import")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(span),
+                format!("'{name_str}' not found in target module"),
+            )
+            .add_claim(
+                Claim::new(Level::Info, format!("no definition of '{name_str}' found in file"))
+                    .element(Element::Origin { path: target_source }),
             );
         self.emit_diagnostic(diagnostic);
     }
 
     pub(crate) fn error_missing_init_block(&self) {
         let diagnostic = Diagnostic::error("missing init block")
+            .element(Element::Origin { path: SourceId::ROOT })
             .note("the entry file must contain an init block");
         self.emit_diagnostic(diagnostic);
     }
 
     pub(crate) fn error_import_collision(
         &self,
-        name: StrId,
+        colliding_name: StrId,
         import_span: Span<TokenIdx>,
         prev_source_id: SourceId,
         prev_source_span: SourceSpan,
         prev_imported: bool,
+        glob_def: Option<(SourceId, SourceSpan)>,
     ) {
-        let prev_label =
-            if prev_imported { "previously imported here" } else { "previously defined here" };
+        let name_str = self.lookup_name(colliding_name);
+        let prev_label = if prev_imported {
+            format!("'{name_str}' previously imported here")
+        } else {
+            format!("'{name_str}' previously defined here")
+        };
         let source_span = self.lexed.tokens_src_span(import_span);
-        let name_str = self.lookup_name(name);
-        let diagnostic =
-            Diagnostic::error(format!("import of '{name_str}' conflicts with existing definition"))
+        let mut diagnostic = Diagnostic::error("imported definition collision");
+        if self.source_id == prev_source_id {
+            diagnostic = diagnostic.element(
+                Annotations::new(self.source_id)
+                    .primary(source_span, "conflicting import")
+                    .secondary(prev_source_span, prev_label),
+            );
+        } else {
+            diagnostic = diagnostic
                 .primary(self.source_id, source_span, "conflicting import")
-                .secondary(prev_source_id, prev_source_span, prev_label);
+                .element(Annotations::new(prev_source_id).secondary(prev_source_span, prev_label));
+        }
+        if let Some((def_source_id, def_span)) = glob_def {
+            diagnostic = diagnostic.element(
+                Annotations::new(def_source_id)
+                    .secondary(def_span, format!("imported colliding '{name_str}'")),
+            );
+        }
         self.emit_diagnostic(diagnostic);
     }
 }
 
 pub(super) fn error_duplicate_const(
-    name: &str,
+    session: &mut Session,
     source_id: SourceId,
+    name: StrId,
     source_span: SourceSpan,
     prev: &crate::ConstDef,
-    session: &mut Session,
 ) {
-    let diagnostic = Diagnostic::error(format!("duplicate definition of '{name}'"))
-        .primary(source_id, source_span, format!("'{name}' redefined here"))
-        .secondary(prev.source_id, prev.source_span, "previously defined here");
+    let name = session.lookup_name(name);
+    let mut diagnostic = Diagnostic::error(format!("duplicate definition of '{name}'"));
+    if source_id == prev.source_id {
+        diagnostic = diagnostic.element(
+            Annotations::new(source_id)
+                .primary(source_span, format!("'{name}' redefined here"))
+                .secondary(prev.source_span, "previously defined here"),
+        );
+    } else {
+        diagnostic =
+            diagnostic.primary(source_id, source_span, format!("'{name}' redefined here")).element(
+                Annotations::new(prev.source_id)
+                    .secondary(prev.source_span, "previously defined here"),
+            );
+    }
     session.emit_diagnostic(diagnostic);
 }

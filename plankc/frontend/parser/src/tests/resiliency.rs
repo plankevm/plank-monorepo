@@ -1,5 +1,104 @@
 use crate::tests::assert_parser_errors;
 
+// ==============================================================================
+// Lexer error diagnostics
+// ==============================================================================
+
+#[test]
+fn test_lexer_error_invalid_char() {
+    assert_parser_errors(
+        r#"
+            run { @; }
+        "#,
+        &[
+            r#"
+            error: invalid character
+             --> test.plk:1:7
+              |
+            1 | run { @; }
+              |       ^ '@' is not part of any valid syntax construct
+            "#,
+            r#"
+            error: unexpected `;`
+             --> test.plk:1:8
+              |
+            1 | run { @; }
+              |        ^ unexpected `;`, expected `}`
+            "#,
+        ],
+    );
+}
+
+#[test]
+fn test_lexer_error_malformed_ident() {
+    assert_parser_errors(
+        r#"
+            run { 0x__; }
+        "#,
+        &[
+            r#"
+            error: malformed number literal or identifier
+             --> test.plk:1:7
+              |
+            1 | run { 0x__; }
+              |       ^^^^ not a valid identifier or literal
+              |
+              = help: identifiers must begin with an ASCII letter or '_'
+              = help: decimal literals may only contain digits 0-9 and '_'
+              = help: hex literals must begin with '0x' and may only contain 0-9, A-F, a-f and '_'
+              = help: binary literals must begin with '0b' and may only contain 0, 1 and '_'
+            "#,
+            r#"
+            error: unexpected `;`
+             --> test.plk:1:11
+              |
+            1 | run { 0x__; }
+              |           ^ unexpected `;`, expected `}`
+            "#,
+        ],
+    );
+}
+
+#[test]
+fn test_lexer_error_unclosed_block_comment() {
+    assert_parser_errors(
+        r#"
+            /* no end
+        "#,
+        &[r#"
+            error: unclosed block comment
+             --> test.plk:1:1
+              |
+            1 | /* no end
+              | ^^^^^^^^^ missing closing `*/`
+        "#],
+    );
+}
+
+#[test]
+fn test_lexer_error_nested_unclosed_block_comment() {
+    assert_parser_errors(
+        r#"
+            /* no end /* wait but I closed ?
+             */
+        "#,
+        &[r#"
+            error: unclosed block comment
+             --> test.plk:1:1
+              |
+            1 | / /* no end /* wait but I closed ?
+            2 | | */
+              | |__^ missing closing `*/`
+              |
+              = help: plank supports nested block comments so each `/*` needs its own `*/`
+        "#],
+    );
+}
+
+// ==============================================================================
+// Parser error diagnostics
+// ==============================================================================
+
 #[test]
 fn test_missing_semicolon() {
     assert_parser_errors(

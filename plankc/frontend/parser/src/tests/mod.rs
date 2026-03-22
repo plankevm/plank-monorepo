@@ -17,7 +17,8 @@ pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let mut session = Session::new();
     let _cst = parse_single_source(&source, &mut session);
 
-    let actual: Vec<String> = session.diagnostics().iter().map(|d| d.render(&session)).collect();
+    let actual: Vec<String> =
+        session.diagnostics().iter().map(|d| d.render_plain(&session).trim().to_string()).collect();
 
     let expected: Vec<String> = expected_errors.iter().map(|s| dedent_preserve_indent(s)).collect();
 
@@ -32,7 +33,7 @@ pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {
 
     if session.has_errors() {
         let formatted: Vec<String> =
-            session.diagnostics().iter().map(|d| d.render(&session)).collect();
+            session.diagnostics().iter().map(|d| d.render_plain(&session)).collect();
         panic!(
             "Expected no parser errors, but found {}:\n\n{}",
             session.diagnostics().len(),

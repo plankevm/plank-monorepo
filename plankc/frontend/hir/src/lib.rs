@@ -72,8 +72,11 @@ pub struct FieldInfo {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FnDef {
+    /// Parameters & return type comptime type expressions.
     pub type_preamble: BlockId,
+    /// Function body.
     pub body: BlockId,
+    /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
 }
 

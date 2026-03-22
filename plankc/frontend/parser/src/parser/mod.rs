@@ -102,7 +102,9 @@ impl<'a> Parser<'a> {
         let ti = self.tokens.current();
         let (token, src_span) = self.tokens.next();
         self.last_src_span = src_span;
-        if let Some(error) = token.lex_error() {
+        if let Some(error) = token.lex_error()
+            && self.last_unexpected != Some(ti)
+        {
             self.emit_lexer_error(error, ti);
         }
     }
@@ -187,15 +189,15 @@ impl<'a> Parser<'a> {
                     self.expected.len() > expected_checkpoint,
                     "parse_fn must use check/eat before returning false to populate expected tokens"
                 );
-                if !self.check(terminator) && !self.eof() {
-                    if !error_emitted {
-                        self.emit_unexpected();
-                        error_emitted = true;
-                    }
-                    self.advance();
-                } else {
+                if self.check(terminator) || self.eof() {
                     break;
                 }
+
+                if !error_emitted {
+                    self.emit_unexpected();
+                    error_emitted = true;
+                }
+                self.advance();
             }
         }
         self.expect(terminator);
