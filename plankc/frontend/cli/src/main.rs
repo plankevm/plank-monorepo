@@ -3,7 +3,9 @@ use plank_hir::{display::DisplayHir, lower};
 use plank_mir::display::DisplayMir;
 use plank_parser::cst::display::DisplayCST;
 use plank_session::{Session, SourceId};
-use plank_source::{ModuleResolver, parse_project, source_fs::RealFs};
+use plank_source::{
+    ModuleResolver, diagnostics::error_duplicate_module, parse_project, source_fs::RealFs,
+};
 use plank_values::BigNumInterner;
 use sir_passes::{OPTIMIZE_HELP, PassManager, parse_optimizations_string};
 use std::path::{Path, PathBuf};
@@ -57,11 +59,16 @@ fn main() {
                 .expect("file path has no parent directory")
                 .to_path_buf(),
         };
-        module_resolver.register(name_id, root);
+        module_resolver.register(name_id, root).expect("first module is by definition unique");
     }
     for (name, path) in &args.deps {
         let name_id = session.intern(name);
-        module_resolver.register(name_id, path.clone());
+        match module_resolver.register(name_id, path.clone()) {
+            Ok(_) => (),
+            Err(_) => {
+                error_duplicate_module(&mut session, name_id);
+            }
+        }
     }
 
     let project =

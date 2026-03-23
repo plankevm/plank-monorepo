@@ -1,5 +1,6 @@
 use crate::{FILE_EXTENSION, ModuleResolver, parse_project, source_fs::RealFs};
 use plank_session::Session;
+use std::path::PathBuf;
 
 fn source_file(name: &str) -> String {
     format!("{name}.{FILE_EXTENSION}")
@@ -25,7 +26,9 @@ fn source_content_matches_source_manager_path() {
 
     let mut session = Session::new();
     let mut modules = ModuleResolver::default();
-    modules.register(session.intern("m"), dir.path().to_path_buf());
+    modules
+        .register(session.intern("m"), dir.path().to_path_buf())
+        .expect("module registration succeeds");
 
     let project =
         parse_project(&dir.path().join(source_file("main")), &modules, &mut session, &RealFs);
@@ -41,4 +44,13 @@ fn source_content_matches_source_manager_path() {
             source.path.display()
         );
     }
+}
+
+#[test]
+fn duplicate_module_registration_is_error() {
+    let mut session = Session::new();
+    let mut modules = ModuleResolver::default();
+    let name_id = session.intern("m");
+    modules.register(name_id, PathBuf::from("/a")).expect("first registration succeeds");
+    modules.register(name_id, PathBuf::from("/b")).expect_err("duplicate registration should fail");
 }

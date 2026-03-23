@@ -71,7 +71,9 @@ impl TestProject {
     pub fn build(self, session: &mut Session) -> ParsedProject {
         let mut module_resolver = ModuleResolver::default();
         for (name, root) in self.modules {
-            module_resolver.register(session.intern(&name), root);
+            module_resolver
+                .register(session.intern(&name), root)
+                .expect("module registration succeeds");
         }
         parse_project(&self.entry_path, &module_resolver, session, &self.fs)
     }

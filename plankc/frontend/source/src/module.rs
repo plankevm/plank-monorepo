@@ -18,10 +18,14 @@ pub enum ModuleResolveError {
     NotEnoughSegments,
 }
 
+#[derive(Debug)]
+pub struct ModuleRegisterError;
+
 impl ModuleResolver {
-    pub fn register(&mut self, name: StrId, root: PathBuf) {
-        if self.modules.insert(name, root).is_some() {
-            todo!("diagnostic: duplicate module");
+    pub fn register(&mut self, name: StrId, root: PathBuf) -> Result<(), ModuleRegisterError> {
+        match self.modules.insert(name, root) {
+            Some(_) => Err(ModuleRegisterError),
+            None => Ok(()),
         }
     }
 
