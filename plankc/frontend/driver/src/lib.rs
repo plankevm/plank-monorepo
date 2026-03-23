@@ -69,3 +69,28 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         bytecode
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plank_source::source_fs::InMemoryFs;
+
+    #[test]
+    fn duplicate_dep_emits_diagnostic() {
+        let mut fs = InMemoryFs::new();
+        fs.add_file("main.plk", "init {}\n".to_string());
+
+        let mut driver = Driver::new(&fs);
+        driver.register_dep("m", PathBuf::from("/a"));
+        driver.register_dep("m", PathBuf::from("/b"));
+
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: duplicate module 'm'
+  |
+  = help: each module name can only be registered once"
+        );
+    }
+}

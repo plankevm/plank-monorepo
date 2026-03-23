@@ -1228,6 +1228,7 @@ dependencies = [
  "plank-session",
  "plank-source",
  "plank-values",
+ "pretty_assertions",
  "sir-debug-backend",
  "sir-passes",
 ]
