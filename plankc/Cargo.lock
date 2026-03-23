@@ -1199,15 +1199,12 @@ name = "plank"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "plank-driver",
  "plank-hir",
- "plank-hir-eval",
  "plank-mir",
- "plank-mir-lower",
  "plank-parser",
  "plank-session",
  "plank-source",
- "plank-values",
- "sir-debug-backend",
  "sir-passes",
 ]
 
@@ -1218,6 +1215,21 @@ dependencies = [
  "allocator-api2",
  "alloy-primitives",
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "plank-driver"
+version = "0.1.0"
+dependencies = [
+ "plank-hir",
+ "plank-hir-eval",
+ "plank-mir",
+ "plank-mir-lower",
+ "plank-session",
+ "plank-source",
+ "plank-values",
+ "sir-debug-backend",
+ "sir-passes",
 ]
 
 [[package]]

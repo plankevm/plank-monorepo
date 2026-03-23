@@ -21,6 +21,7 @@ plank-hir = { path = "frontend/hir" }
 plank-mir = { path = "frontend/mir" }
 plank-mir-lower = { path = "frontend/mir-lower" }
 plank-hir-eval = { path = "frontend/hir-eval" }
+plank-driver = { path = "frontend/driver" }
 
 # Sensei IR Sub Crates
 sir-data = { path = "sir/crates/data" }
