@@ -110,4 +110,47 @@ error: could not open entry file
   = note: 'nonexistent.plk': file not found in InMemoryFs: nonexistent.plk"
         );
     }
+
+    #[test]
+    fn unknown_module_import_emits_diagnostic() {
+        let mut fs = InMemoryFs::new();
+        fs.add_file("main.plk", "import foo::bar::Baz;\ninit {}\n".to_string());
+
+        let mut driver = Driver::new(&fs);
+        driver.load_project(Path::new("main.plk"));
+
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: unresolved import
+ --> main.plk:1:8
+  |
+1 | import foo::bar::Baz;
+  |        ^^^ unknown module 'foo'"
+        );
+    }
+
+    #[test]
+    fn imported_file_not_found_emits_diagnostic() {
+        let mut fs = InMemoryFs::new();
+        fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
+
+        let mut driver = Driver::new(&fs);
+        driver.register_main_module("m", PathBuf::from("/lib"));
+        driver.load_project(Path::new("main.plk"));
+
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: could not open imported file
+ --> main.plk:1:8
+  |
+1 | import m::a::b::X;
+  |        ^^^^^^^ imported here
+  |
+  = note: '/lib/a/b.plk': file not found in InMemoryFs: /lib/a/b.plk"
+        );
+    }
 }

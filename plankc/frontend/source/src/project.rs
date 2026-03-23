@@ -1,10 +1,15 @@
 use crate::{
-    diagnostics::error_failed_to_canonicalize_entry, module::ModuleResolver, source_fs::SourceFs,
+    diagnostics::{
+        error_failed_to_canonicalize_entry, error_failed_to_canonicalize_import,
+        error_failed_to_read_source, error_failed_to_resolve_import,
+    },
+    module::{ModuleResolveError, ModuleResolver},
+    source_fs::SourceFs,
 };
 use hashbrown::HashMap;
 use plank_core::{IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{
-    StrId,
+    SourceSpan, StrId,
     ast::TopLevelDef,
     cst::ConcreteSyntaxTree,
     lexer::{Lexed, TokenIdx},
@@ -56,8 +61,14 @@ struct ProjectParser<'a, F: SourceFs> {
 }
 
 impl<F: SourceFs> ProjectParser<'_, F> {
-    fn parse_source(&mut self, path: PathBuf) -> SourceId {
-        let content = self.fs.read_to_string(&path).expect("failed to read source file");
+    fn parse_source(&mut self, path: PathBuf) -> Option<SourceId> {
+        let content = match self.fs.read_to_string(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                error_failed_to_read_source(self.session, &path, &err);
+                return None;
+            }
+        };
         let source_id = self.session.next_source();
         let lexed = Lexed::lex(&content);
         let cst = parse(self.session, &lexed, &content, source_id);
@@ -86,19 +97,45 @@ impl<F: SourceFs> ProjectParser<'_, F> {
         for (i, import) in imports.enumerate() {
             self.segment_buf.clear();
             import.collect_path_segments(&mut self.segment_buf);
-            let import_kind = self
-                .module_resolver
-                .resolve(&self.segment_buf, import, self.session, &mut self.import_resolved_path)
-                .expect("todo-diagnostic: failed to resolve import");
+            let import_kind = match self.module_resolver.resolve(
+                &self.segment_buf,
+                import,
+                self.session,
+                &mut self.import_resolved_path,
+            ) {
+                Ok(import_kind) => import_kind,
+                Err(err) => {
+                    let span = match &err {
+                        ModuleResolveError::UnknownModule(_) => import.first_path_segment_span(),
+                        ModuleResolveError::NotEnoughSegments => import.node().span(),
+                    };
+                    let source_span = self.source_span(source_id, span);
+                    error_failed_to_resolve_import(self.session, source_id, source_span, &err);
+                    continue;
+                }
+            };
 
-            let target_path = self
-                .fs
-                .canonicalize(&self.import_resolved_path)
-                .expect("todo-diagnostic: failed to canonicalize import path");
+            let target_path = match self.fs.canonicalize(&self.import_resolved_path) {
+                Ok(path) => path,
+                Err(err) => {
+                    let source_span = self.source_span(source_id, import.file_path_span());
+                    error_failed_to_canonicalize_import(
+                        self.session,
+                        source_id,
+                        source_span,
+                        &self.import_resolved_path,
+                        &err,
+                    );
+                    continue;
+                }
+            };
 
             let target_source = match self.path_to_source.get(&target_path) {
                 Some(&id) => id,
-                None => self.parse_source(target_path),
+                None => match self.parse_source(target_path) {
+                    Some(id) => id,
+                    None => continue,
+                },
             };
 
             let prev = self.file_imports[source_id][i].replace(FileImport {
@@ -111,7 +148,11 @@ impl<F: SourceFs> ProjectParser<'_, F> {
 
         assert!(self.parsed_sources[source_id].1.replace(cst).is_none());
 
-        source_id
+        Some(source_id)
+    }
+
+    fn source_span(&self, source_id: SourceId, span: Span<TokenIdx>) -> SourceSpan {
+        self.parsed_sources[source_id].0.tokens_src_span(span)
     }
 }
 
@@ -141,7 +182,7 @@ pub fn parse_project(
         import_resolved_path: PathBuf::with_capacity(256),
     };
 
-    assert_eq!(parser.parse_source(entry_path), SourceId::ROOT);
+    assert_eq!(parser.parse_source(entry_path)?, SourceId::ROOT);
 
     Some(ParsedProject {
         parsed_sources: parser
@@ -159,8 +200,7 @@ pub fn parse_project(
                 parser.file_imports.total_values(),
             );
             for file_imports in parser.file_imports.iter() {
-                imports
-                    .push_iter(file_imports.iter().map(|&i| i.expect("not set in `parse_source`")));
+                imports.push_iter(file_imports.iter().filter_map(|&i| i));
             }
             imports
         },

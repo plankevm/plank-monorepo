@@ -135,6 +135,39 @@ impl<'cst> Import<'cst> {
             .expect("import must have at least one path segment")
             .span()
     }
+
+    pub fn first_path_segment_span(&self) -> Span<TokenIdx> {
+        self.path_node
+            .children()
+            .find(|c| c.ident().is_some())
+            .expect("import must have at least one path segment")
+            .span()
+    }
+
+    /// Span covering the segments that determine the imported file path.
+    /// For `import m::sub::X;` this is `m::sub`, for `import m::sub::*;` this is `m::sub`.
+    pub fn file_path_span(&self) -> Span<TokenIdx> {
+        let mut idents = self.path_node.children().filter(|c| c.ident().is_some());
+        let first = idents.next().expect("import must have at least one path segment");
+        match self.suffix {
+            ImportSuffix::All => {
+                let mut last = first;
+                for ident in idents {
+                    last = ident;
+                }
+                Span::new(first.span().start, last.span().end)
+            }
+            ImportSuffix::As(_) => {
+                let mut second_to_last = first;
+                let mut last = first;
+                for ident in idents {
+                    second_to_last = last;
+                    last = ident;
+                }
+                Span::new(first.span().start, second_to_last.span().end)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
