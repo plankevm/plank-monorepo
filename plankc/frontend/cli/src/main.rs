@@ -66,7 +66,7 @@ fn main() {
         Some(project) => project,
         None => {
             for diagnostic in driver.session.diagnostics() {
-                eprintln!("{}\n", diagnostic.render_plain(&driver.session));
+                eprintln!("{}\n", diagnostic.render_styled(&driver.session));
             }
             std::process::exit(1);
         }
@@ -81,7 +81,7 @@ fn main() {
 
     if driver.session.has_errors() {
         for diagnostic in driver.session.diagnostics() {
-            eprintln!("{}\n", diagnostic.render_plain(&driver.session));
+            eprintln!("{}\n", diagnostic.render_styled(&driver.session));
         }
         std::process::exit(1);
     }
