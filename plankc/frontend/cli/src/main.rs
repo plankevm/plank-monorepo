@@ -62,7 +62,15 @@ fn main() {
         driver.register_dep(name, path.clone());
     }
 
-    let project = driver.load_project(Path::new(&args.file_path));
+    let project = match driver.load_project(Path::new(&args.file_path)) {
+        Some(project) => project,
+        None => {
+            for diagnostic in driver.session.diagnostics() {
+                eprintln!("{}\n", diagnostic.render_plain(&driver.session));
+            }
+            std::process::exit(1);
+        }
+    };
 
     if args.show_cst {
         let parsed = &project.parsed_sources[SourceId::ROOT];

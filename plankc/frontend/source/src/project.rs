@@ -1,4 +1,6 @@
-use crate::{module::ModuleResolver, source_fs::SourceFs};
+use crate::{
+    diagnostics::error_failed_to_canonicalize_entry, module::ModuleResolver, source_fs::SourceFs,
+};
 use hashbrown::HashMap;
 use plank_core::{IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{
@@ -118,9 +120,14 @@ pub fn parse_project(
     module_resolver: &ModuleResolver,
     session: &mut Session,
     fs: &impl SourceFs,
-) -> ParsedProject {
-    let entry_path =
-        fs.canonicalize(entry_path).expect("todo-diagnostic: failed to canonicalize entry path");
+) -> Option<ParsedProject> {
+    let entry_path = match fs.canonicalize(entry_path) {
+        Ok(path) => path,
+        Err(err) => {
+            error_failed_to_canonicalize_entry(session, entry_path, &err);
+            return None;
+        }
+    };
 
     let mut parser = ProjectParser {
         session,
@@ -136,7 +143,7 @@ pub fn parse_project(
 
     assert_eq!(parser.parse_source(entry_path), SourceId::ROOT);
 
-    ParsedProject {
+    Some(ParsedProject {
         parsed_sources: parser
             .parsed_sources
             .raw
@@ -157,5 +164,5 @@ pub fn parse_project(
             }
             imports
         },
-    }
+    })
 }

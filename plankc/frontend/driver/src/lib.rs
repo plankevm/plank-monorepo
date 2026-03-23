@@ -36,7 +36,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         }
     }
 
-    pub fn load_project(&mut self, entry_path: &Path) -> ParsedProject {
+    pub fn load_project(&mut self, entry_path: &Path) -> Option<ParsedProject> {
         parse_project(entry_path, &self.module_resolver, &mut self.session, self.fs)
     }
 
@@ -91,6 +91,23 @@ mod tests {
 error: duplicate module 'm'
   |
   = help: each module name can only be registered once"
+        );
+    }
+
+    #[test]
+    fn missing_entry_file_emits_diagnostic() {
+        let fs = InMemoryFs::new();
+        let mut driver = Driver::new(&fs);
+        let result = driver.load_project(Path::new("nonexistent.plk"));
+
+        assert!(result.is_none());
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: could not open entry file
+  |
+  = note: 'nonexistent.plk': file not found in InMemoryFs: nonexistent.plk"
         );
     }
 }

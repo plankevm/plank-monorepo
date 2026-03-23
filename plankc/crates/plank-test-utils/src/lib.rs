@@ -76,5 +76,6 @@ impl TestProject {
                 .expect("module registration succeeds");
         }
         parse_project(&self.entry_path, &module_resolver, session, &self.fs)
+            .expect("project should be parsed")
     }
 }
