@@ -17,6 +17,7 @@ plank-mir-lower.workspace = true
 plank-values.workspace = true
 sir-debug-backend.workspace = true
 sir-passes.workspace = true
+anstream.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true

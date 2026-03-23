@@ -24,16 +24,18 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         }
     }
 
-    pub fn register_main_module(&mut self, name: &str, root: PathBuf) {
-        let name_id = self.session.intern(name);
-        self.module_resolver.register(name_id, root).expect("first module is by definition unique");
-    }
-
-    pub fn register_dep(&mut self, name: &str, root: PathBuf) {
+    pub fn register_module(&mut self, name: &str, root: PathBuf) {
         let name_id = self.session.intern(name);
         if self.module_resolver.register(name_id, root).is_err() {
             diagnostics::error_duplicate_module(&mut self.session, name_id);
         }
+    }
+
+    pub fn render_diagnostics_and_exit(&self) -> ! {
+        for diagnostic in self.session.diagnostics() {
+            anstream::eprintln!("{}\n", diagnostic.render_styled(&self.session));
+        }
+        std::process::exit(1)
     }
 
     pub fn load_project(&mut self, entry_path: &Path) -> Option<ParsedProject> {
@@ -81,8 +83,8 @@ mod tests {
         fs.add_file("main.plk", "init {}\n".to_string());
 
         let mut driver = Driver::new(&fs);
-        driver.register_dep("m", PathBuf::from("/a"));
-        driver.register_dep("m", PathBuf::from("/b"));
+        driver.register_module("m", PathBuf::from("/a"));
+        driver.register_module("m", PathBuf::from("/b"));
 
         let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
         pretty_assertions::assert_str_eq!(
@@ -137,7 +139,7 @@ error: unresolved import
         fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
 
         let mut driver = Driver::new(&fs);
-        driver.register_main_module("m", PathBuf::from("/lib"));
+        driver.register_module("m", PathBuf::from("/lib"));
         driver.load_project(Path::new("main.plk"));
 
         let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);

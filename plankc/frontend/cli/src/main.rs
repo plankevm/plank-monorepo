@@ -56,19 +56,16 @@ fn main() {
                 .expect("file path has no parent directory")
                 .to_path_buf(),
         };
-        driver.register_main_module(name, root);
+        driver.register_module(name, root);
     }
     for (name, path) in &args.deps {
-        driver.register_dep(name, path.clone());
+        driver.register_module(name, path.clone());
     }
 
     let project = match driver.load_project(Path::new(&args.file_path)) {
         Some(project) => project,
         None => {
-            for diagnostic in driver.session.diagnostics() {
-                eprintln!("{}\n", diagnostic.render_styled(&driver.session));
-            }
-            std::process::exit(1);
+            driver.render_diagnostics_and_exit();
         }
     };
 
@@ -80,10 +77,7 @@ fn main() {
     }
 
     if driver.session.has_errors() {
-        for diagnostic in driver.session.diagnostics() {
-            eprintln!("{}\n", diagnostic.render_styled(&driver.session));
-        }
-        std::process::exit(1);
+        driver.render_diagnostics_and_exit();
     }
 
     let hir = driver.lower_hir(&project);
@@ -101,6 +95,10 @@ fn main() {
             println!("//                            MIR                             //");
             println!("////////////////////////////////////////////////////////////////");
         }
+    }
+
+    if driver.session.has_errors() {
+        driver.render_diagnostics_and_exit();
     }
 
     let mir = driver.evaluate_hir(&hir);

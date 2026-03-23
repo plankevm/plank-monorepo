@@ -1221,6 +1221,7 @@ dependencies = [
 name = "plank-driver"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "plank-hir",
  "plank-hir-eval",
  "plank-mir",

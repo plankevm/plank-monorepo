@@ -42,6 +42,7 @@ logos = "0.16.0"
 chumsky = "0.11.1"
 index_vec = "0.1.4"
 clap = { version = "4.5", features = ["derive"] }
+anstream = "1"
 
 # Testing
 pretty_assertions = "1.4.1"
