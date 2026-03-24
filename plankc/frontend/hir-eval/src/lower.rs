@@ -363,7 +363,8 @@ impl FunctionLowerScope {
                     self.field_names_buf.push(field.name);
                 }
                 let ty = eval.types.intern(Type::Struct(StructInfo {
-                    source: struct_def.source,
+                    source_id: struct_def.source_id,
+                    source_span: struct_def.source_span,
                     type_index,
                     field_names: &self.field_names_buf,
                     field_types: &self.field_types_buf,

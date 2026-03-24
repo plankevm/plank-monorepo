@@ -167,7 +167,8 @@ impl ComptimeInterpreter {
                 }
 
                 eval.types.intern(plank_values::Type::Struct(plank_values::StructInfo {
-                    source: struct_def.source,
+                    source_id: struct_def.source_id,
+                    source_span: struct_def.source_span,
                     type_index: type_index_vid,
                     field_types: types,
                     field_names: names,

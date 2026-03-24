@@ -15,8 +15,8 @@ fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (mir, big_nums, _session) = try_lower(source);
-    let actual = format!("{}", DisplayMir::new(&mir, &big_nums));
+    let (mir, big_nums, session) = try_lower(source);
+    let actual = format!("{}", DisplayMir::new(&mir, &big_nums, &session));
     let expected = dedent_preserve_blank_lines(expected);
 
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
@@ -270,10 +270,10 @@ fn test_fn_struct_return() {
         "#,
         r#"
         ==== Functions ====
-        @fn0(%0: u256, %1: u256) -> struct#0 {
+        @fn0(%0: u256, %1: u256) -> Pair {
             %2 : u256 = %1
             %3 : u256 = %0
-            %4 : struct#0 = struct#0 { %2, %3 }
+            %4 : Pair = Pair { %2, %3 }
             ret %4
         }
 
@@ -281,7 +281,7 @@ fn test_fn_struct_return() {
         @fn1() -> never {
             %0 : u256 = 3
             %1 : u256 = 4
-            %2 : struct#0 = call @fn0(%0, %1)
+            %2 : Pair = call @fn0(%0, %1)
             %3 : never = evm_stop()
         }
         "#,
@@ -312,17 +312,17 @@ fn test_struct_field_access() {
         @fn0() -> never {
             %0 : bool = false
             %1 : u256 = 34
-            %2 : struct#0 = struct#0 { %1, %0 }
-            %3 : struct#0 = %2
+            %2 : Pair = Pair { %1, %0 }
+            %3 : Pair = %2
             %4 : u256 = %3.0
-            %5 : struct#0 = %2
+            %5 : Pair = %2
             %6 : bool = %5.1
             %7 : u256 = 49
             %8 : bool = true
-            %9 : struct#0 = struct#0 { %7, %8 }
-            %10 : struct#0 = %9
+            %9 : Pair = Pair { %7, %8 }
+            %10 : Pair = %9
             %11 : u256 = %10.0
-            %12 : struct#0 = %9
+            %12 : Pair = %9
             %13 : bool = %12.1
             %14 : never = evm_stop()
         }

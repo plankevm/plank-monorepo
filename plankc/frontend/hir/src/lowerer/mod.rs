@@ -363,7 +363,8 @@ impl BlockLowerer<'_> {
                 Expr::StructLit { ty, fields }
             }
             ast::Expr::StructDef(struct_def) => {
-                let source = struct_def.node().idx();
+                let source_id = self.source_id;
+                let source_span = self.lexed.tokens_src_span(struct_def.node().span());
                 let type_index = struct_def
                     .index_expr()
                     .map(|expr| self.lower_expr_to_local(expr))
@@ -378,8 +379,12 @@ impl BlockLowerer<'_> {
                     self.field_buf.push(FieldInfo { name: field.name, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
-                let struct_def_id =
-                    self.builder.struct_defs.push(StructDef { source, type_index, fields });
+                let struct_def_id = self.builder.struct_defs.push(StructDef {
+                    source_id,
+                    source_span,
+                    type_index,
+                    fields,
+                });
                 Expr::StructDef(struct_def_id)
             }
             ast::Expr::FnDef(fn_def) => Expr::FnDef(self.lower_fn_def(fn_def)),

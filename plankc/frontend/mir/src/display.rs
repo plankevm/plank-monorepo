@@ -1,16 +1,18 @@
 use crate::{ArgsId, BlockId, Expr, FnId, Instruction, LocalId, Mir};
 use plank_core::Idx;
+use plank_session::Session;
 use plank_values::{BigNumInterner, Type, TypeId};
 use std::fmt::{self, Display, Formatter};
 
 pub struct DisplayMir<'a> {
     mir: &'a Mir,
     big_nums: &'a BigNumInterner,
+    session: &'a Session,
 }
 
 impl<'a> DisplayMir<'a> {
-    pub fn new(mir: &'a Mir, big_nums: &'a BigNumInterner) -> Self {
-        Self { mir, big_nums }
+    pub fn new(mir: &'a Mir, big_nums: &'a BigNumInterner, session: &'a Session) -> Self {
+        Self { mir, big_nums, session }
     }
 
     fn fmt_type(&self, f: &mut Formatter<'_>, type_id: TypeId) -> fmt::Result {
@@ -22,9 +24,10 @@ impl<'a> DisplayMir<'a> {
             Type::Type => write!(f, "type"),
             Type::Function => write!(f, "function"),
             Type::Never => write!(f, "never"),
-            Type::Struct(info) => {
-                write!(f, "struct#{}", info.type_index.get())
-            }
+            Type::Struct(_) => match self.mir.types.struct_name(type_id) {
+                Some(name) => write!(f, "{}", self.session.lookup_name(name)),
+                None => write!(f, "struct#{}", type_id.get()),
+            },
         }
     }
 

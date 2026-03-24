@@ -1,5 +1,5 @@
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_parser::{StrId, cst::NodeIdx};
+use plank_parser::StrId;
 use plank_session::{Builtin, SourceId, SourceSpan, TypeId};
 
 pub use plank_values;
@@ -82,7 +82,8 @@ pub struct FnDef {
 
 #[derive(Debug, Clone, Copy)]
 pub struct StructDef {
-    pub source: NodeIdx,
+    pub source_id: SourceId,
+    pub source_span: SourceSpan,
     pub type_index: LocalId,
     pub fields: FieldsId,
 }

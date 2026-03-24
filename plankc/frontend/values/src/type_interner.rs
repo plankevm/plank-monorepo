@@ -1,7 +1,6 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_parser::cst;
-use plank_session::{StrId, TypeId};
+use plank_session::{SourceId, SourceSpan, StrId, TypeId};
 use std::hash::BuildHasher;
 
 use crate::ValueId;
@@ -10,15 +9,18 @@ newtype_index! {
     struct StructIdx;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub struct StructExtraInfo {
-    pub source: cst::NodeIdx,
+    pub source_id: SourceId,
+    pub source_span: SourceSpan,
     pub type_index: ValueId,
+    pub name: Option<StrId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StructInfo<'a> {
-    pub source: cst::NodeIdx,
+    pub source_id: SourceId,
+    pub source_span: SourceSpan,
     pub type_index: ValueId,
     pub field_types: &'a [TypeId],
     pub field_names: &'a [StrId],
@@ -148,8 +150,10 @@ impl TypeInterner {
                 let name_struct_idx =
                     self.storage.struct_field_names.push_copy_slice(r#struct.field_names);
                 let new_struct_idx = self.storage.index_to_struct.push(StructExtraInfo {
-                    source: r#struct.source,
+                    source_id: r#struct.source_id,
+                    source_span: r#struct.source_span,
                     type_index: r#struct.type_index,
+                    name: None,
                 });
 
                 for &ty in r#struct.field_types {
@@ -174,7 +178,8 @@ impl TypeInterner {
         };
         let stored = &self.storage.index_to_struct[struct_idx];
         Type::Struct(StructInfo {
-            source: stored.source,
+            source_id: stored.source_id,
+            source_span: stored.source_span,
             type_index: stored.type_index,
             field_types: &self.storage.struct_fields[struct_idx],
             field_names: &self.storage.struct_field_names[struct_idx],
@@ -188,15 +193,33 @@ impl TypeInterner {
             .position(|&n| n == name)
             .map(|i| i as u32)
     }
+
+    pub fn struct_name(&self, type_id: TypeId) -> Option<StrId> {
+        let struct_idx = as_type(type_id).err()?;
+        self.storage.index_to_struct[struct_idx].name
+    }
+
+    pub fn try_set_struct_name(&mut self, type_id: TypeId, name: StrId) -> bool {
+        let Some(struct_idx) = as_type(type_id).err() else { return false };
+        let extra = &mut self.storage.index_to_struct[struct_idx];
+        if extra.name.is_some() {
+            return false;
+        }
+        extra.name = Some(name);
+        true
+    }
 }
 
 impl StructStorage {
     fn get_info(&self, idx: StructIdx) -> StructInfo<'_> {
-        let source = self.index_to_struct[idx].source;
-        let type_index = self.index_to_struct[idx].type_index;
-        let fields = &self.struct_fields[idx];
-        let field_names = &self.struct_field_names[idx];
-        StructInfo { source, type_index, field_types: fields, field_names }
+        let stored = &self.index_to_struct[idx];
+        StructInfo {
+            source_id: stored.source_id,
+            source_span: stored.source_span,
+            type_index: stored.type_index,
+            field_types: &self.struct_fields[idx],
+            field_names: &self.struct_field_names[idx],
+        }
     }
 
     fn hash_struct_id(&self, idx: StructIdx) -> u64 {

@@ -13,7 +13,7 @@ mod value;
 #[cfg(test)]
 mod tests;
 
-use value::ValueInterner;
+use value::{Value, ValueInterner};
 
 #[derive(Clone)]
 enum ConstState {
@@ -64,6 +64,9 @@ impl<'hir> Evaluator<'hir> {
                 interpreter.reset();
                 let value_id = interpreter.eval_const(self, const_def);
                 self.const_states[const_id] = ConstState::Evaluated(value_id);
+                if let Value::Type(type_id) = self.values.lookup(value_id) {
+                    self.types.try_set_struct_name(type_id, const_def.name);
+                }
                 value_id
             }
         }

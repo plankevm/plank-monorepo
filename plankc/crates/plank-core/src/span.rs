@@ -12,7 +12,7 @@ impl IncIterable for u32 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span<T> {
     pub start: T,
     pub end: T,
