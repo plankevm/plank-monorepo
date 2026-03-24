@@ -9,7 +9,7 @@ fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
 
     let mut big_nums = BigNumInterner::default();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir = crate::evaluate(&hir);
+    let mir = crate::evaluate(&hir, &mut session);
 
     (mir, big_nums, session)
 }
@@ -20,6 +20,19 @@ fn assert_lowers_to(source: &str, expected: &str) {
     let expected = dedent_preserve_blank_lines(expected);
 
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
+}
+
+fn render_diagnostics(source: &str) -> Vec<String> {
+    let (_, _, session) = try_lower(source);
+    session.diagnostics().iter().map(|d| d.render_plain(&session)).collect()
+}
+
+fn assert_diagnostics(source: &str, expected: &[&str]) {
+    let actual = render_diagnostics(source);
+    let expected: Vec<String> =
+        expected.iter().map(|s| dedent_preserve_blank_lines(s).trim().to_string()).collect();
+    let actual: Vec<String> = actual.iter().map(|s| s.trim().to_string()).collect();
+    pretty_assertions::assert_eq!(actual, expected);
 }
 
 #[test]

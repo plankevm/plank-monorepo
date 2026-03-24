@@ -1,7 +1,7 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{SourceId, SourceSpan, StrId, TypeId};
-use std::hash::BuildHasher;
+use plank_session::{Session, SourceId, SourceSpan, StrId, TypeId};
+use std::{fmt, hash::BuildHasher};
 
 use crate::ValueId;
 
@@ -237,4 +237,35 @@ impl StructStorage {
         };
         self.comptime_only.contains(struct_idx)
     }
+}
+
+pub fn fmt_type(
+    f: &mut impl fmt::Write,
+    type_id: TypeId,
+    types: &TypeInterner,
+    session: &Session,
+) -> fmt::Result {
+    match types.lookup(type_id) {
+        Type::Void => f.write_str("void"),
+        Type::Int => f.write_str("u256"),
+        Type::Bool => f.write_str("bool"),
+        Type::MemoryPointer => f.write_str("memptr"),
+        Type::Type => f.write_str("Type"),
+        Type::Function => f.write_str("function"),
+        Type::Never => f.write_str("never"),
+        Type::Struct(info) => match types.struct_name(type_id) {
+            Some(name) => f.write_str(session.lookup_name(name)),
+            None => {
+                let (line, col) =
+                    session.offset_to_line_col(info.source_id, info.source_span.start);
+                write!(f, "struct@{line}:{col}")
+            }
+        },
+    }
+}
+
+pub fn type_name(type_id: TypeId, types: &TypeInterner, session: &Session) -> String {
+    let mut buf = String::new();
+    fmt_type(&mut buf, type_id, types, session).expect("writing to String cannot fail");
+    buf
 }

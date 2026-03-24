@@ -2,6 +2,7 @@ use hashbrown::HashMap;
 use plank_core::{IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_hir::{ConstId, Hir};
 use plank_mir::{self as mir, Mir};
+use plank_session::Session;
 use plank_values::{TypeId, TypeInterner, ValueId};
 
 use comptime::ComptimeInterpreter;
@@ -22,8 +23,9 @@ enum ConstState {
     Evaluated(ValueId),
 }
 
-pub(crate) struct Evaluator<'hir> {
-    pub hir: &'hir Hir,
+pub(crate) struct Evaluator<'a> {
+    pub hir: &'a Hir,
+    pub session: &'a mut Session,
     pub values: ValueInterner,
     pub types: TypeInterner,
     const_states: IndexVec<ConstId, ConstState>,
@@ -34,11 +36,12 @@ pub(crate) struct Evaluator<'hir> {
     pub fn_cache: HashMap<ValueId, mir::FnId>,
 }
 
-impl<'hir> Evaluator<'hir> {
-    fn new(hir: &'hir Hir) -> Self {
+impl<'a> Evaluator<'a> {
+    fn new(hir: &'a Hir, session: &'a mut Session) -> Self {
         let const_count = hir.consts.len();
         Self {
             hir,
+            session,
             values: ValueInterner::new(),
             types: TypeInterner::new(),
             const_states: index_vec![ConstState::NotEvaluated; const_count],
@@ -73,8 +76,8 @@ impl<'hir> Evaluator<'hir> {
     }
 }
 
-pub fn evaluate(hir: &Hir) -> Mir {
-    let mut eval = Evaluator::new(hir);
+pub fn evaluate(hir: &Hir, session: &mut Session) -> Mir {
+    let mut eval = Evaluator::new(hir, session);
     let mut interpreter = ComptimeInterpreter::new();
 
     for const_id in hir.consts.iter_idx() {

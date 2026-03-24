@@ -46,8 +46,8 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         lower(project, &mut self.big_nums, &mut self.session)
     }
 
-    pub fn evaluate_hir(&self, hir: &plank_hir::Hir) -> plank_mir::Mir {
-        plank_hir_eval::evaluate(hir)
+    pub fn evaluate_hir(&mut self, hir: &plank_hir::Hir) -> plank_mir::Mir {
+        plank_hir_eval::evaluate(hir, &mut self.session)
     }
 
     pub fn emit_bytecode(
