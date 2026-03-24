@@ -3,12 +3,11 @@ use std::cell::RefCell;
 use hashbrown::HashMap;
 use plank_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists};
 use plank_parser::{
-    StrId,
     ast::{self, Statement, TopLevelDef},
     cst::NumLitId,
     lexer::{Lexed, TokenIdx},
 };
-use plank_session::{Builtin, Session, SourceId, SourceSpan, TypeId};
+use plank_session::{Builtin, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::BigNumInterner;
 

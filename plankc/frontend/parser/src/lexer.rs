@@ -1,6 +1,6 @@
-use crate::{SourceByteOffset, SourceSpan};
 use logos::{Lexer as LogosLexer, Logos};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
+use plank_session::{SourceByteOffset, SourceSpan};
 
 type CharsPeekable<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
 

@@ -4,10 +4,10 @@ pub use expr::*;
 use plank_core::Span;
 
 use crate::{
-    StrId,
     cst::{NodeKind, NodeView},
     lexer::TokenIdx,
 };
+use plank_session::StrId;
 
 #[derive(Debug, Clone, Copy)]
 pub struct InitBlock<'cst> {

@@ -1,9 +1,9 @@
 use crate::{
-    SourceSpan,
     cst::NodeIdx,
     lexer::{Lexed, TokenIdx},
 };
 use plank_core::{Idx, Span};
+use plank_session::SourceSpan;
 
 use crate::cst::ConcreteSyntaxTree;
 

@@ -1,9 +1,6 @@
-use std::path::Path;
-
-use plank_parser::{SourceId, SourceSpan};
-use plank_session::{Diagnostic, Session, StrId};
-
 use crate::module::ModuleResolveError;
+use plank_session::{Diagnostic, Session, SourceId, SourceSpan, StrId};
+use std::path::Path;
 
 pub fn error_duplicate_module(session: &mut Session, name: StrId) {
     let name = session.lookup_name(name);

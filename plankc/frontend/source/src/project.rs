@@ -9,13 +9,12 @@ use crate::{
 use hashbrown::HashMap;
 use plank_core::{IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{
-    SourceSpan, StrId,
     ast::TopLevelDef,
     cst::ConcreteSyntaxTree,
     lexer::{Lexed, TokenIdx},
     parser::parse,
 };
-use plank_session::{Session, Source, SourceId};
+use plank_session::{Session, Source, SourceId, SourceSpan, StrId};
 use std::path::{Path, PathBuf};
 
 newtype_index! {

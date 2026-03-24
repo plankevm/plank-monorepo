@@ -1,10 +1,10 @@
 use plank_core::Span;
 
 use crate::{
-    StrId,
     cst::{BinaryOp, NodeKind, NodeView, NumLitId, UnaryOp},
     lexer::TokenIdx,
 };
+use plank_session::StrId;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Expr<'cst> {

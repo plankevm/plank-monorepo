@@ -1,6 +1,5 @@
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_parser::StrId;
-use plank_session::{Builtin, SourceId, SourceSpan, TypeId};
+use plank_session::{Builtin, SourceId, SourceSpan, StrId, TypeId};
 
 pub use plank_values;
 

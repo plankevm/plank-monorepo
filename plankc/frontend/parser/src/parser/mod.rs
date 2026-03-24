@@ -2,13 +2,12 @@ mod errors;
 mod token_items;
 
 use crate::{
-    SourceByteOffset, SourceId, SourceSpan, StrId,
     cst::{self, *},
     lexer::*,
 };
 use allocator_api2::vec::Vec;
 use plank_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
-use plank_session::Session;
+use plank_session::{Session, SourceByteOffset, SourceId, SourceSpan, StrId};
 
 const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Import];
 

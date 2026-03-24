@@ -1,8 +1,6 @@
-use crate::{
-    SourceSpan,
-    lexer::{Lexed, Token, TokenIdx},
-};
+use crate::lexer::{Lexed, Token, TokenIdx};
 use plank_core::Idx;
+use plank_session::SourceSpan;
 
 pub(crate) struct TokenItems<'a> {
     lexed: &'a Lexed,

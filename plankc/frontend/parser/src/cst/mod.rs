@@ -1,5 +1,6 @@
-use crate::{StrId, ast::File, const_print::const_assert_eq, lexer::TokenIdx};
+use crate::{ast::File, const_print::const_assert_eq, lexer::TokenIdx};
 use plank_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_session::StrId;
 
 pub mod display;
 
