@@ -76,10 +76,6 @@ fn main() {
         println!("{}", display);
     }
 
-    if driver.session.has_errors() {
-        driver.render_diagnostics_and_exit();
-    }
-
     let hir = driver.lower_hir(&project);
 
     if args.show_hir {
@@ -97,14 +93,14 @@ fn main() {
         }
     }
 
-    if driver.session.has_errors() {
-        driver.render_diagnostics_and_exit();
-    }
-
     let mir = driver.evaluate_hir(&hir);
 
     if args.show_mir {
         print!("{}", DisplayMir::new(&mir, &driver.big_nums));
+    }
+
+    if driver.session.has_errors() {
+        driver.render_diagnostics_and_exit();
     }
 
     let bytecode = driver.emit_bytecode(&mir, args.already_ssa, args.optimize.as_deref());
