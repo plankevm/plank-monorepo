@@ -5,6 +5,7 @@ use sir_data::{BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, Loca
 use crate::static_memory_layout::StaticMemoryLayout;
 
 mod operations;
+mod stack_scheduler;
 mod static_memory_layout;
 
 const ASM_BYTES_CAPACITY: usize = 20_000;

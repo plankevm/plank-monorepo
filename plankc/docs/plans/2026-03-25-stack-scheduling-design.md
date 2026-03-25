@@ -108,13 +108,17 @@ sir/crates/debug-backend/src/
 │
 └── stack_scheduler/
     ├── mod.rs                  Orchestrates the pipeline
-    ├── liveness.rs             Per-local next-use analysis
-    ├── sufficiency.rs          Pebble game analysis (stub)
-    ├── reorder.rs              Operation reordering (stub: identity)
-    ├── machine.rs              Abstract stack machine
-    ├── shuffler.rs             Permutation minimization (stub: naive SWAPs)
+    ├── stack_machine.rs        Abstract stack machine
     ├── eviction.rs             Eviction policy trait + next-use implementation
-    └── peephole.rs             Post-pass cleanup (stub: passthrough)
+    ├── analyses/
+    │   ├── mod.rs
+    │   ├── liveness.rs         Per-local next-use analysis
+    │   └── spill.rs            Pebble game analysis (stub)
+    └── transforms/
+        ├── mod.rs
+        ├── reorder.rs          Operation reordering (stub: identity)
+        ├── shuffle.rs          Permutation minimization (stub: naive SWAPs)
+        └── peephole.rs         Post-pass cleanup (stub: passthrough)
 ```
 
 ### Orchestration
