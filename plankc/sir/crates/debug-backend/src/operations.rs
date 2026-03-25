@@ -1,4 +1,4 @@
-use crate::Translator;
+use crate::{TranslationPhase, Translator};
 use sir_assembler::{AsmReference, op};
 use sir_data::{LocalId, operation::*};
 
@@ -184,7 +184,7 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
             }
             OperationKind::RuntimeStartOffset => {
                 debug_assert!(
-                    self.translator.translating_init_code,
+                    self.translator.mark_map.phase() == TranslationPhase::Init,
                     "unexpected runtime_start_offset in run code"
                 );
                 self.translator.asm.push_reference(AsmReference::new_direct(
@@ -194,7 +194,7 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
             }
             OperationKind::InitEndOffset => {
                 debug_assert!(
-                    self.translator.translating_init_code,
+                    self.translator.mark_map.phase() == TranslationPhase::Init,
                     "unexpected init_end_offset in run code"
                 );
                 self.translator.asm.push_reference(AsmReference::new_direct(

@@ -15,6 +15,12 @@ const ASM_SECTIONS_CAPACITY: usize = 512;
 const DEFAULT_SPILL_THRESHOLD: u8 = 16;
 const DEFAULT_CLEANUP_THRESHOLD: u16 = 512;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TranslationPhase {
+    Init,
+    Runtime,
+}
+
 pub(crate) struct MarkMap {
     init_basic_block_marks_start: MarkId,
     run_basic_block_marks_start: MarkId,
@@ -22,6 +28,7 @@ pub(crate) struct MarkMap {
     runtime_start: MarkId,
     initcode_end: MarkId,
     next_mark_id: MarkId,
+    phase: TranslationPhase,
 }
 
 impl MarkMap {
@@ -47,23 +54,41 @@ impl MarkMap {
             runtime_start,
             initcode_end: bytecode_end,
             next_mark_id,
+            phase: TranslationPhase::Init,
         }
+    }
+
+    pub fn set_phase(&mut self, phase: TranslationPhase) {
+        self.phase = phase;
+    }
+
+    pub fn phase(&self) -> TranslationPhase {
+        self.phase
     }
 
     pub fn allocate_mark(&mut self) -> MarkId {
         self.next_mark_id.get_and_inc()
     }
 
-    pub fn get_init_bb_mark(&self, bb_id: BasicBlockId) -> MarkId {
-        self.init_basic_block_marks_start + bb_id.get()
-    }
-
-    pub fn get_run_bb_mark(&self, bb_id: BasicBlockId) -> MarkId {
-        self.run_basic_block_marks_start + bb_id.get()
+    pub fn get_bb_mark(&self, bb_id: BasicBlockId) -> MarkId {
+        match self.phase {
+            TranslationPhase::Init => self.init_basic_block_marks_start + bb_id.get(),
+            TranslationPhase::Runtime => self.run_basic_block_marks_start + bb_id.get(),
+        }
     }
 
     pub fn get_data_mark(&self, data_id: DataId) -> MarkId {
         self.data_marks_start + data_id.get()
+    }
+
+    pub fn push_code_offset(&self, asm: &mut Assembler, offset_mark: MarkId) {
+        let mark_ref = match self.phase {
+            TranslationPhase::Init => MarkReference::Direct(offset_mark),
+            TranslationPhase::Runtime => {
+                MarkReference::Delta(Span::new(self.runtime_start, offset_mark))
+            }
+        };
+        asm.push_reference(AsmReference { mark_ref, set_size: None, pushed: true });
     }
 }
 
@@ -73,7 +98,6 @@ pub(crate) struct Translator<'ir> {
     pub mark_map: MarkMap,
     pub translated_bbs: DenseIndexSet<BasicBlockId>,
     pub bbs_to_be_translated: Vec<(FunctionId, BasicBlockId)>,
-    pub translating_init_code: bool,
     pub asm: Assembler,
     pub stack_machine: StackMachine,
 }
@@ -96,12 +120,7 @@ impl<'ir> Translator<'ir> {
 
     // TODO: remove once stack_machine fully handles control flow emission
     pub(crate) fn emit_code_offset_push(&mut self, offset_mark: MarkId) {
-        let mark_ref = if self.translating_init_code {
-            MarkReference::Direct(offset_mark)
-        } else {
-            MarkReference::Delta(Span::new(self.mark_map.runtime_start, offset_mark))
-        };
-        self.asm.push_reference(AsmReference { mark_ref, set_size: None, pushed: true });
+        self.mark_map.push_code_offset(&mut self.asm, offset_mark);
     }
 
     fn new(ir: &'ir EthIRProgram, spill_threshold: u8, cleanup_threshold: u16) -> Self {
@@ -117,17 +136,12 @@ impl<'ir> Translator<'ir> {
             bbs_to_be_translated,
             mark_map,
             translated_bbs,
-            translating_init_code: true,
             stack_machine: StackMachine::new(spill_threshold, cleanup_threshold),
         }
     }
 
     fn get_bb_mark(&self, bb_id: BasicBlockId) -> MarkId {
-        if self.translating_init_code {
-            self.mark_map.get_init_bb_mark(bb_id)
-        } else {
-            self.mark_map.get_run_bb_mark(bb_id)
-        }
+        self.mark_map.get_bb_mark(bb_id)
     }
 
     fn emit_undefined_behavior_error(&mut self) {
@@ -208,14 +222,13 @@ impl<'ir> Translator<'ir> {
 pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) {
     let mut translator = Translator::new(ir, DEFAULT_SPILL_THRESHOLD, DEFAULT_CLEANUP_THRESHOLD);
 
-    translator.translating_init_code = true;
     translator.memory_layout.emit_init_free_pointer(&mut translator.asm);
     translator.translate_basic_blocks_from_entry_point(ir.init_entry);
 
     // Ignore translated basic blocks because we want separate PCs for functions and basic
     // blocks in run.
     translator.translated_bbs.clear();
-    translator.translating_init_code = false;
+    translator.mark_map.set_phase(TranslationPhase::Runtime);
     translator.asm.push_mark(translator.mark_map.runtime_start);
     if let Some(main_entry) = ir.main_entry {
         translator.translate_basic_blocks_from_entry_point(main_entry);

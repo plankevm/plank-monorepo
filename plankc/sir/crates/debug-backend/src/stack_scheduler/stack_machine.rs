@@ -10,10 +10,13 @@
  * The next block's inputs [x, y, z] maps: x=e (top), y=g, z=c (bottom)
  */
 
-use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference};
-use sir_data::{BasicBlockId, EthIRProgram, LargeConstId, LocalId, Operation, Span};
+use sir_assembler::{AsmReference, Assembler, MarkId};
+use sir_data::{BasicBlockId, EthIRProgram, LargeConstId, LocalId, Operation};
 
-use crate::{MarkMap, operations::op_kind_to_direct_op, static_memory_layout::StaticMemoryLayout};
+use crate::{
+    MarkMap, TranslationPhase, operations::op_kind_to_direct_op,
+    static_memory_layout::StaticMemoryLayout,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StackEntry {
@@ -48,12 +51,11 @@ impl StackMachine {
         asm: &mut Assembler,
         mark_map: &MarkMap,
         memory_layout: &StaticMemoryLayout,
-        translating_init_code: bool,
     ) {
         let block = ir.block(bb_id);
         self.remap_block_inputs(block.inputs());
         for op_view in block.operations() {
-            self.dispatch_operation(op_view.op(), asm, ir, mark_map, translating_init_code);
+            self.dispatch_operation(op_view.op(), asm, ir, mark_map);
         }
         self.build_output_stack(block.outputs(), asm, memory_layout);
     }
@@ -155,27 +157,12 @@ impl StackMachine {
         todo!("aggressive cleanup: SWAP+POP to remove buried non-outputs")
     }
 
-    fn emit_code_offset_push(
-        asm: &mut Assembler,
-        mark_map: &MarkMap,
-        translating_init_code: bool,
-        offset_mark: MarkId,
-    ) {
-        let mark_ref = if translating_init_code {
-            MarkReference::Direct(offset_mark)
-        } else {
-            MarkReference::Delta(Span::new(mark_map.runtime_start, offset_mark))
-        };
-        asm.push_reference(AsmReference { mark_ref, set_size: None, pushed: true });
-    }
-
     fn dispatch_operation(
         &mut self,
         op: Operation,
         asm: &mut Assembler,
         ir: &EthIRProgram,
         mark_map: &MarkMap,
-        translating_init_code: bool,
     ) {
         match op {
             // Nullary: 0 in, 1 out, single opcode
@@ -267,16 +254,22 @@ impl StackMachine {
             }
             Operation::SetDataOffset(data) => {
                 let data_mark = mark_map.get_data_mark(data.segment_id);
-                Self::emit_code_offset_push(asm, mark_map, translating_init_code, data_mark);
+                mark_map.push_code_offset(asm, data_mark);
                 self.stack.push(StackEntry::Label(data_mark));
             }
             Operation::RuntimeStartOffset(_) => {
-                debug_assert!(translating_init_code, "unexpected runtime_start_offset in run code");
+                debug_assert!(
+                    mark_map.phase() == TranslationPhase::Init,
+                    "unexpected runtime_start_offset in run code"
+                );
                 asm.push_reference(AsmReference::new_direct(mark_map.runtime_start));
                 self.stack.push(StackEntry::Label(mark_map.runtime_start));
             }
             Operation::InitEndOffset(_) => {
-                debug_assert!(translating_init_code, "unexpected init_end_offset in run code");
+                debug_assert!(
+                    mark_map.phase() == TranslationPhase::Init,
+                    "unexpected init_end_offset in run code"
+                );
                 asm.push_reference(AsmReference::new_direct(mark_map.initcode_end));
                 self.stack.push(StackEntry::Label(mark_map.initcode_end));
             }
