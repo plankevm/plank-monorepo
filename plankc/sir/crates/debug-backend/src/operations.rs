@@ -2,7 +2,7 @@ use crate::Translator;
 use sir_assembler::{AsmReference, op};
 use sir_data::{LocalId, operation::*};
 
-fn op_kind_to_direct_op(kind: OperationKind) -> Option<u8> {
+pub(crate) fn op_kind_to_direct_op(kind: OperationKind) -> Option<u8> {
     let evm_op = match kind {
         OperationKind::DynamicAllocZeroed
         | OperationKind::DynamicAllocAnyBytes

@@ -2,7 +2,9 @@ use plank_core::{DenseIndexSet, Idx, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, LocalId, Span};
 
-use crate::static_memory_layout::StaticMemoryLayout;
+use crate::{
+    stack_scheduler::stack_machine::StackMachine, static_memory_layout::StaticMemoryLayout,
+};
 
 mod operations;
 mod stack_scheduler;
@@ -10,6 +12,8 @@ mod static_memory_layout;
 
 const ASM_BYTES_CAPACITY: usize = 20_000;
 const ASM_SECTIONS_CAPACITY: usize = 512;
+const DEFAULT_SPILL_THRESHOLD: u8 = 16;
+const DEFAULT_CLEANUP_THRESHOLD: u16 = 512;
 
 pub(crate) struct MarkMap {
     init_basic_block_marks_start: MarkId,
@@ -71,6 +75,7 @@ pub(crate) struct Translator<'ir> {
     pub bbs_to_be_translated: Vec<(FunctionId, BasicBlockId)>,
     pub translating_init_code: bool,
     pub asm: Assembler,
+    pub stack_machine: StackMachine,
 }
 
 impl<'ir> Translator<'ir> {
@@ -89,6 +94,7 @@ impl<'ir> Translator<'ir> {
         self.asm.push_op_byte(op::MSTORE);
     }
 
+    // TODO: remove once stack_machine fully handles control flow emission
     pub(crate) fn emit_code_offset_push(&mut self, offset_mark: MarkId) {
         let mark_ref = if self.translating_init_code {
             MarkReference::Direct(offset_mark)
@@ -98,7 +104,7 @@ impl<'ir> Translator<'ir> {
         self.asm.push_reference(AsmReference { mark_ref, set_size: None, pushed: true });
     }
 
-    fn new(ir: &'ir EthIRProgram) -> Self {
+    fn new(ir: &'ir EthIRProgram, spill_threshold: u8, cleanup_threshold: u16) -> Self {
         let memory_layout = StaticMemoryLayout::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
         let translated_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
@@ -112,6 +118,7 @@ impl<'ir> Translator<'ir> {
             mark_map,
             translated_bbs,
             translating_init_code: true,
+            stack_machine: StackMachine::new(spill_threshold, cleanup_threshold),
         }
     }
 
@@ -199,7 +206,7 @@ impl<'ir> Translator<'ir> {
 }
 
 pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) {
-    let mut translator = Translator::new(ir);
+    let mut translator = Translator::new(ir, DEFAULT_SPILL_THRESHOLD, DEFAULT_CLEANUP_THRESHOLD);
 
     translator.translating_init_code = true;
     translator.memory_layout.emit_init_free_pointer(&mut translator.asm);

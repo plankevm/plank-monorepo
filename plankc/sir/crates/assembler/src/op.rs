@@ -141,6 +141,19 @@ pub const SWAP13: u8 = 0x9C;
 pub const SWAP14: u8 = 0x9D;
 pub const SWAP15: u8 = 0x9E;
 pub const SWAP16: u8 = 0x9F;
+pub const SWAP_LIMIT: u8 = 16;
+
+const SWAPS: [u8; 16] = [
+    SWAP1, SWAP2, SWAP3, SWAP4, SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13,
+    SWAP14, SWAP15, SWAP16,
+];
+
+/// Returns the SWAPn opcode for depth `n` (1-indexed, 1..=16).
+pub const fn swap_n(n: u8) -> u8 {
+    assert!(n >= 1 && n <= SWAP_LIMIT, "SWAPn: n must be 1..=16");
+    SWAPS[(n - 1) as usize]
+}
+
 // Logging 0xa0 - 0xa4
 pub const LOG0: u8 = 0xA0;
 pub const LOG1: u8 = 0xA1;

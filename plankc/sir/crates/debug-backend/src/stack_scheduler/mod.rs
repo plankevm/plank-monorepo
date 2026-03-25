@@ -1,4 +1,4 @@
 mod analyses;
 mod eviction;
-mod stack_machine;
+pub(crate) mod stack_machine;
 mod transforms;
