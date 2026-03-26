@@ -394,7 +394,9 @@ impl Legalizer {
         let mut dom_children: IndexVec<BasicBlockId, Vec<BasicBlockId>> =
             index_vec![Vec::new(); program.basic_blocks.len()];
 
-        for (bb_id, idom) in dominators.enumerate() {
+        for block in program.blocks() {
+            let bb_id = block.id();
+            let idom = dominators.of(bb_id);
             if let Some(parent) = idom
                 && parent != bb_id
             {
