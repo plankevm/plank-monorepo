@@ -23,7 +23,7 @@ impl Ord for IntervalStart {
             (a, b) if a == b => Ordering::Equal,
             (Self::BlockStart, _) => Ordering::Less,
             (_, Self::BlockStart) => Ordering::Greater,
-            (Self::At(op_idx1), Self::At(op_idx2)) => op_idx1.cmp(&op_idx2),
+            (Self::At(op_idx1), Self::At(op_idx2)) => op_idx1.cmp(op_idx2),
         }
     }
 }
@@ -46,7 +46,7 @@ impl Ord for IntervalEnd {
             (a, b) if a == b => Ordering::Equal,
             (Self::BlockEnd, _) => Ordering::Greater,
             (_, Self::BlockEnd) => Ordering::Less,
-            (Self::At(op_idx1), Self::At(op_idx2)) => op_idx1.cmp(&op_idx2),
+            (Self::At(op_idx1), Self::At(op_idx2)) => op_idx1.cmp(op_idx2),
         }
     }
 }
