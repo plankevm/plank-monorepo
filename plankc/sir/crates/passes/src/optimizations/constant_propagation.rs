@@ -215,7 +215,7 @@ impl SCCP {
                 if !reachable.contains(use_loc.block_id) {
                     continue;
                 }
-                self.process_use(program, use_loc.block_id, use_loc.kind, value, reachable);
+                self.process_use(program, use_loc.block_id, use_loc.kind, reachable);
             }
         }
     }
@@ -225,7 +225,6 @@ impl SCCP {
         program: &EthIRProgram,
         block_id: BasicBlockId,
         kind: UseKind,
-        value: LocalId,
         reachable: &mut DenseIndexSet<BasicBlockId>,
     ) {
         match kind {
@@ -250,14 +249,8 @@ impl SCCP {
             UseKind::Control => {
                 self.process_control(program, block_id, reachable);
             }
-            UseKind::BlockOutput => {
-                let block = program.block(block_id);
-                let idx = block
-                    .outputs()
-                    .iter()
-                    .position(|&o| o == value)
-                    .expect("value should be in outputs");
-                for succ in block.successors() {
+            UseKind::BlockOutput(idx) => {
+                for succ in program.block(block_id).successors() {
                     if !self.is_edge_reachable(program, block_id, succ) {
                         continue;
                     }
@@ -309,10 +302,10 @@ impl SCCP {
         program: &EthIRProgram,
         from: BasicBlockId,
         to: BasicBlockId,
-        idx: usize,
+        idx: u32,
     ) {
-        let output = program.block(from).outputs()[idx];
-        let input = program.block(to).inputs()[idx];
+        let output = program.block(from).outputs()[idx as usize];
+        let input = program.block(to).inputs()[idx as usize];
 
         let value = self.lattice[output];
         if self.lattice[input].meet(value) {

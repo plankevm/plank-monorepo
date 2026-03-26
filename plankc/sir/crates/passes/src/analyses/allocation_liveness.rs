@@ -1,4 +1,4 @@
-use crate::analyses::{AnalysesStore, LocalLiveness, UseKind, cache::Analysis};
+use crate::analyses::{AnalysesStore, DefUse, Interval, LocalLiveness, UseKind, cache::Analysis};
 use plank_core::DenseIndexMap;
 use sir_data::{
     BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Operation, OperationIdx, StaticAllocId,
@@ -24,8 +24,6 @@ pub struct AllocData {
     pub escapes: bool,
     pub intervals: Vec<(BasicBlockId, Interval)>,
 }
-
-use crate::analyses::{DefUse, Interval};
 
 #[derive(Debug, Clone, Default)]
 pub struct AllocationLiveness {
@@ -193,15 +191,17 @@ impl AllocationLiveness {
                         (alloc_id, data.ptr_out)
                     }
                     Operation::DynamicAllocZeroed(data) | Operation::DynamicAllocAnyBytes(data) => {
+                        let [size_local] = data.ins;
+                        let [ptr_out] = data.outs;
                         let alloc_id = self.allocations.push(AllocData {
                             def_block: bb_id,
                             def_op: op.id(),
-                            base_ptr: data.outs[0],
-                            kind: AllocKind::Dynamic { size_local: data.ins[0] },
+                            base_ptr: ptr_out,
+                            kind: AllocKind::Dynamic { size_local },
                             escapes: false,
                             intervals: Vec::new(),
                         });
-                        (alloc_id, data.outs[0])
+                        (alloc_id, ptr_out)
                     }
                     _ => continue,
                 };
@@ -237,19 +237,14 @@ impl AllocationLiveness {
             for use_loc in def_use.uses_of(local) {
                 let op = match use_loc.kind {
                     UseKind::Control => continue,
-                    UseKind::BlockOutput => {
+                    UseKind::BlockOutput(pos) => {
                         let block = &program.basic_blocks[use_loc.block_id];
                         if matches!(block.control, Control::InternalReturn) {
                             self.allocations[alloc_id].escapes = true;
                             continue;
                         }
-                        let pos = program.locals[block.outputs]
-                            .iter()
-                            .position(|&o| o == local)
-                            .expect("local must be in outputs");
                         for succ_id in program.block(use_loc.block_id).successors() {
-                            debug_assert!(pos < program.block(succ_id).inputs().len());
-                            let succ_input = program.block(succ_id).inputs()[pos];
+                            let succ_input = program.block(succ_id).inputs()[pos as usize];
                             match self.local_to_alloc.insert(succ_input, alloc_id) {
                                 None => worklist.push(succ_input),
                                 Some(existing) => {

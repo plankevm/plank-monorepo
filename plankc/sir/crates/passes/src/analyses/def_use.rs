@@ -11,7 +11,7 @@ pub struct UseLocation {
 pub enum UseKind {
     Operation(OperationIdx),
     Control,
-    BlockOutput,
+    BlockOutput(u32),
 }
 
 impl std::fmt::Display for UseKind {
@@ -19,7 +19,7 @@ impl std::fmt::Display for UseKind {
         match self {
             UseKind::Operation(op) => write!(f, "operation {op}"),
             UseKind::Control => write!(f, "control"),
-            UseKind::BlockOutput => write!(f, "block output"),
+            UseKind::BlockOutput(idx) => write!(f, "block output {idx}"),
         }
     }
 }
@@ -59,9 +59,11 @@ impl Analysis for DefUse {
                 _ => {}
             }
 
-            for &local in block.outputs() {
-                self.uses[local]
-                    .push(UseLocation { block_id: block.id(), kind: UseKind::BlockOutput });
+            for (idx, &local) in block.outputs().iter().enumerate() {
+                self.uses[local].push(UseLocation {
+                    block_id: block.id(),
+                    kind: UseKind::BlockOutput(idx as u32),
+                });
             }
         }
     }

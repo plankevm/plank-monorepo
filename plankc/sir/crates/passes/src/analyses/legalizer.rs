@@ -449,12 +449,12 @@ impl Legalizer {
             }
         }
 
-        for &local_id in &program.locals[bb.outputs] {
+        for (idx, &local_id) in program.locals[bb.outputs].iter().enumerate() {
             if !in_scope.contains(local_id) {
                 return Err(LegalizerError::LocalNotInScope {
                     block: bb_id,
                     local: local_id,
-                    use_kind: UseKind::BlockOutput,
+                    use_kind: UseKind::BlockOutput(idx as u32),
                 });
             }
         }
@@ -1051,7 +1051,7 @@ mod tests {
             LegalizerError::LocalNotInScope {
                 block: BasicBlockId::new(2),
                 local: LocalId::new(1),
-                use_kind: UseKind::BlockOutput,
+                use_kind: UseKind::BlockOutput(0),
             }
         );
     }
