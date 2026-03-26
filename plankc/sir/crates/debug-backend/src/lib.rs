@@ -1,6 +1,6 @@
 use plank_core::{DenseIndexSet, Idx, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, LocalId, Span};
+use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Span};
 
 use crate::{
     stack_scheduler::stack_machine::StackMachine, static_memory_layout::StaticMemoryLayout,
@@ -81,7 +81,7 @@ impl MarkMap {
         self.data_marks_start + data_id.get()
     }
 
-    pub fn push_code_offset(&self, asm: &mut Assembler, offset_mark: MarkId) {
+    pub fn emit_code_offset_push(&self, asm: &mut Assembler, offset_mark: MarkId) {
         let mark_ref = match self.phase {
             TranslationPhase::Init => MarkReference::Direct(offset_mark),
             TranslationPhase::Runtime => {
@@ -103,26 +103,6 @@ pub(crate) struct Translator<'ir> {
 }
 
 impl<'ir> Translator<'ir> {
-    pub(crate) fn emit_free_ptr_load(&mut self) {
-        self.asm.push_minimal_u32(self.memory_layout.free_pointer);
-        self.asm.push_op_byte(op::MLOAD);
-    }
-
-    pub(crate) fn emit_local_load(&mut self, local: LocalId) {
-        self.asm.push_minimal_u32(self.memory_layout.get_local_addr(local));
-        self.asm.push_op_byte(op::MLOAD);
-    }
-
-    pub(crate) fn emit_local_store(&mut self, local: LocalId) {
-        self.asm.push_minimal_u32(self.memory_layout.get_local_addr(local));
-        self.asm.push_op_byte(op::MSTORE);
-    }
-
-    // TODO: remove once stack_machine fully handles control flow emission
-    pub(crate) fn emit_code_offset_push(&mut self, offset_mark: MarkId) {
-        self.mark_map.push_code_offset(&mut self.asm, offset_mark);
-    }
-
     fn new(ir: &'ir EthIRProgram, spill_threshold: u8, cleanup_threshold: u16) -> Self {
         let memory_layout = StaticMemoryLayout::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
@@ -157,55 +137,16 @@ impl<'ir> Translator<'ir> {
             self.asm.push_op_byte(op::JUMPDEST);
 
             let block = self.ir.block(bb_id);
-            self.memory_layout.emit_transfer_basic_block_outputs(&mut self.asm, block.inputs());
-            for op_view in block.operations() {
-                operations::translate_operation(self, op_view.op());
-            }
-            self.memory_layout.emit_copy_for_basic_block_inputs(&mut self.asm, block.outputs());
-
             self.bbs_to_be_translated.extend(block.successors().map(|bb| (func, bb)));
 
-            match block.control() {
-                ControlView::LastOpTerminates => {}
-                ControlView::InternalReturn => {
-                    let return_dest_loc = self.memory_layout.get_return_dest_store(func);
-                    self.asm.push_minimal_u32(return_dest_loc);
-                    self.asm.push_op_byte(op::MLOAD);
-                    self.asm.push_op_byte(op::JUMP);
-                }
-                ControlView::ContinuesTo(to) => {
-                    self.emit_code_offset_push(self.get_bb_mark(to));
-                    self.asm.push_op_byte(op::JUMP);
-                }
-                ControlView::Branches { condition, non_zero_target, zero_target } => {
-                    self.emit_local_load(condition);
-                    self.emit_code_offset_push(self.get_bb_mark(non_zero_target));
-                    self.asm.push_op_byte(op::JUMPI);
-                    self.emit_code_offset_push(self.get_bb_mark(zero_target));
-                    self.asm.push_op_byte(op::JUMP);
-                }
-                ControlView::Switch(switch) => {
-                    self.emit_local_load(switch.condition());
-                    self.asm.push_minimal_u32(self.memory_layout.switch_store);
-                    self.asm.push_op_byte(op::MSTORE);
-
-                    for (value, bb) in switch.cases() {
-                        self.asm.push_minimal_u32(self.memory_layout.switch_store);
-                        self.asm.push_op_byte(op::MLOAD);
-                        self.asm.push_minimal_u256(value);
-                        self.asm.push_op_byte(op::EQ);
-                        self.emit_code_offset_push(self.get_bb_mark(bb));
-                        self.asm.push_op_byte(op::JUMPI);
-                    }
-
-                    if let Some(fallback) = switch.fallback() {
-                        self.emit_code_offset_push(self.get_bb_mark(fallback));
-                        self.asm.push_op_byte(op::JUMP);
-                    } else {
-                        self.asm.emit_undefined_behavior_error();
-                    };
-                }
-            }
+            self.stack_machine.dispatch_block(
+                func,
+                bb_id,
+                self.ir,
+                &mut self.asm,
+                &self.mark_map,
+                &self.memory_layout,
+            );
         }
     }
 }

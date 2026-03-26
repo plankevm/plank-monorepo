@@ -10,27 +10,16 @@
  * The next block's inputs [x, y, z] maps: x=e (top), y=g, z=c (bottom)
  */
 
-use sir_assembler::{AsmReference, Assembler, MarkId, op};
-use sir_data::{
-    BasicBlockId, ControlView, EthIRProgram, FunctionId, LargeConstId, LocalId, Operation,
-};
+use sir_assembler::{AsmReference, Assembler, op};
+use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, Operation};
 
 use crate::{
     MarkMap, TranslationPhase, operations::op_kind_to_direct_op,
     static_memory_layout::StaticMemoryLayout,
 };
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum StackEntry {
-    Local(LocalId),
-    SmallConst(u32),
-    LargeConst(LargeConstId),
-    Label(MarkId),
-    Opaque,
-}
-
 pub(crate) struct StackMachine {
-    stack: Vec<StackEntry>,
+    stack: Vec<LocalId>,
     spill_threshold: u8,
     cleanup_threshold: u16,
 }
@@ -42,7 +31,7 @@ impl StackMachine {
 
     pub fn remap_block_inputs(&mut self, inputs: &[LocalId]) {
         for (entry, &local) in self.stack.iter_mut().zip(inputs.iter()) {
-            *entry = StackEntry::Local(local);
+            *entry = local;
         }
     }
 
@@ -87,8 +76,7 @@ impl StackMachine {
         asm: &mut Assembler,
         memory_layout: &StaticMemoryLayout,
     ) {
-        let depth =
-            self.stack.iter().rev().position(|e| matches!(e, StackEntry::Local(l) if *l == local));
+        let depth = self.stack.iter().rev().position(|&e| e == local);
 
         match depth {
             Some(0) => {}
@@ -99,9 +87,8 @@ impl StackMachine {
             }
             _ => {
                 // Not reachable on stack — load from memory.
-                asm.push_minimal_u32(memory_layout.get_local_addr(local));
-                asm.push_op_byte(op::MLOAD);
-                self.stack.push(StackEntry::Local(local));
+                memory_layout.emit_local_load(asm, local);
+                self.stack.push(local);
             }
         }
     }
@@ -125,14 +112,14 @@ impl StackMachine {
                 asm.push_op_byte(op::JUMP);
             }
             ControlView::ContinuesTo(to) => {
-                mark_map.push_code_offset(asm, mark_map.get_bb_mark(to));
+                mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(to));
                 asm.push_op_byte(op::JUMP);
             }
             ControlView::Branches { non_zero_target, zero_target, .. } => {
                 self.stack.pop();
-                mark_map.push_code_offset(asm, mark_map.get_bb_mark(non_zero_target));
+                mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(non_zero_target));
                 asm.push_op_byte(op::JUMPI);
-                mark_map.push_code_offset(asm, mark_map.get_bb_mark(zero_target));
+                mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(zero_target));
                 asm.push_op_byte(op::JUMP);
             }
             ControlView::Switch(switch) => {
@@ -145,12 +132,12 @@ impl StackMachine {
                     asm.push_op_byte(op::MLOAD);
                     asm.push_minimal_u256(value);
                     asm.push_op_byte(op::EQ);
-                    mark_map.push_code_offset(asm, mark_map.get_bb_mark(bb));
+                    mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(bb));
                     asm.push_op_byte(op::JUMPI);
                 }
 
                 if let Some(fallback) = switch.fallback() {
-                    mark_map.push_code_offset(asm, mark_map.get_bb_mark(fallback));
+                    mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(fallback));
                     asm.push_op_byte(op::JUMP);
                 } else {
                     asm.emit_undefined_behavior_error();
@@ -167,7 +154,7 @@ impl StackMachine {
         outputs: &[LocalId],
         condition: Option<LocalId>,
         asm: &mut Assembler,
-        memory_layout: &StaticMemoryLayout,
+        _memory_layout: &StaticMemoryLayout,
     ) {
         self.cleanup_stack(outputs, condition, asm);
 
@@ -175,11 +162,7 @@ impl StackMachine {
         // pushed/swapped to the top ends up in the correct final position.
         for &output in outputs.iter().rev() {
             // Search for the output within SWAP reach of the current top.
-            let depth = self
-                .stack
-                .iter()
-                .rev()
-                .position(|e| matches!(e, StackEntry::Local(l) if *l == output));
+            let depth = self.stack.iter().rev().position(|&e| e == output);
             match depth {
                 Some(0) => {
                     // Already on top — nothing to do.
@@ -190,12 +173,9 @@ impl StackMachine {
                     self.stack.swap(top, top - d);
                 }
                 _ => {
-                    // TODO: if output was spilled to memory, reload it:
-                    //   asm.push_minimal_u32(memory_layout.get_local_addr(output));
-                    //   asm.push_op_byte(sir_assembler::op::MLOAD);
-                    //   self.stack.push(StackEntry::Local(output));
+                    // TODO: if output was spilled to memory, reload it
                     // TODO: if not in memory, use aggressive dig (SWAP+POP) to
-                    //   bring it within SWAP reach, then swap to top.
+                    //   bring it within SWAP reach, then swap to top
                     todo!("output not reachable within SWAP depth")
                 }
             }
@@ -227,38 +207,28 @@ impl StackMachine {
         if outputs.is_empty() && condition.is_none() {
             return;
         }
-        while let Some(top) = self.stack.last() {
-            let local = match top {
-                StackEntry::Local(local) => *local,
-                _ => {
-                    self.stack.pop();
-                    asm.push_op_byte(sir_assembler::op::POP);
-                    continue;
-                }
-            };
-
+        while let Some(&top) = self.stack.last() {
             // Preserve the condition — treat it like an output for cleanup purposes.
-            if condition == Some(local) {
+            if condition == Some(top) {
                 break;
             }
 
-            if !outputs.contains(&local) {
+            if !outputs.contains(&top) {
                 self.stack.pop();
                 asm.push_op_byte(sir_assembler::op::POP);
                 continue;
             }
 
             // Last output is already in its final bottom position — stop.
-            if outputs.last() == Some(&local) {
+            if outputs.last() == Some(&top) {
                 break;
             }
 
             // It's an output — only pop if another copy exists within SWAP reach
             let reachable_start =
                 self.stack.len().saturating_sub(1 + sir_assembler::op::SWAP_LIMIT as usize);
-            let has_duplicate = self.stack[reachable_start..self.stack.len() - 1]
-                .iter()
-                .any(|e| matches!(e, StackEntry::Local(l) if *l == local));
+            let has_duplicate =
+                self.stack[reachable_start..self.stack.len() - 1].contains(&top);
             if !has_duplicate {
                 break;
             }
@@ -303,7 +273,7 @@ impl StackMachine {
                 let evm_op =
                     op_kind_to_direct_op(op.kind()).expect("nullary ops have direct EVM op");
                 asm.push_op_byte(evm_op);
-                self.stack.push(StackEntry::Local(data.outs[0]));
+                self.stack.push(data.outs[0]);
             }
 
             // Unary: 1 in, 1 out, single opcode
@@ -362,39 +332,39 @@ impl StackMachine {
             // Constants: 0 in, 1 out, push a value
             Operation::SetSmallConst(data) => {
                 asm.push_minimal_u32(data.value);
-                self.stack.push(StackEntry::SmallConst(data.value));
+                self.stack.push(data.sets);
             }
             Operation::SetLargeConst(data) => {
                 asm.push_minimal_u256(ir.large_consts[data.value]);
-                self.stack.push(StackEntry::LargeConst(data.value));
+                self.stack.push(data.sets);
             }
             Operation::SetDataOffset(data) => {
                 let data_mark = mark_map.get_data_mark(data.segment_id);
-                mark_map.push_code_offset(asm, data_mark);
-                self.stack.push(StackEntry::Label(data_mark));
+                mark_map.emit_code_offset_push(asm, data_mark);
+                self.stack.push(data.sets);
             }
-            Operation::RuntimeStartOffset(_) => {
+            Operation::RuntimeStartOffset(data) => {
                 debug_assert!(
                     mark_map.phase() == TranslationPhase::Init,
                     "unexpected runtime_start_offset in run code"
                 );
                 asm.push_reference(AsmReference::new_direct(mark_map.runtime_start));
-                self.stack.push(StackEntry::Label(mark_map.runtime_start));
+                self.stack.push(data.outs[0]);
             }
-            Operation::InitEndOffset(_) => {
+            Operation::InitEndOffset(data) => {
                 debug_assert!(
                     mark_map.phase() == TranslationPhase::Init,
                     "unexpected init_end_offset in run code"
                 );
                 asm.push_reference(AsmReference::new_direct(mark_map.initcode_end));
-                self.stack.push(StackEntry::Label(mark_map.initcode_end));
+                self.stack.push(data.outs[0]);
             }
-            Operation::RuntimeLength(_) => {
+            Operation::RuntimeLength(data) => {
                 asm.push_reference(AsmReference::new_delta(
                     mark_map.runtime_start,
                     mark_map.initcode_end,
                 ));
-                self.stack.push(StackEntry::Label(mark_map.runtime_start));
+                self.stack.push(data.outs[0]);
             }
 
             // Memory: allocation and memory I/O
