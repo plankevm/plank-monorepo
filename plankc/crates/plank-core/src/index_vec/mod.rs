@@ -314,11 +314,6 @@ impl<I: Idx, T, A: Allocator> IndexVec<I, T, A> {
         new_idx
     }
 
-    pub fn indices(&self) -> impl Iterator<Item = I> + use<I, T, A> {
-        let len = self.len() as u32;
-        (0..len).map(|i| I::ZERO + i)
-    }
-
     pub fn enumerate_idx(&self) -> impl Iterator<Item = (I, &T)> {
         let mut idx = I::ZERO;
         self.iter().map(move |element| {

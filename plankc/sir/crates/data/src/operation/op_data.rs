@@ -49,9 +49,9 @@ impl<const INS: usize, const OUTS: usize> AllocatedIns<INS, OUTS> {
         visitor.visit_allocated_ins_mut(self)
     }
 
-    pub fn get_inputs<'ir>(&self, ir: &'ir EthIRProgram) -> &'ir [LocalId] {
+    pub fn get_inputs<'ir>(&self, ir: &'ir EthIRProgram) -> &'ir [LocalId; INS] {
         let ins_start = self.ins_start.idx();
-        &ir.locals.as_raw_slice()[ins_start..ins_start + INS]
+        ir.locals.as_raw_slice()[ins_start..ins_start + INS].as_array().unwrap()
     }
 
     pub fn get_inputs_mut<'ir>(&self, ir: &'ir mut EthIRProgram) -> &'ir mut [LocalId] {
