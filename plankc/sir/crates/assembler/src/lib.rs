@@ -317,6 +317,15 @@ impl Assembler {
         self.sections.push(section);
     }
 
+    pub fn emit_undefined_behavior_error(&mut self) {
+        self.push_minimal_u32(0xbadbad);
+        self.push_op_byte(op::PUSH0);
+        self.push_op_byte(op::MSTORE);
+        self.push_minimal_u32(3);
+        self.push_minimal_u32(32 - 3);
+        self.push_op_byte(op::REVERT);
+    }
+
     fn converge_mark_offsets(
         &self,
         mark_to_offset: &mut IndexVec<MarkId, u32>,

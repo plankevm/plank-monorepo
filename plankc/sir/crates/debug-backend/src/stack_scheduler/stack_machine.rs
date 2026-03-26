@@ -10,8 +10,10 @@
  * The next block's inputs [x, y, z] maps: x=e (top), y=g, z=c (bottom)
  */
 
-use sir_assembler::{AsmReference, Assembler, MarkId};
-use sir_data::{BasicBlockId, EthIRProgram, LargeConstId, LocalId, Operation};
+use sir_assembler::{AsmReference, Assembler, MarkId, op};
+use sir_data::{
+    BasicBlockId, ControlView, EthIRProgram, FunctionId, LargeConstId, LocalId, Operation,
+};
 
 use crate::{
     MarkMap, TranslationPhase, operations::op_kind_to_direct_op,
@@ -46,6 +48,7 @@ impl StackMachine {
 
     pub fn dispatch_block(
         &mut self,
+        func: FunctionId,
         bb_id: BasicBlockId,
         ir: &EthIRProgram,
         asm: &mut Assembler,
@@ -54,22 +57,119 @@ impl StackMachine {
     ) {
         let block = ir.block(bb_id);
         self.remap_block_inputs(block.inputs());
+
+        let outputs = block.outputs();
+
+        let condition = match block.control() {
+            ControlView::Branches { condition, .. } => Some(condition),
+            ControlView::Switch(switch) => Some(switch.condition()),
+            _ => None,
+        };
+
         for op_view in block.operations() {
             self.dispatch_operation(op_view.op(), asm, ir, mark_map);
         }
-        self.build_output_stack(block.outputs(), asm, memory_layout);
+
+        self.build_output_stack(outputs, condition, asm, memory_layout);
+        if let Some(cond) = condition {
+            self.bring_condition_to_top(cond, asm, memory_layout);
+        }
+        self.emit_control_flow(block.control(), func, asm, mark_map, memory_layout);
     }
 
-    /// Arranges the stack so that only the declared outputs remain, in the
-    /// correct order per the calling convention (first output on top).
-    /// Values not in memory are loaded back onto the stack.
-    fn build_output_stack(
+    /// Brings the control flow condition to the top of the stack.
+    /// Searches the stack first; if not found, loads from memory.
+    /// TODO: if the condition is not on the stack, we assume liveness-driven
+    /// eviction has already spilled it to memory.
+    fn bring_condition_to_top(
         &mut self,
-        outputs: &[LocalId],
+        local: LocalId,
         asm: &mut Assembler,
         memory_layout: &StaticMemoryLayout,
     ) {
-        self.cleanup_stack(outputs, asm);
+        let depth =
+            self.stack.iter().rev().position(|e| matches!(e, StackEntry::Local(l) if *l == local));
+
+        match depth {
+            Some(0) => {}
+            Some(d @ 1..=16) => {
+                asm.push_op_byte(sir_assembler::op::swap_n(d as u8));
+                let top = self.stack.len() - 1;
+                self.stack.swap(top, top - d);
+            }
+            _ => {
+                // Not reachable on stack — load from memory.
+                asm.push_minimal_u32(memory_layout.get_local_addr(local));
+                asm.push_op_byte(op::MLOAD);
+                self.stack.push(StackEntry::Local(local));
+            }
+        }
+    }
+
+    /// Emits control flow for a block. For Branches/Switch, assumes the
+    /// condition is already on top of the stack.
+    fn emit_control_flow(
+        &mut self,
+        control: ControlView,
+        func: FunctionId,
+        asm: &mut Assembler,
+        mark_map: &MarkMap,
+        memory_layout: &StaticMemoryLayout,
+    ) {
+        match control {
+            ControlView::LastOpTerminates => {}
+            ControlView::InternalReturn => {
+                let return_dest_loc = memory_layout.get_return_dest_store(func);
+                asm.push_minimal_u32(return_dest_loc);
+                asm.push_op_byte(op::MLOAD);
+                asm.push_op_byte(op::JUMP);
+            }
+            ControlView::ContinuesTo(to) => {
+                mark_map.push_code_offset(asm, mark_map.get_bb_mark(to));
+                asm.push_op_byte(op::JUMP);
+            }
+            ControlView::Branches { non_zero_target, zero_target, .. } => {
+                self.stack.pop();
+                mark_map.push_code_offset(asm, mark_map.get_bb_mark(non_zero_target));
+                asm.push_op_byte(op::JUMPI);
+                mark_map.push_code_offset(asm, mark_map.get_bb_mark(zero_target));
+                asm.push_op_byte(op::JUMP);
+            }
+            ControlView::Switch(switch) => {
+                self.stack.pop();
+                asm.push_minimal_u32(memory_layout.switch_store);
+                asm.push_op_byte(op::MSTORE);
+
+                for (value, bb) in switch.cases() {
+                    asm.push_minimal_u32(memory_layout.switch_store);
+                    asm.push_op_byte(op::MLOAD);
+                    asm.push_minimal_u256(value);
+                    asm.push_op_byte(op::EQ);
+                    mark_map.push_code_offset(asm, mark_map.get_bb_mark(bb));
+                    asm.push_op_byte(op::JUMPI);
+                }
+
+                if let Some(fallback) = switch.fallback() {
+                    mark_map.push_code_offset(asm, mark_map.get_bb_mark(fallback));
+                    asm.push_op_byte(op::JUMP);
+                } else {
+                    asm.emit_undefined_behavior_error();
+                }
+            }
+        }
+    }
+
+    /// Arranges the stack so that only the declared outputs (and optionally the
+    /// control flow condition) remain, in the correct order per the calling
+    /// convention (first output on top).
+    fn build_output_stack(
+        &mut self,
+        outputs: &[LocalId],
+        condition: Option<LocalId>,
+        asm: &mut Assembler,
+        memory_layout: &StaticMemoryLayout,
+    ) {
+        self.cleanup_stack(outputs, condition, asm);
 
         // Walk outputs in reverse (last output first) so that each value
         // pushed/swapped to the top ends up in the correct final position.
@@ -102,8 +202,13 @@ impl StackMachine {
         }
     }
 
-    fn cleanup_stack(&mut self, outputs: &[LocalId], asm: &mut Assembler) {
-        self.basic_cleanup(outputs, asm);
+    fn cleanup_stack(
+        &mut self,
+        outputs: &[LocalId],
+        condition: Option<LocalId>,
+        asm: &mut Assembler,
+    ) {
+        self.basic_cleanup(outputs, condition, asm);
 
         if self.stack.len() > self.cleanup_threshold as usize {
             self.aggressive_cleanup(outputs, asm);
@@ -112,8 +217,14 @@ impl StackMachine {
 
     /// Pops from the top of the stack: removes non-outputs and duplicate outputs.
     /// Stops at a unique output or the last output (already in its final position).
-    fn basic_cleanup(&mut self, outputs: &[LocalId], asm: &mut Assembler) {
-        if outputs.is_empty() {
+    /// Preserves the control flow condition if present.
+    fn basic_cleanup(
+        &mut self,
+        outputs: &[LocalId],
+        condition: Option<LocalId>,
+        asm: &mut Assembler,
+    ) {
+        if outputs.is_empty() && condition.is_none() {
             return;
         }
         while let Some(top) = self.stack.last() {
@@ -125,6 +236,11 @@ impl StackMachine {
                     continue;
                 }
             };
+
+            // Preserve the condition — treat it like an output for cleanup purposes.
+            if condition == Some(local) {
+                break;
+            }
 
             if !outputs.contains(&local) {
                 self.stack.pop();

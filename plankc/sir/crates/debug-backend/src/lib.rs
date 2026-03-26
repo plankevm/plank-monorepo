@@ -144,15 +144,6 @@ impl<'ir> Translator<'ir> {
         self.mark_map.get_bb_mark(bb_id)
     }
 
-    fn emit_undefined_behavior_error(&mut self) {
-        self.asm.push_minimal_u32(0xbadbad);
-        self.asm.push_op_byte(op::PUSH0);
-        self.asm.push_op_byte(op::MSTORE);
-        self.asm.push_minimal_u32(3);
-        self.asm.push_minimal_u32(32 - 3);
-        self.asm.push_op_byte(op::REVERT);
-    }
-
     fn translate_basic_blocks_from_entry_point(&mut self, entry_point: FunctionId) {
         let entry_basic_block = self.ir.function(entry_point).entry().id();
         self.bbs_to_be_translated.push((entry_point, entry_basic_block));
@@ -211,7 +202,7 @@ impl<'ir> Translator<'ir> {
                         self.emit_code_offset_push(self.get_bb_mark(fallback));
                         self.asm.push_op_byte(op::JUMP);
                     } else {
-                        self.emit_undefined_behavior_error();
+                        self.asm.emit_undefined_behavior_error();
                     };
                 }
             }
