@@ -630,12 +630,15 @@ mod tests {
         assert_eq!(liveness.allocations.len(), 1);
         let alloc = get_alloc(&liveness, 0);
         assert!(!alloc.escapes);
-        assert_eq!(alloc.intervals.len(), 1);
-        assert_has_interval(
-            alloc,
-            BasicBlockId::new(0),
-            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mload256
+        assert_eq!(
+            alloc.intervals,
+            &[(
+                BasicBlockId::new(0),
+                Interval {
+                    start: IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), /* salloc */
+                    end: IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)), // mload256
+                }
+            )]
         );
     }
 
@@ -679,8 +682,8 @@ mod tests {
         assert_eq!(liveness.allocations.len(), 2);
         assert!(get_alloc(&liveness, 0).escapes);
         assert!(get_alloc(&liveness, 1).escapes);
-        assert!(get_alloc(&liveness, 0).intervals.is_empty());
-        assert!(get_alloc(&liveness, 1).intervals.is_empty());
+        assert_eq!(get_alloc(&liveness, 0).intervals, &[]);
+        assert_eq!(get_alloc(&liveness, 1).intervals, &[]);
     }
 
     #[test]
