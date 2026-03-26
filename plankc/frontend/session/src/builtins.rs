@@ -174,10 +174,10 @@ define_builtins! {
         // EVM System Calls
         CREATE "create" => Create { [U256, MP, U256 => U256] };
         CREATE2 "create2" => Create2 { [U256, MP, U256, U256 => U256] };
-        CALL "call" => Call { [U256, U256, U256, MP, U256, MP, U256 => U256] };
-        CALLCODE "callcode" => CallCode { [U256, U256, U256, MP, U256, MP, U256 => U256] };
-        DELEGATECALL "delegatecall" => DelegateCall { [U256, U256, MP, U256, MP, U256 => U256] };
-        STATICCALL "staticcall" => StaticCall { [U256, U256, MP, U256, MP, U256 => U256] };
+        CALL "call" => Call { [U256, U256, U256, MP, U256, MP, U256 => BOOL] };
+        CALLCODE "callcode" => CallCode { [U256, U256, U256, MP, U256, MP, U256 => BOOL] };
+        DELEGATECALL "delegatecall" => DelegateCall { [U256, U256, MP, U256, MP, U256 => BOOL] };
+        STATICCALL "staticcall" => StaticCall { [U256, U256, MP, U256, MP, U256 => BOOL] };
         RETURN "evm_return" => Return { [MP, U256 => NEVER] };
         STOP "evm_stop" => Stop { [=> NEVER] };
         REVERT "revert" => Revert { [MP, U256 => NEVER] };
