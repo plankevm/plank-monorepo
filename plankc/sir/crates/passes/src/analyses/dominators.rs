@@ -1,4 +1,5 @@
 use hashbrown::HashSet;
+use plank_core::LoopLimit;
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram, IndexVec, index_vec};
 
 use crate::analyses::{AnalysesStore, Predecessors, cache::Analysis};
@@ -64,7 +65,9 @@ impl Analysis for DominanceFrontiers {
                     continue;
                 }
                 let mut runner = p;
+                let mut limit = LoopLimit::new();
                 while runner != idom {
+                    limit.tick();
                     self.inner[runner].insert(b);
                     runner = dominators.of(runner).expect("reachable path");
                 }
@@ -97,7 +100,9 @@ fn compute_function_dominators(
     }
 
     let mut changed = true;
+    let mut limit = LoopLimit::new();
     while changed {
+        limit.tick();
         changed = false;
         for bb in reverse_post_order[1..].iter() {
             let preds = predecessors.of(*bb);
@@ -124,16 +129,21 @@ fn intersect(
 ) -> BasicBlockId {
     let mut finger1 = bb1;
     let mut finger2 = bb2;
+    let mut limit = LoopLimit::new();
     while finger1 != finger2 {
+        limit.tick();
         while bb_to_rpo_pos[finger1] > bb_to_rpo_pos[finger2] {
+            limit.tick();
             finger1 = dominators[finger1]
                 .expect("intersect only called on blocks with computed dominators");
         }
         while bb_to_rpo_pos[finger2] > bb_to_rpo_pos[finger1] {
+            limit.tick();
             finger2 = dominators[finger2]
                 .expect("intersect only called on blocks with computed dominators");
         }
     }
+
     finger1
 }
 

@@ -50,6 +50,15 @@ where invariants are relied upon with panic messages capturing the assumption.
 - use of `match e { pat => val, _ => panic/return }` instead of
     `let pat = e else { };`
 
+### Uncapped `while` & `for` loops
+To protect against infinite loops making the compiler look stuck with poor or no
+feedback you must use a `plank_core::LoopLimit`, calling `.tick()` on every
+iteration. Use `LoopLimit::new()` for the default limit or set an appropriate
+limit with `LoopLimit::max(max_iter_count)` if one exists for the situation.
+
+Only necessary for `for` loops if iterating over non-trivial iterators that are
+not guaranteed to terminate.
+
 ## Output Format
 
 If issues found:

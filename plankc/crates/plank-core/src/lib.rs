@@ -24,3 +24,32 @@ pub type ABox<'arena, T> = &'arena mut T;
 const _USIZE_AT_LEAST_U32: () = const {
     assert!(u32::BITS <= usize::BITS);
 };
+
+#[derive(Debug)]
+pub struct LoopLimit {
+    count: u32,
+    max: u32,
+}
+
+impl LoopLimit {
+    /// Initialize a loop limiter with a max of 100M
+    pub fn new() -> Self {
+        Self { count: 0, max: 100_000_000 }
+    }
+
+    pub fn max(max: u32) -> Self {
+        Self { count: 0, max }
+    }
+
+    #[track_caller]
+    pub fn tick(&mut self) {
+        self.count += 1;
+        assert!(self.count <= self.max, "loop limit hit ({})", self.max);
+    }
+}
+
+impl Default for LoopLimit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
