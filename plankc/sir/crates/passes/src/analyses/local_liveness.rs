@@ -3,23 +3,70 @@ use hashbrown::{HashMap, HashSet};
 use crate::analyses::{AnalysesStore, Predecessors, cache::Analysis, dfs_postorder};
 use plank_core::{DenseIndexSet, Idx};
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, IndexVec, LocalId, OperationIdx};
+use std::cmp::{Ord, Ordering};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntervalStart {
     BlockStart,
     At(OperationIdx),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum IntervalEnd {
-    BlockEnd,
-    At(OperationIdx),
+impl PartialOrd for IntervalStart {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+impl Ord for IntervalStart {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (a, b) if a == b => Ordering::Equal,
+            (Self::BlockStart, _) => Ordering::Less,
+            (_, Self::BlockStart) => Ordering::Greater,
+            (Self::At(op_idx1), Self::At(op_idx2)) => op_idx1.cmp(&op_idx2),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IntervalEnd {
+    At(OperationIdx),
+    BlockEnd,
+}
+
+impl PartialOrd for IntervalEnd {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for IntervalEnd {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (a, b) if a == b => Ordering::Equal,
+            (Self::BlockEnd, _) => Ordering::Greater,
+            (_, Self::BlockEnd) => Ordering::Less,
+            (Self::At(op_idx1), Self::At(op_idx2)) => op_idx1.cmp(&op_idx2),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Interval {
     pub start: IntervalStart,
     pub end: IntervalEnd,
+}
+
+impl PartialOrd for Interval {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Interval {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start.cmp(&other.start).then_with(|| self.end.cmp(&other.end))
+    }
 }
 
 pub type LocalIntervals = Vec<(BasicBlockId, Interval)>;

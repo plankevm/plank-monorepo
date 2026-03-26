@@ -341,24 +341,21 @@ fn merge_intervals(intervals: &mut Vec<(BasicBlockId, Interval)>) {
     let mut dst = 0;
     for src in 1..intervals.len() {
         let (prev_bb, prev_interval) = intervals[dst];
-        let (curr_bb, curr_interval) = intervals[src];
+        let (cur_bb, cur_interval) = intervals[src];
 
-        let overlaps = prev_bb == curr_bb
-            && match (prev_interval.end, curr_interval.start) {
+        let overlaps = prev_bb == cur_bb
+            && match (prev_interval.end, cur_interval.start) {
                 (IntervalEnd::BlockEnd, _) | (_, IntervalStart::BlockStart) => true,
-                (IntervalEnd::At(prev_end), IntervalStart::At(curr_start)) => {
-                    prev_end >= curr_start
-                }
+                (IntervalEnd::At(prev_end), IntervalStart::At(cur_start)) => cur_start <= prev_end,
             };
 
         if overlaps {
-            intervals[dst].1.end = match (prev_interval.end, curr_interval.end) {
-                (IntervalEnd::BlockEnd, _) | (_, IntervalEnd::BlockEnd) => IntervalEnd::BlockEnd,
-                (IntervalEnd::At(prev_end), IntervalEnd::At(curr_end)) => {
-                    IntervalEnd::At(std::cmp::max(prev_end, curr_end))
-                }
-            };
+            intervals[dst].1.end = prev_interval.end.max(cur_interval.end);
         } else {
+            // [..., A,      b, ..., F]
+            //    dst^ merged^    src^
+            // We want the final array to be contiguous and the next `dst` to point to `src`,
+            // so we not only bump `dst` but also copy `src` back.
             dst += 1;
             intervals[dst] = intervals[src];
         }
