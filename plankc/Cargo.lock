@@ -1859,7 +1859,6 @@ dependencies = [
  "sir-data",
  "sir-parser",
  "sir-test-utils",
- "smallvec",
  "thiserror",
 ]
 

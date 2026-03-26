@@ -23,7 +23,7 @@ impl<'ir> BlockView<'ir> {
         &self.ir.locals[self.ir.basic_blocks[self.id].outputs]
     }
 
-    pub fn operations(&self) -> impl Iterator<Item = OperationView<'ir>> {
+    pub fn operations(&self) -> impl DoubleEndedIterator<Item = OperationView<'ir>> {
         let ir = self.ir;
         self.ir.basic_blocks[self.id].operations.iter().map(move |id| OperationView { id, ir })
     }

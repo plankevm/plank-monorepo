@@ -1,10 +1,5 @@
-use hashbrown::{HashMap, HashSet};
-use smallvec::SmallVec;
-
-use crate::analyses::{
-    AnalysesStore, DefUse, Predecessors, UseKind, cache::Analysis, dfs_postorder,
-};
-use plank_core::{DenseIndexMap, DenseIndexSet};
+use crate::analyses::{AnalysesStore, LocalLiveness, UseKind, cache::Analysis};
+use plank_core::DenseIndexMap;
 use sir_data::{
     BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Operation, OperationIdx, StaticAllocId,
     newtype_index,
@@ -20,24 +15,6 @@ pub enum AllocKind {
     Dynamic { size_local: LocalId },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum IntervalStart {
-    LiveIn,
-    At(OperationIdx),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum IntervalEnd {
-    LiveOut,
-    At(OperationIdx),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Interval {
-    pub start: IntervalStart,
-    pub end: IntervalEnd,
-}
-
 #[derive(Debug, Clone)]
 pub struct AllocData {
     pub def_block: BasicBlockId,
@@ -48,11 +25,12 @@ pub struct AllocData {
     pub intervals: Vec<(BasicBlockId, Interval)>,
 }
 
+use crate::analyses::{DefUse, Interval};
+
 #[derive(Debug, Clone, Default)]
 pub struct AllocationLiveness {
     pub allocations: IndexVec<AllocId, AllocData>,
     pub local_to_alloc: DenseIndexMap<LocalId, AllocId>,
-    pub block_exit_liveness: IndexVec<BasicBlockId, HashSet<AllocId>>,
 }
 
 impl Analysis for AllocationLiveness {
@@ -60,8 +38,6 @@ impl Analysis for AllocationLiveness {
     fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
         self.allocations.clear();
         self.local_to_alloc.clear();
-        self.block_exit_liveness.clear();
-        self.block_exit_liveness.resize(program.basic_blocks.len(), HashSet::new());
 
         let def_use = store.def_use(program);
         self.discover_allocations(program, &def_use);
@@ -69,24 +45,8 @@ impl Analysis for AllocationLiveness {
             return;
         }
 
-        let local_to_input_origins = propagate_block_input_origins(program, &def_use);
-
-        let mut blocks_postorder = Vec::new();
-        let mut visited = DenseIndexSet::new();
-        for func in program.functions_iter() {
-            dfs_postorder(program, func.entry().id(), &mut visited, &mut blocks_postorder);
-        }
-
-        let predecessors = store.predecessors(program);
-
-        self.compute_block_exit_liveness(
-            program,
-            &local_to_input_origins,
-            &predecessors,
-            &blocks_postorder,
-        );
-
-        self.populate_allocation_intervals(program, &local_to_input_origins, &predecessors);
+        let local_liveness = store.local_liveness(program);
+        self.populate_intervals_from_local_liveness(&local_liveness);
     }
 }
 
@@ -281,6 +241,26 @@ impl AllocationLiveness {
                         let block = &program.basic_blocks[use_loc.block_id];
                         if matches!(block.control, Control::InternalReturn) {
                             self.allocations[alloc_id].escapes = true;
+                            continue;
+                        }
+                        let pos = program.locals[block.outputs]
+                            .iter()
+                            .position(|&o| o == local)
+                            .expect("local must be in outputs");
+                        for succ_id in program.block(use_loc.block_id).successors() {
+                            debug_assert!(pos < program.block(succ_id).inputs().len());
+                            let succ_input = program.block(succ_id).inputs()[pos];
+                            match self.local_to_alloc.insert(succ_input, alloc_id) {
+                                None => worklist.push(succ_input),
+                                Some(existing) => {
+                                    if existing != alloc_id {
+                                        // TODO: Track variables that may be different allocations.
+                                        // For now just conservatively mark as escaped.
+                                        self.allocations[alloc_id].escapes = true;
+                                        self.allocations[existing].escapes = true;
+                                    }
+                                }
+                            }
                         }
                         continue;
                     }
@@ -309,231 +289,13 @@ impl AllocationLiveness {
         }
     }
 
-    fn compute_block_exit_liveness(
-        &mut self,
-        program: &EthIRProgram,
-        local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-        predecessors: &Predecessors,
-        blocks_postorder: &[BasicBlockId],
-    ) {
-        let mut input_live_flags = SmallVec::<[bool; 8]>::new();
-        let mut entry_liveness = HashSet::new();
-        let mut changed = true;
-        while changed {
-            changed = false;
-
-            for &bb_id in blocks_postorder {
-                self.compute_block_entry_liveness(program, bb_id, &mut entry_liveness);
-
-                populate_input_live_flags(
-                    program,
-                    local_to_input_origins,
-                    bb_id,
-                    &mut input_live_flags,
-                );
-
-                changed |= self.propagate_alloc_liveness_to_predecessors(
-                    program,
-                    predecessors.of(bb_id),
-                    &entry_liveness,
-                    &input_live_flags,
-                );
+    fn populate_intervals_from_local_liveness(&mut self, local_liveness: &LocalLiveness) {
+        for (local, &alloc_id) in self.local_to_alloc.iter() {
+            if self.allocations[alloc_id].escapes {
+                continue;
             }
-        }
-    }
-
-    fn compute_block_entry_liveness(
-        &self,
-        program: &EthIRProgram,
-        bb_id: BasicBlockId,
-        entry_liveness: &mut HashSet<AllocId>,
-    ) {
-        let block = &program.basic_blocks[bb_id];
-        entry_liveness.clone_from(&self.block_exit_liveness[bb_id]);
-
-        for op_idx in block.operations.iter().rev() {
-            let op = program.operations[op_idx];
-
-            match op {
-                Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => {
-                    if let Some(alloc_id) = self.local_to_alloc.get(data.ptr_out) {
-                        entry_liveness.remove(alloc_id);
-                    }
-                }
-                Operation::DynamicAllocZeroed(data) | Operation::DynamicAllocAnyBytes(data) => {
-                    let [ptr] = data.outs;
-                    if let Some(alloc_id) = self.local_to_alloc.get(ptr) {
-                        entry_liveness.remove(alloc_id);
-                    }
-                }
-                _ => {}
-            }
-
-            for input in op.inputs(program) {
-                let Some(&alloc_id) = self.local_to_alloc.get(*input) else { continue };
-                if !self.allocations[alloc_id].escapes {
-                    entry_liveness.insert(alloc_id);
-                }
-            }
-        }
-    }
-
-    fn propagate_alloc_liveness_to_predecessors(
-        &mut self,
-        program: &EthIRProgram,
-        predecessors: &[BasicBlockId],
-        entry_liveness: &HashSet<AllocId>,
-        input_live_flags: &[bool],
-    ) -> bool {
-        let mut changed = false;
-
-        for &pred_id in predecessors {
-            let pred_exit = &mut self.block_exit_liveness[pred_id];
-            for &value in entry_liveness {
-                changed |= pred_exit.insert(value);
-            }
-
-            let pred_outputs = program.block(pred_id).outputs();
-            for (pos, &live) in input_live_flags.iter().enumerate() {
-                if !live {
-                    continue;
-                }
-                if let Some(&alloc_id) = self.local_to_alloc.get(pred_outputs[pos])
-                    && !self.allocations[alloc_id].escapes
-                    && pred_exit.insert(alloc_id)
-                {
-                    changed = true;
-                }
-            }
-        }
-
-        changed
-    }
-
-    fn populate_allocation_intervals(
-        &mut self,
-        program: &EthIRProgram,
-        local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-        predecessors: &Predecessors,
-    ) {
-        let mut interval_ends: HashMap<AllocId, IntervalEnd> = HashMap::new();
-        let mut last_use_per_input: SmallVec<[Option<OperationIdx>; 8]> = SmallVec::new();
-
-        for bb_id in program.basic_blocks.iter_idx() {
-            self.compute_block_intervals(program, bb_id, &mut interval_ends);
-
-            self.build_input_intervals(
-                program,
-                local_to_input_origins,
-                bb_id,
-                predecessors.of(bb_id),
-                &mut last_use_per_input,
-            );
-        }
-
-        for alloc in self.allocations.iter_mut() {
-            alloc.intervals.sort();
-            alloc.intervals.dedup();
-        }
-    }
-
-    fn compute_block_intervals(
-        &mut self,
-        program: &EthIRProgram,
-        bb_id: BasicBlockId,
-        interval_ends: &mut HashMap<AllocId, IntervalEnd>,
-    ) {
-        let block = &program.basic_blocks[bb_id];
-        interval_ends.clear();
-        for &alloc_id in &self.block_exit_liveness[bb_id] {
-            interval_ends.insert(alloc_id, IntervalEnd::LiveOut);
-        }
-
-        for op_idx in block.operations.iter().rev() {
-            let op = program.operations[op_idx];
-
-            match op {
-                Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => {
-                    if let Some(alloc_id) = self.local_to_alloc.get(data.ptr_out)
-                        && let Some(end) = interval_ends.remove(alloc_id)
-                    {
-                        self.allocations[*alloc_id]
-                            .intervals
-                            .push((bb_id, Interval { start: IntervalStart::At(op_idx), end }));
-                    }
-                }
-                Operation::DynamicAllocZeroed(data) | Operation::DynamicAllocAnyBytes(data) => {
-                    let [ptr] = data.outs;
-                    if let Some(alloc_id) = self.local_to_alloc.get(ptr)
-                        && let Some(end) = interval_ends.remove(alloc_id)
-                    {
-                        self.allocations[*alloc_id]
-                            .intervals
-                            .push((bb_id, Interval { start: IntervalStart::At(op_idx), end }));
-                    }
-                }
-                _ => {}
-            }
-
-            for input in op.inputs(program) {
-                let Some(&alloc_id) = self.local_to_alloc.get(*input) else { continue };
-                if !self.allocations[alloc_id].escapes {
-                    interval_ends.entry(alloc_id).or_insert(IntervalEnd::At(op_idx));
-                }
-            }
-        }
-
-        for (alloc_id, end) in interval_ends.drain() {
-            self.allocations[alloc_id]
-                .intervals
-                .push((bb_id, Interval { start: IntervalStart::LiveIn, end }));
-        }
-    }
-
-    fn build_input_intervals(
-        &mut self,
-        program: &EthIRProgram,
-        local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-        bb_id: BasicBlockId,
-        predecessors: &[BasicBlockId],
-        last_use_per_input: &mut SmallVec<[Option<OperationIdx>; 8]>,
-    ) {
-        let block = &program.basic_blocks[bb_id];
-        last_use_per_input.clear();
-        last_use_per_input.resize(block.inputs.len() as usize, None);
-
-        for op_idx in block.operations.iter().rev() {
-            for input in program.operations[op_idx].inputs(program) {
-                let Some(origins) = local_to_input_origins.get(input) else { continue };
-                for &origin in origins {
-                    debug_assert_eq!(origin.block, bb_id);
-                    if last_use_per_input[origin.input_idx as usize].is_none() {
-                        last_use_per_input[origin.input_idx as usize] = Some(op_idx);
-                    }
-                }
-            }
-        }
-
-        for (pos, end_op) in last_use_per_input.iter().enumerate() {
-            let Some(end_op) = *end_op else { continue };
-
-            for pred_id in predecessors {
-                let Some(&alloc_id) =
-                    self.local_to_alloc.get(program.block(*pred_id).outputs()[pos])
-                else {
-                    continue;
-                };
-                // Skip escaping allocs and those already handled by compute_block_intervals.
-                if self.allocations[alloc_id].escapes
-                    || self.block_exit_liveness[bb_id].contains(&alloc_id)
-                {
-                    continue;
-                }
-
-                self.allocations[alloc_id].intervals.push((
-                    bb_id,
-                    Interval { start: IntervalStart::LiveIn, end: IntervalEnd::At(end_op) },
-                ));
+            for &(bb_id, interval) in local_liveness.intervals_of(local) {
+                self.allocations[alloc_id].intervals.push((bb_id, interval));
             }
         }
     }
@@ -565,82 +327,10 @@ fn can_derive_pointer(op: Operation) -> bool {
     )
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct BlockInput {
-    block: BasicBlockId,
-    input_idx: u32,
-}
-type BlockInputOrigins = SmallVec<[BlockInput; 1]>;
-
-fn propagate_block_input_origins(
-    program: &EthIRProgram,
-    def_use: &DefUse,
-) -> HashMap<LocalId, BlockInputOrigins> {
-    let mut local_to_input_origins: HashMap<LocalId, BlockInputOrigins> = HashMap::new();
-    let mut worklist: Vec<(LocalId, BlockInput)> = Vec::new();
-
-    for block in program.blocks() {
-        let bb_id = block.id();
-        for (pos, &input) in (0u32..).zip(block.inputs()) {
-            let input_site = BlockInput { block: bb_id, input_idx: pos };
-            local_to_input_origins.entry(input).or_default().push(input_site);
-            worklist.push((input, input_site));
-        }
-    }
-
-    while let Some((local, input_site)) = worklist.pop() {
-        for use_loc in def_use.uses_of(local) {
-            let UseKind::Operation(op_idx) = use_loc.kind else { continue };
-            let op = program.operations[op_idx];
-            if !can_derive_pointer(op) {
-                continue;
-            }
-            for output in op.outputs(program) {
-                let sites = local_to_input_origins.entry(*output).or_default();
-                if sites.contains(&input_site) {
-                    continue;
-                }
-                sites.push(input_site);
-                worklist.push((*output, input_site));
-            }
-        }
-    }
-
-    local_to_input_origins
-}
-
-fn populate_input_live_flags(
-    program: &EthIRProgram,
-    local_to_input_origins: &HashMap<LocalId, BlockInputOrigins>,
-    bb_id: BasicBlockId,
-    input_live_flags: &mut SmallVec<[bool; 8]>,
-) {
-    let block = &program.basic_blocks[bb_id];
-    input_live_flags.clear();
-    input_live_flags.resize(block.inputs.len() as usize, false);
-
-    let mut mark_input_origins_live = |local: &LocalId| {
-        let Some(origins) = local_to_input_origins.get(local) else { return };
-        for origin in origins {
-            debug_assert_eq!(origin.block, bb_id);
-            input_live_flags[origin.input_idx as usize] = true;
-        }
-    };
-
-    for output in &program.locals[block.outputs] {
-        mark_input_origins_live(output);
-    }
-
-    for op_idx in block.operations.iter() {
-        for input in program.operations[op_idx].inputs(program) {
-            mark_input_origins_live(input);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyses::{IntervalEnd, IntervalStart};
     use sir_parser::{EmitConfig, parse_or_panic};
 
     fn get_alloc(liveness: &AllocationLiveness, idx: u32) -> &AllocData {
@@ -760,12 +450,12 @@ mod tests {
             alloc,
             BasicBlockId::new(0),
             IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
-            IntervalEnd::LiveOut,
+            IntervalEnd::BlockEnd,
         );
         assert_has_interval(
             alloc,
             BasicBlockId::new(1),
-            IntervalStart::LiveIn,
+            IntervalStart::BlockStart,
             IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(1), 0)), // mload256
         );
     }
@@ -803,24 +493,24 @@ mod tests {
             alloc,
             BasicBlockId::new(0),
             IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
-            IntervalEnd::LiveOut,
+            IntervalEnd::BlockEnd,
         );
         assert_has_interval(
             alloc,
             BasicBlockId::new(1),
-            IntervalStart::LiveIn,
-            IntervalEnd::LiveOut,
+            IntervalStart::BlockStart,
+            IntervalEnd::BlockEnd,
         );
         assert_has_interval(
             alloc,
             BasicBlockId::new(2),
-            IntervalStart::LiveIn,
-            IntervalEnd::LiveOut,
+            IntervalStart::BlockStart,
+            IntervalEnd::BlockEnd,
         );
         assert_has_interval(
             alloc,
             BasicBlockId::new(3),
-            IntervalStart::LiveIn,
+            IntervalStart::BlockStart,
             IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(3), 0)), // mload256
         );
     }
@@ -855,13 +545,13 @@ mod tests {
             alloc,
             BasicBlockId::new(0),
             IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
-            IntervalEnd::LiveOut,
+            IntervalEnd::BlockEnd,
         );
         assert_has_interval(
             alloc,
             BasicBlockId::new(1),
-            IntervalStart::LiveIn,
-            IntervalEnd::LiveOut,
+            IntervalStart::BlockStart,
+            IntervalEnd::BlockEnd,
         );
     }
 
@@ -904,12 +594,20 @@ mod tests {
         assert_eq!(liveness.allocations.len(), 1);
         let alloc = get_alloc(&liveness, 0);
         assert!(!alloc.escapes);
-        assert_eq!(alloc.intervals.len(), 1);
+        assert_eq!(alloc.intervals.len(), 2);
         assert_has_interval(
             alloc,
             BasicBlockId::new(0),
             IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mload256
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)),   /* add (last use
+                                                                               * of buf) */
+        );
+        assert_has_interval(
+            alloc,
+            BasicBlockId::new(0),
+            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)), /* add (def of
+                                                                               * derived) */
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)), // mload256
         );
     }
 

@@ -1,6 +1,6 @@
 use crate::analyses::{
     AllocationLiveness, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling, DefUse,
-    DominanceFrontiers, Dominators, Predecessors,
+    DominanceFrontiers, Dominators, LocalLiveness, Predecessors,
 };
 use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram};
 use std::cell::{Ref, RefCell, RefMut};
@@ -99,6 +99,7 @@ define_analyses! {
     BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability,
     CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling,
     AllocationLiveness => allocation_liveness: AllocationLiveness,
+    LocalLiveness => local_liveness: LocalLiveness,
     // Produced by SCCP, not computed on-demand. Use get_buffer() + mark_valid().
     SccpReachable => sccp_reachable: DenseIndexSet<BasicBlockId>,
 }
@@ -140,6 +141,10 @@ impl AnalysesStore {
 
     pub fn allocation_liveness(&self, program: &EthIRProgram) -> Ref<'_, AllocationLiveness> {
         self.allocation_liveness.get(program, self)
+    }
+
+    pub fn local_liveness(&self, program: &EthIRProgram) -> Ref<'_, LocalLiveness> {
+        self.local_liveness.get(program, self)
     }
 }
 

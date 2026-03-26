@@ -76,6 +76,13 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         unsafe { self.inner.get_unchecked_mut(key.idx()) }.replace(value)
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (I, &V)> {
+        self.inner
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| slot.as_ref().map(|v| (I::ZERO + i as u32, v)))
+    }
+
     /// Removes a value at `key`, returning the value if one was present.
     pub fn remove(&mut self, key: I) -> Option<V> {
         let idx = key.idx();
