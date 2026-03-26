@@ -1,4 +1,7 @@
-use crate::analyses::{AnalysesStore, DefUse, Interval, LocalLiveness, UseKind, cache::Analysis};
+use crate::analyses::{
+    AnalysesStore, DefUse, Interval, IntervalEnd, IntervalStart, LocalLiveness, UseKind,
+    cache::Analysis,
+};
 use plank_core::DenseIndexMap;
 use sir_data::{
     BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Operation, OperationIdx, StaticAllocId,
@@ -245,17 +248,7 @@ impl AllocationLiveness {
                         }
                         for succ_id in program.block(use_loc.block_id).successors() {
                             let succ_input = program.block(succ_id).inputs()[pos as usize];
-                            match self.local_to_alloc.insert(succ_input, alloc_id) {
-                                None => worklist.push(succ_input),
-                                Some(existing) => {
-                                    if existing != alloc_id {
-                                        // TODO: Track variables that may be different allocations.
-                                        // For now just conservatively mark as escaped.
-                                        self.allocations[alloc_id].escapes = true;
-                                        self.allocations[existing].escapes = true;
-                                    }
-                                }
-                            }
+                            self.link_local_to_alloc(succ_input, alloc_id, worklist);
                         }
                         continue;
                     }
@@ -264,22 +257,31 @@ impl AllocationLiveness {
 
                 if can_derive_pointer(op) {
                     for &out in op.outputs(program) {
-                        match self.local_to_alloc.insert(out, alloc_id) {
-                            None => worklist.push(out),
-                            Some(existing) => {
-                                if existing != alloc_id {
-                                    // TODO: Track variables that may be different allocations.
-                                    // For now just conservatively mark as escaped.
-                                    self.allocations[alloc_id].escapes = true;
-                                    self.allocations[existing].escapes = true;
-                                }
-                            }
-                        }
+                        self.link_local_to_alloc(out, alloc_id, worklist);
                     }
                 }
 
                 self.allocations[alloc_id].escapes |=
                     operation_causes_ptr_escape(program, op, local);
+            }
+        }
+    }
+
+    fn link_local_to_alloc(
+        &mut self,
+        local: LocalId,
+        alloc_id: AllocId,
+        worklist: &mut Vec<LocalId>,
+    ) {
+        match self.local_to_alloc.insert(local, alloc_id) {
+            None => worklist.push(local),
+            Some(existing) => {
+                if existing != alloc_id {
+                    // TODO: Track variables that may be different allocations.
+                    // For now just conservatively mark as escaped.
+                    self.allocations[alloc_id].escapes = true;
+                    self.allocations[existing].escapes = true;
+                }
             }
         }
     }
@@ -292,6 +294,13 @@ impl AllocationLiveness {
             for &(bb_id, interval) in local_liveness.intervals_of(local) {
                 self.allocations[alloc_id].intervals.push((bb_id, interval));
             }
+        }
+
+        for alloc in self.allocations.iter_mut() {
+            if alloc.escapes {
+                continue;
+            }
+            merge_intervals(&mut alloc.intervals);
         }
     }
 }
@@ -320,6 +329,41 @@ fn can_derive_pointer(op: Operation) -> bool {
             | Operation::Sar(_)
             | Operation::SetCopy(_)
     )
+}
+
+fn merge_intervals(intervals: &mut Vec<(BasicBlockId, Interval)>) {
+    if intervals.len() <= 1 {
+        return;
+    }
+
+    intervals.sort();
+
+    let mut dst = 0;
+    for src in 1..intervals.len() {
+        let (prev_bb, prev_interval) = intervals[dst];
+        let (curr_bb, curr_interval) = intervals[src];
+
+        let overlaps = prev_bb == curr_bb
+            && match (prev_interval.end, curr_interval.start) {
+                (IntervalEnd::BlockEnd, _) | (_, IntervalStart::BlockStart) => true,
+                (IntervalEnd::At(prev_end), IntervalStart::At(curr_start)) => {
+                    prev_end >= curr_start
+                }
+            };
+
+        if overlaps {
+            intervals[dst].1.end = match (prev_interval.end, curr_interval.end) {
+                (IntervalEnd::BlockEnd, _) | (_, IntervalEnd::BlockEnd) => IntervalEnd::BlockEnd,
+                (IntervalEnd::At(prev_end), IntervalEnd::At(curr_end)) => {
+                    IntervalEnd::At(std::cmp::max(prev_end, curr_end))
+                }
+            };
+        } else {
+            dst += 1;
+            intervals[dst] = intervals[src];
+        }
+    }
+    intervals.truncate(dst + 1);
 }
 
 #[cfg(test)]
@@ -589,20 +633,12 @@ mod tests {
         assert_eq!(liveness.allocations.len(), 1);
         let alloc = get_alloc(&liveness, 0);
         assert!(!alloc.escapes);
-        assert_eq!(alloc.intervals.len(), 2);
+        assert_eq!(alloc.intervals.len(), 1);
         assert_has_interval(
             alloc,
             BasicBlockId::new(0),
             IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 0)), // salloc
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)),   /* add (last use
-                                                                               * of buf) */
-        );
-        assert_has_interval(
-            alloc,
-            BasicBlockId::new(0),
-            IntervalStart::At(op_idx_in_block(&ir, BasicBlockId::new(0), 2)), /* add (def of
-                                                                               * derived) */
-            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)), // mload256
+            IntervalEnd::At(op_idx_in_block(&ir, BasicBlockId::new(0), 3)),   // mload256
         );
     }
 
