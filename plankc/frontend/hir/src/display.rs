@@ -27,7 +27,11 @@ impl<'a> DisplayHir<'a> {
     }
 
     fn fmt_struct_ref(&self, f: &mut Formatter<'_>, struct_id: StructDefId) -> fmt::Result {
-        write!(f, "@struct{}", struct_id.get())
+        let r#struct = &self.hir.struct_defs[struct_id];
+        let (line, col) =
+            self.session.offset_to_line_col(r#struct.source_id, r#struct.source_span.start);
+        let source = self.session.get_source(r#struct.source_id);
+        write!(f, "struct#{} {}:{}:{}", struct_id.get(), source.path.to_str().unwrap(), line, col)
     }
 
     fn fmt_args(&self, f: &mut Formatter<'_>, args_id: CallArgsId) -> fmt::Result {

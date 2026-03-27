@@ -17,6 +17,7 @@ fn try_lower_project(project: TestProject) -> (Hir, BigNumInterner, Session, Par
     (hir, big_nums, session, project)
 }
 
+#[track_caller]
 fn assert_lowers_to(source: &str, expected: &str) {
     let (hir, big_nums, session, _project) = try_lower(source);
     assert!(
@@ -203,7 +204,7 @@ fn test_fn_struct_return() {
             %1 = void
             %2 = type#1
             %3 = type#1
-            %0 = @struct0
+            %0 = struct#0 main.plk:1:14
         }
         ConstId(1) ("swap") result=LocalId(0) {
             %0 = @fn0
