@@ -20,7 +20,14 @@ newtype_index! {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Expr {
+pub struct Expr {
+    pub source_id: SourceId,
+    pub span: SourceSpan,
+    pub kind: ExprKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ExprKind {
     ConstRef(ConstId),
     LocalRef(LocalId),
     FnDef(FnDefId),
@@ -30,17 +37,31 @@ pub enum Expr {
     BigNum(BigNumId),
     Type(TypeId),
 
-    Call { callee: LocalId, args: CallArgsId },
-    BuiltinCall { builtin: Builtin, args: CallArgsId },
-    Member { object: LocalId, member: StrId },
-    StructLit { ty: LocalId, fields: FieldsId },
+    Call {
+        callee: LocalId,
+        args: CallArgsId,
+    },
+    BuiltinCall {
+        builtin: Builtin,
+        args: CallArgsId,
+    },
+    Member {
+        object: LocalId,
+        member: StrId,
+    },
+    StructLit {
+        ty: LocalId,
+        fields: FieldsId,
+    },
     StructDef(StructDefId),
 
+    /// Indicates the expr that evaluated to the value had some error that was already handled,
+    /// to avoid cascades any expression downstream from it also needs to become an error.
     Error,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum Instruction {
+pub enum InstructionKind {
     Set { local: LocalId, expr: Expr },
     Assign { target: LocalId, value: Expr },
     AssertType { value: LocalId, of_type: LocalId },
@@ -48,6 +69,13 @@ pub enum Instruction {
     Return(Expr),
     If { condition: LocalId, then_block: BlockId, else_block: BlockId },
     While { condition_block: BlockId, condition: LocalId, body: BlockId },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Instruction {
+    pub source: SourceId,
+    pub span: SourceSpan,
+    pub kind: InstructionKind,
 }
 
 #[derive(Debug, Clone, Copy)]

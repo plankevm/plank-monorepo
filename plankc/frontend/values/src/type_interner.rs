@@ -186,6 +186,37 @@ impl TypeInterner {
         })
     }
 
+    pub fn fmt_type(
+        &self,
+        f: &mut impl fmt::Write,
+        type_id: TypeId,
+        session: &Session,
+    ) -> fmt::Result {
+        match self.lookup(type_id) {
+            Type::Void => f.write_str("void"),
+            Type::Int => f.write_str("u256"),
+            Type::Bool => f.write_str("bool"),
+            Type::MemoryPointer => f.write_str("memptr"),
+            Type::Type => f.write_str("type"),
+            Type::Function => f.write_str("function"),
+            Type::Never => f.write_str("never"),
+            Type::Struct(info) => match self.struct_name(type_id) {
+                Some(name) => f.write_str(session.lookup_name(name)),
+                None => {
+                    let (line, col) =
+                        session.offset_to_line_col(info.source_id, info.source_span.start);
+                    write!(f, "struct@{line}:{col}")
+                }
+            },
+        }
+    }
+
+    pub fn type_name(&self, type_id: TypeId, session: &Session) -> String {
+        let mut buf = String::with_capacity(16);
+        self.fmt_type(&mut buf, type_id, session).unwrap();
+        buf
+    }
+
     pub fn field_index_by_name(&self, type_id: TypeId, name: StrId) -> Option<u32> {
         let struct_idx = as_type(type_id).err()?;
         self.storage.struct_field_names[struct_idx]
@@ -237,35 +268,4 @@ impl StructStorage {
         };
         self.comptime_only.contains(struct_idx)
     }
-}
-
-pub fn fmt_type(
-    f: &mut impl fmt::Write,
-    type_id: TypeId,
-    types: &TypeInterner,
-    session: &Session,
-) -> fmt::Result {
-    match types.lookup(type_id) {
-        Type::Void => f.write_str("void"),
-        Type::Int => f.write_str("u256"),
-        Type::Bool => f.write_str("bool"),
-        Type::MemoryPointer => f.write_str("memptr"),
-        Type::Type => f.write_str("Type"),
-        Type::Function => f.write_str("function"),
-        Type::Never => f.write_str("never"),
-        Type::Struct(info) => match types.struct_name(type_id) {
-            Some(name) => f.write_str(session.lookup_name(name)),
-            None => {
-                let (line, col) =
-                    session.offset_to_line_col(info.source_id, info.source_span.start);
-                write!(f, "struct@{line}:{col}")
-            }
-        },
-    }
-}
-
-pub fn type_name(type_id: TypeId, types: &TypeInterner, session: &Session) -> String {
-    let mut buf = String::new();
-    fmt_type(&mut buf, type_id, types, session).expect("writing to String cannot fail");
-    buf
 }

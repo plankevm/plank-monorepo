@@ -1,13 +1,13 @@
-use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
+use plank_core::{list_of_lists::ListOfLists, DenseIndexMap, IndexVec};
 use plank_hir::{self as hir};
 use plank_mir::{self as mir};
 use plank_session::StrId;
 use plank_values::{StructInfo, Type, TypeId, TypeInterner, ValueId};
 
 use crate::{
-    Evaluator,
     comptime::ComptimeInterpreter,
     value::{Value, ValueInterner},
+    Evaluator,
 };
 
 const INSTRUCTION_BUF_CAPACITY: usize = 1024;
@@ -231,23 +231,23 @@ impl FunctionLowerScope {
     }
 
     fn translate_expr(&mut self, eval: &mut Evaluator<'_>, expr: hir::Expr) -> ExprResult {
-        match expr {
-            hir::Expr::Void => ExprResult::Runtime {
+        match expr.kind {
+            hir::ExprKind::Void => ExprResult::Runtime {
                 expr: mir::Expr::Void,
                 ty: TypeId::VOID,
                 comptime: Some(ValueId::VOID),
             },
-            hir::Expr::Bool(b) => ExprResult::Runtime {
+            hir::ExprKind::Bool(b) => ExprResult::Runtime {
                 expr: mir::Expr::Bool(b),
                 ty: TypeId::BOOL,
                 comptime: Some(if b { ValueId::TRUE } else { ValueId::FALSE }),
             },
-            hir::Expr::BigNum(big_num_id) => ExprResult::Runtime {
+            hir::ExprKind::BigNum(big_num_id) => ExprResult::Runtime {
                 expr: mir::Expr::BigNum(big_num_id),
                 ty: TypeId::U256,
                 comptime: Some(eval.values.intern_num(big_num_id)),
             },
-            hir::Expr::BuiltinCall { builtin, args } => {
+            hir::ExprKind::BuiltinCall { builtin, args } => {
                 let args = &eval.hir.call_args[args];
                 'sig: for &(input_types, result_type) in builtin.signatures() {
                     if input_types.len() != args.len() {
@@ -271,7 +271,7 @@ impl FunctionLowerScope {
                 }
                 todo!("diagnostic: no matching builtin type signature")
             }
-            hir::Expr::LocalRef(hir) => {
+            hir::ExprKind::LocalRef(hir) => {
                 let value = self.locals.comptime.get(hir).copied();
                 let mir = self.locals.hir_to_mir.get(hir).copied();
                 match (mir, value) {
@@ -284,15 +284,15 @@ impl FunctionLowerScope {
                     (None, None) => unreachable!("invalid hir {hir:?}"),
                 }
             }
-            hir::Expr::ConstRef(id) => {
+            hir::ExprKind::ConstRef(id) => {
                 let value = eval.ensure_const_evaluated(&mut self.interpreter, id);
                 match self.materialize(&eval.values, &eval.types, &mut eval.mir_args, value) {
                     None => ExprResult::ComptimeOnly(value),
                     Some((expr, ty)) => ExprResult::Runtime { expr, ty, comptime: Some(value) },
                 }
             }
-            hir::Expr::Type(ty) => ExprResult::ComptimeOnly(eval.values.intern_type(ty)),
-            hir::Expr::FnDef(fn_def) => {
+            hir::ExprKind::Type(ty) => ExprResult::ComptimeOnly(eval.values.intern_type(ty)),
+            hir::ExprKind::FnDef(fn_def) => {
                 let captures = &eval.hir.fn_captures[fn_def];
                 assert!(self.values_buf.is_empty());
                 for capture in captures {
@@ -308,7 +308,7 @@ impl FunctionLowerScope {
                 self.values_buf.clear();
                 ExprResult::ComptimeOnly(value_id)
             }
-            hir::Expr::Call { callee, args } => {
+            hir::ExprKind::Call { callee, args } => {
                 let &closure = self
                     .locals
                     .comptime
@@ -344,7 +344,7 @@ impl FunctionLowerScope {
                     comptime: None,
                 }
             }
-            hir::Expr::StructDef(struct_def_id) => {
+            hir::ExprKind::StructDef(struct_def_id) => {
                 let struct_def = eval.hir.struct_defs[struct_def_id];
                 let Some(type_index) = self.locals.comptime(struct_def.type_index) else {
                     todo!("diagnostic: `type_index` not comptime known");
@@ -373,8 +373,10 @@ impl FunctionLowerScope {
                 self.field_types_buf.clear();
                 ExprResult::ComptimeOnly(eval.values.intern(Value::Type(ty)))
             }
-            hir::Expr::StructLit { ty, fields } => self.translate_struct_literal(eval, ty, fields),
-            hir::Expr::Member { object, member } => {
+            hir::ExprKind::StructLit { ty, fields } => {
+                self.translate_struct_literal(eval, ty, fields)
+            }
+            hir::ExprKind::Member { object, member } => {
                 let ty = self.locals.get_type(object, &eval.values);
                 let Type::Struct(r#struct) = eval.types.lookup(ty) else {
                     todo!("diagnostic: member target obj not a struct");
@@ -401,7 +403,7 @@ impl FunctionLowerScope {
                     (None, None) => unreachable!("invalid hir"),
                 }
             }
-            hir::Expr::Error => unreachable!("error expression reached hir-eval"),
+            hir::ExprKind::Error => unreachable!("error expression reached hir-eval"),
         }
     }
 
@@ -463,20 +465,22 @@ impl FunctionLowerScope {
         block: hir::BlockId,
     ) -> Result<(), BlockControlFlowDiverges> {
         for &instr in &eval.hir.blocks[block] {
-            match instr {
-                hir::Instruction::Set { local, expr } => match self.translate_expr(eval, expr) {
-                    ExprResult::Runtime { expr, ty, comptime } => {
-                        let target = self.locals.set(local, ty, comptime);
-                        self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
-                        if ty == TypeId::NEVER {
-                            return Err(BlockControlFlowDiverges);
+            match instr.kind {
+                hir::InstructionKind::Set { local, expr } => {
+                    match self.translate_expr(eval, expr) {
+                        ExprResult::Runtime { expr, ty, comptime } => {
+                            let target = self.locals.set(local, ty, comptime);
+                            self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
+                            if ty == TypeId::NEVER {
+                                return Err(BlockControlFlowDiverges);
+                            }
+                        }
+                        ExprResult::ComptimeOnly(value) => {
+                            self.locals.comptime.insert(local, value);
                         }
                     }
-                    ExprResult::ComptimeOnly(value) => {
-                        self.locals.comptime.insert(local, value);
-                    }
-                },
-                hir::Instruction::Assign { target, value } => {
+                }
+                hir::InstructionKind::Assign { target, value } => {
                     match self.translate_expr(eval, value) {
                         ExprResult::Runtime { expr, ty, comptime: _ } => {
                             let target = self.locals.assign(target, ty);
@@ -487,7 +491,7 @@ impl FunctionLowerScope {
                         }
                     }
                 }
-                hir::Instruction::AssertType { value, of_type } => {
+                hir::InstructionKind::AssertType { value, of_type } => {
                     let Some(&type_value) = self.locals.comptime.get(of_type) else {
                         todo!("diagnostic: AssertType of_type must be comptime")
                     };
@@ -499,7 +503,7 @@ impl FunctionLowerScope {
                         todo!("diagnostic: type mismatch in AssertType")
                     }
                 }
-                hir::Instruction::Eval(expr) => match self.translate_expr(eval, expr) {
+                hir::InstructionKind::Eval(expr) => match self.translate_expr(eval, expr) {
                     ExprResult::ComptimeOnly(_) => { /* No MIR equivalent, do nothing */ }
                     ExprResult::Runtime { expr, ty, comptime: _ } => {
                         // MIR doesn't have `Eval` so we use `Set`.
@@ -510,7 +514,7 @@ impl FunctionLowerScope {
                         }
                     }
                 },
-                hir::Instruction::Return(expr) => match self.translate_expr(eval, expr) {
+                hir::InstructionKind::Return(expr) => match self.translate_expr(eval, expr) {
                     ExprResult::ComptimeOnly(_) => {
                         todo!("diagnostic: returning comptime-only in runtime ctx")
                     }
@@ -528,7 +532,7 @@ impl FunctionLowerScope {
                         return Err(BlockControlFlowDiverges);
                     }
                 },
-                hir::Instruction::If { condition, then_block, else_block } => {
+                hir::InstructionKind::If { condition, then_block, else_block } => {
                     match self.locals.comptime(condition) {
                         Some(ValueId::TRUE) => self.translate_block_inner(eval, then_block)?,
                         Some(ValueId::FALSE) => self.translate_block_inner(eval, else_block)?,
@@ -552,7 +556,7 @@ impl FunctionLowerScope {
                         }
                     }
                 }
-                hir::Instruction::While { condition_block, condition, body } => {
+                hir::InstructionKind::While { condition_block, condition, body } => {
                     let (condition_block, cond_control) =
                         self.translate_block(eval, condition_block);
                     let () = cond_control?;

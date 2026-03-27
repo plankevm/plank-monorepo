@@ -18,7 +18,7 @@ pub enum Expr<'cst> {
     FnDef(FnDef<'cst>),
     Block(BlockExpr<'cst>),
     ComptimeBlock(BlockExpr<'cst>),
-    BoolLiteral(bool),
+    BoolLiteral { value: bool, span: Span<TokenIdx> },
     NumLiteral { negative: bool, id: NumLitId, span: Span<TokenIdx> },
     Ident { name: StrId, span: Span<TokenIdx> },
 }
@@ -35,6 +35,7 @@ impl<'cst> Expr<'cst> {
     pub fn new(mut view: NodeView<'cst>) -> Option<Self> {
         const MAX_PAREN_UNWRAPS: usize = 16_000;
         for _ in 0..MAX_PAREN_UNWRAPS {
+            let span = view.span();
             let expr = match view.kind() {
                 NodeKind::ParenExpr => {
                     view = view.child(0)?;
@@ -50,17 +51,33 @@ impl<'cst> Expr<'cst> {
                 NodeKind::FnDef => Expr::FnDef(FnDef { view }),
                 NodeKind::Block => Expr::Block(BlockExpr { view }),
                 NodeKind::ComptimeBlock => Expr::ComptimeBlock(BlockExpr { view }),
-                NodeKind::BoolLiteral(value) => Expr::BoolLiteral(value),
-                NodeKind::NumLiteral { negative, id } => {
-                    Expr::NumLiteral { negative, id, span: view.span() }
-                }
-                NodeKind::Identifier { ident } => Expr::Ident { name: ident, span: view.span() },
+                NodeKind::BoolLiteral(value) => Expr::BoolLiteral { value, span },
+                NodeKind::NumLiteral { negative, id } => Expr::NumLiteral { negative, id, span },
+                NodeKind::Identifier { ident } => Expr::Ident { name: ident, span },
                 _ => return None,
             };
             return Some(expr);
         }
 
         unreachable!("Nested paren over {MAX_PAREN_UNWRAPS} deep");
+    }
+
+    pub fn span(&self) -> Span<TokenIdx> {
+        match self {
+            Expr::Binary(BinaryExpr { view, .. })
+            | Expr::Unary(UnaryExpr { view, .. })
+            | Expr::Call(CallExpr { view, .. })
+            | Expr::Member(MemberExpr { view, .. })
+            | Expr::StructDef(StructDef { view, .. })
+            | Expr::StructLit(StructLit { view, .. })
+            | Expr::If(IfExpr { view, .. })
+            | Expr::FnDef(FnDef { view, .. })
+            | Expr::Block(BlockExpr { view, .. })
+            | Expr::ComptimeBlock(BlockExpr { view, .. }) => view.span(),
+            Expr::BoolLiteral { span, .. }
+            | Expr::NumLiteral { span, .. }
+            | Expr::Ident { span, .. } => *span,
+        }
     }
 }
 

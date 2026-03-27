@@ -1,9 +1,9 @@
-use plank_core::{DenseIndexMap, vec_buf::VecBuf};
+use plank_core::{vec_buf::VecBuf, DenseIndexMap};
 use plank_hir::{self as hir, ConstDef};
 use plank_session::StrId;
 use plank_values::{TypeId, ValueId};
 
-use crate::{Evaluator, value::Value};
+use crate::{value::Value, Evaluator};
 
 #[derive(Debug)]
 pub struct ReturnValue(ValueId);
@@ -43,7 +43,7 @@ impl ComptimeInterpreter {
         block_id: hir::BlockId,
     ) -> Result<(), ReturnValue> {
         for &instr in &eval.hir.blocks[block_id] {
-            self.interpret_instruction(eval, instr)?;
+            self.interpret_instruction(eval, instr.kind)?;
         }
         Ok(())
     }
@@ -51,23 +51,23 @@ impl ComptimeInterpreter {
     fn interpret_instruction(
         &mut self,
         eval: &mut Evaluator<'_>,
-        instr: hir::Instruction,
+        instr: hir::InstructionKind,
     ) -> Result<(), ReturnValue> {
         match instr {
-            hir::Instruction::Set { local, expr } => {
-                let value = self.eval_expr(eval, expr)?;
+            hir::InstructionKind::Set { local, expr } => {
+                let value = self.eval_expr(eval, expr.kind)?;
                 if self.bindings.insert(local, value).is_some() {
                     unreachable!("hir: overwriting with set");
                 }
             }
-            hir::Instruction::Eval(expr) => {
-                self.eval_expr(eval, expr)?;
+            hir::InstructionKind::Eval(expr) => {
+                self.eval_expr(eval, expr.kind)?;
             }
-            hir::Instruction::Return(expr) => {
-                let value = self.eval_expr(eval, expr)?;
+            hir::InstructionKind::Return(expr) => {
+                let value = self.eval_expr(eval, expr.kind)?;
                 return Err(ReturnValue(value));
             }
-            hir::Instruction::AssertType { value, of_type } => {
+            hir::InstructionKind::AssertType { value, of_type } => {
                 let type_vid = self.bindings[of_type];
                 let Value::Type(expected_type) = eval.values.lookup(type_vid) else {
                     todo!("diagnostic: type error, value not type")
@@ -78,8 +78,8 @@ impl ComptimeInterpreter {
                     todo!("diagnostic: hir-ty-assert type mismatch");
                 }
             }
-            hir::Instruction::Assign { target, value } => {
-                let new_value = self.eval_expr(eval, value)?;
+            hir::InstructionKind::Assign { target, value } => {
+                let new_value = self.eval_expr(eval, value.kind)?;
                 let Some(prev_value) = self.bindings.insert(target, new_value) else {
                     unreachable!("hir: init with assign")
                 };
@@ -89,7 +89,7 @@ impl ComptimeInterpreter {
                     todo!("diagnostic: assign type mismatch");
                 }
             }
-            hir::Instruction::If { condition, then_block, else_block } => {
+            hir::InstructionKind::If { condition, then_block, else_block } => {
                 let cond_vid = self.bindings[condition];
                 match eval.values.lookup(cond_vid) {
                     Value::Bool(true) => self.interpret_block(eval, then_block)?,
@@ -97,7 +97,7 @@ impl ComptimeInterpreter {
                     _ => todo!("diagnostic: type err, condition not bool"),
                 }
             }
-            hir::Instruction::While { .. } => {
+            hir::InstructionKind::While { .. } => {
                 todo!("comptime while loops not yet implemented")
             }
         }
@@ -107,23 +107,23 @@ impl ComptimeInterpreter {
     fn eval_expr(
         &mut self,
         eval: &mut Evaluator<'_>,
-        expr: hir::Expr,
+        expr: hir::ExprKind,
     ) -> Result<ValueId, ReturnValue> {
         let value = match expr {
-            hir::Expr::Void => ValueId::VOID,
-            hir::Expr::Bool(false) => ValueId::FALSE,
-            hir::Expr::Bool(true) => ValueId::TRUE,
-            hir::Expr::BigNum(id) => eval.values.intern_num(id),
-            hir::Expr::Type(type_id) => eval.values.intern_type(type_id),
-            hir::Expr::ConstRef(const_id) => eval.ensure_const_evaluated(self, const_id),
-            hir::Expr::LocalRef(local_id) => self.bindings[local_id],
-            hir::Expr::FnDef(fn_def_id) => self.eval_fn_def(eval, fn_def_id)?,
-            hir::Expr::Call { callee, args } => self.eval_call(eval, callee, args)?,
-            hir::Expr::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
-            hir::Expr::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
-            hir::Expr::Member { object, member } => self.eval_member(eval, object, member)?,
-            hir::Expr::BuiltinCall { .. } => todo!("comptime builtin eval not yet implemented"),
-            hir::Expr::Error => unreachable!("error expression reached hir-eval"),
+            hir::ExprKind::Void => ValueId::VOID,
+            hir::ExprKind::Bool(false) => ValueId::FALSE,
+            hir::ExprKind::Bool(true) => ValueId::TRUE,
+            hir::ExprKind::BigNum(id) => eval.values.intern_num(id),
+            hir::ExprKind::Type(type_id) => eval.values.intern_type(type_id),
+            hir::ExprKind::ConstRef(const_id) => eval.ensure_const_evaluated(self, const_id),
+            hir::ExprKind::LocalRef(local_id) => self.bindings[local_id],
+            hir::ExprKind::FnDef(fn_def_id) => self.eval_fn_def(eval, fn_def_id)?,
+            hir::ExprKind::Call { callee, args } => self.eval_call(eval, callee, args)?,
+            hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
+            hir::ExprKind::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
+            hir::ExprKind::Member { object, member } => self.eval_member(eval, object, member)?,
+            hir::ExprKind::BuiltinCall { .. } => todo!("comptime builtin eval not yet implemented"),
+            hir::ExprKind::Error => unreachable!("error expression reached hir-eval"),
         };
         Ok(value)
     }
