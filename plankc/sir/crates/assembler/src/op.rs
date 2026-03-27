@@ -124,6 +124,19 @@ pub const DUP13: u8 = 0x8C;
 pub const DUP14: u8 = 0x8D;
 pub const DUP15: u8 = 0x8E;
 pub const DUP16: u8 = 0x8F;
+pub const DUP_LIMIT: u8 = 16;
+
+const DUPS: [u8; 16] = [
+    DUP1, DUP2, DUP3, DUP4, DUP5, DUP6, DUP7, DUP8, DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15,
+    DUP16,
+];
+
+/// Returns the DUPn opcode for depth `n` (1-indexed, 1..=16).
+pub const fn dup_n(n: u8) -> u8 {
+    assert!(n >= 1 && n <= DUP_LIMIT, "DUPn: n must be 1..=16");
+    DUPS[(n - 1) as usize]
+}
+
 // Swaps 0x90 - 0x9f
 pub const SWAP1: u8 = 0x90;
 pub const SWAP2: u8 = 0x91;

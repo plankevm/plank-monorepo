@@ -105,6 +105,12 @@ impl LocalLiveness {
         &self.local_intervals[local]
     }
 
+    /// Returns when the local's liveness interval ends in the given block,
+    /// or `None` if the local is not alive in that block.
+    pub fn last_use_in_block(&self, local: LocalId, bb: BasicBlockId) -> Option<IntervalEnd> {
+        self.intervals_of(local).iter().find(|(b, _)| *b == bb).map(|(_, interval)| interval.end)
+    }
+
     fn compute_liveness(
         &mut self,
         program: &EthIRProgram,

@@ -66,8 +66,9 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         if let Some(passes) = optimizations {
             pass_manager.run_optimizations(passes);
         }
+        let store = pass_manager.into_store();
         let mut bytecode = Vec::with_capacity(0x6000);
-        sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
+        sir_debug_backend::ir_to_bytecode(&program, &store, &mut bytecode);
         bytecode
     }
 }

@@ -1,6 +1,7 @@
 use plank_core::{DenseIndexSet, Idx, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Span};
+use sir_passes::{AnalysesStore, LocalLiveness};
 
 use crate::{
     stack_scheduler::stack_machine::StackMachine, static_memory_layout::StaticMemoryLayout,
@@ -16,12 +17,19 @@ const DEFAULT_SPILL_THRESHOLD: u8 = 16;
 const DEFAULT_CLEANUP_THRESHOLD: u16 = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TranslationPhase {
+enum TranslationPhase {
     Init,
     Runtime,
 }
 
-pub(crate) struct MarkMap {
+struct TranslationContext<'a> {
+    pub ir: &'a EthIRProgram,
+    pub mark_map: &'a MarkMap,
+    pub memory_layout: &'a StaticMemoryLayout,
+    pub local_liveness: &'a LocalLiveness,
+}
+
+struct MarkMap {
     init_basic_block_marks_start: MarkId,
     run_basic_block_marks_start: MarkId,
     data_marks_start: MarkId,
@@ -92,7 +100,7 @@ impl MarkMap {
     }
 }
 
-pub(crate) struct Translator<'ir> {
+struct Translator<'ir> {
     pub ir: &'ir EthIRProgram,
     pub memory_layout: StaticMemoryLayout,
     pub mark_map: MarkMap,
@@ -124,9 +132,20 @@ impl<'ir> Translator<'ir> {
         self.mark_map.get_bb_mark(bb_id)
     }
 
-    fn translate_basic_blocks_from_entry_point(&mut self, entry_point: FunctionId) {
+    fn translate_basic_blocks_from_entry_point(
+        &mut self,
+        entry_point: FunctionId,
+        local_liveness: &LocalLiveness,
+    ) {
         let entry_basic_block = self.ir.function(entry_point).entry().id();
         self.bbs_to_be_translated.push((entry_point, entry_basic_block));
+
+        let ctx = TranslationContext {
+            ir: self.ir,
+            mark_map: &self.mark_map,
+            memory_layout: &self.memory_layout,
+            local_liveness,
+        };
 
         while let Some((func, bb_id)) = self.bbs_to_be_translated.pop() {
             if !self.translated_bbs.add(bb_id) {
@@ -139,23 +158,17 @@ impl<'ir> Translator<'ir> {
             let block = self.ir.block(bb_id);
             self.bbs_to_be_translated.extend(block.successors().map(|bb| (func, bb)));
 
-            self.stack_machine.dispatch_block(
-                func,
-                bb_id,
-                self.ir,
-                &mut self.asm,
-                &self.mark_map,
-                &self.memory_layout,
-            );
+            self.stack_machine.dispatch_block(func, bb_id, &mut self.asm, &ctx);
         }
     }
 }
 
-pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) {
+pub fn ir_to_bytecode(ir: &EthIRProgram, store: &AnalysesStore, result: &mut Vec<u8>) {
+    let local_liveness = store.local_liveness(ir);
     let mut translator = Translator::new(ir, DEFAULT_SPILL_THRESHOLD, DEFAULT_CLEANUP_THRESHOLD);
 
     translator.memory_layout.emit_init_free_pointer(&mut translator.asm);
-    translator.translate_basic_blocks_from_entry_point(ir.init_entry);
+    translator.translate_basic_blocks_from_entry_point(ir.init_entry, &local_liveness);
 
     // Ignore translated basic blocks because we want separate PCs for functions and basic
     // blocks in run.
@@ -163,7 +176,7 @@ pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) {
     translator.mark_map.set_phase(TranslationPhase::Runtime);
     translator.asm.push_mark(translator.mark_map.runtime_start);
     if let Some(main_entry) = ir.main_entry {
-        translator.translate_basic_blocks_from_entry_point(main_entry);
+        translator.translate_basic_blocks_from_entry_point(main_entry, &local_liveness);
     }
 
     for (data_id, bytes) in ir.data_segments.enumerate_idx() {

@@ -11,8 +11,8 @@ use transforms::ssa_transform::SsaTransform;
 
 pub use analyses::{
     AnalysesMask, AnalysesStore, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling,
-    DefUse, DominanceFrontiers, Dominators, InOutGroupId, Legalizer, Predecessors, UseKind,
-    UseLocation,
+    DefUse, DominanceFrontiers, Dominators, InOutGroupId, IntervalEnd, Legalizer, LocalLiveness,
+    Predecessors, UseKind, UseLocation,
 };
 pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
 
@@ -63,6 +63,10 @@ impl<'a> PassManager<'a> {
         let pass = self.ssa_transform.get_or_insert_default();
         run_pass(pass, self.program, &self.store);
         self.run_legalize().expect("IR is illegal after SSA transform");
+    }
+
+    pub fn into_store(self) -> AnalysesStore {
+        self.store
     }
 
     pub fn run_optimizations(&mut self, passes: &str) {
