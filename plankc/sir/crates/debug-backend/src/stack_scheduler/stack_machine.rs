@@ -227,8 +227,7 @@ impl StackMachine {
             // It's an output — only pop if another copy exists within SWAP reach
             let reachable_start =
                 self.stack.len().saturating_sub(1 + sir_assembler::op::SWAP_LIMIT as usize);
-            let has_duplicate =
-                self.stack[reachable_start..self.stack.len() - 1].contains(&top);
+            let has_duplicate = self.stack[reachable_start..self.stack.len() - 1].contains(&top);
             if !has_duplicate {
                 break;
             }
