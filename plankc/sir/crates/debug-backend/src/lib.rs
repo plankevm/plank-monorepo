@@ -24,9 +24,10 @@ enum TranslationPhase {
 
 struct TranslationContext<'a> {
     pub ir: &'a EthIRProgram,
-    pub mark_map: &'a MarkMap,
+    pub mark_map: &'a mut MarkMap,
     pub memory_layout: &'a StaticMemoryLayout,
     pub local_liveness: &'a LocalLiveness,
+    pub bbs_to_be_translated: &'a mut Vec<(FunctionId, BasicBlockId)>,
 }
 
 struct MarkMap {
@@ -140,25 +141,25 @@ impl<'ir> Translator<'ir> {
         let entry_basic_block = self.ir.function(entry_point).entry().id();
         self.bbs_to_be_translated.push((entry_point, entry_basic_block));
 
-        let ctx = TranslationContext {
-            ir: self.ir,
-            mark_map: &self.mark_map,
-            memory_layout: &self.memory_layout,
-            local_liveness,
-        };
-
         while let Some((func, bb_id)) = self.bbs_to_be_translated.pop() {
             if !self.translated_bbs.add(bb_id) {
                 continue;
             }
 
-            self.asm.push_mark(self.get_bb_mark(bb_id));
+            self.asm.push_mark(self.mark_map.get_bb_mark(bb_id));
             self.asm.push_op_byte(op::JUMPDEST);
 
             let block = self.ir.block(bb_id);
             self.bbs_to_be_translated.extend(block.successors().map(|bb| (func, bb)));
 
-            self.stack_machine.dispatch_block(func, bb_id, &mut self.asm, &ctx);
+            let mut ctx = TranslationContext {
+                ir: self.ir,
+                mark_map: &mut self.mark_map,
+                memory_layout: &self.memory_layout,
+                local_liveness,
+                bbs_to_be_translated: &mut self.bbs_to_be_translated,
+            };
+            self.stack_machine.dispatch_block(func, bb_id, &mut self.asm, &mut ctx);
         }
     }
 }

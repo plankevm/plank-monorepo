@@ -3,7 +3,11 @@ pub mod index;
 pub mod operation;
 pub mod view;
 
-pub use crate::{index::*, operation::Operation, view::*};
+pub use crate::{
+    index::*,
+    operation::{Operation, op_data::InlineOperands},
+    view::*,
+};
 use alloy_primitives::U256;
 use plank_core::list_of_lists::ListOfLists;
 use std::fmt;

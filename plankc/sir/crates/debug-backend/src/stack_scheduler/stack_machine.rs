@@ -12,7 +12,9 @@
 
 use plank_core::DenseIndexSet;
 use sir_assembler::{AsmReference, Assembler, op};
-use sir_data::{BasicBlockId, ControlView, FunctionId, LocalId, Operation, OperationView};
+use sir_data::{
+    BasicBlockId, ControlView, FunctionId, InlineOperands, LocalId, Operation, OperationView,
+};
 use sir_passes::IntervalEnd;
 
 use crate::{
@@ -20,8 +22,14 @@ use crate::{
     static_memory_layout::StaticMemoryLayout,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StackEntry {
+    Local(LocalId),
+    Intermediate,
+}
+
 pub(crate) struct StackMachine {
-    stack: Vec<LocalId>,
+    stack: Vec<StackEntry>,
     in_memory: DenseIndexSet<LocalId>,
     spill_threshold: u8,
     cleanup_threshold: u16,
@@ -39,7 +47,7 @@ impl StackMachine {
 
     pub fn remap_block_inputs(&mut self, inputs: &[LocalId]) {
         for (entry, &local) in self.stack.iter_mut().zip(inputs.iter()) {
-            *entry = local;
+            *entry = StackEntry::Local(local);
         }
     }
 
@@ -57,7 +65,7 @@ impl StackMachine {
     ) {
         let is_last_use = ctx.local_liveness.last_use_in_block(local, bb_id)
             == Some(IntervalEnd::At(op_view.id()));
-        let depth = self.stack.iter().rev().position(|&e| e == local);
+        let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(local));
         match depth {
             Some(d @ 0..=15) if is_last_use => {
                 if d > 0 {
@@ -68,7 +76,7 @@ impl StackMachine {
             }
             Some(d) if d < 16 => {
                 asm.push_op_byte(op::dup_n(d as u8 + 1));
-                self.stack.push(local);
+                self.stack.push(StackEntry::Local(local));
             }
             _ => {
                 assert!(
@@ -76,7 +84,7 @@ impl StackMachine {
                     "local {local} is not reachable on stack or in memory"
                 );
                 ctx.memory_layout.emit_local_load(asm, local);
-                self.stack.push(local);
+                self.stack.push(StackEntry::Local(local));
             }
         }
     }
@@ -103,7 +111,7 @@ impl StackMachine {
         self.stack.truncate(self.stack.len() - inputs.len());
 
         for output in op_view.outputs() {
-            self.stack.push(*output);
+            self.stack.push(StackEntry::Local(*output));
         }
     }
 
@@ -112,7 +120,7 @@ impl StackMachine {
         func: FunctionId,
         bb_id: BasicBlockId,
         asm: &mut Assembler,
-        ctx: &TranslationContext,
+        ctx: &mut TranslationContext,
     ) {
         let block = ctx.ir.block(bb_id);
         self.remap_block_inputs(block.inputs());
@@ -146,7 +154,7 @@ impl StackMachine {
         asm: &mut Assembler,
         memory_layout: &StaticMemoryLayout,
     ) {
-        let depth = self.stack.iter().rev().position(|&e| e == local);
+        let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(local));
 
         match depth {
             Some(0) => {}
@@ -158,7 +166,7 @@ impl StackMachine {
             _ => {
                 // Not reachable on stack — load from memory.
                 memory_layout.emit_local_load(asm, local);
-                self.stack.push(local);
+                self.stack.push(StackEntry::Local(local));
             }
         }
     }
@@ -186,14 +194,14 @@ impl StackMachine {
                 asm.push_op_byte(op::JUMP);
             }
             ControlView::Branches { non_zero_target, zero_target, .. } => {
-                self.stack.pop();
+                self.stack.pop(); // condition
                 mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(non_zero_target));
                 asm.push_op_byte(op::JUMPI);
                 mark_map.emit_code_offset_push(asm, mark_map.get_bb_mark(zero_target));
                 asm.push_op_byte(op::JUMP);
             }
             ControlView::Switch(switch) => {
-                self.stack.pop();
+                self.stack.pop(); // condition
                 asm.push_minimal_u32(memory_layout.switch_store);
                 asm.push_op_byte(op::MSTORE);
 
@@ -232,7 +240,7 @@ impl StackMachine {
         // pushed/swapped to the top ends up in the correct final position.
         for &output in outputs.iter().rev() {
             // Search for the output within SWAP reach of the current top.
-            let depth = self.stack.iter().rev().position(|&e| e == output);
+            let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(output));
             match depth {
                 Some(0) => {
                     // Already on top — nothing to do.
@@ -278,19 +286,28 @@ impl StackMachine {
             return;
         }
         while let Some(&top) = self.stack.last() {
+            let top_local = match top {
+                StackEntry::Local(local) => local,
+                StackEntry::Intermediate => {
+                    self.stack.pop();
+                    asm.push_op_byte(sir_assembler::op::POP);
+                    continue;
+                }
+            };
+
             // Preserve the condition — treat it like an output for cleanup purposes.
-            if condition == Some(top) {
+            if condition == Some(top_local) {
                 break;
             }
 
-            if !outputs.contains(&top) {
+            if !outputs.contains(&top_local) {
                 self.stack.pop();
                 asm.push_op_byte(sir_assembler::op::POP);
                 continue;
             }
 
             // Last output is already in its final bottom position — stop.
-            if outputs.last() == Some(&top) {
+            if outputs.last() == Some(&top_local) {
                 break;
             }
 
@@ -317,23 +334,23 @@ impl StackMachine {
         op_view: OperationView,
         bb_id: BasicBlockId,
         asm: &mut Assembler,
-        ctx: &TranslationContext,
+        ctx: &mut TranslationContext,
     ) {
         let op = op_view.op();
         match op {
             // Constants: 0 in, 1 out, push a value
             Operation::SetSmallConst(data) => {
                 asm.push_minimal_u32(data.value);
-                self.stack.push(data.sets);
+                self.stack.push(StackEntry::Local(data.sets));
             }
             Operation::SetLargeConst(data) => {
                 asm.push_minimal_u256(ctx.ir.large_consts[data.value]);
-                self.stack.push(data.sets);
+                self.stack.push(StackEntry::Local(data.sets));
             }
             Operation::SetDataOffset(data) => {
                 let data_mark = ctx.mark_map.get_data_mark(data.segment_id);
                 ctx.mark_map.emit_code_offset_push(asm, data_mark);
-                self.stack.push(data.sets);
+                self.stack.push(StackEntry::Local(data.sets));
             }
             Operation::RuntimeStartOffset(data) => {
                 debug_assert!(
@@ -341,7 +358,7 @@ impl StackMachine {
                     "unexpected runtime_start_offset in run code"
                 );
                 asm.push_reference(AsmReference::new_direct(ctx.mark_map.runtime_start));
-                self.stack.push(data.outs[0]);
+                self.stack.push(StackEntry::Local(data.outs[0]));
             }
             Operation::InitEndOffset(data) => {
                 debug_assert!(
@@ -349,30 +366,164 @@ impl StackMachine {
                     "unexpected init_end_offset in run code"
                 );
                 asm.push_reference(AsmReference::new_direct(ctx.mark_map.initcode_end));
-                self.stack.push(data.outs[0]);
+                self.stack.push(StackEntry::Local(data.outs[0]));
             }
             Operation::RuntimeLength(data) => {
                 asm.push_reference(AsmReference::new_delta(
                     ctx.mark_map.runtime_start,
                     ctx.mark_map.initcode_end,
                 ));
-                self.stack.push(data.outs[0]);
+                self.stack.push(StackEntry::Local(data.outs[0]));
             }
 
             // Memory: allocation and memory I/O
-            Operation::DynamicAllocZeroed(_)
-            | Operation::DynamicAllocAnyBytes(_)
-            | Operation::AcquireFreePointer(_)
-            | Operation::StaticAllocZeroed(_)
-            | Operation::StaticAllocAnyBytes(_)
-            | Operation::MemoryLoad(_)
-            | Operation::MemoryStore(_) => todo!("memory ops"),
+            Operation::AcquireFreePointer(InlineOperands { ins: [], outs: [dst] }) => {
+                ctx.memory_layout.emit_free_ptr_load(asm);
+                self.stack.push(StackEntry::Local(dst));
+            }
 
-            // Internal function call
-            Operation::InternalCall(_) => todo!("icall"),
+            Operation::MemoryLoad(data) => {
+                let load_size = data.size as u32;
+                self.prepare_input(data.ptr, bb_id, op_view, asm, ctx);
+                // evm: [ptr]                                   symbolic: [ptr]
+                self.stack.pop();
+                asm.push_op_byte(op::MLOAD);
+                // evm: [raw_word]                              symbolic: []
+                asm.push_minimal_u32(256 - load_size * 8);
+                asm.push_op_byte(op::SHR);
+                self.stack.push(StackEntry::Local(data.out));
+                // evm: [value]                                 symbolic: [out]
+            }
+            Operation::MemoryStore(data) => {
+                let load_size = data.size as u32;
+                let shift_to_clean_word = load_size * 8;
+                self.prepare_input(data.ptr(), bb_id, op_view, asm, ctx);
+                // evm: [ptr]                                   symbolic: [ptr]
+                asm.push_op_byte(op::DUP1);
+                // evm: [ptr, ptr]                              symbolic: [ptr]
+                asm.push_op_byte(op::MLOAD);
+                // evm: [current_word, ptr]                     symbolic: [ptr]
+                asm.push_minimal_u32(shift_to_clean_word);
+                asm.push_op_byte(op::SHL);
+                // evm: [current_word << shift, ptr]            symbolic: [ptr]
+                asm.push_minimal_u32(shift_to_clean_word);
+                asm.push_op_byte(op::SHR);
+                self.stack.push(StackEntry::Intermediate);
+                // evm: [cleaned_word, ptr]                     symbolic: [Intermediate, ptr]
+                self.prepare_input(data.value(), bb_id, op_view, asm, ctx);
+                // evm: [value, cleaned_word, ptr]              symbolic: [value, Intermediate, ptr]
+                asm.push_minimal_u32(256 - load_size * 8);
+                asm.push_op_byte(op::SHL);
+                // evm: [shifted_value, cleaned_word, ptr]      symbolic: [value, Intermediate, ptr]
+                asm.push_op_byte(op::OR);
+                self.stack.pop(); // value
+                self.stack.pop(); // Intermediate
+                self.stack.push(StackEntry::Intermediate); // updated_word
+                // evm: [updated_word, ptr]                     symbolic: [Intermediate, ptr]
+                asm.push_op_byte(op::SWAP1);
+                // evm: [ptr, updated_word]                     symbolic: [Intermediate, ptr]
+                asm.push_op_byte(op::MSTORE);
+                self.stack.pop(); // Intermediate
+                self.stack.pop(); // ptr
+                // evm: []                                      symbolic: []
+            }
 
-            // Copy
-            Operation::SetCopy(_) => todo!("copy"),
+            Operation::DynamicAllocZeroed(InlineOperands { ins: [size], outs: [ptr_out] })
+            | Operation::DynamicAllocAnyBytes(InlineOperands { ins: [size], outs: [ptr_out] }) => {
+                ctx.memory_layout.emit_free_ptr_load(asm);
+                self.stack.push(StackEntry::Intermediate);
+                // evm: [free_ptr]                                    symbolic: [Intermediate]
+                asm.push_op_byte(op::DUP1);
+                self.stack.push(StackEntry::Intermediate);
+                // evm: [free_ptr, free_ptr]                          symbolic: [Intermediate, Intermediate]
+                self.prepare_input(size, bb_id, op_view, asm, ctx);
+                // evm: [size, free_ptr, free_ptr]                    symbolic: [size, Intermediate, Intermediate]
+                asm.push_op_byte(op::DUP1);
+                asm.push_op_byte(op::CALLDATASIZE);
+                asm.push_op_byte(op::DUP4);
+                asm.push_op_byte(op::CALLDATACOPY);
+                // evm: [size, free_ptr, free_ptr]                    symbolic: [size, Intermediate, Intermediate]
+                asm.push_op_byte(op::ADD);
+                // evm: [free_ptr', free_ptr]                         symbolic: [size, Intermediate, Intermediate]
+                asm.push_minimal_u32(ctx.memory_layout.free_pointer);
+                asm.push_op_byte(op::MSTORE);
+                // evm: [free_ptr]                                    symbolic: [size, Intermediate, Intermediate]
+                self.stack.pop(); // size
+                self.stack.pop(); // Intermediate
+                self.stack.pop(); // Intermediate
+                self.stack.push(StackEntry::Local(ptr_out));
+                // evm: [free_ptr]                                    symbolic: [ptr_out]
+            }
+            Operation::StaticAllocZeroed(data)
+            | Operation::StaticAllocAnyBytes(data) => {
+                ctx.memory_layout.emit_free_ptr_load(asm);
+                // evm: [free_ptr]
+                asm.push_op_byte(op::DUP1);
+                // evm: [free_ptr, free_ptr]
+                asm.push_minimal_u32(data.size);
+                // evm: [size, free_ptr, free_ptr]
+                asm.push_op_byte(op::DUP1);
+                asm.push_op_byte(op::CALLDATASIZE);
+                asm.push_op_byte(op::DUP4);
+                asm.push_op_byte(op::CALLDATACOPY);
+                // evm: [size, free_ptr, free_ptr]
+                asm.push_op_byte(op::ADD);
+                // evm: [free_ptr', free_ptr]
+                asm.push_minimal_u32(ctx.memory_layout.free_pointer);
+                asm.push_op_byte(op::MSTORE);
+                // evm: [free_ptr]
+                self.stack.push(StackEntry::Local(data.ptr_out));
+                // evm: [free_ptr]                                    symbolic: [ptr_out]
+            }
+
+            Operation::InternalCall(data) => {
+                let inputs = data.get_inputs(ctx.ir);
+                let outputs = data.get_outputs(ctx.ir);
+
+                // Push call args onto the stack
+                for input in inputs.iter().rev() {
+                    self.prepare_input(*input, bb_id, op_view, asm, ctx);
+                }
+                // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
+
+                // Store return address to memory
+                let return_mark = ctx.mark_map.allocate_mark();
+                let return_store_loc = ctx.memory_layout.get_return_dest_store(data.function);
+                ctx.mark_map.emit_code_offset_push(asm, return_mark);
+                asm.push_minimal_u32(return_store_loc);
+                asm.push_op_byte(op::MSTORE);
+                // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
+
+                // Jump to callee entry
+                let func_entry_bb = ctx.ir.function(data.function).entry().id();
+                let func_entry_bb_mark = ctx.mark_map.get_bb_mark(func_entry_bb);
+                ctx.mark_map.emit_code_offset_push(asm, func_entry_bb_mark);
+                asm.push_op_byte(op::JUMP);
+                // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
+
+                // Return lands here
+                asm.push_mark(return_mark);
+                asm.push_op_byte(op::JUMPDEST);
+                // evm: [out1, ..., outM]                      symbolic: [arg1, ..., argN]
+
+                // Update symbolic stack: pop args, push outputs
+                for _ in inputs {
+                    self.stack.pop();
+                }
+                for output in outputs {
+                    self.stack.push(StackEntry::Local(*output));
+                }
+                // evm: [out1, ..., outM]                      symbolic: [out1, ..., outM]
+
+                // Enqueue callee for translation
+                ctx.bbs_to_be_translated.push((data.function, func_entry_bb));
+            }
+
+            Operation::SetCopy(InlineOperands { ins: [src], outs: [dst] }) => {
+                self.prepare_input(src, bb_id, op_view, asm, ctx);
+                self.stack.pop();
+                self.stack.push(StackEntry::Local(dst));
+            }
 
             Operation::Noop(_) => {}
 
