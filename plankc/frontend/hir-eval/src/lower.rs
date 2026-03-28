@@ -27,7 +27,7 @@ struct LocalState {
 
     /// The concrete type of each MIR local. Stored separately so it can
     /// pre-allocated for if/else results, filled in on first Set.
-    mir_type: IndexVec<mir::LocalId, Option<TypeId>>,
+    mir_type: IndexVec<mir::LocalId, TypeId>,
 }
 
 struct TypeMismatchError {
@@ -37,7 +37,7 @@ struct TypeMismatchError {
 
 impl LocalState {
     fn alloc_anonymous_mir(&mut self, ty: TypeId) -> mir::LocalId {
-        self.mir_type.push(Some(ty))
+        self.mir_type.push(ty)
     }
 
     fn comptime(&self, hir: hir::LocalId) -> Option<ValueId> {
@@ -45,11 +45,11 @@ impl LocalState {
     }
 
     fn mir_type(&self, mir: mir::LocalId) -> TypeId {
-        self.mir_type[mir].expect("mapped mir local without type")
+        self.mir_type[mir]
     }
 
     fn define(&mut self, hir: hir::LocalId, ty: TypeId) {
-        let mir = self.mir_type.push(Some(ty));
+        let mir = self.mir_type.push(ty);
         let prev = self.hir_to_mir.insert(hir, mir);
         assert!(prev.is_none());
     }
@@ -67,7 +67,7 @@ impl LocalState {
             let existing_ty = self.mir_type(mir_local);
             if existing_ty == TypeId::NEVER {
                 // Value was set to `never` in another branch, save more concrete type.
-                self.mir_type[mir_local] = Some(ty);
+                self.mir_type[mir_local] = ty;
             } else if !ty.is_assignable_to(existing_ty) {
                 return Err(TypeMismatchError { expected_ty: existing_ty, received_ty: ty });
             } else {
@@ -80,7 +80,7 @@ impl LocalState {
         if let Some(value) = comptime {
             self.comptime.insert(hir, value);
         }
-        let mir = self.mir_type.push(Some(ty));
+        let mir = self.mir_type.push(ty);
         self.hir_to_mir.insert(hir, mir);
         Ok(mir)
     }
@@ -461,9 +461,7 @@ impl FunctionLowerScope {
 
         let (body, _) = self.translate_block(eval, func.body);
 
-        let fn_id1 = eval
-            .mir_fn_locals
-            .push_iter(self.locals.mir_type.iter().map(|&ty| ty.expect("local left unset")));
+        let fn_id1 = eval.mir_fn_locals.push_iter(self.locals.mir_type.iter().copied());
         let fn_id2 =
             eval.mir_fns.push(mir::FnDef { body, param_count: params.len() as u32, return_type });
         assert_eq!(fn_id1, fn_id2);
@@ -649,9 +647,7 @@ pub(crate) fn lower_entry_point_as_fn(
         todo!("diagnostic: entry point must have an explicit terminator");
     }
 
-    let fn_id1 = eval
-        .mir_fn_locals
-        .push_iter(scope.locals.mir_type.iter().map(|&ty| ty.expect("local left unset")));
+    let fn_id1 = eval.mir_fn_locals.push_iter(scope.locals.mir_type.iter().copied());
     let fn_id2 = eval.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::NEVER });
     assert_eq!(fn_id1, fn_id2);
     fn_id1
