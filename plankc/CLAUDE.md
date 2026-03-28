@@ -34,7 +34,7 @@ Cargo workspace with general-purpose crates in `crates/` and frontend crates in 
     - `cst/`: Homogeneous syntax tree that stores well-formed nodes & errors
     - `parser.rs`: Main parser implementation
     - `ast/`: AST wrappers for easier access to CST nodes.
-    - `diagnostics.rs`: Diagnostic context trait
+    - `errors.rs`: Parser diagnostics
 - **plank-hir** (`frontend/hir`): High-level IR
 - **plank** (`frontend/cli`): CLI frontend
 
@@ -85,4 +85,6 @@ future delete.
 - `./docs/Grammar.md`: Grammar definition, to be referenced for parser work
 - `./docs/Frontend-Architecture.md`: Frontend architecture, read for context on
   intended frontend design and structure.
+- `./tmp/`: Stores any report, plan or other temporary document that was requested by 
+    he user but not explicitly associated with the actual repo docs
 
