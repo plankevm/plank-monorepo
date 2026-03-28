@@ -1,9 +1,9 @@
-use plank_core::{vec_buf::VecBuf, DenseIndexMap};
+use plank_core::{DenseIndexMap, vec_buf::VecBuf};
 use plank_hir::{self as hir, ConstDef};
 use plank_session::StrId;
 use plank_values::{TypeId, ValueId};
 
-use crate::{value::Value, Evaluator};
+use crate::{Evaluator, value::Value};
 
 #[derive(Debug)]
 pub struct ReturnValue(ValueId);

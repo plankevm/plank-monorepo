@@ -32,7 +32,15 @@ fn assert_diagnostics(source: &str, expected: &[&str]) {
     let expected: Vec<String> =
         expected.iter().map(|s| dedent_preserve_blank_lines(s).trim().to_string()).collect();
     let actual: Vec<String> = actual.iter().map(|s| s.trim().to_string()).collect();
-    pretty_assertions::assert_eq!(actual, expected);
+
+    let actual_joined = actual.join("\n\n---\n\n");
+    let expected_joined = expected.join("\n\n---\n\n");
+    let message = if actual.len() != expected.len() {
+        format!("length mismatch: {} != {}", actual.len(), expected.len())
+    } else {
+        "".to_string()
+    };
+    pretty_assertions::assert_str_eq!(actual_joined, expected_joined, "{}", message);
 }
 
 #[test]
@@ -75,9 +83,8 @@ fn test_type_annotation_type_mismatch() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented: diagnostic: type mismatch on set")]
 fn test_if_branches_type_mismatch() {
-    let _ = try_lower(
+    assert_diagnostics(
         "
         init {
             let c = calldataload(0);
@@ -86,8 +93,16 @@ fn test_if_branches_type_mismatch() {
             } else {
                 false
             };
+            evm_stop();
         }
         ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:6:9
+          |
+        6 |         false
+          |         ^^^^^ expected `u256`, got `bool`
+        "#],
     );
 }
 
@@ -393,7 +408,7 @@ fn test_comptime_struct_missing_field() {
         r#"
         const Pair = struct { a: u256, b: bool };
         const my_pair = Pair { a: 42 };
-        
+
         init {
             evm_stop();
         }
@@ -408,11 +423,31 @@ fn test_comptime_struct_duplicate_field() {
         r#"
         const Pair = struct { a: u256, b: bool };
         const my_pair = Pair { a: 42, a: 99, b: false };
-        
+
         init {
             evm_stop();
         }
         "#,
+    );
+}
+
+#[test]
+fn test_assign_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        init {
+            let mut x = 1;
+            x = false;
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:9
+          |
+        3 |     x = false;
+          |         ^^^^^ expected `u256`, got `bool`
+        "#],
     );
 }
 
@@ -423,7 +458,7 @@ fn test_comptime_struct_field_type_mismatch() {
         r#"
         const Pair = struct { a: u256, b: bool };
         const my_pair = Pair { a: false, b: false };
-        
+
         init {
             evm_stop();
         }

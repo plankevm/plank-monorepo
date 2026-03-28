@@ -1,13 +1,13 @@
-use plank_core::{list_of_lists::ListOfLists, DenseIndexMap, IndexVec};
+use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir};
 use plank_mir::{self as mir};
 use plank_session::StrId;
 use plank_values::{StructInfo, Type, TypeId, TypeInterner, ValueId};
 
 use crate::{
+    Evaluator,
     comptime::ComptimeInterpreter,
     value::{Value, ValueInterner},
-    Evaluator,
 };
 
 const INSTRUCTION_BUF_CAPACITY: usize = 1024;
@@ -30,6 +30,11 @@ struct LocalState {
     mir_type: IndexVec<mir::LocalId, Option<TypeId>>,
 }
 
+struct TypeMismatchError {
+    expected_ty: TypeId,
+    received_ty: TypeId,
+}
+
 impl LocalState {
     fn alloc_anonymous_mir(&mut self, ty: TypeId) -> mir::LocalId {
         self.mir_type.push(Some(ty))
@@ -50,7 +55,12 @@ impl LocalState {
     }
 
     /// Process local set, allows type unification for sets in different branches..
-    fn set(&mut self, hir: hir::LocalId, ty: TypeId, comptime: Option<ValueId>) -> mir::LocalId {
+    fn set(
+        &mut self,
+        hir: hir::LocalId,
+        ty: TypeId,
+        comptime: Option<ValueId>,
+    ) -> Result<mir::LocalId, TypeMismatchError> {
         if let Some(&mir_local) = self.hir_to_mir.get(hir) {
             // Not first set, value not guaranteed to be comptime known.
             self.comptime.remove(hir);
@@ -59,29 +69,34 @@ impl LocalState {
                 // Value was set to `never` in another branch, save more concrete type.
                 self.mir_type[mir_local] = Some(ty);
             } else if !ty.is_assignable_to(existing_ty) {
-                todo!("diagnostic: type mismatch on set");
+                return Err(TypeMismatchError { expected_ty: existing_ty, received_ty: ty });
             } else {
                 // `existing_ty` is not `never` and is compatible with `ty`, do nothing.
             }
-            mir_local
-        } else {
-            // We only save the comptime value if this is the first decl (certain comptime).
-            if let Some(value) = comptime {
-                self.comptime.insert(hir, value);
-            }
-            let mir = self.mir_type.push(Some(ty));
-            self.hir_to_mir.insert(hir, mir);
-            mir
+            return Ok(mir_local);
         }
+
+        // We only save the comptime value if this is the first decl (certain comptime).
+        if let Some(value) = comptime {
+            self.comptime.insert(hir, value);
+        }
+        let mir = self.mir_type.push(Some(ty));
+        self.hir_to_mir.insert(hir, mir);
+        Ok(mir)
     }
 
-    fn assign(&mut self, hir: hir::LocalId, ty: TypeId) -> mir::LocalId {
+    fn assign(
+        &mut self,
+        hir: hir::LocalId,
+        new_ty: TypeId,
+    ) -> Result<mir::LocalId, TypeMismatchError> {
         let mir = self.hir_to_mir[hir];
         self.comptime.remove(hir);
-        if !ty.is_assignable_to(self.mir_type(mir)) {
-            todo!("diagnostic: assign type mismatch")
+        let existing_ty = self.mir_type(mir);
+        if !new_ty.is_assignable_to(existing_ty) {
+            return Err(TypeMismatchError { expected_ty: existing_ty, received_ty: new_ty });
         }
-        mir
+        Ok(mir)
     }
 
     fn get_type(&self, hir_local: hir::LocalId, values: &ValueInterner) -> TypeId {
@@ -467,10 +482,22 @@ impl FunctionLowerScope {
         for &instr in &eval.hir.blocks[block] {
             match instr.kind {
                 hir::InstructionKind::Set { local, expr } => {
+                    let src_loc = expr.src_loc();
                     match self.translate_expr(eval, expr) {
                         ExprResult::Runtime { expr, ty, comptime } => {
-                            let target = self.locals.set(local, ty, comptime);
-                            self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
+                            match self.locals.set(local, ty, comptime) {
+                                Ok(target) => {
+                                    self.instr_buf_stack
+                                        .push(mir::Instruction::Set { target, expr });
+                                }
+                                Err(TypeMismatchError { expected_ty, received_ty }) => {
+                                    eval.emit_type_mismatch_error(
+                                        expected_ty,
+                                        received_ty,
+                                        src_loc,
+                                    );
+                                }
+                            }
                             if ty == TypeId::NEVER {
                                 return Err(BlockControlFlowDiverges);
                             }
@@ -483,8 +510,19 @@ impl FunctionLowerScope {
                 hir::InstructionKind::Assign { target, value } => {
                     match self.translate_expr(eval, value) {
                         ExprResult::Runtime { expr, ty, comptime: _ } => {
-                            let target = self.locals.assign(target, ty);
-                            self.instr_buf_stack.push(mir::Instruction::Set { target, expr });
+                            match self.locals.assign(target, ty) {
+                                Ok(mir_target) => {
+                                    self.instr_buf_stack
+                                        .push(mir::Instruction::Set { target: mir_target, expr });
+                                }
+                                Err(TypeMismatchError { expected_ty, received_ty }) => {
+                                    eval.emit_type_mismatch_error(
+                                        expected_ty,
+                                        received_ty,
+                                        value.src_loc(),
+                                    );
+                                }
+                            }
                         }
                         ExprResult::ComptimeOnly(_) => {
                             todo!("diagnostic: assigning comptime only value in runtime ctx")

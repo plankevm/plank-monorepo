@@ -64,6 +64,18 @@ pub struct Annotations {
     annotations: Vec<Annotation>,
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct SrcLoc {
+    pub source: SourceId,
+    pub span: SourceSpan,
+}
+
+impl SrcLoc {
+    pub fn new(source: SourceId, span: SourceSpan) -> Self {
+        Self { source, span }
+    }
+}
+
 impl Annotations {
     pub fn new(source: SourceId) -> Self {
         Self { source, annotations: Vec::new() }

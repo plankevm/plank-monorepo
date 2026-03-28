@@ -1,5 +1,5 @@
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{Builtin, SourceId, SourceSpan, StrId, TypeId};
+use plank_session::{Builtin, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
 
 pub use plank_values;
 
@@ -24,6 +24,12 @@ pub struct Expr {
     pub source_id: SourceId,
     pub span: SourceSpan,
     pub kind: ExprKind,
+}
+
+impl Expr {
+    pub fn src_loc(&self) -> SrcLoc {
+        SrcLoc::new(self.source_id, self.span)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

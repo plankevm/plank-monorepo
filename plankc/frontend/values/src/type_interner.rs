@@ -239,6 +239,10 @@ impl TypeInterner {
         extra.name = Some(name);
         true
     }
+
+    pub fn format<'a>(&'a self, sess: &'a Session, ty: TypeId) -> FmtType<'a> {
+        FmtType { types: self, sess, ty }
+    }
 }
 
 impl StructStorage {
@@ -267,5 +271,17 @@ impl StructStorage {
             Err(struct_idx) => struct_idx,
         };
         self.comptime_only.contains(struct_idx)
+    }
+}
+
+pub struct FmtType<'a> {
+    types: &'a TypeInterner,
+    sess: &'a Session,
+    ty: TypeId,
+}
+
+impl std::fmt::Display for FmtType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.types.fmt_type(f, self.ty, self.sess)
     }
 }

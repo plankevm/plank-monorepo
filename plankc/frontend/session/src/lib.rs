@@ -3,7 +3,7 @@ pub mod diagnostic;
 pub mod types;
 
 pub use builtins::Builtin;
-pub use diagnostic::{AnnotationKind, Annotations, Claim, Diagnostic, Element, Level};
+pub use diagnostic::{AnnotationKind, Annotations, Claim, Diagnostic, Element, Level, SrcLoc};
 pub use types::TypeId;
 
 use plank_core::{Idx, IndexVec, Span, intern::StringInterner, newtype_index};

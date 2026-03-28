@@ -8,6 +8,7 @@ use plank_values::{TypeId, TypeInterner, ValueId};
 use comptime::ComptimeInterpreter;
 
 mod comptime;
+mod diagnostics;
 mod lower;
 mod value;
 

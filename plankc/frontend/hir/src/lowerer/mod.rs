@@ -545,7 +545,10 @@ impl BlockLowerer<'_> {
                     self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
                 self.emit(span, InstructionKind::Set { local: local_id, expr: value });
                 if let Some(type_local) = type_local {
-                    self.emit(span, InstructionKind::AssertType { value: local_id, of_type: type_local });
+                    self.emit(
+                        span,
+                        InstructionKind::AssertType { value: local_id, of_type: type_local },
+                    );
                 }
             }
             Statement::Expr(expr) => {
@@ -642,14 +645,23 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
                         if let Some(type_expr) = const_def.r#type {
                             let type_local = this.lower_expr_to_local(type_expr);
                             let assign = this.lower_expr(const_def.assign);
-                            this.emit(span, InstructionKind::Set { local: hir_def.result, expr: assign });
-                            this.emit(span, InstructionKind::AssertType {
-                                value: hir_def.result,
-                                of_type: type_local,
-                            });
+                            this.emit(
+                                span,
+                                InstructionKind::Set { local: hir_def.result, expr: assign },
+                            );
+                            this.emit(
+                                span,
+                                InstructionKind::AssertType {
+                                    value: hir_def.result,
+                                    of_type: type_local,
+                                },
+                            );
                         } else {
                             let assign = this.lower_expr(const_def.assign);
-                            this.emit(span, InstructionKind::Set { local: hir_def.result, expr: assign });
+                            this.emit(
+                                span,
+                                InstructionKind::Set { local: hir_def.result, expr: assign },
+                            );
                         }
                     });
                 }
