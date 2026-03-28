@@ -71,25 +71,34 @@ fn test_simple_malloc_mstore_return() {
 }
 
 #[test]
-#[should_panic(expected = "type mismatch in AssertType")]
 fn test_type_annotation_type_mismatch() {
-    let _ = try_lower(
+    assert_diagnostics(
         "
         init {
             let x: u256 = false;
+            evm_stop();
         }
         ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:19
+          |
+        2 |     let x: u256 = false;
+          |            ----   ^^^^^ expected `u256`, got `bool`
+          |            |
+          |            expected because of this
+        "#],
     );
 }
 
 #[test]
-fn test_if_branches_type_mismatch() {
+fn test_if_two_branches_type_mismatch() {
     assert_diagnostics(
         "
         init {
             let c = calldataload(0);
             let x = if slt(c, 0)  {
-                3
+                334
             } else {
                 false
             };
@@ -97,19 +106,62 @@ fn test_if_branches_type_mismatch() {
         }
         ",
         &[r#"
-        error: mismatched types
-         --> main.plk:6:9
-          |
-        6 |         false
-          |         ^^^^^ expected `u256`, got `bool`
+            error: `if` and `else` have incompatible types
+             --> main.plk:6:9
+              |
+            4 |         334
+              |         --- expected because of this
+            5 |     } else {
+            6 |         false
+              |         ^^^^^ expected `u256`, got `bool`
         "#],
     );
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented: diagnostic: type mismatch in AssertType")]
+fn test_if_three_branches_type_mismatch() {
+    assert_diagnostics(
+        "
+        init {
+            let c = calldataload(0);
+            let x = if slt(c, 0) {
+                3
+            } else if eq(c, 34) {
+                false
+            } else {
+                true
+            };
+            evm_stop();
+        }
+        ",
+        &[
+            r#"
+                error: `if` and `else` have incompatible types
+                 --> main.plk:6:9
+                  |
+                4 |         3
+                  |         - expected because of this
+                5 |     } else if eq(c, 34) {
+                6 |         false
+                  |         ^^^^^ expected `u256`, got `bool`
+            "#,
+            r#"
+                error: `if` and `else` have incompatible types
+                 --> main.plk:8:9
+                  |
+                4 |         3
+                  |         - expected because of this
+                ...
+                8 |         true
+                  |         ^^^^ expected `u256`, got `bool`
+            "#,
+        ],
+    );
+}
+
+#[test]
 fn test_if_type_mismatch() {
-    let _ = try_lower(
+    assert_diagnostics(
         "
         init {
             let c = calldataload(0);
@@ -118,8 +170,23 @@ fn test_if_type_mismatch() {
             } else {
                 false
             };
+            evm_stop();
         }
         ",
+        &[r#"
+            error: mismatched types
+             --> main.plk:3:19
+              |
+            3 |       let x: u256 = if slt(c, 0)  {
+              |  ____________----___^
+              | |            |
+              | |            expected because of this
+            4 | |         true
+            5 | |     } else {
+            6 | |         false
+            7 | |     };
+              | |_____^ expected `u256`, got `bool`
+            "#],
     );
 }
 
@@ -445,6 +512,8 @@ fn test_assign_type_mismatch() {
         error: mismatched types
          --> main.plk:3:9
           |
+        2 |     let mut x = 1;
+          |                 - expected because of this
         3 |     x = false;
           |         ^^^^^ expected `u256`, got `bool`
         "#],

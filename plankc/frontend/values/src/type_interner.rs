@@ -1,6 +1,6 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{Session, SourceId, SourceSpan, StrId, TypeId};
+use plank_session::{Session, SourceId, SourceSpan, StrId, TypeId, builtins::builtin_names};
 use std::{fmt, hash::BuildHasher};
 
 use crate::ValueId;
@@ -35,6 +35,7 @@ pub enum Type<'fields> {
     Type,
     Function,
     Never,
+    Error,
     Struct(StructInfo<'fields>),
 }
 
@@ -47,15 +48,19 @@ fn get_primitive_id(ty: Type<'_>) -> Result<TypeId, StructInfo<'_>> {
         Type::Type => Ok(TypeId::TYPE),
         Type::Function => Ok(TypeId::FUNCTION),
         Type::Never => Ok(TypeId::NEVER),
+        Type::Error => Ok(TypeId::ERROR),
         Type::Struct(r#struct) => Err(r#struct),
     }
 }
 
 const fn comptime_only_primitive(ty: TypeId) -> Result<bool, StructIdx> {
     match ty {
-        TypeId::VOID | TypeId::U256 | TypeId::BOOL | TypeId::NEVER | TypeId::MEMORY_POINTER => {
-            Ok(false)
-        }
+        TypeId::VOID
+        | TypeId::U256
+        | TypeId::BOOL
+        | TypeId::NEVER
+        | TypeId::MEMORY_POINTER
+        | TypeId::ERROR => Ok(false),
         TypeId::TYPE | TypeId::FUNCTION => Ok(true),
         _ => Err(StructIdx::new(ty.const_get() - TypeId::STRUCT_IDS_OFFSET)),
     }
@@ -193,13 +198,14 @@ impl TypeInterner {
         session: &Session,
     ) -> fmt::Result {
         match self.lookup(type_id) {
-            Type::Void => f.write_str("void"),
-            Type::Int => f.write_str("u256"),
-            Type::Bool => f.write_str("bool"),
-            Type::MemoryPointer => f.write_str("memptr"),
-            Type::Type => f.write_str("type"),
-            Type::Function => f.write_str("function"),
-            Type::Never => f.write_str("never"),
+            Type::Void => f.write_str(builtin_names::VOID),
+            Type::Int => f.write_str(builtin_names::U256),
+            Type::Bool => f.write_str(builtin_names::BOOL),
+            Type::MemoryPointer => f.write_str(builtin_names::MEMORY_POINTER),
+            Type::Type => f.write_str(builtin_names::TYPE),
+            Type::Function => f.write_str(builtin_names::FUNCTION),
+            Type::Never => f.write_str(builtin_names::NEVER),
+            Type::Error => f.write_str("<error>"),
             Type::Struct(info) => match self.struct_name(type_id) {
                 Some(name) => f.write_str(session.lookup_name(name)),
                 None => {

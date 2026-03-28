@@ -71,6 +71,7 @@ impl LowerCtx<'_> {
         match self.mir.types.lookup(ty) {
             Type::Void | Type::Never => 0,
             Type::Bool | Type::Int | Type::MemoryPointer => 1,
+            Type::Error => panic!("error untransformable in MIR"),
             Type::Function => panic!("function unsizeable in SIR"),
             Type::Type => panic!("type unsizeable in SIR"),
             Type::Struct(r#struct) => {
@@ -160,6 +161,7 @@ fn lower_basic_block(
     for &instr in &ctx.mir.blocks[block] {
         match instr {
             Instruction::Set { target, expr } => match expr {
+                Expr::Error => panic!("attempting to lower MIR with error"),
                 Expr::Void => {}
                 Expr::Bool(b) => {
                     let value = if b { 1u32 } else { 0u32 };

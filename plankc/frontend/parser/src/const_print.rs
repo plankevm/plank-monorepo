@@ -1,13 +1,13 @@
 pub const fn const_num_to_str(buf: &mut [u8; 20], mut x: u64) -> &str {
     // Safety: 10^20 > 2^64
     unsafe {
-        let mut i = 19;
-        buf[i] = b'0';
+        buf[19] = b'0';
 
+        let mut i = 20;
         while x > 0 {
-            buf[i] = (x % 10) as u8 + b'0';
-            x /= 10;
             i -= 1;
+            buf[i] = (x % 10) as u8 + b'0';
+            x = x / 10;
         }
 
         let ptr: *mut u8 = buf.as_mut_ptr();

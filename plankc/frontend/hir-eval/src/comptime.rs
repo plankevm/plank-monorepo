@@ -1,6 +1,6 @@
 use plank_core::{DenseIndexMap, vec_buf::VecBuf};
 use plank_hir::{self as hir, ConstDef};
-use plank_session::StrId;
+use plank_session::{SrcLoc, StrId};
 use plank_values::{TypeId, ValueId};
 
 use crate::{Evaluator, value::Value};
@@ -9,9 +9,10 @@ use crate::{Evaluator, value::Value};
 pub struct ReturnValue(ValueId);
 
 pub(crate) struct ComptimeInterpreter {
-    pub(crate) bindings: DenseIndexMap<hir::LocalId, ValueId>,
+    pub(crate) bindings: DenseIndexMap<hir::LocalId, (ValueId, SrcLoc)>,
 
     value_buf: VecBuf<ValueId>,
+    capture_buf: VecBuf<(ValueId, SrcLoc)>,
     type_buf: VecBuf<TypeId>,
     name_buf: VecBuf<StrId>,
 }
@@ -22,6 +23,7 @@ impl ComptimeInterpreter {
         Self {
             bindings: DenseIndexMap::default(),
             value_buf: VecBuf::default(),
+            capture_buf: VecBuf::new(),
             type_buf: VecBuf::with_capacity(EST_MAX_FIELD_COUNT),
             name_buf: VecBuf::with_capacity(EST_MAX_FIELD_COUNT),
         }
@@ -34,7 +36,7 @@ impl ComptimeInterpreter {
     pub fn eval_const(&mut self, eval: &mut Evaluator<'_>, const_def: ConstDef) -> ValueId {
         self.interpret_block(eval, const_def.body)
             .expect("hir: const expr shouldn't have `return`");
-        self.bindings[const_def.result]
+        self.bindings[const_def.result].0
     }
 
     pub fn interpret_block(
@@ -43,7 +45,7 @@ impl ComptimeInterpreter {
         block_id: hir::BlockId,
     ) -> Result<(), ReturnValue> {
         for &instr in &eval.hir.blocks[block_id] {
-            self.interpret_instruction(eval, instr.kind)?;
+            self.interpret_instruction(eval, instr)?;
         }
         Ok(())
     }
@@ -51,12 +53,41 @@ impl ComptimeInterpreter {
     fn interpret_instruction(
         &mut self,
         eval: &mut Evaluator<'_>,
-        instr: hir::InstructionKind,
+        instr: hir::Instruction,
     ) -> Result<(), ReturnValue> {
-        match instr {
-            hir::InstructionKind::Set { local, expr } => {
+        match instr.kind {
+            hir::InstructionKind::Set { local, r#type, expr } => {
+                let mut value = self.eval_expr(eval, expr.kind)?;
+                if let Some(r#type) = r#type
+                    && value != ValueId::ERROR
+                {
+                    let (type_value, type_loc) = self.bindings[r#type];
+                    match eval.values.lookup(type_value) {
+                        Value::Error => { /* already had error, supress cascade */ }
+                        Value::Type(expected_ty) => {
+                            let actual_ty = eval.values.type_of_value(value);
+                            if !actual_ty.is_assignable_to(expected_ty) {
+                                eval.emit_type_mismatch_error(
+                                    expected_ty,
+                                    type_loc,
+                                    actual_ty,
+                                    expr.src_loc(),
+                                );
+                            }
+                        }
+                        non_type_value => {
+                            eval.emit_type_constraint_not_type(non_type_value.get_type(), type_loc);
+                            value = ValueId::ERROR;
+                        }
+                    }
+                }
+                if self.bindings.insert(local, (value, expr.src_loc())).is_some() {
+                    unreachable!("hir: overwriting with set");
+                }
+            }
+            hir::InstructionKind::BranchSet { local, expr } => {
                 let value = self.eval_expr(eval, expr.kind)?;
-                if self.bindings.insert(local, value).is_some() {
+                if self.bindings.insert(local, (value, expr.src_loc())).is_some() {
                     unreachable!("hir: overwriting with set");
                 }
             }
@@ -67,30 +98,20 @@ impl ComptimeInterpreter {
                 let value = self.eval_expr(eval, expr.kind)?;
                 return Err(ReturnValue(value));
             }
-            hir::InstructionKind::AssertType { value, of_type } => {
-                let type_vid = self.bindings[of_type];
-                let Value::Type(expected_type) = eval.values.lookup(type_vid) else {
-                    todo!("diagnostic: type error, value not type")
-                };
-                let value_vid = self.bindings[value];
-                let actual_type = eval.values.type_of_value(value_vid);
-                if !actual_type.is_assignable_to(expected_type) {
-                    todo!("diagnostic: hir-ty-assert type mismatch");
-                }
-            }
             hir::InstructionKind::Assign { target, value } => {
                 let new_value = self.eval_expr(eval, value.kind)?;
-                let Some(prev_value) = self.bindings.insert(target, new_value) else {
+                let Some(prev_value) = self.bindings.insert(target, (new_value, value.src_loc()))
+                else {
                     unreachable!("hir: init with assign")
                 };
                 let new_type = eval.values.type_of_value(new_value);
-                let prev_type = eval.values.type_of_value(prev_value);
+                let prev_type = eval.values.type_of_value(prev_value.0);
                 if !new_type.is_assignable_to(prev_type) {
                     todo!("diagnostic: assign type mismatch");
                 }
             }
             hir::InstructionKind::If { condition, then_block, else_block } => {
-                let cond_vid = self.bindings[condition];
+                let cond_vid = self.bindings[condition].0;
                 match eval.values.lookup(cond_vid) {
                     Value::Bool(true) => self.interpret_block(eval, then_block)?,
                     Value::Bool(false) => self.interpret_block(eval, else_block)?,
@@ -116,7 +137,7 @@ impl ComptimeInterpreter {
             hir::ExprKind::BigNum(id) => eval.values.intern_num(id),
             hir::ExprKind::Type(type_id) => eval.values.intern_type(type_id),
             hir::ExprKind::ConstRef(const_id) => eval.ensure_const_evaluated(self, const_id),
-            hir::ExprKind::LocalRef(local_id) => self.bindings[local_id],
+            hir::ExprKind::LocalRef(local_id) => self.bindings[local_id].0,
             hir::ExprKind::FnDef(fn_def_id) => self.eval_fn_def(eval, fn_def_id)?,
             hir::ExprKind::Call { callee, args } => self.eval_call(eval, callee, args)?,
             hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
@@ -133,7 +154,7 @@ impl ComptimeInterpreter {
         eval: &mut Evaluator<'_>,
         fn_def: hir::FnDefId,
     ) -> Result<ValueId, ReturnValue> {
-        let value_id = self.value_buf.use_as(|captures| {
+        let value_id = self.capture_buf.use_as(|captures| {
             for capture in &eval.hir.fn_captures[fn_def] {
                 captures.push(self.bindings[capture.outer_local]);
             }
@@ -150,13 +171,13 @@ impl ComptimeInterpreter {
         struct_def_id: hir::StructDefId,
     ) -> Result<ValueId, ReturnValue> {
         let struct_def = eval.hir.struct_defs[struct_def_id];
-        let type_index_vid = self.bindings[struct_def.type_index];
+        let (type_index_vid, _) = self.bindings[struct_def.type_index];
         let fields_info = &eval.hir.fields[struct_def.fields];
 
         let struct_type_id = self.type_buf.use_as(|types| {
             self.name_buf.use_as(|names| {
                 for field in fields_info {
-                    let field_vid = self.bindings[field.value];
+                    let (field_vid, _) = self.bindings[field.value];
                     match eval.values.lookup(field_vid) {
                         Value::Type(tid) => {
                             types.push(tid);
@@ -185,7 +206,7 @@ impl ComptimeInterpreter {
         ty: hir::LocalId,
         fields_id: hir::FieldsId,
     ) -> Result<ValueId, ReturnValue> {
-        let type_vid = self.bindings[ty];
+        let (type_vid, _) = self.bindings[ty];
         let Value::Type(struct_type_id) = eval.values.lookup(type_vid) else {
             todo!("diagnostic: struct literal type must be Type")
         };
@@ -203,7 +224,7 @@ impl ComptimeInterpreter {
             if fields_info[..i].iter().any(|f| f.name == field.name) {
                 todo!("diagnostic: duplicate struct field assignment");
             }
-            let field_value_vid = self.bindings[field.value];
+            let (field_value_vid, _) = self.bindings[field.value];
             let field_value_ty = eval.values.type_of_value(field_value_vid);
             if !field_value_ty.is_assignable_to(r#struct.field_types[field_pos]) {
                 todo!("diagnostic: field type mismatch");
@@ -215,7 +236,7 @@ impl ComptimeInterpreter {
                 let Some(&field) = fields_info.iter().find(|field| field.name == field_name) else {
                     todo!("diagnostic: literal missing struct field");
                 };
-                fields.push(self.bindings[field.value]);
+                fields.push(self.bindings[field.value].0);
             }
             Ok(eval.values.intern(Value::StructVal { ty: struct_type_id, fields }))
         })
@@ -227,7 +248,7 @@ impl ComptimeInterpreter {
         object: hir::LocalId,
         member: StrId,
     ) -> Result<ValueId, ReturnValue> {
-        let obj_vid = self.bindings[object];
+        let (obj_vid, _) = self.bindings[object];
         match eval.values.lookup(obj_vid) {
             Value::StructVal { ty, fields } => {
                 let Some(field_index) = eval.types.field_index_by_name(ty, member) else {
@@ -245,7 +266,7 @@ impl ComptimeInterpreter {
         callee: hir::LocalId,
         args: hir::CallArgsId,
     ) -> Result<ValueId, ReturnValue> {
-        let closure_vid = self.bindings[callee];
+        let (closure_vid, _) = self.bindings[callee];
         let Value::Closure { fn_def: fn_def_id, captures } = eval.values.lookup(closure_vid) else {
             todo!("diagnostic: comptime call on non-function")
         };
@@ -262,17 +283,18 @@ impl ComptimeInterpreter {
 
         let saved_bindings = self.value_buf.use_as(|args| {
             for &local in arg_locals {
-                args.push(self.bindings[local]);
+                args.push(self.bindings[local].0);
             }
 
             let saved_bindings = std::mem::take(&mut self.bindings);
 
-            for (capture_info, capture) in hir_captures.iter().zip(captures) {
-                self.bindings.insert(capture_info.inner_local, *capture);
+            for (capture_info, &capture) in hir_captures.iter().zip(captures) {
+                self.bindings.insert(capture_info.inner_local, capture);
             }
 
             for (param, arg) in params.iter().zip(args) {
-                self.bindings.insert(param.value, *arg);
+                let loc = SrcLoc::new(fn_def.source, param.span);
+                self.bindings.insert(param.value, (*arg, loc));
             }
 
             saved_bindings
@@ -281,11 +303,11 @@ impl ComptimeInterpreter {
         self.interpret_block(eval, fn_def.type_preamble).expect("hir: preamble with return?");
 
         for param in params {
-            let expected_type_vid = self.bindings[param.r#type];
+            let (expected_type_vid, _) = self.bindings[param.r#type];
             let Value::Type(expected_type) = eval.values.lookup(expected_type_vid) else {
                 todo!("diagnostic: param type must be Type")
             };
-            let actual_arg_vid = self.bindings[param.value];
+            let (actual_arg_vid, _) = self.bindings[param.value];
             let actual_type = eval.values.type_of_value(actual_arg_vid);
             if actual_type != expected_type {
                 todo!("diagnostic: comptime call argument type mismatch");

@@ -68,9 +68,9 @@ pub enum ExprKind {
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {
-    Set { local: LocalId, expr: Expr },
+    Set { local: LocalId, r#type: Option<LocalId>, expr: Expr },
+    BranchSet { local: LocalId, expr: Expr },
     Assign { target: LocalId, value: Expr },
-    AssertType { value: LocalId, of_type: LocalId },
     Eval(Expr),
     Return(Expr),
     If { condition: LocalId, then_block: BlockId, else_block: BlockId },
@@ -79,8 +79,7 @@ pub enum InstructionKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Instruction {
-    pub source: SourceId,
-    pub span: SourceSpan,
+    pub loc: SrcLoc,
     pub kind: InstructionKind,
 }
 
@@ -89,6 +88,7 @@ pub struct ParamInfo {
     pub is_comptime: bool,
     pub value: LocalId,
     pub r#type: LocalId,
+    pub span: SourceSpan,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -111,6 +111,7 @@ pub struct FnDef {
     pub body: BlockId,
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
+    pub source: SourceId,
 }
 
 #[derive(Debug, Clone, Copy)]

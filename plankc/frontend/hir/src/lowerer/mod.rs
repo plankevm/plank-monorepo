@@ -199,7 +199,7 @@ impl BlockLowerer<'_> {
         let span = expr.span();
         let expr = self.lower_expr(expr);
         let local = self.alloc_temp();
-        self.emit(span, InstructionKind::Set { local, expr });
+        self.emit(span, InstructionKind::Set { local, r#type: None, expr });
         local
     }
 
@@ -228,11 +228,7 @@ impl BlockLowerer<'_> {
         })
     }
 
-    fn lower_body_to_block_with_result(
-        &mut self,
-        block: ast::BlockExpr<'_>,
-        result: LocalId,
-    ) -> BlockId {
+    fn lower_branch_body(&mut self, block: ast::BlockExpr<'_>, result: LocalId) -> BlockId {
         self.create_sub_block(|this| {
             for stmt in block.statements() {
                 this.lower_statement(stmt);
@@ -247,7 +243,7 @@ impl BlockLowerer<'_> {
                     (span, this.expr(ExprKind::Void, span))
                 }
             };
-            this.emit(span, InstructionKind::Set { local: result, expr });
+            this.emit(span, InstructionKind::BranchSet { local: result, expr });
         })
     }
 
@@ -295,7 +291,7 @@ impl BlockLowerer<'_> {
 
     fn emit(&mut self, span: Span<TokenIdx>, kind: InstructionKind) {
         let span = self.lexed.tokens_src_span(span);
-        self.instructions_buf.push(Instruction { source: self.source_id, span, kind });
+        self.instructions_buf.push(Instruction { loc: SrcLoc::new(self.source_id, span), kind });
     }
 
     fn flush_instructions_from(&mut self, start: usize) -> BlockId {
@@ -394,7 +390,7 @@ impl BlockLowerer<'_> {
                     .unwrap_or_else(|| {
                         let local = self.alloc_temp();
                         let expr = self.expr(ExprKind::Void, struct_def.node().span());
-                        self.emit(span, InstructionKind::Set { local, expr });
+                        self.emit(span, InstructionKind::Set { local, r#type: None, expr });
                         local
                     });
                 let buf_start = self.field_buf.len();
@@ -415,7 +411,7 @@ impl BlockLowerer<'_> {
             ast::Expr::If(if_expr) => {
                 let result = self.alloc_temp();
                 let condition = self.lower_expr_to_local(if_expr.condition());
-                let then_block = self.lower_body_to_block_with_result(if_expr.body(), result);
+                let then_block = self.lower_branch_body(if_expr.body(), result);
                 let else_block = self.lower_else_chain(
                     result,
                     if_expr.else_if_branches(),
@@ -466,14 +462,20 @@ impl BlockLowerer<'_> {
         };
 
         let body = self.lower_fn_body_block(fn_def.body());
-        let fn_def_id = self.builder.fns.push(FnDef { type_preamble, body, return_type });
+        let fn_def_id = self.builder.fns.push(FnDef {
+            type_preamble,
+            body,
+            return_type,
+            source: self.source_id,
+        });
 
         let (type_value_pairs, []) = self.locals_buf[param_locals_start..].as_chunks() else {
             unreachable!("not only pairs?")
         };
         let fn_params_id = self.builder.fn_params.push_iter(
             type_value_pairs.iter().zip(fn_def.params()).map(|(&[r#type, value], param)| {
-                ParamInfo { is_comptime: param.is_comptime, value, r#type }
+                let span = self.lexed.tokens_src_span(param.node().span());
+                ParamInfo { is_comptime: param.is_comptime, value, r#type, span }
             }),
         );
         self.locals_buf.truncate(param_locals_start);
@@ -520,17 +522,17 @@ impl BlockLowerer<'_> {
             return self.create_sub_block(|this| {
                 let span = first.node().span();
                 let condition = this.lower_expr_to_local(first.condition());
-                let then_block = this.lower_body_to_block_with_result(first.body(), result);
+                let then_block = this.lower_branch_body(first.body(), result);
                 let else_body = else_body.map_err(|_| first.body().node().span());
                 let else_block = this.lower_else_chain(result, branches, else_body);
                 this.emit(span, InstructionKind::If { condition, then_block, else_block });
             });
         }
         match else_body {
-            Ok(body) => self.lower_body_to_block_with_result(body, result),
+            Ok(body) => self.lower_branch_body(body, result),
             Err(empty_else_span) => self.create_sub_block(|this| {
                 let expr = this.expr(ExprKind::Void, empty_else_span);
-                this.emit(empty_else_span, InstructionKind::Set { local: result, expr });
+                this.emit(empty_else_span, InstructionKind::BranchSet { local: result, expr });
             }),
         }
     }
@@ -538,18 +540,12 @@ impl BlockLowerer<'_> {
     fn lower_statement(&mut self, stmt: Statement<'_>) {
         match stmt {
             Statement::Let(let_stmt) => {
-                let span = let_stmt.name_span;
-                let type_local = let_stmt.type_expr().map(|t| self.lower_expr_to_local(t));
-                let value = self.lower_expr(let_stmt.value());
-                let local_id =
-                    self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
-                self.emit(span, InstructionKind::Set { local: local_id, expr: value });
-                if let Some(type_local) = type_local {
-                    self.emit(
-                        span,
-                        InstructionKind::AssertType { value: local_id, of_type: type_local },
-                    );
-                }
+                let expr = self.lower_expr(let_stmt.value());
+                // Need to allocate local *after* evals to make sure it doesn't confuse scope.
+                let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
+                let r#type =
+                    let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
+                self.emit(let_stmt.value().span(), InstructionKind::Set { local, r#type, expr });
             }
             Statement::Expr(expr) => {
                 let span = expr.span();
@@ -638,31 +634,16 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
                 TopLevelDef::Const(const_def) => {
                     let id = lowerer.consts[&const_def.name].const_id;
                     let hir_def = &mut consts[id];
-                    let span = const_def.span();
                     hir_def.result =
                         lowerer.alloc_local(const_def.name, false, const_def.name_span());
                     hir_def.body = lowerer.create_sub_block(|this| {
-                        if let Some(type_expr) = const_def.r#type {
-                            let type_local = this.lower_expr_to_local(type_expr);
-                            let assign = this.lower_expr(const_def.assign);
-                            this.emit(
-                                span,
-                                InstructionKind::Set { local: hir_def.result, expr: assign },
-                            );
-                            this.emit(
-                                span,
-                                InstructionKind::AssertType {
-                                    value: hir_def.result,
-                                    of_type: type_local,
-                                },
-                            );
-                        } else {
-                            let assign = this.lower_expr(const_def.assign);
-                            this.emit(
-                                span,
-                                InstructionKind::Set { local: hir_def.result, expr: assign },
-                            );
-                        }
+                        let r#type =
+                            const_def.r#type.map(|type_expr| this.lower_expr_to_local(type_expr));
+                        let expr = this.lower_expr(const_def.assign);
+                        this.emit(
+                            const_def.assign.span(),
+                            InstructionKind::Set { local: hir_def.result, r#type, expr },
+                        );
                     });
                 }
                 TopLevelDef::Init(init_def) => {

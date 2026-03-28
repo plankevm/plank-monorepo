@@ -13,6 +13,7 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Expr {
+    Error,
     LocalRef(LocalId),
     Bool(bool),
     Void,

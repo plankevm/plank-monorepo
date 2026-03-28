@@ -1,12 +1,13 @@
-use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
+use plank_core::list_of_lists::ListOfLists;
 use plank_hir::{self as hir};
 use plank_mir::{self as mir};
-use plank_session::StrId;
+use plank_session::{SrcLoc, StrId};
 use plank_values::{StructInfo, Type, TypeId, TypeInterner, ValueId};
 
 use crate::{
     Evaluator,
     comptime::ComptimeInterpreter,
+    local_state::*,
     value::{Value, ValueInterner},
 };
 
@@ -15,108 +16,15 @@ const VALUES_BUF_CAPACITY: usize = 32;
 const MIR_LOCALS_BUF_CAPACITY: usize = 32;
 const FIELDS_BUF_CAPACITY: usize = 128;
 
-#[derive(Default)]
-struct LocalState {
-    /// Every HIR local optionally maps to a MIR local.
-    /// Once set, never changes (the MIR local ID is stable).
-    hir_to_mir: DenseIndexMap<hir::LocalId, mir::LocalId>,
-
-    /// Every HIR local optionally has a comptime-known value.
-    /// Can be set and later cleared (e.g., after runtime if/else).
-    comptime: DenseIndexMap<hir::LocalId, ValueId>,
-
-    /// The concrete type of each MIR local. Stored separately so it can
-    /// pre-allocated for if/else results, filled in on first Set.
-    mir_type: IndexVec<mir::LocalId, TypeId>,
-}
-
-struct TypeMismatchError {
-    expected_ty: TypeId,
-    received_ty: TypeId,
-}
-
-impl LocalState {
-    fn alloc_anonymous_mir(&mut self, ty: TypeId) -> mir::LocalId {
-        self.mir_type.push(ty)
-    }
-
-    fn comptime(&self, hir: hir::LocalId) -> Option<ValueId> {
-        self.comptime.get(hir).copied()
-    }
-
-    fn mir_type(&self, mir: mir::LocalId) -> TypeId {
-        self.mir_type[mir]
-    }
-
-    fn define(&mut self, hir: hir::LocalId, ty: TypeId) {
-        let mir = self.mir_type.push(ty);
-        let prev = self.hir_to_mir.insert(hir, mir);
-        assert!(prev.is_none());
-    }
-
-    /// Process local set, allows type unification for sets in different branches..
-    fn set(
-        &mut self,
-        hir: hir::LocalId,
-        ty: TypeId,
-        comptime: Option<ValueId>,
-    ) -> Result<mir::LocalId, TypeMismatchError> {
-        if let Some(&mir_local) = self.hir_to_mir.get(hir) {
-            // Not first set, value not guaranteed to be comptime known.
-            self.comptime.remove(hir);
-            let existing_ty = self.mir_type(mir_local);
-            if existing_ty == TypeId::NEVER {
-                // Value was set to `never` in another branch, save more concrete type.
-                self.mir_type[mir_local] = ty;
-            } else if !ty.is_assignable_to(existing_ty) {
-                return Err(TypeMismatchError { expected_ty: existing_ty, received_ty: ty });
-            } else {
-                // `existing_ty` is not `never` and is compatible with `ty`, do nothing.
-            }
-            return Ok(mir_local);
-        }
-
-        // We only save the comptime value if this is the first decl (certain comptime).
-        if let Some(value) = comptime {
-            self.comptime.insert(hir, value);
-        }
-        let mir = self.mir_type.push(ty);
-        self.hir_to_mir.insert(hir, mir);
-        Ok(mir)
-    }
-
-    fn assign(
-        &mut self,
-        hir: hir::LocalId,
-        new_ty: TypeId,
-    ) -> Result<mir::LocalId, TypeMismatchError> {
-        let mir = self.hir_to_mir[hir];
-        self.comptime.remove(hir);
-        let existing_ty = self.mir_type(mir);
-        if !new_ty.is_assignable_to(existing_ty) {
-            return Err(TypeMismatchError { expected_ty: existing_ty, received_ty: new_ty });
-        }
-        Ok(mir)
-    }
-
-    fn get_type(&self, hir_local: hir::LocalId, values: &ValueInterner) -> TypeId {
-        if let Some(&vid) = self.comptime.get(hir_local) {
-            values.type_of_value(vid)
-        } else {
-            let mir = self.hir_to_mir[hir_local];
-            self.mir_type(mir)
-        }
-    }
-}
-
 struct FunctionLowerScope {
     expected_return_type: TypeId,
-    locals: LocalState,
+    locals: Locals,
     interpreter: ComptimeInterpreter,
 
     instr_buf_stack: Vec<mir::Instruction>,
     mir_buf_stack: Vec<mir::LocalId>,
     values_buf: Vec<ValueId>,
+    captures_buf: Vec<(ValueId, SrcLoc)>,
     field_types_buf: Vec<TypeId>,
     field_names_buf: Vec<StrId>,
 }
@@ -138,6 +46,7 @@ impl FunctionLowerScope {
         value: ValueId,
     ) -> Option<(mir::Expr, TypeId)> {
         let (ty, fields) = match values.lookup(value) {
+            Value::Error => return Some((mir::Expr::Error, TypeId::ERROR)),
             Value::Void => return Some((mir::Expr::Void, TypeId::VOID)),
             Value::Bool(b) => return Some((mir::Expr::Bool(b), TypeId::BOOL)),
             Value::BigNum(x) => return Some((mir::Expr::BigNum(x), TypeId::U256)),
@@ -234,7 +143,7 @@ impl FunctionLowerScope {
                 }
             }
             // Only comptime only values may have value but no hir local.
-            self.mir_buf_stack.push(self.locals.hir_to_mir[field.value]);
+            self.mir_buf_stack.push(self.locals.hir_to_mir(field.value));
         }
         let fields = eval.mir_args.push_iter(self.mir_buf_stack.drain(mir_start..));
         let comptime = comptime_known.then(|| {
@@ -277,7 +186,7 @@ impl FunctionLowerScope {
 
                     let args = eval
                         .mir_args
-                        .push_iter(args.iter().map(|&arg| self.locals.hir_to_mir[arg]));
+                        .push_iter(args.iter().map(|&arg| self.locals.hir_to_mir(arg)));
                     return ExprResult::Runtime {
                         expr: mir::Expr::BuiltinCall { builtin, args },
                         ty: result_type,
@@ -287,8 +196,8 @@ impl FunctionLowerScope {
                 todo!("diagnostic: no matching builtin type signature")
             }
             hir::ExprKind::LocalRef(hir) => {
-                let value = self.locals.comptime.get(hir).copied();
-                let mir = self.locals.hir_to_mir.get(hir).copied();
+                let value = self.locals.comptime(hir);
+                let mir = self.locals.get_mir(hir);
                 match (mir, value) {
                     (Some(mir), comptime) => ExprResult::Runtime {
                         expr: mir::Expr::LocalRef(mir),
@@ -296,7 +205,7 @@ impl FunctionLowerScope {
                         comptime,
                     },
                     (None, Some(value)) => ExprResult::ComptimeOnly(value),
-                    (None, None) => unreachable!("invalid hir {hir:?}"),
+                    (None, None) => unreachable!("undefined hir {hir:?}"),
                 }
             }
             hir::ExprKind::ConstRef(id) => {
@@ -309,25 +218,24 @@ impl FunctionLowerScope {
             hir::ExprKind::Type(ty) => ExprResult::ComptimeOnly(eval.values.intern_type(ty)),
             hir::ExprKind::FnDef(fn_def) => {
                 let captures = &eval.hir.fn_captures[fn_def];
-                assert!(self.values_buf.is_empty());
+                assert!(self.captures_buf.is_empty());
                 for capture in captures {
                     let vid = self
                         .locals
-                        .comptime
-                        .get(capture.outer_local)
-                        .expect("closure capture must be comptime");
-                    self.values_buf.push(*vid);
+                        .comptime(capture.outer_local)
+                        .expect("todo-diagnostic: closure capture must be comptime");
+                    let loc = self.locals.def_loc(capture.outer_local);
+                    self.captures_buf.push((vid, loc));
                 }
                 let value_id =
-                    eval.values.intern(Value::Closure { fn_def, captures: &self.values_buf });
-                self.values_buf.clear();
+                    eval.values.intern(Value::Closure { fn_def, captures: &self.captures_buf });
+                self.captures_buf.clear();
                 ExprResult::ComptimeOnly(value_id)
             }
             hir::ExprKind::Call { callee, args } => {
-                let &closure = self
+                let closure = self
                     .locals
-                    .comptime
-                    .get(callee)
+                    .comptime(callee)
                     .expect("todo-diagnostic: call target must be comptime-known");
                 let callee = eval.fn_cache.get(&closure).copied().unwrap_or_else(|| {
                     let id = self.lower_closure(eval, closure);
@@ -349,9 +257,10 @@ impl FunctionLowerScope {
                     }
                 }
 
-                let args = eval.mir_args.push_iter(arg_locals.iter().map(|&hir| {
-                    *self.locals.hir_to_mir.get(hir).expect("todo: non-runtime arg handling")
-                }));
+                let args =
+                    eval.mir_args.push_iter(arg_locals.iter().map(|&hir| {
+                        self.locals.get_mir(hir).expect("todo: non-runtime arg handling")
+                    }));
 
                 ExprResult::Runtime {
                     expr: mir::Expr::Call { callee, args },
@@ -407,7 +316,7 @@ impl FunctionLowerScope {
                     };
                     fields[field_index]
                 });
-                let mir = self.locals.hir_to_mir.get(object).copied();
+                let mir = self.locals.get_mir(object);
                 match (mir, value) {
                     (Some(object), comptime) => ExprResult::Runtime {
                         expr: mir::Expr::FieldAccess { object, field_index: field_index as u32 },
@@ -435,33 +344,37 @@ impl FunctionLowerScope {
 
         self.interpreter.reset();
         // Insert captures.
-        for (capture_info, &value) in hir_captures.iter().zip(captures) {
-            let prev = self.interpreter.bindings.insert(capture_info.inner_local, value);
+        for (capture_info, &(value, loc)) in hir_captures.iter().zip(captures) {
+            let prev = self.interpreter.bindings.insert(capture_info.inner_local, (value, loc));
             assert!(prev.is_none(), "invalid hir");
-            let prev = self.locals.comptime.insert(capture_info.inner_local, value);
-            assert!(prev.is_none(), "invalid hir");
+            self.locals.set_comptime_only(capture_info.inner_local, value, loc);
         }
         // Interpret type premable to determine types.
         self.interpreter
             .interpret_block(eval, func.type_preamble)
             .expect("invalid hir: premable with `return`");
-        let return_type = self.interpreter.bindings[func.return_type];
+        let (return_type, _) = self.interpreter.bindings[func.return_type];
         let Value::Type(return_type) = eval.values.lookup(return_type) else {
             todo!("diagnostic: return type not type")
         };
         let saved_return_type = std::mem::replace(&mut self.expected_return_type, return_type);
 
         for param in params {
-            let ty = self.interpreter.bindings[param.r#type];
-            let Value::Type(ty) = eval.values.lookup(ty) else {
-                todo!("diagnostic: param type must be Type")
+            let (ty, _) = self.interpreter.bindings[param.r#type];
+            let param_src_loc = SrcLoc::new(func.source, param.span);
+            let ty = match eval.values.lookup(ty) {
+                Value::Type(ty) => ty,
+                non_type_value => {
+                    eval.emit_type_constraint_not_type(non_type_value.get_type(), param_src_loc);
+                    TypeId::ERROR
+                }
             };
-            self.locals.define(param.value, ty);
+            self.locals.define_unset(param.value, ty, param_src_loc);
         }
 
         let (body, _) = self.translate_block(eval, func.body);
 
-        let fn_id1 = eval.mir_fn_locals.push_iter(self.locals.mir_type.iter().copied());
+        let fn_id1 = eval.mir_fn_locals.push_iter(self.locals.mir_types());
         let fn_id2 =
             eval.mir_fns.push(mir::FnDef { body, param_count: params.len() as u32, return_type });
         assert_eq!(fn_id1, fn_id2);
@@ -472,6 +385,20 @@ impl FunctionLowerScope {
         fn_id1
     }
 
+    fn expect_type(&mut self, eval: &mut Evaluator<'_>, local: hir::LocalId) -> TypeId {
+        let Some(type_value) = self.locals.comptime(local) else {
+            todo!("diagnostic: AssertType of_type must be comptime")
+        };
+        let Value::Type(expected) = eval.values.lookup(type_value) else {
+            eval.emit_type_constraint_not_type(
+                self.locals.get_type(local, &eval.values),
+                self.locals.def_loc(local),
+            );
+            return TypeId::ERROR;
+        };
+        expected
+    }
+
     fn translate_block_inner(
         &mut self,
         eval: &mut Evaluator<'_>,
@@ -479,11 +406,11 @@ impl FunctionLowerScope {
     ) -> Result<(), BlockControlFlowDiverges> {
         for &instr in &eval.hir.blocks[block] {
             match instr.kind {
-                hir::InstructionKind::Set { local, expr } => {
+                hir::InstructionKind::Set { local, r#type, expr } => {
                     let src_loc = expr.src_loc();
-                    match self.translate_expr(eval, expr) {
+                    let ty = match self.translate_expr(eval, expr) {
                         ExprResult::Runtime { expr, ty, comptime } => {
-                            match self.locals.set(local, ty, comptime) {
+                            match self.locals.set(local, ty, src_loc, comptime) {
                                 Ok(target) => {
                                     self.instr_buf_stack
                                         .push(mir::Instruction::Set { target, expr });
@@ -491,7 +418,50 @@ impl FunctionLowerScope {
                                 Err(TypeMismatchError { expected_ty, received_ty }) => {
                                     eval.emit_type_mismatch_error(
                                         expected_ty,
+                                        self.locals.def_loc(local),
                                         received_ty,
+                                        src_loc,
+                                    );
+                                }
+                            }
+                            ty
+                        }
+                        ExprResult::ComptimeOnly(value) => {
+                            self.locals.set_comptime_only(local, value, src_loc);
+                            eval.values.type_of_value(value)
+                        }
+                    };
+
+                    if let Some(r#type) = r#type {
+                        let expected = self.expect_type(eval, r#type);
+                        if !ty.is_assignable_to(expected) {
+                            eval.emit_type_mismatch_error(
+                                expected,
+                                self.locals.def_loc(r#type),
+                                ty,
+                                src_loc,
+                            );
+                        }
+                    }
+
+                    if ty == TypeId::NEVER {
+                        return Err(BlockControlFlowDiverges);
+                    }
+                }
+                hir::InstructionKind::BranchSet { local, expr } => {
+                    let src_loc = expr.src_loc();
+                    match self.translate_expr(eval, expr) {
+                        ExprResult::Runtime { expr, ty, comptime: _ } => {
+                            match self.locals.branch_set(local, ty, src_loc) {
+                                Ok(target) => {
+                                    self.instr_buf_stack
+                                        .push(mir::Instruction::Set { target, expr });
+                                }
+                                Err(TypeUnificationError { existing_def, existing_ty, new_ty }) => {
+                                    eval.emit_incompatible_branch_types(
+                                        existing_ty,
+                                        existing_def,
+                                        new_ty,
                                         src_loc,
                                     );
                                 }
@@ -501,7 +471,7 @@ impl FunctionLowerScope {
                             }
                         }
                         ExprResult::ComptimeOnly(value) => {
-                            self.locals.comptime.insert(local, value);
+                            self.locals.set_comptime_only(local, value, src_loc)
                         }
                     }
                 }
@@ -516,6 +486,7 @@ impl FunctionLowerScope {
                                 Err(TypeMismatchError { expected_ty, received_ty }) => {
                                     eval.emit_type_mismatch_error(
                                         expected_ty,
+                                        self.locals.def_loc(target),
                                         received_ty,
                                         value.src_loc(),
                                     );
@@ -525,18 +496,6 @@ impl FunctionLowerScope {
                         ExprResult::ComptimeOnly(_) => {
                             todo!("diagnostic: assigning comptime only value in runtime ctx")
                         }
-                    }
-                }
-                hir::InstructionKind::AssertType { value, of_type } => {
-                    let Some(&type_value) = self.locals.comptime.get(of_type) else {
-                        todo!("diagnostic: AssertType of_type must be comptime")
-                    };
-                    let Value::Type(expected) = eval.values.lookup(type_value) else {
-                        todo!("diagnostic: AssertType of_type must be Type");
-                    };
-                    let actual = self.locals.get_type(value, &eval.values);
-                    if !actual.is_assignable_to(expected) {
-                        todo!("diagnostic: type mismatch in AssertType")
                     }
                 }
                 hir::InstructionKind::Eval(expr) => match self.translate_expr(eval, expr) {
@@ -580,7 +539,7 @@ impl FunctionLowerScope {
                             }
                             let (then_block, then_control) = self.translate_block(eval, then_block);
                             let (else_block, else_control) = self.translate_block(eval, else_block);
-                            let condition = self.locals.hir_to_mir[condition];
+                            let condition = self.locals.hir_to_mir(condition);
                             self.instr_buf_stack.push(mir::Instruction::If {
                                 condition,
                                 then_block,
@@ -601,7 +560,7 @@ impl FunctionLowerScope {
                     if !ty.is_assignable_to(TypeId::BOOL) {
                         todo!("diagnostic: while condition not bool");
                     }
-                    let condition = self.locals.hir_to_mir[condition];
+                    let condition = self.locals.hir_to_mir(condition);
                     let (body, _) = self.translate_block(eval, body);
                     self.instr_buf_stack.push(mir::Instruction::While {
                         condition_block,
@@ -632,11 +591,12 @@ pub(crate) fn lower_entry_point_as_fn(
 ) -> mir::FnId {
     let mut scope = FunctionLowerScope {
         expected_return_type: TypeId::NEVER,
-        locals: LocalState::default(),
+        locals: Locals::default(),
         interpreter: ComptimeInterpreter::new(),
 
         instr_buf_stack: Vec::with_capacity(INSTRUCTION_BUF_CAPACITY),
         values_buf: Vec::with_capacity(VALUES_BUF_CAPACITY),
+        captures_buf: Vec::with_capacity(VALUES_BUF_CAPACITY),
         mir_buf_stack: Vec::with_capacity(MIR_LOCALS_BUF_CAPACITY),
         field_types_buf: Vec::with_capacity(FIELDS_BUF_CAPACITY),
         field_names_buf: Vec::with_capacity(FIELDS_BUF_CAPACITY),
@@ -647,7 +607,7 @@ pub(crate) fn lower_entry_point_as_fn(
         todo!("diagnostic: entry point must have an explicit terminator");
     }
 
-    let fn_id1 = eval.mir_fn_locals.push_iter(scope.locals.mir_type.iter().copied());
+    let fn_id1 = eval.mir_fn_locals.push_iter(scope.locals.mir_types());
     let fn_id2 = eval.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::NEVER });
     assert_eq!(fn_id1, fn_id2);
     fn_id1

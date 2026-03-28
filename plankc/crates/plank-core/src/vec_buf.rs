@@ -1,4 +1,3 @@
-#[derive(Default)]
 pub struct VecBuf<T>(Vec<T>);
 
 impl<T> VecBuf<T> {
@@ -14,5 +13,11 @@ impl<T> VecBuf<T> {
         let res = f(&mut self.0);
         self.0.clear();
         res
+    }
+}
+
+impl<T> Default for VecBuf<T> {
+    fn default() -> Self {
+        Self(Vec::default())
     }
 }

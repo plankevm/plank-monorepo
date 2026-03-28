@@ -1,31 +1,49 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::FnDefId;
+use plank_session::SrcLoc;
 use plank_values::{BigNumId, TypeId, ValueId};
 use std::hash::BuildHasher;
 
 newtype_index! {
     struct CompoundIdx;
+    struct CaptureIdx;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StoredValue {
+    Error,
     Void,
     Bool(bool),
     BigNum(BigNumId),
     Type(TypeId),
-    Closure { fn_def: FnDefId, children: CompoundIdx },
+    Closure { fn_def: FnDefId, captures: CaptureIdx },
     StructVal { ty: TypeId, children: CompoundIdx },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Value<'a> {
+    Error,
     Void,
     Bool(bool),
     BigNum(BigNumId),
     Type(TypeId),
-    Closure { fn_def: FnDefId, captures: &'a [ValueId] },
+    Closure { fn_def: FnDefId, captures: &'a [(ValueId, SrcLoc)] },
     StructVal { ty: TypeId, fields: &'a [ValueId] },
+}
+
+impl Value<'_> {
+    pub fn get_type(&self) -> TypeId {
+        match self {
+            Value::Error => TypeId::ERROR,
+            Value::Void => TypeId::VOID,
+            Value::Bool(_) => TypeId::BOOL,
+            Value::BigNum(_) => TypeId::U256,
+            Value::Type(_) => TypeId::TYPE,
+            Value::Closure { .. } => TypeId::FUNCTION,
+            Value::StructVal { ty, .. } => *ty,
+        }
+    }
 }
 
 pub(crate) struct ValueInterner {
@@ -33,19 +51,22 @@ pub(crate) struct ValueInterner {
     dedup: HashTable<ValueId>,
     hasher: DefaultHashBuilder,
     children: ListOfLists<CompoundIdx, ValueId>,
+    captures: ListOfLists<CaptureIdx, (ValueId, SrcLoc)>,
 }
 
 fn stored_to_value<'a>(
     stored: StoredValue,
     children: &'a ListOfLists<CompoundIdx, ValueId>,
+    captures: &'a ListOfLists<CaptureIdx, (ValueId, SrcLoc)>,
 ) -> Value<'a> {
     match stored {
+        StoredValue::Error => Value::Error,
         StoredValue::Void => Value::Void,
         StoredValue::Bool(b) => Value::Bool(b),
         StoredValue::BigNum(n) => Value::BigNum(n),
         StoredValue::Type(t) => Value::Type(t),
-        StoredValue::Closure { fn_def, children: idx } => {
-            Value::Closure { fn_def, captures: &children[idx] }
+        StoredValue::Closure { fn_def, captures: idx } => {
+            Value::Closure { fn_def, captures: &captures[idx] }
         }
         StoredValue::StructVal { ty, children: idx } => {
             Value::StructVal { ty, fields: &children[idx] }
@@ -60,10 +81,12 @@ impl ValueInterner {
             dedup: HashTable::new(),
             hasher: DefaultHashBuilder::default(),
             children: ListOfLists::new(),
+            captures: ListOfLists::new(),
         };
         assert_eq!(new_interner.intern(Value::Void), ValueId::VOID);
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
         assert_eq!(new_interner.intern(Value::Bool(true)), ValueId::TRUE);
+        assert_eq!(new_interner.intern(Value::Error), ValueId::ERROR);
         new_interner
     }
 
@@ -72,14 +95,7 @@ impl ValueInterner {
     }
 
     pub fn type_of_value(&self, value: ValueId) -> TypeId {
-        match self.lookup(value) {
-            Value::Void => TypeId::VOID,
-            Value::Bool(_) => TypeId::BOOL,
-            Value::BigNum(_) => TypeId::U256,
-            Value::Type(_) => TypeId::TYPE,
-            Value::Closure { .. } => TypeId::FUNCTION,
-            Value::StructVal { ty, .. } => ty,
-        }
+        self.lookup(value).get_type()
     }
 
     pub fn intern_num(&mut self, num: BigNumId) -> ValueId {
@@ -94,20 +110,27 @@ impl ValueInterner {
         let hash = self.hash_value(value);
         let entry = self.dedup.entry(
             hash,
-            |&id| stored_to_value(self.values[id], &self.children) == value,
-            |&id| self.hasher.hash_one(stored_to_value(self.values[id], &self.children)),
+            |&id| stored_to_value(self.values[id], &self.children, &self.captures) == value,
+            |&id| {
+                self.hasher.hash_one(stored_to_value(
+                    self.values[id],
+                    &self.children,
+                    &self.captures,
+                ))
+            },
         );
         match entry {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let stored = match value {
+                    Value::Error => StoredValue::Error,
                     Value::Void => StoredValue::Void,
                     Value::Bool(b) => StoredValue::Bool(b),
                     Value::BigNum(n) => StoredValue::BigNum(n),
                     Value::Type(t) => StoredValue::Type(t),
                     Value::Closure { fn_def, captures } => StoredValue::Closure {
                         fn_def,
-                        children: self.children.push_copy_slice(captures),
+                        captures: self.captures.push_copy_slice(captures),
                     },
                     Value::StructVal { ty, fields } => StoredValue::StructVal {
                         ty,
@@ -122,7 +145,7 @@ impl ValueInterner {
     }
 
     pub fn lookup(&self, id: ValueId) -> Value<'_> {
-        stored_to_value(self.values[id], &self.children)
+        stored_to_value(self.values[id], &self.children, &self.captures)
     }
 }
 

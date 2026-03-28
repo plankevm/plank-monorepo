@@ -100,10 +100,21 @@ impl<'a> DisplayHir<'a> {
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         match instr {
-            InstructionKind::Set { local, expr } => {
+            InstructionKind::Set { local, r#type, expr } => {
                 write!(f, "{pad}")?;
                 self.fmt_local(f, local)?;
+                if let Some(r#type) = r#type {
+                    write!(f, ": ")?;
+                    self.fmt_local(f, r#type)?;
+                }
                 write!(f, " = ")?;
+                self.fmt_expr(f, expr)?;
+                writeln!(f)
+            }
+            InstructionKind::BranchSet { local, expr } => {
+                write!(f, "{pad}")?;
+                self.fmt_local(f, local)?;
+                write!(f, " [br]= ")?;
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
@@ -112,13 +123,6 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_local(f, target)?;
                 write!(f, " := ")?;
                 self.fmt_expr(f, value)?;
-                writeln!(f)
-            }
-            InstructionKind::AssertType { value, of_type } => {
-                write!(f, "{pad}assert_type ")?;
-                self.fmt_local(f, value)?;
-                write!(f, " : ")?;
-                self.fmt_local(f, of_type)?;
                 writeln!(f)
             }
             InstructionKind::Eval(expr) => {

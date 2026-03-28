@@ -9,6 +9,7 @@ use comptime::ComptimeInterpreter;
 
 mod comptime;
 mod diagnostics;
+mod local_state;
 mod lower;
 mod value;
 

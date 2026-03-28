@@ -11,6 +11,7 @@ impl ValueId {
     pub const VOID: Self = ValueId::new(0);
     pub const FALSE: Self = ValueId::new(1);
     pub const TRUE: Self = ValueId::new(2);
+    pub const ERROR: Self = ValueId::new(3);
 }
 
 pub use bignum_interner::{BigNumId, BigNumInterner};
