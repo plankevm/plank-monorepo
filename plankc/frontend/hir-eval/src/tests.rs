@@ -208,17 +208,28 @@ fn test_run_missing_termination() {
 }
 
 #[test]
-#[should_panic(expected = "return type mismatch")]
 fn test_never_fn_missing_termination() {
-    let _ = try_lower(
+    assert_diagnostics(
         "
-            init {
-                let halt = fn() never {
-                    let x = 5;
-                };
-                halt();
-            }
+        init {
+            let halt = fn() never {
+                let x = 5;
+            };
+            halt();
+        }
         ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:27
+          |
+        2 |       let halt = fn() never {
+          |  _____________________-----_^
+          | |                     |
+          | |                     expected because of this
+        3 | |         let x = 5;
+        4 | |     };
+          | |_____^ expected `never`, got `void`
+        "#],
     );
 }
 
@@ -521,14 +532,404 @@ fn test_assign_type_mismatch() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented: diagnostic: field type mismatch")]
 fn test_comptime_struct_field_type_mismatch() {
-    let _ = try_lower(
+    assert_diagnostics(
         r#"
         const Pair = struct { a: u256, b: bool };
         const my_pair = Pair { a: false, b: false };
 
         init {
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:27
+          |
+        2 | const my_pair = Pair { a: false, b: false };
+          |                           ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_struct_def_field_not_type() {
+    assert_diagnostics(
+        r#"
+        const S = struct { x: 42 };
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: type constraint not type
+         --> main.plk:1:23
+          |
+        1 | const S = struct { x: 42 };
+          |                       ^^ expected type, got value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_struct_lit_type_not_type() {
+    assert_diagnostics(
+        r#"
+        const T = 42;
+        const x = T { };
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: type constraint not type
+         --> main.plk:2:11
+          |
+        2 | const x = T { };
+          |           ^ expected type, got value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_param_type_not_type() {
+    assert_diagnostics(
+        r#"
+        const forty_two = 42;
+        const f = fn(x: forty_two) u256 { return x; };
+        const r = f(1);
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: type constraint not type
+         --> main.plk:2:17
+          |
+        2 | const f = fn(x: forty_two) u256 { return x; };
+          |                 ^^^^^^^^^ expected type, got value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: struct type not comptime known")]
+fn test_runtime_struct_lit_type_not_type() {
+    let _ = try_lower(
+        r#"
+        const T = 42;
+        init {
+            let x = T { };
+            evm_stop();
+        }
+        "#,
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: `type_index` not comptime known")]
+fn test_runtime_struct_def_field_not_type() {
+    let _ = try_lower(
+        r#"
+        init {
+            let S = struct { x: 42 };
+            evm_stop();
+        }
+        "#,
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented: diagnostic: return type not type — error recovery")]
+fn test_runtime_fn_return_type_not_type() {
+    let _ = try_lower(
+        r#"
+        const forty_two = 42;
+        init {
+            let f = fn() forty_two { return 1; };
+            f();
+            evm_stop();
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_assign_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const f = fn() u256 {
+            let mut x = 1;
+            x = false;
+            return x;
+        };
+        const r = f();
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:9
+          |
+        2 |     let mut x = 1;
+          |                 - expected because of this
+        3 |     x = false;
+          |         ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_call_arg_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const f = fn(x: u256) u256 { return x; };
+        const r = f(false);
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:13
+          |
+        1 | const f = fn(x: u256) u256 { return x; };
+          |                 ---- expected because of this
+        2 | const r = f(false);
+          |             ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_return_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        init {
+            let f = fn() u256 { return false; };
+            f();
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:32
+          |
+        2 |     let f = fn() u256 { return false; };
+          |                  ----          ^^^^^ expected `u256`, got `bool`
+          |                  |
+          |                  expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_if_condition_not_bool() {
+    assert_diagnostics(
+        r#"
+        const f = fn() u256 {
+            if 42 { return 1; } else { return 2; }
+        };
+        const r = f();
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:8
+          |
+        2 |     if 42 { return 1; } else { return 2; }
+          |        ^^ expected `bool`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_struct_lit_field_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        init {
+            let x = Pair { a: false, b: false };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:23
+          |
+        3 |     let x = Pair { a: false, b: false };
+          |                       ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_call_arg_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        init {
+            let f = fn(x: u256) never { evm_stop(); };
+            f(false);
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:7
+          |
+        3 |     f(false);
+          |       ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_if_condition_comptime_not_bool() {
+    assert_diagnostics(
+        "
+        init {
+            if 42 { evm_stop(); } else { evm_stop(); }
+        }
+        ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:8
+          |
+        2 |     if 42 { evm_stop(); } else { evm_stop(); }
+          |        ^^ expected `bool`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_if_condition_runtime_not_bool() {
+    assert_diagnostics(
+        "
+        init {
+            let c = calldataload(0);
+            if c { evm_stop(); } else { evm_stop(); }
+        }
+        ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:8
+          |
+        3 |     if c { evm_stop(); } else { evm_stop(); }
+          |        ^ expected `bool`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_while_condition_not_bool() {
+    assert_diagnostics(
+        "
+        init {
+            let c = calldataload(0);
+            while c { }
+            evm_stop();
+        }
+        ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:11
+          |
+        3 |     while c { }
+          |           ^ expected `bool`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_struct_lit_not_a_struct() {
+    assert_diagnostics(
+        r#"
+        const x = u256 { };
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: expected struct type
+         --> main.plk:1:11
+          |
+        1 | const x = u256 { };
+          |           ^^^^ `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_struct_lit_not_a_struct() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = u256 { };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: expected struct type
+         --> main.plk:2:13
+          |
+        2 |     let x = u256 { };
+          |             ^^^^ `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_member_on_non_struct() {
+    assert_diagnostics(
+        r#"
+        const x: u256 = 5;
+        const y = x.foo;
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: no fields on type
+         --> main.plk:2:11
+          |
+        2 | const y = x.foo;
+          |           ^ `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_member_on_non_struct() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x: u256 = calldataload(0);
+            let y = x.foo;
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: no fields on type
+         --> main.plk:3:13
+          |
+        3 |     let y = x.foo;
+          |             ^ `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_call_on_non_function() {
+    assert_diagnostics(
+        r#"
+        const x = 5;
+        const y = x();
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: expected function
+         --> main.plk:2:11
+          |
+        2 | const y = x();
+          |           ^ `u256` is not callable
+        "#],
+    );
+}
+
+#[test]
+#[should_panic(expected = "todo-diagnostic: call target must be comptime-known")]
+fn test_runtime_call_on_non_function() {
+    let _ = try_lower(
+        r#"
+        init {
+            let x = 5;
+            x();
             evm_stop();
         }
         "#,

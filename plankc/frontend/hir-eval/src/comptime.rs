@@ -1,7 +1,7 @@
 use plank_core::{DenseIndexMap, vec_buf::VecBuf};
 use plank_hir::{self as hir, ConstDef};
 use plank_session::{SrcLoc, StrId};
-use plank_values::{TypeId, ValueId};
+use plank_values::{StructInfo, Type, TypeId, ValueId};
 
 use crate::{Evaluator, value::Value};
 
@@ -107,15 +107,23 @@ impl ComptimeInterpreter {
                 let new_type = eval.values.type_of_value(new_value);
                 let prev_type = eval.values.type_of_value(prev_value.0);
                 if !new_type.is_assignable_to(prev_type) {
-                    todo!("diagnostic: assign type mismatch");
+                    eval.emit_type_mismatch_error(
+                        prev_type,
+                        prev_value.1,
+                        new_type,
+                        value.src_loc(),
+                    );
                 }
             }
             hir::InstructionKind::If { condition, then_block, else_block } => {
-                let cond_vid = self.bindings[condition].0;
+                let (cond_vid, cond_loc) = self.bindings[condition];
                 match eval.values.lookup(cond_vid) {
                     Value::Bool(true) => self.interpret_block(eval, then_block)?,
                     Value::Bool(false) => self.interpret_block(eval, else_block)?,
-                    _ => todo!("diagnostic: type err, condition not bool"),
+                    other => {
+                        eval.emit_type_mismatch_simple(TypeId::BOOL, other.get_type(), cond_loc);
+                        self.interpret_block(eval, else_block)?
+                    }
                 }
             }
             hir::InstructionKind::While { .. } => {
@@ -177,17 +185,21 @@ impl ComptimeInterpreter {
         let struct_type_id = self.type_buf.use_as(|types| {
             self.name_buf.use_as(|names| {
                 for field in fields_info {
-                    let (field_vid, _) = self.bindings[field.value];
+                    let (field_vid, field_loc) = self.bindings[field.value];
                     match eval.values.lookup(field_vid) {
                         Value::Type(tid) => {
                             types.push(tid);
                             names.push(field.name);
                         }
-                        _ => todo!("diagnostic: struct field type must be Type"),
+                        non_type => {
+                            eval.emit_type_constraint_not_type(non_type.get_type(), field_loc);
+                            types.push(TypeId::ERROR);
+                            names.push(field.name);
+                        }
                     }
                 }
 
-                eval.types.intern(plank_values::Type::Struct(plank_values::StructInfo {
+                eval.types.intern(Type::Struct(StructInfo {
                     source_id: struct_def.source_id,
                     source_span: struct_def.source_span,
                     type_index: type_index_vid,
@@ -206,17 +218,20 @@ impl ComptimeInterpreter {
         ty: hir::LocalId,
         fields_id: hir::FieldsId,
     ) -> Result<ValueId, ReturnValue> {
-        let (type_vid, _) = self.bindings[ty];
+        let (type_vid, type_loc) = self.bindings[ty];
         let Value::Type(struct_type_id) = eval.values.lookup(type_vid) else {
-            todo!("diagnostic: struct literal type must be Type")
+            eval.emit_type_constraint_not_type(eval.values.type_of_value(type_vid), type_loc);
+            return Ok(ValueId::ERROR);
         };
-        let plank_values::Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else {
-            todo!("diagnostic: struct type not struct");
-        };
+        if !matches!(eval.types.lookup(struct_type_id), Type::Struct(_)) {
+            eval.emit_not_a_struct_type(struct_type_id, type_loc);
+            return Ok(ValueId::ERROR);
+        }
 
         let fields_info = &eval.hir.fields[fields_id];
 
         for (i, field) in fields_info.iter().enumerate() {
+            let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
                 todo!("diagnostic: struct _ has no field named _");
@@ -224,14 +239,16 @@ impl ComptimeInterpreter {
             if fields_info[..i].iter().any(|f| f.name == field.name) {
                 todo!("diagnostic: duplicate struct field assignment");
             }
-            let (field_value_vid, _) = self.bindings[field.value];
+            let expected_field_ty = r#struct.field_types[field_pos];
+            let (field_value_vid, field_value_loc) = self.bindings[field.value];
             let field_value_ty = eval.values.type_of_value(field_value_vid);
-            if !field_value_ty.is_assignable_to(r#struct.field_types[field_pos]) {
-                todo!("diagnostic: field type mismatch");
+            if !field_value_ty.is_assignable_to(expected_field_ty) {
+                eval.emit_type_mismatch_simple(expected_field_ty, field_value_ty, field_value_loc);
             }
         }
 
         self.value_buf.use_as(|fields| {
+            let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
             for &field_name in r#struct.field_names {
                 let Some(&field) = fields_info.iter().find(|field| field.name == field_name) else {
                     todo!("diagnostic: literal missing struct field");
@@ -248,7 +265,7 @@ impl ComptimeInterpreter {
         object: hir::LocalId,
         member: StrId,
     ) -> Result<ValueId, ReturnValue> {
-        let (obj_vid, _) = self.bindings[object];
+        let (obj_vid, obj_loc) = self.bindings[object];
         match eval.values.lookup(obj_vid) {
             Value::StructVal { ty, fields } => {
                 let Some(field_index) = eval.types.field_index_by_name(ty, member) else {
@@ -256,7 +273,10 @@ impl ComptimeInterpreter {
                 };
                 Ok(fields[field_index as usize])
             }
-            _ => todo!("diagnostic: member access on non-struct"),
+            other => {
+                eval.emit_member_on_non_struct(other.get_type(), obj_loc);
+                Ok(ValueId::ERROR)
+            }
         }
     }
 
@@ -266,9 +286,10 @@ impl ComptimeInterpreter {
         callee: hir::LocalId,
         args: hir::CallArgsId,
     ) -> Result<ValueId, ReturnValue> {
-        let (closure_vid, _) = self.bindings[callee];
+        let (closure_vid, callee_loc) = self.bindings[callee];
         let Value::Closure { fn_def: fn_def_id, captures } = eval.values.lookup(closure_vid) else {
-            todo!("diagnostic: comptime call on non-function")
+            eval.emit_not_callable(eval.values.type_of_value(closure_vid), callee_loc);
+            return Ok(ValueId::ERROR);
         };
 
         let fn_def = eval.hir.fns[fn_def_id];
@@ -281,9 +302,9 @@ impl ComptimeInterpreter {
             todo!("diagnostic: function argument count mismatch");
         }
 
-        let saved_bindings = self.value_buf.use_as(|args| {
+        let saved_bindings = self.capture_buf.use_as(|args| {
             for &local in arg_locals {
-                args.push(self.bindings[local].0);
+                args.push(self.bindings[local]);
             }
 
             let saved_bindings = std::mem::take(&mut self.bindings);
@@ -292,9 +313,8 @@ impl ComptimeInterpreter {
                 self.bindings.insert(capture_info.inner_local, capture);
             }
 
-            for (param, arg) in params.iter().zip(args) {
-                let loc = SrcLoc::new(fn_def.source, param.span);
-                self.bindings.insert(param.value, (*arg, loc));
+            for (param, &(arg_value, arg_loc)) in params.iter().zip(args.iter()) {
+                self.bindings.insert(param.value, (arg_value, arg_loc));
             }
 
             saved_bindings
@@ -303,14 +323,23 @@ impl ComptimeInterpreter {
         self.interpret_block(eval, fn_def.type_preamble).expect("hir: preamble with return?");
 
         for param in params {
-            let (expected_type_vid, _) = self.bindings[param.r#type];
+            let (expected_type_vid, expected_type_loc) = self.bindings[param.r#type];
             let Value::Type(expected_type) = eval.values.lookup(expected_type_vid) else {
-                todo!("diagnostic: param type must be Type")
+                eval.emit_type_constraint_not_type(
+                    eval.values.type_of_value(expected_type_vid),
+                    expected_type_loc,
+                );
+                continue;
             };
-            let (actual_arg_vid, _) = self.bindings[param.value];
+            let (actual_arg_vid, actual_arg_loc) = self.bindings[param.value];
             let actual_type = eval.values.type_of_value(actual_arg_vid);
             if actual_type != expected_type {
-                todo!("diagnostic: comptime call argument type mismatch");
+                eval.emit_type_mismatch_error(
+                    expected_type,
+                    expected_type_loc,
+                    actual_type,
+                    actual_arg_loc,
+                );
             }
         }
 

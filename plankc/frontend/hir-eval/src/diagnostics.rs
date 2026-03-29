@@ -33,10 +33,55 @@ impl Evaluator<'_> {
             loc.source,
             loc.span,
             format!(
-                "expected `{}`, got `{}`",
+                "expected {}, got value of type `{}`",
                 builtin_names::TYPE,
                 self.types.format(self.session, ty)
             ),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_type_mismatch_simple(
+        &mut self,
+        expected_ty: TypeId,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        let diagnostic = Diagnostic::error("mismatched types").primary(
+            loc.source,
+            loc.span,
+            format!(
+                "expected `{}`, got `{}`",
+                self.types.format(self.session, expected_ty),
+                self.types.format(self.session, actual_ty),
+            ),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_not_a_struct_type(&mut self, ty: TypeId, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("expected struct type").primary(
+            loc.source,
+            loc.span,
+            format!("`{}` is not a struct type", self.types.format(self.session, ty)),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_member_on_non_struct(&mut self, ty: TypeId, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("no fields on type").primary(
+            loc.source,
+            loc.span,
+            format!("`{}` is not a struct type", self.types.format(self.session, ty)),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_not_callable(&mut self, ty: TypeId, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("expected function").primary(
+            loc.source,
+            loc.span,
+            format!("`{}` is not callable", self.types.format(self.session, ty)),
         );
         self.session.emit_diagnostic(diagnostic);
     }

@@ -18,6 +18,7 @@ const FIELDS_BUF_CAPACITY: usize = 128;
 
 struct FunctionLowerScope {
     expected_return_type: TypeId,
+    expected_return_type_loc: Option<SrcLoc>,
     locals: Locals,
     interpreter: ComptimeInterpreter,
 
@@ -83,17 +84,24 @@ impl FunctionLowerScope {
         ty: hir::LocalId,
         fields: hir::FieldsId,
     ) -> ExprResult {
+        let ty_loc = self.locals.def_loc(ty);
         let Some(ty) = self.locals.comptime(ty) else {
             todo!("diagnostic: struct type not comptime known");
         };
         let Value::Type(ty) = eval.values.lookup(ty) else {
-            todo!("diagnostic: struct type not type");
+            eval.emit_type_constraint_not_type(eval.values.type_of_value(ty), ty_loc);
+            return ExprResult::ComptimeOnly(ValueId::ERROR);
         };
-        let Type::Struct(r#struct) = eval.types.lookup(ty) else {
-            todo!("diagnostic: struct type not struct");
-        };
+        if !matches!(eval.types.lookup(ty), Type::Struct(_)) {
+            eval.emit_not_a_struct_type(ty, ty_loc);
+            return ExprResult::ComptimeOnly(ValueId::ERROR);
+        }
 
         for (i, field) in eval.hir.fields[fields].iter().enumerate() {
+            let r#struct = match eval.types.lookup(ty) {
+                Type::Struct(s) => s,
+                _ => unreachable!(),
+            };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
                 todo!("diagnostic: struct _ has no field named _");
@@ -101,11 +109,18 @@ impl FunctionLowerScope {
             if eval.hir.fields[fields][..i].iter().any(|f| f.name == field.name) {
                 todo!("diagnostic: duplicate struct field assignment");
             }
+            let expected_field_ty = r#struct.field_types[field_pos];
             let field_value_ty = self.locals.get_type(field.value, &eval.values);
-            if !field_value_ty.is_assignable_to(r#struct.field_types[field_pos]) {
-                todo!("diagnostic: field type mismatch");
+            if !field_value_ty.is_assignable_to(expected_field_ty) {
+                eval.emit_type_mismatch_simple(
+                    expected_field_ty,
+                    field_value_ty,
+                    self.locals.def_loc(field.value),
+                );
             }
         }
+
+        let Type::Struct(r#struct) = eval.types.lookup(ty) else { unreachable!() };
 
         assert!(self.values_buf.is_empty());
 
@@ -233,12 +248,13 @@ impl FunctionLowerScope {
                 ExprResult::ComptimeOnly(value_id)
             }
             hir::ExprKind::Call { callee, args } => {
+                let callee_loc = self.locals.def_loc(callee);
                 let closure = self
                     .locals
                     .comptime(callee)
                     .expect("todo-diagnostic: call target must be comptime-known");
                 let callee = eval.fn_cache.get(&closure).copied().unwrap_or_else(|| {
-                    let id = self.lower_closure(eval, closure);
+                    let id = self.lower_closure(eval, closure, callee_loc);
                     eval.fn_cache.insert(closure, id);
                     id
                 });
@@ -249,11 +265,15 @@ impl FunctionLowerScope {
                     todo!("diagnostic: function call argument count mismatch");
                 }
 
-                let param_types = &eval.mir_fn_locals[callee][..fn_def.param_count as usize];
-                for (&arg_local, &expected_ty) in arg_locals.iter().zip(param_types) {
+                for (arg_i, &arg_local) in arg_locals.iter().enumerate() {
+                    let expected_ty = eval.mir_fn_locals[callee][arg_i];
                     let actual_ty = self.locals.get_type(arg_local, &eval.values);
                     if !actual_ty.is_assignable_to(expected_ty) {
-                        todo!("diagnostic: function call argument type mismatch");
+                        eval.emit_type_mismatch_simple(
+                            expected_ty,
+                            actual_ty,
+                            self.locals.def_loc(arg_local),
+                        );
                     }
                 }
 
@@ -281,7 +301,13 @@ impl FunctionLowerScope {
                         todo!("diagnostic: field type not comptime known");
                     };
                     let Value::Type(r#type) = eval.values.lookup(value) else {
-                        todo!("diagnostic: field type not type");
+                        eval.emit_type_constraint_not_type(
+                            eval.values.type_of_value(value),
+                            self.locals.def_loc(field.value),
+                        );
+                        self.field_types_buf.push(TypeId::ERROR);
+                        self.field_names_buf.push(field.name);
+                        continue;
                     };
                     self.field_types_buf.push(r#type);
                     self.field_names_buf.push(field.name);
@@ -303,7 +329,8 @@ impl FunctionLowerScope {
             hir::ExprKind::Member { object, member } => {
                 let ty = self.locals.get_type(object, &eval.values);
                 let Type::Struct(r#struct) = eval.types.lookup(ty) else {
-                    todo!("diagnostic: member target obj not a struct");
+                    eval.emit_member_on_non_struct(ty, self.locals.def_loc(object));
+                    return ExprResult::ComptimeOnly(ValueId::ERROR);
                 };
                 let Some(field_index) =
                     r#struct.field_names.iter().position(|&name| name == member)
@@ -331,9 +358,15 @@ impl FunctionLowerScope {
         }
     }
 
-    fn lower_closure(&mut self, eval: &mut Evaluator<'_>, closure: ValueId) -> mir::FnId {
+    fn lower_closure(
+        &mut self,
+        eval: &mut Evaluator<'_>,
+        closure: ValueId,
+        callee_loc: SrcLoc,
+    ) -> mir::FnId {
         let Value::Closure { fn_def, captures } = eval.values.lookup(closure) else {
-            todo!("diagnostic: callee is not a function")
+            eval.emit_not_callable(eval.values.type_of_value(closure), callee_loc);
+            todo!("diagnostic: callee is not a function — error recovery")
         };
         let func = eval.hir.fns[fn_def];
         let params = &eval.hir.fn_params[fn_def];
@@ -353,11 +386,16 @@ impl FunctionLowerScope {
         self.interpreter
             .interpret_block(eval, func.type_preamble)
             .expect("invalid hir: premable with `return`");
-        let (return_type, _) = self.interpreter.bindings[func.return_type];
+        let (return_type, return_type_loc) = self.interpreter.bindings[func.return_type];
         let Value::Type(return_type) = eval.values.lookup(return_type) else {
-            todo!("diagnostic: return type not type")
+            eval.emit_type_constraint_not_type(
+                eval.values.type_of_value(return_type),
+                return_type_loc,
+            );
+            todo!("diagnostic: return type not type — error recovery")
         };
         let saved_return_type = std::mem::replace(&mut self.expected_return_type, return_type);
+        let saved_return_type_loc = self.expected_return_type_loc.replace(return_type_loc);
 
         for param in params {
             let (ty, _) = self.interpreter.bindings[param.r#type];
@@ -381,6 +419,7 @@ impl FunctionLowerScope {
 
         self.locals = saved_locals;
         self.expected_return_type = saved_return_type;
+        self.expected_return_type_loc = saved_return_type_loc;
 
         fn_id1
     }
@@ -509,33 +548,61 @@ impl FunctionLowerScope {
                         }
                     }
                 },
-                hir::InstructionKind::Return(expr) => match self.translate_expr(eval, expr) {
-                    ExprResult::ComptimeOnly(_) => {
-                        todo!("diagnostic: returning comptime-only in runtime ctx")
-                    }
-                    ExprResult::Runtime { expr, ty, comptime: _ } => {
-                        let temp_store = self.locals.alloc_anonymous_mir(ty);
-                        self.instr_buf_stack
-                            .push(mir::Instruction::Set { target: temp_store, expr });
-                        if !ty.is_assignable_to(self.expected_return_type) {
-                            todo!("diagnostic: return type mismatch");
+                hir::InstructionKind::Return(expr) => {
+                    let return_src_loc = expr.src_loc();
+                    match self.translate_expr(eval, expr) {
+                        ExprResult::ComptimeOnly(_) => {
+                            todo!("diagnostic: returning comptime-only in runtime ctx")
                         }
-                        if ty == TypeId::NEVER {
+                        ExprResult::Runtime { expr, ty, comptime: _ } => {
+                            let temp_store = self.locals.alloc_anonymous_mir(ty);
+                            self.instr_buf_stack
+                                .push(mir::Instruction::Set { target: temp_store, expr });
+                            if !ty.is_assignable_to(self.expected_return_type) {
+                                if let Some(expected_loc) = self.expected_return_type_loc {
+                                    eval.emit_type_mismatch_error(
+                                        self.expected_return_type,
+                                        expected_loc,
+                                        ty,
+                                        return_src_loc,
+                                    );
+                                } else {
+                                    eval.emit_type_mismatch_simple(
+                                        self.expected_return_type,
+                                        ty,
+                                        return_src_loc,
+                                    );
+                                }
+                            }
+                            if ty == TypeId::NEVER {
+                                return Err(BlockControlFlowDiverges);
+                            }
+                            self.instr_buf_stack.push(mir::Instruction::Return(temp_store));
                             return Err(BlockControlFlowDiverges);
                         }
-                        self.instr_buf_stack.push(mir::Instruction::Return(temp_store));
-                        return Err(BlockControlFlowDiverges);
                     }
-                },
+                }
                 hir::InstructionKind::If { condition, then_block, else_block } => {
                     match self.locals.comptime(condition) {
                         Some(ValueId::TRUE) => self.translate_block_inner(eval, then_block)?,
                         Some(ValueId::FALSE) => self.translate_block_inner(eval, else_block)?,
-                        Some(_) => todo!("diagnostic: type mismatch, if condition not bool"),
+                        Some(_) => {
+                            let cond_ty = self.locals.get_type(condition, &eval.values);
+                            eval.emit_type_mismatch_simple(
+                                TypeId::BOOL,
+                                cond_ty,
+                                self.locals.def_loc(condition),
+                            );
+                            self.translate_block_inner(eval, else_block)?
+                        }
                         None => {
                             let ty = self.locals.get_type(condition, &eval.values);
                             if !ty.is_assignable_to(TypeId::BOOL) {
-                                todo!("diagnostic: type mismatch, if condition not bool");
+                                eval.emit_type_mismatch_simple(
+                                    TypeId::BOOL,
+                                    ty,
+                                    self.locals.def_loc(condition),
+                                );
                             }
                             let (then_block, then_control) = self.translate_block(eval, then_block);
                             let (else_block, else_control) = self.translate_block(eval, else_block);
@@ -558,7 +625,11 @@ impl FunctionLowerScope {
 
                     let ty = self.locals.get_type(condition, &eval.values);
                     if !ty.is_assignable_to(TypeId::BOOL) {
-                        todo!("diagnostic: while condition not bool");
+                        eval.emit_type_mismatch_simple(
+                            TypeId::BOOL,
+                            ty,
+                            self.locals.def_loc(condition),
+                        );
                     }
                     let condition = self.locals.hir_to_mir(condition);
                     let (body, _) = self.translate_block(eval, body);
@@ -591,6 +662,7 @@ pub(crate) fn lower_entry_point_as_fn(
 ) -> mir::FnId {
     let mut scope = FunctionLowerScope {
         expected_return_type: TypeId::NEVER,
+        expected_return_type_loc: None,
         locals: Locals::default(),
         interpreter: ComptimeInterpreter::new(),
 
