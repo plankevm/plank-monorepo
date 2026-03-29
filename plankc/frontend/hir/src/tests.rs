@@ -63,15 +63,14 @@ fn test_basic_init_builtin_calls() {
         ==== Init ====
         %0 = 0
         %1 = calldataload(%0)
-        %2 = type#1
-        %3 = 32
-        %4 = calldataload(%3)
-        assert_type %4 : %2
+        %2 = 32
+        %4 = type#1
+        %3 : %4 = calldataload(%2)
         %5 = 32
         %6 = malloc_uninit(%5)
         %7 = %6
         %8 = %1
-        %9 = %4
+        %9 = %3
         %10 = add(%8, %9)
         eval mstore32(%7, %10)
         %11 = %6

@@ -104,7 +104,7 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "{pad}")?;
                 self.fmt_local(f, local)?;
                 if let Some(r#type) = r#type {
-                    write!(f, ": ")?;
+                    write!(f, " : ")?;
                     self.fmt_local(f, r#type)?;
                 }
                 write!(f, " = ")?;
