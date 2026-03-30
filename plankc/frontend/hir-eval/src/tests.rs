@@ -86,7 +86,7 @@ fn test_type_annotation_type_mismatch() {
         2 |     let x: u256 = false;
           |            ----   ^^^^^ expected `u256`, got `bool`
           |            |
-          |            expected because of this
+          |            `u256` expected because of this
         "#],
     );
 }
@@ -110,7 +110,7 @@ fn test_if_two_branches_type_mismatch() {
              --> main.plk:6:9
               |
             4 |         334
-              |         --- expected because of this
+              |         --- `u256` expected because of this
             5 |     } else {
             6 |         false
               |         ^^^^^ expected `u256`, got `bool`
@@ -140,7 +140,7 @@ fn test_if_three_branches_type_mismatch() {
                  --> main.plk:6:9
                   |
                 4 |         3
-                  |         - expected because of this
+                  |         - `u256` expected because of this
                 5 |     } else if eq(c, 34) {
                 6 |         false
                   |         ^^^^^ expected `u256`, got `bool`
@@ -150,7 +150,7 @@ fn test_if_three_branches_type_mismatch() {
                  --> main.plk:8:9
                   |
                 4 |         3
-                  |         - expected because of this
+                  |         - `u256` expected because of this
                 ...
                 8 |         true
                   |         ^^^^ expected `u256`, got `bool`
@@ -180,7 +180,7 @@ fn test_if_type_mismatch() {
             3 |       let x: u256 = if slt(c, 0)  {
               |  ____________----___^
               | |            |
-              | |            expected because of this
+              | |            `u256` expected because of this
             4 | |         true
             5 | |     } else {
             6 | |         false
@@ -225,7 +225,7 @@ fn test_never_fn_missing_termination() {
         2 |       let halt = fn() never {
           |  _____________________-----_^
           | |                     |
-          | |                     expected because of this
+          | |                     `never` expected because of this
         3 | |         let x = 5;
         4 | |     };
           | |_____^ expected `never`, got `void`
@@ -524,7 +524,7 @@ fn test_assign_type_mismatch() {
          --> main.plk:3:9
           |
         2 |     let mut x = 1;
-          |                 - expected because of this
+          |                 - `u256` expected because of this
         3 |     x = false;
           |         ^^^^^ expected `u256`, got `bool`
         "#],
@@ -665,7 +665,7 @@ fn test_comptime_assign_type_mismatch() {
          --> main.plk:3:9
           |
         2 |     let mut x = 1;
-          |                 - expected because of this
+          |                 - `u256` expected because of this
         3 |     x = false;
           |         ^^^^^ expected `u256`, got `bool`
         "#],
@@ -685,7 +685,7 @@ fn test_comptime_call_arg_type_mismatch() {
          --> main.plk:2:13
           |
         1 | const f = fn(x: u256) u256 { return x; };
-          |                 ---- expected because of this
+          |                 ---- `u256` expected because of this
         2 | const r = f(false);
           |             ^^^^^ expected `u256`, got `bool`
         "#],
@@ -709,7 +709,7 @@ fn test_runtime_return_type_mismatch() {
         2 |     let f = fn() u256 { return false; };
           |                  ----          ^^^^^ expected `u256`, got `bool`
           |                  |
-          |                  expected because of this
+          |                  `u256` expected because of this
         "#],
     );
 }
@@ -879,7 +879,7 @@ fn test_comptime_member_on_non_struct() {
          --> main.plk:2:11
           |
         2 | const y = x.foo;
-          |           ^ `u256` is not a struct type
+          |           ^ value of type `u256` is not a struct type
         "#],
     );
 }
@@ -899,7 +899,7 @@ fn test_runtime_member_on_non_struct() {
          --> main.plk:3:13
           |
         3 |     let y = x.foo;
-          |             ^ `u256` is not a struct type
+          |             ^ value of type `u256` is not a struct type
         "#],
     );
 }
@@ -939,7 +939,7 @@ fn test_diagnostic_renders_struct_name() {
         3 |     let x: Pair = 42;
           |            ----   ^^ expected `Pair`, got `u256`
           |            |
-          |            expected because of this
+          |            `Pair` expected because of this
         "#],
     );
 }

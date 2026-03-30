@@ -23,7 +23,13 @@ impl Evaluator<'_> {
                         self.types.format(self.session, actual_ty),
                     ),
                 )
-                .secondary(expected_loc.span, "expected because of this"),
+                .secondary(
+                    expected_loc.span,
+                    format!(
+                        "`{}` expected because of this",
+                        self.types.format(self.session, expected_ty),
+                    ),
+                ),
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -72,7 +78,7 @@ impl Evaluator<'_> {
         let diagnostic = Diagnostic::error("no fields on type").primary(
             loc.source,
             loc.span,
-            format!("`{}` is not a struct type", self.types.format(self.session, ty)),
+            format!("value of type `{}` is not a struct type", self.types.format(self.session, ty)),
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -104,7 +110,10 @@ impl Evaluator<'_> {
                         self.types.format(self.session, ty2),
                     ),
                 )
-                .secondary(loc1.span, "expected because of this"),
+                .secondary(
+                    loc1.span,
+                    format!("`{}` expected because of this", self.types.format(self.session, ty1)),
+                ),
         );
         self.session.emit_diagnostic(diagnostic);
     }
