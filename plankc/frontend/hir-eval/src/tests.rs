@@ -1304,3 +1304,64 @@ fn test_logical_not_type_mismatch_comptime() {
         "#],
     );
 }
+
+#[test]
+fn test_and_comptime_short_circuit_false() {
+    assert_lowers_to(
+        r#"
+        const x = false and true;
+        init {
+            let v: bool = x;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_and_condition_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        init {
+            let c = calldataload(0);
+            let x = c and true;
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:13
+          |
+        3 |     let x = c and true;
+          |             ^ expected `bool`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_or_condition_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        init {
+            let c = calldataload(0);
+            let x = c or true;
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:13
+          |
+        3 |     let x = c or true;
+          |             ^ expected `bool`, got `u256`
+        "#],
+    );
+}

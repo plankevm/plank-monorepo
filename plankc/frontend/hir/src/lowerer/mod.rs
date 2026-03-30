@@ -79,6 +79,10 @@ struct BlockLowerer<'a> {
     lexed: &'a Lexed,
     source_id: SourceId,
 }
+enum ShortCircuitOp {
+    And,
+    Or,
+}
 
 impl BlockLowerer<'_> {
     fn build_file_scope(
@@ -427,9 +431,11 @@ impl BlockLowerer<'_> {
             ast::Expr::ComptimeBlock(_) => {
                 todo!("comptime block lowering requires extra HIR instructions")
             }
-            ast::Expr::Binary(_) => {
-                todo!("binary expression lowering")
-            }
+            ast::Expr::Binary(binary) => match binary.op {
+                cst::BinaryOp::And => self.lower_short_circuit_op(binary, ShortCircuitOp::And),
+                cst::BinaryOp::Or => self.lower_short_circuit_op(binary, ShortCircuitOp::Or),
+                _ => todo!("binary expression lowering"),
+            },
             ast::Expr::Unary(unary) => match unary.op {
                 cst::UnaryOp::Bang => {
                     let input = self.lower_expr_to_local(unary.operand());
@@ -544,6 +550,42 @@ impl BlockLowerer<'_> {
                 this.emit(empty_else_span, InstructionKind::BranchSet { local: result, expr });
             }),
         }
+    }
+
+    /// Desugars short-circuit boolean operators.
+    fn lower_short_circuit_op(
+        &mut self,
+        binary: ast::BinaryExpr<'_>,
+        op: ShortCircuitOp,
+    ) -> ExprKind {
+        let result = self.alloc_temp();
+        let condition = self.lower_expr_to_local(binary.lhs());
+        let span = binary.node().span();
+
+        let rhs_block = self.create_sub_block(|this| {
+            let rhs_span = binary.rhs().span();
+            let expr = this.lower_expr(binary.rhs());
+            this.emit(rhs_span, InstructionKind::BranchSet { local: result, expr });
+        });
+
+        // Lowers `<lhs> or <rhs>` to `if lhs { true } else { rhs }`
+        // Lowers `<lhs> and <rhs>` to `if lhs { rhs } else { false }`
+
+        let literal_block = self.create_sub_block(|this| {
+            let short_circuit_value = match op {
+                ShortCircuitOp::And => false,
+                ShortCircuitOp::Or => true,
+            };
+            let expr = this.expr(ExprKind::Bool(short_circuit_value), span);
+            this.emit(span, InstructionKind::BranchSet { local: result, expr });
+        });
+        let (then_block, else_block) = match op {
+            ShortCircuitOp::Or => (literal_block, rhs_block),
+            ShortCircuitOp::And => (rhs_block, literal_block),
+        };
+
+        self.emit(span, InstructionKind::If { condition, then_block, else_block });
+        ExprKind::LocalRef(result)
     }
 
     fn lower_statement(&mut self, stmt: Statement<'_>) {

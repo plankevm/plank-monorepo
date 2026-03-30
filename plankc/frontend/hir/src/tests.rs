@@ -638,3 +638,84 @@ fn test_logical_not_runtime() {
         "#,
     );
 }
+
+#[test]
+fn test_and_desugaring() {
+    assert_lowers_to(
+        r#"
+        const slot_good = fn () bool {
+            sstore(0, 0);
+            false
+        };
+
+        init {
+            let a = iszero(calldataload(0));
+            let c = a and slot_good();
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("slot_good") result=LocalId(0) {
+            %0 = @fn0
+        }
+
+        ==== Functions ====
+        @fn0() -> %0 {
+            preamble:
+                %0 = type#2
+            body:
+                %1 = 0
+                %2 = 0
+                eval sstore(%1, %2)
+                ret false
+        }
+
+        ==== Init ====
+        %0 = 0
+        %1 = calldataload(%0)
+        %2 = iszero(%1)
+        %4 = %2
+        if %4 {
+            %5 = $0
+            %3 [br]= call %5()
+        } else {
+            %3 [br]= false
+        }
+        %6 = %3
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_or_desugaring() {
+    assert_lowers_to(
+        r#"
+        init {
+            let a = iszero(calldataload(0));
+            let c = a or {
+                sstore(1, 1);
+                false
+            };
+            evm_stop();
+        }
+        "#,
+        r#"
+        %0 = 0
+        %1 = calldataload(%0)
+        %2 = iszero(%1)
+        %4 = %2
+        if %4 {
+            %3 [br]= true
+        } else {
+            %5 = 1
+            %6 = 1
+            eval sstore(%5, %6)
+            %3 [br]= false
+        }
+        %7 = %3
+        eval evm_stop()
+        "#,
+    );
+}
