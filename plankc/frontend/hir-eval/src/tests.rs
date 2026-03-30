@@ -1,6 +1,6 @@
-use plank_mir::{display::DisplayMir, Mir};
+use plank_mir::{Mir, display::DisplayMir};
 use plank_session::Session;
-use plank_test_utils::{dedent_preserve_blank_lines, TestProject};
+use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::BigNumInterner;
 
 fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
