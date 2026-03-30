@@ -153,9 +153,24 @@ impl ComptimeInterpreter {
             hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
             hir::ExprKind::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
             hir::ExprKind::Member { object, member } => self.eval_member(eval, object, member)?,
+            hir::ExprKind::LogicalNot { input } => {
+                let (input_vid, input_loc) = self.bindings[input];
+                match input_vid {
+                    ValueId::TRUE => ValueId::FALSE,
+                    ValueId::FALSE => ValueId::TRUE,
+                    ValueId::ERROR => ValueId::ERROR,
+                    other => {
+                        let ty = eval.values.type_of_value(other);
+                        eval.emit_type_mismatch_simple(TypeId::BOOL, ty, input_loc);
+                        ValueId::ERROR
+                    }
+                }
+            }
             hir::ExprKind::EvmBuiltinCall { .. } => {
                 todo!("comptime builtin eval not yet implemented")
             }
+            hir::ExprKind::UnaryOpCall { .. } => todo!("comptime unary op eval"),
+            hir::ExprKind::BinaryOpCall { .. } => todo!("comptime binary op eval"),
             hir::ExprKind::Error => unreachable!("error expression reached hir-eval"),
         };
         Ok(value)

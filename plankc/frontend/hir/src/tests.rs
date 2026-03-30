@@ -589,3 +589,52 @@ fn test_inline_while_not_yet_supported() {
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
+
+#[test]
+fn test_logical_not_literal() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x = !true;
+            let y = !false;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = true
+        %1 = logical_not %0
+        %2 = false
+        %3 = logical_not %2
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_logical_not_runtime() {
+    assert_lowers_to(
+        r#"
+        init {
+            let c = calldataload(0);
+            let b = iszero(c);
+            let nb = !b;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = calldataload(%0)
+        %2 = %1
+        %3 = iszero(%2)
+        %4 = %3
+        %5 = logical_not %4
+        eval evm_stop()
+        "#,
+    );
+}

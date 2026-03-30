@@ -88,6 +88,20 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "}}")
             }
             Expr::StructDef(id) => self.fmt_struct_ref(f, id),
+            Expr::LogicalNot { input } => {
+                write!(f, "logical_not ")?;
+                self.fmt_local(f, input)
+            }
+            Expr::UnaryOpCall { op, input } => {
+                write!(f, "{op:?}(")?;
+                self.fmt_local(f, input)?;
+                write!(f, ")")
+            }
+            Expr::BinaryOpCall { op, lhs, rhs } => {
+                self.fmt_local(f, lhs)?;
+                write!(f, " {op:?} ")?;
+                self.fmt_local(f, rhs)
+            }
             Expr::Error => write!(f, "<error>"),
         }
     }

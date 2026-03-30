@@ -1,10 +1,12 @@
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_parser::const_print::const_assert_eq;
 use plank_session::{EvmBuiltin, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
 
 pub use plank_values;
 
 pub mod display;
 mod lowerer;
+pub mod operators;
 
 pub use lowerer::lower;
 pub use plank_values::{BigNumId, BigNumInterner};
@@ -51,6 +53,15 @@ pub enum ExprKind {
         builtin: EvmBuiltin,
         args: CallArgsId,
     },
+    UnaryOpCall {
+        op: operators::UnaryOp,
+        input: LocalId,
+    },
+    BinaryOpCall {
+        op: operators::BinaryOp,
+        lhs: LocalId,
+        rhs: LocalId,
+    },
     Member {
         object: LocalId,
         member: StrId,
@@ -61,10 +72,19 @@ pub enum ExprKind {
     },
     StructDef(StructDefId),
 
+    /// Bool-specific logical NOT (`!x`). Not in `operators::UnaryOp` because it is not
+    /// overridable — it is hardcoded to only work on `bool`.
+    LogicalNot {
+        input: LocalId,
+    },
+
     /// Indicates the expr that evaluated to the value had some error that was already handled,
     /// to avoid cascades any expression downstream from it also needs to become an error.
     Error,
 }
+
+/// [`ExprKind`] memory size check. May be changed intentionally.
+const _EXPR_KIND_SIZE: () = const_assert_eq(std::mem::size_of::<ExprKind>(), 12);
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {

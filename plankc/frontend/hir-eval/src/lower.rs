@@ -1,7 +1,7 @@
 use plank_core::list_of_lists::ListOfLists;
 use plank_hir::{self as hir};
 use plank_mir::{self as mir};
-use plank_session::{SrcLoc, StrId};
+use plank_session::{EvmBuiltin, SrcLoc, StrId};
 use plank_values::{StructInfo, Type, TypeId, TypeInterner, ValueId};
 
 use crate::{
@@ -389,6 +389,26 @@ impl FunctionLowerScope {
                     (None, None) => unreachable!("invalid hir"),
                 }
             }
+            hir::ExprKind::LogicalNot { input } => {
+                let ty = self.locals.get_type(input, &eval.values);
+                if ty != TypeId::ERROR && !ty.is_assignable_to(TypeId::BOOL) {
+                    eval.emit_type_mismatch_simple(TypeId::BOOL, ty, self.locals.def_loc(input));
+                }
+                let comptime = self.locals.comptime(input).map(|vid| match vid {
+                    ValueId::TRUE => ValueId::FALSE,
+                    ValueId::FALSE => ValueId::TRUE,
+                    _ => ValueId::ERROR,
+                });
+                let mir_input = self.locals.hir_to_mir(input);
+                let args = eval.mir_args.push_iter(std::iter::once(mir_input));
+                ExprResult::Runtime {
+                    expr: mir::Expr::BuiltinCall { builtin: EvmBuiltin::IsZero, args },
+                    ty: TypeId::BOOL,
+                    comptime,
+                }
+            }
+            hir::ExprKind::UnaryOpCall { .. } => todo!("runtime unary op lowering"),
+            hir::ExprKind::BinaryOpCall { .. } => todo!("runtime binary op lowering"),
             hir::ExprKind::Error => unreachable!("error expression reached hir-eval"),
         }
     }

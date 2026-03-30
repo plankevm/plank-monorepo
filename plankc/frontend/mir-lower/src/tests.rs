@@ -564,3 +564,50 @@ fn test_weird_error() {
         "#,
     );
 }
+
+#[test]
+fn test_logical_not() {
+    assert_lowers_to(
+        r#"
+        init {
+            let c = calldataload(0);
+            let b = iszero(c);
+            if !b {
+                revert(malloc_uninit(0), 0);
+            }
+            evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = copy $1
+                $3 = iszero $2
+                $4 = copy $3
+                $5 = iszero $4
+                => $5 ? @1 : @2
+            }
+
+            @1 {
+                $6 = const 0x0
+                $7 = mallocany $6
+                $8 = const 0x0
+                revert $7 $8
+            }
+
+            @2 {
+                => @3
+            }
+
+            @3 {
+                stop
+            }
+        "#,
+    );
+}

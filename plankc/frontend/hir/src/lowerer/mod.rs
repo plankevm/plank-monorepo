@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 use plank_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, Statement, TopLevelDef},
-    cst::NumLitId,
+    cst::{self, NumLitId},
     lexer::{Lexed, TokenIdx},
 };
 use plank_session::{EvmBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
@@ -427,12 +427,17 @@ impl BlockLowerer<'_> {
             ast::Expr::ComptimeBlock(_) => {
                 todo!("comptime block lowering requires extra HIR instructions")
             }
-            ast::Expr::Binary(binary) => {
-                panic!("binary expression lowering not yet implemented (op: {:?})", binary.op)
+            ast::Expr::Binary(_) => {
+                todo!("binary expression lowering")
             }
-            ast::Expr::Unary(unary) => {
-                panic!("unary expression lowering not yet implemented (op: {:?})", unary.op)
-            }
+            ast::Expr::Unary(unary) => match unary.op {
+                cst::UnaryOp::Bang => {
+                    let input = self.lower_expr_to_local(unary.operand());
+                    ExprKind::LogicalNot { input }
+                }
+                cst::UnaryOp::Minus => todo!("unary minus lowering"),
+                cst::UnaryOp::Tilde => todo!("bitwise not lowering"),
+            },
         };
         self.expr(kind, expr.span())
     }
