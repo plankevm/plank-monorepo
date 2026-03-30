@@ -957,3 +957,48 @@ fn test_runtime_call_on_non_function() {
         "#,
     );
 }
+
+#[test]
+fn test_no_matching_builtin_signature() {
+    assert_diagnostics(
+        r#"
+        init {
+            add(true, false);
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: no valid match for builtin signature
+         --> main.plk:2:5
+          |
+        2 |     add(true, false);
+          |     ^^^^^^^^^^^^^^^^ `add` cannot be called with (bool, bool)
+          |
+          = note: `add` accepts (u256, u256), (memptr, u256), (u256, memptr)
+        "#],
+    );
+}
+
+#[test]
+fn test_closure_capture_not_comptime() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = calldataload(0);
+            let f = fn() u256 { x };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: closure capture must be known at compile time
+         --> main.plk:3:13
+          |
+        2 |     let x = calldataload(0);
+          |            ---------------- not known at compile time
+        3 |     let f = fn() u256 { x };
+          |             ^^^^^^^^^^^^^^^ closure captures a runtime value
+          |
+          = note: closures can only capture values known at compile time
+        "#],
+    );
+}

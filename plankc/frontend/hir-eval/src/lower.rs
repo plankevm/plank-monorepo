@@ -190,7 +190,7 @@ impl FunctionLowerScope {
                 let args = &eval.hir.call_args[args];
                 'sig: for &(input_types, result_type) in builtin.signatures() {
                     if input_types.len() != args.len() {
-                        todo!("diagnostic: builtin argument count mismatch");
+                        continue 'sig;
                     }
 
                     for (&input, &arg) in input_types.iter().zip(args) {
@@ -208,7 +208,16 @@ impl FunctionLowerScope {
                         comptime: None,
                     };
                 }
-                todo!("diagnostic: no matching builtin type signature")
+                for arg in args {
+                    self.field_types_buf.push(self.locals.get_type(*arg, &eval.values));
+                }
+                eval.emit_no_matching_builtin_signature(
+                    builtin,
+                    &self.field_types_buf,
+                    expr.src_loc(),
+                );
+                self.field_types_buf.clear();
+                ExprResult::Runtime { expr: mir::Expr::Error, ty: TypeId::ERROR, comptime: None }
             }
             hir::ExprKind::LocalRef(hir) => {
                 let value = self.locals.comptime(hir);
@@ -235,10 +244,13 @@ impl FunctionLowerScope {
                 let captures = &eval.hir.fn_captures[fn_def];
                 assert!(self.captures_buf.is_empty());
                 for capture in captures {
-                    let vid = self
-                        .locals
-                        .comptime(capture.outer_local)
-                        .expect("todo-diagnostic: closure capture must be comptime");
+                    let vid = self.locals.comptime(capture.outer_local).unwrap_or_else(|| {
+                        eval.emit_closure_capture_not_comptime(
+                            expr.src_loc(),
+                            self.locals.def_loc(capture.outer_local),
+                        );
+                        ValueId::ERROR
+                    });
                     let loc = self.locals.def_loc(capture.outer_local);
                     self.captures_buf.push((vid, loc));
                 }
@@ -249,10 +261,14 @@ impl FunctionLowerScope {
             }
             hir::ExprKind::Call { callee, args } => {
                 let callee_loc = self.locals.def_loc(callee);
-                let closure = self
-                    .locals
-                    .comptime(callee)
-                    .expect("todo-diagnostic: call target must be comptime-known");
+                let Some(closure) = self.locals.comptime(callee) else {
+                    eval.emit_not_known_at_comptime("call target", callee_loc);
+                    return ExprResult::Runtime {
+                        expr: mir::Expr::Error,
+                        ty: TypeId::ERROR,
+                        comptime: None,
+                    };
+                };
                 let callee = eval.fn_cache.get(&closure).copied().unwrap_or_else(|| {
                     let id = self.lower_closure(eval, closure, callee_loc);
                     eval.fn_cache.insert(closure, id);
