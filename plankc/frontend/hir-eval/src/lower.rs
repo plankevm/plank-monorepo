@@ -86,7 +86,12 @@ impl FunctionLowerScope {
     ) -> ExprResult {
         let ty_loc = self.locals.def_loc(ty);
         let Some(ty) = self.locals.comptime(ty) else {
-            todo!("diagnostic: struct type not comptime known");
+            eval.emit_struct_type_not_comptime(ty_loc);
+            return ExprResult::Runtime {
+                expr: mir::Expr::Error,
+                ty: TypeId::ERROR,
+                comptime: None,
+            };
         };
         let Value::Type(ty) = eval.values.lookup(ty) else {
             eval.emit_type_constraint_not_type(eval.values.type_of_value(ty), ty_loc);
@@ -269,6 +274,14 @@ impl FunctionLowerScope {
                         comptime: None,
                     };
                 };
+                if !matches!(eval.values.lookup(closure), Value::Closure { .. }) {
+                    eval.emit_not_callable(eval.values.type_of_value(closure), callee_loc);
+                    return ExprResult::Runtime {
+                        expr: mir::Expr::Error,
+                        ty: TypeId::ERROR,
+                        comptime: None,
+                    };
+                }
                 let callee = eval.fn_cache.get(&closure).copied().unwrap_or_else(|| {
                     let id = self.lower_closure(eval, closure, callee_loc);
                     eval.fn_cache.insert(closure, id);
@@ -381,8 +394,7 @@ impl FunctionLowerScope {
         callee_loc: SrcLoc,
     ) -> mir::FnId {
         let Value::Closure { fn_def, captures } = eval.values.lookup(closure) else {
-            eval.emit_not_callable(eval.values.type_of_value(closure), callee_loc);
-            todo!("diagnostic: callee is not a function — error recovery")
+            unreachable!("caller checks for Closure before calling lower_closure")
         };
         let func = eval.hir.fns[fn_def];
         let params = &eval.hir.fn_params[fn_def];

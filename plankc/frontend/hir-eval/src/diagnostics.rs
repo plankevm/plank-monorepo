@@ -149,6 +149,12 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
+    pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("struct type must be known at compile time")
+            .primary(loc.source, loc.span, "not known at compile time");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
     pub fn emit_no_matching_builtin_signature(
         &mut self,
         builtin: Builtin,

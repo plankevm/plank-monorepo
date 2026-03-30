@@ -607,9 +607,8 @@ fn test_comptime_param_type_not_type() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented: diagnostic: struct type not comptime known")]
-fn test_runtime_struct_lit_type_not_type() {
-    let _ = try_lower(
+fn test_struct_lit_value_as_type_in_init() {
+    assert_diagnostics(
         r#"
         const T = 42;
         init {
@@ -617,19 +616,52 @@ fn test_runtime_struct_lit_type_not_type() {
             evm_stop();
         }
         "#,
+        &[r#"
+        error: type constraint not type
+         --> main.plk:3:13
+          |
+        3 |     let x = T { };
+          |             ^ expected type, got value of type `u256`
+        "#],
     );
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented: diagnostic: `type_index` not comptime known")]
+fn test_struct_type_not_comptime_known() {
+    assert_diagnostics(
+        r#"
+        init {
+            let T = calldataload(0);
+            let x = T { };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: struct type must be known at compile time
+         --> main.plk:3:13
+          |
+        3 |     let x = T { };
+          |             ^ not known at compile time
+        "#],
+    );
+}
+
+#[test]
 fn test_runtime_struct_def_field_not_type() {
-    let _ = try_lower(
+    assert_diagnostics(
         r#"
         init {
             let S = struct { x: 42 };
             evm_stop();
         }
         "#,
+        &[r#"
+        error: type constraint not type
+         --> main.plk:2:25
+          |
+        2 |     let S = struct { x: 42 };
+          |                         ^^ expected type, got value of type `u256`
+        "#],
     );
 }
 
@@ -945,9 +977,8 @@ fn test_diagnostic_renders_struct_name() {
 }
 
 #[test]
-#[should_panic(expected = "todo-diagnostic: call target must be comptime-known")]
 fn test_runtime_call_on_non_function() {
-    let _ = try_lower(
+    assert_diagnostics(
         r#"
         init {
             let x = 5;
@@ -955,6 +986,13 @@ fn test_runtime_call_on_non_function() {
             evm_stop();
         }
         "#,
+        &[r#"
+        error: expected function
+         --> main.plk:3:5
+          |
+        3 |     x();
+          |     ^ `u256` is not callable
+        "#],
     );
 }
 

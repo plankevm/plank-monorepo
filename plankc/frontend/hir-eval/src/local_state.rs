@@ -84,18 +84,20 @@ impl Locals {
         loc: SrcLoc,
         comptime_known: Option<ValueId>,
     ) -> Result<mir::LocalId, TypeMismatchError> {
-        if let Some(&mir) = self.hir_to_mir.get(hir) {
+        let mir = if let Some(&mir) = self.hir_to_mir.get(hir) {
             let expected_ty = self.types[mir];
             if !ty.is_assignable_to(expected_ty) {
                 return Err(TypeMismatchError { expected_ty, received_ty: ty });
             }
-            if let Some(value) = comptime_known {
-                let prev = self.value.insert(hir, value);
-                assert!(prev.is_none());
-            }
-            return Ok(mir);
+            mir
+        } else {
+            self.associate_hir_to_new_mir(hir, ty, loc)
+        };
+        if let Some(value) = comptime_known {
+            let prev = self.value.insert(hir, value);
+            assert!(prev.is_none());
         }
-        Ok(self.associate_hir_to_new_mir(hir, ty, loc))
+        Ok(mir)
     }
 
     pub fn set_from_branch(
