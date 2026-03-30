@@ -640,6 +640,8 @@ fn test_struct_type_not_comptime_known() {
         error: struct type must be known at compile time
          --> main.plk:3:13
           |
+        2 |     let T = calldataload(0);
+          |         - defined here
         3 |     let x = T { };
           |             ^ not known at compile time
         "#],

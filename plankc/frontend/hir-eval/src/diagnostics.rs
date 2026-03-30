@@ -1,5 +1,8 @@
 use crate::Evaluator;
-use plank_session::{builtins::builtin_names, builtins::Builtin, *};
+use plank_session::{
+    builtins::{Builtin, builtin_names},
+    *,
+};
 
 impl Evaluator<'_> {
     pub fn emit_type_mismatch_error(
@@ -133,11 +136,7 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_closure_capture_not_comptime(
-        &mut self,
-        closure_loc: SrcLoc,
-        capture_loc: SrcLoc,
-    ) {
+    pub fn emit_closure_capture_not_comptime(&mut self, closure_loc: SrcLoc, capture_loc: SrcLoc) {
         assert_eq!(closure_loc.source, capture_loc.source);
         let diagnostic = Diagnostic::error("closure capture must be known at compile time")
             .element(
@@ -149,9 +148,14 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error("struct type must be known at compile time")
-            .primary(loc.source, loc.span, "not known at compile time");
+    pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc, name_span: Option<SourceSpan>) {
+        let mut annotations =
+            Annotations::new(loc.source).primary(loc.span, "not known at compile time");
+        if let Some(name_span) = name_span {
+            annotations = annotations.secondary(name_span, "defined here");
+        }
+        let diagnostic =
+            Diagnostic::error("struct type must be known at compile time").element(annotations);
         self.session.emit_diagnostic(diagnostic);
     }
 

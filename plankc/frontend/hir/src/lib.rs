@@ -68,7 +68,7 @@ pub enum ExprKind {
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {
-    Set { local: LocalId, r#type: Option<LocalId>, expr: Expr },
+    Set { local: LocalId, r#type: Option<LocalId>, expr: Expr, name_span: Option<SourceSpan> },
     BranchSet { local: LocalId, expr: Expr },
     Assign { target: LocalId, value: Expr },
     Eval(Expr),

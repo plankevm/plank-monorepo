@@ -56,7 +56,7 @@ impl ComptimeInterpreter {
         instr: hir::Instruction,
     ) -> Result<(), ReturnValue> {
         match instr.kind {
-            hir::InstructionKind::Set { local, r#type, expr } => {
+            hir::InstructionKind::Set { local, r#type, expr, .. } => {
                 let mut value = self.eval_expr(eval, expr.kind)?;
                 if let Some(r#type) = r#type
                     && value != ValueId::ERROR
