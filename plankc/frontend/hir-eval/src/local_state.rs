@@ -17,6 +17,9 @@ pub(crate) struct TypeUnificationError {
     pub new_ty: TypeId,
 }
 
+/// Keeps track of the mapping between MIR and HIR locals. MIR locals must each have a known type.
+/// HIR locals may be runtime known (lowering to a MIR local) or comptime known (has a set value).
+/// HIR locals may be both runtime and comptime known
 #[derive(Debug, Default)]
 pub(crate) struct Locals {
     def_loc: DenseIndexMap<hir::LocalId, SrcLoc>,
@@ -26,6 +29,7 @@ pub(crate) struct Locals {
 }
 
 impl Locals {
+    /// Creates an independent MIR local that isn't tied to any HIR local.
     pub fn alloc_anonymous_mir(&mut self, ty: TypeId) -> mir::LocalId {
         self.types.push(ty)
     }
@@ -54,15 +58,16 @@ impl Locals {
         self.types.iter().copied()
     }
 
-    fn checked_alloc_mir(&mut self, hir: hir::LocalId, ty: TypeId, loc: SrcLoc) -> mir::LocalId {
+    pub fn associate_hir_to_new_mir(
+        &mut self,
+        hir: hir::LocalId,
+        ty: TypeId,
+        loc: SrcLoc,
+    ) -> mir::LocalId {
         let mir = self.types.push(ty);
         assert!(self.hir_to_mir.insert(hir, mir).is_none());
         assert!(self.def_loc.insert(hir, loc).is_none());
         mir
-    }
-
-    pub fn define_unset(&mut self, hir: hir::LocalId, ty: TypeId, loc: SrcLoc) {
-        self.checked_alloc_mir(hir, ty, loc);
     }
 
     pub fn set_comptime_only(&mut self, hir: hir::LocalId, value: ValueId, loc: SrcLoc) {
@@ -90,10 +95,10 @@ impl Locals {
             }
             return Ok(mir);
         }
-        Ok(self.checked_alloc_mir(hir, ty, loc))
+        Ok(self.associate_hir_to_new_mir(hir, ty, loc))
     }
 
-    pub fn branch_set(
+    pub fn set_from_branch(
         &mut self,
         hir: hir::LocalId,
         ty: TypeId,
@@ -111,10 +116,10 @@ impl Locals {
             assert!(self.value.get(hir).is_none());
             return Ok(mir);
         }
-        Ok(self.checked_alloc_mir(hir, ty, loc))
+        Ok(self.associate_hir_to_new_mir(hir, ty, loc))
     }
 
-    pub fn assign(
+    pub fn handle_assign(
         &mut self,
         hir: hir::LocalId,
         new_ty: TypeId,

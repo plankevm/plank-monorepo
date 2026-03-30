@@ -31,7 +31,7 @@ impl TypeId {
             return true;
         }
         if other == TypeId::NEVER || *self == other {
-            // Keep `self` as is incase it's a more specific type.
+            // Keep `self` as is in case it's a more specific type.
             return true;
         }
         false

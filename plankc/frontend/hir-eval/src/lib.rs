@@ -2,7 +2,7 @@ use hashbrown::HashMap;
 use plank_core::{IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_hir::{ConstId, Hir};
 use plank_mir::{self as mir, Mir};
-use plank_session::Session;
+use plank_session::{Session, StrId};
 use plank_values::{TypeId, TypeInterner, ValueId};
 
 use comptime::ComptimeInterpreter;
@@ -69,11 +69,15 @@ impl<'a> Evaluator<'a> {
                 interpreter.reset();
                 let value_id = interpreter.eval_const(self, const_def);
                 self.const_states[const_id] = ConstState::Evaluated(value_id);
-                if let Value::Type(type_id) = self.values.lookup(value_id) {
-                    self.types.try_set_struct_name(type_id, const_def.name);
-                }
+                self.try_name_type(value_id, const_def.name);
                 value_id
             }
+        }
+    }
+
+    fn try_name_type(&mut self, value_id: ValueId, name: StrId) {
+        if let Value::Type(type_id) = self.values.lookup(value_id) {
+            self.types.try_set_struct_name(type_id, name);
         }
     }
 }

@@ -541,7 +541,7 @@ impl BlockLowerer<'_> {
         match stmt {
             Statement::Let(let_stmt) => {
                 let expr = self.lower_expr(let_stmt.value());
-                // Need to allocate local *after* evals to make sure it doesn't confuse scope.
+                // Local allocated *after* to ensure it's not visible to `lower_expr`.
                 let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));

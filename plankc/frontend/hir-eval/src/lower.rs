@@ -407,7 +407,7 @@ impl FunctionLowerScope {
                     TypeId::ERROR
                 }
             };
-            self.locals.define_unset(param.value, ty, param_src_loc);
+            self.locals.associate_hir_to_new_mir(param.value, ty, param_src_loc);
         }
 
         let (body, _) = self.translate_block(eval, func.body);
@@ -491,7 +491,7 @@ impl FunctionLowerScope {
                     let src_loc = expr.src_loc();
                     match self.translate_expr(eval, expr) {
                         ExprResult::Runtime { expr, ty, comptime: _ } => {
-                            match self.locals.branch_set(local, ty, src_loc) {
+                            match self.locals.set_from_branch(local, ty, src_loc) {
                                 Ok(target) => {
                                     self.instr_buf_stack
                                         .push(mir::Instruction::Set { target, expr });
@@ -517,7 +517,7 @@ impl FunctionLowerScope {
                 hir::InstructionKind::Assign { target, value } => {
                     match self.translate_expr(eval, value) {
                         ExprResult::Runtime { expr, ty, comptime: _ } => {
-                            match self.locals.assign(target, ty) {
+                            match self.locals.handle_assign(target, ty) {
                                 Ok(mir_target) => {
                                     self.instr_buf_stack
                                         .push(mir::Instruction::Set { target: mir_target, expr });
