@@ -1,5 +1,5 @@
 use alloy_primitives::U256;
-use plank_session::Builtin;
+use plank_session::EvmBuiltin;
 use sir_data::{
     self as sir,
     builder::BasicBlockBuilder,
@@ -7,211 +7,211 @@ use sir_data::{
 };
 
 pub(crate) fn add_as_op(
-    builtin: Builtin,
+    builtin: EvmBuiltin,
     inputs: &[sir::LocalId],
     output: Option<sir::LocalId>,
     builder: &mut BasicBlockBuilder<'_, '_>,
 ) -> Result<OperationKind, sir::operation::OpBuildError> {
     let kind = match builtin {
         // ========== EVM Arithmetic ==========
-        Builtin::Add => OperationKind::Add,
-        Builtin::Mul => OperationKind::Mul,
-        Builtin::Sub => OperationKind::Sub,
-        Builtin::Div => OperationKind::Div,
-        Builtin::SDiv => OperationKind::SDiv,
-        Builtin::Mod => OperationKind::Mod,
-        Builtin::SMod => OperationKind::SMod,
-        Builtin::AddMod => OperationKind::AddMod,
-        Builtin::MulMod => OperationKind::MulMod,
-        Builtin::Exp => OperationKind::Exp,
-        Builtin::SignExtend => OperationKind::SignExtend,
+        EvmBuiltin::Add => OperationKind::Add,
+        EvmBuiltin::Mul => OperationKind::Mul,
+        EvmBuiltin::Sub => OperationKind::Sub,
+        EvmBuiltin::Div => OperationKind::Div,
+        EvmBuiltin::SDiv => OperationKind::SDiv,
+        EvmBuiltin::Mod => OperationKind::Mod,
+        EvmBuiltin::SMod => OperationKind::SMod,
+        EvmBuiltin::AddMod => OperationKind::AddMod,
+        EvmBuiltin::MulMod => OperationKind::MulMod,
+        EvmBuiltin::Exp => OperationKind::Exp,
+        EvmBuiltin::SignExtend => OperationKind::SignExtend,
 
         // ========== EVM Comparison & Bitwise Logic ==========
-        Builtin::Lt => OperationKind::Lt,
-        Builtin::Gt => OperationKind::Gt,
-        Builtin::SLt => OperationKind::SLt,
-        Builtin::SGt => OperationKind::SGt,
-        Builtin::Eq => OperationKind::Eq,
-        Builtin::IsZero => OperationKind::IsZero,
-        Builtin::And => OperationKind::And,
-        Builtin::Or => OperationKind::Or,
-        Builtin::Xor => OperationKind::Xor,
-        Builtin::Not => OperationKind::Not,
-        Builtin::Byte => OperationKind::Byte,
-        Builtin::Shl => OperationKind::Shl,
-        Builtin::Shr => OperationKind::Shr,
-        Builtin::Sar => OperationKind::Sar,
+        EvmBuiltin::Lt => OperationKind::Lt,
+        EvmBuiltin::Gt => OperationKind::Gt,
+        EvmBuiltin::SLt => OperationKind::SLt,
+        EvmBuiltin::SGt => OperationKind::SGt,
+        EvmBuiltin::Eq => OperationKind::Eq,
+        EvmBuiltin::IsZero => OperationKind::IsZero,
+        EvmBuiltin::And => OperationKind::And,
+        EvmBuiltin::Or => OperationKind::Or,
+        EvmBuiltin::Xor => OperationKind::Xor,
+        EvmBuiltin::Not => OperationKind::Not,
+        EvmBuiltin::Byte => OperationKind::Byte,
+        EvmBuiltin::Shl => OperationKind::Shl,
+        EvmBuiltin::Shr => OperationKind::Shr,
+        EvmBuiltin::Sar => OperationKind::Sar,
 
         // ========== EVM Keccak-256 ==========
-        Builtin::Keccak256 => OperationKind::Keccak256,
+        EvmBuiltin::Keccak256 => OperationKind::Keccak256,
 
         // ========== EVM Environment Information ==========
-        Builtin::Address => OperationKind::Address,
-        Builtin::Balance => OperationKind::Balance,
-        Builtin::Origin => OperationKind::Origin,
-        Builtin::Caller => OperationKind::Caller,
-        Builtin::CallValue => OperationKind::CallValue,
-        Builtin::CallDataLoad => OperationKind::CallDataLoad,
-        Builtin::CallDataSize => OperationKind::CallDataSize,
-        Builtin::CallDataCopy => OperationKind::CallDataCopy,
-        Builtin::CodeSize => OperationKind::CodeSize,
-        Builtin::CodeCopy => OperationKind::CodeCopy,
-        Builtin::GasPrice => OperationKind::GasPrice,
-        Builtin::ExtCodeSize => OperationKind::ExtCodeSize,
-        Builtin::ExtCodeCopy => OperationKind::ExtCodeCopy,
-        Builtin::ReturnDataSize => OperationKind::ReturnDataSize,
-        Builtin::ReturnDataCopy => OperationKind::ReturnDataCopy,
-        Builtin::ExtCodeHash => OperationKind::ExtCodeHash,
-        Builtin::Gas => OperationKind::Gas,
+        EvmBuiltin::Address => OperationKind::Address,
+        EvmBuiltin::Balance => OperationKind::Balance,
+        EvmBuiltin::Origin => OperationKind::Origin,
+        EvmBuiltin::Caller => OperationKind::Caller,
+        EvmBuiltin::CallValue => OperationKind::CallValue,
+        EvmBuiltin::CallDataLoad => OperationKind::CallDataLoad,
+        EvmBuiltin::CallDataSize => OperationKind::CallDataSize,
+        EvmBuiltin::CallDataCopy => OperationKind::CallDataCopy,
+        EvmBuiltin::CodeSize => OperationKind::CodeSize,
+        EvmBuiltin::CodeCopy => OperationKind::CodeCopy,
+        EvmBuiltin::GasPrice => OperationKind::GasPrice,
+        EvmBuiltin::ExtCodeSize => OperationKind::ExtCodeSize,
+        EvmBuiltin::ExtCodeCopy => OperationKind::ExtCodeCopy,
+        EvmBuiltin::ReturnDataSize => OperationKind::ReturnDataSize,
+        EvmBuiltin::ReturnDataCopy => OperationKind::ReturnDataCopy,
+        EvmBuiltin::ExtCodeHash => OperationKind::ExtCodeHash,
+        EvmBuiltin::Gas => OperationKind::Gas,
 
         // ========== EVM Block Information ==========
-        Builtin::BlockHash => OperationKind::BlockHash,
-        Builtin::Coinbase => OperationKind::Coinbase,
-        Builtin::Timestamp => OperationKind::Timestamp,
-        Builtin::Number => OperationKind::Number,
-        Builtin::Difficulty => OperationKind::Difficulty,
-        Builtin::GasLimit => OperationKind::GasLimit,
-        Builtin::ChainId => OperationKind::ChainId,
-        Builtin::SelfBalance => OperationKind::SelfBalance,
-        Builtin::BaseFee => OperationKind::BaseFee,
-        Builtin::BlobHash => OperationKind::BlobHash,
-        Builtin::BlobBaseFee => OperationKind::BlobBaseFee,
+        EvmBuiltin::BlockHash => OperationKind::BlockHash,
+        EvmBuiltin::Coinbase => OperationKind::Coinbase,
+        EvmBuiltin::Timestamp => OperationKind::Timestamp,
+        EvmBuiltin::Number => OperationKind::Number,
+        EvmBuiltin::Difficulty => OperationKind::Difficulty,
+        EvmBuiltin::GasLimit => OperationKind::GasLimit,
+        EvmBuiltin::ChainId => OperationKind::ChainId,
+        EvmBuiltin::SelfBalance => OperationKind::SelfBalance,
+        EvmBuiltin::BaseFee => OperationKind::BaseFee,
+        EvmBuiltin::BlobHash => OperationKind::BlobHash,
+        EvmBuiltin::BlobBaseFee => OperationKind::BlobBaseFee,
 
         // ========== EVM State Manipulation ==========
-        Builtin::SLoad => OperationKind::SLoad,
-        Builtin::SStore => OperationKind::SStore,
-        Builtin::TLoad => OperationKind::TLoad,
-        Builtin::TStore => OperationKind::TStore,
+        EvmBuiltin::SLoad => OperationKind::SLoad,
+        EvmBuiltin::SStore => OperationKind::SStore,
+        EvmBuiltin::TLoad => OperationKind::TLoad,
+        EvmBuiltin::TStore => OperationKind::TStore,
 
         // ========== EVM Logging Operations ==========
-        Builtin::Log0 => OperationKind::Log0,
-        Builtin::Log1 => OperationKind::Log1,
-        Builtin::Log2 => OperationKind::Log2,
-        Builtin::Log3 => OperationKind::Log3,
-        Builtin::Log4 => OperationKind::Log4,
+        EvmBuiltin::Log0 => OperationKind::Log0,
+        EvmBuiltin::Log1 => OperationKind::Log1,
+        EvmBuiltin::Log2 => OperationKind::Log2,
+        EvmBuiltin::Log3 => OperationKind::Log3,
+        EvmBuiltin::Log4 => OperationKind::Log4,
 
         // ========== EVM System Calls ==========
-        Builtin::Create => OperationKind::Create,
-        Builtin::Create2 => OperationKind::Create2,
-        Builtin::Call => OperationKind::Call,
-        Builtin::CallCode => OperationKind::CallCode,
-        Builtin::DelegateCall => OperationKind::DelegateCall,
-        Builtin::StaticCall => OperationKind::StaticCall,
-        Builtin::Return => OperationKind::Return,
-        Builtin::Stop => OperationKind::Stop,
-        Builtin::Revert => OperationKind::Revert,
-        Builtin::Invalid => OperationKind::Invalid,
-        Builtin::SelfDestruct => OperationKind::SelfDestruct,
+        EvmBuiltin::Create => OperationKind::Create,
+        EvmBuiltin::Create2 => OperationKind::Create2,
+        EvmBuiltin::Call => OperationKind::Call,
+        EvmBuiltin::CallCode => OperationKind::CallCode,
+        EvmBuiltin::DelegateCall => OperationKind::DelegateCall,
+        EvmBuiltin::StaticCall => OperationKind::StaticCall,
+        EvmBuiltin::Return => OperationKind::Return,
+        EvmBuiltin::Stop => OperationKind::Stop,
+        EvmBuiltin::Revert => OperationKind::Revert,
+        EvmBuiltin::Invalid => OperationKind::Invalid,
+        EvmBuiltin::SelfDestruct => OperationKind::SelfDestruct,
 
         // ========== IR Memory Primitives ==========
-        Builtin::DynamicAllocZeroed => OperationKind::DynamicAllocZeroed,
-        Builtin::DynamicAllocAnyBytes => OperationKind::DynamicAllocAnyBytes,
+        EvmBuiltin::DynamicAllocZeroed => OperationKind::DynamicAllocZeroed,
+        EvmBuiltin::DynamicAllocAnyBytes => OperationKind::DynamicAllocAnyBytes,
 
         // ========== Memory Manipulation ==========
-        Builtin::MemoryCopy => OperationKind::MemoryCopy,
-        Builtin::MLoad1
-        | Builtin::MLoad2
-        | Builtin::MLoad3
-        | Builtin::MLoad4
-        | Builtin::MLoad5
-        | Builtin::MLoad6
-        | Builtin::MLoad7
-        | Builtin::MLoad8
-        | Builtin::MLoad9
-        | Builtin::MLoad10
-        | Builtin::MLoad11
-        | Builtin::MLoad12
-        | Builtin::MLoad13
-        | Builtin::MLoad14
-        | Builtin::MLoad15
-        | Builtin::MLoad16
-        | Builtin::MLoad17
-        | Builtin::MLoad18
-        | Builtin::MLoad19
-        | Builtin::MLoad20
-        | Builtin::MLoad21
-        | Builtin::MLoad22
-        | Builtin::MLoad23
-        | Builtin::MLoad24
-        | Builtin::MLoad25
-        | Builtin::MLoad26
-        | Builtin::MLoad27
-        | Builtin::MLoad28
-        | Builtin::MLoad29
-        | Builtin::MLoad30
-        | Builtin::MLoad31
-        | Builtin::MLoad32 => OperationKind::MemoryLoad,
-        Builtin::MStore1
-        | Builtin::MStore2
-        | Builtin::MStore3
-        | Builtin::MStore4
-        | Builtin::MStore5
-        | Builtin::MStore6
-        | Builtin::MStore7
-        | Builtin::MStore8
-        | Builtin::MStore9
-        | Builtin::MStore10
-        | Builtin::MStore11
-        | Builtin::MStore12
-        | Builtin::MStore13
-        | Builtin::MStore14
-        | Builtin::MStore15
-        | Builtin::MStore16
-        | Builtin::MStore17
-        | Builtin::MStore18
-        | Builtin::MStore19
-        | Builtin::MStore20
-        | Builtin::MStore21
-        | Builtin::MStore22
-        | Builtin::MStore23
-        | Builtin::MStore24
-        | Builtin::MStore25
-        | Builtin::MStore26
-        | Builtin::MStore27
-        | Builtin::MStore28
-        | Builtin::MStore29
-        | Builtin::MStore30
-        | Builtin::MStore31
-        | Builtin::MStore32 => OperationKind::MemoryStore,
+        EvmBuiltin::MemoryCopy => OperationKind::MemoryCopy,
+        EvmBuiltin::MLoad1
+        | EvmBuiltin::MLoad2
+        | EvmBuiltin::MLoad3
+        | EvmBuiltin::MLoad4
+        | EvmBuiltin::MLoad5
+        | EvmBuiltin::MLoad6
+        | EvmBuiltin::MLoad7
+        | EvmBuiltin::MLoad8
+        | EvmBuiltin::MLoad9
+        | EvmBuiltin::MLoad10
+        | EvmBuiltin::MLoad11
+        | EvmBuiltin::MLoad12
+        | EvmBuiltin::MLoad13
+        | EvmBuiltin::MLoad14
+        | EvmBuiltin::MLoad15
+        | EvmBuiltin::MLoad16
+        | EvmBuiltin::MLoad17
+        | EvmBuiltin::MLoad18
+        | EvmBuiltin::MLoad19
+        | EvmBuiltin::MLoad20
+        | EvmBuiltin::MLoad21
+        | EvmBuiltin::MLoad22
+        | EvmBuiltin::MLoad23
+        | EvmBuiltin::MLoad24
+        | EvmBuiltin::MLoad25
+        | EvmBuiltin::MLoad26
+        | EvmBuiltin::MLoad27
+        | EvmBuiltin::MLoad28
+        | EvmBuiltin::MLoad29
+        | EvmBuiltin::MLoad30
+        | EvmBuiltin::MLoad31
+        | EvmBuiltin::MLoad32 => OperationKind::MemoryLoad,
+        EvmBuiltin::MStore1
+        | EvmBuiltin::MStore2
+        | EvmBuiltin::MStore3
+        | EvmBuiltin::MStore4
+        | EvmBuiltin::MStore5
+        | EvmBuiltin::MStore6
+        | EvmBuiltin::MStore7
+        | EvmBuiltin::MStore8
+        | EvmBuiltin::MStore9
+        | EvmBuiltin::MStore10
+        | EvmBuiltin::MStore11
+        | EvmBuiltin::MStore12
+        | EvmBuiltin::MStore13
+        | EvmBuiltin::MStore14
+        | EvmBuiltin::MStore15
+        | EvmBuiltin::MStore16
+        | EvmBuiltin::MStore17
+        | EvmBuiltin::MStore18
+        | EvmBuiltin::MStore19
+        | EvmBuiltin::MStore20
+        | EvmBuiltin::MStore21
+        | EvmBuiltin::MStore22
+        | EvmBuiltin::MStore23
+        | EvmBuiltin::MStore24
+        | EvmBuiltin::MStore25
+        | EvmBuiltin::MStore26
+        | EvmBuiltin::MStore27
+        | EvmBuiltin::MStore28
+        | EvmBuiltin::MStore29
+        | EvmBuiltin::MStore30
+        | EvmBuiltin::MStore31
+        | EvmBuiltin::MStore32 => OperationKind::MemoryStore,
 
         // ========== Bytecode Introspection ==========
-        Builtin::RuntimeStartOffset => OperationKind::RuntimeStartOffset,
-        Builtin::InitEndOffset => OperationKind::InitEndOffset,
-        Builtin::RuntimeLength => OperationKind::RuntimeLength,
+        EvmBuiltin::RuntimeStartOffset => OperationKind::RuntimeStartOffset,
+        EvmBuiltin::InitEndOffset => OperationKind::InitEndOffset,
+        EvmBuiltin::RuntimeLength => OperationKind::RuntimeLength,
     };
     let op_extra_data = match builtin {
-        Builtin::MLoad1 | Builtin::MStore1 => OpExtraData::Num(U256::from(1)),
-        Builtin::MLoad2 | Builtin::MStore2 => OpExtraData::Num(U256::from(2)),
-        Builtin::MLoad3 | Builtin::MStore3 => OpExtraData::Num(U256::from(3)),
-        Builtin::MLoad4 | Builtin::MStore4 => OpExtraData::Num(U256::from(4)),
-        Builtin::MLoad5 | Builtin::MStore5 => OpExtraData::Num(U256::from(5)),
-        Builtin::MLoad6 | Builtin::MStore6 => OpExtraData::Num(U256::from(6)),
-        Builtin::MLoad7 | Builtin::MStore7 => OpExtraData::Num(U256::from(7)),
-        Builtin::MLoad8 | Builtin::MStore8 => OpExtraData::Num(U256::from(8)),
-        Builtin::MLoad9 | Builtin::MStore9 => OpExtraData::Num(U256::from(9)),
-        Builtin::MLoad10 | Builtin::MStore10 => OpExtraData::Num(U256::from(10)),
-        Builtin::MLoad11 | Builtin::MStore11 => OpExtraData::Num(U256::from(11)),
-        Builtin::MLoad12 | Builtin::MStore12 => OpExtraData::Num(U256::from(12)),
-        Builtin::MLoad13 | Builtin::MStore13 => OpExtraData::Num(U256::from(13)),
-        Builtin::MLoad14 | Builtin::MStore14 => OpExtraData::Num(U256::from(14)),
-        Builtin::MLoad15 | Builtin::MStore15 => OpExtraData::Num(U256::from(15)),
-        Builtin::MLoad16 | Builtin::MStore16 => OpExtraData::Num(U256::from(16)),
-        Builtin::MLoad17 | Builtin::MStore17 => OpExtraData::Num(U256::from(17)),
-        Builtin::MLoad18 | Builtin::MStore18 => OpExtraData::Num(U256::from(18)),
-        Builtin::MLoad19 | Builtin::MStore19 => OpExtraData::Num(U256::from(19)),
-        Builtin::MLoad20 | Builtin::MStore20 => OpExtraData::Num(U256::from(20)),
-        Builtin::MLoad21 | Builtin::MStore21 => OpExtraData::Num(U256::from(21)),
-        Builtin::MLoad22 | Builtin::MStore22 => OpExtraData::Num(U256::from(22)),
-        Builtin::MLoad23 | Builtin::MStore23 => OpExtraData::Num(U256::from(23)),
-        Builtin::MLoad24 | Builtin::MStore24 => OpExtraData::Num(U256::from(24)),
-        Builtin::MLoad25 | Builtin::MStore25 => OpExtraData::Num(U256::from(25)),
-        Builtin::MLoad26 | Builtin::MStore26 => OpExtraData::Num(U256::from(26)),
-        Builtin::MLoad27 | Builtin::MStore27 => OpExtraData::Num(U256::from(27)),
-        Builtin::MLoad28 | Builtin::MStore28 => OpExtraData::Num(U256::from(28)),
-        Builtin::MLoad29 | Builtin::MStore29 => OpExtraData::Num(U256::from(29)),
-        Builtin::MLoad30 | Builtin::MStore30 => OpExtraData::Num(U256::from(30)),
-        Builtin::MLoad31 | Builtin::MStore31 => OpExtraData::Num(U256::from(31)),
-        Builtin::MLoad32 | Builtin::MStore32 => OpExtraData::Num(U256::from(32)),
+        EvmBuiltin::MLoad1 | EvmBuiltin::MStore1 => OpExtraData::Num(U256::from(1)),
+        EvmBuiltin::MLoad2 | EvmBuiltin::MStore2 => OpExtraData::Num(U256::from(2)),
+        EvmBuiltin::MLoad3 | EvmBuiltin::MStore3 => OpExtraData::Num(U256::from(3)),
+        EvmBuiltin::MLoad4 | EvmBuiltin::MStore4 => OpExtraData::Num(U256::from(4)),
+        EvmBuiltin::MLoad5 | EvmBuiltin::MStore5 => OpExtraData::Num(U256::from(5)),
+        EvmBuiltin::MLoad6 | EvmBuiltin::MStore6 => OpExtraData::Num(U256::from(6)),
+        EvmBuiltin::MLoad7 | EvmBuiltin::MStore7 => OpExtraData::Num(U256::from(7)),
+        EvmBuiltin::MLoad8 | EvmBuiltin::MStore8 => OpExtraData::Num(U256::from(8)),
+        EvmBuiltin::MLoad9 | EvmBuiltin::MStore9 => OpExtraData::Num(U256::from(9)),
+        EvmBuiltin::MLoad10 | EvmBuiltin::MStore10 => OpExtraData::Num(U256::from(10)),
+        EvmBuiltin::MLoad11 | EvmBuiltin::MStore11 => OpExtraData::Num(U256::from(11)),
+        EvmBuiltin::MLoad12 | EvmBuiltin::MStore12 => OpExtraData::Num(U256::from(12)),
+        EvmBuiltin::MLoad13 | EvmBuiltin::MStore13 => OpExtraData::Num(U256::from(13)),
+        EvmBuiltin::MLoad14 | EvmBuiltin::MStore14 => OpExtraData::Num(U256::from(14)),
+        EvmBuiltin::MLoad15 | EvmBuiltin::MStore15 => OpExtraData::Num(U256::from(15)),
+        EvmBuiltin::MLoad16 | EvmBuiltin::MStore16 => OpExtraData::Num(U256::from(16)),
+        EvmBuiltin::MLoad17 | EvmBuiltin::MStore17 => OpExtraData::Num(U256::from(17)),
+        EvmBuiltin::MLoad18 | EvmBuiltin::MStore18 => OpExtraData::Num(U256::from(18)),
+        EvmBuiltin::MLoad19 | EvmBuiltin::MStore19 => OpExtraData::Num(U256::from(19)),
+        EvmBuiltin::MLoad20 | EvmBuiltin::MStore20 => OpExtraData::Num(U256::from(20)),
+        EvmBuiltin::MLoad21 | EvmBuiltin::MStore21 => OpExtraData::Num(U256::from(21)),
+        EvmBuiltin::MLoad22 | EvmBuiltin::MStore22 => OpExtraData::Num(U256::from(22)),
+        EvmBuiltin::MLoad23 | EvmBuiltin::MStore23 => OpExtraData::Num(U256::from(23)),
+        EvmBuiltin::MLoad24 | EvmBuiltin::MStore24 => OpExtraData::Num(U256::from(24)),
+        EvmBuiltin::MLoad25 | EvmBuiltin::MStore25 => OpExtraData::Num(U256::from(25)),
+        EvmBuiltin::MLoad26 | EvmBuiltin::MStore26 => OpExtraData::Num(U256::from(26)),
+        EvmBuiltin::MLoad27 | EvmBuiltin::MStore27 => OpExtraData::Num(U256::from(27)),
+        EvmBuiltin::MLoad28 | EvmBuiltin::MStore28 => OpExtraData::Num(U256::from(28)),
+        EvmBuiltin::MLoad29 | EvmBuiltin::MStore29 => OpExtraData::Num(U256::from(29)),
+        EvmBuiltin::MLoad30 | EvmBuiltin::MStore30 => OpExtraData::Num(U256::from(30)),
+        EvmBuiltin::MLoad31 | EvmBuiltin::MStore31 => OpExtraData::Num(U256::from(31)),
+        EvmBuiltin::MLoad32 | EvmBuiltin::MStore32 => OpExtraData::Num(U256::from(32)),
         _ => OpExtraData::Empty,
     };
     let outputs = output.as_ref().map_or(&[] as &[_], std::slice::from_ref);

@@ -2,7 +2,7 @@ pub mod builtins;
 pub mod diagnostic;
 pub mod types;
 
-pub use builtins::Builtin;
+pub use builtins::EvmBuiltin;
 pub use diagnostic::{AnnotationKind, Annotations, Claim, Diagnostic, Element, Level, SrcLoc};
 pub use types::TypeId;
 

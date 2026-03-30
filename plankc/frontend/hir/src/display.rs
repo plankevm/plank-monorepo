@@ -61,7 +61,7 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_local(f, callee)?;
                 self.fmt_args(f, args)
             }
-            Expr::BuiltinCall { builtin, args } => {
+            Expr::EvmBuiltinCall { builtin, args } => {
                 write!(f, "{builtin}")?;
                 self.fmt_args(f, args)
             }

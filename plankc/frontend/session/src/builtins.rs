@@ -35,14 +35,14 @@ macro_rules! define_builtins {
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum Builtin {
+        pub enum EvmBuiltin {
             $($b_variant,)*
         }
 
-        impl Builtin {
+        impl EvmBuiltin {
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
-                    $($b_const => Builtin::$b_variant,)*
+                    $($b_const => EvmBuiltin::$b_variant,)*
                     _ => return None,
                 })
             }
@@ -55,15 +55,15 @@ macro_rules! define_builtins {
                 const NEVER: TypeId = TypeId::NEVER;
 
                 match self {
-                    $(Builtin::$b_variant => &[ $( (&[$($arg),*], $ret) ),+ ]),*
+                    $(EvmBuiltin::$b_variant => &[ $( (&[$($arg),*], $ret) ),+ ]),*
                 }
             }
         }
 
-        impl ::std::fmt::Display for Builtin {
+        impl ::std::fmt::Display for EvmBuiltin {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 let name = match self {
-                    $(Builtin::$b_variant => builtin_names::$b_const,)*
+                    $(EvmBuiltin::$b_variant => builtin_names::$b_const,)*
                 };
                 f.write_str(name)
             }
@@ -274,9 +274,9 @@ mod tests {
 
     #[test]
     fn test_builtin_roundtrip() {
-        assert_eq!(Builtin::from_str_id(ADD), Some(Builtin::Add));
-        assert_eq!(Builtin::from_str_id(KECCAK256), Some(Builtin::Keccak256));
-        assert_eq!(Builtin::from_str_id(VOID), None);
+        assert_eq!(EvmBuiltin::from_str_id(ADD), Some(EvmBuiltin::Add));
+        assert_eq!(EvmBuiltin::from_str_id(KECCAK256), Some(EvmBuiltin::Keccak256));
+        assert_eq!(EvmBuiltin::from_str_id(VOID), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 pub mod display;
 
 use plank_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
-use plank_session::Builtin;
+use plank_session::EvmBuiltin;
 use plank_values::{BigNumId, TypeId, TypeInterner};
 
 newtype_index! {
@@ -19,7 +19,7 @@ pub enum Expr {
     Void,
     BigNum(BigNumId),
     Call { callee: FnId, args: ArgsId },
-    BuiltinCall { builtin: Builtin, args: ArgsId },
+    BuiltinCall { builtin: EvmBuiltin, args: ArgsId },
     FieldAccess { object: LocalId, field_index: u32 },
     StructLit { ty: TypeId, fields: ArgsId },
 }

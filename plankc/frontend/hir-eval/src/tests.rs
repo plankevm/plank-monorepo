@@ -7,9 +7,9 @@ fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
     try_lower_project(TestProject::single(source))
 }
 
-fn try_lower_project(test_project: TestProject) -> (Mir, BigNumInterner, Session) {
+fn try_lower_project(project: TestProject) -> (Mir, BigNumInterner, Session) {
     let mut session = Session::new();
-    let project = test_project.build(&mut session);
+    let project = project.build(&mut session);
 
     let mut big_nums = BigNumInterner::default();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);

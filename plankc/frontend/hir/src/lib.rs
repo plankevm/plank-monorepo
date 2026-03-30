@@ -1,5 +1,5 @@
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{Builtin, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
+use plank_session::{EvmBuiltin, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
 
 pub use plank_values;
 
@@ -47,8 +47,8 @@ pub enum ExprKind {
         callee: LocalId,
         args: CallArgsId,
     },
-    BuiltinCall {
-        builtin: Builtin,
+    EvmBuiltinCall {
+        builtin: EvmBuiltin,
         args: CallArgsId,
     },
     Member {

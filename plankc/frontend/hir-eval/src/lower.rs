@@ -192,7 +192,7 @@ impl FunctionLowerScope {
                 ty: TypeId::U256,
                 comptime: Some(eval.values.intern_num(big_num_id)),
             },
-            hir::ExprKind::BuiltinCall { builtin, args } => {
+            hir::ExprKind::EvmBuiltinCall { builtin, args } => {
                 let args = &eval.hir.call_args[args];
                 'sig: for &(input_types, result_type) in builtin.signatures() {
                     if input_types.len() != args.len() {
