@@ -105,6 +105,10 @@ impl LocalLiveness {
         &self.local_intervals[local]
     }
 
+    pub fn live_at_exit(&self, bb: BasicBlockId) -> &HashSet<LocalId> {
+        &self.locals_live_at_exit[bb]
+    }
+
     /// Returns when the local's liveness interval ends in the given block,
     /// or `None` if the local is not alive in that block.
     pub fn last_use_in_block(&self, local: LocalId, bb: BasicBlockId) -> Option<IntervalEnd> {

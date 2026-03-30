@@ -1,7 +1,9 @@
-use plank_core::{DenseIndexSet, Idx, IncIterable};
+use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Span};
-use sir_passes::{AnalysesStore, LocalLiveness};
+use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, LocalId, Span};
+use sir_passes::{
+    AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, LocalLiveness, Predecessors,
+};
 
 use crate::{
     stack_scheduler::stack_machine::StackMachine, static_memory_layout::StaticMemoryLayout,
@@ -14,7 +16,6 @@ mod static_memory_layout;
 const ASM_BYTES_CAPACITY: usize = 20_000;
 const ASM_SECTIONS_CAPACITY: usize = 512;
 const DEFAULT_SPILL_THRESHOLD: u8 = 16;
-const DEFAULT_CLEANUP_THRESHOLD: u16 = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TranslationPhase {
@@ -26,7 +27,9 @@ struct TranslationContext<'a> {
     pub ir: &'a EthIRProgram,
     pub mark_map: &'a mut MarkMap,
     pub memory_layout: &'a StaticMemoryLayout,
-    pub local_liveness: &'a LocalLiveness,
+    pub predecessors: &'a Predecessors,
+    pub bundling: &'a ControlFlowGraphInOutBundling,
+    pub group_layouts: &'a IndexVec<InOutGroupId, Vec<LocalId>>,
     pub bbs_to_be_translated: &'a mut Vec<(FunctionId, BasicBlockId)>,
 }
 
@@ -101,6 +104,30 @@ impl MarkMap {
     }
 }
 
+fn compute_group_layouts(
+    ir: &EthIRProgram,
+    bundling: &ControlFlowGraphInOutBundling,
+    liveness: &LocalLiveness,
+) -> IndexVec<InOutGroupId, Vec<LocalId>> {
+    let mut layouts: IndexVec<InOutGroupId, Vec<LocalId>> =
+        IndexVec::from_vec(vec![Vec::new(); bundling.next_group_id().idx()]);
+
+    for block in ir.blocks() {
+        let Some(group_id) = bundling.get_out_group(block.id()) else {
+            continue;
+        };
+        if !layouts[group_id].is_empty() {
+            continue;
+        }
+        let live_at_exit = liveness.live_at_exit(block.id());
+        let mut layout: Vec<LocalId> = live_at_exit.iter().copied().collect();
+        layout.sort();
+        layouts[group_id] = layout;
+    }
+
+    layouts
+}
+
 struct Translator<'ir> {
     pub ir: &'ir EthIRProgram,
     pub memory_layout: StaticMemoryLayout,
@@ -112,7 +139,7 @@ struct Translator<'ir> {
 }
 
 impl<'ir> Translator<'ir> {
-    fn new(ir: &'ir EthIRProgram, spill_threshold: u8, cleanup_threshold: u16) -> Self {
+    fn new(ir: &'ir EthIRProgram, spill_threshold: u8) -> Self {
         let memory_layout = StaticMemoryLayout::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
         let translated_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
@@ -125,18 +152,16 @@ impl<'ir> Translator<'ir> {
             bbs_to_be_translated,
             mark_map,
             translated_bbs,
-            stack_machine: StackMachine::new(spill_threshold, cleanup_threshold),
+            stack_machine: StackMachine::new(spill_threshold),
         }
-    }
-
-    fn get_bb_mark(&self, bb_id: BasicBlockId) -> MarkId {
-        self.mark_map.get_bb_mark(bb_id)
     }
 
     fn translate_basic_blocks_from_entry_point(
         &mut self,
         entry_point: FunctionId,
-        local_liveness: &LocalLiveness,
+        predecessors: &Predecessors,
+        bundling: &ControlFlowGraphInOutBundling,
+        group_layouts: &IndexVec<InOutGroupId, Vec<LocalId>>,
     ) {
         let entry_basic_block = self.ir.function(entry_point).entry().id();
         self.bbs_to_be_translated.push((entry_point, entry_basic_block));
@@ -156,7 +181,9 @@ impl<'ir> Translator<'ir> {
                 ir: self.ir,
                 mark_map: &mut self.mark_map,
                 memory_layout: &self.memory_layout,
-                local_liveness,
+                predecessors,
+                bundling,
+                group_layouts,
                 bbs_to_be_translated: &mut self.bbs_to_be_translated,
             };
             self.stack_machine.dispatch_block(func, bb_id, &mut self.asm, &mut ctx);
@@ -166,10 +193,18 @@ impl<'ir> Translator<'ir> {
 
 pub fn ir_to_bytecode(ir: &EthIRProgram, store: &AnalysesStore, result: &mut Vec<u8>) {
     let local_liveness = store.local_liveness(ir);
-    let mut translator = Translator::new(ir, DEFAULT_SPILL_THRESHOLD, DEFAULT_CLEANUP_THRESHOLD);
+    let predecessors = store.predecessors(ir);
+    let bundling = store.cfg_in_out_bundling(ir);
+    let group_layouts = compute_group_layouts(ir, &bundling, &local_liveness);
+    let mut translator = Translator::new(ir, DEFAULT_SPILL_THRESHOLD);
 
     translator.memory_layout.emit_init_free_pointer(&mut translator.asm);
-    translator.translate_basic_blocks_from_entry_point(ir.init_entry, &local_liveness);
+    translator.translate_basic_blocks_from_entry_point(
+        ir.init_entry,
+        &predecessors,
+        &bundling,
+        &group_layouts,
+    );
 
     // Ignore translated basic blocks because we want separate PCs for functions and basic
     // blocks in run.
@@ -177,7 +212,12 @@ pub fn ir_to_bytecode(ir: &EthIRProgram, store: &AnalysesStore, result: &mut Vec
     translator.mark_map.set_phase(TranslationPhase::Runtime);
     translator.asm.push_mark(translator.mark_map.runtime_start);
     if let Some(main_entry) = ir.main_entry {
-        translator.translate_basic_blocks_from_entry_point(main_entry, &local_liveness);
+        translator.translate_basic_blocks_from_entry_point(
+            main_entry,
+            &predecessors,
+            &bundling,
+            &group_layouts,
+        );
     }
 
     for (data_id, bytes) in ir.data_segments.enumerate_idx() {

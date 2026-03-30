@@ -15,7 +15,6 @@ use sir_assembler::{AsmReference, Assembler, op};
 use sir_data::{
     BasicBlockId, ControlView, FunctionId, InlineOperands, LocalId, Operation, OperationView,
 };
-use sir_passes::IntervalEnd;
 
 use crate::{
     MarkMap, TranslationContext, TranslationPhase, operations::op_kind_to_direct_op,
@@ -31,49 +30,48 @@ enum StackEntry {
 pub(crate) struct StackMachine {
     stack: Vec<StackEntry>,
     in_memory: DenseIndexSet<LocalId>,
-    spill_threshold: u8,
-    cleanup_threshold: u16,
+    remap_buf: Vec<LocalId>,
+    _spill_threshold: u8,
 }
 
 impl StackMachine {
-    pub fn new(spill_threshold: u8, cleanup_threshold: u16) -> Self {
+    pub fn new(_spill_threshold: u8) -> Self {
         Self {
             stack: Vec::new(),
             in_memory: DenseIndexSet::new(),
-            spill_threshold,
-            cleanup_threshold,
+            remap_buf: Vec::new(),
+            _spill_threshold,
         }
     }
 
-    pub fn remap_block_inputs(&mut self, inputs: &[LocalId]) {
-        for (entry, &local) in self.stack.iter_mut().zip(inputs.iter()) {
-            *entry = StackEntry::Local(local);
-        }
-    }
-
-    /// Gets `local` to the top of the stack.
-    /// - Last use + on stack: SWAP to top (or noop if already there).
-    /// - Not last use + on stack: DUP to top.
-    /// - Not on stack: load from memory (must have been spilled).
-    fn prepare_input(
+    fn set_stack_from_layout(
         &mut self,
-        local: LocalId,
         bb_id: BasicBlockId,
-        op_view: OperationView,
-        asm: &mut Assembler,
+        block_inputs: &[LocalId],
         ctx: &TranslationContext,
     ) {
-        let is_last_use = ctx.local_liveness.last_use_in_block(local, bb_id)
-            == Some(IntervalEnd::At(op_view.id()));
+        self.stack.clear();
+        let Some(in_group) = ctx.bundling.get_in_group(bb_id) else {
+            return;
+        };
+        let preds = ctx.predecessors.of(bb_id);
+        debug_assert!(!preds.is_empty(), "block with in-group must have predecessors");
+        let pred_outputs = ctx.ir.block(preds[0]).outputs();
+        for local in &ctx.group_layouts[in_group] {
+            let remapped = pred_outputs
+                .iter()
+                .position(|&out| out == *local)
+                .map(|pos| block_inputs[pos])
+                .unwrap_or(*local);
+            self.stack.push(StackEntry::Local(remapped));
+        }
+    }
+
+    /// DUPs `local` to the top of the stack, or loads it from memory if spilled.
+    /// Dead copies remain until `arrange_stack_to_layout` cleans them up at block end.
+    fn prepare_input(&mut self, local: LocalId, asm: &mut Assembler, ctx: &TranslationContext) {
         let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(local));
         match depth {
-            Some(d @ 0..=15) if is_last_use => {
-                if d > 0 {
-                    asm.push_op_byte(op::swap_n(d as u8));
-                    let top = self.stack.len() - 1;
-                    self.stack.swap(top, top - d);
-                }
-            }
             Some(d) if d < 16 => {
                 asm.push_op_byte(op::dup_n(d as u8 + 1));
                 self.stack.push(StackEntry::Local(local));
@@ -95,13 +93,12 @@ impl StackMachine {
     fn emit_standard_op(
         &mut self,
         op_view: OperationView,
-        bb_id: BasicBlockId,
         asm: &mut Assembler,
         ctx: &TranslationContext,
     ) {
         let inputs = op_view.inputs();
         for input in inputs.iter().rev() {
-            self.prepare_input(*input, bb_id, op_view, asm, ctx);
+            self.prepare_input(*input, asm, ctx);
         }
 
         let evm_op =
@@ -123,51 +120,129 @@ impl StackMachine {
         ctx: &mut TranslationContext,
     ) {
         let block = ctx.ir.block(bb_id);
-        self.remap_block_inputs(block.inputs());
-
-        let outputs = block.outputs();
-
-        let condition = match block.control() {
-            ControlView::Branches { condition, .. } => Some(condition),
-            ControlView::Switch(switch) => Some(switch.condition()),
-            _ => None,
-        };
+        self.set_stack_from_layout(bb_id, block.inputs(), ctx);
 
         for op_view in block.operations() {
-            self.dispatch_operation(op_view, bb_id, asm, ctx);
+            self.dispatch_operation(op_view, asm, ctx);
         }
 
-        self.build_output_stack(outputs, condition, asm, ctx.memory_layout);
-        if let Some(cond) = condition {
-            self.bring_condition_to_top(cond, asm, ctx.memory_layout);
+        let control = block.control();
+        match control {
+            ControlView::LastOpTerminates => {}
+            ControlView::InternalReturn => {
+                Self::arrange_stack_to_layout(&mut self.stack, block.outputs(), None, asm);
+            }
+            ControlView::ContinuesTo(_) | ControlView::Branches { .. } | ControlView::Switch(_) => {
+                let condition = match control {
+                    ControlView::Branches { condition, .. } => Some(condition),
+                    ControlView::Switch(switch) => Some(switch.condition()),
+                    _ => None,
+                };
+                let out_layout = Self::get_out_layout(&self.stack, bb_id, ctx, &mut self.remap_buf);
+                Self::arrange_stack_to_layout(&mut self.stack, out_layout, condition, asm);
+            }
         }
-        self.emit_control_flow(block.control(), func, asm, ctx.mark_map, ctx.memory_layout);
+
+        self.emit_control_flow(control, func, asm, ctx.mark_map, ctx.memory_layout);
     }
 
-    /// Brings the control flow condition to the top of the stack.
-    /// Searches the stack first; if not found, loads from memory.
-    /// TODO: if the condition is not on the stack, we assume liveness-driven
-    /// eviction has already spilled it to memory.
-    fn bring_condition_to_top(
-        &mut self,
-        local: LocalId,
-        asm: &mut Assembler,
-        memory_layout: &StaticMemoryLayout,
-    ) {
-        let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(local));
+    fn get_out_layout<'a>(
+        stack: &[StackEntry],
+        bb_id: BasicBlockId,
+        ctx: &'a TranslationContext,
+        remap_buf: &'a mut Vec<LocalId>,
+    ) -> &'a [LocalId] {
+        let group_id = ctx
+            .bundling
+            .get_out_group(bb_id)
+            .expect("block with successors must have an out-group");
+        let group_layout = &ctx.group_layouts[group_id];
+        let block_outputs = ctx.ir.block(bb_id).outputs();
 
-        match depth {
-            Some(0) => {}
-            Some(d @ 1..=16) => {
-                asm.push_op_byte(sir_assembler::op::swap_n(d as u8));
-                let top = self.stack.len() - 1;
-                self.stack.swap(top, top - d);
+        if block_outputs.is_empty() {
+            return group_layout;
+        }
+
+        // Remap group layout entries that belong to the reference block's outputs
+        // to this block's outputs at the same position.
+        remap_buf.clear();
+        let mut output_idx = 0;
+        for entry in group_layout {
+            if stack.contains(&StackEntry::Local(*entry)) {
+                remap_buf.push(*entry);
+            } else {
+                remap_buf.push(block_outputs[output_idx]);
+                output_idx += 1;
             }
-            _ => {
-                // Not reachable on stack — load from memory.
-                memory_layout.emit_local_load(asm, local);
-                self.stack.push(StackEntry::Local(local));
+        }
+        remap_buf
+    }
+
+    /// Arranges the stack so layout elements are at positions 0..layout.len() and the
+    /// condition (if present) is on top. All other values are POPped.
+    fn arrange_stack_to_layout(
+        stack: &mut Vec<StackEntry>,
+        layout: &[LocalId],
+        condition: Option<LocalId>,
+        asm: &mut Assembler,
+    ) {
+        let condition_in_layout = condition.is_some_and(|c| layout.contains(&c));
+        let target_stack_depth =
+            layout.len() + condition.is_some() as usize - condition_in_layout as usize;
+
+        // Target position for a stack entry, or None if junk.
+        let target_of = |entry: StackEntry| match entry {
+            StackEntry::Intermediate => None,
+            StackEntry::Local(local) => layout.iter().position(|l| *l == local).or_else(|| {
+                (!condition_in_layout && condition == Some(local)).then_some(layout.len())
+            }),
+        };
+
+        // Process from the top: POP junk, SWAP layout/condition to target position.
+        // Each SWAP follows a permutation cycle, surfacing junk to be POPped.
+        while let Some(&top_entry) = stack.last() {
+            if stack.len() <= target_stack_depth {
+                break;
             }
+            match target_of(top_entry) {
+                None => {
+                    stack.pop();
+                    asm.push_op_byte(op::POP);
+                }
+                Some(target) => {
+                    let top = stack.len() - 1;
+                    asm.push_op_byte(op::swap_n((top - target) as u8));
+                    stack.swap(top, target);
+                }
+            }
+        }
+
+        // Fix remaining out-of-position elements that were already below the junk.
+        for i in 0..target_stack_depth {
+            let target = target_of(stack[i]).expect("all junk already popped");
+            if target == i {
+                continue;
+            }
+            let top = target_stack_depth - 1;
+            if i != top {
+                asm.push_op_byte(op::swap_n((top - i) as u8));
+                stack.swap(top, i);
+            }
+            if target != top {
+                asm.push_op_byte(op::swap_n((top - target) as u8));
+                stack.swap(top, target);
+            }
+        }
+
+        // If the condition is in the layout, DUP it so JUMPI consumes the copy.
+        if let Some(cond) = condition.filter(|_| condition_in_layout) {
+            let depth = stack
+                .iter()
+                .rev()
+                .position(|&e| e == StackEntry::Local(cond))
+                .expect("condition must be on the stack");
+            asm.push_op_byte(op::dup_n((depth + 1) as u8));
+            stack.push(StackEntry::Local(cond));
         }
     }
 
@@ -224,115 +299,9 @@ impl StackMachine {
         }
     }
 
-    /// Arranges the stack so that only the declared outputs (and optionally the
-    /// control flow condition) remain, in the correct order per the calling
-    /// convention (first output on top).
-    fn build_output_stack(
-        &mut self,
-        outputs: &[LocalId],
-        condition: Option<LocalId>,
-        asm: &mut Assembler,
-        _memory_layout: &StaticMemoryLayout,
-    ) {
-        self.cleanup_stack(outputs, condition, asm);
-
-        // Walk outputs in reverse (last output first) so that each value
-        // pushed/swapped to the top ends up in the correct final position.
-        for &output in outputs.iter().rev() {
-            // Search for the output within SWAP reach of the current top.
-            let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(output));
-            match depth {
-                Some(0) => {
-                    // Already on top — nothing to do.
-                }
-                Some(d @ 1..=16) => {
-                    asm.push_op_byte(sir_assembler::op::swap_n(d as u8));
-                    let top = self.stack.len() - 1;
-                    self.stack.swap(top, top - d);
-                }
-                _ => {
-                    // TODO: if output was spilled to memory, reload it
-                    // TODO: if not in memory, use aggressive dig (SWAP+POP) to
-                    //   bring it within SWAP reach, then swap to top
-                    todo!("output not reachable within SWAP depth")
-                }
-            }
-        }
-    }
-
-    fn cleanup_stack(
-        &mut self,
-        outputs: &[LocalId],
-        condition: Option<LocalId>,
-        asm: &mut Assembler,
-    ) {
-        self.basic_cleanup(outputs, condition, asm);
-
-        if self.stack.len() > self.cleanup_threshold as usize {
-            self.aggressive_cleanup(outputs, asm);
-        }
-    }
-
-    /// Pops from the top of the stack: removes non-outputs and duplicate outputs.
-    /// Stops at a unique output or the last output (already in its final position).
-    /// Preserves the control flow condition if present.
-    fn basic_cleanup(
-        &mut self,
-        outputs: &[LocalId],
-        condition: Option<LocalId>,
-        asm: &mut Assembler,
-    ) {
-        if outputs.is_empty() && condition.is_none() {
-            return;
-        }
-        while let Some(&top) = self.stack.last() {
-            let top_local = match top {
-                StackEntry::Local(local) => local,
-                StackEntry::Intermediate => {
-                    self.stack.pop();
-                    asm.push_op_byte(sir_assembler::op::POP);
-                    continue;
-                }
-            };
-
-            // Preserve the condition — treat it like an output for cleanup purposes.
-            if condition == Some(top_local) {
-                break;
-            }
-
-            if !outputs.contains(&top_local) {
-                self.stack.pop();
-                asm.push_op_byte(sir_assembler::op::POP);
-                continue;
-            }
-
-            // Last output is already in its final bottom position — stop.
-            if outputs.last() == Some(&top_local) {
-                break;
-            }
-
-            // It's an output — only pop if another copy exists within SWAP reach
-            let reachable_start =
-                self.stack.len().saturating_sub(1 + sir_assembler::op::SWAP_LIMIT as usize);
-            let has_duplicate = self.stack[reachable_start..self.stack.len() - 1].contains(&top);
-            if !has_duplicate {
-                break;
-            }
-
-            self.stack.pop();
-            asm.push_op_byte(sir_assembler::op::POP);
-        }
-    }
-
-    /// Uses SWAP+POP to remove non-outputs buried deeper in the stack.
-    fn aggressive_cleanup(&mut self, _outputs: &[LocalId], _asm: &mut Assembler) {
-        todo!("aggressive cleanup: SWAP+POP to remove buried non-outputs")
-    }
-
     fn dispatch_operation(
         &mut self,
         op_view: OperationView,
-        bb_id: BasicBlockId,
         asm: &mut Assembler,
         ctx: &mut TranslationContext,
     ) {
@@ -384,7 +353,7 @@ impl StackMachine {
 
             Operation::MemoryLoad(data) => {
                 let load_size = data.size as u32;
-                self.prepare_input(data.ptr, bb_id, op_view, asm, ctx);
+                self.prepare_input(data.ptr, asm, ctx);
                 // evm: [ptr]                                   symbolic: [ptr]
                 self.stack.pop();
                 asm.push_op_byte(op::MLOAD);
@@ -397,7 +366,7 @@ impl StackMachine {
             Operation::MemoryStore(data) => {
                 let load_size = data.size as u32;
                 let shift_to_clean_word = load_size * 8;
-                self.prepare_input(data.ptr(), bb_id, op_view, asm, ctx);
+                self.prepare_input(data.ptr(), asm, ctx);
                 // evm: [ptr]                                   symbolic: [ptr]
                 asm.push_op_byte(op::DUP1);
                 // evm: [ptr, ptr]                              symbolic: [ptr]
@@ -410,7 +379,7 @@ impl StackMachine {
                 asm.push_op_byte(op::SHR);
                 self.stack.push(StackEntry::Intermediate);
                 // evm: [cleaned_word, ptr]                     symbolic: [Intermediate, ptr]
-                self.prepare_input(data.value(), bb_id, op_view, asm, ctx);
+                self.prepare_input(data.value(), asm, ctx);
                 // evm: [value, cleaned_word, ptr]              symbolic: [value, Intermediate, ptr]
                 asm.push_minimal_u32(256 - load_size * 8);
                 asm.push_op_byte(op::SHL);
@@ -436,7 +405,7 @@ impl StackMachine {
                 asm.push_op_byte(op::DUP1);
                 self.stack.push(StackEntry::Intermediate);
                 // evm: [free_ptr, free_ptr]                          symbolic: [Intermediate, Intermediate]
-                self.prepare_input(size, bb_id, op_view, asm, ctx);
+                self.prepare_input(size, asm, ctx);
                 // evm: [size, free_ptr, free_ptr]                    symbolic: [size, Intermediate, Intermediate]
                 asm.push_op_byte(op::DUP1);
                 asm.push_op_byte(op::CALLDATASIZE);
@@ -482,7 +451,7 @@ impl StackMachine {
 
                 // Push call args onto the stack
                 for input in inputs.iter().rev() {
-                    self.prepare_input(*input, bb_id, op_view, asm, ctx);
+                    self.prepare_input(*input, asm, ctx);
                 }
                 // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
 
@@ -520,7 +489,7 @@ impl StackMachine {
             }
 
             Operation::SetCopy(InlineOperands { ins: [src], outs: [dst] }) => {
-                self.prepare_input(src, bb_id, op_view, asm, ctx);
+                self.prepare_input(src, asm, ctx);
                 self.stack.pop();
                 self.stack.push(StackEntry::Local(dst));
             }
@@ -608,7 +577,7 @@ impl StackMachine {
             | Operation::Stop(_)
             | Operation::Revert(_)
             | Operation::Invalid(_)
-            | Operation::SelfDestruct(_) => self.emit_standard_op(op_view, bb_id, asm, ctx),
+            | Operation::SelfDestruct(_) => self.emit_standard_op(op_view, asm, ctx),
         }
     }
 }
