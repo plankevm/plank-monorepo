@@ -1,6 +1,6 @@
-use plank_mir::{Mir, display::DisplayMir};
+use plank_mir::{display::DisplayMir, Mir};
 use plank_session::Session;
-use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
+use plank_test_utils::{dedent_preserve_blank_lines, TestProject};
 use plank_values::BigNumInterner;
 
 fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
@@ -918,6 +918,28 @@ fn test_comptime_call_on_non_function() {
           |
         2 | const y = x();
           |           ^ `u256` is not callable
+        "#],
+    );
+}
+
+#[test]
+fn test_diagnostic_renders_struct_name() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        init {
+            let x: Pair = 42;
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:19
+          |
+        3 |     let x: Pair = 42;
+          |            ----   ^^ expected `Pair`, got `u256`
+          |            |
+          |            expected because of this
         "#],
     );
 }
