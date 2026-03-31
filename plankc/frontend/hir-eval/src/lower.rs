@@ -36,6 +36,10 @@ enum ExprResult {
     ComptimeOnly(ValueId),
 }
 
+impl ExprResult {
+    const ERROR: Self = Self::Runtime { expr: mir::Expr::Error, ty: TypeId::ERROR, comptime: None };
+}
+
 struct BlockControlFlowDiverges;
 
 impl FunctionLowerScope {
@@ -88,11 +92,7 @@ impl FunctionLowerScope {
         let name_span = self.locals.name_span(ty);
         let Some(ty) = self.locals.comptime(ty) else {
             eval.emit_struct_type_not_comptime(ty_loc, name_span);
-            return ExprResult::Runtime {
-                expr: mir::Expr::Error,
-                ty: TypeId::ERROR,
-                comptime: None,
-            };
+            return ExprResult::ERROR;
         };
         let Value::Type(ty) = eval.values.lookup(ty) else {
             eval.emit_type_constraint_not_type(eval.values.type_of_value(ty), ty_loc);
@@ -223,7 +223,7 @@ impl FunctionLowerScope {
                     expr.src_loc(),
                 );
                 self.field_types_buf.clear();
-                ExprResult::Runtime { expr: mir::Expr::Error, ty: TypeId::ERROR, comptime: None }
+                ExprResult::ERROR
             }
             hir::ExprKind::LocalRef(hir) => {
                 let value = self.locals.comptime(hir);
@@ -267,32 +267,37 @@ impl FunctionLowerScope {
             }
             hir::ExprKind::Call { callee, args } => {
                 let callee_loc = self.locals.def_loc(callee);
+                let name_span = self.locals.name_span(callee);
                 let Some(closure) = self.locals.comptime(callee) else {
-                    eval.emit_not_known_at_comptime("call target", callee_loc);
-                    return ExprResult::Runtime {
-                        expr: mir::Expr::Error,
-                        ty: TypeId::ERROR,
-                        comptime: None,
-                    };
+                    eval.emit_call_target_not_comptime(callee_loc, name_span);
+                    return ExprResult::ERROR;
                 };
-                if !matches!(eval.values.lookup(closure), Value::Closure { .. }) {
+                let Value::Closure { fn_def: hir_fn_def_id, .. } = eval.values.lookup(closure)
+                else {
                     eval.emit_not_callable(eval.values.type_of_value(closure), callee_loc);
-                    return ExprResult::Runtime {
-                        expr: mir::Expr::Error,
-                        ty: TypeId::ERROR,
-                        comptime: None,
-                    };
-                }
+                    return ExprResult::ERROR;
+                };
                 let callee = eval.fn_cache.get(&closure).copied().unwrap_or_else(|| {
-                    let id = self.lower_closure(eval, closure, callee_loc);
+                    let id = self.lower_closure(eval, closure);
                     eval.fn_cache.insert(closure, id);
                     id
                 });
 
                 let fn_def = eval.mir_fns[callee];
+                if fn_def.is_error() {
+                    return ExprResult::ERROR;
+                }
                 let arg_locals = &eval.hir.call_args[args];
                 if arg_locals.len() != fn_def.param_count as usize {
-                    todo!("diagnostic: function call argument count mismatch");
+                    let hir_fn_def = eval.hir.fns[hir_fn_def_id];
+                    let def_loc = SrcLoc::new(hir_fn_def.source, hir_fn_def.param_list_span);
+                    eval.emit_arg_count_mismatch(
+                        fn_def.param_count as usize,
+                        arg_locals.len(),
+                        expr.src_loc(),
+                        def_loc,
+                    );
+                    return ExprResult::ERROR;
                 }
 
                 for (arg_i, &arg_local) in arg_locals.iter().enumerate() {
@@ -388,12 +393,7 @@ impl FunctionLowerScope {
         }
     }
 
-    fn lower_closure(
-        &mut self,
-        eval: &mut Evaluator<'_>,
-        closure: ValueId,
-        callee_loc: SrcLoc,
-    ) -> mir::FnId {
+    fn lower_closure(&mut self, eval: &mut Evaluator<'_>, closure: ValueId) -> mir::FnId {
         let Value::Closure { fn_def, captures } = eval.values.lookup(closure) else {
             unreachable!("caller checks for Closure before calling lower_closure")
         };
@@ -411,17 +411,18 @@ impl FunctionLowerScope {
             assert!(prev.is_none(), "invalid hir");
             self.locals.set_comptime_only(capture_info.inner_local, value, loc, None);
         }
-        // Interpret type premable to determine types.
+        // Interpret type preamble to determine types.
         self.interpreter
             .interpret_block(eval, func.type_preamble)
-            .expect("invalid hir: premable with `return`");
+            .expect("invalid hir: preamble with `return`");
         let (return_type, return_type_loc) = self.interpreter.bindings[func.return_type];
         let Value::Type(return_type) = eval.values.lookup(return_type) else {
             eval.emit_type_constraint_not_type(
                 eval.values.type_of_value(return_type),
                 return_type_loc,
             );
-            todo!("diagnostic: return type not type — error recovery")
+            self.locals = saved_locals;
+            return eval.push_error_fn();
         };
         let saved_return_type = std::mem::replace(&mut self.expected_return_type, return_type);
         let saved_return_type_loc = self.expected_return_type_loc.replace(return_type_loc);

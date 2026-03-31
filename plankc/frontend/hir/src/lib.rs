@@ -112,6 +112,7 @@ pub struct FnDef {
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
     pub source: SourceId,
+    pub param_list_span: SourceSpan,
 }
 
 #[derive(Debug, Clone, Copy)]

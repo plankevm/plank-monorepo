@@ -121,18 +121,46 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_arg_count_mismatch(&mut self, expected: usize, actual: usize, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error("wrong number of arguments").primary(
-            loc.source,
-            loc.span,
-            format!("expected {expected} argument(s), got {actual}"),
+    pub fn emit_arg_count_mismatch(
+        &mut self,
+        expected: usize,
+        actual: usize,
+        call_loc: SrcLoc,
+        def_loc: SrcLoc,
+    ) {
+        let source = {
+            assert_eq!(call_loc.source, def_loc.source);
+            call_loc.source
+        };
+        let diagnostic = Diagnostic::error("wrong number of arguments").element(
+            Annotations::new(source)
+                .primary(
+                    call_loc.span,
+                    format!(
+                        "expected {expected} {}, got {actual}",
+                        if expected == 1 { "argument" } else { "arguments" },
+                    ),
+                )
+                .secondary(
+                    def_loc.span,
+                    format!(
+                        "defined with {expected} {}",
+                        if expected == 1 { "parameter" } else { "parameters" },
+                    ),
+                ),
         );
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_not_known_at_comptime(&mut self, what: &str, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error(format!("{what} must be known at compile time"))
-            .primary(loc.source, loc.span, "not known at compile time");
+    pub fn emit_call_target_not_comptime(&mut self, loc: SrcLoc, name_span: Option<SourceSpan>) {
+        let mut annotations =
+            Annotations::new(loc.source).primary(loc.span, "not known at compile time");
+        if let Some(name_span) = name_span {
+            annotations = annotations.secondary(name_span, "defined here");
+        }
+        let diagnostic = Diagnostic::error("call target must be known at compile time")
+            .element(annotations)
+            .note("function calls are statically dispatched");
         self.session.emit_diagnostic(diagnostic);
     }
 
@@ -166,13 +194,6 @@ impl Evaluator<'_> {
         loc: SrcLoc,
     ) {
         use std::fmt::Write;
-        let mut args_str = String::new();
-        for (i, &ty) in arg_types.iter().enumerate() {
-            if i > 0 {
-                args_str.push_str(", ");
-            }
-            let _ = write!(args_str, "{}", self.types.format(self.session, ty));
-        }
 
         let mut note = format!("`{builtin}` accepts ");
         for (i, &(params, _ret)) in builtin.signatures().iter().enumerate() {
@@ -189,13 +210,32 @@ impl Evaluator<'_> {
             note.push(')');
         }
 
-        let diagnostic = Diagnostic::error("no valid match for builtin signature")
-            .primary(
-                loc.source,
-                loc.span,
+        let (title, label) = if builtin.signatures()[0].0.len() == arg_types.len() {
+            let mut args_str = String::new();
+            for (i, &ty) in arg_types.iter().enumerate() {
+                if i > 0 {
+                    args_str.push_str(", ");
+                }
+                let _ = write!(args_str, "{}", self.types.format(self.session, ty));
+            }
+            (
+                "no valid match for builtin signature",
                 format!("`{builtin}` cannot be called with ({args_str})"),
             )
-            .note(note);
+        } else {
+            let expected = builtin.signatures()[0].0.len();
+            (
+                "wrong number of arguments",
+                format!(
+                    "`{builtin}` called with {} argument{}, but requires {}",
+                    arg_types.len(),
+                    if arg_types.len() == 1 { "" } else { "s" },
+                    expected,
+                ),
+            )
+        };
+
+        let diagnostic = Diagnostic::error(title).primary(loc.source, loc.span, label).note(note);
         self.session.emit_diagnostic(diagnostic);
     }
 }

@@ -40,6 +40,10 @@ pub struct FnDef {
 }
 
 impl FnDef {
+    pub fn is_error(&self) -> bool {
+        self.return_type == TypeId::ERROR
+    }
+
     pub fn iter_params(&self) -> impl Iterator<Item = LocalId> {
         Span::new(LocalId::ZERO, LocalId::new(self.param_count)).iter()
     }

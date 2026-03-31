@@ -55,6 +55,15 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    pub fn push_error_fn(&mut self) -> mir::FnId {
+        let body = self.mir_blocks.push_iter(std::iter::empty());
+        let fn_id1 = self.mir_fn_locals.push_iter(std::iter::empty());
+        let fn_id2 =
+            self.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::ERROR });
+        assert_eq!(fn_id1, fn_id2);
+        fn_id1
+    }
+
     pub fn ensure_const_evaluated(
         &mut self,
         interpreter: &mut ComptimeInterpreter,

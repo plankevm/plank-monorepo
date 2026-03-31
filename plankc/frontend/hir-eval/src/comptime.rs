@@ -57,7 +57,7 @@ impl ComptimeInterpreter {
     ) -> Result<(), ReturnValue> {
         match instr.kind {
             hir::InstructionKind::Set { local, r#type, expr, .. } => {
-                let mut value = self.eval_expr(eval, expr.kind)?;
+                let mut value = self.eval_expr(eval, expr)?;
                 if let Some(r#type) = r#type
                     && value != ValueId::ERROR
                 {
@@ -86,20 +86,20 @@ impl ComptimeInterpreter {
                 }
             }
             hir::InstructionKind::BranchSet { local, expr } => {
-                let value = self.eval_expr(eval, expr.kind)?;
+                let value = self.eval_expr(eval, expr)?;
                 if self.bindings.insert(local, (value, expr.src_loc())).is_some() {
                     unreachable!("hir: overwriting with set");
                 }
             }
             hir::InstructionKind::Eval(expr) => {
-                self.eval_expr(eval, expr.kind)?;
+                self.eval_expr(eval, expr)?;
             }
             hir::InstructionKind::Return(expr) => {
-                let value = self.eval_expr(eval, expr.kind)?;
+                let value = self.eval_expr(eval, expr)?;
                 return Err(ReturnValue(value));
             }
             hir::InstructionKind::Assign { target, value } => {
-                let new_value = self.eval_expr(eval, value.kind)?;
+                let new_value = self.eval_expr(eval, value)?;
                 let Some(prev_value) = self.bindings.insert(target, (new_value, value.src_loc()))
                 else {
                     unreachable!("hir: init with assign")
@@ -136,9 +136,9 @@ impl ComptimeInterpreter {
     fn eval_expr(
         &mut self,
         eval: &mut Evaluator<'_>,
-        expr: hir::ExprKind,
+        expr: hir::Expr,
     ) -> Result<ValueId, ReturnValue> {
-        let value = match expr {
+        let value = match expr.kind {
             hir::ExprKind::Void => ValueId::VOID,
             hir::ExprKind::Bool(false) => ValueId::FALSE,
             hir::ExprKind::Bool(true) => ValueId::TRUE,
@@ -147,7 +147,9 @@ impl ComptimeInterpreter {
             hir::ExprKind::ConstRef(const_id) => eval.ensure_const_evaluated(self, const_id),
             hir::ExprKind::LocalRef(local_id) => self.bindings[local_id].0,
             hir::ExprKind::FnDef(fn_def_id) => self.eval_fn_def(eval, fn_def_id)?,
-            hir::ExprKind::Call { callee, args } => self.eval_call(eval, callee, args)?,
+            hir::ExprKind::Call { callee, args } => {
+                self.eval_call(eval, callee, args, expr.src_loc())?
+            }
             hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
             hir::ExprKind::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
             hir::ExprKind::Member { object, member } => self.eval_member(eval, object, member)?,
@@ -285,6 +287,7 @@ impl ComptimeInterpreter {
         eval: &mut Evaluator<'_>,
         callee: hir::LocalId,
         args: hir::CallArgsId,
+        call_loc: SrcLoc,
     ) -> Result<ValueId, ReturnValue> {
         let (closure_vid, callee_loc) = self.bindings[callee];
         let Value::Closure { fn_def: fn_def_id, captures } = eval.values.lookup(closure_vid) else {
@@ -299,7 +302,9 @@ impl ComptimeInterpreter {
         let arg_locals = &eval.hir.call_args[args];
 
         if params.len() != arg_locals.len() {
-            todo!("diagnostic: function argument count mismatch");
+            let def_loc = SrcLoc::new(fn_def.source, fn_def.param_list_span);
+            eval.emit_arg_count_mismatch(params.len(), arg_locals.len(), call_loc, def_loc);
+            return Ok(ValueId::ERROR);
         }
 
         let saved_bindings = self.capture_buf.use_as(|args| {
