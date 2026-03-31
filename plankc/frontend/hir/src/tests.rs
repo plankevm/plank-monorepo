@@ -1,7 +1,7 @@
-use crate::{display::DisplayHir, BigNumInterner, Hir};
+use crate::{BigNumInterner, Hir, display::DisplayHir};
 use plank_session::Session;
 use plank_source::ParsedProject;
-use plank_test_utils::{dedent_preserve_blank_lines, TestProject};
+use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 
 fn try_lower(source: &str) -> (Hir, BigNumInterner, Session, ParsedProject) {
     try_lower_project(TestProject::single(source))
@@ -35,14 +35,18 @@ fn render_diagnostics(source: &str) -> String {
     render_project_diagnostics(TestProject::single(source))
 }
 
-fn render_project_diagnostics(project: TestProject) -> String {
-    let (_hir, _big_nums, session, _project) = try_lower_project(project);
+fn format_session_diagnostics(session: &Session) -> String {
     session
         .diagnostics()
         .iter()
-        .map(|diagnostic| diagnostic.render_plain(&session))
+        .map(|diagnostic| diagnostic.render_plain(session))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn render_project_diagnostics(project: TestProject) -> String {
+    let (_hir, _big_nums, session, _project) = try_lower_project(project);
+    format_session_diagnostics(&session)
 }
 
 #[test]
@@ -724,8 +728,85 @@ fn test_or_desugaring() {
 }
 
 #[test]
+fn test_binary_op_lowering() {
+    assert_lowers_to(
+        r#"
+        init {
+            let a = calldataload(0x00);
+            let b = calldataload(0x20);
+            let c = a + b;
+            let d = a -/ b;
+            let e = a +/ b;
+            let f = a </ b;
+            let g = a >/ b;
+            let h = a *% b;
+            let i = a << b;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = calldataload(%0)
+        %2 = 32
+        %3 = calldataload(%2)
+        %4 = %1
+        %5 = %3
+        %6 = (+) %4 %5
+        %7 = %1
+        %8 = %3
+        %9 = (-/) %7 %8
+        %10 = %1
+        %11 = %3
+        %12 = (+/) %10 %11
+        %13 = %1
+        %14 = %3
+        %15 = (</) %13 %14
+        %16 = %1
+        %17 = %3
+        %18 = (>/) %16 %17
+        %19 = %1
+        %20 = %3
+        %21 = (*%) %19 %20
+        %22 = %1
+        %23 = %3
+        %24 = (<<) %22 %23
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_unary_op_lowering() {
+    assert_lowers_to(
+        r#"
+        init {
+            let a = calldataload(0x00);
+            let b = -a;
+            let c = ~a;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = calldataload(%0)
+        %2 = %1
+        %3 = (-) %2
+        %4 = %1
+        %5 = (~) %4
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
 fn test_lone_slash_not_supported() {
-    let rendered = render_diagnostics(
+    let (hir, big_nums, session, _project) = try_lower(
         r#"
         init {
             let a = 10;
@@ -734,7 +815,9 @@ fn test_lone_slash_not_supported() {
         }
         "#,
     );
-    let expected = dedent_preserve_blank_lines(
+
+    let rendered = format_session_diagnostics(&session);
+    let expected_diag = dedent_preserve_blank_lines(
         r#"
         error: unsupported syntax
          --> main.plk:3:15
@@ -748,5 +831,20 @@ fn test_lone_slash_not_supported() {
           = help: for division rounding towards positive infinity use `+/`
         "#,
     );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected_diag.trim());
+
+    let actual_hir = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
+    let expected_hir = dedent_preserve_blank_lines(
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 10
+        %1 = %0
+        %2 = 2
+        %3 = (</) %1 %2
+        eval evm_stop()
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
 }

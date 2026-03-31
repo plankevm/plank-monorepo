@@ -32,8 +32,46 @@ pub enum BinaryOp {
     DivRoundAwayFromZero,
 }
 
+impl BinaryOp {
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::NotEquals => "!=",
+            Self::Equals => "==",
+            Self::LessThan => "<",
+            Self::GreaterThan => ">",
+            Self::LessEquals => "<=",
+            Self::GreaterEquals => ">=",
+            Self::BitwiseOr => "|",
+            Self::BitwiseXor => "^",
+            Self::BitwiseAnd => "&",
+            Self::ShiftLeft => "<<",
+            Self::ShiftRight => ">>",
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::AddWrap => "+%",
+            Self::SubtractWrap => "-%",
+            Self::Mul => "*",
+            Self::Mod => "%",
+            Self::MulWrap => "*%",
+            Self::DivRoundPos => "+/",
+            Self::DivRoundNeg => "-/",
+            Self::DivRoundToZero => "</",
+            Self::DivRoundAwayFromZero => ">/",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Negate,
     BitwiseNot,
+}
+
+impl UnaryOp {
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Negate => "-",
+            Self::BitwiseNot => "~",
+        }
+    }
 }

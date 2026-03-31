@@ -93,13 +93,13 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_local(f, input)
             }
             Expr::UnaryOpCall { op, input } => {
-                write!(f, "{op:?}(")?;
-                self.fmt_local(f, input)?;
-                write!(f, ")")
+                write!(f, "({}) ", op.symbol())?;
+                self.fmt_local(f, input)
             }
             Expr::BinaryOpCall { op, lhs, rhs } => {
+                write!(f, "({}) ", op.symbol())?;
                 self.fmt_local(f, lhs)?;
-                write!(f, " {op:?} ")?;
+                write!(f, " ")?;
                 self.fmt_local(f, rhs)
             }
             Expr::Error => write!(f, "<error>"),

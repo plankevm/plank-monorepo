@@ -407,9 +407,15 @@ impl FunctionLowerScope {
                     comptime,
                 }
             }
-            hir::ExprKind::UnaryOpCall { .. }
-            | hir::ExprKind::BinaryOpCall { .. }
-            | hir::ExprKind::Error => {
+            hir::ExprKind::UnaryOpCall { .. } | hir::ExprKind::BinaryOpCall { .. } => {
+                eval.emit_not_yet_implemented(expr.src_loc());
+                ExprResult::Runtime {
+                    expr: mir::Expr::Error,
+                    ty: TypeId::ERROR,
+                    comptime: Some(ValueId::ERROR),
+                }
+            }
+            hir::ExprKind::Error => {
                 // TODO: binary & unary
 
                 ExprResult::Runtime {
