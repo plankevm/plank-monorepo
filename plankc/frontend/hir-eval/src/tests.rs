@@ -560,7 +560,7 @@ fn test_comptime_struct_def_field_not_type() {
         init { evm_stop(); }
         "#,
         &[r#"
-        error: type constraint not type
+        error: value used as type
          --> main.plk:1:23
           |
         1 | const S = struct { x: 42 };
@@ -578,7 +578,7 @@ fn test_comptime_struct_lit_type_not_type() {
         init { evm_stop(); }
         "#,
         &[r#"
-        error: type constraint not type
+        error: value used as type
          --> main.plk:2:11
           |
         2 | const x = T { };
@@ -597,7 +597,7 @@ fn test_comptime_param_type_not_type() {
         init { evm_stop(); }
         "#,
         &[r#"
-        error: type constraint not type
+        error: value used as type
          --> main.plk:2:17
           |
         2 | const f = fn(x: forty_two) u256 { return x; };
@@ -617,7 +617,7 @@ fn test_struct_lit_value_as_type_in_init() {
         }
         "#,
         &[r#"
-        error: type constraint not type
+        error: value used as type
          --> main.plk:3:13
           |
         3 |     let x = T { };
@@ -658,7 +658,7 @@ fn test_runtime_struct_def_field_not_type() {
         }
         "#,
         &[r#"
-        error: type constraint not type
+        error: value used as type
          --> main.plk:2:25
           |
         2 |     let S = struct { x: 42 };
@@ -679,7 +679,7 @@ fn test_runtime_fn_return_type_not_type() {
         }
         "#,
         &[r#"
-        error: type constraint not type
+        error: value used as type
          --> main.plk:3:18
           |
         3 |     let f = fn() forty_two { return 1; };

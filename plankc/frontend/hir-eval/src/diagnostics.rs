@@ -38,7 +38,7 @@ impl Evaluator<'_> {
     }
 
     pub fn emit_type_constraint_not_type(&mut self, ty: TypeId, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error("type constraint not type").primary(
+        let diagnostic = Diagnostic::error("value used as type").primary(
             loc.source,
             loc.span,
             format!(
