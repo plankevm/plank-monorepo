@@ -93,8 +93,12 @@ impl<'cst> BinaryExpr<'cst> {
         Expr::new_unwrap(child)
     }
 
+    pub fn op_span(&self) -> Span<TokenIdx> {
+        self.view.child(1).expect("BinaryExpr must have operator child").span()
+    }
+
     pub fn rhs(&self) -> Expr<'cst> {
-        let child = self.view.child(1).expect("BinaryExpr must have rhs child");
+        let child = self.view.child(2).expect("BinaryExpr must have rhs child");
         Expr::new_unwrap(child)
     }
 

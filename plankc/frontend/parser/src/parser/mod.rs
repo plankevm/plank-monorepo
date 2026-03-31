@@ -682,9 +682,12 @@ impl<'a> Parser<'a> {
                 if lhs < min_bp {
                     break;
                 }
-                self.advance(); // consume operator token
+                let op_node = self.alloc_node(NodeKind::Operator);
+                self.advance();
+                let op_idx = self.close_node(op_node);
                 let mut binary_expr = self.alloc_node_from(start, NodeKind::BinaryExpr(kind));
                 self.push_child(&mut binary_expr, expr);
+                self.push_child(&mut binary_expr, op_idx);
                 let rhs_expr = self.try_parse_expr_min_bp(mode, rhs).unwrap_or_else(|| {
                     self.emit_unexpected();
                     let err = self.alloc_node(NodeKind::Error);
