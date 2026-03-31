@@ -183,6 +183,27 @@ impl Diagnostic {
         self.element(Annotations::new(source_id).primary(span, label))
     }
 
+    pub fn cross_source_annotations(
+        self,
+        primary_loc: SrcLoc,
+        primary_label: impl Into<String>,
+        secondary_loc: SrcLoc,
+        secondary_label: impl Into<String>,
+    ) -> Self {
+        if primary_loc.source == secondary_loc.source {
+            self.element(
+                Annotations::new(primary_loc.source)
+                    .primary(primary_loc.span, primary_label)
+                    .secondary(secondary_loc.span, secondary_label),
+            )
+        } else {
+            self.primary(primary_loc.source, primary_loc.span, primary_label).element(
+                Annotations::new(secondary_loc.source)
+                    .secondary(secondary_loc.span, secondary_label),
+            )
+        }
+    }
+
     pub fn note(mut self, message: impl Into<String>) -> Self {
         self.primary_elements
             .push(Element::Message { level: Some(Level::Note), text: message.into() });

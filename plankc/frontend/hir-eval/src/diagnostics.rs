@@ -12,27 +12,18 @@ impl Evaluator<'_> {
         actual_ty: TypeId,
         actual_loc: SrcLoc,
     ) {
-        let source = {
-            assert_eq!(expected_loc.source, actual_loc.source);
-            expected_loc.source
-        };
-        let diagnostic = Diagnostic::error("mismatched types").element(
-            Annotations::new(source)
-                .primary(
-                    actual_loc.span,
-                    format!(
-                        "expected `{}`, got `{}`",
-                        self.types.format(self.session, expected_ty),
-                        self.types.format(self.session, actual_ty),
-                    ),
-                )
-                .secondary(
-                    expected_loc.span,
-                    format!(
-                        "`{}` expected because of this",
-                        self.types.format(self.session, expected_ty),
-                    ),
-                ),
+        let primary_label = format!(
+            "expected `{}`, got `{}`",
+            self.types.format(self.session, expected_ty),
+            self.types.format(self.session, actual_ty),
+        );
+        let secondary_label =
+            format!("`{}` expected because of this", self.types.format(self.session, expected_ty),);
+        let diagnostic = Diagnostic::error("mismatched types").cross_source_annotations(
+            actual_loc,
+            primary_label,
+            expected_loc,
+            secondary_label,
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -102,22 +93,15 @@ impl Evaluator<'_> {
         ty2: TypeId,
         loc2: SrcLoc,
     ) {
-        assert_eq!(loc1.source, loc2.source);
-        let diagnostic = Diagnostic::error("`if` and `else` have incompatible types").element(
-            Annotations::new(loc1.source)
-                .primary(
-                    loc2.span,
-                    format!(
-                        "expected `{}`, got `{}`",
-                        self.types.format(self.session, ty1),
-                        self.types.format(self.session, ty2),
-                    ),
-                )
-                .secondary(
-                    loc1.span,
-                    format!("`{}` expected because of this", self.types.format(self.session, ty1)),
-                ),
+        let primary_label = format!(
+            "expected `{}`, got `{}`",
+            self.types.format(self.session, ty1),
+            self.types.format(self.session, ty2),
         );
+        let secondary_label =
+            format!("`{}` expected because of this", self.types.format(self.session, ty1));
+        let diagnostic = Diagnostic::error("`if` and `else` have incompatible types")
+            .cross_source_annotations(loc2, primary_label, loc1, secondary_label);
         self.session.emit_diagnostic(diagnostic);
     }
 
@@ -128,27 +112,16 @@ impl Evaluator<'_> {
         call_loc: SrcLoc,
         def_loc: SrcLoc,
     ) {
-        let source = {
-            assert_eq!(call_loc.source, def_loc.source);
-            call_loc.source
-        };
-        let diagnostic = Diagnostic::error("wrong number of arguments").element(
-            Annotations::new(source)
-                .primary(
-                    call_loc.span,
-                    format!(
-                        "expected {expected} {}, got {actual}",
-                        if expected == 1 { "argument" } else { "arguments" },
-                    ),
-                )
-                .secondary(
-                    def_loc.span,
-                    format!(
-                        "defined with {expected} {}",
-                        if expected == 1 { "parameter" } else { "parameters" },
-                    ),
-                ),
+        let call_label = format!(
+            "expected {expected} {}, got {actual}",
+            if expected == 1 { "argument" } else { "arguments" },
         );
+        let def_label = format!(
+            "defined with {expected} {}",
+            if expected == 1 { "parameter" } else { "parameters" },
+        );
+        let diagnostic = Diagnostic::error("wrong number of arguments")
+            .cross_source_annotations(call_loc, call_label, def_loc, def_label);
         self.session.emit_diagnostic(diagnostic);
     }
 
@@ -165,12 +138,12 @@ impl Evaluator<'_> {
     }
 
     pub fn emit_closure_capture_not_comptime(&mut self, closure_loc: SrcLoc, capture_loc: SrcLoc) {
-        assert_eq!(closure_loc.source, capture_loc.source);
         let diagnostic = Diagnostic::error("closure capture must be known at compile time")
-            .element(
-                Annotations::new(closure_loc.source)
-                    .primary(closure_loc.span, "closure captures a runtime value")
-                    .secondary(capture_loc.span, "not known at compile time"),
+            .cross_source_annotations(
+                closure_loc,
+                "closure captures a runtime value",
+                capture_loc,
+                "not known at compile time",
             )
             .note("closures can only capture values known at compile time");
         self.session.emit_diagnostic(diagnostic);

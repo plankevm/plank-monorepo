@@ -4,8 +4,12 @@ use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::BigNumInterner;
 
 fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
+    try_lower_project(TestProject::single(source))
+}
+
+fn try_lower_project(test_project: TestProject) -> (Mir, BigNumInterner, Session) {
     let mut session = Session::new();
-    let project = TestProject::single(source).build(&mut session);
+    let project = test_project.build(&mut session);
 
     let mut big_nums = BigNumInterner::default();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
@@ -22,13 +26,17 @@ fn assert_lowers_to(source: &str, expected: &str) {
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
 }
 
-fn render_diagnostics(source: &str) -> Vec<String> {
-    let (_, _, session) = try_lower(source);
+fn render_project_diagnostics(test_project: TestProject) -> Vec<String> {
+    let (_, _, session) = try_lower_project(test_project);
     session.diagnostics().iter().map(|d| d.render_plain(&session)).collect()
 }
 
 fn assert_diagnostics(source: &str, expected: &[&str]) {
-    let actual = render_diagnostics(source);
+    assert_project_diagnostics(TestProject::single(source), expected)
+}
+
+fn assert_project_diagnostics(test_project: TestProject, expected: &[&str]) {
+    let actual = render_project_diagnostics(test_project);
     let expected: Vec<String> =
         expected.iter().map(|s| dedent_preserve_blank_lines(s).trim().to_string()).collect();
     let actual: Vec<String> = actual.iter().map(|s| s.trim().to_string()).collect();
@@ -1067,6 +1075,27 @@ fn test_comptime_call_arg_count_mismatch() {
           |             --------- defined with 1 parameter
         2 | const r = f(1, 2);
           |           ^^^^^^^ expected 1 argument, got 2
+        "#],
+    );
+}
+
+#[test]
+fn test_cross_file_call_arg_count_mismatch() {
+    assert_project_diagnostics(
+        TestProject::single("import m::other::f;\ninit { f(1, 2); evm_stop(); }")
+            .add_file("other", "const f = fn(x: u256) u256 { return x; };")
+            .add_module("m", ""),
+        &[r#"
+        error: wrong number of arguments
+         --> main.plk:2:8
+          |
+        2 | init { f(1, 2); evm_stop(); }
+          |        ^^^^^^^ expected 1 argument, got 2
+          |
+         ::: other.plk:1:13
+          |
+        1 | const f = fn(x: u256) u256 { return x; };
+          |             --------- defined with 1 parameter
         "#],
     );
 }
