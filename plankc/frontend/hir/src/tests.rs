@@ -702,6 +702,9 @@ fn test_or_desugaring() {
         }
         "#,
         r#"
+        ==== Constants ====
+
+        ==== Init ====
         %0 = 0
         %1 = calldataload(%0)
         %2 = iszero(%1)
@@ -718,4 +721,32 @@ fn test_or_desugaring() {
         eval evm_stop()
         "#,
     );
+}
+
+#[test]
+fn test_lone_slash_not_supported() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let a = 10;
+            let b = a / 2;
+            evm_stop();
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unsupported syntax
+         --> main.plk:3:15
+          |
+        3 |     let b = a / 2;
+          |               ^ lone `/` not supported as an operator
+          |
+          = help: for division rounding towards 0 use `/<` (EVM default)
+          = help: for division rounding away from 0 use `/>`
+          = help: for division rounding towards negative infinity use `/-`
+          = help: for division rounding towards positive infinity use `/+`
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }

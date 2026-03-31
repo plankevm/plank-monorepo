@@ -48,6 +48,7 @@ anstream = "1"
 pretty_assertions = "1.4.1"
 annotate-snippets = "0.12"
 tempfile = "3"
+enum-iterator = "2"
 
 [workspace.lints.rust]
 unused_crate_dependencies = "deny"

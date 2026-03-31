@@ -11,6 +11,8 @@ use plank_session::{EvmBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::BigNumInterner;
 
+use crate::operators as hir_ops;
+
 mod diagnostics;
 
 use plank_source::ParsedProject;
@@ -431,19 +433,62 @@ impl BlockLowerer<'_> {
             ast::Expr::ComptimeBlock(_) => {
                 todo!("comptime block lowering requires extra HIR instructions")
             }
-            ast::Expr::Binary(binary) => match binary.op {
-                cst::BinaryOp::And => self.lower_short_circuit_op(binary, ShortCircuitOp::And),
-                cst::BinaryOp::Or => self.lower_short_circuit_op(binary, ShortCircuitOp::Or),
-                _ => todo!("binary expression lowering"),
-            },
-            ast::Expr::Unary(unary) => match unary.op {
-                cst::UnaryOp::Bang => {
-                    let input = self.lower_expr_to_local(unary.operand());
-                    ExprKind::LogicalNot { input }
+            ast::Expr::Binary(binary) => 'binary: {
+                let op = match binary.op {
+                    // Logical (short-circuit, handled specially)
+                    cst::BinaryOp::And => {
+                        break 'binary self.lower_short_circuit_op(binary, ShortCircuitOp::And);
+                    }
+                    cst::BinaryOp::Or => {
+                        break 'binary self.lower_short_circuit_op(binary, ShortCircuitOp::Or);
+                    }
+                    // Comparison
+                    cst::BinaryOp::DoubleEquals => hir_ops::BinaryOp::NotEquals,
+                    cst::BinaryOp::BangEquals => hir_ops::BinaryOp::Equals,
+                    cst::BinaryOp::LessThan => hir_ops::BinaryOp::LessThan,
+                    cst::BinaryOp::GreaterThan => hir_ops::BinaryOp::GreaterThan,
+                    cst::BinaryOp::LessEquals => hir_ops::BinaryOp::LessEquals,
+                    cst::BinaryOp::GreaterEquals => hir_ops::BinaryOp::GreaterEquals,
+                    // Bitwise
+                    cst::BinaryOp::Pipe => hir_ops::BinaryOp::BitwiseOr,
+                    cst::BinaryOp::Caret => hir_ops::BinaryOp::BitwiseXor,
+                    cst::BinaryOp::Ampersand => hir_ops::BinaryOp::BitwiseAnd,
+                    cst::BinaryOp::ShiftLeft => hir_ops::BinaryOp::ShiftLeft,
+                    cst::BinaryOp::ShiftRight => hir_ops::BinaryOp::ShiftRight,
+                    // Arithmetic (additive)
+                    cst::BinaryOp::Plus => hir_ops::BinaryOp::Add,
+                    cst::BinaryOp::Minus => hir_ops::BinaryOp::Subtract,
+                    cst::BinaryOp::PlusPercent => hir_ops::BinaryOp::AddWrap,
+                    cst::BinaryOp::MinusPercent => hir_ops::BinaryOp::SubtractWrap,
+                    // Arithmetic (multiplicative)
+                    cst::BinaryOp::Star => hir_ops::BinaryOp::Mul,
+                    cst::BinaryOp::Slash => {
+                        self.emit_lone_slash_not_supported(binary.op_span());
+                        hir_ops::BinaryOp::DivRoundToZero
+                    }
+                    cst::BinaryOp::Percent => hir_ops::BinaryOp::Mod,
+                    cst::BinaryOp::StarPercent => hir_ops::BinaryOp::MulWrap,
+                    cst::BinaryOp::SlashPlus => hir_ops::BinaryOp::DivRoundPos,
+                    cst::BinaryOp::SlashMinus => hir_ops::BinaryOp::DivRoundNeg,
+                    cst::BinaryOp::SlashLess => hir_ops::BinaryOp::DivRoundToZero,
+                    cst::BinaryOp::SlashGreater => hir_ops::BinaryOp::DivRoundAwayFromZero,
+                };
+                let lhs = self.lower_expr_to_local(binary.lhs());
+                let rhs = self.lower_expr_to_local(binary.rhs());
+                ExprKind::BinaryOpCall { op, lhs, rhs }
+            }
+            ast::Expr::Unary(unary) => {
+                let input = self.lower_expr_to_local(unary.operand());
+                match unary.op {
+                    cst::UnaryOp::Bang => ExprKind::LogicalNot { input },
+                    cst::UnaryOp::Minus => {
+                        ExprKind::UnaryOpCall { op: hir_ops::UnaryOp::Negate, input }
+                    }
+                    cst::UnaryOp::Tilde => {
+                        ExprKind::UnaryOpCall { op: hir_ops::UnaryOp::BitwiseNot, input }
+                    }
                 }
-                cst::UnaryOp::Minus => todo!("unary minus lowering"),
-                cst::UnaryOp::Tilde => todo!("bitwise not lowering"),
-            },
+            }
         };
         self.expr(kind, expr.span())
     }

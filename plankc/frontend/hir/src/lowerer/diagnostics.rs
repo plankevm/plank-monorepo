@@ -1,5 +1,5 @@
 use plank_core::Span;
-use plank_parser::lexer::TokenIdx;
+use plank_parser::lexer::{Token, TokenIdx};
 use plank_session::{
     Annotations, Claim, Diagnostic, Element, Level, Session, SourceId, SourceSpan, StrId,
 };
@@ -202,6 +202,28 @@ impl BlockLowerer<'_> {
                     .secondary(def_span, format!("imported colliding '{name_str}'")),
             );
         }
+        self.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_lone_slash_not_supported(&self, op_span: Span<TokenIdx>) {
+        let op_span = self.lexed.tokens_src_span(op_span);
+
+        let diagnostic = Diagnostic::error("unsupported syntax")
+            .primary(self.source_id, op_span, "lone `/` not supported as an operator")
+            .help(format!(
+                "for division rounding towards 0 use {} (EVM default)",
+                Token::SlashLess.name()
+            ))
+            .help(format!("for division rounding away from 0 use {}", Token::SlashGreater.name()))
+            .help(format!(
+                "for division rounding towards negative infinity use {}",
+                Token::SlashMinus.name()
+            ))
+            .help(format!(
+                "for division rounding towards positive infinity use {}",
+                Token::SlashPlus.name()
+            ));
+
         self.emit_diagnostic(diagnostic);
     }
 }

@@ -49,13 +49,16 @@ pub enum Element {
         text: String,
     },
     Annotations(Annotations),
-    Patches {
-        source: SourceId,
-        patches: Vec<Patch>,
-    },
+    Patches(Patches),
     Origin {
         path: SourceId,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct Patches {
+    source: SourceId,
+    patches: Vec<Patch>,
 }
 
 #[derive(Debug, Clone)]
@@ -105,9 +108,30 @@ impl Annotations {
     }
 }
 
+impl Patches {
+    pub fn new(source: SourceId) -> Self {
+        Self { source, patches: Vec::new() }
+    }
+
+    pub fn lone(source: SourceId, span: SourceSpan, replacement: impl Into<String>) -> Self {
+        Self::new(source).patch(span, replacement)
+    }
+
+    pub fn patch(mut self, span: SourceSpan, replacement: impl Into<String>) -> Self {
+        self.patches.push(Patch { span, replacement: replacement.into() });
+        self
+    }
+}
+
 impl From<Annotations> for Element {
     fn from(cause: Annotations) -> Self {
         Element::Annotations(cause)
+    }
+}
+
+impl From<Patches> for Element {
+    fn from(value: Patches) -> Self {
+        Element::Patches(value)
     }
 }
 
@@ -272,12 +296,12 @@ impl Diagnostic {
                     }
                     group = group.element(snippet);
                 }
-                Element::Patches { source, patches } => {
-                    let src = session.get_source(*source);
+                Element::Patches(patches) => {
+                    let src = session.get_source(patches.source);
                     let path = src.path.to_str().expect("source path is not valid UTF-8");
                     let mut snippet: Snippet<'_, snip::Patch<'_>> =
                         Snippet::source(&src.content).path(path);
-                    for p in patches {
+                    for p in &patches.patches {
                         snippet =
                             snippet.patch(snip::Patch::new(p.span.usize_range(), &*p.replacement));
                     }

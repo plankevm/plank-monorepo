@@ -48,7 +48,7 @@ pub enum BinaryOp {
     Percent,
     StarPercent,
     SlashPlus,
-    SlashNeg,
+    SlashMinus,
     SlashLess,
     SlashGreater,
 }

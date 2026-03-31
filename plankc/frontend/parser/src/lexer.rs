@@ -59,6 +59,7 @@ fn lex_number_literal<const RADIX: u32>(lexer: &mut LogosLexer<Token>) -> Result
 }
 
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Copy, Default)]
+#[cfg_attr(test, derive(enum_iterator::Sequence))]
 #[logos(error(Token))]
 pub enum Token {
     // Delimiters
@@ -105,7 +106,7 @@ pub enum Token {
     #[token("/+")]
     SlashPlus,
     #[token("/-")]
-    SlashNeg,
+    SlashMinus,
     #[token("/<")]
     SlashLess,
     #[token("/>")]
@@ -243,6 +244,82 @@ impl Token {
         }
     }
 
+    pub const fn text(self) -> Option<&'static str> {
+        let s = match self {
+            Token::Semicolon => ";",
+            Token::Comma => ",",
+            Token::Colon => ":",
+            Token::Dot => ".",
+            Token::LeftCurly => "{",
+            Token::RightCurly => "}",
+            Token::LeftRound => "(",
+            Token::RightRound => ")",
+            Token::LeftSquare => "[",
+            Token::RightSquare => "]",
+            Token::Equals => "=",
+            Token::Plus => "+",
+            Token::PlusPercent => "+%",
+            Token::Minus => "-",
+            Token::MinusPercent => "-%",
+            Token::Star => "*",
+            Token::StarPercent => "*%",
+            Token::Slash => "/",
+            Token::SlashPlus => "/+",
+            Token::SlashMinus => "/-",
+            Token::SlashLess => "/<",
+            Token::SlashGreater => "/>",
+            Token::Percent => "%",
+            Token::DoubleEquals => "==",
+            Token::BangEquals => "!=",
+            Token::LessThan => "<",
+            Token::GreaterThan => ">",
+            Token::LessEquals => "<=",
+            Token::GreaterEquals => ">=",
+            Token::AmperAmper => "&&",
+            Token::PipePipe => "||",
+            Token::Bang => "!",
+            Token::Ampersand => "&",
+            Token::Pipe => "|",
+            Token::Caret => "^",
+            Token::Tilde => "~",
+            Token::ShiftLeft => "<<",
+            Token::ShiftRight => ">>",
+            Token::If => "if",
+            Token::Else => "else",
+            Token::Fn => "fn",
+            Token::Let => "let",
+            Token::Mut => "mut",
+            Token::Const => "const",
+            Token::Init => "init",
+            Token::Run => "run",
+            Token::Struct => "struct",
+            Token::Return => "return",
+            Token::Comptime => "comptime",
+            Token::Inline => "inline",
+            Token::While => "while",
+            Token::True => "true",
+            Token::False => "false",
+            Token::And => "and",
+            Token::Or => "or",
+            Token::Import => "import",
+            Token::As => "as",
+            Token::DoubleColon => "::",
+
+            Token::Identifier
+            | Token::DecimalLiteral
+            | Token::HexLiteral
+            | Token::BinLiteral
+            | Token::Whitespace
+            | Token::LineComment
+            | Token::BlockComment
+            | Token::InvalidCharError
+            | Token::MalformedIdentError
+            | Token::UnclosedBlockCommentError
+            | Token::Eof => return None,
+        };
+        Some(s)
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Token::Semicolon => "`;`",
@@ -264,7 +341,7 @@ impl Token {
             Token::StarPercent => "`*%`",
             Token::Slash => "`/`",
             Token::SlashPlus => "`/+`",
-            Token::SlashNeg => "`/-`",
+            Token::SlashMinus => "`/-`",
             Token::SlashLess => "`/<`",
             Token::SlashGreater => "`/>`",
             Token::Percent => "`%`",
@@ -452,7 +529,7 @@ mod tests {
         assert_eq!(lex_all("*%"), vec![(Token::StarPercent, 0..2, "*%")]);
         assert_eq!(lex_all("/"), vec![(Token::Slash, 0..1, "/")]);
         assert_eq!(lex_all("/+"), vec![(Token::SlashPlus, 0..2, "/+")]);
-        assert_eq!(lex_all("/-"), vec![(Token::SlashNeg, 0..2, "/-")]);
+        assert_eq!(lex_all("/-"), vec![(Token::SlashMinus, 0..2, "/-")]);
         assert_eq!(lex_all("/<"), vec![(Token::SlashLess, 0..2, "/<")]);
         assert_eq!(lex_all("/>"), vec![(Token::SlashGreater, 0..2, "/>")]);
         assert_eq!(lex_all("%"), vec![(Token::Percent, 0..1, "%")]);
@@ -795,6 +872,16 @@ mod tests {
     }
 
     #[test]
+    fn test_ambiguous_slash_minus_handling() {
+        let results = lex_all("num /-x");
+        assert_eq!(results.len(), 4);
+        assert_eq!(results[0], (Token::Identifier, 0..3, "num"));
+        assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
+        assert_eq!(results[2], (Token::SlashMinus, 4..6, "/-"));
+        assert_eq!(results[3], (Token::Identifier, 6..7, "x"));
+    }
+
+    #[test]
     fn test_comment_span() {
         let results = lex_all("/* block */ // line");
         assert_eq!(results.len(), 3);
@@ -808,5 +895,41 @@ mod tests {
         let results = lex_all("/* outer /* inner */ end */");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], (Token::BlockComment, 0..27, "/* outer /* inner */ end */"));
+    }
+
+    #[test]
+    fn test_token_text_roundtrip() {
+        use enum_iterator::all;
+
+        for token in all::<Token>() {
+            if let Some(text) = token.text() {
+                let lexed: Vec<Token> = Lexer::new(text).map(|(tok, _)| tok).collect();
+                assert_eq!(
+                    lexed,
+                    vec![token],
+                    "token {token:?} with text {text:?} didn't roundtrip"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_token_name_text_sync() {
+        use enum_iterator::all;
+
+        for token in all::<Token>() {
+            if let Some(text) = token.text() {
+                let expected_name = format!("`{text}`");
+                assert_eq!(
+                    token.name(),
+                    expected_name,
+                    "token {:?} has text {:?} but name {:?} (expected {:?})",
+                    token,
+                    text,
+                    token.name(),
+                    expected_name
+                );
+            }
+        }
     }
 }

@@ -407,9 +407,17 @@ impl FunctionLowerScope {
                     comptime,
                 }
             }
-            hir::ExprKind::UnaryOpCall { .. } => todo!("runtime unary op lowering"),
-            hir::ExprKind::BinaryOpCall { .. } => todo!("runtime binary op lowering"),
-            hir::ExprKind::Error => unreachable!("error expression reached hir-eval"),
+            hir::ExprKind::UnaryOpCall { .. }
+            | hir::ExprKind::BinaryOpCall { .. }
+            | hir::ExprKind::Error => {
+                // TODO: binary & unary
+
+                ExprResult::Runtime {
+                    expr: mir::Expr::Error,
+                    ty: TypeId::ERROR,
+                    comptime: Some(ValueId::ERROR),
+                }
+            }
         }
     }
 
