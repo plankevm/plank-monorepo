@@ -120,14 +120,9 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_call_target_not_comptime(&mut self, loc: SrcLoc, name_span: Option<SourceSpan>) {
-        let mut annotations =
-            Annotations::new(loc.source).primary(loc.span, "not known at compile time");
-        if let Some(name_span) = name_span {
-            annotations = annotations.secondary(name_span, "defined here");
-        }
+    pub fn emit_call_target_not_comptime(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("call target must be known at compile time")
-            .element(annotations)
+            .primary(loc.source, loc.span, "not known at compile time")
             .note("function calls are statically dispatched");
         self.session.emit_diagnostic(diagnostic);
     }
@@ -144,14 +139,12 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc, name_span: Option<SourceSpan>) {
-        let mut annotations =
-            Annotations::new(loc.source).primary(loc.span, "not known at compile time");
-        if let Some(name_span) = name_span {
-            annotations = annotations.secondary(name_span, "defined here");
-        }
-        let diagnostic =
-            Diagnostic::error("struct type must be known at compile time").element(annotations);
+    pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("struct type must be known at compile time").primary(
+            loc.source,
+            loc.span,
+            "not known at compile time",
+        );
         self.session.emit_diagnostic(diagnostic);
     }
 

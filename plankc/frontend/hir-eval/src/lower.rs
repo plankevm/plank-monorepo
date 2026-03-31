@@ -90,9 +90,8 @@ impl FunctionLowerScope {
         fields: hir::FieldsId,
     ) -> ExprResult {
         let ty_loc = self.locals.def_loc(ty);
-        let name_span = self.locals.name_span(ty);
         let Some(ty) = self.locals.comptime(ty) else {
-            eval.emit_struct_type_not_comptime(ty_loc, name_span);
+            eval.emit_struct_type_not_comptime(ty_loc);
             return ExprResult::ERROR;
         };
         let Value::Type(ty) = eval.values.lookup(ty) else {
@@ -269,9 +268,8 @@ impl FunctionLowerScope {
             }
             hir::ExprKind::Call { callee, args } => {
                 let callee_loc = self.locals.def_loc(callee);
-                let name_span = self.locals.name_span(callee);
                 let Some(closure) = self.locals.comptime(callee) else {
-                    eval.emit_call_target_not_comptime(callee_loc, name_span);
+                    eval.emit_call_target_not_comptime(callee_loc);
                     return ExprResult::ERROR;
                 };
                 let Value::Closure { fn_def: hir_fn_def_id, .. } = eval.values.lookup(closure)
@@ -411,7 +409,7 @@ impl FunctionLowerScope {
         for (capture_info, &(value, loc)) in hir_captures.iter().zip(captures) {
             let prev = self.interpreter.bindings.insert(capture_info.inner_local, (value, loc));
             assert!(prev.is_none(), "invalid hir");
-            self.locals.set_comptime_only(capture_info.inner_local, value, loc, None);
+            self.locals.set_comptime_only(capture_info.inner_local, value, loc);
         }
         // Interpret type preamble to determine types.
         self.interpreter
@@ -439,7 +437,7 @@ impl FunctionLowerScope {
                     TypeId::ERROR
                 }
             };
-            self.locals.associate_hir_to_new_mir(param.value, ty, param_src_loc, None);
+            self.locals.associate_hir_to_new_mir(param.value, ty, param_src_loc);
         }
 
         let (body, _) = self.translate_block(eval, func.body);
@@ -477,15 +475,12 @@ impl FunctionLowerScope {
     ) -> Result<(), BlockControlFlowDiverges> {
         for &instr in &eval.hir.blocks[block] {
             match instr.kind {
-                hir::InstructionKind::Set { local, r#type, expr, name_span } => {
-                    let src_loc = expr.src_loc();
-                    let name_span = name_span.or_else(|| match expr.kind {
-                        hir::ExprKind::LocalRef(source) => self.locals.name_span(source),
-                        _ => None,
-                    });
+                hir::InstructionKind::Set { local, r#type, expr } => {
+                    let def_loc = instr.loc;
+                    let expr_loc = expr.src_loc();
                     let ty = match self.translate_expr(eval, expr) {
                         ExprResult::Runtime { expr, ty, comptime } => {
-                            match self.locals.set(local, ty, src_loc, comptime, name_span) {
+                            match self.locals.set(local, ty, expr_loc, comptime) {
                                 Ok(target) => {
                                     self.instr_buf_stack
                                         .push(mir::Instruction::Set { target, expr });
@@ -495,14 +490,14 @@ impl FunctionLowerScope {
                                         expected_ty,
                                         self.locals.def_loc(local),
                                         received_ty,
-                                        src_loc,
+                                        expr_loc,
                                     );
                                 }
                             }
                             ty
                         }
                         ExprResult::ComptimeOnly(value) => {
-                            self.locals.set_comptime_only(local, value, src_loc, name_span);
+                            self.locals.set_comptime_only(local, value, def_loc);
                             eval.values.type_of_value(value)
                         }
                     };
@@ -514,7 +509,7 @@ impl FunctionLowerScope {
                                 expected,
                                 self.locals.def_loc(r#type),
                                 ty,
-                                src_loc,
+                                expr_loc,
                             );
                         }
                     }
@@ -546,7 +541,7 @@ impl FunctionLowerScope {
                             }
                         }
                         ExprResult::ComptimeOnly(value) => {
-                            self.locals.set_comptime_only(local, value, src_loc, None)
+                            self.locals.set_comptime_only(local, value, src_loc)
                         }
                     }
                 }

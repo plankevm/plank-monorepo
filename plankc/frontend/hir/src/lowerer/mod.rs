@@ -199,7 +199,7 @@ impl BlockLowerer<'_> {
         let span = expr.span();
         let expr = self.lower_expr(expr);
         let local = self.alloc_temp();
-        self.emit(span, InstructionKind::Set { local, r#type: None, expr, name_span: None });
+        self.emit(span, InstructionKind::Set { local, r#type: None, expr });
         local
     }
 
@@ -391,10 +391,7 @@ impl BlockLowerer<'_> {
                     .unwrap_or_else(|| {
                         let local = self.alloc_temp();
                         let expr = self.expr(ExprKind::Void, struct_def.node().span());
-                        self.emit(
-                            span,
-                            InstructionKind::Set { local, r#type: None, expr, name_span: None },
-                        );
+                        self.emit(span, InstructionKind::Set { local, r#type: None, expr });
                         local
                     });
                 let buf_start = self.field_buf.len();
@@ -552,11 +549,7 @@ impl BlockLowerer<'_> {
                 let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
-                let name_span = Some(self.lexed.tokens_src_span(let_stmt.name_span));
-                self.emit(
-                    let_stmt.value().span(),
-                    InstructionKind::Set { local, r#type, expr, name_span },
-                );
+                self.emit(let_stmt.value().span(), InstructionKind::Set { local, r#type, expr });
             }
             Statement::Expr(expr) => {
                 let span = expr.span();
@@ -651,10 +644,9 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
                         let r#type =
                             const_def.r#type.map(|type_expr| this.lower_expr_to_local(type_expr));
                         let expr = this.lower_expr(const_def.assign);
-                        let name_span = Some(this.lexed.tokens_src_span(const_def.name_span()));
                         this.emit(
-                            const_def.assign.span(),
-                            InstructionKind::Set { local: hir_def.result, r#type, expr, name_span },
+                            const_def.span(),
+                            InstructionKind::Set { local: hir_def.result, r#type, expr },
                         );
                     });
                 }

@@ -1,7 +1,7 @@
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir};
 use plank_mir::{self as mir};
-use plank_session::{SourceSpan, SrcLoc};
+use plank_session::SrcLoc;
 use plank_values::{TypeId, ValueId};
 
 use crate::value::ValueInterner;
@@ -23,7 +23,6 @@ pub(crate) struct TypeUnificationError {
 #[derive(Debug, Default)]
 pub(crate) struct Locals {
     def_loc: DenseIndexMap<hir::LocalId, SrcLoc>,
-    name_span: DenseIndexMap<hir::LocalId, SourceSpan>,
     hir_to_mir: DenseIndexMap<hir::LocalId, mir::LocalId>,
     value: DenseIndexMap<hir::LocalId, ValueId>,
     types: IndexVec<mir::LocalId, TypeId>,
@@ -47,10 +46,6 @@ impl Locals {
         self.def_loc[hir]
     }
 
-    pub fn name_span(&self, hir: hir::LocalId) -> Option<SourceSpan> {
-        self.name_span.get(hir).copied()
-    }
-
     pub fn hir_to_mir(&self, hir: hir::LocalId) -> mir::LocalId {
         self.hir_to_mir[hir]
     }
@@ -68,31 +63,18 @@ impl Locals {
         hir: hir::LocalId,
         ty: TypeId,
         loc: SrcLoc,
-        name_span: Option<SourceSpan>,
     ) -> mir::LocalId {
         let mir = self.types.push(ty);
         assert!(self.hir_to_mir.insert(hir, mir).is_none());
         assert!(self.def_loc.insert(hir, loc).is_none());
-        if let Some(span) = name_span {
-            self.name_span.insert(hir, span);
-        }
         mir
     }
 
-    pub fn set_comptime_only(
-        &mut self,
-        hir: hir::LocalId,
-        value: ValueId,
-        loc: SrcLoc,
-        name_span: Option<SourceSpan>,
-    ) {
+    pub fn set_comptime_only(&mut self, hir: hir::LocalId, value: ValueId, loc: SrcLoc) {
         assert!(!self.hir_to_mir.contains(hir));
         let prev = self.value.insert(hir, value);
         assert!(prev.is_none(), "comptime-only local already set");
         assert!(self.def_loc.insert(hir, loc).is_none());
-        if let Some(span) = name_span {
-            self.name_span.insert(hir, span);
-        }
     }
 
     pub fn set(
@@ -101,7 +83,6 @@ impl Locals {
         ty: TypeId,
         loc: SrcLoc,
         comptime_known: Option<ValueId>,
-        name_span: Option<SourceSpan>,
     ) -> Result<mir::LocalId, TypeMismatchError> {
         let mir = if let Some(&mir) = self.hir_to_mir.get(hir) {
             let expected_ty = self.types[mir];
@@ -110,7 +91,7 @@ impl Locals {
             }
             mir
         } else {
-            self.associate_hir_to_new_mir(hir, ty, loc, name_span)
+            self.associate_hir_to_new_mir(hir, ty, loc)
         };
         if let Some(value) = comptime_known {
             let prev = self.value.insert(hir, value);
@@ -137,7 +118,7 @@ impl Locals {
             assert!(self.value.get(hir).is_none());
             return Ok(mir);
         }
-        Ok(self.associate_hir_to_new_mir(hir, ty, loc, None))
+        Ok(self.associate_hir_to_new_mir(hir, ty, loc))
     }
 
     pub fn handle_assign(

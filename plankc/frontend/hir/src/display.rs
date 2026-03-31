@@ -100,7 +100,7 @@ impl<'a> DisplayHir<'a> {
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         match instr {
-            InstructionKind::Set { local, r#type, expr, .. } => {
+            InstructionKind::Set { local, r#type, expr } => {
                 write!(f, "{pad}")?;
                 self.fmt_local(f, local)?;
                 if let Some(r#type) = r#type {
