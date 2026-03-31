@@ -1846,6 +1846,7 @@ dependencies = [
  "plank-core",
  "sir-assembler",
  "sir-data",
+ "sir-parser",
  "sir-passes",
 ]
 

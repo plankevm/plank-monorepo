@@ -27,21 +27,49 @@ enum StackEntry {
     Intermediate,
 }
 
+enum DispatchMode<'a> {
+    Simulate { needs_spill: &'a mut DenseIndexSet<LocalId> },
+    Emit { asm: &'a mut Assembler, needs_spill: &'a DenseIndexSet<LocalId> },
+}
+
 pub(crate) struct StackMachine {
     stack: Vec<StackEntry>,
     in_memory: DenseIndexSet<LocalId>,
     remap_buf: Vec<LocalId>,
-    _spill_threshold: u8,
+    spill_threshold: u8,
+    #[cfg(debug_assertions)]
+    pub(crate) spill_count: usize,
 }
 
 impl StackMachine {
-    pub fn new(_spill_threshold: u8) -> Self {
+    pub fn new(spill_threshold: u8) -> Self {
         Self {
             stack: Vec::new(),
             in_memory: DenseIndexSet::new(),
             remap_buf: Vec::new(),
-            _spill_threshold,
+            spill_threshold,
+            #[cfg(debug_assertions)]
+            spill_count: 0,
         }
+    }
+
+    /// Runs the simulation pass over operations to identify locals that would be
+    /// unreachable (depth >= threshold) at some use site. Saves and restores self.stack.
+    fn simulate_for_spills<'a>(
+        &mut self,
+        operations: impl Iterator<Item = OperationView<'a>>,
+        ctx: &mut TranslationContext,
+    ) -> DenseIndexSet<LocalId> {
+        let saved_stack = self.stack.clone();
+        let mut needs_spill = DenseIndexSet::new();
+        {
+            let mut mode = DispatchMode::Simulate { needs_spill: &mut needs_spill };
+            for op_view in operations {
+                self.dispatch_operation(op_view, &mut mode, ctx);
+            }
+        }
+        self.stack = saved_stack;
+        needs_spill
     }
 
     fn set_stack_from_layout(
@@ -68,21 +96,52 @@ impl StackMachine {
     }
 
     /// DUPs `local` to the top of the stack, or loads it from memory if spilled.
+    /// In Simulate mode, flags locals that would be unreachable (depth >= threshold).
     /// Dead copies remain until `arrange_stack_to_layout` cleans them up at block end.
-    fn prepare_input(&mut self, local: LocalId, asm: &mut Assembler, ctx: &TranslationContext) {
+    fn prepare_input(&mut self, local: LocalId, mode: &mut DispatchMode, ctx: &TranslationContext) {
         let depth = self.stack.iter().rev().position(|&e| e == StackEntry::Local(local));
+        let threshold = self.spill_threshold as usize;
         match depth {
-            Some(d) if d < 16 => {
-                asm.push_op_byte(op::dup_n(d as u8 + 1));
-                self.stack.push(StackEntry::Local(local));
+            Some(d) if d < threshold => {
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_op_byte(op::dup_n(d as u8 + 1));
+                }
             }
-            _ => {
-                assert!(
-                    self.in_memory.contains(local),
-                    "local {local} is not reachable on stack or in memory"
-                );
-                ctx.memory_layout.emit_local_load(asm, local);
-                self.stack.push(StackEntry::Local(local));
+            _ => match mode {
+                DispatchMode::Simulate { needs_spill } => {
+                    needs_spill.add(local);
+                }
+                DispatchMode::Emit { asm, .. } => {
+                    assert!(
+                        self.in_memory.contains(local),
+                        "local {local} is not reachable on stack or in memory"
+                    );
+                    ctx.memory_layout.emit_local_load(asm, local);
+                }
+            },
+        }
+        self.stack.push(StackEntry::Local(local));
+    }
+
+    /// Pushes a local onto the symbolic stack. In Emit mode, if the local is in
+    /// the spill set, emits DUP1 + MSTORE to back it to memory while keeping it
+    /// on the stack.
+    fn push_local(
+        &mut self,
+        local: LocalId,
+        mode: &mut DispatchMode,
+        memory_layout: &StaticMemoryLayout,
+    ) {
+        self.stack.push(StackEntry::Local(local));
+        if let DispatchMode::Emit { asm, needs_spill } = mode
+            && needs_spill.contains(local)
+        {
+            asm.push_op_byte(op::DUP1);
+            memory_layout.emit_local_store(asm, local);
+            self.in_memory.add(local);
+            #[cfg(debug_assertions)]
+            {
+                self.spill_count += 1;
             }
         }
     }
@@ -93,22 +152,24 @@ impl StackMachine {
     fn emit_standard_op(
         &mut self,
         op_view: OperationView,
-        asm: &mut Assembler,
+        mode: &mut DispatchMode,
         ctx: &TranslationContext,
     ) {
         let inputs = op_view.inputs();
         for input in inputs.iter().rev() {
-            self.prepare_input(*input, asm, ctx);
+            self.prepare_input(*input, mode, ctx);
         }
 
-        let evm_op =
-            op_kind_to_direct_op(op_view.op().kind()).expect("standard op has direct EVM mapping");
-        asm.push_op_byte(evm_op);
+        if let DispatchMode::Emit { asm, .. } = mode {
+            let evm_op = op_kind_to_direct_op(op_view.op().kind())
+                .expect("standard op has direct EVM mapping");
+            asm.push_op_byte(evm_op);
+        }
 
         self.stack.truncate(self.stack.len() - inputs.len());
 
         for output in op_view.outputs() {
-            self.stack.push(StackEntry::Local(*output));
+            self.push_local(*output, mode, ctx.memory_layout);
         }
     }
 
@@ -122,8 +183,30 @@ impl StackMachine {
         let block = ctx.ir.block(bb_id);
         self.set_stack_from_layout(bb_id, block.inputs(), ctx);
 
-        for op_view in block.operations() {
-            self.dispatch_operation(op_view, asm, ctx);
+        let needs_spill = self.simulate_for_spills(block.operations(), ctx);
+
+        // Spill layout values that the simulation flagged (they're on stack from block entry)
+        for i in 0..self.stack.len() {
+            if let StackEntry::Local(local) = self.stack[i]
+                && needs_spill.contains(local)
+            {
+                let depth = self.stack.len() - 1 - i;
+                assert!(
+                    depth < self.spill_threshold as usize,
+                    "layout value at depth >= spill_threshold cannot be spilled at block entry"
+                );
+                asm.push_op_byte(op::dup_n(depth as u8 + 1));
+                ctx.memory_layout.emit_local_store(asm, local);
+                self.in_memory.add(local);
+            }
+        }
+
+        // Pass 2: codegen with spill stores
+        {
+            let mut mode = DispatchMode::Emit { asm: &mut *asm, needs_spill: &needs_spill };
+            for op_view in block.operations() {
+                self.dispatch_operation(op_view, &mut mode, ctx);
+            }
         }
 
         let control = block.control();
@@ -302,96 +385,119 @@ impl StackMachine {
     fn dispatch_operation(
         &mut self,
         op_view: OperationView,
-        asm: &mut Assembler,
+        mode: &mut DispatchMode,
         ctx: &mut TranslationContext,
     ) {
         let op = op_view.op();
         match op {
             // Constants: 0 in, 1 out, push a value
             Operation::SetSmallConst(data) => {
-                asm.push_minimal_u32(data.value);
-                self.stack.push(StackEntry::Local(data.sets));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_minimal_u32(data.value);
+                }
+                self.push_local(data.sets, mode, ctx.memory_layout);
             }
             Operation::SetLargeConst(data) => {
-                asm.push_minimal_u256(ctx.ir.large_consts[data.value]);
-                self.stack.push(StackEntry::Local(data.sets));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_minimal_u256(ctx.ir.large_consts[data.value]);
+                }
+                self.push_local(data.sets, mode, ctx.memory_layout);
             }
             Operation::SetDataOffset(data) => {
-                let data_mark = ctx.mark_map.get_data_mark(data.segment_id);
-                ctx.mark_map.emit_code_offset_push(asm, data_mark);
-                self.stack.push(StackEntry::Local(data.sets));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    let data_mark = ctx.mark_map.get_data_mark(data.segment_id);
+                    ctx.mark_map.emit_code_offset_push(asm, data_mark);
+                }
+                self.push_local(data.sets, mode, ctx.memory_layout);
             }
             Operation::RuntimeStartOffset(data) => {
                 debug_assert!(
                     ctx.mark_map.phase() == TranslationPhase::Init,
                     "unexpected runtime_start_offset in run code"
                 );
-                asm.push_reference(AsmReference::new_direct(ctx.mark_map.runtime_start));
-                self.stack.push(StackEntry::Local(data.outs[0]));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_reference(AsmReference::new_direct(ctx.mark_map.runtime_start));
+                }
+                self.push_local(data.outs[0], mode, ctx.memory_layout);
             }
             Operation::InitEndOffset(data) => {
                 debug_assert!(
                     ctx.mark_map.phase() == TranslationPhase::Init,
                     "unexpected init_end_offset in run code"
                 );
-                asm.push_reference(AsmReference::new_direct(ctx.mark_map.initcode_end));
-                self.stack.push(StackEntry::Local(data.outs[0]));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_reference(AsmReference::new_direct(ctx.mark_map.initcode_end));
+                }
+                self.push_local(data.outs[0], mode, ctx.memory_layout);
             }
             Operation::RuntimeLength(data) => {
-                asm.push_reference(AsmReference::new_delta(
-                    ctx.mark_map.runtime_start,
-                    ctx.mark_map.initcode_end,
-                ));
-                self.stack.push(StackEntry::Local(data.outs[0]));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_reference(AsmReference::new_delta(
+                        ctx.mark_map.runtime_start,
+                        ctx.mark_map.initcode_end,
+                    ));
+                }
+                self.push_local(data.outs[0], mode, ctx.memory_layout);
             }
 
             // Memory: allocation and memory I/O
             Operation::AcquireFreePointer(InlineOperands { ins: [], outs: [dst] }) => {
-                ctx.memory_layout.emit_free_ptr_load(asm);
-                self.stack.push(StackEntry::Local(dst));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    ctx.memory_layout.emit_free_ptr_load(asm);
+                }
+                self.push_local(dst, mode, ctx.memory_layout);
             }
 
             Operation::MemoryLoad(data) => {
-                let load_size = data.size as u32;
-                self.prepare_input(data.ptr, asm, ctx);
+                self.prepare_input(data.ptr, mode, ctx);
                 // evm: [ptr]                                   symbolic: [ptr]
                 self.stack.pop();
-                asm.push_op_byte(op::MLOAD);
-                // evm: [raw_word]                              symbolic: []
-                asm.push_minimal_u32(256 - load_size * 8);
-                asm.push_op_byte(op::SHR);
-                self.stack.push(StackEntry::Local(data.out));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    let load_size = data.size as u32;
+                    asm.push_op_byte(op::MLOAD);
+                    // evm: [raw_word]                              symbolic: []
+                    asm.push_minimal_u32(256 - load_size * 8);
+                    asm.push_op_byte(op::SHR);
+                }
+                self.push_local(data.out, mode, ctx.memory_layout);
                 // evm: [value]                                 symbolic: [out]
             }
             Operation::MemoryStore(data) => {
-                let load_size = data.size as u32;
-                let shift_to_clean_word = load_size * 8;
-                self.prepare_input(data.ptr(), asm, ctx);
+                self.prepare_input(data.ptr(), mode, ctx);
                 // evm: [ptr]                                   symbolic: [ptr]
-                asm.push_op_byte(op::DUP1);
-                // evm: [ptr, ptr]                              symbolic: [ptr]
-                asm.push_op_byte(op::MLOAD);
-                // evm: [current_word, ptr]                     symbolic: [ptr]
-                asm.push_minimal_u32(shift_to_clean_word);
-                asm.push_op_byte(op::SHL);
-                // evm: [current_word << shift, ptr]            symbolic: [ptr]
-                asm.push_minimal_u32(shift_to_clean_word);
-                asm.push_op_byte(op::SHR);
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    let load_size = data.size as u32;
+                    let shift_to_clean_word = load_size * 8;
+                    asm.push_op_byte(op::DUP1);
+                    // evm: [ptr, ptr]                              symbolic: [ptr]
+                    asm.push_op_byte(op::MLOAD);
+                    // evm: [current_word, ptr]                     symbolic: [ptr]
+                    asm.push_minimal_u32(shift_to_clean_word);
+                    asm.push_op_byte(op::SHL);
+                    // evm: [current_word << shift, ptr]            symbolic: [ptr]
+                    asm.push_minimal_u32(shift_to_clean_word);
+                    asm.push_op_byte(op::SHR);
+                }
                 self.stack.push(StackEntry::Intermediate);
                 // evm: [cleaned_word, ptr]                     symbolic: [Intermediate, ptr]
-                self.prepare_input(data.value(), asm, ctx);
+                self.prepare_input(data.value(), mode, ctx);
                 // evm: [value, cleaned_word, ptr]              symbolic: [value, Intermediate, ptr]
-                asm.push_minimal_u32(256 - load_size * 8);
-                asm.push_op_byte(op::SHL);
-                // evm: [shifted_value, cleaned_word, ptr]      symbolic: [value, Intermediate, ptr]
-                asm.push_op_byte(op::OR);
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    let load_size = data.size as u32;
+                    asm.push_minimal_u32(256 - load_size * 8);
+                    asm.push_op_byte(op::SHL);
+                    // evm: [shifted_value, cleaned_word, ptr]      symbolic: [value, Intermediate, ptr]
+                    asm.push_op_byte(op::OR);
+                }
                 self.stack.pop(); // value
                 self.stack.pop(); // Intermediate
                 self.stack.push(StackEntry::Intermediate); // updated_word
                 // evm: [updated_word, ptr]                     symbolic: [Intermediate, ptr]
-                asm.push_op_byte(op::SWAP1);
-                // evm: [ptr, updated_word]                     symbolic: [Intermediate, ptr]
-                asm.push_op_byte(op::MSTORE);
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_op_byte(op::SWAP1);
+                    // evm: [ptr, updated_word]                     symbolic: [Intermediate, ptr]
+                    asm.push_op_byte(op::MSTORE);
+                }
                 self.stack.pop(); // Intermediate
                 self.stack.pop(); // ptr
                 // evm: []                                      symbolic: []
@@ -399,49 +505,57 @@ impl StackMachine {
 
             Operation::DynamicAllocZeroed(InlineOperands { ins: [size], outs: [ptr_out] })
             | Operation::DynamicAllocAnyBytes(InlineOperands { ins: [size], outs: [ptr_out] }) => {
-                ctx.memory_layout.emit_free_ptr_load(asm);
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    ctx.memory_layout.emit_free_ptr_load(asm);
+                }
                 self.stack.push(StackEntry::Intermediate);
                 // evm: [free_ptr]                                    symbolic: [Intermediate]
-                asm.push_op_byte(op::DUP1);
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_op_byte(op::DUP1);
+                }
                 self.stack.push(StackEntry::Intermediate);
                 // evm: [free_ptr, free_ptr]                          symbolic: [Intermediate, Intermediate]
-                self.prepare_input(size, asm, ctx);
+                self.prepare_input(size, mode, ctx);
                 // evm: [size, free_ptr, free_ptr]                    symbolic: [size, Intermediate, Intermediate]
-                asm.push_op_byte(op::DUP1);
-                asm.push_op_byte(op::CALLDATASIZE);
-                asm.push_op_byte(op::DUP4);
-                asm.push_op_byte(op::CALLDATACOPY);
-                // evm: [size, free_ptr, free_ptr]                    symbolic: [size, Intermediate, Intermediate]
-                asm.push_op_byte(op::ADD);
-                // evm: [free_ptr', free_ptr]                         symbolic: [size, Intermediate, Intermediate]
-                asm.push_minimal_u32(ctx.memory_layout.free_pointer);
-                asm.push_op_byte(op::MSTORE);
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    asm.push_op_byte(op::DUP1);
+                    asm.push_op_byte(op::CALLDATASIZE);
+                    asm.push_op_byte(op::DUP4);
+                    asm.push_op_byte(op::CALLDATACOPY);
+                    // evm: [size, free_ptr, free_ptr]                    symbolic: [size, Intermediate, Intermediate]
+                    asm.push_op_byte(op::ADD);
+                    // evm: [free_ptr', free_ptr]                         symbolic: [size, Intermediate, Intermediate]
+                    asm.push_minimal_u32(ctx.memory_layout.free_pointer);
+                    asm.push_op_byte(op::MSTORE);
+                }
                 // evm: [free_ptr]                                    symbolic: [size, Intermediate, Intermediate]
                 self.stack.pop(); // size
                 self.stack.pop(); // Intermediate
                 self.stack.pop(); // Intermediate
-                self.stack.push(StackEntry::Local(ptr_out));
+                self.push_local(ptr_out, mode, ctx.memory_layout);
                 // evm: [free_ptr]                                    symbolic: [ptr_out]
             }
             Operation::StaticAllocZeroed(data)
             | Operation::StaticAllocAnyBytes(data) => {
-                ctx.memory_layout.emit_free_ptr_load(asm);
-                // evm: [free_ptr]
-                asm.push_op_byte(op::DUP1);
-                // evm: [free_ptr, free_ptr]
-                asm.push_minimal_u32(data.size);
-                // evm: [size, free_ptr, free_ptr]
-                asm.push_op_byte(op::DUP1);
-                asm.push_op_byte(op::CALLDATASIZE);
-                asm.push_op_byte(op::DUP4);
-                asm.push_op_byte(op::CALLDATACOPY);
-                // evm: [size, free_ptr, free_ptr]
-                asm.push_op_byte(op::ADD);
-                // evm: [free_ptr', free_ptr]
-                asm.push_minimal_u32(ctx.memory_layout.free_pointer);
-                asm.push_op_byte(op::MSTORE);
-                // evm: [free_ptr]
-                self.stack.push(StackEntry::Local(data.ptr_out));
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    ctx.memory_layout.emit_free_ptr_load(asm);
+                    // evm: [free_ptr]
+                    asm.push_op_byte(op::DUP1);
+                    // evm: [free_ptr, free_ptr]
+                    asm.push_minimal_u32(data.size);
+                    // evm: [size, free_ptr, free_ptr]
+                    asm.push_op_byte(op::DUP1);
+                    asm.push_op_byte(op::CALLDATASIZE);
+                    asm.push_op_byte(op::DUP4);
+                    asm.push_op_byte(op::CALLDATACOPY);
+                    // evm: [size, free_ptr, free_ptr]
+                    asm.push_op_byte(op::ADD);
+                    // evm: [free_ptr', free_ptr]
+                    asm.push_minimal_u32(ctx.memory_layout.free_pointer);
+                    asm.push_op_byte(op::MSTORE);
+                    // evm: [free_ptr]
+                }
+                self.push_local(data.ptr_out, mode, ctx.memory_layout);
                 // evm: [free_ptr]                                    symbolic: [ptr_out]
             }
 
@@ -449,49 +563,47 @@ impl StackMachine {
                 let inputs = data.get_inputs(ctx.ir);
                 let outputs = data.get_outputs(ctx.ir);
 
-                // Push call args onto the stack
                 for input in inputs.iter().rev() {
-                    self.prepare_input(*input, asm, ctx);
+                    self.prepare_input(*input, mode, ctx);
                 }
                 // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
 
-                // Store return address to memory
-                let return_mark = ctx.mark_map.allocate_mark();
-                let return_store_loc = ctx.memory_layout.get_return_dest_store(data.function);
-                ctx.mark_map.emit_code_offset_push(asm, return_mark);
-                asm.push_minimal_u32(return_store_loc);
-                asm.push_op_byte(op::MSTORE);
-                // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
+                if let DispatchMode::Emit { asm, .. } = mode {
+                    // Store return address to memory
+                    let return_mark = ctx.mark_map.allocate_mark();
+                    let return_store_loc = ctx.memory_layout.get_return_dest_store(data.function);
+                    ctx.mark_map.emit_code_offset_push(asm, return_mark);
+                    asm.push_minimal_u32(return_store_loc);
+                    asm.push_op_byte(op::MSTORE);
 
-                // Jump to callee entry
-                let func_entry_bb = ctx.ir.function(data.function).entry().id();
-                let func_entry_bb_mark = ctx.mark_map.get_bb_mark(func_entry_bb);
-                ctx.mark_map.emit_code_offset_push(asm, func_entry_bb_mark);
-                asm.push_op_byte(op::JUMP);
-                // evm: [arg1, ..., argN]                      symbolic: [arg1, ..., argN]
+                    // Jump to callee entry
+                    let func_entry_bb = ctx.ir.function(data.function).entry().id();
+                    let func_entry_bb_mark = ctx.mark_map.get_bb_mark(func_entry_bb);
+                    ctx.mark_map.emit_code_offset_push(asm, func_entry_bb_mark);
+                    asm.push_op_byte(op::JUMP);
 
-                // Return lands here
-                asm.push_mark(return_mark);
-                asm.push_op_byte(op::JUMPDEST);
-                // evm: [out1, ..., outM]                      symbolic: [arg1, ..., argN]
+                    // Return lands here
+                    asm.push_mark(return_mark);
+                    asm.push_op_byte(op::JUMPDEST);
+
+                    // Enqueue callee for translation
+                    ctx.bbs_to_be_translated.push((data.function, func_entry_bb));
+                }
 
                 // Update symbolic stack: pop args, push outputs
                 for _ in inputs {
                     self.stack.pop();
                 }
                 for output in outputs {
-                    self.stack.push(StackEntry::Local(*output));
+                    self.push_local(*output, mode, ctx.memory_layout);
                 }
                 // evm: [out1, ..., outM]                      symbolic: [out1, ..., outM]
-
-                // Enqueue callee for translation
-                ctx.bbs_to_be_translated.push((data.function, func_entry_bb));
             }
 
             Operation::SetCopy(InlineOperands { ins: [src], outs: [dst] }) => {
-                self.prepare_input(src, asm, ctx);
+                self.prepare_input(src, mode, ctx);
                 self.stack.pop();
-                self.stack.push(StackEntry::Local(dst));
+                self.push_local(dst, mode, ctx.memory_layout);
             }
 
             Operation::Noop(_) => {}
@@ -577,7 +689,7 @@ impl StackMachine {
             | Operation::Stop(_)
             | Operation::Revert(_)
             | Operation::Invalid(_)
-            | Operation::SelfDestruct(_) => self.emit_standard_op(op_view, asm, ctx),
+            | Operation::SelfDestruct(_) => self.emit_standard_op(op_view, mode, ctx),
         }
     }
 }

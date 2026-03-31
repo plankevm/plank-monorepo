@@ -233,3 +233,56 @@ pub fn ir_to_bytecode(ir: &EthIRProgram, store: &AnalysesStore, result: &mut Vec
         .assemble(result, Some(translator.mark_map.next_mark_id.get() as usize))
         .expect("debug backend produces valid assembly");
 }
+
+#[cfg(test)]
+fn ir_to_bytecode_spill_count(
+    ir: &EthIRProgram,
+    store: &AnalysesStore,
+    result: &mut Vec<u8>,
+) -> usize {
+    let local_liveness = store.local_liveness(ir);
+    let predecessors = store.predecessors(ir);
+    let bundling = store.cfg_in_out_bundling(ir);
+    let group_layouts = compute_group_layouts(ir, &bundling, &local_liveness);
+    let mut translator = Translator::new(ir, DEFAULT_SPILL_THRESHOLD);
+
+    translator.memory_layout.emit_init_free_pointer(&mut translator.asm);
+    translator.translate_basic_blocks_from_entry_point(
+        ir.init_entry,
+        &predecessors,
+        &bundling,
+        &group_layouts,
+    );
+
+    translator.translated_bbs.clear();
+    translator.mark_map.set_phase(TranslationPhase::Runtime);
+    translator.asm.push_mark(translator.mark_map.runtime_start);
+    if let Some(main_entry) = ir.main_entry {
+        translator.translate_basic_blocks_from_entry_point(
+            main_entry,
+            &predecessors,
+            &bundling,
+            &group_layouts,
+        );
+    }
+
+    for (data_id, bytes) in ir.data_segments.enumerate_idx() {
+        let mark = translator.mark_map.get_data_mark(data_id);
+        translator.asm.push_mark(mark);
+        translator.asm.push_data(bytes);
+    }
+
+    translator.asm.push_mark(translator.mark_map.initcode_end);
+
+    let spill_count = translator.stack_machine.spill_count;
+
+    let _mark_to_offset = translator
+        .asm
+        .assemble(result, Some(translator.mark_map.next_mark_id.get() as usize))
+        .expect("debug backend produces valid assembly");
+
+    spill_count
+}
+
+#[cfg(test)]
+mod tests;

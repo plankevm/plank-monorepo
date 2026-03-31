@@ -53,7 +53,7 @@ impl StaticMemoryLayout {
         asm.push_op_byte(op::MLOAD);
     }
 
-    pub fn _emit_local_store(&self, asm: &mut Assembler, local: LocalId) {
+    pub fn emit_local_store(&self, asm: &mut Assembler, local: LocalId) {
         asm.push_minimal_u32(self.get_local_addr(local));
         asm.push_op_byte(op::MSTORE);
     }
