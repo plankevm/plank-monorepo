@@ -112,14 +112,9 @@ impl Evaluator<'_> {
         call_loc: SrcLoc,
         def_loc: SrcLoc,
     ) {
-        let call_label = format!(
-            "expected {expected} {}, got {actual}",
-            if expected == 1 { "argument" } else { "arguments" },
-        );
-        let def_label = format!(
-            "defined with {expected} {}",
-            if expected == 1 { "parameter" } else { "parameters" },
-        );
+        let s = if expected == 1 { "" } else { "s" };
+        let call_label = format!("expected {expected} argument{s}, got {actual}");
+        let def_label = format!("defined with {expected} parameter{s}");
         let diagnostic = Diagnostic::error("wrong number of arguments")
             .cross_source_annotations(call_loc, call_label, def_loc, def_label);
         self.session.emit_diagnostic(diagnostic);
@@ -137,12 +132,12 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_closure_capture_not_comptime(&mut self, closure_loc: SrcLoc, capture_loc: SrcLoc) {
+    pub fn emit_closure_capture_not_comptime(&mut self, use_loc: SrcLoc, def_loc: SrcLoc) {
         let diagnostic = Diagnostic::error("closure capture must be known at compile time")
             .cross_source_annotations(
-                closure_loc,
-                "closure captures a runtime value",
-                capture_loc,
+                use_loc,
+                "captures a runtime value",
+                def_loc,
                 "not known at compile time",
             )
             .note("closures can only capture values known at compile time");

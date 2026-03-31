@@ -95,6 +95,7 @@ pub struct ParamInfo {
 pub struct CaptureInfo {
     pub outer_local: LocalId,
     pub inner_local: LocalId,
+    pub use_span: SourceSpan,
 }
 
 #[derive(Debug, Clone, Copy)]

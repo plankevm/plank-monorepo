@@ -239,6 +239,7 @@ impl<'a> Parser<'a> {
         let idx = self.nodes.push(Node {
             kind,
             tokens: Span::new(start, start),
+            content_start: self.tokens.content_start(start),
             next_sibling: None,
             first_child: None,
         });
@@ -246,9 +247,11 @@ impl<'a> Parser<'a> {
     }
 
     fn alloc_node(&mut self, kind: NodeKind) -> UnfinishedNode {
+        let current = self.tokens.current();
         let idx = self.nodes.push(Node {
             kind,
-            tokens: Span::new(self.tokens.current(), self.tokens.current()),
+            tokens: Span::new(current, current),
+            content_start: self.tokens.content_start(current),
             next_sibling: None,
             first_child: None,
         });

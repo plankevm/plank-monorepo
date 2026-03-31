@@ -192,7 +192,7 @@ impl BlockLowerer<'_> {
     }
 
     fn expr(&self, kind: ExprKind, span: Span<TokenIdx>) -> Expr {
-        Expr { source_id: self.source_id, kind, span: self.lexed.tokens_content_src_span(span) }
+        Expr { source_id: self.source_id, kind, span: self.lexed.tokens_src_span(span) }
     }
 
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
@@ -274,7 +274,7 @@ impl BlockLowerer<'_> {
         Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
     }
 
-    fn lookup_capture(&mut self, name: StrId) -> Option<LocalId> {
+    fn lookup_capture(&mut self, name: StrId, use_span: Span<TokenIdx>) -> Option<LocalId> {
         let outer_local =
             Self::find_in_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?.id;
 
@@ -284,13 +284,14 @@ impl BlockLowerer<'_> {
             }
         }
 
+        let use_span = self.lexed.tokens_src_span(use_span);
         let inner_local = self.alloc_anonymous_local(name);
-        self.captures_buf.push(CaptureInfo { outer_local, inner_local });
+        self.captures_buf.push(CaptureInfo { outer_local, inner_local, use_span });
         Some(inner_local)
     }
 
     fn emit(&mut self, span: Span<TokenIdx>, kind: InstructionKind) {
-        let span = self.lexed.tokens_content_src_span(span);
+        let span = self.lexed.tokens_src_span(span);
         self.instructions_buf.push(Instruction { loc: SrcLoc::new(self.source_id, span), kind });
     }
 
@@ -312,7 +313,7 @@ impl BlockLowerer<'_> {
             return ExprKind::LocalRef(entry.id);
         }
 
-        if let Some(capture_local) = self.lookup_capture(name) {
+        if let Some(capture_local) = self.lookup_capture(name, span) {
             return ExprKind::LocalRef(capture_local);
         }
 
@@ -466,7 +467,7 @@ impl BlockLowerer<'_> {
 
         let body = self.lower_fn_body_block(fn_def.body());
         let param_list = fn_def.node().child(0).expect("FnDef missing ParamList");
-        let param_list_span = self.lexed.tokens_content_src_span(param_list.span());
+        let param_list_span = self.lexed.tokens_src_span(param_list.span());
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,

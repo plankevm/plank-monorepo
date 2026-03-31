@@ -37,7 +37,8 @@ enum ExprResult {
 }
 
 impl ExprResult {
-    const ERROR: Self = Self::Runtime { expr: mir::Expr::Error, ty: TypeId::ERROR, comptime: None };
+    const ERROR: Self =
+        Self::Runtime { expr: mir::Expr::Error, ty: TypeId::ERROR, comptime: Some(ValueId::ERROR) };
 }
 
 struct BlockControlFlowDiverges;
@@ -251,8 +252,9 @@ impl FunctionLowerScope {
                 assert!(self.captures_buf.is_empty());
                 for capture in captures {
                     let vid = self.locals.comptime(capture.outer_local).unwrap_or_else(|| {
+                        let use_loc = SrcLoc::new(expr.source_id, capture.use_span);
                         eval.emit_closure_capture_not_comptime(
-                            expr.src_loc(),
+                            use_loc,
                             self.locals.def_loc(capture.outer_local),
                         );
                         ValueId::ERROR

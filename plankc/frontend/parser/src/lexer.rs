@@ -362,15 +362,6 @@ impl Lexed {
         Span::new(start, end)
     }
 
-    /// Like `tokens_src_span` but skips leading trivia tokens.
-    pub fn tokens_content_src_span(&self, tokens: Span<TokenIdx>) -> Span<SourceByteOffset> {
-        let mut start = tokens.start;
-        while start < tokens.end && self.tokens[start].is_trivia() {
-            start += 1;
-        }
-        self.tokens_src_span(Span::new(start, tokens.end))
-    }
-
     pub fn token_src_span(&self, index: TokenIdx) -> Span<SourceByteOffset> {
         let start = self.token_src_start(index);
         Span::new(start, self.source_ends[index])

@@ -1154,12 +1154,12 @@ fn test_closure_capture_not_comptime() {
         "#,
         &[r#"
         error: closure capture must be known at compile time
-         --> main.plk:3:13
+         --> main.plk:3:25
           |
         2 |     let x = calldataload(0);
           |             --------------- not known at compile time
         3 |     let f = fn() u256 { x };
-          |             ^^^^^^^^^^^^^^^ closure captures a runtime value
+          |                         ^ captures a runtime value
           |
           = note: closures can only capture values known at compile time
         "#],

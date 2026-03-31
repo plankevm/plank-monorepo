@@ -12,12 +12,21 @@ newtype_index! {
 #[derive(Debug, Clone, Copy)]
 pub struct Node {
     pub kind: NodeKind,
+    /// Full token range including leading trivia. Used for CST tree structure.
     pub tokens: Span<TokenIdx>,
+    /// Token range starting at first non-trivia token. Used for source locations.
+    pub content_start: TokenIdx,
     pub next_sibling: Option<NodeIdx>,
     pub first_child: Option<NodeIdx>,
 }
 
-const _ASSERT_NODE_SIZE: () = const_assert_eq(std::mem::size_of::<Node>(), 24);
+impl Node {
+    pub fn content_span(&self) -> Span<TokenIdx> {
+        Span::new(self.content_start, self.tokens.end)
+    }
+}
+
+const _ASSERT_NODE_SIZE: () = const_assert_eq(std::mem::size_of::<Node>(), 28);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
@@ -218,7 +227,7 @@ impl<'cst> NodeView<'cst> {
     }
 
     pub fn span(self) -> Span<TokenIdx> {
-        self.node().tokens
+        self.node().content_span()
     }
 
     pub fn idx(self) -> NodeIdx {
