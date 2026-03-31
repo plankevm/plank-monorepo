@@ -42,7 +42,10 @@ impl<'cst> Expr<'cst> {
                     view = view.child(0)?;
                     continue;
                 }
-                NodeKind::BinaryExpr(op) => Expr::Binary(BinaryExpr { op, view }),
+                NodeKind::BinaryExpr(op) => {
+                    let op_span = view.child(1)?.span();
+                    Expr::Binary(BinaryExpr { op, op_span, view })
+                }
                 NodeKind::UnaryExpr(op) => Expr::Unary(UnaryExpr { op, view }),
                 NodeKind::CallExpr => Expr::Call(CallExpr { view }),
                 NodeKind::MemberExpr => match MemberExpr::new(view) {
@@ -51,8 +54,15 @@ impl<'cst> Expr<'cst> {
                 },
                 NodeKind::StructDef => Expr::StructDef(StructDef { view }),
                 NodeKind::StructLit => Expr::StructLit(StructLit { view }),
-                NodeKind::If => Expr::If(IfExpr { view }),
-                NodeKind::FnDef => Expr::FnDef(FnDef { view }),
+                NodeKind::If => {
+                    let body_node = view.child(1)?;
+                    Expr::If(IfExpr { body_node, view })
+                }
+                NodeKind::FnDef => {
+                    let param_list = view.child(0)?;
+                    let body_node = view.child(2)?;
+                    Expr::FnDef(FnDef { param_list, body_node, view })
+                }
                 NodeKind::Block => Expr::Block(BlockExpr { view }),
                 NodeKind::ComptimeBlock => Expr::ComptimeBlock(BlockExpr { view }),
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral { value, span },
@@ -90,6 +100,7 @@ impl<'cst> Expr<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct BinaryExpr<'cst> {
     pub op: BinaryOp,
+    op_span: Span<TokenIdx>,
     view: NodeView<'cst>,
 }
 
@@ -99,7 +110,7 @@ impl<'cst> BinaryExpr<'cst> {
     }
 
     pub fn op_span(&self) -> Span<TokenIdx> {
-        self.view.child(1).expect("BinaryExpr must have operator child").span()
+        self.op_span
     }
 
     pub fn rhs(&self) -> Expr<'cst> {
@@ -152,6 +163,7 @@ impl<'cst> CallExpr<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct MemberExpr<'cst> {
     pub member: StrId,
+    member_span: Span<TokenIdx>,
     view: NodeView<'cst>,
 }
 
@@ -160,12 +172,17 @@ impl<'cst> MemberExpr<'cst> {
         if view.kind() != NodeKind::MemberExpr {
             return None;
         }
-        let member = view.child(1).and_then(NodeView::ident)?;
-        Some(Self { member, view })
+        let member_node = view.child(1)?;
+        let member = member_node.ident()?;
+        Some(Self { member, member_span: member_node.span(), view })
     }
 
     pub fn object(&self) -> Expr<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
+    }
+
+    pub fn member_span(&self) -> Span<TokenIdx> {
+        self.member_span
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -201,6 +218,7 @@ impl<'cst> StructDef<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldDef<'cst> {
     pub name: StrId,
+    pub name_span: Span<TokenIdx>,
     view: NodeView<'cst>,
 }
 
@@ -208,8 +226,9 @@ impl<'cst> FieldDef<'cst> {
     fn new(view: NodeView<'cst>) -> Option<Self> {
         match view.kind() {
             NodeKind::FieldDef => {
-                let name = view.child(0).and_then(|v| v.kind().as_ident())?;
-                Some(Self { name, view })
+                let name_node = view.child(0)?;
+                let name = name_node.kind().as_ident()?;
+                Some(Self { name, name_span: name_node.span(), view })
             }
             _ => None,
         }
@@ -217,6 +236,10 @@ impl<'cst> FieldDef<'cst> {
 
     pub fn type_expr(&self) -> Expr<'cst> {
         self.view.child(1).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
+    }
+
+    pub fn name_span(&self) -> Span<TokenIdx> {
+        self.name_span
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -248,6 +271,7 @@ impl<'cst> StructLit<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldAssign<'cst> {
     pub name: StrId,
+    pub name_span: Span<TokenIdx>,
     view: NodeView<'cst>,
 }
 
@@ -255,8 +279,9 @@ impl<'cst> FieldAssign<'cst> {
     fn new(view: NodeView<'cst>) -> Option<Self> {
         match view.kind() {
             NodeKind::FieldAssign => {
-                let name = view.child(0).and_then(|v| v.kind().as_ident())?;
-                Some(Self { name, view })
+                let name_node = view.child(0)?;
+                let name = name_node.kind().as_ident()?;
+                Some(Self { name, name_span: name_node.span(), view })
             }
             _ => None,
         }
@@ -264,6 +289,10 @@ impl<'cst> FieldAssign<'cst> {
 
     pub fn value(&self) -> Expr<'cst> {
         self.view.child(1).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
+    }
+
+    pub fn name_span(&self) -> Span<TokenIdx> {
+        self.name_span
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -274,6 +303,7 @@ impl<'cst> FieldAssign<'cst> {
 /// If expression: `if condition { body } else if ... else { ... }`
 #[derive(Debug, Clone, Copy)]
 pub struct IfExpr<'cst> {
+    body_node: NodeView<'cst>,
     view: NodeView<'cst>,
 }
 
@@ -283,8 +313,7 @@ impl<'cst> IfExpr<'cst> {
     }
 
     pub fn body(&self) -> BlockExpr<'cst> {
-        let child = self.view.child(1).expect("If must have body child");
-        BlockExpr::new(child)
+        BlockExpr::new(self.body_node)
     }
 
     /// Returns an iterator over the else-if branches.
@@ -306,13 +335,17 @@ impl<'cst> IfExpr<'cst> {
 /// An else-if branch: `else if condition { body }`
 #[derive(Debug, Clone, Copy)]
 pub struct ElseIfBranch<'cst> {
+    body_node: NodeView<'cst>,
     view: NodeView<'cst>,
 }
 
 impl<'cst> ElseIfBranch<'cst> {
     fn new(view: NodeView<'cst>) -> Option<Self> {
         match view.kind() {
-            NodeKind::ElseIfBranch => Some(Self { view }),
+            NodeKind::ElseIfBranch => {
+                let body_node = view.child(1)?;
+                Some(Self { body_node, view })
+            }
             _ => None,
         }
     }
@@ -322,8 +355,7 @@ impl<'cst> ElseIfBranch<'cst> {
     }
 
     pub fn body(&self) -> BlockExpr<'cst> {
-        let node = self.view.child(1).expect("ElseIfBranch must have body child");
-        BlockExpr::new(node)
+        BlockExpr::new(self.body_node)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -334,13 +366,18 @@ impl<'cst> ElseIfBranch<'cst> {
 /// Function definition: `fn(params) return_type { body }`
 #[derive(Debug, Clone, Copy)]
 pub struct FnDef<'cst> {
+    param_list: NodeView<'cst>,
+    body_node: NodeView<'cst>,
     view: NodeView<'cst>,
 }
 
 impl<'cst> FnDef<'cst> {
+    pub fn param_list_span(&self) -> Span<TokenIdx> {
+        self.param_list.span()
+    }
+
     pub fn params(&self) -> impl Iterator<Item = Param<'cst>> {
-        let param_list = self.view.child(0).expect("FnDef missing ParamList");
-        param_list.children().filter_map(Param::new)
+        self.param_list.children().filter_map(Param::new)
     }
 
     pub fn return_type(&self) -> Expr<'cst> {
@@ -348,8 +385,7 @@ impl<'cst> FnDef<'cst> {
     }
 
     pub fn body(&self) -> BlockExpr<'cst> {
-        let node = self.view.child(2).expect("FnDef must have body child");
-        BlockExpr::new(node)
+        BlockExpr::new(self.body_node)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -361,6 +397,7 @@ impl<'cst> FnDef<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct Param<'cst> {
     pub name: StrId,
+    pub name_span: Span<TokenIdx>,
     pub is_comptime: bool,
     view: NodeView<'cst>,
 }
@@ -372,8 +409,9 @@ impl<'cst> Param<'cst> {
             NodeKind::ComptimeParameter => true,
             _ => return None,
         };
-        let name = view.child(0).and_then(|v| v.kind().as_ident())?;
-        Some(Self { name, is_comptime: comptime, view })
+        let name_node = view.child(0)?;
+        let name = name_node.kind().as_ident()?;
+        Some(Self { name, name_span: name_node.span(), is_comptime: comptime, view })
     }
 
     pub fn type_expr(&self) -> Expr<'cst> {
@@ -381,7 +419,7 @@ impl<'cst> Param<'cst> {
     }
 
     pub fn name_span(&self) -> Span<TokenIdx> {
-        self.view.child(0).expect("Parameter must have name child").span()
+        self.name_span
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -480,6 +518,7 @@ impl<'cst> AssignStmt<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct WhileStmt<'cst> {
     pub inline: bool,
+    body_node: NodeView<'cst>,
     view: NodeView<'cst>,
 }
 
@@ -490,7 +529,8 @@ impl<'cst> WhileStmt<'cst> {
             NodeKind::InlineWhileStmt => true,
             _ => return None,
         };
-        Some(Self { inline, view })
+        let body_node = view.child(1)?;
+        Some(Self { inline, body_node, view })
     }
 
     pub fn condition(&self) -> Expr<'cst> {
@@ -498,8 +538,7 @@ impl<'cst> WhileStmt<'cst> {
     }
 
     pub fn body(&self) -> BlockExpr<'cst> {
-        let child = self.view.child(1).expect("WhileStmt must have body child");
-        BlockExpr::new(child)
+        BlockExpr::new(self.body_node)
     }
 
     pub fn node(&self) -> NodeView<'cst> {

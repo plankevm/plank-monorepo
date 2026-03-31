@@ -22,7 +22,7 @@ impl TypeId {
     }
 
     pub fn is_assignable_to(self, target: TypeId) -> bool {
-        self == target || self == TypeId::NEVER
+        self == target || self == TypeId::NEVER || self == TypeId::ERROR || target == TypeId::ERROR
     }
 
     pub fn unify(&mut self, other: TypeId) -> bool {

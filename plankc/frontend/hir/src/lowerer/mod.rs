@@ -353,7 +353,8 @@ impl BlockLowerer<'_> {
             }
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
-                ExprKind::Member { object, member: member_expr.member }
+                let member_span = self.lexed.tokens_src_span(member_expr.member_span());
+                ExprKind::Member { object, member: member_expr.member, member_span }
             }
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
@@ -383,7 +384,8 @@ impl BlockLowerer<'_> {
                 let buf_start = self.field_buf.len();
                 for field in struct_lit.fields() {
                     let value = self.lower_expr_to_local(field.value());
-                    self.field_buf.push(FieldInfo { name: field.name, value });
+                    let name_span = self.lexed.tokens_src_span(field.name_span());
+                    self.field_buf.push(FieldInfo { name: field.name, name_span, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
                 ExprKind::StructLit { ty, fields }
@@ -404,7 +406,8 @@ impl BlockLowerer<'_> {
                 let buf_start = self.field_buf.len();
                 for field in struct_def.fields() {
                     let value = self.lower_expr_to_local(field.type_expr());
-                    self.field_buf.push(FieldInfo { name: field.name, value });
+                    let name_span = self.lexed.tokens_src_span(field.name_span());
+                    self.field_buf.push(FieldInfo { name: field.name, name_span, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
                 let struct_def_id = self.builder.struct_defs.push(StructDef {
@@ -520,8 +523,7 @@ impl BlockLowerer<'_> {
         };
 
         let body = self.lower_fn_body_block(fn_def.body());
-        let param_list = fn_def.node().child(0).expect("FnDef missing ParamList");
-        let param_list_span = self.lexed.tokens_src_span(param_list.span());
+        let param_list_span = self.lexed.tokens_src_span(fn_def.param_list_span());
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,

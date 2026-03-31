@@ -56,6 +56,7 @@ impl<'cst> RunBlock<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct ConstDecl<'cst> {
     pub name: StrId,
+    pub name_span: Span<TokenIdx>,
     view: NodeView<'cst>,
     pub r#type: Option<Expr<'cst>>,
     pub assign: Expr<'cst>,
@@ -67,10 +68,12 @@ impl<'cst> ConstDecl<'cst> {
             return None;
         };
         let mut children = view.children();
-        let name = children.next().and_then(NodeView::ident)?;
+        let name_node = children.next()?;
+        let name_span = name_node.span();
+        let name = name_node.ident()?;
         let r#type = if typed { Some(children.next().and_then(Expr::new)?) } else { None };
         let assign = children.next().and_then(Expr::new)?;
-        Some(Self { name, view, r#type, assign })
+        Some(Self { name, name_span, view, r#type, assign })
     }
 
     pub fn span(&self) -> Span<TokenIdx> {
@@ -78,7 +81,7 @@ impl<'cst> ConstDecl<'cst> {
     }
 
     pub fn name_span(&self) -> Span<TokenIdx> {
-        self.view.child(0).expect("ConstDecl must have name child").span()
+        self.name_span
     }
 }
 
@@ -91,6 +94,7 @@ pub enum ImportSuffix {
 #[derive(Debug, Clone, Copy)]
 pub struct Import<'cst> {
     path_node: NodeView<'cst>,
+    first_child: NodeView<'cst>,
     pub suffix: ImportSuffix,
     view: NodeView<'cst>,
 }
@@ -108,7 +112,8 @@ impl<'cst> Import<'cst> {
             NodeKind::ImportDecl { glob: true } => (view, ImportSuffix::All),
             _ => return None,
         };
-        Some(Self { path_node, suffix, view })
+        let first_child = path_node.child(0).filter(|c| c.ident().is_some())?;
+        Some(Self { path_node, first_child, suffix, view })
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -124,45 +129,32 @@ impl<'cst> Import<'cst> {
     }
 
     pub fn last_path_segment_span(&self) -> Span<TokenIdx> {
-        self.path_node
-            .children()
-            .filter(|c| c.ident().is_some())
-            .last()
-            .expect("import must have at least one path segment")
-            .span()
+        let mut last = self.first_child;
+        for child in self.path_node.children().filter(|c| c.ident().is_some()) {
+            last = child;
+        }
+        last.span()
     }
 
     pub fn first_path_segment_span(&self) -> Span<TokenIdx> {
-        self.path_node
-            .children()
-            .find(|c| c.ident().is_some())
-            .expect("import must have at least one path segment")
-            .span()
+        self.first_child.span()
     }
 
     /// Span covering the segments that determine the imported file path.
     /// For `import m::sub::X;` this is `m::sub`, for `import m::sub::*;` this is `m::sub`.
     pub fn file_path_span(&self) -> Span<TokenIdx> {
-        let mut idents = self.path_node.children().filter(|c| c.ident().is_some());
-        let first = idents.next().expect("import must have at least one path segment");
-        match self.suffix {
-            ImportSuffix::All => {
-                let mut last = first;
-                for ident in idents {
-                    last = ident;
-                }
-                Span::new(first.span().start, last.span().end)
-            }
-            ImportSuffix::As(_) => {
-                let mut second_to_last = first;
-                let mut last = first;
-                for ident in idents {
-                    second_to_last = last;
-                    last = ident;
-                }
-                Span::new(first.span().start, second_to_last.span().end)
-            }
+        let first = self.first_child;
+        let mut second_to_last = first;
+        let mut last = first;
+        for ident in self.path_node.children().filter(|c| c.ident().is_some()) {
+            second_to_last = last;
+            last = ident;
         }
+        let end = match self.suffix {
+            ImportSuffix::All => last,
+            ImportSuffix::As(_) => second_to_last,
+        };
+        Span::new(first.span().start, end.span().end)
     }
 }
 

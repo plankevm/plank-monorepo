@@ -75,6 +75,7 @@ const fn as_type(ty: TypeId) -> Result<Type<'static>, StructIdx> {
         TypeId::TYPE => Ok(Type::Type),
         TypeId::FUNCTION => Ok(Type::Function),
         TypeId::NEVER => Ok(Type::Never),
+        TypeId::ERROR => Ok(Type::Error),
         _ => Err(StructIdx::new(ty.const_get() - TypeId::STRUCT_IDS_OFFSET)),
     }
 }

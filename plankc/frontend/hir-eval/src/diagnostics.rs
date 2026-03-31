@@ -135,6 +135,30 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
+    pub fn emit_struct_field_not_comptime(&mut self, field_name: StrId, field_loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("struct field must be known at compile time").primary(
+            field_loc.source,
+            field_loc.span,
+            format!(
+                "value of `{}` is not known at compile time",
+                self.session.lookup_name(field_name),
+            ),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_struct_index_type_not_comptime(&mut self, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("struct definition requires compile-time values")
+            .primary(loc.source, loc.span, "index type is not known at compile time");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_struct_field_type_not_comptime(&mut self, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("struct definition requires compile-time values")
+            .primary(loc.source, loc.span, "field type is not known at compile time");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
     pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("struct type must be known at compile time").primary(
             loc.source,
@@ -206,6 +230,60 @@ impl Evaluator<'_> {
             loc.source,
             loc.span,
             format!("`{}` cannot be evaluated at compile time", builtin.name()),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_struct_unknown_field(
+        &mut self,
+        struct_ty: TypeId,
+        field_name: StrId,
+        field_loc: SrcLoc,
+    ) {
+        let diagnostic = Diagnostic::error("unknown field").primary(
+            field_loc.source,
+            field_loc.span,
+            format!(
+                "`{}` has no field `{}`",
+                self.types.format(self.session, struct_ty),
+                self.session.lookup_name(field_name),
+            ),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_struct_duplicate_field(
+        &mut self,
+        field_name: StrId,
+        first_loc: SrcLoc,
+        duplicate_loc: SrcLoc,
+    ) {
+        assert_eq!(first_loc.source, duplicate_loc.source);
+        let diagnostic = Diagnostic::error("duplicate field").element(
+            Annotations::new(first_loc.source)
+                .primary(
+                    duplicate_loc.span,
+                    format!("`{}` assigned more than once", self.session.lookup_name(field_name),),
+                )
+                .secondary(first_loc.span, "first assigned here"),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_struct_missing_field(
+        &mut self,
+        struct_ty: TypeId,
+        field_name: StrId,
+        lit_loc: SrcLoc,
+    ) {
+        let diagnostic = Diagnostic::error("missing field").primary(
+            lit_loc.source,
+            lit_loc.span,
+            format!(
+                "missing field `{}` in `{}`",
+                self.session.lookup_name(field_name),
+                self.types.format(self.session, struct_ty),
+            ),
         );
         self.session.emit_diagnostic(diagnostic);
     }

@@ -110,10 +110,20 @@ impl FunctionLowerScope {
             };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
-                todo!("diagnostic: struct _ has no field named _");
+                eval.emit_struct_unknown_field(
+                    ty,
+                    field.name,
+                    SrcLoc::new(ty_loc.source, field.name_span),
+                );
+                continue;
             };
-            if eval.hir.fields[fields][..i].iter().any(|f| f.name == field.name) {
-                todo!("diagnostic: duplicate struct field assignment");
+            if let Some(prev) = eval.hir.fields[fields][..i].iter().find(|f| f.name == field.name) {
+                eval.emit_struct_duplicate_field(
+                    field.name,
+                    SrcLoc::new(ty_loc.source, prev.name_span),
+                    SrcLoc::new(ty_loc.source, field.name_span),
+                );
+                continue;
             }
             let expected_field_ty = r#struct.field_types[field_pos];
             let field_value_ty = self.locals.get_type(field.value, &eval.values);
@@ -127,20 +137,30 @@ impl FunctionLowerScope {
         }
 
         let Type::Struct(r#struct) = eval.types.lookup(ty) else { unreachable!() };
+        assert!(self.field_names_buf.is_empty());
+        self.field_names_buf.extend_from_slice(r#struct.field_names);
 
         assert!(self.values_buf.is_empty());
 
         if eval.types.comptime_only(ty) {
-            for &field_name in r#struct.field_names {
+            let mut has_missing_fields = false;
+            for &field_name in &self.field_names_buf {
                 let Some(&field) =
                     eval.hir.fields[fields].iter().find(|field| field.name == field_name)
                 else {
-                    todo!("diagnostic: literal missing struct field");
+                    eval.emit_struct_missing_field(ty, field_name, ty_loc);
+                    has_missing_fields = true;
+                    continue;
                 };
                 let Some(value) = self.locals.comptime(field.value) else {
                     todo!("diagnostic: non-comptime field in struct with comptime-only fields");
                 };
                 self.values_buf.push(value);
+            }
+            self.field_names_buf.clear();
+            if has_missing_fields {
+                self.values_buf.clear();
+                return ExprResult::ComptimeOnly(ValueId::ERROR);
             }
             let struct_value =
                 eval.values.intern(Value::StructVal { ty, fields: &self.values_buf });
@@ -150,11 +170,14 @@ impl FunctionLowerScope {
 
         let mir_start = self.mir_buf_stack.len();
         let mut comptime_known = true;
-        for &field_name in r#struct.field_names {
+        let mut has_missing_fields = false;
+        for &field_name in &self.field_names_buf {
             let Some(&field) =
                 eval.hir.fields[fields].iter().find(|field| field.name == field_name)
             else {
-                todo!("diagnostic: literal missing struct field");
+                eval.emit_struct_missing_field(ty, field_name, ty_loc);
+                has_missing_fields = true;
+                continue;
             };
             if comptime_known {
                 if let Some(value) = self.locals.comptime(field.value) {
@@ -166,11 +189,15 @@ impl FunctionLowerScope {
             // Only comptime only values may have value but no hir local.
             self.mir_buf_stack.push(self.locals.hir_to_mir(field.value));
         }
+        self.field_names_buf.clear();
+        if has_missing_fields {
+            self.mir_buf_stack.truncate(mir_start);
+            self.values_buf.clear();
+            return ExprResult::ComptimeOnly(ValueId::ERROR);
+        }
         let fields = eval.mir_args.push_iter(self.mir_buf_stack.drain(mir_start..));
-        let comptime = comptime_known.then(|| {
-            assert_eq!(self.values_buf.len(), r#struct.field_types.len());
-            eval.values.intern(Value::StructVal { ty, fields: &self.values_buf })
-        });
+        let comptime = comptime_known
+            .then(|| eval.values.intern(Value::StructVal { ty, fields: &self.values_buf }));
         self.values_buf.clear();
         ExprResult::Runtime { expr: mir::Expr::StructLit { ty, fields }, ty, comptime }
     }
@@ -361,16 +388,18 @@ impl FunctionLowerScope {
             hir::ExprKind::StructLit { ty, fields } => {
                 self.translate_struct_literal(eval, ty, fields)
             }
-            hir::ExprKind::Member { object, member } => {
+            hir::ExprKind::Member { object, member, member_span } => {
                 let ty = self.locals.get_type(object, &eval.values);
                 let Type::Struct(r#struct) = eval.types.lookup(ty) else {
                     eval.emit_member_on_non_struct(ty, self.locals.def_loc(object));
                     return ExprResult::ComptimeOnly(ValueId::ERROR);
                 };
-                let Some(field_index) =
-                    r#struct.field_names.iter().position(|&name| name == member)
-                else {
-                    todo!("diagnostic: access undefined attribute");
+                let field_index = r#struct.field_names.iter().position(|&name| name == member);
+                let _ = r#struct;
+                let Some(field_index) = field_index else {
+                    let source = self.locals.def_loc(object).source;
+                    eval.emit_struct_unknown_field(ty, member, SrcLoc::new(source, member_span));
+                    return ExprResult::ComptimeOnly(ValueId::ERROR);
                 };
                 let value = self.locals.comptime(object).map(|object| {
                     let Value::StructVal { ty: _, fields } = eval.values.lookup(object) else {
