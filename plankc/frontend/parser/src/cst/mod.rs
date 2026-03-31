@@ -47,10 +47,10 @@ pub enum BinaryOp {
     Slash,
     Percent,
     StarPercent,
-    SlashPlus,
-    SlashMinus,
-    SlashLess,
-    SlashGreater,
+    PlusSlash,
+    MinusSlash,
+    LessSlash,
+    GreaterSlash,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
-use crate::{BigNumInterner, Hir, display::DisplayHir};
+use crate::{display::DisplayHir, BigNumInterner, Hir};
 use plank_session::Session;
 use plank_source::ParsedProject;
-use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
+use plank_test_utils::{dedent_preserve_blank_lines, TestProject};
 
 fn try_lower(source: &str) -> (Hir, BigNumInterner, Session, ParsedProject) {
     try_lower_project(TestProject::single(source))
@@ -742,10 +742,10 @@ fn test_lone_slash_not_supported() {
         3 |     let b = a / 2;
           |               ^ lone `/` not supported as an operator
           |
-          = help: for division rounding towards 0 use `/<` (EVM default)
-          = help: for division rounding away from 0 use `/>`
-          = help: for division rounding towards negative infinity use `/-`
-          = help: for division rounding towards positive infinity use `/+`
+          = help: for division rounding towards 0 use `</` (EVM default)
+          = help: for division rounding away from 0 use `>/`
+          = help: for division rounding towards negative infinity use `-/`
+          = help: for division rounding towards positive infinity use `+/`
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

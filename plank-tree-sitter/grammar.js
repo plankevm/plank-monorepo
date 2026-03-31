@@ -87,7 +87,7 @@ module.exports = grammar({
         bin_op_variant(PREC.BIT_AND, ["&"]),
         bin_op_variant(PREC.SHIFT, ["<<", ">>"]),
         bin_op_variant(PREC.ADDITIVE, ["+", "-", "+%", "-%"]),
-        bin_op_variant(PREC.MULTIPLICATIVE, ["*", "/", "%", "*%", "/+", "/-", "/<", "/>"]),
+        bin_op_variant(PREC.MULTIPLICATIVE, ["*", "/", "%", "*%", "+/", "-/", "</", ">/"]),
       )
     },
 

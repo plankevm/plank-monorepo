@@ -356,10 +356,10 @@ impl<'a> Parser<'a> {
             Slash => (17, 18),
             Percent => (17, 18),
             StarPercent => (17, 18),
-            SlashPlus => (17, 18),
-            SlashMinus => (17, 18),
-            SlashLess => (17, 18),
-            SlashGreater => (17, 18),
+            PlusSlash => (17, 18),
+            MinusSlash => (17, 18),
+            LessSlash => (17, 18),
+            GreaterSlash => (17, 18),
         }
 
         None

@@ -468,10 +468,10 @@ impl BlockLowerer<'_> {
                     }
                     cst::BinaryOp::Percent => hir_ops::BinaryOp::Mod,
                     cst::BinaryOp::StarPercent => hir_ops::BinaryOp::MulWrap,
-                    cst::BinaryOp::SlashPlus => hir_ops::BinaryOp::DivRoundPos,
-                    cst::BinaryOp::SlashMinus => hir_ops::BinaryOp::DivRoundNeg,
-                    cst::BinaryOp::SlashLess => hir_ops::BinaryOp::DivRoundToZero,
-                    cst::BinaryOp::SlashGreater => hir_ops::BinaryOp::DivRoundAwayFromZero,
+                    cst::BinaryOp::PlusSlash => hir_ops::BinaryOp::DivRoundPos,
+                    cst::BinaryOp::MinusSlash => hir_ops::BinaryOp::DivRoundNeg,
+                    cst::BinaryOp::LessSlash => hir_ops::BinaryOp::DivRoundToZero,
+                    cst::BinaryOp::GreaterSlash => hir_ops::BinaryOp::DivRoundAwayFromZero,
                 };
                 let lhs = self.lower_expr_to_local(binary.lhs());
                 let rhs = self.lower_expr_to_local(binary.rhs());

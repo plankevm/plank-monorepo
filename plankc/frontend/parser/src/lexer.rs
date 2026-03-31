@@ -103,14 +103,14 @@ pub enum Token {
     StarPercent,
     #[token("/")]
     Slash,
-    #[token("/+")]
-    SlashPlus,
-    #[token("/-")]
-    SlashMinus,
-    #[token("/<")]
-    SlashLess,
-    #[token("/>")]
-    SlashGreater,
+    #[token("+/")]
+    PlusSlash,
+    #[token("-/")]
+    MinusSlash,
+    #[token("</")]
+    LessSlash,
+    #[token(">/")]
+    GreaterSlash,
     #[token("%")]
     Percent,
 
@@ -264,10 +264,10 @@ impl Token {
             Token::Star => "*",
             Token::StarPercent => "*%",
             Token::Slash => "/",
-            Token::SlashPlus => "/+",
-            Token::SlashMinus => "/-",
-            Token::SlashLess => "/<",
-            Token::SlashGreater => "/>",
+            Token::PlusSlash => "+/",
+            Token::MinusSlash => "-/",
+            Token::LessSlash => "</",
+            Token::GreaterSlash => ">/",
             Token::Percent => "%",
             Token::DoubleEquals => "==",
             Token::BangEquals => "!=",
@@ -340,10 +340,10 @@ impl Token {
             Token::Star => "`*`",
             Token::StarPercent => "`*%`",
             Token::Slash => "`/`",
-            Token::SlashPlus => "`/+`",
-            Token::SlashMinus => "`/-`",
-            Token::SlashLess => "`/<`",
-            Token::SlashGreater => "`/>`",
+            Token::PlusSlash => "`+/`",
+            Token::MinusSlash => "`-/`",
+            Token::LessSlash => "`</`",
+            Token::GreaterSlash => "`>/`",
             Token::Percent => "`%`",
             Token::DoubleEquals => "`==`",
             Token::BangEquals => "`!=`",
@@ -528,10 +528,10 @@ mod tests {
         assert_eq!(lex_all("*"), vec![(Token::Star, 0..1, "*")]);
         assert_eq!(lex_all("*%"), vec![(Token::StarPercent, 0..2, "*%")]);
         assert_eq!(lex_all("/"), vec![(Token::Slash, 0..1, "/")]);
-        assert_eq!(lex_all("/+"), vec![(Token::SlashPlus, 0..2, "/+")]);
-        assert_eq!(lex_all("/-"), vec![(Token::SlashMinus, 0..2, "/-")]);
-        assert_eq!(lex_all("/<"), vec![(Token::SlashLess, 0..2, "/<")]);
-        assert_eq!(lex_all("/>"), vec![(Token::SlashGreater, 0..2, "/>")]);
+        assert_eq!(lex_all("+/"), vec![(Token::PlusSlash, 0..2, "+/")]);
+        assert_eq!(lex_all("-/"), vec![(Token::MinusSlash, 0..2, "-/")]);
+        assert_eq!(lex_all("</"), vec![(Token::LessSlash, 0..2, "</")]);
+        assert_eq!(lex_all(">/"), vec![(Token::GreaterSlash, 0..2, ">/")]);
         assert_eq!(lex_all("%"), vec![(Token::Percent, 0..1, "%")]);
         assert_eq!(lex_all("=="), vec![(Token::DoubleEquals, 0..2, "==")]);
         assert_eq!(lex_all("!="), vec![(Token::BangEquals, 0..2, "!=")]);
@@ -872,13 +872,24 @@ mod tests {
     }
 
     #[test]
-    fn test_ambiguous_slash_minus_handling() {
-        let results = lex_all("num /-x");
+    fn test_prefix_rounding_div() {
+        let results = lex_all("num -/x");
         assert_eq!(results.len(), 4);
         assert_eq!(results[0], (Token::Identifier, 0..3, "num"));
         assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
-        assert_eq!(results[2], (Token::SlashMinus, 4..6, "/-"));
+        assert_eq!(results[2], (Token::MinusSlash, 4..6, "-/"));
         assert_eq!(results[3], (Token::Identifier, 6..7, "x"));
+    }
+
+    #[test]
+    fn test_slash_minus_no_longer_ambiguous() {
+        let results = lex_all("num /-x");
+        assert_eq!(results.len(), 5);
+        assert_eq!(results[0], (Token::Identifier, 0..3, "num"));
+        assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
+        assert_eq!(results[2], (Token::Slash, 4..5, "/"));
+        assert_eq!(results[3], (Token::Minus, 5..6, "-"));
+        assert_eq!(results[4], (Token::Identifier, 6..7, "x"));
     }
 
     #[test]

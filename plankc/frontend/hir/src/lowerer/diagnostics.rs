@@ -212,16 +212,16 @@ impl BlockLowerer<'_> {
             .primary(self.source_id, op_span, "lone `/` not supported as an operator")
             .help(format!(
                 "for division rounding towards 0 use {} (EVM default)",
-                Token::SlashLess.name()
+                Token::LessSlash.name()
             ))
-            .help(format!("for division rounding away from 0 use {}", Token::SlashGreater.name()))
+            .help(format!("for division rounding away from 0 use {}", Token::GreaterSlash.name()))
             .help(format!(
                 "for division rounding towards negative infinity use {}",
-                Token::SlashMinus.name()
+                Token::MinusSlash.name()
             ))
             .help(format!(
                 "for division rounding towards positive infinity use {}",
-                Token::SlashPlus.name()
+                Token::PlusSlash.name()
             ));
 
         self.emit_diagnostic(diagnostic);
