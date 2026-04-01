@@ -67,13 +67,9 @@ impl<'cst> ConstDecl<'cst> {
             return None;
         };
         let mut children = view.children();
-        let name = children.next().and_then(NodeView::ident).expect("TODO: malformed");
-        let r#type = if typed {
-            Some(children.next().and_then(Expr::new).expect("TODO: malformed"))
-        } else {
-            None
-        };
-        let assign = children.next().and_then(Expr::new).expect("TODO: malformed");
+        let name = children.next().and_then(NodeView::ident)?;
+        let r#type = if typed { Some(children.next().and_then(Expr::new)?) } else { None };
+        let assign = children.next().and_then(Expr::new)?;
         Some(Self { name, view, r#type, assign })
     }
 
@@ -176,6 +172,7 @@ pub enum TopLevelDef<'cst> {
     Run(RunBlock<'cst>),
     Const(ConstDecl<'cst>),
     Import(Import<'cst>),
+    Error { span: Span<TokenIdx> },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -203,7 +200,7 @@ impl<'cst> File<'cst> {
             if let Some(def) = Import::new(child) {
                 return TopLevelDef::Import(def);
             }
-            panic!("unexpected top-level node kind: {:?}", child.kind())
+            TopLevelDef::Error { span: child.span() }
         })
     }
 }

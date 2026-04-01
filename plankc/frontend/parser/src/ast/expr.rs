@@ -21,6 +21,7 @@ pub enum Expr<'cst> {
     BoolLiteral { value: bool, span: Span<TokenIdx> },
     NumLiteral { negative: bool, id: NumLitId, span: Span<TokenIdx> },
     Ident { name: StrId, span: Span<TokenIdx> },
+    Error { span: Span<TokenIdx> },
 }
 
 impl<'cst> Expr<'cst> {
@@ -44,7 +45,10 @@ impl<'cst> Expr<'cst> {
                 NodeKind::BinaryExpr(op) => Expr::Binary(BinaryExpr { op, view }),
                 NodeKind::UnaryExpr(op) => Expr::Unary(UnaryExpr { op, view }),
                 NodeKind::CallExpr => Expr::Call(CallExpr { view }),
-                NodeKind::MemberExpr => Expr::Member(MemberExpr::new(view).unwrap()),
+                NodeKind::MemberExpr => match MemberExpr::new(view) {
+                    Some(member) => Expr::Member(member),
+                    None => Expr::Error { span },
+                },
                 NodeKind::StructDef => Expr::StructDef(StructDef { view }),
                 NodeKind::StructLit => Expr::StructLit(StructLit { view }),
                 NodeKind::If => Expr::If(IfExpr { view }),
@@ -54,6 +58,7 @@ impl<'cst> Expr<'cst> {
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral { value, span },
                 NodeKind::NumLiteral { negative, id } => Expr::NumLiteral { negative, id, span },
                 NodeKind::Identifier { ident } => Expr::Ident { name: ident, span },
+                NodeKind::Error => Expr::Error { span },
                 _ => return None,
             };
             return Some(expr);
@@ -76,7 +81,8 @@ impl<'cst> Expr<'cst> {
             | Expr::ComptimeBlock(BlockExpr { view, .. }) => view.span(),
             Expr::BoolLiteral { span, .. }
             | Expr::NumLiteral { span, .. }
-            | Expr::Ident { span, .. } => *span,
+            | Expr::Ident { span, .. }
+            | Expr::Error { span, .. } => *span,
         }
     }
 }
@@ -158,7 +164,7 @@ impl<'cst> MemberExpr<'cst> {
         if view.kind() != NodeKind::MemberExpr {
             return None;
         }
-        let member = view.child(1).and_then(NodeView::ident).expect("TODO: Malformed member expr");
+        let member = view.child(1).and_then(NodeView::ident)?;
         Some(Self { member, view })
     }
 
@@ -207,10 +213,7 @@ impl<'cst> FieldDef<'cst> {
     fn new(view: NodeView<'cst>) -> Option<Self> {
         match view.kind() {
             NodeKind::FieldDef => {
-                let name = view
-                    .child(0)
-                    .and_then(|v| v.kind().as_ident())
-                    .expect("TODO: handle malformed FieldDef");
+                let name = view.child(0).and_then(|v| v.kind().as_ident())?;
                 Some(Self { name, view })
             }
             _ => None,
@@ -259,10 +262,7 @@ impl<'cst> FieldAssign<'cst> {
     fn new(view: NodeView<'cst>) -> Option<Self> {
         match view.kind() {
             NodeKind::FieldAssign => {
-                let name = view
-                    .child(0)
-                    .and_then(|v| v.kind().as_ident())
-                    .expect("TODO: handle malformed FieldAssign");
+                let name = view.child(0).and_then(|v| v.kind().as_ident())?;
                 Some(Self { name, view })
             }
             _ => None,
@@ -383,10 +383,7 @@ impl<'cst> Param<'cst> {
             NodeKind::ComptimeParameter => true,
             _ => return None,
         };
-        let name = view
-            .child(0)
-            .and_then(|v| v.kind().as_ident())
-            .expect("TODO: handle malformed Parameter");
+        let name = view.child(0).and_then(|v| v.kind().as_ident())?;
         Some(Self { name, is_comptime: comptime, view })
     }
 
@@ -424,11 +421,11 @@ impl<'cst> LetStmt<'cst> {
             return None;
         };
         let mut children = view.children();
-        let name_view = children.next().expect("TODO: malformed");
+        let name_view = children.next()?;
         let name_span = name_view.span();
-        let name = name_view.ident().expect("TODO: malformed");
-        let type_view = typed.then(|| children.next().expect("TODO: malformed"));
-        let value_view = children.next().expect("TODO: malformed");
+        let name = name_view.ident()?;
+        let type_view = if typed { Some(children.next()?) } else { None };
+        let value_view = children.next()?;
         Some(Self { name, name_span, mutable, type_view, value_view })
     }
 
@@ -533,6 +530,7 @@ pub enum Statement<'cst> {
     Assign(AssignStmt<'cst>),
     While(WhileStmt<'cst>),
     Expr(Expr<'cst>),
+    Error { span: Span<TokenIdx> },
 }
 
 impl<'cst> Statement<'cst> {
@@ -576,7 +574,7 @@ impl<'cst> BlockExpr<'cst> {
     pub fn statements(&self) -> impl Iterator<Item = Statement<'cst>> {
         let list = self.view.child(0).expect("todo: malformed block missing stmt list child");
         list.children()
-            .map(|view| Statement::new(view).expect("todo: non-statement child of stmt list"))
+            .map(|view| Statement::new(view).unwrap_or(Statement::Error { span: view.span() }))
     }
 
     /// Returns the trailing/end expression if present.

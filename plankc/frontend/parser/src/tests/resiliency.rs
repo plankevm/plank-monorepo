@@ -439,3 +439,42 @@ fn test_missing_semicolon_unexpected_garbage() {
         "],
     );
 }
+
+#[test]
+fn test_syntax_error_causes_no_ast_panic() {
+    let source = "5;\ninit { }";
+    let mut session = plank_session::Session::new();
+    let cst = super::parse_single_source(source, &mut session);
+
+    let file = cst.as_file();
+    for _ in file.iter_defs() {}
+
+    assert!(session.has_errors());
+}
+
+#[test]
+fn test_malformed_const_no_ast_panic() {
+    let source = "const x =\ninit { }";
+    let mut session = plank_session::Session::new();
+    let cst = super::parse_single_source(source, &mut session);
+
+    let file = cst.as_file();
+    for _ in file.iter_defs() {}
+
+    assert!(session.has_errors());
+}
+
+#[test]
+fn test_error_in_block_no_ast_panic() {
+    let source = "run { 1 + ; }";
+    let mut session = plank_session::Session::new();
+    let cst = super::parse_single_source(source, &mut session);
+
+    let file = cst.as_file();
+    for def in file.iter_defs() {
+        if let crate::ast::TopLevelDef::Run(run) = def {
+            for _ in run.body().statements() {}
+        }
+    }
+    assert!(session.has_errors());
+}

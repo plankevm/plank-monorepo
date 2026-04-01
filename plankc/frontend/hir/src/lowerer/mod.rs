@@ -334,6 +334,7 @@ impl BlockLowerer<'_> {
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
+            ast::Expr::Error { .. } => ExprKind::Error,
 
             ast::Expr::Ident { name, span } => self.resolve_name(name, span),
             ast::Expr::BoolLiteral { value, .. } => ExprKind::Bool(value),
@@ -687,6 +688,7 @@ impl BlockLowerer<'_> {
                 let body = self.lower_body_to_block(while_stmt.body());
                 self.emit(span, InstructionKind::While { condition_block, condition, body });
             }
+            Statement::Error { .. } => {}
         }
     }
 }
@@ -765,6 +767,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
                     }
                 }
                 TopLevelDef::Import(_) => {}
+                TopLevelDef::Error { .. } => {}
             }
         }
     }
