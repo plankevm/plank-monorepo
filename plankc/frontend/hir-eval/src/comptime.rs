@@ -152,7 +152,9 @@ impl ComptimeInterpreter {
             }
             hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
             hir::ExprKind::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
-            hir::ExprKind::Member { object, member, member_span } => self.eval_member(eval, object, member, member_span)?,
+            hir::ExprKind::Member { object, member, member_span } => {
+                self.eval_member(eval, object, member, member_span)?
+            }
             hir::ExprKind::LogicalNot { input } => {
                 let (input_vid, input_loc) = self.bindings[input];
                 match input_vid {
