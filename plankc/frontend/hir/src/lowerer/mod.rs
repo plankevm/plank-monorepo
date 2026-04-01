@@ -605,9 +605,8 @@ impl BlockLowerer<'_> {
         binary: ast::BinaryExpr<'_>,
         op: ShortCircuitOp,
     ) -> ExprKind {
-        let op_lhs_as_condition = self.lower_expr_to_local(binary.lhs());
-
         let op_result_local = self.alloc_temp();
+        let op_lhs_as_condition = self.lower_expr_to_local(binary.lhs());
 
         // Creates `{ <rhs> }` block.
         let eval_op_rhs_block = self.create_sub_block(|this| {
