@@ -415,15 +415,11 @@ impl FunctionLowerScope {
                     comptime: Some(ValueId::ERROR),
                 }
             }
-            hir::ExprKind::Error => {
-                // TODO: binary & unary
-
-                ExprResult::Runtime {
-                    expr: mir::Expr::Error,
-                    ty: TypeId::ERROR,
-                    comptime: Some(ValueId::ERROR),
-                }
-            }
+            hir::ExprKind::Error => ExprResult::Runtime {
+                expr: mir::Expr::Error,
+                ty: TypeId::ERROR,
+                comptime: Some(ValueId::ERROR),
+            },
         }
     }
 
