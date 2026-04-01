@@ -186,6 +186,7 @@ fn test_member_priority() {
                     " "
                     Operator
                         "*"
+                    " "
                     MemberExpr
                         Identifier
                             "a"
@@ -599,6 +600,7 @@ fn test_binary_precedence_mul_add() {
                     " "
                     Operator
                         "+"
+                    " "
                     BinaryExpr(Star)
                         NumLiteral
                             "2"
@@ -640,6 +642,7 @@ fn test_binary_precedence_cmp_and() {
                         " "
                     Operator
                         "and"
+                    " "
                     BinaryExpr(GreaterThan)
                         Identifier
                             "c"

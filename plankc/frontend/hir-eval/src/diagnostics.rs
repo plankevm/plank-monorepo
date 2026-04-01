@@ -1,8 +1,5 @@
 use crate::Evaluator;
-use plank_session::{
-    builtins::{Builtin, builtin_names},
-    *,
-};
+use plank_session::{builtins::builtin_names, *};
 
 impl Evaluator<'_> {
     pub fn emit_type_mismatch_error(
@@ -151,6 +148,58 @@ impl Evaluator<'_> {
     pub(crate) fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("not yet implemented")
             .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary));
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_no_matching_builtin_signature(
+        &mut self,
+        builtin: EvmBuiltin,
+        arg_types: &[TypeId],
+        loc: SrcLoc,
+    ) {
+        use std::fmt::Write;
+
+        let mut note = format!("`{builtin}` accepts ");
+        for (i, &(params, _ret)) in builtin.signatures().iter().enumerate() {
+            if i > 0 {
+                note.push_str(", ");
+            }
+            note.push('(');
+            for (j, &ty) in params.iter().enumerate() {
+                if j > 0 {
+                    note.push_str(", ");
+                }
+                let _ = write!(note, "{}", self.types.format(self.session, ty));
+            }
+            note.push(')');
+        }
+
+        let (title, label) = if builtin.signatures()[0].0.len() == arg_types.len() {
+            let mut args_str = String::new();
+            for (i, &ty) in arg_types.iter().enumerate() {
+                if i > 0 {
+                    args_str.push_str(", ");
+                }
+                let _ = write!(args_str, "{}", self.types.format(self.session, ty));
+            }
+            (
+                "no valid match for builtin signature",
+                format!("`{builtin}` cannot be called with ({args_str})"),
+            )
+        } else {
+            let expected = builtin.signatures()[0].0.len();
+            (
+                "wrong number of arguments",
+                format!(
+                    "`{builtin}` called with {} argument{}, but requires {}",
+                    arg_types.len(),
+                    if arg_types.len() == 1 { "" } else { "s" },
+                    expected,
+                ),
+            )
+        };
+
+        let diagnostic = Diagnostic::error(title).primary(loc.source, loc.span, label).note(note);
         self.session.emit_diagnostic(diagnostic);
     }
 }
