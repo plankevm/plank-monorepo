@@ -239,19 +239,21 @@ impl<'a> Parser<'a> {
         let idx = self.nodes.push(Node {
             kind,
             tokens: Span::new(start, start),
-            content_start: self.tokens.content_start(start),
             next_sibling: None,
             first_child: None,
         });
         UnfinishedNode { idx, last_child: None }
     }
 
+    fn skip_trivia_start(&mut self) -> TokenIdx {
+        self.skip_trivia();
+        self.tokens.current()
+    }
+
     fn alloc_node(&mut self, kind: NodeKind) -> UnfinishedNode {
-        let current = self.tokens.current();
         let idx = self.nodes.push(Node {
             kind,
-            tokens: Span::new(current, current),
-            content_start: self.tokens.content_start(current),
+            tokens: Span::new(self.tokens.current(), self.tokens.current()),
             next_sibling: None,
             first_child: None,
         });
@@ -597,7 +599,7 @@ impl<'a> Parser<'a> {
         mode: ParseExprMode,
         min_bp: OpPriority,
     ) -> Option<NodeIdx> {
-        let start = self.tokens.current();
+        let start = self.skip_trivia_start();
 
         let mut expr = if let Some(((), rhs, kind)) = self.eat_unary() {
             let mut unary = self.alloc_node_from(start, NodeKind::UnaryExpr(kind));

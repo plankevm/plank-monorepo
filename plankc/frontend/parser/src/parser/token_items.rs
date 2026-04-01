@@ -32,18 +32,6 @@ impl<'a> TokenItems<'a> {
         self.current
     }
 
-    pub(crate) fn is_trivia(&self, idx: TokenIdx) -> bool {
-        self.lexed.get(idx).0.is_trivia()
-    }
-
-    pub(crate) fn content_start(&self, from: TokenIdx) -> TokenIdx {
-        let mut idx = from;
-        while idx < self.current && self.is_trivia(idx) {
-            idx += 1;
-        }
-        idx
-    }
-
     pub(crate) fn peek(&mut self) -> (Token, SourceSpan) {
         self.fuel = self.fuel.checked_sub(1).expect("out of fuel: likely caused by infinite loop");
         self.lexed.get(self.current)

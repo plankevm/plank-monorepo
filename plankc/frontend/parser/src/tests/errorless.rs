@@ -154,8 +154,8 @@ fn test_member_access_single() {
                     "x"
                 " "
                 "="
+                " "
                 MemberExpr
-                    " "
                     Identifier
                         "a"
                     "."
@@ -179,14 +179,14 @@ fn test_member_priority() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(Star)
-                    " "
                     NumLiteral
                         "3"
                     " "
                     "*"
+                    " "
                     MemberExpr
-                        " "
                         Identifier
                             "a"
                         "."
@@ -210,9 +210,9 @@ fn test_member_access_chain() {
                     "x"
                 " "
                 "="
+                " "
                 MemberExpr
                     MemberExpr
-                        " "
                         Identifier
                             "a"
                         "."
@@ -298,8 +298,8 @@ fn test_unary_minus() {
                     "x"
                 " "
                 "="
+                " "
                 UnaryExpr(Minus)
-                    " "
                     "-"
                     Identifier
                         "a"
@@ -321,8 +321,8 @@ fn test_unary_not() {
                     "x"
                 " "
                 "="
+                " "
                 UnaryExpr(Bang)
-                    " "
                     "!"
                     Identifier
                         "a"
@@ -344,8 +344,8 @@ fn test_unary_tilde() {
                     "x"
                 " "
                 "="
+                " "
                 UnaryExpr(Tilde)
-                    " "
                     "~"
                     Identifier
                         "a"
@@ -367,8 +367,8 @@ fn test_unary_nested() {
                     "x"
                 " "
                 "="
+                " "
                 UnaryExpr(Minus)
-                    " "
                     "-"
                     UnaryExpr(Tilde)
                         "~"
@@ -396,8 +396,8 @@ fn test_binary_plus() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(Plus)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -423,8 +423,8 @@ fn test_binary_minus() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(Minus)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -450,8 +450,8 @@ fn test_binary_double_equals() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(DoubleEquals)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -477,8 +477,8 @@ fn test_binary_not_equals() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(BangEquals)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -504,8 +504,8 @@ fn test_binary_greater_than() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(GreaterThan)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -531,8 +531,8 @@ fn test_binary_and() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(And)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -558,8 +558,8 @@ fn test_binary_ampersand() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(Ampersand)
-                    " "
                     Identifier
                         "a"
                     " "
@@ -585,14 +585,14 @@ fn test_binary_precedence_mul_add() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(Plus)
-                    " "
                     NumLiteral
                         "1"
                     " "
                     "+"
+                    " "
                     BinaryExpr(Star)
-                        " "
                         NumLiteral
                             "2"
                         " "
@@ -618,9 +618,9 @@ fn test_binary_precedence_cmp_and() {
                     "x"
                 " "
                 "="
+                " "
                 BinaryExpr(And)
                     BinaryExpr(LessThan)
-                        " "
                         Identifier
                             "a"
                         " "
@@ -630,8 +630,8 @@ fn test_binary_precedence_cmp_and() {
                             "b"
                         " "
                     "and"
+                    " "
                     BinaryExpr(GreaterThan)
-                        " "
                         Identifier
                             "c"
                         " "
@@ -777,8 +777,8 @@ fn test_fn_call_zero_args() {
                     "x"
                 " "
                 "="
+                " "
                 CallExpr
-                    " "
                     Identifier
                         "f"
                     "("
@@ -801,8 +801,8 @@ fn test_fn_call_one_arg() {
                     "x"
                 " "
                 "="
+                " "
                 CallExpr
-                    " "
                     Identifier
                         "f"
                     "("
@@ -827,8 +827,8 @@ fn test_fn_call_two_args() {
                     "x"
                 " "
                 "="
+                " "
                 CallExpr
-                    " "
                     Identifier
                         "f"
                     "("
@@ -857,8 +857,8 @@ fn test_fn_call_trailing_comma() {
                     "x"
                 " "
                 "="
+                " "
                 CallExpr
-                    " "
                     Identifier
                         "f"
                     "("
@@ -1012,8 +1012,8 @@ fn test_fn_def_two_params() {
                             Identifier
                                 "x"
                             ":"
+                            " "
                             CallExpr
-                                " "
                                 Identifier
                                     "T"
                                 "("
@@ -1062,8 +1062,8 @@ fn test_fn_def_with_return_type() {
                     ParamList
                         "("
                         ")"
+                    " "
                     CallExpr
-                        " "
                         Identifier
                             "Wow"
                         "("
@@ -1432,8 +1432,8 @@ fn test_struct_lit_zero_fields() {
                     "s"
                 " "
                 "="
+                " "
                 StructLit
-                    " "
                     Identifier
                         "S"
                     " "
@@ -1457,8 +1457,8 @@ fn test_struct_lit_one_field() {
                     "s"
                 " "
                 "="
+                " "
                 StructLit
-                    " "
                     Identifier
                         "S"
                     " "
@@ -1554,8 +1554,8 @@ fn test_struct_lit_two_fields() {
                     "s"
                 " "
                 "="
+                " "
                 StructLit
-                    " "
                     Identifier
                         "S"
                     " "
@@ -1597,8 +1597,8 @@ fn test_struct_lit_trailing_comma() {
                     "s"
                 " "
                 "="
+                " "
                 StructLit
-                    " "
                     Identifier
                         "S"
                     " "
@@ -1915,8 +1915,8 @@ fn test_assign_stmt_complex_rhs() {
                             "x"
                         " "
                         "="
+                        " "
                         BinaryExpr(Plus)
-                            " "
                             Identifier
                                 "a"
                             " "
