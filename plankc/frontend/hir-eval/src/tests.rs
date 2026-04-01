@@ -654,6 +654,27 @@ fn test_comptime_struct_field_type_mismatch() {
 }
 
 #[test]
+fn test_comptime_struct_field_not_comptime() {
+    assert_diagnostics(
+        r#"
+        const Wrapper = struct { t: type, n: u256 };
+        init {
+            let x = calldataload(0);
+            let w = Wrapper { t: u256, n: x };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: struct field must be known at compile time
+         --> main.plk:4:35
+          |
+        4 |     let w = Wrapper { t: u256, n: x };
+          |                                   ^ value of `n` is not known at compile time
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_struct_def_field_not_type() {
     assert_diagnostics(
         r#"
@@ -762,6 +783,46 @@ fn test_runtime_struct_def_field_not_type() {
           |
         2 |     let S = struct { x: 42 };
           |                         ^^ expected type, got value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_struct_def_type_index_not_comptime() {
+    assert_diagnostics(
+        r#"
+        init {
+            let T = calldataload(0);
+            let S = struct T { x: u256 };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: struct definition requires compile-time values
+         --> main.plk:3:20
+          |
+        3 |     let S = struct T { x: u256 };
+          |                    ^ index type is not known at compile time
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_struct_def_field_type_not_comptime() {
+    assert_diagnostics(
+        r#"
+        init {
+            let T = calldataload(0);
+            let S = struct { x: T };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: struct definition requires compile-time values
+         --> main.plk:3:25
+          |
+        3 |     let S = struct { x: T };
+          |                         ^ field type is not known at compile time
         "#],
     );
 }

@@ -143,22 +143,27 @@ impl FunctionLowerScope {
         assert!(self.values_buf.is_empty());
 
         if eval.types.comptime_only(ty) {
-            let mut has_missing_fields = false;
+            let mut has_errors = false;
             for &field_name in &self.field_names_buf {
                 let Some(&field) =
                     eval.hir.fields[fields].iter().find(|field| field.name == field_name)
                 else {
                     eval.emit_struct_missing_field(ty, field_name, ty_loc);
-                    has_missing_fields = true;
+                    has_errors = true;
                     continue;
                 };
                 let Some(value) = self.locals.comptime(field.value) else {
-                    todo!("diagnostic: non-comptime field in struct with comptime-only fields");
+                    eval.emit_struct_field_not_comptime(
+                        field_name,
+                        self.locals.def_loc(field.value),
+                    );
+                    has_errors = true;
+                    continue;
                 };
                 self.values_buf.push(value);
             }
             self.field_names_buf.clear();
-            if has_missing_fields {
+            if has_errors {
                 self.values_buf.clear();
                 return ExprResult::ComptimeOnly(ValueId::ERROR);
             }
@@ -353,14 +358,20 @@ impl FunctionLowerScope {
             hir::ExprKind::StructDef(struct_def_id) => {
                 let struct_def = eval.hir.struct_defs[struct_def_id];
                 let Some(type_index) = self.locals.comptime(struct_def.type_index) else {
-                    todo!("diagnostic: `type_index` not comptime known");
+                    eval.emit_struct_index_type_not_comptime(
+                        self.locals.def_loc(struct_def.type_index),
+                    );
+                    return ExprResult::ComptimeOnly(ValueId::ERROR);
                 };
                 let fields = &eval.hir.fields[struct_def.fields];
                 assert!(self.field_types_buf.is_empty());
                 assert!(self.field_names_buf.is_empty());
                 for field in fields {
                     let Some(value) = self.locals.comptime(field.value) else {
-                        todo!("diagnostic: field type not comptime known");
+                        eval.emit_struct_field_type_not_comptime(self.locals.def_loc(field.value));
+                        self.field_types_buf.push(TypeId::ERROR);
+                        self.field_names_buf.push(field.name);
+                        continue;
                     };
                     let Value::Type(r#type) = eval.values.lookup(value) else {
                         eval.emit_type_constraint_not_type(
