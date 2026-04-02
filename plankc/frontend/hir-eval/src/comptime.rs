@@ -255,19 +255,20 @@ impl ComptimeInterpreter {
             let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
+                let name_span = field.name_span(&eval.session.borrow());
                 eval.emit_struct_unknown_field(
                     struct_type_id,
                     field.name,
-                    SrcLoc::new(type_loc.source, field.name_span(eval.session)),
+                    SrcLoc::new(type_loc.source, name_span),
                 );
                 continue;
             };
             if let Some(prev) = fields_info[..i].iter().find(|f| f.name == field.name) {
-                eval.emit_struct_duplicate_field(
-                    field.name,
-                    SrcLoc::new(type_loc.source, prev.name_span(eval.session)),
-                    SrcLoc::new(type_loc.source, field.name_span(eval.session)),
-                );
+                let session = eval.session.borrow();
+                let first_loc = SrcLoc::new(type_loc.source, prev.name_span(&session));
+                let duplicate_loc = SrcLoc::new(type_loc.source, field.name_span(&session));
+                drop(session);
+                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
                 continue;
             }
             let expected_field_ty = r#struct.field_types[field_pos];
@@ -278,19 +279,14 @@ impl ComptimeInterpreter {
             }
         }
 
-        let has_missing_fields = self.name_buf.use_as(|names| {
-            let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
-            names.extend_from_slice(r#struct.field_names);
-            let _ = r#struct;
-            let mut has_missing_fields = false;
-            for &field_name in names.iter() {
-                if !fields_info.iter().any(|f| f.name == field_name) {
-                    eval.emit_struct_missing_field(struct_type_id, field_name, type_loc);
-                    has_missing_fields = true;
-                }
+        let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
+        let mut has_missing_fields = false;
+        for &field_name in r#struct.field_names {
+            if !fields_info.iter().any(|f| f.name == field_name) {
+                eval.emit_struct_missing_field(struct_type_id, field_name, type_loc);
+                has_missing_fields = true;
             }
-            has_missing_fields
-        });
+        }
         if has_missing_fields {
             return Ok(ValueId::ERROR);
         }

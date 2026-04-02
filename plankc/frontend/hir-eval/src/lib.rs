@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use hashbrown::HashMap;
 use plank_core::{IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_hir::{ConstId, Hir};
@@ -28,7 +30,7 @@ enum ConstState {
 
 pub(crate) struct Evaluator<'a> {
     pub hir: &'a Hir,
-    pub session: &'a mut Session,
+    pub session: RefCell<&'a mut Session>,
     pub big_nums: &'a mut BigNumInterner,
     pub values: ValueInterner,
     pub types: TypeInterner,
@@ -45,7 +47,7 @@ impl<'a> Evaluator<'a> {
         let const_count = hir.consts.len();
         Self {
             hir,
-            session,
+            session: RefCell::new(session),
             big_nums,
             values: ValueInterner::new(),
             types: TypeInterner::new(),

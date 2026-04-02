@@ -110,19 +110,20 @@ impl FunctionLowerScope {
             };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
+                let name_span = field.name_span(&eval.session.borrow());
                 eval.emit_struct_unknown_field(
                     ty,
                     field.name,
-                    SrcLoc::new(ty_loc.source, field.name_span(eval.session)),
+                    SrcLoc::new(ty_loc.source, name_span),
                 );
                 continue;
             };
             if let Some(prev) = eval.hir.fields[fields][..i].iter().find(|f| f.name == field.name) {
-                eval.emit_struct_duplicate_field(
-                    field.name,
-                    SrcLoc::new(ty_loc.source, prev.name_span(eval.session)),
-                    SrcLoc::new(ty_loc.source, field.name_span(eval.session)),
-                );
+                let session = eval.session.borrow();
+                let first_loc = SrcLoc::new(ty_loc.source, prev.name_span(&session));
+                let duplicate_loc = SrcLoc::new(ty_loc.source, field.name_span(&session));
+                drop(session);
+                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
                 continue;
             }
             let expected_field_ty = r#struct.field_types[field_pos];
@@ -137,14 +138,12 @@ impl FunctionLowerScope {
         }
 
         let Type::Struct(r#struct) = eval.types.lookup(ty) else { unreachable!() };
-        assert!(self.field_names_buf.is_empty());
-        self.field_names_buf.extend_from_slice(r#struct.field_names);
 
         assert!(self.values_buf.is_empty());
 
         if eval.types.comptime_only(ty) {
             let mut has_errors = false;
-            for &field_name in &self.field_names_buf {
+            for &field_name in r#struct.field_names {
                 let Some(&field) =
                     eval.hir.fields[fields].iter().find(|field| field.name == field_name)
                 else {
@@ -162,7 +161,6 @@ impl FunctionLowerScope {
                 };
                 self.values_buf.push(value);
             }
-            self.field_names_buf.clear();
             if has_errors {
                 self.values_buf.clear();
                 return ExprResult::ERROR;
@@ -176,7 +174,7 @@ impl FunctionLowerScope {
         let mir_start = self.mir_buf_stack.len();
         let mut comptime_known = true;
         let mut has_missing_fields = false;
-        for &field_name in &self.field_names_buf {
+        for &field_name in r#struct.field_names {
             let Some(&field) =
                 eval.hir.fields[fields].iter().find(|field| field.name == field_name)
             else {
@@ -194,7 +192,6 @@ impl FunctionLowerScope {
             // Only comptime only values may have value but no hir local.
             self.mir_buf_stack.push(self.locals.hir_to_mir(field.value));
         }
-        self.field_names_buf.clear();
         if has_missing_fields {
             self.mir_buf_stack.truncate(mir_start);
             self.values_buf.clear();
