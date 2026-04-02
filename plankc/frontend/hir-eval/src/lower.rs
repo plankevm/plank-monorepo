@@ -96,11 +96,11 @@ impl FunctionLowerScope {
         };
         let Value::Type(ty) = eval.values.lookup(ty) else {
             eval.emit_type_constraint_not_type(eval.values.type_of_value(ty), ty_loc);
-            return ExprResult::ComptimeOnly(ValueId::ERROR);
+            return ExprResult::ERROR;
         };
         if !matches!(eval.types.lookup(ty), Type::Struct(_)) {
             eval.emit_not_a_struct_type(ty, ty_loc);
-            return ExprResult::ComptimeOnly(ValueId::ERROR);
+            return ExprResult::ERROR;
         }
 
         for (i, field) in eval.hir.fields[fields].iter().enumerate() {
@@ -165,7 +165,7 @@ impl FunctionLowerScope {
             self.field_names_buf.clear();
             if has_errors {
                 self.values_buf.clear();
-                return ExprResult::ComptimeOnly(ValueId::ERROR);
+                return ExprResult::ERROR;
             }
             let struct_value =
                 eval.values.intern(Value::StructVal { ty, fields: &self.values_buf });
@@ -198,7 +198,7 @@ impl FunctionLowerScope {
         if has_missing_fields {
             self.mir_buf_stack.truncate(mir_start);
             self.values_buf.clear();
-            return ExprResult::ComptimeOnly(ValueId::ERROR);
+            return ExprResult::ERROR;
         }
         let fields = eval.mir_args.push_iter(self.mir_buf_stack.drain(mir_start..));
         let comptime = comptime_known
@@ -361,7 +361,7 @@ impl FunctionLowerScope {
                     eval.emit_struct_type_index_not_comptime(
                         self.locals.def_loc(struct_def.type_index),
                     );
-                    return ExprResult::ComptimeOnly(ValueId::ERROR);
+                    return ExprResult::ERROR;
                 };
                 let fields = &eval.hir.fields[struct_def.fields];
                 assert!(self.field_types_buf.is_empty());
@@ -403,13 +403,13 @@ impl FunctionLowerScope {
                 let ty = self.locals.get_type(object, &eval.values);
                 let Type::Struct(r#struct) = eval.types.lookup(ty) else {
                     eval.emit_member_on_non_struct(ty, self.locals.def_loc(object));
-                    return ExprResult::ComptimeOnly(ValueId::ERROR);
+                    return ExprResult::ERROR;
                 };
-                let field_index = r#struct.field_names.iter().position(|&name| name == member);
-                let _ = r#struct;
-                let Some(field_index) = field_index else {
+                let Some(field_index) =
+                    r#struct.field_names.iter().position(|&name| name == member)
+                else {
                     eval.emit_struct_unknown_field(ty, member, expr.src_loc());
-                    return ExprResult::ComptimeOnly(ValueId::ERROR);
+                    return ExprResult::ERROR;
                 };
                 let value = self.locals.comptime(object).map(|object| {
                     let Value::StructVal { ty: _, fields } = eval.values.lookup(object) else {
