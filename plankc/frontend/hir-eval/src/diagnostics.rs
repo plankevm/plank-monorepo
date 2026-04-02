@@ -147,9 +147,9 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_struct_index_type_not_comptime(&mut self, loc: SrcLoc) {
+    pub fn emit_struct_type_index_not_comptime(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("struct definition requires compile-time values")
-            .primary(loc.source, loc.span, "index type is not known at compile time");
+            .primary(loc.source, loc.span, "type index is not known at compile time");
         self.session.emit_diagnostic(diagnostic);
     }
 

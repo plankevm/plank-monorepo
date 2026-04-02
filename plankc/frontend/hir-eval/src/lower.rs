@@ -358,7 +358,7 @@ impl FunctionLowerScope {
             hir::ExprKind::StructDef(struct_def_id) => {
                 let struct_def = eval.hir.struct_defs[struct_def_id];
                 let Some(type_index) = self.locals.comptime(struct_def.type_index) else {
-                    eval.emit_struct_index_type_not_comptime(
+                    eval.emit_struct_type_index_not_comptime(
                         self.locals.def_loc(struct_def.type_index),
                     );
                     return ExprResult::ComptimeOnly(ValueId::ERROR);

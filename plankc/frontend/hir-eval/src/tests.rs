@@ -802,7 +802,7 @@ fn test_runtime_struct_def_type_index_not_comptime() {
          --> main.plk:3:20
           |
         3 |     let S = struct T { x: u256 };
-          |                    ^ index type is not known at compile time
+          |                    ^ type index is not known at compile time
         "#],
     );
 }
