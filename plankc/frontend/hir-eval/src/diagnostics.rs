@@ -202,4 +202,13 @@ impl Evaluator<'_> {
         let diagnostic = Diagnostic::error(title).primary(loc.source, loc.span, label).note(note);
         self.session.emit_diagnostic(diagnostic);
     }
+
+    pub fn emit_unsupported_eval_of_evm_builtin(&mut self, builtin: EvmBuiltin, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("comptime evaluation not supported").primary(
+            loc.source,
+            loc.span,
+            format!("`{}` cannot be evaluated at compile time", builtin.name()),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
 }

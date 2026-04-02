@@ -40,6 +40,12 @@ macro_rules! define_builtins {
         }
 
         impl EvmBuiltin {
+            pub fn name(self) -> &'static str {
+                match self {
+                    $(Self::$b_variant => $b_str,)*
+                }
+            }
+
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
                     $($b_const => EvmBuiltin::$b_variant,)*

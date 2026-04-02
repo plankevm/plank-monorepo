@@ -1,6 +1,6 @@
 use plank_core::{DenseIndexMap, vec_buf::VecBuf};
-use plank_hir::{self as hir, ConstDef};
-use plank_session::{SrcLoc, StrId};
+use plank_hir::{self as hir, CallArgsId, ConstDef};
+use plank_session::{EvmBuiltin, SrcLoc, StrId};
 use plank_values::{StructInfo, Type, TypeId, ValueId};
 
 use crate::{Evaluator, value::Value};
@@ -56,7 +56,7 @@ impl ComptimeInterpreter {
         instr: hir::Instruction,
     ) -> Result<(), ReturnValue> {
         match instr.kind {
-            hir::InstructionKind::Set { local, r#type, expr, .. } => {
+            hir::InstructionKind::Set { local, r#type, expr } => {
                 let mut value = self.eval_expr(eval, expr)?;
                 if let Some(r#type) = r#type
                     && value != ValueId::ERROR
@@ -166,14 +166,176 @@ impl ComptimeInterpreter {
                     }
                 }
             }
-            hir::ExprKind::EvmBuiltinCall { .. } => {
-                todo!("comptime builtin eval not yet implemented")
+            hir::ExprKind::EvmBuiltinCall { builtin, args } => {
+                self.eval_evm_builtin(eval, builtin, args, expr.src_loc())
             }
             hir::ExprKind::UnaryOpCall { .. } => todo!("comptime unary op eval"),
             hir::ExprKind::BinaryOpCall { .. } => todo!("comptime binary op eval"),
             hir::ExprKind::Error => unreachable!("error expression reached hir-eval"),
         };
         Ok(value)
+    }
+
+    fn eval_evm_builtin(
+        &mut self,
+        eval: &mut Evaluator<'_>,
+        builtin: EvmBuiltin,
+        args: CallArgsId,
+        loc: SrcLoc,
+    ) -> ValueId {
+        match builtin {
+            // EVM Arithmetic
+            EvmBuiltin::Add => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Mul => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Sub => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Div => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::SDiv => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Mod => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::SMod => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::AddMod => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::MulMod => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Exp => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::SignExtend => todo!("eval builtin {builtin:?}"),
+
+            // EVM Comparison & Bitwise Logic
+            EvmBuiltin::Lt => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Gt => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::SLt => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::SGt => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Eq => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::IsZero => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::And => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Or => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Xor => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Not => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Byte => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Shl => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Shr => todo!("eval builtin {builtin:?}"),
+            EvmBuiltin::Sar => todo!("eval builtin {builtin:?}"),
+
+            EvmBuiltin::Keccak256
+            | EvmBuiltin::Address
+            | EvmBuiltin::Balance
+            | EvmBuiltin::Origin
+            | EvmBuiltin::Caller
+            | EvmBuiltin::CallValue
+            | EvmBuiltin::CallDataLoad
+            | EvmBuiltin::CallDataSize
+            | EvmBuiltin::CallDataCopy
+            | EvmBuiltin::CodeSize
+            | EvmBuiltin::CodeCopy
+            | EvmBuiltin::GasPrice
+            | EvmBuiltin::ExtCodeSize
+            | EvmBuiltin::ExtCodeCopy
+            | EvmBuiltin::ReturnDataSize
+            | EvmBuiltin::ReturnDataCopy
+            | EvmBuiltin::ExtCodeHash
+            | EvmBuiltin::Gas
+            | EvmBuiltin::BlockHash
+            | EvmBuiltin::Coinbase
+            | EvmBuiltin::Timestamp
+            | EvmBuiltin::Number
+            | EvmBuiltin::Difficulty
+            | EvmBuiltin::GasLimit
+            | EvmBuiltin::ChainId
+            | EvmBuiltin::SelfBalance
+            | EvmBuiltin::BaseFee
+            | EvmBuiltin::BlobHash
+            | EvmBuiltin::BlobBaseFee
+            | EvmBuiltin::SLoad
+            | EvmBuiltin::SStore
+            | EvmBuiltin::TLoad
+            | EvmBuiltin::TStore
+            | EvmBuiltin::Log0
+            | EvmBuiltin::Log1
+            | EvmBuiltin::Log2
+            | EvmBuiltin::Log3
+            | EvmBuiltin::Log4
+            | EvmBuiltin::Create
+            | EvmBuiltin::Create2
+            | EvmBuiltin::Call
+            | EvmBuiltin::CallCode
+            | EvmBuiltin::DelegateCall
+            | EvmBuiltin::StaticCall
+            | EvmBuiltin::Return
+            | EvmBuiltin::Stop
+            | EvmBuiltin::Revert
+            | EvmBuiltin::Invalid
+            | EvmBuiltin::SelfDestruct
+            | EvmBuiltin::DynamicAllocZeroed
+            | EvmBuiltin::DynamicAllocAnyBytes
+            | EvmBuiltin::MemoryCopy
+            | EvmBuiltin::MLoad1
+            | EvmBuiltin::MLoad2
+            | EvmBuiltin::MLoad3
+            | EvmBuiltin::MLoad4
+            | EvmBuiltin::MLoad5
+            | EvmBuiltin::MLoad6
+            | EvmBuiltin::MLoad7
+            | EvmBuiltin::MLoad8
+            | EvmBuiltin::MLoad9
+            | EvmBuiltin::MLoad10
+            | EvmBuiltin::MLoad11
+            | EvmBuiltin::MLoad12
+            | EvmBuiltin::MLoad13
+            | EvmBuiltin::MLoad14
+            | EvmBuiltin::MLoad15
+            | EvmBuiltin::MLoad16
+            | EvmBuiltin::MLoad17
+            | EvmBuiltin::MLoad18
+            | EvmBuiltin::MLoad19
+            | EvmBuiltin::MLoad20
+            | EvmBuiltin::MLoad21
+            | EvmBuiltin::MLoad22
+            | EvmBuiltin::MLoad23
+            | EvmBuiltin::MLoad24
+            | EvmBuiltin::MLoad25
+            | EvmBuiltin::MLoad26
+            | EvmBuiltin::MLoad27
+            | EvmBuiltin::MLoad28
+            | EvmBuiltin::MLoad29
+            | EvmBuiltin::MLoad30
+            | EvmBuiltin::MLoad31
+            | EvmBuiltin::MLoad32
+            | EvmBuiltin::MStore1
+            | EvmBuiltin::MStore2
+            | EvmBuiltin::MStore3
+            | EvmBuiltin::MStore4
+            | EvmBuiltin::MStore5
+            | EvmBuiltin::MStore6
+            | EvmBuiltin::MStore7
+            | EvmBuiltin::MStore8
+            | EvmBuiltin::MStore9
+            | EvmBuiltin::MStore10
+            | EvmBuiltin::MStore11
+            | EvmBuiltin::MStore12
+            | EvmBuiltin::MStore13
+            | EvmBuiltin::MStore14
+            | EvmBuiltin::MStore15
+            | EvmBuiltin::MStore16
+            | EvmBuiltin::MStore17
+            | EvmBuiltin::MStore18
+            | EvmBuiltin::MStore19
+            | EvmBuiltin::MStore20
+            | EvmBuiltin::MStore21
+            | EvmBuiltin::MStore22
+            | EvmBuiltin::MStore23
+            | EvmBuiltin::MStore24
+            | EvmBuiltin::MStore25
+            | EvmBuiltin::MStore26
+            | EvmBuiltin::MStore27
+            | EvmBuiltin::MStore28
+            | EvmBuiltin::MStore29
+            | EvmBuiltin::MStore30
+            | EvmBuiltin::MStore31
+            | EvmBuiltin::MStore32
+            | EvmBuiltin::RuntimeStartOffset
+            | EvmBuiltin::InitEndOffset
+            | EvmBuiltin::RuntimeLength => {
+                eval.emit_unsupported_eval_of_evm_builtin(builtin, loc);
+                ValueId::ERROR
+            }
+        }
     }
 
     fn eval_fn_def(
