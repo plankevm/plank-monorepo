@@ -1,6 +1,6 @@
-use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::const_print::const_assert_eq;
-use plank_session::{EvmBuiltin, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
+use plank_session::{EvmBuiltin, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
 
 pub use plank_values;
 
@@ -121,8 +121,15 @@ pub struct CaptureInfo {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldInfo {
     pub name: StrId,
-    pub name_span: SourceSpan,
+    pub name_offset: SourceByteOffset,
     pub value: LocalId,
+}
+
+impl FieldInfo {
+    pub fn name_span(&self, session: &plank_session::Session) -> SourceSpan {
+        let len = session.lookup_name(self.name).len() as u32;
+        Span::new(self.name_offset, self.name_offset + len)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

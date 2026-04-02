@@ -258,15 +258,15 @@ impl ComptimeInterpreter {
                 eval.emit_struct_unknown_field(
                     struct_type_id,
                     field.name,
-                    SrcLoc::new(type_loc.source, field.name_span),
+                    SrcLoc::new(type_loc.source, field.name_span(eval.session)),
                 );
                 continue;
             };
             if let Some(prev) = fields_info[..i].iter().find(|f| f.name == field.name) {
                 eval.emit_struct_duplicate_field(
                     field.name,
-                    SrcLoc::new(type_loc.source, prev.name_span),
-                    SrcLoc::new(type_loc.source, field.name_span),
+                    SrcLoc::new(type_loc.source, prev.name_span(eval.session)),
+                    SrcLoc::new(type_loc.source, field.name_span(eval.session)),
                 );
                 continue;
             }

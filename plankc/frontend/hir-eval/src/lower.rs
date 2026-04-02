@@ -113,15 +113,15 @@ impl FunctionLowerScope {
                 eval.emit_struct_unknown_field(
                     ty,
                     field.name,
-                    SrcLoc::new(ty_loc.source, field.name_span),
+                    SrcLoc::new(ty_loc.source, field.name_span(eval.session)),
                 );
                 continue;
             };
             if let Some(prev) = eval.hir.fields[fields][..i].iter().find(|f| f.name == field.name) {
                 eval.emit_struct_duplicate_field(
                     field.name,
-                    SrcLoc::new(ty_loc.source, prev.name_span),
-                    SrcLoc::new(ty_loc.source, field.name_span),
+                    SrcLoc::new(ty_loc.source, prev.name_span(eval.session)),
+                    SrcLoc::new(ty_loc.source, field.name_span(eval.session)),
                 );
                 continue;
             }

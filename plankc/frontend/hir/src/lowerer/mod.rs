@@ -383,8 +383,8 @@ impl BlockLowerer<'_> {
                 let buf_start = self.field_buf.len();
                 for field in struct_lit.fields() {
                     let value = self.lower_expr_to_local(field.value());
-                    let name_span = self.lexed.tokens_src_span(field.name_span());
-                    self.field_buf.push(FieldInfo { name: field.name, name_span, value });
+                    let name_offset = self.lexed.tokens_src_span(field.name_span()).start;
+                    self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
                 ExprKind::StructLit { ty, fields }
@@ -405,8 +405,8 @@ impl BlockLowerer<'_> {
                 let buf_start = self.field_buf.len();
                 for field in struct_def.fields() {
                     let value = self.lower_expr_to_local(field.type_expr());
-                    let name_span = self.lexed.tokens_src_span(field.name_span());
-                    self.field_buf.push(FieldInfo { name: field.name, name_span, value });
+                    let name_offset = self.lexed.tokens_src_span(field.name_span()).start;
+                    self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
                 let struct_def_id = self.builder.struct_defs.push(StructDef {
