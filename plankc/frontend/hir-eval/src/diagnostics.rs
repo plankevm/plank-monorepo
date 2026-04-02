@@ -135,6 +135,13 @@ impl Evaluator<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
+    pub fn emit_comptime_block_capture_not_comptime(&mut self, def_loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("comptime block capture must be known at compile time")
+            .primary(def_loc.source, def_loc.span, "not known at compile time")
+            .note("comptime blocks can only reference values known at compile time");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
     pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("struct type must be known at compile time").primary(
             loc.source,

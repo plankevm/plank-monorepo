@@ -34,9 +34,19 @@ impl ComptimeInterpreter {
     }
 
     pub fn eval_const(&mut self, eval: &mut Evaluator<'_>, const_def: ConstDef) -> ValueId {
-        self.interpret_block(eval, const_def.body)
-            .expect("hir: const expr shouldn't have `return`");
-        self.bindings[const_def.result].0
+        self.eval_block_to_value(eval, const_def.body, const_def.result)
+    }
+
+    /// Interprets a block and returns the value of `result` local.
+    /// Expects the block to set `result` via a `Set` instruction and not contain `return`.
+    pub fn eval_block_to_value(
+        &mut self,
+        eval: &mut Evaluator<'_>,
+        body: hir::BlockId,
+        result: hir::LocalId,
+    ) -> ValueId {
+        self.interpret_block(eval, body).expect("hir: block expression shouldn't have `return`");
+        self.bindings[result].0
     }
 
     pub fn interpret_block(
@@ -165,6 +175,10 @@ impl ComptimeInterpreter {
                         ValueId::ERROR
                     }
                 }
+            }
+            hir::ExprKind::ComptimeBlock(id) => {
+                let block_def = eval.hir.comptime_blocks[id];
+                self.eval_block_to_value(eval, block_def.body, block_def.result)
             }
             hir::ExprKind::EvmBuiltinCall { builtin, args } => {
                 self.eval_evm_builtin(eval, builtin, args, expr.src_loc())

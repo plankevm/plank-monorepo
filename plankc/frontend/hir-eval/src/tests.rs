@@ -1519,3 +1519,136 @@ fn test_comptime_evm_wrong_arg_type_in_const() {
         "#],
     );
 }
+
+#[test]
+fn test_comptime_block_multi_statement() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x: u256 = comptime {
+                let a = 10;
+                let b = 20;
+                a
+            };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 10
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_block_with_const_ref() {
+    assert_lowers_to(
+        r#"
+        const N = 42;
+        init {
+            let x: u256 = comptime { N };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 42
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_block_nested_const() {
+    assert_lowers_to(
+        r#"
+        const A = 10;
+        const B = comptime { A };
+        init {
+            let x: u256 = comptime { B };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 10
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_block_struct_type() {
+    assert_lowers_to(
+        r#"
+        init {
+            let T = comptime {
+                struct { x: u256 }
+            };
+            let val = T { x: 42 };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 42
+            %1 : struct@3:9 = struct@3:9 { %0 }
+            %2 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_block_runtime_capture() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = calldataload(0);
+            let y = comptime { x };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: comptime block capture must be known at compile time
+         --> main.plk:2:13
+          |
+        2 |     let x = calldataload(0);
+          |             ^^^^^^^^^^^^^^^ not known at compile time
+          |
+          = note: comptime blocks can only reference values known at compile time
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_block_type_result() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x: comptime { u256 } = 5;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 5
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}

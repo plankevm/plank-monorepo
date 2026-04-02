@@ -1,7 +1,10 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use plank_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists};
+use plank_core::{
+    Idx, IncIterable, IndexVec, Span,
+    list_of_lists::{ListOfLists, ListOfListsPusher},
+};
 use plank_parser::{
     ast::{self, Statement, TopLevelDef},
     cst::{self, NumLitId},
@@ -37,6 +40,9 @@ struct HirBuilder {
     fns: IndexVec<FnDefId, FnDef>,
     fn_params: ListOfLists<FnDefId, ParamInfo>,
     fn_captures: ListOfLists<FnDefId, CaptureInfo>,
+
+    comptime_blocks: IndexVec<ComptimeBlockId, ComptimeBlockDef>,
+    comptime_captures: ListOfLists<ComptimeBlockId, LocalId>,
 }
 
 impl HirBuilder {
@@ -49,6 +55,8 @@ impl HirBuilder {
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
             struct_defs: IndexVec::new(),
+            comptime_blocks: IndexVec::new(),
+            comptime_captures: ListOfLists::new(),
         }
     }
 }
@@ -168,7 +176,6 @@ impl BlockLowerer<'_> {
 
         debug_assert_eq!(self.fn_scope_start, 0);
         debug_assert_eq!(self.fn_captures_start, 0);
-
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
@@ -431,8 +438,39 @@ impl BlockLowerer<'_> {
                 );
                 ExprKind::LocalRef(result)
             }
-            ast::Expr::ComptimeBlock(_) => {
-                todo!("comptime block lowering requires extra HIR instructions")
+            ast::Expr::ComptimeBlock(block) => {
+                let inner_locals_start = self.next_local_id;
+
+                let result = self.alloc_temp();
+                let body = self.create_sub_block(|this| {
+                    for stmt in block.statements() {
+                        this.lower_statement(stmt);
+                    }
+                    let (span, expr) = match block.end_expr() {
+                        Some(e) => {
+                            let span = e.span();
+                            (span, this.lower_expr(e))
+                        }
+                        None => {
+                            let span = block.node().span();
+                            (span, this.expr(ExprKind::Void, span))
+                        }
+                    };
+                    this.emit(span, InstructionKind::Set { local: result, r#type: None, expr });
+                });
+
+                let comptime_block_id =
+                    self.builder.comptime_blocks.push(ComptimeBlockDef { body, result });
+                self.builder.comptime_captures.push_with(|mut captures| {
+                    collect_captures_from_block(
+                        &self.builder.blocks,
+                        body,
+                        inner_locals_start,
+                        &mut captures,
+                    );
+                });
+
+                ExprKind::ComptimeBlock(comptime_block_id)
             }
             ast::Expr::Binary(binary) => 'binary: {
                 let op = match binary.op {
@@ -789,8 +827,59 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
         fn_params: builder.fn_params,
         fn_captures: builder.fn_captures,
         struct_defs: builder.struct_defs,
+        comptime_blocks: builder.comptime_blocks,
+        comptime_captures: builder.comptime_captures,
         init,
         run: run.map(|(id, _)| id),
+    }
+}
+
+/// Scans a block's instructions for references to locals allocated before
+/// `inner_locals_start` (i.e., outer locals that the comptime block captures).
+fn collect_captures_from_block(
+    blocks: &ListOfLists<BlockId, Instruction>,
+    block_id: BlockId,
+    inner_locals_start: LocalId,
+    captures: &mut ListOfListsPusher<'_, ComptimeBlockId, LocalId>,
+) {
+    macro_rules! track_capture {
+        ($local_id:expr) => {
+            let local_id = $local_id;
+            // `local_id < inner_locals_start` is sufficient because name resolution guarantees
+            // only in-scope locals appear in the block's instructions.
+            if local_id < inner_locals_start && !captures.current().contains(&local_id) {
+                captures.push(local_id);
+            }
+        };
+    }
+
+    for instr in &blocks[block_id] {
+        match instr.kind {
+            InstructionKind::Set { expr, .. }
+            | InstructionKind::BranchSet { expr, .. }
+            | InstructionKind::Eval(expr)
+            | InstructionKind::Return(expr) => {
+                if let ExprKind::LocalRef(id) = expr.kind {
+                    track_capture!(id);
+                }
+            }
+            InstructionKind::Assign { target, value } => {
+                track_capture!(target);
+                if let ExprKind::LocalRef(id) = value.kind {
+                    track_capture!(id);
+                }
+            }
+            InstructionKind::If { condition, then_block, else_block } => {
+                track_capture!(condition);
+                collect_captures_from_block(blocks, then_block, inner_locals_start, captures);
+                collect_captures_from_block(blocks, else_block, inner_locals_start, captures);
+            }
+            InstructionKind::While { condition_block, condition, body } => {
+                track_capture!(condition);
+                collect_captures_from_block(blocks, condition_block, inner_locals_start, captures);
+                collect_captures_from_block(blocks, body, inner_locals_start, captures);
+            }
+        }
     }
 }
 

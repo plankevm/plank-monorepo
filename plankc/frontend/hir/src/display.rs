@@ -102,6 +102,25 @@ impl<'a> DisplayHir<'a> {
                 write!(f, " ")?;
                 self.fmt_local(f, rhs)
             }
+            Expr::ComptimeBlock(id) => {
+                let block_def = self.hir.comptime_blocks[id];
+                let captures = &self.hir.comptime_captures[id];
+                if !captures.is_empty() {
+                    write!(f, "comptime [")?;
+                    for (i, &local) in captures.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        self.fmt_local(f, local)?;
+                    }
+                    writeln!(f, "] {{")?;
+                } else {
+                    writeln!(f, "comptime {{")?;
+                }
+                self.fmt_block(f, block_def.body, 1)?;
+                write!(f, "}} -> ")?;
+                self.fmt_local(f, block_def.result)
+            }
             Expr::Error => write!(f, "<error>"),
         }
     }

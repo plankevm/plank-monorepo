@@ -415,6 +415,29 @@ impl FunctionLowerScope {
                     comptime: Some(ValueId::ERROR),
                 }
             }
+            hir::ExprKind::ComptimeBlock(id) => {
+                let block_def = eval.hir.comptime_blocks[id];
+                let captures = &eval.hir.comptime_captures[id];
+
+                let saved_bindings = std::mem::take(&mut self.interpreter.bindings);
+                for &local in captures {
+                    let loc = self.locals.def_loc(local);
+                    let value = self.locals.comptime(local).unwrap_or_else(|| {
+                        eval.emit_comptime_block_capture_not_comptime(loc);
+                        ValueId::ERROR
+                    });
+                    self.interpreter.bindings.insert(local, (value, loc));
+                }
+
+                let value =
+                    self.interpreter.eval_block_to_value(eval, block_def.body, block_def.result);
+                self.interpreter.bindings = saved_bindings;
+
+                match self.materialize(&eval.values, &eval.types, &mut eval.mir_args, value) {
+                    None => ExprResult::ComptimeOnly(value),
+                    Some((expr, ty)) => ExprResult::Runtime { expr, ty, comptime: Some(value) },
+                }
+            }
             hir::ExprKind::Error => ExprResult::Runtime {
                 expr: mir::Expr::Error,
                 ty: TypeId::ERROR,
