@@ -648,4 +648,77 @@ data .0 0x1234
         "#;
         assert_trim_strings_eq_with_diff(&actual, expected, "defragment dead function data");
     }
+
+    #[test]
+    fn test_structural_vs_sccp_reachability() {
+        let input = r#"
+            fn init:
+                entry {
+                    cond = const 1
+                    => cond ? @live : @dead
+                }
+                live { stop }
+                dead { stop }
+                orphan { stop }
+        "#;
+
+        // Structural reachability removes orphan but keeps both branches
+        let mut ir_structural = parse_or_panic(input, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut Defragmenter::default(), &mut ir_structural, &store);
+
+        let structural_result = sir_data::display_program(&ir_structural);
+        let expected_structural = r#"
+Init: @0
+Functions:
+    fn @0 -> entry @0  (outputs: 0)
+
+Basic Blocks:
+    @0 {
+        $0 = const 0x1
+        => $0 ? @2 : @1
+    }
+
+    @1 {
+        stop
+    }
+
+    @2 {
+        stop
+    }
+        "#;
+        assert_trim_strings_eq_with_diff(
+            &structural_result,
+            expected_structural,
+            "structural reachability removes orphan but keeps both branches",
+        );
+
+        // SCCP-refined reachability additionally eliminates the dead branch
+        let mut ir_sccp = parse_or_panic(input, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut SCCP::default(), &mut ir_sccp, &store);
+        run_pass(&mut Defragmenter::default(), &mut ir_sccp, &store);
+
+        let sccp_result = sir_data::display_program(&ir_sccp);
+        let expected_sccp = r#"
+Init: @0
+Functions:
+    fn @0 -> entry @0  (outputs: 0)
+
+Basic Blocks:
+    @0 {
+        $0 = const 0x1
+        => @1
+    }
+
+    @1 {
+        stop
+    }
+        "#;
+        assert_trim_strings_eq_with_diff(
+            &sccp_result,
+            expected_sccp,
+            "sccp reachability also eliminates dead branch",
+        );
+    }
 }
