@@ -59,7 +59,7 @@ impl Pass for UnusedOperationElimination {
             | AnalysesMask::DominanceFrontiers
             | AnalysesMask::BasicBlockOwnership
             | AnalysesMask::CfgInOutBundling
-            | AnalysesMask::SccpReachable
+            | AnalysesMask::Reachability
     }
 }
 

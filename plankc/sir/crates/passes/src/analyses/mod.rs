@@ -7,6 +7,7 @@ mod dominators;
 mod legalizer;
 mod local_liveness;
 mod predecessors;
+mod reachability;
 mod traversal;
 
 pub use allocation_liveness::{AllocData, AllocId, AllocKind, AllocationLiveness};
@@ -18,4 +19,5 @@ pub use dominators::{DominanceFrontiers, Dominators};
 pub use legalizer::{Legalizer, LegalizerError};
 pub use local_liveness::{Interval, IntervalEnd, IntervalStart, LocalIntervals, LocalLiveness};
 pub use predecessors::Predecessors;
+pub use reachability::Reachability;
 pub use traversal::dfs_postorder;

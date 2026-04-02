@@ -1,8 +1,8 @@
 use crate::analyses::{
     AllocationLiveness, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling, DefUse,
-    DominanceFrontiers, Dominators, LocalLiveness, Predecessors,
+    DominanceFrontiers, Dominators, LocalLiveness, Predecessors, Reachability,
 };
-use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram};
+use sir_data::EthIRProgram;
 use std::cell::{Ref, RefCell, RefMut};
 
 #[derive(Default)]
@@ -30,9 +30,14 @@ impl<T: Analysis> Cached<T> {
         Ref::map(self.state.borrow(), |s| &s.analysis)
     }
 
-    fn get_mut(&self, program: &EthIRProgram, store: &AnalysesStore) -> RefMut<'_, T> {
+    fn get_mut(
+        &self,
+        program: &EthIRProgram,
+        store: &AnalysesStore,
+        compute: bool,
+    ) -> RefMut<'_, T> {
         let mut cached = self.state.borrow_mut();
-        if !cached.valid {
+        if compute && !cached.valid {
             cached.analysis.compute(program, store);
         }
         cached.valid = false;
@@ -41,14 +46,6 @@ impl<T: Analysis> Cached<T> {
 }
 
 impl<T> Cached<T> {
-    pub(crate) fn get_if_valid(&self) -> Option<Ref<'_, T>> {
-        if self.is_valid() { Some(Ref::map(self.state.borrow(), |s| &s.analysis)) } else { None }
-    }
-
-    pub(crate) fn get_mut_maybe_invalid(&self) -> RefMut<'_, T> {
-        RefMut::map(self.state.borrow_mut(), |s| &mut s.analysis)
-    }
-
     pub(crate) fn mark_valid(&self) {
         self.state.borrow_mut().valid = true;
     }
@@ -100,8 +97,7 @@ define_analyses! {
     CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling,
     AllocationLiveness => allocation_liveness: AllocationLiveness,
     LocalLiveness => local_liveness: LocalLiveness,
-    // Produced by SCCP, not computed on-demand. Use get_buffer() + mark_valid().
-    SccpReachable => sccp_reachable: DenseIndexSet<BasicBlockId>,
+    Reachability => reachability: Reachability,
 }
 
 impl AnalysesStore {
@@ -110,7 +106,7 @@ impl AnalysesStore {
     }
 
     pub fn def_use_mut(&self, program: &EthIRProgram) -> RefMut<'_, DefUse> {
-        self.def_use.get_mut(program, self)
+        self.def_use.get_mut(program, self, true)
     }
 
     pub fn predecessors(&self, program: &EthIRProgram) -> Ref<'_, Predecessors> {
@@ -145,6 +141,18 @@ impl AnalysesStore {
 
     pub fn local_liveness(&self, program: &EthIRProgram) -> Ref<'_, LocalLiveness> {
         self.local_liveness.get(program, self)
+    }
+
+    pub fn reachability(&self, program: &EthIRProgram) -> Ref<'_, Reachability> {
+        self.reachability.get(program, self)
+    }
+
+    pub fn reachability_mut(
+        &self,
+        program: &EthIRProgram,
+        compute: bool,
+    ) -> RefMut<'_, Reachability> {
+        self.reachability.get_mut(program, self, compute)
     }
 }
 
@@ -193,7 +201,7 @@ mod tests {
         assert!(store.dominance_frontiers.is_valid());
 
         // SCCP invalidates DefUse, Predecessors (cascades to Dominators, DominanceFrontiers),
-        // BasicBlockOwnership, CfgInOutBundling — and populates sccp_reachable
+        // BasicBlockOwnership, CfgInOutBundling — and populates reachability
         run_pass(&mut SCCP::default(), &mut program, &store);
         assert!(!store.def_use.is_valid());
         assert!(!store.predecessors.is_valid());
@@ -201,12 +209,12 @@ mod tests {
         assert!(!store.dominance_frontiers.is_valid());
         assert!(!store.basic_block_ownership.is_valid());
         assert!(!store.cfg_in_out_bundling.is_valid());
-        assert!(store.sccp_reachable.is_valid());
+        assert!(store.reachability.is_valid());
 
-        // Defragmenter consumes sccp_reachable and invalidates it
+        // Defragmenter consumes reachability and invalidates it
         let mut defrag = Defragmenter::default();
         run_pass(&mut defrag, &mut program, &store);
-        assert!(!store.sccp_reachable.is_valid());
+        assert!(!store.reachability.is_valid());
 
         // Copy prop invalidates DefUse
         run_pass(&mut CopyPropagation::default(), &mut program, &store);
@@ -219,9 +227,5 @@ mod tests {
         // Unused elim uses def_use_mut: computes DefUse then marks it invalid
         run_pass(&mut UnusedOperationElimination::default(), &mut program, &store);
         assert!(!store.def_use.is_valid());
-
-        // Defragmenter works without sccp_reachable
-        assert!(!store.sccp_reachable.is_valid());
-        run_pass(&mut defrag, &mut program, &store);
     }
 }

@@ -1,12 +1,12 @@
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::span::IncIterable;
 use sir_data::{
-    BasicBlock, BasicBlockId, BlockView, Branch, Cases, Control, ControlView, DataId,
-    DenseIndexSet, EthIRProgram, Function, FunctionId, Idx, LargeConstId, LocalId, LocalIdx,
-    Operation, OperationIdx, Span, StaticAllocId, Switch, operation::OpVisitorMut,
+    BasicBlock, BasicBlockId, BlockView, Branch, Cases, Control, ControlView, DataId, EthIRProgram,
+    Function, FunctionId, Idx, LargeConstId, LocalId, LocalIdx, Operation, OperationIdx, Span,
+    StaticAllocId, Switch, operation::OpVisitorMut,
 };
 
-use crate::{AnalysesStore, Pass};
+use crate::{AnalysesStore, Pass, analyses::Reachability};
 
 #[derive(Default)]
 pub struct Defragmenter {
@@ -18,12 +18,12 @@ impl Pass for Defragmenter {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         self.state.clear();
         self.scratch.clear();
-        let live_blocks = store.sccp_reachable.get_if_valid();
+        let reachability = store.reachability(program);
         Rewriter {
             state: &mut self.state,
             src: program,
             dst: &mut self.scratch,
-            live_blocks: live_blocks.as_deref(),
+            reachability: &reachability,
         }
         .rewrite();
         std::mem::swap(program, &mut self.scratch);
@@ -59,7 +59,7 @@ struct Rewriter<'a> {
     state: &'a mut DefragmenterState,
     src: &'a EthIRProgram,
     dst: &'a mut EthIRProgram,
-    live_blocks: Option<&'a DenseIndexSet<BasicBlockId>>,
+    reachability: &'a Reachability,
 }
 
 impl<'a> Rewriter<'a> {
@@ -114,7 +114,7 @@ impl<'a> Rewriter<'a> {
     }
 
     fn emit_block(&mut self, old_id: BasicBlockId) {
-        if self.live_blocks.is_some_and(|blocks| !blocks.contains(old_id)) {
+        if !self.reachability.contains(old_id) {
             return;
         }
 
@@ -200,10 +200,7 @@ impl<'a> Rewriter<'a> {
     }
 
     fn push_block(&mut self, bb: BasicBlockId) {
-        debug_assert!(
-            self.live_blocks.is_none_or(|live| live.contains(bb)),
-            "successor {bb:?} should be in live_blocks"
-        );
+        debug_assert!(self.reachability.contains(bb), "successor {bb:?} should be reachable");
         if !self.state.block_map.contains_key(&bb) {
             self.state.block_worklist.push(bb);
         }

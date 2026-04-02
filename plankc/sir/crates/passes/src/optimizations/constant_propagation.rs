@@ -16,15 +16,15 @@ pub struct SCCP {
 impl Pass for SCCP {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let uses = store.def_use(program);
-        let mut reachable = store.sccp_reachable.get_mut_maybe_invalid();
-        self.analysis(program, &uses, &mut reachable);
-        self.apply(program, &reachable);
-        drop(reachable);
-        store.sccp_reachable.mark_valid();
+        let mut reachability = store.reachability_mut(program, false);
+        self.analysis(program, &uses, reachability.set_mut());
+        self.apply(program, reachability.set_mut());
+        drop(reachability);
+        store.reachability.mark_valid();
     }
 
     fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::SccpReachable
+        AnalysesMask::Reachability
     }
 }
 
@@ -1363,10 +1363,15 @@ Basic Blocks:
         let store = AnalysesStore::default();
         run_pass(&mut SCCP::default(), &mut ir, &store);
 
-        let reachable =
-            store.sccp_reachable.get_if_valid().expect("sccp did not populate reachable");
-        assert!(reachable.contains(BasicBlockId::new(5)), "true_target (@5) should be reachable");
-        assert!(reachable.contains(BasicBlockId::new(6)), "false_target (@6) should be reachable");
+        let reachability = store.reachability(&ir);
+        assert!(
+            reachability.contains(BasicBlockId::new(5)),
+            "true_target (@5) should be reachable"
+        );
+        assert!(
+            reachability.contains(BasicBlockId::new(6)),
+            "false_target (@6) should be reachable"
+        );
     }
 
     #[test]
