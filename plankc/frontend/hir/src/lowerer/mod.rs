@@ -353,8 +353,7 @@ impl BlockLowerer<'_> {
             }
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
-                let member_span = self.lexed.tokens_src_span(member_expr.member_span());
-                ExprKind::Member { object, member: member_expr.member, member_span }
+                ExprKind::Member { object, member: member_expr.member }
             }
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();

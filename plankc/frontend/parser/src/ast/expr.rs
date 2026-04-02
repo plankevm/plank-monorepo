@@ -163,7 +163,6 @@ impl<'cst> CallExpr<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct MemberExpr<'cst> {
     pub member: StrId,
-    member_span: Span<TokenIdx>,
     view: NodeView<'cst>,
 }
 
@@ -172,17 +171,12 @@ impl<'cst> MemberExpr<'cst> {
         if view.kind() != NodeKind::MemberExpr {
             return None;
         }
-        let member_node = view.child(1)?;
-        let member = member_node.ident()?;
-        Some(Self { member, member_span: member_node.span(), view })
+        let member = view.child(1).and_then(NodeView::ident)?;
+        Some(Self { member, view })
     }
 
     pub fn object(&self) -> Expr<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
-    }
-
-    pub fn member_span(&self) -> Span<TokenIdx> {
-        self.member_span
     }
 
     pub fn node(&self) -> NodeView<'cst> {

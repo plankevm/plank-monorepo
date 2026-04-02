@@ -458,10 +458,10 @@ fn test_invalid_field_access() {
         "#,
         &[r#"
         error: unknown field
-         --> main.plk:4:21
+         --> main.plk:4:19
           |
         4 |     let y: u256 = x.hey;
-          |                     ^^^ `Pair` has no field `hey`
+          |                   ^^^^^ `Pair` has no field `hey`
         "#],
     );
 }
@@ -480,10 +480,10 @@ fn test_comptime_invalid_field_access() {
         "#,
         &[r#"
         error: unknown field
-         --> main.plk:3:13
+         --> main.plk:3:11
           |
         3 | const x = p.hey;
-          |             ^^^ `Pair` has no field `hey`
+          |           ^^^^^ `Pair` has no field `hey`
         "#],
     );
 }

@@ -65,7 +65,6 @@ pub enum ExprKind {
     Member {
         object: LocalId,
         member: StrId,
-        member_span: SourceSpan,
     },
     StructLit {
         ty: LocalId,
@@ -85,7 +84,7 @@ pub enum ExprKind {
 }
 
 /// [`ExprKind`] memory size check. May be changed intentionally.
-const _EXPR_KIND_SIZE: () = const_assert_eq(std::mem::size_of::<ExprKind>(), 20);
+const _EXPR_KIND_SIZE: () = const_assert_eq(std::mem::size_of::<ExprKind>(), 12);
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {

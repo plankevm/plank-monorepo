@@ -399,7 +399,7 @@ impl FunctionLowerScope {
             hir::ExprKind::StructLit { ty, fields } => {
                 self.translate_struct_literal(eval, ty, fields)
             }
-            hir::ExprKind::Member { object, member, member_span } => {
+            hir::ExprKind::Member { object, member } => {
                 let ty = self.locals.get_type(object, &eval.values);
                 let Type::Struct(r#struct) = eval.types.lookup(ty) else {
                     eval.emit_member_on_non_struct(ty, self.locals.def_loc(object));
@@ -408,8 +408,7 @@ impl FunctionLowerScope {
                 let field_index = r#struct.field_names.iter().position(|&name| name == member);
                 let _ = r#struct;
                 let Some(field_index) = field_index else {
-                    let source = self.locals.def_loc(object).source;
-                    eval.emit_struct_unknown_field(ty, member, SrcLoc::new(source, member_span));
+                    eval.emit_struct_unknown_field(ty, member, expr.src_loc());
                     return ExprResult::ComptimeOnly(ValueId::ERROR);
                 };
                 let value = self.locals.comptime(object).map(|object| {

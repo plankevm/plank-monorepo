@@ -1,6 +1,6 @@
 use plank_core::{DenseIndexMap, vec_buf::VecBuf};
 use plank_hir::{self as hir, ConstDef};
-use plank_session::{SourceSpan, SrcLoc, StrId};
+use plank_session::{SrcLoc, StrId};
 use plank_values::{StructInfo, Type, TypeId, ValueId};
 
 use crate::{Evaluator, value::Value};
@@ -152,8 +152,8 @@ impl ComptimeInterpreter {
             }
             hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
             hir::ExprKind::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
-            hir::ExprKind::Member { object, member, member_span } => {
-                self.eval_member(eval, object, member, member_span)?
+            hir::ExprKind::Member { object, member } => {
+                self.eval_member(eval, object, member, expr.src_loc())?
             }
             hir::ExprKind::LogicalNot { input } => {
                 let (input_vid, input_loc) = self.bindings[input];
@@ -313,17 +313,13 @@ impl ComptimeInterpreter {
         eval: &mut Evaluator<'_>,
         object: hir::LocalId,
         member: StrId,
-        member_span: SourceSpan,
+        expr_loc: SrcLoc,
     ) -> Result<ValueId, ReturnValue> {
         let (obj_vid, obj_loc) = self.bindings[object];
         match eval.values.lookup(obj_vid) {
             Value::StructVal { ty, fields } => {
                 let Some(field_index) = eval.types.field_index_by_name(ty, member) else {
-                    eval.emit_struct_unknown_field(
-                        ty,
-                        member,
-                        SrcLoc::new(obj_loc.source, member_span),
-                    );
+                    eval.emit_struct_unknown_field(ty, member, expr_loc);
                     return Ok(ValueId::ERROR);
                 };
                 Ok(fields[field_index as usize])
