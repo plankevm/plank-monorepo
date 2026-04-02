@@ -11,6 +11,12 @@ const ASM_BYTES_CAPACITY: usize = 20_000;
 const ASM_SECTIONS_CAPACITY: usize = 512;
 
 #[derive(Debug, Clone)]
+pub struct SourceMapEntry {
+    pub op_index: u32,
+    pub pc: u32,
+}
+
+#[derive(Debug, Clone)]
 pub enum BytecodeError {
     Assemble(AssembleError),
 }
@@ -85,9 +91,18 @@ pub(crate) struct Translator<'ir> {
     pub bbs_to_be_translated: Vec<(FunctionId, BasicBlockId)>,
     pub translating_init_code: bool,
     pub asm: Assembler,
+    pub source_map_marks: Vec<(MarkId, u32)>,
+    pub global_op_index: u32,
 }
 
 impl<'ir> Translator<'ir> {
+    fn push_source_map_mark(&mut self) {
+        let op_mark = self.mark_map.allocate_mark();
+        self.asm.push_mark(op_mark);
+        self.source_map_marks.push((op_mark, self.global_op_index));
+        self.global_op_index += 1;
+    }
+
     pub(crate) fn emit_free_ptr_load(&mut self) {
         self.asm.push_minimal_u32(self.memory_layout.free_pointer);
         self.asm.push_op_byte(op::MLOAD);
@@ -126,6 +141,8 @@ impl<'ir> Translator<'ir> {
             mark_map,
             translated_bbs,
             translating_init_code: true,
+            source_map_marks: Vec::with_capacity(256),
+            global_op_index: 0,
         }
     }
 
@@ -161,6 +178,7 @@ impl<'ir> Translator<'ir> {
             let block = self.ir.block(bb_id);
             self.memory_layout.emit_transfer_basic_block_outputs(&mut self.asm, block.inputs());
             for op_view in block.operations() {
+                self.push_source_map_mark();
                 operations::translate_operation(self, op_view.op());
             }
             self.memory_layout.emit_copy_for_basic_block_inputs(&mut self.asm, block.outputs());
@@ -170,16 +188,19 @@ impl<'ir> Translator<'ir> {
             match block.control() {
                 ControlView::LastOpTerminates => {}
                 ControlView::InternalReturn => {
+                    self.push_source_map_mark();
                     let return_dest_loc = self.memory_layout.get_return_dest_store(func);
                     self.asm.push_minimal_u32(return_dest_loc);
                     self.asm.push_op_byte(op::MLOAD);
                     self.asm.push_op_byte(op::JUMP);
                 }
                 ControlView::ContinuesTo(to) => {
+                    self.push_source_map_mark();
                     self.emit_code_offset_push(self.get_bb_mark(to));
                     self.asm.push_op_byte(op::JUMP);
                 }
                 ControlView::Branches { condition, non_zero_target, zero_target } => {
+                    self.push_source_map_mark();
                     self.emit_local_load(condition);
                     self.emit_code_offset_push(self.get_bb_mark(non_zero_target));
                     self.asm.push_op_byte(op::JUMPI);
@@ -187,6 +208,7 @@ impl<'ir> Translator<'ir> {
                     self.asm.push_op_byte(op::JUMP);
                 }
                 ControlView::Switch(switch) => {
+                    self.push_source_map_mark();
                     self.emit_local_load(switch.condition());
                     self.asm.push_minimal_u32(self.memory_layout.switch_store);
                     self.asm.push_op_byte(op::MSTORE);
@@ -213,6 +235,15 @@ impl<'ir> Translator<'ir> {
 }
 
 pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) -> Result<(), BytecodeError> {
+    ir_to_bytecode_with_source_map(ir, result, None, None)
+}
+
+pub fn ir_to_bytecode_with_source_map(
+    ir: &EthIRProgram,
+    result: &mut Vec<u8>,
+    source_map: Option<&mut Vec<SourceMapEntry>>,
+    runtime_start_pc: Option<&mut u32>,
+) -> Result<(), BytecodeError> {
     let mut translator = Translator::new(ir);
 
     translator.translating_init_code = true;
@@ -233,9 +264,19 @@ pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) -> Result<(), Byt
 
     translator.asm.push_mark(translator.mark_map.initcode_end);
 
-    let _mark_to_offset = translator
+    let mark_to_offset = translator
         .asm
         .assemble(result, Some(translator.mark_map.next_mark_id.get() as usize))
         .map_err(BytecodeError::Assemble)?;
+
+    if let Some(runtime_start_pc) = runtime_start_pc {
+        *runtime_start_pc = mark_to_offset[translator.mark_map.runtime_start];
+    }
+
+    if let Some(source_map) = source_map {
+        for &(mark, op_idx) in &translator.source_map_marks {
+            source_map.push(SourceMapEntry { op_index: op_idx, pc: mark_to_offset[mark] });
+        }
+    }
     Ok(())
 }

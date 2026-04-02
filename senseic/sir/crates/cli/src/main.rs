@@ -1,9 +1,10 @@
 use clap::Parser;
+use sir_debug_backend::SourceMapEntry;
 use sir_optimizations::Optimizer;
 use sir_parser::{EmitConfig, parse_ir};
 use std::{
     fs,
-    io::{self, Read},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 
@@ -47,6 +48,10 @@ struct Cli {
     /// Example: -O csud
     #[arg(short = 'O', long = "optimize", value_parser = parse_optimization_passes)]
     optimize: Option<String>,
+
+    /// Write source map (op_index -> bytecode_pc) to this file
+    #[arg(long)]
+    source_map: Option<PathBuf>,
 }
 
 fn read_input(input: Option<PathBuf>) -> String {
@@ -95,7 +100,15 @@ fn main() {
     }
 
     let mut bytecode = Vec::with_capacity(0x6000);
-    if let Err(err) = sir_debug_backend::ir_to_bytecode(&program, &mut bytecode) {
+    if let Some(ref source_map_path) = cli.source_map {
+        let mut source_map = Vec::with_capacity(256);
+        let mut runtime_start_pc = 0u32;
+        if let Err(err) = sir_debug_backend::ir_to_bytecode_with_source_map(&program, &mut bytecode, Some(&mut source_map), Some(&mut runtime_start_pc)) {
+            eprintln!("Failed to generate bytecode: {err}");
+            std::process::exit(1);
+        }
+        write_source_map(source_map_path, &source_map, runtime_start_pc);
+    } else if let Err(err) = sir_debug_backend::ir_to_bytecode(&program, &mut bytecode) {
         eprintln!("Failed to generate bytecode: {err}");
         std::process::exit(1);
     }
@@ -106,4 +119,21 @@ fn main() {
         print!("{:02x}", byte);
     }
     println!();
+}
+
+fn write_source_map(path: &PathBuf, entries: &[SourceMapEntry], runtime_start_pc: u32) {
+    let mut out = String::with_capacity(entries.len() * 20);
+    out.push_str(&format!("{{\"runtime_start_pc\":{},\"ops\":[", runtime_start_pc));
+    for (i, entry) in entries.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!("{{\"idx\":{},\"pc\":{}}}", entry.op_index, entry.pc));
+    }
+    out.push_str("]}");
+
+    let mut file = fs::File::create(path)
+        .unwrap_or_else(|e| panic!("failed to create source map '{}': {}", path.display(), e));
+    file.write_all(out.as_bytes())
+        .unwrap_or_else(|e| panic!("failed to write source map '{}': {}", path.display(), e));
 }
