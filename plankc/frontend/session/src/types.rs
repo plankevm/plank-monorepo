@@ -26,6 +26,9 @@ impl TypeId {
     }
 
     pub fn unify(&mut self, other: TypeId) -> bool {
+        if *self == TypeId::ERROR || other == TypeId::ERROR {
+            return true;
+        }
         if *self == TypeId::NEVER {
             *self = other;
             return true;
