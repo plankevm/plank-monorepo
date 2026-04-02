@@ -249,9 +249,9 @@ impl ComptimeInterpreter {
             return Ok(ValueId::ERROR);
         }
 
-        let fields_info = &eval.hir.fields[fields_id];
+        let lit_fields = &eval.hir.fields[fields_id];
 
-        for (i, field) in fields_info.iter().enumerate() {
+        for (i, field) in lit_fields.iter().enumerate() {
             let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
@@ -263,7 +263,7 @@ impl ComptimeInterpreter {
                 );
                 continue;
             };
-            if let Some(prev) = fields_info[..i].iter().find(|f| f.name == field.name) {
+            if let Some(prev) = lit_fields[..i].iter().find(|f| f.name == field.name) {
                 let session = eval.session.borrow();
                 let first_loc = SrcLoc::new(type_loc.source, prev.name_span(&session));
                 let duplicate_loc = SrcLoc::new(type_loc.source, field.name_span(&session));
@@ -279,26 +279,19 @@ impl ComptimeInterpreter {
             }
         }
 
-        let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
-        let mut has_missing_fields = false;
-        for &field_name in r#struct.field_names {
-            if !fields_info.iter().any(|f| f.name == field_name) {
-                eval.emit_struct_missing_field(struct_type_id, field_name, type_loc);
-                has_missing_fields = true;
-            }
-        }
-        if has_missing_fields {
-            return Ok(ValueId::ERROR);
-        }
-
         self.value_buf.use_as(|fields| {
             let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
+            let mut has_missing_fields = false;
             for &field_name in r#struct.field_names {
-                let field = fields_info
-                    .iter()
-                    .find(|field| field.name == field_name)
-                    .expect("missing field: already validated");
+                let Some(field) = lit_fields.iter().find(|f| f.name == field_name) else {
+                    eval.emit_struct_missing_field(struct_type_id, field_name, type_loc);
+                    has_missing_fields = true;
+                    continue;
+                };
                 fields.push(self.bindings[field.value].0);
+            }
+            if has_missing_fields {
+                return Ok(ValueId::ERROR);
             }
             Ok(eval.values.intern(Value::StructVal { ty: struct_type_id, fields }))
         })

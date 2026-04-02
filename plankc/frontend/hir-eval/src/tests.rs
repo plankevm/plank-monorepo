@@ -1067,6 +1067,68 @@ fn test_runtime_struct_lit_not_a_struct() {
 }
 
 #[test]
+fn test_runtime_struct_lit_unknown_field() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        init {
+            let x = Pair { a: 42, c: true, b: false };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:3:27
+          |
+        3 |     let x = Pair { a: 42, c: true, b: false };
+          |                           ^ `Pair` has no field `c`
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_struct_lit_duplicate_field() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        init {
+            let x = Pair { a: 42, a: 99, b: false };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: duplicate field
+         --> main.plk:3:27
+          |
+        3 |     let x = Pair { a: 42, a: 99, b: false };
+          |                    -      ^ `a` assigned more than once
+          |                    |
+          |                    first assigned here
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_struct_lit_missing_field() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        init {
+            let x = Pair { a: 42 };
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: missing field
+         --> main.plk:3:13
+          |
+        3 |     let x = Pair { a: 42 };
+          |             ^^^^ missing field `b` in `Pair`
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_member_on_non_struct() {
     assert_diagnostics(
         r#"
