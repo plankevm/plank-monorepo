@@ -18,11 +18,9 @@ impl Analysis for Reachability {
 
 impl Reachability {
     fn mark_reachable(&mut self, program: &EthIRProgram, block: BasicBlockId) {
-        if self.reachable.contains(block) {
+        if !self.reachable.add(block) {
             return;
         }
-
-        self.reachable.add(block);
 
         for successor in program.block(block).successors() {
             self.mark_reachable(program, successor);
