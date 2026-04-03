@@ -143,9 +143,8 @@ impl<'cst> Import<'cst> {
     /// Span covering the segments that determine the imported file path.
     /// For `import m::sub::X;` this is `m::sub`, for `import m::sub::*;` this is `m::sub`.
     pub fn file_path_span(&self) -> Span<TokenIdx> {
-        let first = self.first_child;
-        let mut second_to_last = first;
-        let mut last = first;
+        let mut second_to_last = self.first_child;
+        let mut last = self.first_child;
         for ident in self.path_node.children().filter(|c| c.ident().is_some()) {
             second_to_last = last;
             last = ident;
@@ -154,7 +153,7 @@ impl<'cst> Import<'cst> {
             ImportSuffix::All => last,
             ImportSuffix::As(_) => second_to_last,
         };
-        Span::new(first.span().start, end.span().end)
+        Span::new(self.first_child.span().start, end.span().end)
     }
 }
 
