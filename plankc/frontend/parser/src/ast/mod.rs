@@ -1,11 +1,12 @@
 mod expr;
 
 pub use expr::*;
+
 use plank_core::Span;
 
 use crate::{
     cst::{NodeKind, NodeView},
-    lexer::TokenIdx,
+    lexer::TokenSpan,
 };
 use plank_session::StrId;
 
@@ -56,7 +57,7 @@ impl<'cst> RunBlock<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct ConstDecl<'cst> {
     pub name: StrId,
-    pub name_span: Span<TokenIdx>,
+    pub name_span: TokenSpan,
     view: NodeView<'cst>,
     pub r#type: Option<Expr<'cst>>,
     pub assign: Expr<'cst>,
@@ -76,11 +77,11 @@ impl<'cst> ConstDecl<'cst> {
         Some(Self { name, name_span, view, r#type, assign })
     }
 
-    pub fn span(&self) -> Span<TokenIdx> {
+    pub fn span(&self) -> TokenSpan {
         self.view.span()
     }
 
-    pub fn name_span(&self) -> Span<TokenIdx> {
+    pub fn name_span(&self) -> TokenSpan {
         self.name_span
     }
 }
@@ -128,7 +129,7 @@ impl<'cst> Import<'cst> {
         }
     }
 
-    pub fn last_path_segment_span(&self) -> Span<TokenIdx> {
+    pub fn last_path_segment_span(&self) -> TokenSpan {
         let mut last = self.first_child;
         for child in self.path_node.children().filter(|c| c.ident().is_some()) {
             last = child;
@@ -136,13 +137,13 @@ impl<'cst> Import<'cst> {
         last.span()
     }
 
-    pub fn first_path_segment_span(&self) -> Span<TokenIdx> {
+    pub fn first_path_segment_span(&self) -> TokenSpan {
         self.first_child.span()
     }
 
     /// Span covering the segments that determine the imported file path.
     /// For `import m::sub::X;` this is `m::sub`, for `import m::sub::*;` this is `m::sub`.
-    pub fn file_path_span(&self) -> Span<TokenIdx> {
+    pub fn file_path_span(&self) -> TokenSpan {
         let mut second_to_last = self.first_child;
         let mut last = self.first_child;
         for ident in self.path_node.children().filter(|c| c.ident().is_some()) {
@@ -163,7 +164,7 @@ pub enum TopLevelDef<'cst> {
     Run(RunBlock<'cst>),
     Const(ConstDecl<'cst>),
     Import(Import<'cst>),
-    Error { span: Span<TokenIdx> },
+    Error { span: TokenSpan },
 }
 
 #[derive(Debug, Clone, Copy)]

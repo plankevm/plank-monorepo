@@ -1,6 +1,6 @@
 use crate::{
     cst::NodeIdx,
-    lexer::{Lexed, TokenIdx},
+    lexer::{Lexed, TokenIdx, TokenSpan},
 };
 use plank_core::{Idx, Span};
 use plank_session::SourceSpan;
@@ -48,7 +48,7 @@ impl<'src, 'lexed, 'ast> DisplayCST<'src, 'lexed, 'ast> {
     fn write_token_span(
         &self,
         f: &mut std::fmt::Formatter<'_>,
-        tokens: Span<TokenIdx>,
+        tokens: TokenSpan,
         indent_level: u32,
     ) -> std::fmt::Result {
         for ti in tokens.iter() {

@@ -399,6 +399,8 @@ newtype_index! {
     pub struct TokenIdx;
 }
 
+pub type TokenSpan = Span<TokenIdx>;
+
 #[derive(Debug, Clone)]
 pub struct Lexed {
     tokens: IndexVec<TokenIdx, Token>,
@@ -432,7 +434,7 @@ impl Lexed {
         if token == TokenIdx::ZERO { SourceByteOffset::ZERO } else { self.source_ends[token - 1] }
     }
 
-    pub fn tokens_src_span(&self, tokens: Span<TokenIdx>) -> Span<SourceByteOffset> {
+    pub fn tokens_src_span(&self, tokens: TokenSpan) -> Span<SourceByteOffset> {
         let start = self.token_src_start(tokens.start);
         // Span is exclusive so we want the end token's start.
         let end = self.token_src_start(tokens.end);

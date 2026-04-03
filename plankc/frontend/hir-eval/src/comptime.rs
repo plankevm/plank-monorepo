@@ -243,6 +243,18 @@ impl ComptimeInterpreter {
         lit_loc: SrcLoc,
     ) -> Result<ValueId, ReturnValue> {
         let (type_vid, type_loc) = self.bindings[ty];
+        let lit_fields = &eval.hir.fields[fields_id];
+
+        for (i, field) in lit_fields.iter().enumerate() {
+            if let Some(prev) = lit_fields[..i].iter().find(|f| f.name == field.name) {
+                let session = eval.session.borrow();
+                let first_loc = prev.name_loc(&session, type_loc.source);
+                let duplicate_loc = field.name_loc(&session, type_loc.source);
+                drop(session);
+                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
+            }
+        }
+
         let Value::Type(struct_type_id) = eval.values.lookup(type_vid) else {
             eval.emit_type_constraint_not_type(eval.values.type_of_value(type_vid), type_loc);
             return Ok(ValueId::ERROR);
@@ -252,9 +264,10 @@ impl ComptimeInterpreter {
             return Ok(ValueId::ERROR);
         }
 
-        let lit_fields = &eval.hir.fields[fields_id];
-
         for (i, field) in lit_fields.iter().enumerate() {
+            if lit_fields[..i].iter().any(|f| f.name == field.name) {
+                continue;
+            }
             let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
@@ -262,14 +275,6 @@ impl ComptimeInterpreter {
                 eval.emit_struct_unknown_field(struct_type_id, field.name, loc);
                 continue;
             };
-            if let Some(prev) = lit_fields[..i].iter().find(|f| f.name == field.name) {
-                let session = eval.session.borrow();
-                let first_loc = prev.name_loc(&session, type_loc.source);
-                let duplicate_loc = field.name_loc(&session, type_loc.source);
-                drop(session);
-                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
-                continue;
-            }
             let expected_field_ty = r#struct.field_types[field_pos];
             let (field_value_vid, field_value_loc) = self.bindings[field.value];
             let field_value_ty = eval.values.type_of_value(field_value_vid);

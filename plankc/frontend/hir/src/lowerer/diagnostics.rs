@@ -1,5 +1,4 @@
-use plank_core::Span;
-use plank_parser::lexer::{Token, TokenIdx};
+use plank_parser::lexer::{Token, TokenSpan};
 use plank_session::{
     Annotations, Claim, Diagnostic, Element, Level, Session, SourceId, SourceSpan, StrId,
 };
@@ -15,7 +14,7 @@ impl BlockLowerer<'_> {
         self.session.borrow().lookup_name(name).to_string()
     }
 
-    pub(crate) fn error_not_yet_implemented(&self, feature: &str, span: Span<TokenIdx>) {
+    pub(crate) fn error_not_yet_implemented(&self, feature: &str, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let diagnostic = Diagnostic::error(format!("{feature} is not yet supported")).primary(
             self.source_id,
@@ -25,7 +24,7 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn error_unresolved_identifier(&self, name: StrId, span: Span<TokenIdx>) {
+    pub(crate) fn error_unresolved_identifier(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
         let diagnostic = Diagnostic::error(format!("unresolved identifier '{name_str}'")).primary(
@@ -39,8 +38,8 @@ impl BlockLowerer<'_> {
     pub(crate) fn error_assignment_to_immutable(
         &self,
         name: StrId,
-        span: Span<TokenIdx>,
-        decl_span: Span<TokenIdx>,
+        span: TokenSpan,
+        decl_span: TokenSpan,
     ) {
         let source_span = self.lexed.tokens_src_span(span);
         let decl_source_span = self.lexed.tokens_src_span(decl_span);
@@ -56,23 +55,15 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn error_multiple_init_blocks(
-        &self,
-        current: Span<TokenIdx>,
-        previous: Span<TokenIdx>,
-    ) {
+    pub(crate) fn error_multiple_init_blocks(&self, current: TokenSpan, previous: TokenSpan) {
         self.error_multiple_blocks("init", current, previous);
     }
 
-    pub(crate) fn error_multiple_run_blocks(
-        &self,
-        current: Span<TokenIdx>,
-        previous: Span<TokenIdx>,
-    ) {
+    pub(crate) fn error_multiple_run_blocks(&self, current: TokenSpan, previous: TokenSpan) {
         self.error_multiple_blocks("run", current, previous);
     }
 
-    fn error_multiple_blocks(&self, kind: &str, current: Span<TokenIdx>, previous: Span<TokenIdx>) {
+    fn error_multiple_blocks(&self, kind: &str, current: TokenSpan, previous: TokenSpan) {
         let diagnostic = Diagnostic::error(format!("multiple {kind} blocks")).element(
             Annotations::new(self.source_id)
                 .primary(self.lexed.tokens_src_span(current), format!("duplicate {kind} block"))
@@ -81,15 +72,15 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn error_init_outside_entry(&self, span: Span<TokenIdx>) {
+    pub(crate) fn error_init_outside_entry(&self, span: TokenSpan) {
         self.error_outside_entry("init", span);
     }
 
-    pub(crate) fn error_run_outside_entry(&self, span: Span<TokenIdx>) {
+    pub(crate) fn error_run_outside_entry(&self, span: TokenSpan) {
         self.error_outside_entry("run", span);
     }
 
-    fn error_outside_entry(&self, kind: &str, span: Span<TokenIdx>) {
+    fn error_outside_entry(&self, kind: &str, span: TokenSpan) {
         let diagnostic = Diagnostic::error(format!("`{kind}` not allowed here"))
             .primary(
                 self.source_id,
@@ -103,15 +94,15 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn error_shadowing_primitive_type(&self, name: StrId, span: Span<TokenIdx>) {
+    pub(crate) fn error_shadowing_primitive_type(&self, name: StrId, span: TokenSpan) {
         self.error_shadowing("primitive type", name, span);
     }
 
-    pub(crate) fn error_shadowing_builtin(&self, name: StrId, span: Span<TokenIdx>) {
+    pub(crate) fn error_shadowing_builtin(&self, name: StrId, span: TokenSpan) {
         self.error_shadowing("built-in function", name, span);
     }
 
-    fn error_shadowing(&self, kind: &str, name: StrId, span: Span<TokenIdx>) {
+    fn error_shadowing(&self, kind: &str, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
         let diagnostic = Diagnostic::error(format!("shadowing {kind}")).primary(
@@ -122,7 +113,7 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn error_number_out_of_range(&self, span: Span<TokenIdx>) {
+    pub(crate) fn error_number_out_of_range(&self, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let diagnostic = Diagnostic::error("number literal out of range").primary(
             self.source_id,
@@ -132,7 +123,7 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn error_non_call_reference_to_builtin(&self, name: StrId, span: Span<TokenIdx>) {
+    pub(crate) fn error_non_call_reference_to_builtin(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
         let diagnostic = Diagnostic::error("referencing built-in function as a value")
@@ -144,7 +135,7 @@ impl BlockLowerer<'_> {
     pub(crate) fn error_unresolved_import(
         &self,
         name: StrId,
-        span: Span<TokenIdx>,
+        span: TokenSpan,
         target_source: SourceId,
     ) {
         let name_str = self.lookup_name(name);
@@ -171,7 +162,7 @@ impl BlockLowerer<'_> {
     pub(crate) fn error_import_collision(
         &self,
         colliding_name: StrId,
-        import_span: Span<TokenIdx>,
+        import_span: TokenSpan,
         prev_source_id: SourceId,
         prev_source_span: SourceSpan,
         prev_imported: bool,
@@ -205,7 +196,7 @@ impl BlockLowerer<'_> {
         self.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_lone_slash_not_supported(&self, op_span: Span<TokenIdx>) {
+    pub fn emit_lone_slash_not_supported(&self, op_span: TokenSpan) {
         let op_span = self.lexed.tokens_src_span(op_span);
 
         let diagnostic = Diagnostic::error("unsupported syntax")

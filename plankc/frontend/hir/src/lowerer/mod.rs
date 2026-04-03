@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use plank_core::{Idx, IncIterable, IndexVec, Span, list_of_lists::ListOfLists};
+use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, Statement, TopLevelDef},
     cst::{self, NumLitId},
-    lexer::{Lexed, TokenIdx},
+    lexer::{Lexed, TokenSpan},
 };
 use plank_session::{EvmBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
@@ -24,7 +24,7 @@ struct ScopedLocal {
     name: StrId,
     id: LocalId,
     mutable: bool,
-    span: Option<Span<TokenIdx>>,
+    span: Option<TokenSpan>,
 }
 
 struct HirBuilder {
@@ -175,7 +175,7 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, mutable: bool, span: Span<TokenIdx>) -> LocalId {
+    fn alloc_local(&mut self, name: StrId, mutable: bool, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         } else if EvmBuiltin::from_str_id(name).is_some() {
@@ -197,7 +197,7 @@ impl BlockLowerer<'_> {
         self.next_local_id.get_and_inc()
     }
 
-    fn expr(&self, kind: ExprKind, span: Span<TokenIdx>) -> Expr {
+    fn expr(&self, kind: ExprKind, span: TokenSpan) -> Expr {
         Expr { source_id: self.source_id, kind, span: self.lexed.tokens_src_span(span) }
     }
 
@@ -280,7 +280,7 @@ impl BlockLowerer<'_> {
         Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
     }
 
-    fn lookup_capture(&mut self, name: StrId, use_span: Span<TokenIdx>) -> Option<LocalId> {
+    fn lookup_capture(&mut self, name: StrId, use_span: TokenSpan) -> Option<LocalId> {
         let outer_local =
             Self::find_in_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?.id;
 
@@ -296,7 +296,7 @@ impl BlockLowerer<'_> {
         Some(inner_local)
     }
 
-    fn emit(&mut self, span: Span<TokenIdx>, kind: InstructionKind) {
+    fn emit(&mut self, span: TokenSpan, kind: InstructionKind) {
         let span = self.lexed.tokens_src_span(span);
         self.instructions_buf.push(Instruction { loc: SrcLoc::new(self.source_id, span), kind });
     }
@@ -305,7 +305,7 @@ impl BlockLowerer<'_> {
         self.builder.blocks.push_iter(self.instructions_buf.drain(start..))
     }
 
-    fn resolve_name(&mut self, name: StrId, span: Span<TokenIdx>) -> ExprKind {
+    fn resolve_name(&mut self, name: StrId, span: TokenSpan) -> ExprKind {
         if let Some(ty) = TypeId::resolve_primitive(name) {
             return ExprKind::Type(ty);
         }
@@ -582,8 +582,8 @@ impl BlockLowerer<'_> {
     fn lower_else_chain<'cst>(
         &mut self,
         result: LocalId,
-        mut branches: impl Iterator<Item = Result<ast::ElseIfBranch<'cst>, Span<TokenIdx>>>,
-        else_body: Result<ast::BlockExpr<'cst>, Span<TokenIdx>>,
+        mut branches: impl Iterator<Item = Result<ast::ElseIfBranch<'cst>, TokenSpan>>,
+        else_body: Result<ast::BlockExpr<'cst>, TokenSpan>,
     ) -> BlockId {
         while let Some(next) = branches.next() {
             let Ok(first) = next else { continue };

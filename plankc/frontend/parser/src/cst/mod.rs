@@ -1,5 +1,5 @@
-use crate::{ast::File, const_print::const_assert_eq, lexer::TokenIdx};
-use plank_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use crate::{ast::File, const_print::const_assert_eq, lexer::TokenSpan};
+use plank_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_session::StrId;
 
 pub mod display;
@@ -12,7 +12,7 @@ newtype_index! {
 #[derive(Debug, Clone, Copy)]
 pub struct Node {
     pub kind: NodeKind,
-    pub tokens: Span<TokenIdx>,
+    pub tokens: TokenSpan,
     pub next_sibling: Option<NodeIdx>,
     pub first_child: Option<NodeIdx>,
 }
@@ -219,7 +219,7 @@ impl<'cst> NodeView<'cst> {
         self.node().kind
     }
 
-    pub fn span(self) -> Span<TokenIdx> {
+    pub fn span(self) -> TokenSpan {
         self.node().tokens
     }
 

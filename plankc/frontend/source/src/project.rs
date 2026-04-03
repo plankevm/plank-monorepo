@@ -7,11 +7,11 @@ use crate::{
     source_fs::SourceFs,
 };
 use hashbrown::HashMap;
-use plank_core::{IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_parser::{
     ast::TopLevelDef,
     cst::ConcreteSyntaxTree,
-    lexer::{Lexed, TokenIdx},
+    lexer::{Lexed, TokenSpan},
     parser::parse,
 };
 use plank_session::{Session, Source, SourceId, SourceSpan, StrId};
@@ -23,7 +23,7 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ImportKind {
-    Specific { selected_name: StrId, imported_as: StrId, name_span: Span<TokenIdx> },
+    Specific { selected_name: StrId, imported_as: StrId, name_span: TokenSpan },
     All,
 }
 
@@ -31,7 +31,7 @@ pub enum ImportKind {
 pub struct FileImport {
     pub kind: ImportKind,
     pub target_source: SourceId,
-    pub span: Span<TokenIdx>,
+    pub span: TokenSpan,
 }
 
 #[derive(Debug)]
@@ -150,7 +150,7 @@ impl<F: SourceFs> ProjectParser<'_, F> {
         Some(source_id)
     }
 
-    fn source_span(&self, source_id: SourceId, span: Span<TokenIdx>) -> SourceSpan {
+    fn source_span(&self, source_id: SourceId, span: TokenSpan) -> SourceSpan {
         self.parsed_sources[source_id].0.tokens_src_span(span)
     }
 }

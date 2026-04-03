@@ -1,8 +1,6 @@
-use plank_core::Span;
-
 use crate::{
     cst::{BinaryOp, NodeKind, NodeView, NumLitId, UnaryOp},
-    lexer::TokenIdx,
+    lexer::TokenSpan,
 };
 use plank_session::StrId;
 
@@ -18,10 +16,10 @@ pub enum Expr<'cst> {
     FnDef(FnDef<'cst>),
     Block(BlockExpr<'cst>),
     ComptimeBlock(BlockExpr<'cst>),
-    BoolLiteral { value: bool, span: Span<TokenIdx> },
-    NumLiteral { negative: bool, id: NumLitId, span: Span<TokenIdx> },
-    Ident { name: StrId, span: Span<TokenIdx> },
-    Error { span: Span<TokenIdx> },
+    BoolLiteral { value: bool, span: TokenSpan },
+    NumLiteral { negative: bool, id: NumLitId, span: TokenSpan },
+    Ident { name: StrId, span: TokenSpan },
+    Error { span: TokenSpan },
 }
 
 impl<'cst> Expr<'cst> {
@@ -81,7 +79,7 @@ impl<'cst> Expr<'cst> {
         unreachable!("Nested paren over {MAX_PAREN_UNWRAPS} deep");
     }
 
-    pub fn span(&self) -> Span<TokenIdx> {
+    pub fn span(&self) -> TokenSpan {
         match self {
             Expr::Binary(BinaryExpr { view, .. })
             | Expr::Unary(UnaryExpr { view, .. })
@@ -104,7 +102,7 @@ impl<'cst> Expr<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct BinaryExpr<'cst> {
     pub op: BinaryOp,
-    op_span: Span<TokenIdx>,
+    op_span: TokenSpan,
     view: NodeView<'cst>,
 }
 
@@ -113,7 +111,7 @@ impl<'cst> BinaryExpr<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn op_span(&self) -> Span<TokenIdx> {
+    pub fn op_span(&self) -> TokenSpan {
         self.op_span
     }
 
@@ -203,7 +201,7 @@ impl<'cst> StructDef<'cst> {
         })
     }
 
-    pub fn fields(&self) -> impl Iterator<Item = Result<FieldDef<'cst>, Span<TokenIdx>>> {
+    pub fn fields(&self) -> impl Iterator<Item = Result<FieldDef<'cst>, TokenSpan>> {
         self.view.children().filter_map(FieldDef::try_new)
     }
 
@@ -216,13 +214,13 @@ impl<'cst> StructDef<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldDef<'cst> {
     pub name: StrId,
-    pub name_span: Span<TokenIdx>,
+    pub name_span: TokenSpan,
     view: NodeView<'cst>,
 }
 
 impl<'cst> FieldDef<'cst> {
     /// Returns `None` for non-FieldDef nodes, `Some(Err(span))` for malformed FieldDef nodes.
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
         match view.kind() {
             NodeKind::FieldDef => {
                 let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
@@ -237,7 +235,7 @@ impl<'cst> FieldDef<'cst> {
         self.view.child(1).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn name_span(&self) -> Span<TokenIdx> {
+    pub fn name_span(&self) -> TokenSpan {
         self.name_span
     }
 
@@ -257,7 +255,7 @@ impl<'cst> StructLit<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn fields(&self) -> impl Iterator<Item = Result<FieldAssign<'cst>, Span<TokenIdx>>> {
+    pub fn fields(&self) -> impl Iterator<Item = Result<FieldAssign<'cst>, TokenSpan>> {
         self.view.children().skip(1).filter_map(FieldAssign::try_new)
     }
 
@@ -270,12 +268,12 @@ impl<'cst> StructLit<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct FieldAssign<'cst> {
     pub name: StrId,
-    pub name_span: Span<TokenIdx>,
+    pub name_span: TokenSpan,
     view: NodeView<'cst>,
 }
 
 impl<'cst> FieldAssign<'cst> {
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
         match view.kind() {
             NodeKind::FieldAssign => {
                 let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
@@ -290,7 +288,7 @@ impl<'cst> FieldAssign<'cst> {
         self.view.child(1).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn name_span(&self) -> Span<TokenIdx> {
+    pub fn name_span(&self) -> TokenSpan {
         self.name_span
     }
 
@@ -316,9 +314,7 @@ impl<'cst> IfExpr<'cst> {
     }
 
     /// Returns an iterator over the else-if branches.
-    pub fn else_if_branches(
-        &self,
-    ) -> impl Iterator<Item = Result<ElseIfBranch<'cst>, Span<TokenIdx>>> {
+    pub fn else_if_branches(&self) -> impl Iterator<Item = Result<ElseIfBranch<'cst>, TokenSpan>> {
         let else_if_list = self.view.child(2);
         else_if_list.into_iter().flat_map(|list| list.children()).filter_map(ElseIfBranch::try_new)
     }
@@ -341,7 +337,7 @@ pub struct ElseIfBranch<'cst> {
 }
 
 impl<'cst> ElseIfBranch<'cst> {
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
         match view.kind() {
             NodeKind::ElseIfBranch => {
                 let Some(body_node) = view.child(1) else { return Some(Err(view.span())) };
@@ -373,11 +369,11 @@ pub struct FnDef<'cst> {
 }
 
 impl<'cst> FnDef<'cst> {
-    pub fn param_list_span(&self) -> Span<TokenIdx> {
+    pub fn param_list_span(&self) -> TokenSpan {
         self.param_list.span()
     }
 
-    pub fn params(&self) -> impl Iterator<Item = Result<Param<'cst>, Span<TokenIdx>>> {
+    pub fn params(&self) -> impl Iterator<Item = Result<Param<'cst>, TokenSpan>> {
         self.param_list.children().filter_map(Param::try_new)
     }
 
@@ -398,13 +394,13 @@ impl<'cst> FnDef<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct Param<'cst> {
     pub name: StrId,
-    pub name_span: Span<TokenIdx>,
+    pub name_span: TokenSpan,
     pub is_comptime: bool,
     view: NodeView<'cst>,
 }
 
 impl<'cst> Param<'cst> {
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
         let comptime = match view.kind() {
             NodeKind::Parameter => false,
             NodeKind::ComptimeParameter => true,
@@ -419,7 +415,7 @@ impl<'cst> Param<'cst> {
         self.view.child(1).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn name_span(&self) -> Span<TokenIdx> {
+    pub fn name_span(&self) -> TokenSpan {
         self.name_span
     }
 
@@ -436,7 +432,7 @@ pub struct BlockExpr<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub struct LetStmt<'cst> {
     pub name: StrId,
-    pub name_span: Span<TokenIdx>,
+    pub name_span: TokenSpan,
     pub mutable: bool,
     type_view: Option<NodeView<'cst>>,
     value_view: NodeView<'cst>,
@@ -554,7 +550,7 @@ pub enum Statement<'cst> {
     Assign(AssignStmt<'cst>),
     While(WhileStmt<'cst>),
     Expr(Expr<'cst>),
-    Error { span: Span<TokenIdx> },
+    Error { span: TokenSpan },
 }
 
 impl<'cst> Statement<'cst> {
