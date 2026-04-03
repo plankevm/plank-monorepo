@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 sir-data.workspace = true
 plank-core.workspace = true
+plank-evm.workspace = true
 hashbrown.workspace = true
 thiserror.workspace = true
 alloy-primitives.workspace = true

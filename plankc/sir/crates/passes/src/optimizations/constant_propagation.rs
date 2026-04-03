@@ -1,5 +1,5 @@
 use crate::analyses::{AnalysesMask, DefUse, UseKind};
-use alloy_primitives::{I256, U256, U512};
+use alloy_primitives::U256;
 
 use crate::{AnalysesStore, Pass};
 use sir_data::{operation::*, *};
@@ -317,145 +317,93 @@ impl SCCP {
     fn evaluate(&self, program: &EthIRProgram, op: &Operation) -> Option<(LocalId, U256)> {
         match op {
             Operation::Add(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, U256::wrapping_add)
+                self.eval_binary(a, b, out, plank_evm::add)
             }
             Operation::Mul(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, U256::wrapping_mul)
+                self.eval_binary(a, b, out, plank_evm::mul)
             }
             Operation::Sub(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, U256::wrapping_sub)
+                self.eval_binary(a, b, out, plank_evm::sub)
             }
             Operation::Div(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| va.checked_div(vb).unwrap_or(U256::ZERO))
+                self.eval_binary(a, b, out, plank_evm::div)
             }
             Operation::SDiv(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| {
-                    let sa = I256::from_raw(va);
-                    let sb = I256::from_raw(vb);
-                    sa.checked_div(sb)
-                        .unwrap_or_else(|| if sb.is_zero() { I256::ZERO } else { sa })
-                        .into_raw()
-                })
+                self.eval_binary(a, b, out, plank_evm::sdiv)
             }
             Operation::Mod(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| va.checked_rem(vb).unwrap_or(U256::ZERO))
+                self.eval_binary(a, b, out, plank_evm::r#mod)
             }
             Operation::SMod(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| {
-                    let sa = I256::from_raw(va);
-                    let sb = I256::from_raw(vb);
-                    sa.checked_rem(sb).unwrap_or(I256::ZERO).into_raw()
-                })
+                self.eval_binary(a, b, out, plank_evm::smod)
             }
             Operation::AddMod(AllocatedIns { ins_start, outs: [out] }) => {
                 let a = program.locals[*ins_start];
                 let b = program.locals[*ins_start + 1];
                 let n = program.locals[*ins_start + 2];
-
                 let va = self.const_u256(a)?;
                 let vb = self.const_u256(b)?;
                 let vn = self.const_u256(n)?;
-                let result = if vn.is_zero() {
-                    U256::ZERO
-                } else {
-                    let sum = U512::from(va) + U512::from(vb);
-                    U256::from(sum % U512::from(vn))
-                };
-                Some((*out, result))
+                Some((*out, plank_evm::addmod(va, vb, vn)))
             }
             Operation::MulMod(AllocatedIns { ins_start, outs: [out] }) => {
                 let a = program.locals[*ins_start];
                 let b = program.locals[*ins_start + 1];
                 let n = program.locals[*ins_start + 2];
-
                 let va = self.const_u256(a)?;
                 let vb = self.const_u256(b)?;
                 let vn = self.const_u256(n)?;
-                let result = if vn.is_zero() {
-                    U256::ZERO
-                } else {
-                    let prod = U512::from(va) * U512::from(vb);
-                    U256::from(prod % U512::from(vn))
-                };
-                Some((*out, result))
+                Some((*out, plank_evm::mulmod(va, vb, vn)))
             }
             Operation::Exp(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| va.pow(vb))
+                self.eval_binary(a, b, out, plank_evm::exp)
             }
             Operation::SignExtend(InlineOperands { ins: [b, x], outs: [out] }) => {
-                self.eval_binary(b, x, out, |vb, vx| {
-                    if vb >= U256::from(31) {
-                        vx
-                    } else {
-                        let sign_bit_pos = (vb.to::<usize>() + 1) * 8 - 1;
-                        let sign_bit_mask = U256::ONE << sign_bit_pos;
-
-                        if (vx & sign_bit_mask) != U256::ZERO {
-                            vx | (U256::MAX << (sign_bit_pos + 1))
-                        } else {
-                            vx & ((U256::ONE << (sign_bit_pos + 1)) - U256::ONE)
-                        }
-                    }
-                })
+                self.eval_binary(b, x, out, plank_evm::signextend)
             }
             Operation::Lt(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| U256::from(va < vb))
+                self.eval_binary(a, b, out, |a, b| U256::from(plank_evm::lt(a, b)))
             }
             Operation::Gt(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| U256::from(va > vb))
+                self.eval_binary(a, b, out, |a, b| U256::from(plank_evm::gt(a, b)))
             }
             Operation::SLt(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| {
-                    U256::from(I256::from_raw(va) < I256::from_raw(vb))
-                })
+                self.eval_binary(a, b, out, |a, b| U256::from(plank_evm::slt(a, b)))
             }
             Operation::SGt(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| {
-                    U256::from(I256::from_raw(va) > I256::from_raw(vb))
-                })
+                self.eval_binary(a, b, out, |a, b| U256::from(plank_evm::sgt(a, b)))
             }
             Operation::Eq(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| U256::from(va == vb))
+                self.eval_binary(a, b, out, |a, b| U256::from(plank_evm::eq(a, b)))
             }
             Operation::And(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| va & vb)
+                self.eval_binary(a, b, out, plank_evm::and)
             }
             Operation::Or(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| va | vb)
+                self.eval_binary(a, b, out, plank_evm::or)
             }
             Operation::Xor(InlineOperands { ins: [a, b], outs: [out] }) => {
-                self.eval_binary(a, b, out, |va, vb| va ^ vb)
+                self.eval_binary(a, b, out, plank_evm::xor)
             }
             Operation::Byte(InlineOperands { ins: [i, x], outs: [out] }) => {
-                self.eval_binary(i, x, out, |vi, vx| {
-                    if vi >= U256::from(32) {
-                        U256::ZERO
-                    } else {
-                        U256::from(vx.byte(31 - vi.to::<usize>()))
-                    }
-                })
+                self.eval_binary(i, x, out, plank_evm::byte)
             }
             Operation::Shl(InlineOperands { ins: [shift, value], outs: [out] }) => {
-                self.eval_binary(shift, value, out, |vshift, vvalue| vvalue << vshift)
+                self.eval_binary(shift, value, out, plank_evm::shl)
             }
             Operation::Shr(InlineOperands { ins: [shift, value], outs: [out] }) => {
-                self.eval_binary(shift, value, out, |vshift, vvalue| vvalue >> vshift)
+                self.eval_binary(shift, value, out, plank_evm::shr)
             }
-            Operation::Sar(InlineOperands { ins: [shift, value], outs: [out] }) => self
-                .eval_binary(shift, value, out, |vshift, vvalue| {
-                    if vshift >= U256::from(256) {
-                        if vvalue.bit(255) { U256::MAX } else { U256::ZERO }
-                    } else {
-                        I256::from_raw(vvalue).asr(vshift.to::<usize>()).into_raw()
-                    }
-                }),
+            Operation::Sar(InlineOperands { ins: [shift, value], outs: [out] }) => {
+                self.eval_binary(shift, value, out, plank_evm::sar)
+            }
             Operation::Not(InlineOperands { ins: [a], outs: [out] }) => {
                 let va = self.const_u256(*a)?;
-                Some((*out, !va))
+                Some((*out, plank_evm::not(va)))
             }
             Operation::IsZero(InlineOperands { ins: [a], outs: [out] }) => {
                 let va = self.const_u256(*a)?;
-                Some((*out, U256::from(va.is_zero())))
+                Some((*out, U256::from(plank_evm::iszero(va))))
             }
             _ => None,
         }

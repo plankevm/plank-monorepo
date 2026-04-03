@@ -10,6 +10,7 @@ license = "MIT"
 [workspace.dependencies]
 # Core
 plank-core = { path = "crates/plank-core" }
+plank-evm = { path = "crates/plank-evm" }
 plank-test-utils = { path = "crates/plank-test-utils" }
 
 # Frontend Sub Crates
