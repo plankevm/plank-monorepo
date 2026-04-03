@@ -29,10 +29,6 @@ impl ComptimeInterpreter {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.bindings.clear();
-    }
-
     pub fn eval_const(&mut self, eval: &mut Evaluator<'_>, const_def: ConstDef) -> ValueId {
         self.eval_block_to_value(eval, const_def.body, const_def.result)
     }

@@ -1569,6 +1569,28 @@ fn test_comptime_block_with_const_ref() {
 }
 
 #[test]
+fn test_out_of_order_const_ref() {
+    assert_lowers_to(
+        r#"
+        const B = comptime { A };
+        const A = 34;
+        init {
+            let x: u256 = comptime { B };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 34
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_block_nested_const() {
     assert_lowers_to(
         r#"

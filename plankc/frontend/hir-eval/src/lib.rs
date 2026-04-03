@@ -78,8 +78,9 @@ impl<'a> Evaluator<'a> {
             ConstState::NotEvaluated => {
                 self.const_states[const_id] = ConstState::InProgress;
                 let const_def = self.hir.consts[const_id];
-                interpreter.reset();
+                let saved = std::mem::take(&mut interpreter.bindings);
                 let value_id = interpreter.eval_const(self, const_def);
+                interpreter.bindings = saved;
                 self.const_states[const_id] = ConstState::Evaluated(value_id);
                 self.try_name_type(value_id, const_def.name);
                 value_id
