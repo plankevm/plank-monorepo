@@ -1,5 +1,5 @@
 use crate::Evaluator;
-use plank_session::{builtins::builtin_names, *};
+use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 
 impl Evaluator<'_> {
     pub fn emit_type_mismatch_error(
@@ -109,9 +109,8 @@ impl Evaluator<'_> {
         call_loc: SrcLoc,
         def_loc: SrcLoc,
     ) {
-        let s = if expected == 1 { "" } else { "s" };
-        let call_label = format!("expected {expected} argument{s}, got {actual}");
-        let def_label = format!("defined with {expected} parameter{s}");
+        let call_label = format!("expected {}, got {actual}", fmt_count(expected, "argument"));
+        let def_label = format!("defined with {}", fmt_count(expected, "parameter"));
         let diagnostic = Diagnostic::error("wrong number of arguments")
             .cross_source_annotations(call_loc, call_label, def_loc, def_label);
         self.session.emit_diagnostic(diagnostic);
@@ -191,9 +190,8 @@ impl Evaluator<'_> {
             (
                 "wrong number of arguments",
                 format!(
-                    "`{builtin}` called with {} argument{}, but requires {}",
-                    arg_types.len(),
-                    if arg_types.len() == 1 { "" } else { "s" },
+                    "`{builtin}` called with {}, but requires {}",
+                    fmt_count(arg_types.len(), "argument"),
                     expected,
                 ),
             )

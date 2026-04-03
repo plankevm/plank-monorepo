@@ -318,3 +318,20 @@ impl Diagnostic {
         group
     }
 }
+
+pub struct FmtCount {
+    count: usize,
+    thing: &'static str,
+}
+
+#[inline]
+pub fn fmt_count(count: usize, thing: &'static str) -> FmtCount {
+    FmtCount { count, thing }
+}
+
+impl std::fmt::Display for FmtCount {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}{}", self.count, self.thing, if self.count == 1 { "" } else { "s" })
+    }
+}
