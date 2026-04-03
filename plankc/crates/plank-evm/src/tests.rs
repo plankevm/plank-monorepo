@@ -3,7 +3,6 @@ use revm::{
     ExecuteEvm, MainBuilder, MainContext,
     bytecode::{Bytecode, opcode},
     context::{Context, TxEnv},
-    context_interface::result::{ExecutionResult, Output},
     database::CacheDB,
     database_interface::EmptyDB,
     primitives::{Address, TxKind},
