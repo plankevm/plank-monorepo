@@ -102,7 +102,7 @@ impl FunctionLowerScope {
         fields: hir::FieldsId,
         lit_loc: SrcLoc,
     ) -> ExprResult {
-        let ty_loc = self.locals.def_loc(ty);
+        let ty_loc = self.runtime_locals.def_loc(ty);
         let lit_fields = &eval.hir.fields[fields];
 
         for (i, field) in lit_fields.iter().enumerate() {
@@ -116,7 +116,7 @@ impl FunctionLowerScope {
             }
         }
 
-        let Some(ty) = self.locals.comptime(ty) else {
+        let Some(ty) = self.comptime_value(ty) else {
             eval.emit_struct_type_not_comptime(ty_loc);
             return ExprResult::ERROR;
         };
@@ -163,10 +163,10 @@ impl FunctionLowerScope {
                     has_errors = true;
                     continue;
                 };
-                let Some(value) = self.locals.comptime(field.value) else {
+                let Some(value) = self.comptime_value(field.value) else {
                     eval.emit_struct_field_not_comptime(
                         field_name,
-                        self.locals.def_loc(field.value),
+                        self.runtime_locals.def_loc(field.value),
                     );
                     has_errors = true;
                     continue;
@@ -373,9 +373,9 @@ impl FunctionLowerScope {
             }
             hir::ExprKind::StructDef(struct_def_id) => {
                 let struct_def = eval.hir.struct_defs[struct_def_id];
-                let Some(type_index) = self.locals.comptime(struct_def.type_index) else {
+                let Some(type_index) = self.comptime_value(struct_def.type_index) else {
                     eval.emit_struct_type_index_not_comptime(
-                        self.locals.def_loc(struct_def.type_index),
+                        self.runtime_locals.def_loc(struct_def.type_index),
                     );
                     return ExprResult::ERROR;
                 };
@@ -383,8 +383,10 @@ impl FunctionLowerScope {
                 assert!(self.field_types_buf.is_empty());
                 assert!(self.field_names_buf.is_empty());
                 for field in fields {
-                    let Some(value) = self.locals.comptime(field.value) else {
-                        eval.emit_struct_field_type_not_comptime(self.locals.def_loc(field.value));
+                    let Some(value) = self.comptime_value(field.value) else {
+                        eval.emit_struct_field_type_not_comptime(
+                            self.runtime_locals.def_loc(field.value),
+                        );
                         self.field_types_buf.push(TypeId::ERROR);
                         self.field_names_buf.push(field.name);
                         continue;
@@ -417,7 +419,7 @@ impl FunctionLowerScope {
             hir::ExprKind::Member { object, member } => {
                 let ty = self.get_type(object, &eval.values);
                 let Type::Struct(r#struct) = eval.types.lookup(ty) else {
-                    eval.emit_member_on_non_struct(ty, self.locals.def_loc(object));
+                    eval.emit_member_on_non_struct(ty, self.runtime_locals.def_loc(object));
                     return ExprResult::ERROR;
                 };
                 let Some(field_index) =
