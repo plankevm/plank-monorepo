@@ -340,7 +340,7 @@ impl BlockLowerer<'_> {
             ast::Expr::BoolLiteral { value, .. } => ExprKind::Bool(value),
             ast::Expr::NumLiteral { id, span } => {
                 let limbs = &self.num_lit_limbs[id];
-                match plank_core::bigint::limbs_to_u256(limbs, false) {
+                match plank_core::bigint::limbs_to_u256(limbs) {
                     Some(value) => {
                         let big_num_id = self.big_nums.intern(value);
                         ExprKind::BigNum(big_num_id)

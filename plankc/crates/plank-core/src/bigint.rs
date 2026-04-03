@@ -114,14 +114,11 @@ fn mul_add_over_limbs(limbs: &mut [u32], mul: u32, add: u32) -> u32 {
 }
 
 const U32_LIMBS_PER_U256: usize = 8;
-const INT256_MIN_MAGNITUDE: U256 = U256::from_limbs([0, 0, 0, 1 << 63]);
 
-/// Converts u32 limbs (little-endian) to a U256, optionally negating via two's complement.
+/// Converts u32 limbs (little-endian) to a U256.
 ///
-/// Returns `None` if:
-/// - `limbs.len() > 8` (value doesn't fit in 256 bits)
-/// - `negative` is true and the magnitude exceeds 2^255 (the max for int256 two's complement)
-pub fn limbs_to_u256(limbs: &[u32], negative: bool) -> Option<U256> {
+/// Returns `None` if `limbs.len() > 8` (value doesn't fit in 256 bits).
+pub fn limbs_to_u256(limbs: &[u32]) -> Option<U256> {
     if limbs.len() > U32_LIMBS_PER_U256 {
         return None;
     }
@@ -135,14 +132,7 @@ pub fn limbs_to_u256(limbs: &[u32], negative: bool) -> Option<U256> {
 
     let value = U256::from_limbs(u64_limbs);
 
-    if negative && value != U256::ZERO {
-        if value > INT256_MIN_MAGNITUDE {
-            return None;
-        }
-        Some(U256::ZERO.wrapping_sub(value))
-    } else {
-        Some(value)
-    }
+    Some(value)
 }
 
 #[cfg(test)]
@@ -254,76 +244,33 @@ mod tests {
 
     #[test]
     fn test_limbs_to_u256_zero() {
-        assert_eq!(limbs_to_u256(&[], false), Some(U256::ZERO));
+        assert_eq!(limbs_to_u256(&[]), Some(U256::ZERO));
     }
 
     #[test]
-    fn test_limbs_to_u256_small_positive() {
-        assert_eq!(limbs_to_u256(&[1], false), Some(uint!(1U256)));
-        assert_eq!(limbs_to_u256(&[42], false), Some(uint!(42U256)));
-        assert_eq!(limbs_to_u256(&[u32::MAX], false), Some(uint!(0xffffffffU256)));
+    fn test_limbs_to_u256_small() {
+        assert_eq!(limbs_to_u256(&[1]), Some(uint!(1U256)));
+        assert_eq!(limbs_to_u256(&[42]), Some(uint!(42U256)));
+        assert_eq!(limbs_to_u256(&[u32::MAX]), Some(uint!(0xffffffffU256)));
     }
 
     #[test]
     fn test_limbs_to_u256_multi_limb() {
         // 2^32
-        assert_eq!(limbs_to_u256(&[0, 1], false), Some(uint!(0x100000000U256)));
+        assert_eq!(limbs_to_u256(&[0, 1]), Some(uint!(0x100000000U256)));
         // 2^64 + 1
-        assert_eq!(limbs_to_u256(&[1, 0, 1], false), Some(uint!(0x10000000000000001U256)));
+        assert_eq!(limbs_to_u256(&[1, 0, 1]), Some(uint!(0x10000000000000001U256)));
     }
 
     #[test]
     fn test_limbs_to_u256_max() {
         let max_limbs = [u32::MAX; 8];
-        assert_eq!(limbs_to_u256(&max_limbs, false), Some(U256::MAX));
-    }
-
-    #[test]
-    fn test_limbs_to_u256_negative_one() {
-        // -1 in two's complement is all 1s
-        assert_eq!(limbs_to_u256(&[1], true), Some(U256::ZERO.wrapping_sub(uint!(1U256))));
-    }
-
-    #[test]
-    fn test_limbs_to_u256_negative_small() {
-        // -42 in two's complement
-        assert_eq!(limbs_to_u256(&[42], true), Some(U256::ZERO.wrapping_sub(uint!(42U256))));
-    }
-
-    #[test]
-    fn test_limbs_to_u256_negative_zero() {
-        // -0 is just 0
-        assert_eq!(limbs_to_u256(&[], true), Some(U256::ZERO));
-    }
-
-    #[test]
-    fn test_limbs_to_u256_int256_min() {
-        // -2^255 (the minimum int256 value)
-        // magnitude = 2^255 = 0x8000...0000
-        let mut limbs = [0u32; 8];
-        limbs[7] = 0x80000000; // high bit of the highest limb
-        let result = limbs_to_u256(&limbs, true);
-        // In two's complement, -2^255 has the same bit pattern as its magnitude
-        assert_eq!(
-            result,
-            Some(U256::ZERO.wrapping_sub(uint!(
-                0x8000000000000000000000000000000000000000000000000000000000000000U256
-            )))
-        );
+        assert_eq!(limbs_to_u256(&max_limbs), Some(U256::MAX));
     }
 
     #[test]
     fn test_limbs_to_u256_too_many_limbs() {
         let limbs = [1u32; 9];
-        assert_eq!(limbs_to_u256(&limbs, false), None);
-    }
-
-    #[test]
-    fn test_limbs_to_u256_negative_overflow() {
-        // magnitude = 2^255 + 1, which exceeds the int256 minimum
-        let mut limbs = [0u32; 8];
-        limbs[7] = 0x80000000;
-        limbs[0] = 1; // add 1 to make it 2^255 + 1
-        assert_eq!(limbs_to_u256(&limbs, true), None);
+        assert_eq!(limbs_to_u256(&limbs), None);
     }
 }
