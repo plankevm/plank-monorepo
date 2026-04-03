@@ -106,7 +106,10 @@ pub fn not(a: U256) -> U256 {
 }
 
 pub fn byte(i: U256, x: U256) -> U256 {
-    let byte = usize::try_from(i).ok().and_then(|i| x.to_be_bytes::<32>().get(i).copied());
+    let Ok(i) = usize::try_from(i) else {
+        return U256::ZERO;
+    };
+    let byte = x.to_be_bytes::<32>().get(i).copied();
     U256::from(byte.unwrap_or(0))
 }
 
