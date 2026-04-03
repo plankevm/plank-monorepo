@@ -1526,8 +1526,9 @@ fn test_comptime_block_multi_statement() {
         r#"
         init {
             let x: u256 = comptime {
-                let a = 10;
+                let mut a = 10;
                 let b = 20;
+                a = 15;
                 a
             };
             evm_stop();
@@ -1537,7 +1538,7 @@ fn test_comptime_block_multi_statement() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : u256 = 10
+            %0 : u256 = 15
             %1 : never = evm_stop()
         }
         "#,
