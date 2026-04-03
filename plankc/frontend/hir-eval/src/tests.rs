@@ -1623,10 +1623,10 @@ fn test_comptime_block_runtime_capture() {
         "#,
         &[r#"
         error: comptime block capture must be known at compile time
-         --> main.plk:2:13
+         --> main.plk:3:24
           |
-        2 |     let x = calldataload(0);
-          |             ^^^^^^^^^^^^^^^ not known at compile time
+        3 |     let y = comptime { x };
+          |                        ^ not known at compile time
           |
           = note: comptime blocks can only reference values known at compile time
         "#],

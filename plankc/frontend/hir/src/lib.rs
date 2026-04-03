@@ -19,7 +19,6 @@ newtype_index! {
     pub struct StructDefId;
     pub struct CallArgsId;
     pub struct FieldsId;
-    pub struct ComptimeBlockId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -80,7 +79,10 @@ pub enum ExprKind {
     },
 
     /// Forces compile-time evaluation of the block body.
-    ComptimeBlock(ComptimeBlockId),
+    ComptimeBlock {
+        body: BlockId,
+        result: LocalId,
+    },
 
     /// Indicates the expr that evaluated to the value had some error that was already handled,
     /// to avoid cascades any expression downstream from it also needs to become an error.
@@ -157,12 +159,6 @@ pub struct ConstDef {
     pub result: LocalId,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ComptimeBlockDef {
-    pub body: BlockId,
-    pub result: LocalId,
-}
-
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub init: BlockId,
@@ -178,9 +174,6 @@ pub struct Hir {
     pub fns: IndexVec<FnDefId, FnDef>,
     pub fn_params: ListOfLists<FnDefId, ParamInfo>,
     pub fn_captures: ListOfLists<FnDefId, CaptureInfo>,
-
-    pub comptime_blocks: IndexVec<ComptimeBlockId, ComptimeBlockDef>,
-    pub comptime_captures: ListOfLists<ComptimeBlockId, LocalId>,
 }
 
 #[cfg(test)]

@@ -155,7 +155,13 @@ impl ComptimeInterpreter {
             hir::ExprKind::BigNum(id) => eval.values.intern_num(id),
             hir::ExprKind::Type(type_id) => eval.values.intern_type(type_id),
             hir::ExprKind::ConstRef(const_id) => eval.ensure_const_evaluated(self, const_id),
-            hir::ExprKind::LocalRef(local_id) => self.bindings[local_id].0,
+            hir::ExprKind::LocalRef(local_id) => match self.bindings.get(local_id) {
+                Some(&(vid, _)) => vid,
+                None => {
+                    eval.emit_comptime_local_not_available(expr.src_loc());
+                    ValueId::ERROR
+                }
+            },
             hir::ExprKind::FnDef(fn_def_id) => self.eval_fn_def(eval, fn_def_id)?,
             hir::ExprKind::Call { callee, args } => {
                 self.eval_call(eval, callee, args, expr.src_loc())?
@@ -176,9 +182,8 @@ impl ComptimeInterpreter {
                     }
                 }
             }
-            hir::ExprKind::ComptimeBlock(id) => {
-                let block_def = eval.hir.comptime_blocks[id];
-                self.eval_block_to_value(eval, block_def.body, block_def.result)
+            hir::ExprKind::ComptimeBlock { body, result } => {
+                self.eval_block_to_value(eval, body, result)
             }
             hir::ExprKind::EvmBuiltinCall { builtin, args } => {
                 self.eval_evm_builtin(eval, builtin, args, expr.src_loc())

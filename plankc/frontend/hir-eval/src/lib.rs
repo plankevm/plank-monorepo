@@ -87,6 +87,13 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    pub fn get_const(&self, const_id: ConstId) -> ValueId {
+        match self.const_states[const_id] {
+            ConstState::Evaluated(value_id) => value_id,
+            _ => unreachable!("all consts are evaluated before lowering"),
+        }
+    }
+
     fn try_name_type(&mut self, value_id: ValueId, name: StrId) {
         if let Value::Type(type_id) = self.values.lookup(value_id) {
             self.types.try_set_struct_name(type_id, name);
@@ -96,8 +103,8 @@ impl<'a> Evaluator<'a> {
 
 pub fn evaluate(hir: &Hir, big_nums: &mut BigNumInterner, session: &mut Session) -> Mir {
     let mut eval = Evaluator::new(hir, big_nums, session);
-    let mut interpreter = ComptimeInterpreter::new();
 
+    let mut interpreter = ComptimeInterpreter::new();
     for const_id in hir.consts.iter_idx() {
         eval.ensure_const_evaluated(&mut interpreter, const_id);
     }
