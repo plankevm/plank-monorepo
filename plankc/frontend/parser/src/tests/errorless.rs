@@ -441,6 +441,32 @@ fn test_binary_minus() {
 }
 
 #[test]
+fn test_binary_minus_no_spaces() {
+    assert_parses_to_cst_no_errors_dedented(
+        "const x = a-3;",
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                BinaryExpr(Minus)
+                    Identifier
+                        "a"
+                    Operator
+                        "-"
+                    NumLiteral
+                        "3"
+                ";"
+        "#,
+    );
+}
+
+#[test]
 fn test_binary_double_equals() {
     assert_parses_to_cst_no_errors_dedented(
         "const x = a == b;",
