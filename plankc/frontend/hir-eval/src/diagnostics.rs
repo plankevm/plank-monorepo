@@ -235,16 +235,33 @@ impl Evaluator<'_> {
         self.session.borrow_mut().emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_struct_unknown_field(
+    pub fn emit_struct_lit_unexpected_field(
         &self,
         struct_ty: TypeId,
+        lit_loc: SrcLoc,
         field_name: StrId,
-        field_loc: SrcLoc,
+        field_offset: SourceByteOffset,
+    ) {
+        let mut session = self.session.borrow_mut();
+        let (field, field_span) = session.lookup_name_spanned(field_name, field_offset);
+        let diagnostic = Diagnostic::error("unexpected field").primary(
+            lit_loc.source,
+            field_span,
+            format!("`{}` has no field `{field}`", self.types.format(&session, struct_ty)),
+        );
+        session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_struct_unknown_field_access(
+        &self,
+        struct_ty: TypeId,
+        expr_loc: SrcLoc,
+        field_name: StrId,
     ) {
         let mut session = self.session.borrow_mut();
         let diagnostic = Diagnostic::error("unknown field").primary(
-            field_loc.source,
-            field_loc.span,
+            expr_loc.source,
+            expr_loc.span,
             format!(
                 "`{}` has no field `{}`",
                 self.types.format(&session, struct_ty),
@@ -257,14 +274,18 @@ impl Evaluator<'_> {
     pub fn emit_struct_duplicate_field(
         &self,
         field_name: StrId,
-        first_loc: SrcLoc,
-        duplicate_loc: SrcLoc,
+        lit_loc: SrcLoc,
+        first: SourceByteOffset,
+        duplicate: SourceByteOffset,
     ) {
         let mut session = self.session.borrow_mut();
+        let (field, first_span) = session.lookup_name_spanned(field_name, first);
+        let (_, duplicate_span) = session.lookup_name_spanned(field_name, duplicate);
+
         let diagnostic = Diagnostic::error("duplicate field").cross_source_annotations(
-            duplicate_loc,
-            format!("`{}` assigned more than once", session.lookup_name(field_name)),
-            first_loc,
+            SrcLoc::new(lit_loc.source, duplicate_span),
+            format!("`{field}` assigned more than once"),
+            SrcLoc::new(lit_loc.source, first_span),
             "first assigned here",
         );
         session.emit_diagnostic(diagnostic);

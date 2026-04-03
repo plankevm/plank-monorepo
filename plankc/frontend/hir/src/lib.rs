@@ -125,12 +125,6 @@ pub struct FieldInfo {
     pub value: LocalId,
 }
 
-impl FieldInfo {
-    pub fn name_loc(&self, session: &plank_session::Session, source: SourceId) -> SrcLoc {
-        SrcLoc::new(source, session.name_span(self.name, self.name_offset))
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct FnDef {
     /// Parameters & return type comptime type expressions.

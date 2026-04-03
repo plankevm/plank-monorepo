@@ -1,6 +1,6 @@
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{Session, SourceId, SourceSpan, StrId, TypeId, builtins::builtin_names};
+use plank_session::{Session, SrcLoc, StrId, TypeId, builtins::builtin_names};
 use std::{fmt, hash::BuildHasher};
 
 use crate::ValueId;
@@ -11,16 +11,14 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub struct StructExtraInfo {
-    pub source_id: SourceId,
-    pub source_span: SourceSpan,
+    pub loc: SrcLoc,
     pub type_index: ValueId,
     pub name: Option<StrId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StructInfo<'a> {
-    pub source_id: SourceId,
-    pub source_span: SourceSpan,
+    pub loc: SrcLoc,
     pub type_index: ValueId,
     pub field_types: &'a [TypeId],
     pub field_names: &'a [StrId],
@@ -156,8 +154,7 @@ impl TypeInterner {
                 let name_struct_idx =
                     self.storage.struct_field_names.push_copy_slice(r#struct.field_names);
                 let new_struct_idx = self.storage.index_to_struct.push(StructExtraInfo {
-                    source_id: r#struct.source_id,
-                    source_span: r#struct.source_span,
+                    loc: r#struct.loc,
                     type_index: r#struct.type_index,
                     name: None,
                 });
@@ -182,14 +179,7 @@ impl TypeInterner {
             Ok(ty) => return ty,
             Err(struct_idx) => struct_idx,
         };
-        let stored = &self.storage.index_to_struct[struct_idx];
-        Type::Struct(StructInfo {
-            source_id: stored.source_id,
-            source_span: stored.source_span,
-            type_index: stored.type_index,
-            field_types: &self.storage.struct_fields[struct_idx],
-            field_names: &self.storage.struct_field_names[struct_idx],
-        })
+        Type::Struct(self.storage.get_info(struct_idx))
     }
 
     pub fn fmt_type(
@@ -211,7 +201,7 @@ impl TypeInterner {
                 Some(name) => f.write_str(session.lookup_name(name)),
                 None => {
                     let (line, col) =
-                        session.offset_to_line_col(info.source_id, info.source_span.start);
+                        session.offset_to_line_col(info.loc.source, info.loc.span.start);
                     write!(f, "struct@{line}:{col}")
                 }
             },
@@ -256,8 +246,7 @@ impl StructStorage {
     fn get_info(&self, idx: StructIdx) -> StructInfo<'_> {
         let stored = &self.index_to_struct[idx];
         StructInfo {
-            source_id: stored.source_id,
-            source_span: stored.source_span,
+            loc: stored.loc,
             type_index: stored.type_index,
             field_types: &self.struct_fields[idx],
             field_names: &self.struct_field_names[idx],

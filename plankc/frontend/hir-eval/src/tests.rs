@@ -548,7 +548,7 @@ fn test_comptime_struct_unknown_field() {
         }
         "#,
         &[r#"
-        error: unknown field
+        error: unexpected field
          --> main.plk:2:31
           |
         2 | const my_pair = Pair { a: 42, c: true, b: false };
@@ -593,7 +593,7 @@ fn test_comptime_struct_unknown_and_missing() {
         "#,
         &[
             r#"
-            error: unknown field
+            error: unexpected field
              --> main.plk:2:31
               |
             2 | const my_pair = Pair { a: 42, c: true };
@@ -1077,7 +1077,7 @@ fn test_runtime_struct_lit_unknown_field() {
         }
         "#,
         &[r#"
-        error: unknown field
+        error: unexpected field
          --> main.plk:3:27
           |
         3 |     let x = Pair { a: 42, c: true, b: false };

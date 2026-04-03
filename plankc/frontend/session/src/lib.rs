@@ -53,6 +53,11 @@ impl Session {
         &self.name_interner[name]
     }
 
+    pub fn lookup_name_spanned(&self, name: StrId, start: SourceByteOffset) -> (&str, SourceSpan) {
+        let name = &self.name_interner[name];
+        (name, Span::new(start, start + name.len() as u32))
+    }
+
     pub fn next_source(&self) -> SourceId {
         self.source_map.next_idx()
     }
@@ -79,11 +84,6 @@ impl Session {
 
     pub fn interner(&self) -> &plank_core::intern::StringInterner<StrId> {
         &self.name_interner
-    }
-
-    pub fn name_span(&self, name: StrId, offset: SourceByteOffset) -> SourceSpan {
-        let len = self.lookup_name(name).len() as u32;
-        Span::new(offset, offset + len)
     }
 
     /// Both line and col are 1-indexed. O(n) linear scan.

@@ -95,11 +95,12 @@ impl FunctionLowerScope {
 
         for (i, field) in lit_fields.iter().enumerate() {
             if let Some(prev) = lit_fields[..i].iter().find(|f| f.name == field.name) {
-                let session = eval.session.borrow();
-                let first_loc = prev.name_loc(&session, ty_loc.source);
-                let duplicate_loc = field.name_loc(&session, ty_loc.source);
-                drop(session);
-                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
+                eval.emit_struct_duplicate_field(
+                    field.name,
+                    ty_loc,
+                    prev.name_offset,
+                    field.name_offset,
+                );
             }
         }
 
@@ -122,8 +123,7 @@ impl FunctionLowerScope {
             }
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
-                let loc = field.name_loc(&eval.session.borrow(), ty_loc.source);
-                eval.emit_struct_unknown_field(ty, field.name, loc);
+                eval.emit_struct_lit_unexpected_field(ty, ty_loc, field.name, field.name_offset);
                 continue;
             };
             let expected_field_ty = r#struct.field_types[field_pos];
@@ -383,8 +383,7 @@ impl FunctionLowerScope {
                     self.field_names_buf.push(field.name);
                 }
                 let ty = eval.types.intern(Type::Struct(StructInfo {
-                    source_id: struct_def.source_id,
-                    source_span: struct_def.source_span,
+                    loc: SrcLoc::new(struct_def.source_id, struct_def.source_span),
                     type_index,
                     field_names: &self.field_names_buf,
                     field_types: &self.field_types_buf,
@@ -405,7 +404,7 @@ impl FunctionLowerScope {
                 let Some(field_index) =
                     r#struct.field_names.iter().position(|&name| name == member)
                 else {
-                    eval.emit_struct_unknown_field(ty, member, expr.src_loc());
+                    eval.emit_struct_unknown_field_access(ty, expr.src_loc(), member);
                     return ExprResult::ERROR;
                 };
                 let value = self.locals.comptime(object).map(|object| {
