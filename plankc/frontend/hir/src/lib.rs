@@ -78,12 +78,6 @@ pub enum ExprKind {
         input: LocalId,
     },
 
-    /// Forces compile-time evaluation of the block body.
-    ComptimeBlock {
-        body: BlockId,
-        result: LocalId,
-    },
-
     /// Indicates the expr that evaluated to the value had some error that was already handled,
     /// to avoid cascades any expression downstream from it also needs to become an error.
     Error,
@@ -94,13 +88,35 @@ const _EXPR_KIND_SIZE: () = const_assert_eq(std::mem::size_of::<ExprKind>(), 12)
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {
-    Set { local: LocalId, r#type: Option<LocalId>, expr: Expr },
-    BranchSet { local: LocalId, expr: Expr },
-    Assign { target: LocalId, value: Expr },
+    Set {
+        local: LocalId,
+        r#type: Option<LocalId>,
+        expr: Expr,
+    },
+    BranchSet {
+        local: LocalId,
+        expr: Expr,
+    },
+    Assign {
+        target: LocalId,
+        value: Expr,
+    },
     Eval(Expr),
     Return(Expr),
-    If { condition: LocalId, then_block: BlockId, else_block: BlockId },
-    While { condition_block: BlockId, condition: LocalId, body: BlockId },
+    If {
+        condition: LocalId,
+        then_block: BlockId,
+        else_block: BlockId,
+    },
+    While {
+        condition_block: BlockId,
+        condition: LocalId,
+        body: BlockId,
+    },
+    /// Forces compile-time evaluation of the block body.
+    ComptimeBlock {
+        body: BlockId,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]

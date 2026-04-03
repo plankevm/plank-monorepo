@@ -449,7 +449,8 @@ impl BlockLowerer<'_> {
                     this.emit(span, InstructionKind::Set { local: result, r#type: None, expr });
                 });
 
-                ExprKind::ComptimeBlock { body, result }
+                self.emit(block.node().span(), InstructionKind::ComptimeBlock { body });
+                ExprKind::LocalRef(result)
             }
             ast::Expr::Binary(binary) => 'binary: {
                 let op = match binary.op {

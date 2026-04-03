@@ -139,6 +139,9 @@ impl ComptimeInterpreter {
             hir::InstructionKind::While { .. } => {
                 todo!("comptime while loops not yet implemented")
             }
+            hir::InstructionKind::ComptimeBlock { body } => {
+                self.interpret_block(eval, body)?;
+            }
         }
         Ok(())
     }
@@ -181,9 +184,6 @@ impl ComptimeInterpreter {
                         ValueId::ERROR
                     }
                 }
-            }
-            hir::ExprKind::ComptimeBlock { body, result } => {
-                self.eval_block_to_value(eval, body, result)
             }
             hir::ExprKind::EvmBuiltinCall { builtin, args } => {
                 self.eval_evm_builtin(eval, builtin, args, expr.src_loc())

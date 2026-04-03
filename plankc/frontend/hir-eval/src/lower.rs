@@ -430,13 +430,6 @@ impl FunctionLowerScope {
                     comptime: Some(ValueId::ERROR),
                 }
             }
-            hir::ExprKind::ComptimeBlock { body, result } => {
-                let value = self.interpreter.eval_block_to_value(eval, body, result);
-                match self.materialize(&eval.values, &eval.types, &mut eval.mir_args, value) {
-                    None => ExprResult::ComptimeOnly(value),
-                    Some((expr, ty)) => ExprResult::Runtime { expr, ty, comptime: Some(value) },
-                }
-            }
             hir::ExprKind::Error => ExprResult::Runtime {
                 expr: mir::Expr::Error,
                 ty: TypeId::ERROR,
@@ -531,7 +524,24 @@ impl FunctionLowerScope {
                 hir::InstructionKind::Set { local, r#type, expr } => {
                     let def_loc = instr.loc;
                     let expr_loc = expr.src_loc();
-                    let ty = match self.translate_expr(eval, expr) {
+                    let result = match self.translate_expr(eval, expr) {
+                        ExprResult::ComptimeOnly(value) => {
+                            self.interpreter.bindings.insert(local, (value, def_loc));
+                            match self.materialize(
+                                &eval.values,
+                                &eval.types,
+                                &mut eval.mir_args,
+                                value,
+                            ) {
+                                Some((expr, ty)) => {
+                                    ExprResult::Runtime { expr, ty, comptime: Some(value) }
+                                }
+                                None => ExprResult::ComptimeOnly(value),
+                            }
+                        }
+                        other => other,
+                    };
+                    let ty = match result {
                         ExprResult::Runtime { expr, ty, comptime } => {
                             match self.runtime_locals.set(local, ty, expr_loc) {
                                 Ok(target) => {
@@ -554,7 +564,6 @@ impl FunctionLowerScope {
                         }
                         ExprResult::ComptimeOnly(value) => {
                             self.runtime_locals.register_def_loc(local, def_loc);
-                            self.interpreter.bindings.insert(local, (value, def_loc));
                             eval.values.type_of_value(value)
                         }
                     };
@@ -707,6 +716,11 @@ impl FunctionLowerScope {
                             }
                         }
                     }
+                }
+                hir::InstructionKind::ComptimeBlock { body } => {
+                    self.interpreter
+                        .interpret_block(eval, body)
+                        .expect("comptime block should not contain `return`");
                 }
                 hir::InstructionKind::While { condition_block, condition, body } => {
                     let (condition_block, cond_control) =

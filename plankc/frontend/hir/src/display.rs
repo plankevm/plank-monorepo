@@ -102,12 +102,6 @@ impl<'a> DisplayHir<'a> {
                 write!(f, " ")?;
                 self.fmt_local(f, rhs)
             }
-            Expr::ComptimeBlock { body, result } => {
-                writeln!(f, "comptime {{")?;
-                self.fmt_block(f, body, 1)?;
-                write!(f, "}} -> ")?;
-                self.fmt_local(f, result)
-            }
             Expr::Error => write!(f, "<error>"),
         }
     }
@@ -173,6 +167,11 @@ impl<'a> DisplayHir<'a> {
                 writeln!(f)?;
                 writeln!(f, "{pad}    body:")?;
                 self.fmt_block(f, body, indent + 2)?;
+                writeln!(f, "{pad}}}")
+            }
+            InstructionKind::ComptimeBlock { body } => {
+                writeln!(f, "{pad}comptime {{")?;
+                self.fmt_block(f, body, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
         }
