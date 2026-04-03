@@ -1525,10 +1525,11 @@ fn test_comptime_block_multi_statement() {
     assert_lowers_to(
         r#"
         init {
+            let y = 15;
             let x: u256 = comptime {
                 let mut a = 10;
                 let b = 20;
-                a = 15;
+                a = y;
                 a
             };
             evm_stop();
@@ -1539,7 +1540,8 @@ fn test_comptime_block_multi_statement() {
         ; init
         @fn0() -> never {
             %0 : u256 = 15
-            %1 : never = evm_stop()
+            %1 : u256 = 15
+            %2 : never = evm_stop()
         }
         "#,
     );
