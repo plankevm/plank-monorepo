@@ -80,12 +80,20 @@ impl<'a> Evaluator<'a> {
             ConstState::NotEvaluated => {
                 self.const_states[const_id] = ConstState::InProgress;
                 let const_def = self.hir.consts[const_id];
-                interpreter.reset();
+                let saved = std::mem::take(&mut interpreter.bindings);
                 let value_id = interpreter.eval_const(self, const_def);
+                interpreter.bindings = saved;
                 self.const_states[const_id] = ConstState::Evaluated(value_id);
                 self.try_name_type(value_id, const_def.name);
                 value_id
             }
+        }
+    }
+
+    pub fn get_const(&self, const_id: ConstId) -> ValueId {
+        match self.const_states[const_id] {
+            ConstState::Evaluated(value_id) => value_id,
+            _ => unreachable!("all consts are evaluated before lowering"),
         }
     }
 
@@ -98,8 +106,8 @@ impl<'a> Evaluator<'a> {
 
 pub fn evaluate(hir: &Hir, big_nums: &mut BigNumInterner, session: &mut Session) -> Mir {
     let mut eval = Evaluator::new(hir, big_nums, session);
-    let mut interpreter = ComptimeInterpreter::new();
 
+    let mut interpreter = ComptimeInterpreter::new();
     for const_id in hir.consts.iter_idx() {
         eval.ensure_const_evaluated(&mut interpreter, const_id);
     }

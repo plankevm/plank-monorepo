@@ -168,7 +168,6 @@ impl BlockLowerer<'_> {
 
         debug_assert_eq!(self.fn_scope_start, 0);
         debug_assert_eq!(self.fn_captures_start, 0);
-
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
@@ -435,8 +434,27 @@ impl BlockLowerer<'_> {
                 );
                 ExprKind::LocalRef(result)
             }
-            ast::Expr::ComptimeBlock(_) => {
-                todo!("comptime block lowering requires extra HIR instructions")
+            ast::Expr::ComptimeBlock(block) => {
+                let result = self.alloc_temp();
+                let body = self.create_sub_block(|this| {
+                    for stmt in block.statements() {
+                        this.lower_statement(stmt);
+                    }
+                    let (span, expr) = match block.end_expr() {
+                        Some(e) => {
+                            let span = e.span();
+                            (span, this.lower_expr(e))
+                        }
+                        None => {
+                            let span = block.node().span();
+                            (span, this.expr(ExprKind::Void, span))
+                        }
+                    };
+                    this.emit(span, InstructionKind::Set { local: result, r#type: None, expr });
+                });
+
+                self.emit(block.node().span(), InstructionKind::ComptimeBlock { body });
+                ExprKind::LocalRef(result)
             }
             ast::Expr::Binary(binary) => 'binary: {
                 let op = match binary.op {

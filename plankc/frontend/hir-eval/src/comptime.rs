@@ -29,14 +29,20 @@ impl ComptimeInterpreter {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.bindings.clear();
+    pub fn eval_const(&mut self, eval: &mut Evaluator<'_>, const_def: ConstDef) -> ValueId {
+        self.eval_block_to_value(eval, const_def.body, const_def.result)
     }
 
-    pub fn eval_const(&mut self, eval: &mut Evaluator<'_>, const_def: ConstDef) -> ValueId {
-        self.interpret_block(eval, const_def.body)
-            .expect("hir: const expr shouldn't have `return`");
-        self.bindings[const_def.result].0
+    /// Interprets a block and returns the value of `result` local.
+    /// Expects the block to set `result` via a `Set` instruction and not contain `return`.
+    pub fn eval_block_to_value(
+        &mut self,
+        eval: &mut Evaluator<'_>,
+        body: hir::BlockId,
+        result: hir::LocalId,
+    ) -> ValueId {
+        self.interpret_block(eval, body).expect("hir: block expression shouldn't have `return`");
+        self.bindings[result].0
     }
 
     pub fn interpret_block(
@@ -129,6 +135,9 @@ impl ComptimeInterpreter {
             hir::InstructionKind::While { .. } => {
                 todo!("comptime while loops not yet implemented")
             }
+            hir::InstructionKind::ComptimeBlock { body } => {
+                self.interpret_block(eval, body)?;
+            }
         }
         Ok(())
     }
@@ -145,7 +154,13 @@ impl ComptimeInterpreter {
             hir::ExprKind::BigNum(id) => eval.values.intern_num(id),
             hir::ExprKind::Type(type_id) => eval.values.intern_type(type_id),
             hir::ExprKind::ConstRef(const_id) => eval.ensure_const_evaluated(self, const_id),
-            hir::ExprKind::LocalRef(local_id) => self.bindings[local_id].0,
+            hir::ExprKind::LocalRef(local_id) => match self.bindings.get(local_id) {
+                Some(&(vid, _)) => vid,
+                None => {
+                    eval.emit_comptime_local_not_available(expr.src_loc());
+                    ValueId::ERROR
+                }
+            },
             hir::ExprKind::FnDef(fn_def_id) => self.eval_fn_def(eval, fn_def_id)?,
             hir::ExprKind::Call { callee, args } => {
                 self.eval_call(eval, callee, args, expr.src_loc())?
