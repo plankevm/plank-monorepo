@@ -193,11 +193,11 @@ pub enum Token {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Identifier,
 
-    #[regex("-?[0-9]", lex_number_literal::<10>)]
+    #[regex("[0-9]", lex_number_literal::<10>)]
     DecimalLiteral,
-    #[regex("-?0x[0-9A-Fa-f]", lex_number_literal::<16>)]
+    #[regex("0x[0-9A-Fa-f]", lex_number_literal::<16>)]
     HexLiteral,
-    #[regex("-?0b[01]", lex_number_literal::<2>)]
+    #[regex("0b[01]", lex_number_literal::<2>)]
     BinLiteral,
 
     // Trivia
@@ -613,10 +613,12 @@ mod tests {
     #[test]
     fn test_negative_decimal_literals() {
         let results = lex_all("-42 -1_000");
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0], (Token::DecimalLiteral, 0..3, "-42"));
-        assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
-        assert_eq!(results[2], (Token::DecimalLiteral, 4..10, "-1_000"));
+        assert_eq!(results.len(), 5);
+        assert_eq!(results[0], (Token::Minus, 0..1, "-"));
+        assert_eq!(results[1], (Token::DecimalLiteral, 1..3, "42"));
+        assert_eq!(results[2], (Token::Whitespace, 3..4, " "));
+        assert_eq!(results[3], (Token::Minus, 4..5, "-"));
+        assert_eq!(results[4], (Token::DecimalLiteral, 5..10, "1_000"));
     }
 
     #[test]
@@ -635,10 +637,12 @@ mod tests {
     #[test]
     fn test_negative_hex_literals() {
         let results = lex_all("-0xDEAD -0xff");
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0], (Token::HexLiteral, 0..7, "-0xDEAD"));
-        assert_eq!(results[1], (Token::Whitespace, 7..8, " "));
-        assert_eq!(results[2], (Token::HexLiteral, 8..13, "-0xff"));
+        assert_eq!(results.len(), 5);
+        assert_eq!(results[0], (Token::Minus, 0..1, "-"));
+        assert_eq!(results[1], (Token::HexLiteral, 1..7, "0xDEAD"));
+        assert_eq!(results[2], (Token::Whitespace, 7..8, " "));
+        assert_eq!(results[3], (Token::Minus, 8..9, "-"));
+        assert_eq!(results[4], (Token::HexLiteral, 9..13, "0xff"));
     }
 
     #[test]
@@ -657,10 +661,12 @@ mod tests {
     #[test]
     fn test_negative_binary_literals() {
         let results = lex_all("-0b11 -0b1010");
-        assert_eq!(results.len(), 3);
-        assert_eq!(results[0], (Token::BinLiteral, 0..5, "-0b11"));
-        assert_eq!(results[1], (Token::Whitespace, 5..6, " "));
-        assert_eq!(results[2], (Token::BinLiteral, 6..13, "-0b1010"));
+        assert_eq!(results.len(), 5);
+        assert_eq!(results[0], (Token::Minus, 0..1, "-"));
+        assert_eq!(results[1], (Token::BinLiteral, 1..5, "0b11"));
+        assert_eq!(results[2], (Token::Whitespace, 5..6, " "));
+        assert_eq!(results[3], (Token::Minus, 6..7, "-"));
+        assert_eq!(results[4], (Token::BinLiteral, 7..13, "0b1010"));
     }
 
     #[test]

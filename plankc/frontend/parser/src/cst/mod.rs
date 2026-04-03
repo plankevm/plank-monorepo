@@ -96,7 +96,7 @@ pub enum NodeKind {
 
     // Atoms
     BoolLiteral(bool),
-    NumLiteral { negative: bool, id: NumLitId },
+    NumLiteral { id: NumLitId },
     Identifier { ident: StrId },
 
     // Function Definition

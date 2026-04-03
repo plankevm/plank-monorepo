@@ -311,14 +311,10 @@ impl<'a> Parser<'a> {
 
         let span = self.tokens.token_src_span(token_idx);
         let src = &self.source[span.usize_range()];
-        let (negative, digits) = if let Some(rest) = src.strip_prefix('-') {
-            (true, &rest[prefix_len..])
-        } else {
-            (false, &src[prefix_len..])
-        };
+        let digits = &src[prefix_len..];
 
         let id = parse_fn(digits, &mut self.num_lit_limbs);
-        Some(NodeKind::NumLiteral { negative, id })
+        Some(NodeKind::NumLiteral { id })
     }
 
     // ======================== EXPRESSION PARSING (PRATT) ========================
