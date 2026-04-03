@@ -151,7 +151,9 @@ impl ComptimeInterpreter {
                 self.eval_call(eval, callee, args, expr.src_loc())?
             }
             hir::ExprKind::StructDef(struct_def_id) => self.eval_struct_def(eval, struct_def_id)?,
-            hir::ExprKind::StructLit { ty, fields } => self.eval_struct_lit(eval, ty, fields)?,
+            hir::ExprKind::StructLit { ty, fields } => {
+                self.eval_struct_lit(eval, ty, fields, expr.src_loc())?
+            }
             hir::ExprKind::Member { object, member } => {
                 self.eval_member(eval, object, member, expr.src_loc())?
             }
@@ -238,6 +240,7 @@ impl ComptimeInterpreter {
         eval: &mut Evaluator<'_>,
         ty: hir::LocalId,
         fields_id: hir::FieldsId,
+        lit_loc: SrcLoc,
     ) -> Result<ValueId, ReturnValue> {
         let (type_vid, type_loc) = self.bindings[ty];
         let Value::Type(struct_type_id) = eval.values.lookup(type_vid) else {
@@ -255,18 +258,14 @@ impl ComptimeInterpreter {
             let Type::Struct(r#struct) = eval.types.lookup(struct_type_id) else { unreachable!() };
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
-                let name_span = field.name_span(&eval.session.borrow());
-                eval.emit_struct_unknown_field(
-                    struct_type_id,
-                    field.name,
-                    SrcLoc::new(type_loc.source, name_span),
-                );
+                let loc = field.name_loc(&eval.session.borrow(), type_loc.source);
+                eval.emit_struct_unknown_field(struct_type_id, field.name, loc);
                 continue;
             };
             if let Some(prev) = lit_fields[..i].iter().find(|f| f.name == field.name) {
                 let session = eval.session.borrow();
-                let first_loc = SrcLoc::new(type_loc.source, prev.name_span(&session));
-                let duplicate_loc = SrcLoc::new(type_loc.source, field.name_span(&session));
+                let first_loc = prev.name_loc(&session, type_loc.source);
+                let duplicate_loc = field.name_loc(&session, type_loc.source);
                 drop(session);
                 eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
                 continue;
@@ -284,7 +283,7 @@ impl ComptimeInterpreter {
             let mut has_missing_fields = false;
             for &field_name in r#struct.field_names {
                 let Some(field) = lit_fields.iter().find(|f| f.name == field_name) else {
-                    eval.emit_struct_missing_field(struct_type_id, field_name, type_loc);
+                    eval.emit_struct_missing_field(struct_type_id, field_name, lit_loc);
                     has_missing_fields = true;
                     continue;
                 };

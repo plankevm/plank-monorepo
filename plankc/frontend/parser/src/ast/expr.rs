@@ -38,14 +38,17 @@ impl<'cst> Expr<'cst> {
         for _ in 0..MAX_PAREN_UNWRAPS {
             let span = view.span();
             let expr = match view.kind() {
-                NodeKind::ParenExpr => {
-                    view = view.child(0)?;
-                    continue;
-                }
-                NodeKind::BinaryExpr(op) => {
-                    let op_span = view.child(1)?.span();
-                    Expr::Binary(BinaryExpr { op, op_span, view })
-                }
+                NodeKind::ParenExpr => match view.child(0) {
+                    Some(inner) => {
+                        view = inner;
+                        continue;
+                    }
+                    None => Expr::Error { span },
+                },
+                NodeKind::BinaryExpr(op) => match view.child(1) {
+                    Some(op_node) => Expr::Binary(BinaryExpr { op, op_span: op_node.span(), view }),
+                    None => Expr::Error { span },
+                },
                 NodeKind::UnaryExpr(op) => Expr::Unary(UnaryExpr { op, view }),
                 NodeKind::CallExpr => Expr::Call(CallExpr { view }),
                 NodeKind::MemberExpr => match MemberExpr::new(view) {
@@ -54,15 +57,16 @@ impl<'cst> Expr<'cst> {
                 },
                 NodeKind::StructDef => Expr::StructDef(StructDef { view }),
                 NodeKind::StructLit => Expr::StructLit(StructLit { view }),
-                NodeKind::If => {
-                    let body_node = view.child(1)?;
-                    Expr::If(IfExpr { body_node, view })
-                }
-                NodeKind::FnDef => {
-                    let param_list = view.child(0)?;
-                    let body_node = view.child(2)?;
-                    Expr::FnDef(FnDef { param_list, body_node, view })
-                }
+                NodeKind::If => match view.child(1) {
+                    Some(body_node) => Expr::If(IfExpr { body_node, view }),
+                    None => Expr::Error { span },
+                },
+                NodeKind::FnDef => match (view.child(0), view.child(2)) {
+                    (Some(param_list), Some(body_node)) => {
+                        Expr::FnDef(FnDef { param_list, body_node, view })
+                    }
+                    _ => Expr::Error { span },
+                },
                 NodeKind::Block => Expr::Block(BlockExpr { view }),
                 NodeKind::ComptimeBlock => Expr::ComptimeBlock(BlockExpr { view }),
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral { value, span },
@@ -199,8 +203,8 @@ impl<'cst> StructDef<'cst> {
         })
     }
 
-    pub fn fields(&self) -> impl Iterator<Item = FieldDef<'cst>> {
-        self.view.children().filter_map(FieldDef::new)
+    pub fn fields(&self) -> impl Iterator<Item = Result<FieldDef<'cst>, Span<TokenIdx>>> {
+        self.view.children().filter_map(FieldDef::try_new)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -217,12 +221,13 @@ pub struct FieldDef<'cst> {
 }
 
 impl<'cst> FieldDef<'cst> {
-    fn new(view: NodeView<'cst>) -> Option<Self> {
+    /// Returns `None` for non-FieldDef nodes, `Some(Err(span))` for malformed FieldDef nodes.
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
         match view.kind() {
             NodeKind::FieldDef => {
-                let name_node = view.child(0)?;
-                let name = name_node.kind().as_ident()?;
-                Some(Self { name, name_span: name_node.span(), view })
+                let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
+                let Some(name) = name_node.kind().as_ident() else { return Some(Err(view.span())) };
+                Some(Ok(Self { name, name_span: name_node.span(), view }))
             }
             _ => None,
         }
@@ -252,8 +257,8 @@ impl<'cst> StructLit<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn fields(&self) -> impl Iterator<Item = FieldAssign<'cst>> {
-        self.view.children().skip(1).filter_map(FieldAssign::new)
+    pub fn fields(&self) -> impl Iterator<Item = Result<FieldAssign<'cst>, Span<TokenIdx>>> {
+        self.view.children().skip(1).filter_map(FieldAssign::try_new)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -270,12 +275,12 @@ pub struct FieldAssign<'cst> {
 }
 
 impl<'cst> FieldAssign<'cst> {
-    fn new(view: NodeView<'cst>) -> Option<Self> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
         match view.kind() {
             NodeKind::FieldAssign => {
-                let name_node = view.child(0)?;
-                let name = name_node.kind().as_ident()?;
-                Some(Self { name, name_span: name_node.span(), view })
+                let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
+                let Some(name) = name_node.kind().as_ident() else { return Some(Err(view.span())) };
+                Some(Ok(Self { name, name_span: name_node.span(), view }))
             }
             _ => None,
         }
@@ -311,9 +316,11 @@ impl<'cst> IfExpr<'cst> {
     }
 
     /// Returns an iterator over the else-if branches.
-    pub fn else_if_branches(&self) -> impl Iterator<Item = ElseIfBranch<'cst>> {
+    pub fn else_if_branches(
+        &self,
+    ) -> impl Iterator<Item = Result<ElseIfBranch<'cst>, Span<TokenIdx>>> {
         let else_if_list = self.view.child(2);
-        else_if_list.into_iter().flat_map(|list| list.children()).filter_map(ElseIfBranch::new)
+        else_if_list.into_iter().flat_map(|list| list.children()).filter_map(ElseIfBranch::try_new)
     }
 
     /// Returns the else body if present.
@@ -334,11 +341,11 @@ pub struct ElseIfBranch<'cst> {
 }
 
 impl<'cst> ElseIfBranch<'cst> {
-    fn new(view: NodeView<'cst>) -> Option<Self> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
         match view.kind() {
             NodeKind::ElseIfBranch => {
-                let body_node = view.child(1)?;
-                Some(Self { body_node, view })
+                let Some(body_node) = view.child(1) else { return Some(Err(view.span())) };
+                Some(Ok(Self { body_node, view }))
             }
             _ => None,
         }
@@ -370,8 +377,8 @@ impl<'cst> FnDef<'cst> {
         self.param_list.span()
     }
 
-    pub fn params(&self) -> impl Iterator<Item = Param<'cst>> {
-        self.param_list.children().filter_map(Param::new)
+    pub fn params(&self) -> impl Iterator<Item = Result<Param<'cst>, Span<TokenIdx>>> {
+        self.param_list.children().filter_map(Param::try_new)
     }
 
     pub fn return_type(&self) -> Expr<'cst> {
@@ -397,15 +404,15 @@ pub struct Param<'cst> {
 }
 
 impl<'cst> Param<'cst> {
-    fn new(view: NodeView<'cst>) -> Option<Self> {
+    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, Span<TokenIdx>>> {
         let comptime = match view.kind() {
             NodeKind::Parameter => false,
             NodeKind::ComptimeParameter => true,
             _ => return None,
         };
-        let name_node = view.child(0)?;
-        let name = name_node.kind().as_ident()?;
-        Some(Self { name, name_span: name_node.span(), is_comptime: comptime, view })
+        let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
+        let Some(name) = name_node.kind().as_ident() else { return Some(Err(view.span())) };
+        Some(Ok(Self { name, name_span: name_node.span(), is_comptime: comptime, view }))
     }
 
     pub fn type_expr(&self) -> Expr<'cst> {

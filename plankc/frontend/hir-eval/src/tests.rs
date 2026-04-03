@@ -531,7 +531,7 @@ fn test_comptime_struct_missing_field() {
          --> main.plk:2:17
           |
         2 | const my_pair = Pair { a: 42 };
-          |                 ^^^^ missing field `b` in `Pair`
+          |                 ^^^^^^^^^^^^^^ missing field `b` in `Pair`
         "#],
     );
 }
@@ -604,7 +604,7 @@ fn test_comptime_struct_unknown_and_missing() {
              --> main.plk:2:17
               |
             2 | const my_pair = Pair { a: 42, c: true };
-              |                 ^^^^ missing field `b` in `Pair`
+              |                 ^^^^^^^^^^^^^^^^^^^^^^^ missing field `b` in `Pair`
             "#,
         ],
     );
@@ -1123,7 +1123,7 @@ fn test_runtime_struct_lit_missing_field() {
          --> main.plk:3:13
           |
         3 |     let x = Pair { a: 42 };
-          |             ^^^^ missing field `b` in `Pair`
+          |             ^^^^^^^^^^^^^^ missing field `b` in `Pair`
         "#],
     );
 }

@@ -81,6 +81,11 @@ impl Session {
         &self.name_interner
     }
 
+    pub fn name_span(&self, name: StrId, offset: SourceByteOffset) -> SourceSpan {
+        let len = self.lookup_name(name).len() as u32;
+        Span::new(offset, offset + len)
+    }
+
     /// Both line and col are 1-indexed. O(n) linear scan.
     pub fn offset_to_line_col(&self, source_id: SourceId, offset: SourceByteOffset) -> (u32, u32) {
         let source = self.get_source(source_id);

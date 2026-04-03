@@ -88,8 +88,21 @@ impl FunctionLowerScope {
         eval: &mut Evaluator<'_>,
         ty: hir::LocalId,
         fields: hir::FieldsId,
+        lit_loc: SrcLoc,
     ) -> ExprResult {
         let ty_loc = self.locals.def_loc(ty);
+        let lit_fields = &eval.hir.fields[fields];
+
+        for (i, field) in lit_fields.iter().enumerate() {
+            if let Some(prev) = lit_fields[..i].iter().find(|f| f.name == field.name) {
+                let session = eval.session.borrow();
+                let first_loc = prev.name_loc(&session, ty_loc.source);
+                let duplicate_loc = field.name_loc(&session, ty_loc.source);
+                drop(session);
+                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
+            }
+        }
+
         let Some(ty) = self.locals.comptime(ty) else {
             eval.emit_struct_type_not_comptime(ty_loc);
             return ExprResult::ERROR;
@@ -98,34 +111,21 @@ impl FunctionLowerScope {
             eval.emit_type_constraint_not_type(eval.values.type_of_value(ty), ty_loc);
             return ExprResult::ERROR;
         };
-        if !matches!(eval.types.lookup(ty), Type::Struct(_)) {
+        let Type::Struct(r#struct) = eval.types.lookup(ty) else {
             eval.emit_not_a_struct_type(ty, ty_loc);
             return ExprResult::ERROR;
-        }
+        };
 
-        for (i, field) in eval.hir.fields[fields].iter().enumerate() {
-            let r#struct = match eval.types.lookup(ty) {
-                Type::Struct(s) => s,
-                _ => unreachable!(),
-            };
-            let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
-            else {
-                let name_span = field.name_span(&eval.session.borrow());
-                eval.emit_struct_unknown_field(
-                    ty,
-                    field.name,
-                    SrcLoc::new(ty_loc.source, name_span),
-                );
-                continue;
-            };
-            if let Some(prev) = eval.hir.fields[fields][..i].iter().find(|f| f.name == field.name) {
-                let session = eval.session.borrow();
-                let first_loc = SrcLoc::new(ty_loc.source, prev.name_span(&session));
-                let duplicate_loc = SrcLoc::new(ty_loc.source, field.name_span(&session));
-                drop(session);
-                eval.emit_struct_duplicate_field(field.name, first_loc, duplicate_loc);
+        for (i, field) in lit_fields.iter().enumerate() {
+            if lit_fields[..i].iter().any(|f| f.name == field.name) {
                 continue;
             }
+            let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
+            else {
+                let loc = field.name_loc(&eval.session.borrow(), ty_loc.source);
+                eval.emit_struct_unknown_field(ty, field.name, loc);
+                continue;
+            };
             let expected_field_ty = r#struct.field_types[field_pos];
             let field_value_ty = self.locals.get_type(field.value, &eval.values);
             if !field_value_ty.is_assignable_to(expected_field_ty) {
@@ -147,7 +147,7 @@ impl FunctionLowerScope {
                 let Some(&field) =
                     eval.hir.fields[fields].iter().find(|field| field.name == field_name)
                 else {
-                    eval.emit_struct_missing_field(ty, field_name, ty_loc);
+                    eval.emit_struct_missing_field(ty, field_name, lit_loc);
                     has_errors = true;
                     continue;
                 };
@@ -178,7 +178,7 @@ impl FunctionLowerScope {
             let Some(&field) =
                 eval.hir.fields[fields].iter().find(|field| field.name == field_name)
             else {
-                eval.emit_struct_missing_field(ty, field_name, ty_loc);
+                eval.emit_struct_missing_field(ty, field_name, lit_loc);
                 has_missing_fields = true;
                 continue;
             };
@@ -394,7 +394,7 @@ impl FunctionLowerScope {
                 ExprResult::ComptimeOnly(eval.values.intern(Value::Type(ty)))
             }
             hir::ExprKind::StructLit { ty, fields } => {
-                self.translate_struct_literal(eval, ty, fields)
+                self.translate_struct_literal(eval, ty, fields, expr.src_loc())
             }
             hir::ExprKind::Member { object, member } => {
                 let ty = self.locals.get_type(object, &eval.values);

@@ -381,7 +381,8 @@ impl BlockLowerer<'_> {
             ast::Expr::StructLit(struct_lit) => {
                 let ty = self.lower_expr_to_local(struct_lit.type_expr());
                 let buf_start = self.field_buf.len();
-                for field in struct_lit.fields() {
+                for result in struct_lit.fields() {
+                    let Ok(field) = result else { continue };
                     let value = self.lower_expr_to_local(field.value());
                     let name_offset = self.lexed.tokens_src_span(field.name_span()).start;
                     self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
@@ -403,7 +404,8 @@ impl BlockLowerer<'_> {
                         local
                     });
                 let buf_start = self.field_buf.len();
-                for field in struct_def.fields() {
+                for result in struct_def.fields() {
+                    let Ok(field) = result else { continue };
                     let value = self.lower_expr_to_local(field.type_expr());
                     let name_offset = self.lexed.tokens_src_span(field.name_span()).start;
                     self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
@@ -511,7 +513,8 @@ impl BlockLowerer<'_> {
         let return_type;
         let type_preamble = {
             let preamble_block_start = self.instructions_buf.len();
-            for param in fn_def.params() {
+            for result in fn_def.params() {
+                let Ok(param) = result else { continue };
                 let param_type = self.lower_expr_to_local(param.type_expr());
                 self.locals_buf.push(param_type);
                 let param_value = self.add_param_to_scope_as_local(param);
@@ -535,10 +538,12 @@ impl BlockLowerer<'_> {
             unreachable!("not only pairs?")
         };
         let fn_params_id = self.builder.fn_params.push_iter(
-            type_value_pairs.iter().zip(fn_def.params()).map(|(&[r#type, value], param)| {
-                let span = self.lexed.tokens_src_span(param.node().span());
-                ParamInfo { is_comptime: param.is_comptime, value, r#type, span }
-            }),
+            type_value_pairs.iter().zip(fn_def.params().flatten()).map(
+                |(&[r#type, value], param)| {
+                    let span = self.lexed.tokens_src_span(param.node().span());
+                    ParamInfo { is_comptime: param.is_comptime, value, r#type, span }
+                },
+            ),
         );
         self.locals_buf.truncate(param_locals_start);
         let fn_captures_id =
@@ -577,10 +582,11 @@ impl BlockLowerer<'_> {
     fn lower_else_chain<'cst>(
         &mut self,
         result: LocalId,
-        mut branches: impl Iterator<Item = ast::ElseIfBranch<'cst>>,
+        mut branches: impl Iterator<Item = Result<ast::ElseIfBranch<'cst>, Span<TokenIdx>>>,
         else_body: Result<ast::BlockExpr<'cst>, Span<TokenIdx>>,
     ) -> BlockId {
-        if let Some(first) = branches.next() {
+        while let Some(next) = branches.next() {
+            let Ok(first) = next else { continue };
             return self.create_sub_block(|this| {
                 let span = first.node().span();
                 let condition = this.lower_expr_to_local(first.condition());
