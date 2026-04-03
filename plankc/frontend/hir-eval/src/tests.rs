@@ -1433,6 +1433,27 @@ fn test_comptime_call_arg_count_mismatch() {
 }
 
 #[test]
+fn test_cross_file_type_mismatch() {
+    assert_project_diagnostics(
+        TestProject::single("import m::other::f;\nconst y = f(true);\ninit { evm_stop(); }")
+            .add_file("other", "const f = fn(x: u256) u256 { return x; };")
+            .add_module("m", ""),
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:13
+          |
+        2 | const y = f(true);
+          |             ^^^^ expected `u256`, got `bool`
+          |
+         ::: other.plk:1:17
+          |
+        1 | const f = fn(x: u256) u256 { return x; };
+          |                 ---- `u256` expected because of this
+        "#],
+    );
+}
+
+#[test]
 fn test_cross_file_call_arg_count_mismatch() {
     assert_project_diagnostics(
         TestProject::root("import m::other::f;\ninit { f(1, 2); evm_stop(); }")
