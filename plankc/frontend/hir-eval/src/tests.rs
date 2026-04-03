@@ -13,7 +13,7 @@ fn try_lower_project(project: TestProject) -> (Mir, BigNumInterner, Session) {
 
     let mut big_nums = BigNumInterner::default();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir = crate::evaluate(&hir, &mut session);
+    let mir = crate::evaluate(&hir, &mut big_nums, &mut session);
 
     (mir, big_nums, session)
 }

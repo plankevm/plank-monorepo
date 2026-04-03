@@ -8,7 +8,7 @@ fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
 
     let mut big_nums = BigNumInterner::default();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir = plank_hir_eval::evaluate(&hir, &mut session);
+    let mir = plank_hir_eval::evaluate(&hir, &mut big_nums, &mut session);
     let sir = crate::lower(&mir, &big_nums);
     (sir, session)
 }

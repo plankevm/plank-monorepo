@@ -3,10 +3,11 @@ use plank_core::{IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_hir::{ConstId, Hir};
 use plank_mir::{self as mir, Mir};
 use plank_session::{Session, StrId};
-use plank_values::{TypeId, TypeInterner, ValueId};
+use plank_values::{BigNumInterner, TypeId, TypeInterner, ValueId};
 
 use comptime::ComptimeInterpreter;
 
+mod builtins;
 mod comptime;
 mod diagnostics;
 mod local_state;
@@ -28,6 +29,7 @@ enum ConstState {
 pub(crate) struct Evaluator<'a> {
     pub hir: &'a Hir,
     pub session: &'a mut Session,
+    pub big_nums: &'a mut BigNumInterner,
     pub values: ValueInterner,
     pub types: TypeInterner,
     const_states: IndexVec<ConstId, ConstState>,
@@ -39,11 +41,12 @@ pub(crate) struct Evaluator<'a> {
 }
 
 impl<'a> Evaluator<'a> {
-    fn new(hir: &'a Hir, session: &'a mut Session) -> Self {
+    fn new(hir: &'a Hir, big_nums: &'a mut BigNumInterner, session: &'a mut Session) -> Self {
         let const_count = hir.consts.len();
         Self {
             hir,
             session,
+            big_nums,
             values: ValueInterner::new(),
             types: TypeInterner::new(),
             const_states: index_vec![ConstState::NotEvaluated; const_count],
@@ -91,8 +94,8 @@ impl<'a> Evaluator<'a> {
     }
 }
 
-pub fn evaluate(hir: &Hir, session: &mut Session) -> Mir {
-    let mut eval = Evaluator::new(hir, session);
+pub fn evaluate(hir: &Hir, big_nums: &mut BigNumInterner, session: &mut Session) -> Mir {
+    let mut eval = Evaluator::new(hir, big_nums, session);
     let mut interpreter = ComptimeInterpreter::new();
 
     for const_id in hir.consts.iter_idx() {

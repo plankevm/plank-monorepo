@@ -47,7 +47,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     }
 
     pub fn evaluate_hir(&mut self, hir: &plank_hir::Hir) -> plank_mir::Mir {
-        plank_hir_eval::evaluate(hir, &mut self.session)
+        plank_hir_eval::evaluate(hir, &mut self.big_nums, &mut self.session)
     }
 
     pub fn emit_bytecode(&self, mir: &plank_mir::Mir, optimizations: Option<&str>) -> Vec<u8> {

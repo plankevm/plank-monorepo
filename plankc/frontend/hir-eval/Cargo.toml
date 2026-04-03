@@ -9,11 +9,13 @@ workspace = true
 
 [dependencies]
 plank-core.workspace = true
+plank-evm.workspace = true
 plank-session.workspace = true
 plank-hir.workspace = true
 plank-mir.workspace = true
 plank-values.workspace = true
 
+alloy-primitives.workspace = true
 hashbrown.workspace = true
 
 [dev-dependencies]
