@@ -1365,3 +1365,157 @@ fn test_or_condition_type_mismatch() {
         "#],
     );
 }
+
+#[test]
+fn test_comptime_evm_builtins() {
+    assert_lowers_to(
+        r#"
+        const add_res = add(10, 7);
+        const mul_res = mul(3, 4);
+        const sub_res = sub(10, 3);
+        const div_res = raw_div(10, 3);
+        const mod_res = raw_mod(10, 3);
+        const sdiv_res = raw_sdiv(10, 3);
+        const smod_res = raw_smod(10, 3);
+        const exp_res = exp(2, 10);
+        const div_zero = raw_div(5, 0);
+        const signext_res = signextend(0, 0x7F);
+        const and_res = bitwise_and(0xFF, 0x0F);
+        const or_res = bitwise_or(0xF0, 0x0F);
+        const xor_res = bitwise_xor(0xFF, 0x0F);
+        const byte_res = byte(31, 0x42);
+        const shl_res = shl(4, 1);
+        const shr_res = shr(1, 16);
+        const sar_res = sar(1, 8);
+        const lt_res = lt(3, 5);
+        const gt_res = gt(5, 3);
+        const slt_res = slt(3, 5);
+        const sgt_res = sgt(5, 3);
+        const eq_res = eq(5, 5);
+        const iszero_t = iszero(0);
+        const iszero_f = iszero(1);
+        const addmod_res = raw_addmod(5, 7, 10);
+        const mulmod_res = raw_mulmod(3, 4, 5);
+        init {
+            let a: u256 = add_res;
+            let b: u256 = mul_res;
+            let c: u256 = sub_res;
+            let d: u256 = div_res;
+            let e: u256 = mod_res;
+            let f: u256 = sdiv_res;
+            let g: u256 = smod_res;
+            let h: u256 = exp_res;
+            let i: u256 = div_zero;
+            let j: u256 = signext_res;
+            let k: u256 = and_res;
+            let l: u256 = or_res;
+            let m: u256 = xor_res;
+            let n: u256 = byte_res;
+            let o: u256 = shl_res;
+            let p: u256 = shr_res;
+            let q: u256 = sar_res;
+            let r: bool = lt_res;
+            let s: bool = gt_res;
+            let t: bool = slt_res;
+            let u: bool = sgt_res;
+            let v: bool = eq_res;
+            let w: bool = iszero_t;
+            let x: bool = iszero_f;
+            let y: u256 = addmod_res;
+            let z: u256 = mulmod_res;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 17
+            %1 : u256 = 12
+            %2 : u256 = 7
+            %3 : u256 = 3
+            %4 : u256 = 1
+            %5 : u256 = 3
+            %6 : u256 = 1
+            %7 : u256 = 1024
+            %8 : u256 = 0
+            %9 : u256 = 127
+            %10 : u256 = 15
+            %11 : u256 = 255
+            %12 : u256 = 240
+            %13 : u256 = 66
+            %14 : u256 = 16
+            %15 : u256 = 8
+            %16 : u256 = 4
+            %17 : bool = true
+            %18 : bool = true
+            %19 : bool = true
+            %20 : bool = true
+            %21 : bool = true
+            %22 : bool = true
+            %23 : bool = false
+            %24 : u256 = 2
+            %25 : u256 = 2
+            %26 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_evm_const_chain() {
+    assert_lowers_to(
+        r#"
+        const a = add(5, 10);
+        const b = mul(a, 3);
+        init {
+            let x: u256 = b;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 45
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_unsupported_evm_builtin() {
+    assert_diagnostics(
+        r#"
+        const x = caller();
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: comptime evaluation not supported
+         --> main.plk:1:11
+          |
+        1 | const x = caller();
+          |           ^^^^^^^^ `caller` cannot be evaluated at compile time
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_evm_wrong_arg_type_in_const() {
+    assert_diagnostics(
+        r#"
+        const y = mul(true, 5);
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: no valid match for builtin signature
+         --> main.plk:1:11
+          |
+        1 | const y = mul(true, 5);
+          |           ^^^^^^^^^^^^ `mul` cannot be called with (bool, u256)
+          |
+          = note: `mul` accepts (u256, u256)
+        "#],
+    );
+}
