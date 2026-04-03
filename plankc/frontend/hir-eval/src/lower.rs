@@ -129,10 +129,7 @@ impl FunctionLowerScope {
             return ExprResult::ERROR;
         };
 
-        for (i, field) in lit_fields.iter().enumerate() {
-            if lit_fields[..i].iter().any(|f| f.name == field.name) {
-                continue;
-            }
+        for field in lit_fields {
             let Some(field_pos) = r#struct.field_names.iter().position(|&name| name == field.name)
             else {
                 eval.emit_struct_lit_unexpected_field(ty, ty_loc, field.name, field.name_offset);
@@ -148,8 +145,6 @@ impl FunctionLowerScope {
                 );
             }
         }
-
-        let Type::Struct(r#struct) = eval.types.lookup(ty) else { unreachable!() };
 
         assert!(self.values_buf.is_empty());
 
