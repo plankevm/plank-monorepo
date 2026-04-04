@@ -225,6 +225,26 @@ fn test_if_three_branches() {
 }
 
 #[test]
+fn test_type_annotation_not_comptime() {
+    assert_diagnostics(
+        "
+        init {
+            let T = calldataload(0);
+            let x: T = 5;
+            evm_stop();
+        }
+        ",
+        &[r#"
+        error: type must be known at compile time
+         --> main.plk:3:12
+          |
+        3 |     let x: T = 5;
+          |            ^ not known at compile time
+        "#],
+    );
+}
+
+#[test]
 fn test_if_two_branches_type_mismatch() {
     assert_diagnostics(
         "
@@ -1435,9 +1455,15 @@ fn test_comptime_call_arg_count_mismatch() {
 #[test]
 fn test_cross_file_type_mismatch() {
     assert_project_diagnostics(
-        TestProject::single("import m::other::f;\nconst y = f(true);\ninit { evm_stop(); }")
-            .add_file("other", "const f = fn(x: u256) u256 { return x; };")
-            .add_module("m", ""),
+        TestProject::root(
+            "
+            import m::other::f;
+            const y = f(true);
+            init { evm_stop(); }
+            ",
+        )
+        .add_file("other", "const f = fn(x: u256) u256 { return x; };")
+        .add_module("m", ""),
         &[r#"
         error: mismatched types
          --> main.plk:2:13
