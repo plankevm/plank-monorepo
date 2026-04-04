@@ -1,0 +1,257 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PLANK_DIR="${PLANK_DIR:-$HOME/.plank}"
+PLANK_BIN_DIR="$PLANK_DIR/bin"
+PLANK_VERSIONS_DIR="$PLANK_DIR/versions"
+
+REPO="plankevm/plank-monorepo"
+GITHUB_API="https://api.github.com/repos/$REPO/releases"
+GITHUB_DOWNLOAD="https://github.com/$REPO/releases/download"
+
+say() { printf "plankup: %s\n" "$1"; }
+warn() { say "warning: $1" >&2; }
+err() { say "error: $1" >&2; exit 1; }
+
+need_cmd() {
+    if ! command -v "$1" > /dev/null 2>&1; then
+        err "need '$1' (command not found)"
+    fi
+}
+
+download() {
+    local url="$1"
+    local output="$2"
+    curl -sSfL "$url" -o "$output" || err "failed to download $url"
+}
+
+detect_platform() {
+    local uname_s
+    uname_s=$(uname -s)
+    case "$uname_s" in
+        Linux*)  PLATFORM="linux" ;;
+        Darwin*) PLATFORM="darwin" ;;
+        *)       err "unsupported platform: $uname_s" ;;
+    esac
+}
+
+detect_arch() {
+    local uname_m
+    uname_m=$(uname -m)
+    case "$uname_m" in
+        x86_64)
+            # Check for Rosetta translation on macOS
+            if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+                ARCH="arm64"
+            else
+                ARCH="amd64"
+            fi
+            ;;
+        arm64|aarch64)
+            ARCH="arm64"
+            ;;
+        *)
+            err "unsupported architecture: $uname_m"
+            ;;
+    esac
+}
+
+compute_sha256() {
+    local file="$1"
+    if command -v sha256sum > /dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    elif command -v shasum > /dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    else
+        return 1
+    fi
+}
+
+verify_checksum() {
+    local file="$1"
+    local checksums_file="$2"
+    local filename
+    filename=$(basename "$file")
+
+    local expected
+    expected=$(grep "$filename" "$checksums_file" | awk '{print $1}')
+    if [ -z "$expected" ]; then
+        err "no checksum found for $filename in checksums.txt"
+    fi
+
+    local actual
+    if ! actual=$(compute_sha256 "$file"); then
+        warn "could not verify checksum — neither 'sha256sum' nor 'shasum' found"
+        printf "continue without verification? [y/N] "
+        read -r answer
+        if [ "$answer" != "y" ] && [ "$answer" != "Y" ]; then
+            err "aborted"
+        fi
+        return
+    fi
+
+    if [ "$actual" != "$expected" ]; then
+        err "checksum mismatch for $filename\n  expected: $expected\n  actual:   $actual"
+    fi
+
+    say "checksum verified for $filename"
+}
+
+cmd_list() {
+    if [ ! -d "$PLANK_VERSIONS_DIR" ]; then
+        say "no versions installed"
+        return
+    fi
+
+    local active_version=""
+    if [ -L "$PLANK_BIN_DIR/plank" ]; then
+        local link_target
+        link_target=$(readlink "$PLANK_BIN_DIR/plank")
+        # Extract version from path like ../versions/v0.1.0/plank
+        active_version=$(echo "$link_target" | sed 's|.*/versions/\([^/]*\)/.*|\1|')
+    fi
+
+    say "installed versions:"
+    for version_dir in "$PLANK_VERSIONS_DIR"/*/; do
+        [ -d "$version_dir" ] || continue
+        local version
+        version=$(basename "$version_dir")
+        if [ "$version" = "$active_version" ]; then
+            printf "  %s (active)\n" "$version"
+        else
+            printf "  %s\n" "$version"
+        fi
+    done
+}
+
+usage() {
+    cat <<EOF
+plankup — the Plank compiler installer and updater
+
+USAGE:
+    plankup [OPTIONS]
+    plankup <COMMAND>
+
+OPTIONS:
+    --version <TAG>    Install a specific version (e.g., v0.1.0)
+    -h, --help         Print help
+
+COMMANDS:
+    list               List installed versions
+EOF
+}
+
+resolve_latest_version() {
+    need_cmd curl
+
+    local response
+    response=$(curl -sSfL "$GITHUB_API/latest" 2>/dev/null) \
+        || err "failed to fetch latest release from GitHub API. Check your internet connection."
+
+    LATEST_TAG=$(echo "$response" | grep '"tag_name"' | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
+    if [ -z "$LATEST_TAG" ]; then
+        err "could not determine latest release tag"
+    fi
+}
+
+update_symlink() {
+    local version="$1"
+    mkdir -p "$PLANK_BIN_DIR"
+    rm -f "$PLANK_BIN_DIR/plank"
+    ln -s "../versions/$version/plank" "$PLANK_BIN_DIR/plank"
+    say "plank $version is now active"
+    say "run 'plank --help' to get started"
+}
+
+cmd_install() {
+    local version="$1"
+
+    need_cmd curl
+    need_cmd tar
+    need_cmd mkdir
+
+    detect_platform
+    detect_arch
+
+    # Resolve version
+    if [ -z "$version" ]; then
+        say "fetching latest release..."
+        resolve_latest_version
+        version="$LATEST_TAG"
+    fi
+
+    say "installing plank $version ($PLATFORM/$ARCH)..."
+
+    # Check if already installed
+    if [ -d "$PLANK_VERSIONS_DIR/$version" ] && [ -x "$PLANK_VERSIONS_DIR/$version/plank" ]; then
+        say "plank $version is already installed"
+        update_symlink "$version"
+        return
+    fi
+
+    # Set up temp directory for download
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    trap 'rm -rf "$tmpdir"' EXIT
+
+    local asset_name="plank-${version}-${PLATFORM}-${ARCH}.tar.gz"
+    local download_url="$GITHUB_DOWNLOAD/$version/$asset_name"
+    local checksums_url="$GITHUB_DOWNLOAD/$version/checksums.txt"
+
+    # Download checksums and tarball
+    say "downloading checksums..."
+    download "$checksums_url" "$tmpdir/checksums.txt"
+
+    say "downloading $asset_name..."
+    download "$download_url" "$tmpdir/$asset_name"
+
+    # Verify checksum
+    verify_checksum "$tmpdir/$asset_name" "$tmpdir/checksums.txt"
+
+    # Extract
+    mkdir -p "$PLANK_VERSIONS_DIR/$version"
+    tar -xzf "$tmpdir/$asset_name" -C "$PLANK_VERSIONS_DIR/$version"
+
+    # Verify the binary exists after extraction
+    if [ ! -f "$PLANK_VERSIONS_DIR/$version/plank" ]; then
+        rm -rf "$PLANK_VERSIONS_DIR/$version"
+        err "extracted archive does not contain 'plank' binary"
+    fi
+
+    chmod +x "$PLANK_VERSIONS_DIR/$version/plank"
+
+    # Update symlink
+    update_symlink "$version"
+}
+
+main() {
+    local version=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            list)
+                cmd_list
+                return
+                ;;
+            --version)
+                shift
+                if [ $# -eq 0 ]; then
+                    err "--version requires a value"
+                fi
+                version="$1"
+                ;;
+            -h|--help)
+                usage
+                return
+                ;;
+            *)
+                err "unknown argument: $1"
+                ;;
+        esac
+        shift
+    done
+
+    cmd_install "$version"
+}
+
+main "$@"
