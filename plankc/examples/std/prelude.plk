@@ -1,0 +1,9 @@
+const return_runtime = fn () never {
+    let buf = malloc_uninit(runtime_length());
+    codecopy(buf, runtime_start_offset(), runtime_length());
+    evm_return(buf, runtime_length());
+};
+
+const revert_empty = fn () never {
+    revert(malloc_uninit(0), 0);
+};
