@@ -1,5 +1,4 @@
 pub mod ast;
-pub mod const_print;
 pub mod cst;
 pub mod lexer;
 pub mod parser;

@@ -1,8 +1,11 @@
 pub mod display;
 
-use plank_core::{Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{
+    Idx, IndexVec, Span, const_print::const_assert_mem_size, list_of_lists::ListOfLists,
+    newtype_index,
+};
 use plank_session::EvmBuiltin;
-use plank_values::{BigNumId, TypeId, TypeInterner};
+use plank_values::{TypeId, TypeInterner, ValueId};
 
 newtype_index! {
     pub struct FnId;
@@ -13,16 +16,16 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub enum Expr {
-    Error,
     LocalRef(LocalId),
-    Bool(bool),
-    Void,
-    BigNum(BigNumId),
+    Const(ValueId),
     Call { callee: FnId, args: ArgsId },
     BuiltinCall { builtin: EvmBuiltin, args: ArgsId },
     FieldAccess { object: LocalId, field_index: u32 },
     StructLit { ty: TypeId, fields: ArgsId },
 }
+
+const _EXPR_SIZE: () = const_assert_mem_size::<Expr>(12);
+const _INSTR_SIZE: () = const_assert_mem_size::<Instruction>(16);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Instruction {

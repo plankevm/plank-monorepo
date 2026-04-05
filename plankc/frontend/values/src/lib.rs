@@ -1,5 +1,6 @@
 mod bignum_interner;
 mod type_interner;
+mod value_interner;
 
 use plank_core::newtype_index;
 
@@ -14,6 +15,16 @@ impl ValueId {
     pub const ERROR: Self = ValueId::new(3);
 }
 
-pub use bignum_interner::{BigNumId, BigNumInterner};
+impl From<bool> for ValueId {
+    fn from(value: bool) -> Self {
+        match value {
+            false => Self::FALSE,
+            true => Self::TRUE,
+        }
+    }
+}
+
+pub use alloy_primitives::{U256, uint};
 pub use plank_session::TypeId;
 pub use type_interner::{StructInfo, Type, TypeInterner};
+pub use value_interner::*;

@@ -1,15 +1,15 @@
 use plank_session::Session;
 use plank_test_utils::TestProject;
-use plank_values::BigNumInterner;
+use plank_values::ValueInterner;
 
 fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
     let mut session = Session::new();
-    let project = TestProject::single(source).build(&mut session);
+    let project = TestProject::root(source).build(&mut session);
 
-    let mut big_nums = BigNumInterner::default();
-    let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir = plank_hir_eval::evaluate(&hir, &mut big_nums, &mut session);
-    let sir = crate::lower(&mir, &big_nums);
+    let mut values = ValueInterner::new();
+    let hir = plank_hir::lower(&project, &mut values, &mut session);
+    let mir = plank_hir_eval::evaluate(&hir, &mut values, &mut session);
+    let sir = crate::lower(&mir, &values);
     (sir, session)
 }
 

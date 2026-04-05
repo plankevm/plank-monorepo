@@ -5,7 +5,7 @@ mod tests;
 
 use plank_core::{DenseIndexMap, DenseIndexSet, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
-use plank_values::{BigNumInterner, Type, TypeId};
+use plank_values::{Type, TypeId, Value, ValueId, ValueInterner};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},
@@ -55,9 +55,8 @@ impl LocalMap {
     }
 }
 
-struct LowerCtx<'mir> {
-    mir: &'mir Mir,
-    big_nums: &'mir BigNumInterner,
+struct LowerCtx<'a> {
+    mir: &'a Mir,
 
     mir_to_sir_functions: DenseIndexMap<mir::FnId, sir::FunctionId>,
     entered_functions: DenseIndexSet<mir::FnId>,
@@ -71,9 +70,9 @@ impl LowerCtx<'_> {
         match self.mir.types.lookup(ty) {
             Type::Void | Type::Never => 0,
             Type::Bool | Type::Int | Type::MemoryPointer => 1,
-            Type::Error => panic!("error untransformable in MIR"),
-            Type::Function => panic!("function unsizeable in SIR"),
-            Type::Type => panic!("type unsizeable in SIR"),
+            Type::Error => unreachable!("error untransformable in MIR"),
+            Type::Function => unreachable!("function unsizeable in SIR"),
+            Type::Type => unreachable!("type unsizeable in SIR"),
             Type::Struct(r#struct) => {
                 r#struct.field_types.iter().map(|&ty| self.size_in_locals(ty)).sum()
             }
@@ -81,12 +80,11 @@ impl LowerCtx<'_> {
     }
 }
 
-pub fn lower(mir: &Mir, big_nums: &BigNumInterner) -> EthIRProgram {
+pub fn lower(mir: &Mir, values: &ValueInterner) -> EthIRProgram {
     let mut builder = EthIRBuilder::new();
 
     let mut ctx = LowerCtx {
         mir,
-        big_nums,
 
         mir_to_sir_functions: DenseIndexMap::with_capacity(mir.fns.len()),
         entered_functions: DenseIndexSet::with_capacity_in_bits(mir.fns.len()),
@@ -95,14 +93,15 @@ pub fn lower(mir: &Mir, big_nums: &BigNumInterner) -> EthIRProgram {
         locals_buf: Vec::new(),
     };
 
-    let init = lower_function(&mut ctx, &mut builder, mir.init);
-    let run = mir.run.as_ref().map(|&run| lower_function(&mut ctx, &mut builder, run));
+    let init = lower_function(&mut ctx, values, &mut builder, mir.init);
+    let run = mir.run.as_ref().map(|&run| lower_function(&mut ctx, values, &mut builder, run));
 
     builder.build(init, run)
 }
 
 fn lower_function(
     ctx: &mut LowerCtx<'_>,
+    values: &ValueInterner,
     builder: &mut EthIRBuilder,
     mir_func: mir::FnId,
 ) -> sir::FunctionId {
@@ -114,7 +113,7 @@ fn lower_function(
         todo!("diagnostic: cyclic call graph");
     }
     let fn_def = ctx.mir.fns[mir_func];
-    ensure_block_func_deps_lowered(ctx, builder, fn_def.body);
+    ensure_block_func_deps_lowered(ctx, values, builder, fn_def.body);
     ctx.entered_functions.remove(mir_func);
 
     let mut new_func = builder.begin_function();
@@ -127,7 +126,7 @@ fn lower_function(
     }
 
     let CFGSegment { bb_in: entry_bb_id, .. } =
-        lower_basic_block(ctx, &mut new_func, mir_func, ctx.mir.fns[mir_func].body, true);
+        lower_basic_block(ctx, values, &mut new_func, mir_func, ctx.mir.fns[mir_func].body, true);
     let fn_id = new_func.finish(entry_bb_id);
     ctx.mir_to_sir_functions.insert(mir_func, fn_id);
     fn_id
@@ -141,6 +140,7 @@ struct CFGSegment {
 
 fn lower_basic_block(
     ctx: &mut LowerCtx<'_>,
+    values: &ValueInterner,
     fn_builder: &mut FunctionBuilder<'_>,
     mir_func: mir::FnId,
     block: mir::BlockId,
@@ -161,21 +161,42 @@ fn lower_basic_block(
     for &instr in &ctx.mir.blocks[block] {
         match instr {
             Instruction::Set { target, expr } => match expr {
-                Expr::Error => panic!("attempting to lower MIR with error"),
-                Expr::Void => {}
-                Expr::Bool(b) => {
-                    let value = if b { 1u32 } else { 0u32 };
-                    let sets =
-                        ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
-                    current_bb
-                        .add_operation(Operation::SetSmallConst(SetSmallConstData { sets, value }));
-                }
-                Expr::BigNum(id) => {
-                    let sets =
-                        ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
-                    let value = ctx.big_nums.lookup(id);
-                    current_bb.add_set_const_op(sets, value);
-                }
+                Expr::Const(vid) => match values.lookup(vid) {
+                    Value::Void => {}
+                    Value::Bool(b) => {
+                        let value = if b { 1u32 } else { 0u32 };
+                        let sets =
+                            ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
+                        current_bb.add_operation(Operation::SetSmallConst(SetSmallConstData {
+                            sets,
+                            value,
+                        }));
+                    }
+                    Value::BigNum(x) => {
+                        let sets =
+                            ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
+                        current_bb.add_set_const_op(sets, x);
+                    }
+                    Value::Error => unreachable!("attempting to lower MIR with error"),
+                    Value::StructVal { fields, ty } => {
+                        let size = ctx.size_in_locals(ty);
+                        ctx.locals_map.ensure_many(
+                            target,
+                            || current_bb.new_local(),
+                            size as usize,
+                        );
+                        let mut locals = ctx.locals_map.get(target).iter().copied();
+                        materialize_constant_struct_literal(
+                            values,
+                            &mut current_bb,
+                            &mut locals,
+                            fields,
+                        )
+                    }
+                    Value::Type(_) | Value::Closure { .. } => {
+                        unreachable!("comptime-only value in MIR")
+                    }
+                },
                 Expr::LocalRef(mir_src) => {
                     let ty = ctx.mir.fn_locals[mir_func][mir_src.idx()];
                     if ctx.size_in_locals(ty) == 0 {
@@ -274,8 +295,9 @@ fn lower_basic_block(
                 let last_end_id = current_bb.finish_with_placeholder_control();
 
                 bb_in = bb_in.or(Some(last_end_id));
-                let then = lower_basic_block(ctx, fn_builder, mir_func, then_block, false);
-                let r#else = lower_basic_block(ctx, fn_builder, mir_func, else_block, false);
+                let then = lower_basic_block(ctx, values, fn_builder, mir_func, then_block, false);
+                let r#else =
+                    lower_basic_block(ctx, values, fn_builder, mir_func, else_block, false);
 
                 let mut continue_bb = fn_builder.begin_basic_block();
                 continue_bb
@@ -308,7 +330,7 @@ fn lower_basic_block(
                 bb_in = bb_in.or(Some(loop_entry_id));
 
                 let condition_segment =
-                    lower_basic_block(ctx, fn_builder, mir_func, condition_block, false);
+                    lower_basic_block(ctx, values, fn_builder, mir_func, condition_block, false);
                 let &[condition] = ctx.locals_map.get(condition) else {
                     unreachable!("invalid mir")
                 };
@@ -316,7 +338,7 @@ fn lower_basic_block(
                 fn_builder
                     .set_control(loop_entry_id, Control::ContinuesTo(condition_segment.bb_in))
                     .unwrap();
-                let body = lower_basic_block(ctx, fn_builder, mir_func, body, false);
+                let body = lower_basic_block(ctx, values, fn_builder, mir_func, body, false);
                 if body.end_loose {
                     fn_builder
                         .set_control(body.bb_out, Control::ContinuesTo(condition_segment.bb_in))
@@ -355,6 +377,37 @@ fn lower_basic_block(
     CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: true }
 }
 
+fn materialize_constant_struct_literal(
+    values: &ValueInterner,
+    bb: &mut BasicBlockBuilder<'_, '_>,
+    targets: &mut impl Iterator<Item = sir::LocalId>,
+    fields: &[ValueId],
+) {
+    for &field in fields {
+        match values.lookup(field) {
+            Value::Void => {}
+            Value::Bool(b) => {
+                let value = match b {
+                    true => 1,
+                    false => 0,
+                };
+                let sets = targets.next().expect("target count, size mismatch");
+                bb.add_operation(Operation::SetSmallConst(SetSmallConstData { sets, value }));
+            }
+            Value::BigNum(x) => {
+                let sets = targets.next().expect("target count, size mismatch");
+                bb.add_set_const_op(sets, x);
+            }
+            Value::StructVal { ty: _, fields } => {
+                materialize_constant_struct_literal(values, bb, targets, fields);
+            }
+            Value::Error | Value::Type(_) | Value::Closure { .. } => {
+                unreachable!("MIR: setting error / comptime-only value")
+            }
+        }
+    }
+}
+
 fn lower_struct_literal(
     ctx: &mut LowerCtx<'_>,
     bb: &mut BasicBlockBuilder<'_, '_>,
@@ -386,7 +439,7 @@ fn lower_field_access(
 ) {
     let object_type = ctx.mir.fn_locals[mir_func][object.idx()];
     let Type::Struct(r#struct) = ctx.mir.types.lookup(object_type) else {
-        unreachable!("invalid mir");
+        unreachable!("MIR invariant: field access on non-struct");
     };
     let field_type = r#struct.field_types[field_index as usize];
     let size = ctx.size_in_locals(field_type);
@@ -411,22 +464,23 @@ fn lower_field_access(
 
 fn ensure_block_func_deps_lowered(
     ctx: &mut LowerCtx<'_>,
+    values: &ValueInterner,
     builder: &mut EthIRBuilder,
     block: mir::BlockId,
 ) {
     for &instr in &ctx.mir.blocks[block] {
         match instr {
             Instruction::Set { target: _, expr } => {
-                ensure_expr_func_deps_lowered(ctx, builder, expr);
+                ensure_expr_func_deps_lowered(ctx, values, builder, expr);
             }
             Instruction::Return(_) => {}
             Instruction::If { condition: _, then_block, else_block } => {
-                ensure_block_func_deps_lowered(ctx, builder, then_block);
-                ensure_block_func_deps_lowered(ctx, builder, else_block);
+                ensure_block_func_deps_lowered(ctx, values, builder, then_block);
+                ensure_block_func_deps_lowered(ctx, values, builder, else_block);
             }
             Instruction::While { condition_block, condition: _, body } => {
-                ensure_block_func_deps_lowered(ctx, builder, condition_block);
-                ensure_block_func_deps_lowered(ctx, builder, body);
+                ensure_block_func_deps_lowered(ctx, values, builder, condition_block);
+                ensure_block_func_deps_lowered(ctx, values, builder, body);
             }
         }
     }
@@ -434,10 +488,11 @@ fn ensure_block_func_deps_lowered(
 
 fn ensure_expr_func_deps_lowered(
     ctx: &mut LowerCtx<'_>,
+    values: &ValueInterner,
     builder: &mut EthIRBuilder,
     expr: mir::Expr,
 ) {
     if let Expr::Call { callee, args: _ } = expr {
-        lower_function(ctx, builder, callee);
+        lower_function(ctx, values, builder, callee);
     }
 }

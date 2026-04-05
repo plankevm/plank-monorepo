@@ -1,17 +1,18 @@
-use crate::{BigNumInterner, Hir, display::DisplayHir};
+use crate::{Hir, display::DisplayHir};
 use plank_session::Session;
 use plank_source::ParsedProject;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
+use plank_values::ValueInterner;
 
-fn try_lower(source: &str) -> (Hir, BigNumInterner, Session, ParsedProject) {
-    try_lower_project(TestProject::single(source))
+fn try_lower(source: &str) -> (Hir, ValueInterner, Session, ParsedProject) {
+    try_lower_project(TestProject::root(source))
 }
 
-fn try_lower_project(project: TestProject) -> (Hir, BigNumInterner, Session, ParsedProject) {
+fn try_lower_project(project: TestProject) -> (Hir, ValueInterner, Session, ParsedProject) {
     let mut session = Session::new();
     let project = project.build(&mut session);
 
-    let mut big_nums = BigNumInterner::default();
+    let mut big_nums = ValueInterner::new();
     let hir = crate::lower(&project, &mut big_nums, &mut session);
 
     (hir, big_nums, session, project)
@@ -32,7 +33,7 @@ fn assert_lowers_to(source: &str, expected: &str) {
 }
 
 fn render_diagnostics(source: &str) -> String {
-    render_project_diagnostics(TestProject::single(source))
+    render_project_diagnostics(TestProject::root(source))
 }
 
 fn format_session_diagnostics(session: &Session) -> String {
@@ -252,7 +253,7 @@ fn test_assign_to_mutable_let() {
         ==== Constants ====
 
         ==== Init ====
-        %0 = 1
+        %0 [mut]= 1
         %0 := 2
         "#,
     );
@@ -343,7 +344,7 @@ fn test_duplicate_const_def() {
 
 #[test]
 fn test_init_and_run_outside_entry() {
-    let project = TestProject::single("import m::other::*;\ninit {}")
+    let project = TestProject::root("import m::other::*;\ninit {}")
         .add_file(
             "other",
             "
@@ -378,7 +379,7 @@ fn test_init_and_run_outside_entry() {
 
 #[test]
 fn test_import_name_collision() {
-    let project = TestProject::single("const x = 1;\nimport m::other::x;\ninit {}")
+    let project = TestProject::root("const x = 1;\nimport m::other::x;\ninit {}")
         .add_file("other", "const x = 2;")
         .add_module("m", "");
     let rendered = render_project_diagnostics(project);
@@ -398,7 +399,7 @@ fn test_import_name_collision() {
 
 #[test]
 fn test_glob_import_name_collision() {
-    let project = TestProject::single(
+    let project = TestProject::root(
         r#"
         const x = 1;
         import m::other::*;
@@ -429,7 +430,7 @@ fn test_glob_import_name_collision() {
 
 #[test]
 fn test_alias_import_collision() {
-    let project = TestProject::single("const x = 1;\nimport m::other::y as x;\ninit {}")
+    let project = TestProject::root("const x = 1;\nimport m::other::y as x;\ninit {}")
         .add_file("other", "const y = 2;")
         .add_module("m", "");
     let rendered = render_project_diagnostics(project);
@@ -449,7 +450,7 @@ fn test_alias_import_collision() {
 
 #[test]
 fn test_import_collision_with_previous_import() {
-    let project = TestProject::single("import m::a::x;\nimport m::b::x;\ninit {}")
+    let project = TestProject::root("import m::a::x;\nimport m::b::x;\ninit {}")
         .add_file("a", "const x = 1;")
         .add_file("b", "const x = 2;")
         .add_module("m", "");
@@ -470,7 +471,7 @@ fn test_import_collision_with_previous_import() {
 
 #[test]
 fn test_unresolved_import() {
-    let project = TestProject::single("import m::other::y;\ninit {}")
+    let project = TestProject::root("import m::other::y;\ninit {}")
         .add_file("other", "const x = 1;")
         .add_module("m", "");
     let rendered = render_project_diagnostics(project);

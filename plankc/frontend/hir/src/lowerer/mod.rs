@@ -9,7 +9,7 @@ use plank_parser::{
 };
 use plank_session::{EvmBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
-use plank_values::BigNumInterner;
+use plank_values::ValueInterner;
 
 use crate::operators as hir_ops;
 
@@ -66,7 +66,7 @@ struct BlockLowerer<'a> {
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
     session: RefCell<&'a mut Session>,
 
-    big_nums: &'a mut BigNumInterner,
+    values: &'a mut ValueInterner,
     builder: &'a mut HirBuilder,
     scoped_locals_stack: Vec<ScopedLocal>,
     fn_scope_start: usize,
@@ -197,14 +197,13 @@ impl BlockLowerer<'_> {
     }
 
     fn expr(&self, kind: ExprKind, span: TokenSpan) -> Expr {
-        Expr { source_id: self.source_id, kind, span: self.lexed.tokens_src_span(span) }
+        Expr { kind, span: self.lexed.tokens_src_span(span) }
     }
 
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
-        let span = expr.span();
         let expr = self.lower_expr(expr);
         let local = self.alloc_temp();
-        self.emit(span, InstructionKind::Set { local, r#type: None, expr });
+        self.emit(InstructionKind::Set { local, r#type: None, expr });
         local
     }
 
@@ -226,9 +225,8 @@ impl BlockLowerer<'_> {
                 this.lower_statement(stmt);
             }
             if let Some(e) = block.end_expr() {
-                let span = e.span();
                 let value = this.lower_expr(e);
-                this.emit(span, InstructionKind::Eval(value));
+                this.emit(InstructionKind::Eval(value));
             }
         })
     }
@@ -238,17 +236,14 @@ impl BlockLowerer<'_> {
             for stmt in block.statements() {
                 this.lower_statement(stmt);
             }
-            let (span, expr) = match block.end_expr() {
-                Some(e) => {
-                    let span = e.span();
-                    (span, this.lower_expr(e))
-                }
+            let expr = match block.end_expr() {
+                Some(e) => this.lower_expr(e),
                 None => {
                     let span = block.node().span();
-                    (span, this.expr(ExprKind::Void, span))
+                    this.expr(ExprKind::VOID, span)
                 }
             };
-            this.emit(span, InstructionKind::BranchSet { local: result, expr });
+            this.emit(InstructionKind::BranchSet { local: result, expr });
         })
     }
 
@@ -257,17 +252,14 @@ impl BlockLowerer<'_> {
             for stmt in block.statements() {
                 this.lower_statement(stmt);
             }
-            let (span, value) = match block.end_expr() {
-                Some(e) => {
-                    let span = e.span();
-                    (span, this.lower_expr(e))
-                }
+            let value = match block.end_expr() {
+                Some(e) => this.lower_expr(e),
                 None => {
                     let span = block.node().span();
-                    (span, this.expr(ExprKind::Void, span))
+                    this.expr(ExprKind::VOID, span)
                 }
             };
-            this.emit(span, InstructionKind::Return(value));
+            this.emit(InstructionKind::Return(value));
         })
     }
 
@@ -295,9 +287,8 @@ impl BlockLowerer<'_> {
         Some(inner_local)
     }
 
-    fn emit(&mut self, span: TokenSpan, kind: InstructionKind) {
-        let span = self.lexed.tokens_src_span(span);
-        self.instructions_buf.push(Instruction { loc: SrcLoc::new(self.source_id, span), kind });
+    fn emit(&mut self, kind: InstructionKind) {
+        self.instructions_buf.push(Instruction { kind });
     }
 
     fn flush_instructions_from(&mut self, start: usize) -> BlockId {
@@ -306,12 +297,12 @@ impl BlockLowerer<'_> {
 
     fn resolve_name(&mut self, name: StrId, span: TokenSpan) -> ExprKind {
         if let Some(ty) = TypeId::resolve_primitive(name) {
-            return ExprKind::Type(ty);
+            return ExprKind::Value(self.values.intern_type(ty));
         }
 
         if EvmBuiltin::from_str_id(name).is_some() {
             self.error_non_call_reference_to_builtin(name, span);
-            return ExprKind::Error;
+            return ExprKind::ERROR;
         }
 
         if let Some(entry) = self.find_local(name) {
@@ -327,26 +318,22 @@ impl BlockLowerer<'_> {
         }
 
         self.error_unresolved_identifier(name, span);
-        ExprKind::Error
+        ExprKind::ERROR
     }
 
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
-            ast::Expr::Error { .. } => ExprKind::Error,
-
+            ast::Expr::Error { .. } => ExprKind::Value(ValueId::ERROR),
             ast::Expr::Ident { name, span } => self.resolve_name(name, span),
-            ast::Expr::BoolLiteral { value, .. } => ExprKind::Bool(value),
+            ast::Expr::BoolLiteral { value, .. } => ExprKind::Value(value.into()),
             ast::Expr::NumLiteral { id, span } => {
                 let limbs = &self.num_lit_limbs[id];
                 match plank_core::bigint::limbs_to_u256(limbs) {
-                    Some(value) => {
-                        let big_num_id = self.big_nums.intern(value);
-                        ExprKind::BigNum(big_num_id)
-                    }
+                    Some(value) => ExprKind::Value(self.values.intern_num(value)),
                     None => {
                         self.error_number_out_of_range(span);
-                        ExprKind::Error
+                        ExprKind::ERROR
                     }
                 }
             }
@@ -398,8 +385,8 @@ impl BlockLowerer<'_> {
                     .map(|expr| self.lower_expr_to_local(expr))
                     .unwrap_or_else(|| {
                         let local = self.alloc_temp();
-                        let expr = self.expr(ExprKind::Void, struct_def.node().span());
-                        self.emit(span, InstructionKind::Set { local, r#type: None, expr });
+                        let expr = self.expr(ExprKind::VOID, struct_def.node().span());
+                        self.emit(InstructionKind::Set { local, r#type: None, expr });
                         local
                     });
                 let buf_start = self.field_buf.len();
@@ -428,10 +415,7 @@ impl BlockLowerer<'_> {
                     if_expr.else_if_branches(),
                     if_expr.else_body().ok_or_else(|| if_expr.body().node().span()),
                 );
-                self.emit(
-                    if_expr.node().span(),
-                    InstructionKind::If { condition, then_block, else_block },
-                );
+                self.emit(InstructionKind::If { condition, then_block, else_block });
                 ExprKind::LocalRef(result)
             }
             ast::Expr::ComptimeBlock(block) => {
@@ -440,20 +424,17 @@ impl BlockLowerer<'_> {
                     for stmt in block.statements() {
                         this.lower_statement(stmt);
                     }
-                    let (span, expr) = match block.end_expr() {
-                        Some(e) => {
-                            let span = e.span();
-                            (span, this.lower_expr(e))
-                        }
+                    let expr = match block.end_expr() {
+                        Some(e) => this.lower_expr(e),
                         None => {
                             let span = block.node().span();
-                            (span, this.expr(ExprKind::Void, span))
+                            this.expr(ExprKind::VOID, span)
                         }
                     };
-                    this.emit(span, InstructionKind::Set { local: result, r#type: None, expr });
+                    this.emit(InstructionKind::Set { local: result, r#type: None, expr });
                 });
 
-                self.emit(block.node().span(), InstructionKind::ComptimeBlock { body });
+                self.emit(InstructionKind::ComptimeBlock { body });
                 ExprKind::LocalRef(result)
             }
             ast::Expr::Binary(binary) => 'binary: {
@@ -592,7 +573,7 @@ impl BlockLowerer<'_> {
 
             match block.end_expr() {
                 Some(expr) => this.lower_expr(expr),
-                None => this.expr(ExprKind::Void, block.node().span()),
+                None => this.expr(ExprKind::VOID, block.node().span()),
             }
         })
     }
@@ -606,19 +587,18 @@ impl BlockLowerer<'_> {
         while let Some(next) = branches.next() {
             let Ok(first) = next else { continue };
             return self.create_sub_block(|this| {
-                let span = first.node().span();
                 let condition = this.lower_expr_to_local(first.condition());
                 let then_block = this.lower_branch_body(first.body(), result);
                 let else_body = else_body.map_err(|_| first.body().node().span());
                 let else_block = this.lower_else_chain(result, branches, else_body);
-                this.emit(span, InstructionKind::If { condition, then_block, else_block });
+                this.emit(InstructionKind::If { condition, then_block, else_block });
             });
         }
         match else_body {
             Ok(body) => self.lower_branch_body(body, result),
             Err(empty_else_span) => self.create_sub_block(|this| {
-                let expr = this.expr(ExprKind::Void, empty_else_span);
-                this.emit(empty_else_span, InstructionKind::BranchSet { local: result, expr });
+                let expr = this.expr(ExprKind::VOID, empty_else_span);
+                this.emit(InstructionKind::BranchSet { local: result, expr });
             }),
         }
     }
@@ -636,9 +616,8 @@ impl BlockLowerer<'_> {
 
         // Creates `{ <rhs> }` block.
         let eval_op_rhs_block = self.create_sub_block(|this| {
-            let rhs_span = binary.rhs().span();
             let expr = this.lower_expr(binary.rhs());
-            this.emit(rhs_span, InstructionKind::BranchSet { local: op_result_local, expr });
+            this.emit(InstructionKind::BranchSet { local: op_result_local, expr });
         });
 
         // Creates `{ false }` / `{ true }` block.
@@ -648,8 +627,8 @@ impl BlockLowerer<'_> {
                 ShortCircuitOp::And => false,
                 ShortCircuitOp::Or => true,
             };
-            let expr = this.expr(ExprKind::Bool(short_circuit_value), span);
-            this.emit(span, InstructionKind::BranchSet { local: op_result_local, expr });
+            let expr = this.expr(ExprKind::Value(short_circuit_value.into()), span);
+            this.emit(InstructionKind::BranchSet { local: op_result_local, expr });
         });
 
         let (then_block, else_block) = match op {
@@ -657,7 +636,7 @@ impl BlockLowerer<'_> {
             ShortCircuitOp::And => (eval_op_rhs_block, short_circuit_block),
         };
         let r#if = InstructionKind::If { condition: op_lhs_as_condition, then_block, else_block };
-        self.emit(span, r#if);
+        self.emit(r#if);
         ExprKind::LocalRef(op_result_local)
     }
 
@@ -669,20 +648,21 @@ impl BlockLowerer<'_> {
                 let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
-                self.emit(let_stmt.value().span(), InstructionKind::Set { local, r#type, expr });
+                self.emit(if let_stmt.mutable {
+                    InstructionKind::SetMut { local, r#type, expr }
+                } else {
+                    InstructionKind::Set { local, r#type, expr }
+                });
             }
             Statement::Expr(expr) => {
-                let span = expr.span();
                 let value = self.lower_expr(expr);
-                self.emit(span, InstructionKind::Eval(value));
+                self.emit(InstructionKind::Eval(value));
             }
             Statement::Return(return_stmt) => {
-                let span = return_stmt.node().span();
                 let value = self.lower_expr(return_stmt.value());
-                self.emit(span, InstructionKind::Return(value));
+                self.emit(InstructionKind::Return(value));
             }
             Statement::Assign(assign_stmt) => {
-                let stmt_span = assign_stmt.node().span();
                 let ast::Expr::Ident { name, span } = assign_stmt.target() else {
                     panic!("complex assignment targets not yet supported")
                 };
@@ -700,7 +680,7 @@ impl BlockLowerer<'_> {
                 }
                 let target = entry.id;
                 let value = self.lower_expr(assign_stmt.value());
-                self.emit(stmt_span, InstructionKind::Assign { target, value });
+                self.emit(InstructionKind::Assign { target, expr: value });
             }
             Statement::While(while_stmt) => {
                 let span = while_stmt.node().span();
@@ -711,14 +691,14 @@ impl BlockLowerer<'_> {
                 let (condition_block, condition) = self
                     .create_sub_block_with(|this| this.lower_expr_to_local(while_stmt.condition()));
                 let body = self.lower_body_to_block(while_stmt.body());
-                self.emit(span, InstructionKind::While { condition_block, condition, body });
+                self.emit(InstructionKind::While { condition_block, condition, body });
             }
             Statement::Error { .. } => {}
         }
     }
 }
 
-pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &mut Session) -> Hir {
+pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
 
     let mut builder = HirBuilder::new();
@@ -730,7 +710,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
         num_lit_limbs: &project.parsed_sources[SourceId::ROOT].cst.num_lit_limbs,
         session: RefCell::new(session),
 
-        big_nums,
+        values,
         builder: &mut builder,
         scoped_locals_stack: Vec::new(),
         fn_scope_start: 0,
@@ -765,10 +745,7 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
                         let r#type =
                             const_def.r#type.map(|type_expr| this.lower_expr_to_local(type_expr));
                         let expr = this.lower_expr(const_def.assign);
-                        this.emit(
-                            const_def.span(),
-                            InstructionKind::Set { local: hir_def.result, r#type, expr },
-                        );
+                        this.emit(InstructionKind::Set { local: hir_def.result, r#type, expr });
                     });
                 }
                 TopLevelDef::Init(init_def) => {
@@ -806,16 +783,20 @@ pub fn lower(project: &ParsedProject, big_nums: &mut BigNumInterner, session: &m
     };
 
     Hir {
+        entry_source: SourceId::ROOT,
+        init,
+        run: run.map(|(id, _)| id),
+
         blocks: builder.blocks,
+        consts,
+
         call_args: builder.call_args,
         fields: builder.fields,
-        consts,
+        struct_defs: builder.struct_defs,
+
         fns: builder.fns,
         fn_params: builder.fn_params,
         fn_captures: builder.fn_captures,
-        struct_defs: builder.struct_defs,
-        init,
-        run: run.map(|(id, _)| id),
     }
 }
 

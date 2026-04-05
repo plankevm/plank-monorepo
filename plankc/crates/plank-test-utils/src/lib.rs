@@ -49,8 +49,14 @@ pub struct TestProject {
     modules: Vec<(String, PathBuf)>,
 }
 
+impl From<&str> for TestProject {
+    fn from(source: &str) -> Self {
+        Self::root(source)
+    }
+}
+
 impl TestProject {
-    pub fn single(source: &str) -> Self {
+    pub fn root(source: &str) -> Self {
         let entry_name = format!("main.{FILE_EXTENSION}");
         let mut fs = InMemoryFs::new();
         fs.add_file(&entry_name, dedent_preserve_indent(source));

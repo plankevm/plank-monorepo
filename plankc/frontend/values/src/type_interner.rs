@@ -202,7 +202,11 @@ impl TypeInterner {
                 None => {
                     let (line, col) =
                         session.offset_to_line_col(info.loc.source, info.loc.span.start);
-                    write!(f, "struct@{line}:{col}")
+                    write!(
+                        f,
+                        "struct@{}:{line}:{col}",
+                        &session.get_source(info.loc.source).path.to_str().unwrap()
+                    )
                 }
             },
         }

@@ -5,11 +5,11 @@ use std::hash::BuildHasher;
 
 newtype_index! {
     /// Unique ID for numbers.
-    pub struct BigNumId;
+    pub(crate) struct BigNumId;
 }
 
 #[derive(Debug, Clone)]
-pub struct BigNumInterner {
+pub(crate) struct BigNumInterner {
     values: IndexVec<BigNumId, U256>,
     dedup: HashTable<BigNumId>,
     hasher: DefaultHashBuilder,

@@ -3,13 +3,13 @@ use plank_session::Session;
 use plank_source::{
     ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
-use plank_values::BigNumInterner;
+use plank_values::ValueInterner;
 use sir_passes::PassManager;
 use std::path::{Path, PathBuf};
 
 pub struct Driver<'a, F: SourceFs> {
     pub session: Session,
-    pub big_nums: BigNumInterner,
+    pub values: ValueInterner,
     module_resolver: ModuleResolver,
     fs: &'a F,
 }
@@ -18,7 +18,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     pub fn new(fs: &'a F) -> Self {
         Self {
             session: Session::new(),
-            big_nums: BigNumInterner::new(),
+            values: ValueInterner::new(),
             module_resolver: ModuleResolver::default(),
             fs,
         }
@@ -43,15 +43,15 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     }
 
     pub fn lower_hir(&mut self, project: &ParsedProject) -> plank_hir::Hir {
-        lower(project, &mut self.big_nums, &mut self.session)
+        lower(project, &mut self.values, &mut self.session)
     }
 
     pub fn evaluate_hir(&mut self, hir: &plank_hir::Hir) -> plank_mir::Mir {
-        plank_hir_eval::evaluate(hir, &mut self.big_nums, &mut self.session)
+        plank_hir_eval::evaluate(hir, &mut self.values, &mut self.session)
     }
 
     pub fn emit_bytecode(&self, mir: &plank_mir::Mir, optimizations: Option<&str>) -> Vec<u8> {
-        let mut program = plank_mir_lower::lower(mir, &self.big_nums);
+        let mut program = plank_mir_lower::lower(mir, &self.values);
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
         if let Some(passes) = optimizations {

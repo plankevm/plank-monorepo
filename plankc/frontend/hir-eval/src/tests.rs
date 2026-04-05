@@ -1,17 +1,17 @@
 use plank_mir::{Mir, display::DisplayMir};
 use plank_session::Session;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
-use plank_values::BigNumInterner;
+use plank_values::ValueInterner;
 
-fn try_lower(source: &str) -> (Mir, BigNumInterner, Session) {
-    try_lower_project(TestProject::single(source))
+fn try_lower(source: &str) -> (Mir, ValueInterner, Session) {
+    try_lower_project(TestProject::root(source))
 }
 
-fn try_lower_project(project: TestProject) -> (Mir, BigNumInterner, Session) {
+fn try_lower_project(project: TestProject) -> (Mir, ValueInterner, Session) {
     let mut session = Session::new();
     let project = project.build(&mut session);
 
-    let mut big_nums = BigNumInterner::default();
+    let mut big_nums = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
     let mir = crate::evaluate(&hir, &mut big_nums, &mut session);
 
@@ -32,7 +32,7 @@ fn render_project_diagnostics(test_project: TestProject) -> Vec<String> {
 }
 
 fn assert_diagnostics(source: &str, expected: &[&str]) {
-    assert_project_diagnostics(TestProject::single(source), expected)
+    assert_project_diagnostics(TestProject::root(source), expected)
 }
 
 fn assert_project_diagnostics(test_project: TestProject, expected: &[&str]) {
@@ -1294,7 +1294,7 @@ fn test_comptime_call_arg_count_mismatch() {
 #[test]
 fn test_cross_file_call_arg_count_mismatch() {
     assert_project_diagnostics(
-        TestProject::single("import m::other::f;\ninit { f(1, 2); evm_stop(); }")
+        TestProject::root("import m::other::f;\ninit { f(1, 2); evm_stop(); }")
             .add_file("other", "const f = fn(x: u256) u256 { return x; };")
             .add_module("m", ""),
         &[r#"

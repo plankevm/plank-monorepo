@@ -1,17 +1,20 @@
 use crate::*;
 use plank_core::Idx;
 use plank_session::Session;
+use plank_values::{U256, Value, ValueInterner, uint};
 use std::fmt::{self, Display, Formatter};
+
+const DISPLAY_AS_HEX_THRESHOLD: U256 = uint!(100_000_U256);
 
 pub struct DisplayHir<'a> {
     hir: &'a Hir,
-    big_nums: &'a BigNumInterner,
+    values: &'a ValueInterner,
     session: &'a Session,
 }
 
 impl<'a> DisplayHir<'a> {
-    pub fn new(hir: &'a Hir, big_nums: &'a BigNumInterner, session: &'a Session) -> Self {
-        Self { hir, big_nums, session }
+    pub fn new(hir: &'a Hir, values: &'a ValueInterner, session: &'a Session) -> Self {
+        Self { hir, values, session }
     }
 
     fn fmt_local(&self, f: &mut Formatter<'_>, local: LocalId) -> fmt::Result {
@@ -52,10 +55,22 @@ impl<'a> DisplayHir<'a> {
             Expr::ConstRef(id) => self.fmt_const_ref(f, id),
             Expr::LocalRef(id) => self.fmt_local(f, id),
             Expr::FnDef(id) => self.fmt_fn_ref(f, id),
-            Expr::Bool(b) => write!(f, "{b}"),
-            Expr::Void => write!(f, "void"),
-            Expr::BigNum(id) => write!(f, "{}", self.big_nums[id]),
-            Expr::Type(id) => write!(f, "type#{}", id.get()),
+            Expr::Value(vid) => match self.values.lookup(vid) {
+                Value::Bool(b) => write!(f, "{b}"),
+                Value::Void => write!(f, "void"),
+                Value::BigNum(x) => {
+                    if x < DISPLAY_AS_HEX_THRESHOLD {
+                        write!(f, "{x}")
+                    } else {
+                        write!(f, "0x{x:x}")
+                    }
+                }
+                Value::Error => write!(f, "<error>"),
+                Value::Type(id) => write!(f, "type#{}", id.get()),
+                other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
+                    unreachable!("unexpected value in HIR: {other:?}")
+                }
+            },
             Expr::Call { callee, args } => {
                 write!(f, "call ")?;
                 self.fmt_local(f, callee)?;
@@ -102,8 +117,28 @@ impl<'a> DisplayHir<'a> {
                 write!(f, " ")?;
                 self.fmt_local(f, rhs)
             }
-            Expr::Error => write!(f, "<error>"),
         }
+    }
+
+    fn fmt_set(
+        &self,
+        f: &mut Formatter<'_>,
+        indent: usize,
+        local: LocalId,
+        r#type: Option<LocalId>,
+        expr: Expr,
+        mutable: bool,
+    ) -> fmt::Result {
+        let pad = "    ".repeat(indent);
+        write!(f, "{pad}")?;
+        self.fmt_local(f, local)?;
+        if let Some(r#type) = r#type {
+            write!(f, " : ")?;
+            self.fmt_local(f, r#type)?;
+        }
+        write!(f, " {}= ", if mutable { "[mut]" } else { "" })?;
+        self.fmt_expr(f, expr)?;
+        writeln!(f)
     }
 
     fn fmt_instr(
@@ -115,15 +150,10 @@ impl<'a> DisplayHir<'a> {
         let pad = "    ".repeat(indent);
         match instr {
             InstructionKind::Set { local, r#type, expr } => {
-                write!(f, "{pad}")?;
-                self.fmt_local(f, local)?;
-                if let Some(r#type) = r#type {
-                    write!(f, " : ")?;
-                    self.fmt_local(f, r#type)?;
-                }
-                write!(f, " = ")?;
-                self.fmt_expr(f, expr)?;
-                writeln!(f)
+                self.fmt_set(f, indent, local, r#type, expr, false)
+            }
+            InstructionKind::SetMut { local, r#type, expr } => {
+                self.fmt_set(f, indent, local, r#type, expr, true)
             }
             InstructionKind::BranchSet { local, expr } => {
                 write!(f, "{pad}")?;
@@ -132,7 +162,7 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
-            InstructionKind::Assign { target, value } => {
+            InstructionKind::Assign { target, expr: value } => {
                 write!(f, "{pad}")?;
                 self.fmt_local(f, target)?;
                 write!(f, " := ")?;

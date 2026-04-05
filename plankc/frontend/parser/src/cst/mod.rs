@@ -1,5 +1,7 @@
-use crate::{ast::File, const_print::const_assert_eq, lexer::TokenSpan};
-use plank_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use crate::{ast::File, lexer::TokenSpan};
+use plank_core::{
+    Idx, IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
+};
 use plank_session::StrId;
 
 pub mod display;
@@ -17,7 +19,7 @@ pub struct Node {
     pub first_child: Option<NodeIdx>,
 }
 
-const _ASSERT_NODE_SIZE: () = const_assert_eq(std::mem::size_of::<Node>(), 24);
+const _ASSERT_NODE_SIZE: () = const_assert_mem_size::<Node>(24);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {

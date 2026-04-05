@@ -1,6 +1,7 @@
-use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_parser::const_print::const_assert_eq;
-use plank_session::{EvmBuiltin, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId, TypeId};
+use plank_core::{
+    IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
+};
+use plank_session::{EvmBuiltin, SourceByteOffset, SourceId, SourceSpan, StrId};
 
 pub use plank_values;
 
@@ -9,7 +10,7 @@ mod lowerer;
 pub mod operators;
 
 pub use lowerer::lower;
-pub use plank_values::{BigNumId, BigNumInterner};
+use plank_values::ValueId;
 
 newtype_index! {
     pub struct ConstId;
@@ -23,15 +24,8 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Expr {
-    pub source_id: SourceId,
     pub span: SourceSpan,
     pub kind: ExprKind,
-}
-
-impl Expr {
-    pub fn src_loc(&self) -> SrcLoc {
-        SrcLoc::new(self.source_id, self.span)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,11 +33,7 @@ pub enum ExprKind {
     ConstRef(ConstId),
     LocalRef(LocalId),
     FnDef(FnDefId),
-
-    Bool(bool),
-    Void,
-    BigNum(BigNumId),
-    Type(TypeId),
+    Value(ValueId),
 
     Call {
         callee: LocalId,
@@ -77,14 +67,12 @@ pub enum ExprKind {
     LogicalNot {
         input: LocalId,
     },
-
-    /// Indicates the expr that evaluated to the value had some error that was already handled,
-    /// to avoid cascades any expression downstream from it also needs to become an error.
-    Error,
 }
 
-/// [`ExprKind`] memory size check. May be changed intentionally.
-const _EXPR_KIND_SIZE: () = const_assert_eq(std::mem::size_of::<ExprKind>(), 12);
+impl ExprKind {
+    pub const VOID: Self = ExprKind::Value(ValueId::VOID);
+    pub const ERROR: Self = ExprKind::Value(ValueId::ERROR);
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {
@@ -97,9 +85,14 @@ pub enum InstructionKind {
         local: LocalId,
         expr: Expr,
     },
+    SetMut {
+        local: LocalId,
+        r#type: Option<LocalId>,
+        expr: Expr,
+    },
     Assign {
         target: LocalId,
-        value: Expr,
+        expr: Expr,
     },
     Eval(Expr),
     Return(Expr),
@@ -121,9 +114,14 @@ pub enum InstructionKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Instruction {
-    pub loc: SrcLoc,
     pub kind: InstructionKind,
 }
+
+// Memory size checks. Remember size impacts performance. May be changed intentionally.
+const _EXPR_KIND_SIZE: () = const_assert_mem_size::<ExprKind>(12);
+const _EXPR_SIZE: () = const_assert_mem_size::<Expr>(20);
+const _INSTR_KIND_SIZE: () = const_assert_mem_size::<InstructionKind>(32);
+const _INSTR_SIZE: () = const_assert_mem_size::<Instruction>(32);
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParamInfo {
@@ -178,6 +176,7 @@ pub struct ConstDef {
 
 #[derive(Debug, Clone)]
 pub struct Hir {
+    pub entry_source: SourceId,
     pub init: BlockId,
     pub run: Option<BlockId>,
 

@@ -81,7 +81,7 @@ fn main() {
             println!("//                            HIR                             //");
             println!("////////////////////////////////////////////////////////////////");
         }
-        print!("{}", DisplayHir::new(&hir, &driver.big_nums, &driver.session));
+        print!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
         if args.show_mir {
             println!("\n");
             println!("////////////////////////////////////////////////////////////////");
@@ -93,7 +93,7 @@ fn main() {
     let mir = driver.evaluate_hir(&hir);
 
     if args.show_mir {
-        print!("{}", DisplayMir::new(&mir, &driver.big_nums, &driver.session));
+        print!("{}", DisplayMir::new(&mir, &driver.values, &driver.session));
     }
 
     if driver.session.has_errors() {

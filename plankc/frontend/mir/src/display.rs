@@ -1,18 +1,18 @@
 use crate::{ArgsId, BlockId, Expr, FnId, Instruction, LocalId, Mir};
 use plank_core::Idx;
 use plank_session::Session;
-use plank_values::{BigNumInterner, TypeId};
+use plank_values::{TypeId, Value, ValueId, ValueInterner};
 use std::fmt::{self, Display, Formatter};
 
 pub struct DisplayMir<'a> {
     mir: &'a Mir,
-    big_nums: &'a BigNumInterner,
+    values: &'a ValueInterner,
     session: &'a Session,
 }
 
 impl<'a> DisplayMir<'a> {
-    pub fn new(mir: &'a Mir, big_nums: &'a BigNumInterner, session: &'a Session) -> Self {
-        Self { mir, big_nums, session }
+    pub fn new(mir: &'a Mir, values: &'a ValueInterner, session: &'a Session) -> Self {
+        Self { mir, values, session }
     }
 
     fn fmt_type(&self, f: &mut Formatter<'_>, type_id: TypeId) -> fmt::Result {
@@ -35,13 +35,36 @@ impl<'a> DisplayMir<'a> {
         write!(f, "%{}", local.get())
     }
 
+    fn fmt_value(&self, f: &mut Formatter<'_>, vid: ValueId, indent: usize) -> fmt::Result {
+        match self.values.lookup(vid) {
+            Value::Error => write!(f, "<error>"),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::BigNum(x) => write!(f, "{x:x}"),
+            Value::Void => write!(f, "void_unit"),
+            Value::StructVal { ty, fields } => {
+                write!(f, "struct#{} {{", ty.get())?;
+                if !fields.is_empty() {
+                    write!(f, "\n")?;
+                }
+                for &field in fields {
+                    for _ in 0..indent {
+                        write!(f, " ")?;
+                    }
+                    self.fmt_value(f, field, indent + 1)?;
+                    write!(f, ",")?;
+                }
+                write!(f, "}}")
+            }
+            Value::Type(_) | Value::Closure { .. } => {
+                unreachable!("comptime-only value in MIR")
+            }
+        }
+    }
+
     fn fmt_expr(&self, f: &mut Formatter<'_>, expr: Expr) -> fmt::Result {
         match expr {
             Expr::LocalRef(local) => self.fmt_local(f, local),
-            Expr::Bool(b) => write!(f, "{b}"),
-            Expr::Void => write!(f, "unit"),
-            Expr::Error => write!(f, "<error>"),
-            Expr::BigNum(id) => write!(f, "{}", self.big_nums[id]),
+            Expr::Const(vid) => self.fmt_value(f, vid, 1),
             Expr::Call { callee, args } => {
                 write!(f, "call @fn{}", callee.get())?;
                 self.fmt_args(f, args)
