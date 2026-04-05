@@ -119,17 +119,18 @@ const U32_LIMBS_PER_U256: usize = 8;
 ///
 /// Returns `None` if `limbs.len() > 8` (value doesn't fit in 256 bits).
 pub fn limbs_to_u256(limbs: &[u32]) -> Option<U256> {
-    if limbs.len() > U32_LIMBS_PER_U256 {
+    if let Some(extra_limbs) = limbs.get(U32_LIMBS_PER_U256..)
+        && extra_limbs.iter().any(|limb| *limb != 0)
+    {
         return None;
     }
 
     let mut u64_limbs = [0u64; 4];
-    for (i, u64_limb) in u64_limbs.iter_mut().enumerate() {
-        let lo = limbs.get(2 * i).copied().unwrap_or(0) as u64;
-        let hi = limbs.get(2 * i + 1).copied().unwrap_or(0) as u64;
-        *u64_limb = (hi << 32) | lo;
+    let (full, remainder) = limbs.as_chunks::<2>();
+    let padded_remainder = remainder.get(0).map(|&last_lo| [last_lo, 0]);
+    for ([lo, hi], limb) in full.iter().copied().chain(padded_remainder).zip(&mut u64_limbs) {
+        *limb = (u64::from(hi) << 32) | u64::from(lo);
     }
-
     let value = U256::from_limbs(u64_limbs);
 
     Some(value)
@@ -272,5 +273,14 @@ mod tests {
     fn test_limbs_to_u256_too_many_limbs() {
         let limbs = [1u32; 9];
         assert_eq!(limbs_to_u256(&limbs), None);
+    }
+
+    #[test]
+    fn test_limbs_leading_zeros() {
+        let limbs = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0];
+        assert_eq!(
+            limbs_to_u256(&limbs),
+            Some(uint!(0x100000001000000010000000100000001000000010000000100000001U256))
+        );
     }
 }

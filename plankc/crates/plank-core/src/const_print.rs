@@ -26,3 +26,7 @@ pub const fn const_assert_eq(x: usize, y: usize) {
     let xs = const_num_to_str(&mut xbuf, x as u64);
     panic!("{}", xs);
 }
+
+pub const fn const_assert_mem_size<T>(size: usize) {
+    const_assert_eq(std::mem::size_of::<T>(), size);
+}

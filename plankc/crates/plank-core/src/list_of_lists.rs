@@ -1,5 +1,5 @@
 use crate::{Idx, IncIterable, IndexVec};
-use allocator_api2::vec::Vec;
+use allocator_api2::vec::{Drain, Vec};
 
 /// Efficient version of `IndexVec<I, Box<[T]>>`
 #[derive(Debug, Clone)]
@@ -108,6 +108,11 @@ impl<I: Idx, T> ListOfLists<I, T> {
     pub fn clear(&mut self) {
         self.starts.clear();
         self.values.clear();
+    }
+
+    pub fn pop(&mut self) -> Option<Drain<'_, T>> {
+        let start = self.starts.pop()?;
+        Some(self.values.drain(start as usize..))
     }
 }
 
