@@ -42,7 +42,7 @@ fn source_content_matches_source_manager_path() {
         ],
     );
 
-    let mut session = Session::new();
+    let mut session = Session::new(PathBuf::new());
     let mut modules = ModuleResolver::default();
     modules
         .register(session.intern("m"), dir.path().to_path_buf())
@@ -67,7 +67,7 @@ fn source_content_matches_source_manager_path() {
 
 #[test]
 fn duplicate_module_registration_is_error() {
-    let mut session = Session::new();
+    let mut session = Session::new(PathBuf::new());
     let mut modules = ModuleResolver::default();
     let name_id = session.intern("m");
     modules.register(name_id, PathBuf::from("/a")).expect("first registration succeeds");

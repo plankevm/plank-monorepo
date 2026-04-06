@@ -48,17 +48,15 @@ fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {
 
 fn main() {
     let args = Args::parse();
-    let mut driver = Driver::new(&RealFs);
+    let root = Path::new(&args.file_path)
+        .parent()
+        .expect("file path has no parent directory")
+        .to_path_buf();
+    let mut driver = Driver::new(&RealFs, root.clone());
 
     if let Some(name) = &args.module_name {
-        let root = match &args.module_root {
-            Some(root) => PathBuf::from(root),
-            None => Path::new(&args.file_path)
-                .parent()
-                .expect("file path has no parent directory")
-                .to_path_buf(),
-        };
-        driver.register_module(name, root);
+        let module_root = args.module_root.map_or(root, PathBuf::from);
+        driver.register_module(name, module_root);
     }
     for (name, path) in &args.deps {
         driver.register_module(name, path.clone());

@@ -1,9 +1,10 @@
 use plank_session::Session;
 use plank_test_utils::TestProject;
 use plank_values::ValueInterner;
+use std::path::PathBuf;
 
 fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
-    let mut session = Session::new();
+    let mut session = Session::new(PathBuf::new());
     let project = TestProject::root(source).build(&mut session);
 
     let mut values = ValueInterner::new();

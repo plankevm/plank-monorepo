@@ -355,10 +355,11 @@ impl EvmBuiltin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_inject_builtins() {
-        let mut session = Session::new();
+        let mut session = Session::new(PathBuf::new());
         inject_builtins(&mut session);
     }
 

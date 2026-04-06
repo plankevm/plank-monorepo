@@ -9,7 +9,7 @@ pub use poison::{MaybePoisoned, Poisoned};
 pub use types::TypeId;
 
 use plank_core::{Idx, IndexVec, Span, intern::StringInterner, newtype_index};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 newtype_index! {
     pub struct StrId;
@@ -34,17 +34,48 @@ pub struct Session {
     name_interner: StringInterner<StrId>,
     source_map: IndexVec<SourceId, Source>,
     diagnostics: Vec<Diagnostic>,
+    root: PathBuf,
+    dep_roots: Vec<(StrId, PathBuf)>,
 }
 
 impl Session {
-    pub fn new() -> Self {
+    pub fn new(root: PathBuf) -> Self {
         let mut this = Self {
             name_interner: StringInterner::new(),
             source_map: IndexVec::new(),
             diagnostics: Vec::new(),
+            root,
+            dep_roots: Vec::new(),
         };
         builtins::inject_builtins(&mut this);
         this
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn register_dep_root(&mut self, name: StrId, root: PathBuf) {
+        self.dep_roots.push((name, root));
+    }
+
+    pub fn display_path(&self, path: &Path) -> String {
+        fn expect_utf8(p: &Path) -> &str {
+            p.to_str().expect("source path is not valid UTF-8")
+        }
+
+        if let Ok(relative) = path.strip_prefix(&self.root) {
+            return expect_utf8(relative).to_owned();
+        }
+
+        for &(name_id, ref dep_root) in &self.dep_roots {
+            if let Ok(relative) = path.strip_prefix(dep_root) {
+                let name = self.lookup_name(name_id);
+                return format!("<{name}>:{}", expect_utf8(relative));
+            }
+        }
+
+        expect_utf8(path).to_owned()
     }
 
     pub fn intern(&mut self, name: &str) -> StrId {
@@ -106,11 +137,5 @@ impl Session {
             }
         }
         (line, col)
-    }
-}
-
-impl Default for Session {
-    fn default() -> Self {
-        Self::new()
     }
 }

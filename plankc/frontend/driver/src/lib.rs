@@ -15,9 +15,9 @@ pub struct Driver<'a, F: SourceFs> {
 }
 
 impl<'a, F: SourceFs> Driver<'a, F> {
-    pub fn new(fs: &'a F) -> Self {
+    pub fn new(fs: &'a F, root: PathBuf) -> Self {
         Self {
-            session: Session::new(),
+            session: Session::new(root),
             values: ValueInterner::new(),
             module_resolver: ModuleResolver::default(),
             fs,
@@ -26,8 +26,10 @@ impl<'a, F: SourceFs> Driver<'a, F> {
 
     pub fn register_module(&mut self, name: &str, root: PathBuf) {
         let name_id = self.session.intern(name);
-        if self.module_resolver.register(name_id, root).is_err() {
+        if self.module_resolver.register(name_id, root.clone()).is_err() {
             diagnostics::error_duplicate_module(&mut self.session, name_id);
+        } else if root != self.session.root() {
+            self.session.register_dep_root(name_id, root);
         }
     }
 
@@ -73,7 +75,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "init {}\n".to_string());
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, PathBuf::new());
         driver.register_module("m", PathBuf::from("/a"));
         driver.register_module("m", PathBuf::from("/b"));
 
@@ -90,7 +92,7 @@ error: duplicate module 'm'
     #[test]
     fn missing_entry_file_emits_diagnostic() {
         let fs = InMemoryFs::new();
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, PathBuf::new());
         let result = driver.load_project(Path::new("nonexistent.plk"));
 
         assert!(result.is_none());
@@ -109,7 +111,7 @@ error: could not open entry file
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import foo::bar::Baz;\ninit {}\n".to_string());
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, PathBuf::new());
         driver.load_project(Path::new("main.plk"));
 
         let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
@@ -129,7 +131,7 @@ error: unresolved import
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, PathBuf::new());
         driver.register_module("m", PathBuf::from("/lib"));
         driver.load_project(Path::new("main.plk"));
 
