@@ -20,6 +20,13 @@ fn try_lower_project(project: TestProject) -> (Mir, ValueInterner, Session) {
 
 fn assert_lowers_to(source: &str, expected: &str) {
     let (mir, big_nums, session) = try_lower(source);
+
+    if session.has_errors() {
+        let diags: Vec<String> =
+            session.diagnostics().iter().map(|d| d.render_plain(&session)).collect();
+        panic!("expected no diagnostics but got {}:\n{}", diags.len(), diags.join("\n---\n"));
+    }
+
     let actual = format!("{}", DisplayMir::new(&mir, &big_nums, &session));
     let expected = dedent_preserve_blank_lines(expected);
 
@@ -199,19 +206,25 @@ fn test_if_type_mismatch() {
 }
 
 #[test]
-#[should_panic(
-    expected = "not yet implemented: diagnostic: entry point must have an explicit terminator"
-)]
 fn test_run_missing_termination() {
-    let _ = try_lower(
+    assert_diagnostics(
         "
-            init {
-                evm_stop();
-            }
-            run {
-                let x = 5;
-            }
+        init {
+            evm_stop();
+        }
+        run {
+            let x = 5;
+        }
         ",
+        &[r#"
+        error: entry point must diverge
+         --> main.plk:5:13
+          |
+        5 |     let x = 5;
+          |             ^ execution may reach end of entry point
+          |
+          = help: entry points must end with a diverging expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
+        "#],
     );
 }
 
@@ -424,9 +437,9 @@ fn test_struct_field_access() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : bool = false
-            %1 : u256 = 34
-            %2 : Pair = Pair { %1, %0 }
+            %0 : u256 = 34
+            %1 : bool = false
+            %2 : Pair = Pair { %0, %1 }
             %3 : Pair = %2
             %4 : u256 = %3.0
             %5 : Pair = %2
@@ -498,8 +511,8 @@ fn test_comptime_struct_field_ordering() {
         const b_val = my_pair.b;
 
         init {
-            let x: u256 = a_val;
-            let y: bool = b_val;
+            let mut x: u256 = a_val;
+            let mut y: bool = b_val;
             evm_stop();
         }
         "#,
@@ -967,6 +980,8 @@ fn test_runtime_call_arg_type_mismatch() {
         error: mismatched types
          --> main.plk:3:7
           |
+        2 |     let f = fn(x: u256) never { evm_stop(); };
+          |                   ---- `u256` expected because of this
         3 |     f(false);
           |       ^^^^^ expected `u256`, got `bool`
         "#],
@@ -1411,7 +1426,7 @@ fn test_logical_not_comptime_true() {
         r#"
         const x = !true;
         init {
-            let v: bool = x;
+            let mut v: bool = x;
             evm_stop();
         }
         "#,
@@ -1432,7 +1447,7 @@ fn test_logical_not_comptime_false() {
         r#"
         const x = !false;
         init {
-            let v: bool = x;
+            let mut v: bool = x;
             evm_stop();
         }
         "#,
@@ -1527,7 +1542,7 @@ fn test_and_comptime_short_circuit_false() {
         r#"
         const x = false and true;
         init {
-            let v: bool = x;
+            let mut v: bool = x;
             evm_stop();
         }
         "#,
@@ -1613,32 +1628,32 @@ fn test_comptime_evm_builtins() {
         const addmod_res = raw_addmod(5, 7, 10);
         const mulmod_res = raw_mulmod(3, 4, 5);
         init {
-            let a: u256 = add_res;
-            let b: u256 = mul_res;
-            let c: u256 = sub_res;
-            let d: u256 = div_res;
-            let e: u256 = mod_res;
-            let f: u256 = sdiv_res;
-            let g: u256 = smod_res;
-            let h: u256 = exp_res;
-            let i: u256 = div_zero;
-            let j: u256 = signext_res;
-            let k: u256 = and_res;
-            let l: u256 = or_res;
-            let m: u256 = xor_res;
-            let n: u256 = byte_res;
-            let o: u256 = shl_res;
-            let p: u256 = shr_res;
-            let q: u256 = sar_res;
-            let r: bool = lt_res;
-            let s: bool = gt_res;
-            let t: bool = slt_res;
-            let u: bool = sgt_res;
-            let v: bool = eq_res;
-            let w: bool = iszero_t;
-            let x: bool = iszero_f;
-            let y: u256 = addmod_res;
-            let z: u256 = mulmod_res;
+            let mut a: u256 = add_res;
+            let mut b: u256 = mul_res;
+            let mut c: u256 = sub_res;
+            let mut d: u256 = div_res;
+            let mut e: u256 = mod_res;
+            let mut f: u256 = sdiv_res;
+            let mut g: u256 = smod_res;
+            let mut h: u256 = exp_res;
+            let mut i: u256 = div_zero;
+            let mut j: u256 = signext_res;
+            let mut k: u256 = and_res;
+            let mut l: u256 = or_res;
+            let mut m: u256 = xor_res;
+            let mut n: u256 = byte_res;
+            let mut o: u256 = shl_res;
+            let mut p: u256 = shr_res;
+            let mut q: u256 = sar_res;
+            let mut r: bool = lt_res;
+            let mut s: bool = gt_res;
+            let mut t: bool = slt_res;
+            let mut u: bool = sgt_res;
+            let mut v: bool = eq_res;
+            let mut w: bool = iszero_t;
+            let mut x: bool = iszero_f;
+            let mut y: u256 = addmod_res;
+            let mut z: u256 = mulmod_res;
             evm_stop();
         }
         "#,
@@ -1685,7 +1700,7 @@ fn test_comptime_evm_const_chain() {
         const a = add(5, 10);
         const b = mul(a, 3);
         init {
-            let x: u256 = b;
+            let mut x: u256 = b;
             evm_stop();
         }
         "#,
@@ -1742,7 +1757,7 @@ fn test_comptime_block_multi_statement() {
         r#"
         init {
             let y = 15;
-            let x: u256 = comptime {
+            let mut x: u256 = comptime {
                 let mut a = 10;
                 let b = 20;
                 a = y;
@@ -1756,8 +1771,7 @@ fn test_comptime_block_multi_statement() {
         ; init
         @fn0() -> never {
             %0 : u256 = 15
-            %1 : u256 = 15
-            %2 : never = evm_stop()
+            %1 : never = evm_stop()
         }
         "#,
     );
@@ -1769,7 +1783,7 @@ fn test_comptime_block_with_const_ref() {
         r#"
         const N = 42;
         init {
-            let x: u256 = comptime { N };
+            let mut x: u256 = comptime { N };
             evm_stop();
         }
         "#,
@@ -1791,7 +1805,7 @@ fn test_out_of_order_const_ref() {
         const B = comptime { A };
         const A = 34;
         init {
-            let x: u256 = comptime { B };
+            let mut x: u256 = comptime { B };
             evm_stop();
         }
         "#,
@@ -1813,7 +1827,7 @@ fn test_comptime_block_nested_const() {
         const A = 10;
         const B = comptime { A };
         init {
-            let x: u256 = comptime { B };
+            let mut x: u256 = comptime { B };
             evm_stop();
         }
         "#,
@@ -1879,7 +1893,7 @@ fn test_comptime_block_type_result() {
     assert_lowers_to(
         r#"
         init {
-            let x: comptime { u256 } = 5;
+            let mut x: comptime { u256 } = 5;
             evm_stop();
         }
         "#,

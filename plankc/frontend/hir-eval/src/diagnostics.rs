@@ -188,6 +188,22 @@ impl DiagCtx<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
+    pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("entry point must diverge")
+            .primary(loc.source, loc.span, "execution may reach end of entry point")
+            .help("entry points must end with a diverging expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_const_cycle(&mut self, name: StrId, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("cycle in constant evaluation").primary(
+            loc.source,
+            loc.span,
+            format!("`{}` depends on itself", self.session.lookup_name(name)),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
     pub fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("not yet implemented")
             .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary));
