@@ -27,6 +27,7 @@ pub const ZERO_SPAN: SourceSpan = Span::new(SourceByteOffset::ZERO, SourceByteOf
 #[derive(Debug, Clone)]
 pub struct Source {
     pub path: PathBuf,
+    pub display_path: String,
     pub content: String,
 }
 
@@ -95,8 +96,9 @@ impl Session {
         self.source_map.next_idx()
     }
 
-    pub fn register_source(&mut self, source: Source) -> SourceId {
-        self.source_map.push(source)
+    pub fn register_source(&mut self, path: PathBuf, content: String) -> SourceId {
+        let display_path = self.display_path(&path);
+        self.source_map.push(Source { path, display_path, content })
     }
 
     pub fn get_source(&self, source: SourceId) -> &Source {

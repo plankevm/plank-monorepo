@@ -294,9 +294,8 @@ impl Diagnostic {
                 }
                 Element::Annotations(cause) => {
                     let src = session.get_source(cause.source);
-                    let path = src.path.to_str().expect("source path is not valid UTF-8");
                     let mut snippet: Snippet<'_, snip::Annotation<'_>> =
-                        Snippet::source(&src.content).path(path);
+                        Snippet::source(&src.content).path(&src.display_path);
                     for ann in &cause.annotations {
                         let marker = ann.kind.span(ann.span.usize_range());
                         snippet = snippet.annotation(match &ann.label {
@@ -308,9 +307,8 @@ impl Diagnostic {
                 }
                 Element::Patches(patches) => {
                     let src = session.get_source(patches.source);
-                    let path = src.path.to_str().expect("source path is not valid UTF-8");
                     let mut snippet: Snippet<'_, snip::Patch<'_>> =
-                        Snippet::source(&src.content).path(path);
+                        Snippet::source(&src.content).path(&src.display_path);
                     for p in &patches.patches {
                         snippet =
                             snippet.patch(snip::Patch::new(p.span.usize_range(), &*p.replacement));
@@ -319,8 +317,7 @@ impl Diagnostic {
                 }
                 Element::Origin { path: source_id } => {
                     let src = session.get_source(*source_id);
-                    let path = src.path.to_str().expect("source path is not valid UTF-8");
-                    group = group.element(snip::Origin::path(path));
+                    group = group.element(snip::Origin::path(&src.display_path));
                 }
             }
         }

@@ -1,5 +1,5 @@
 use crate::{cst::display::DisplayCST, lexer::Lexed, parser::parse};
-use plank_session::{Session, Source};
+use plank_session::Session;
 use plank_test_utils::{dedent, dedent_preserve_indent};
 use std::path::PathBuf;
 
@@ -7,8 +7,7 @@ mod errorless;
 mod resiliency;
 
 fn parse_single_source(source: &str, session: &mut Session) -> crate::cst::ConcreteSyntaxTree {
-    let source_id =
-        session.register_source(Source { path: "test.plk".into(), content: source.to_string() });
+    let source_id = session.register_source("test.plk".into(), source.to_string());
     let lexed = Lexed::lex(source);
     parse(session, &lexed, source, source_id)
 }
