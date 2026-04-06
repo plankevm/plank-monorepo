@@ -1,0 +1,31 @@
+const Option = fn (comptime T: type) type {
+    struct {
+        inner: T,
+        is_some: bool
+    }
+};
+
+const Some = fn (comptime T: type, value: T) Option(T) {
+    Option(T) { inner: value, is_some: true }
+};
+
+// Assumes `zeroed` builtin: type -> T (not yet implemented in compiler)
+// TODO: remove this comment once `zeroed` is implemented
+const None = fn (comptime T: type) Option(T) {
+    Option(T) { inner: zeroed(T), is_some: false }
+};
+
+const is_some = fn (comptime T: type, opt: Option(T)) bool {
+    opt.is_some
+};
+
+const is_none = fn (comptime T: type, opt: Option(T)) bool {
+    !opt.is_some
+};
+
+const unwrap = fn (comptime T: type, opt: Option(T)) T {
+    if !opt.is_some {
+        revert(malloc_uninit(0), 0);
+    }
+    opt.inner
+};
