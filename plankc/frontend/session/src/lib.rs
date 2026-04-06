@@ -76,7 +76,10 @@ impl Session {
             }
         }
 
-        expect_utf8(path).to_owned()
+        unreachable!(
+            "source path '{}' is not under the project root or any registered dependency",
+            path.display()
+        )
     }
 
     pub fn intern(&mut self, name: &str) -> StrId {
@@ -139,5 +142,24 @@ impl Session {
             }
         }
         (line, col)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_path_relative_to_root() {
+        let session = Session::new(PathBuf::from("/project"));
+        assert_eq!(session.display_path(Path::new("/project/src/foo.plk")), "src/foo.plk");
+    }
+
+    #[test]
+    fn display_path_dep_outside_root() {
+        let mut session = Session::new(PathBuf::from("/project"));
+        let name = session.intern("std");
+        session.register_dep_root(name, PathBuf::from("/lib/std"));
+        assert_eq!(session.display_path(Path::new("/lib/std/math.plk")), "<std>:math.plk");
     }
 }

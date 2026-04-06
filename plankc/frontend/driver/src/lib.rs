@@ -148,4 +148,50 @@ error: could not open imported file
   = note: '/lib/a/b.plk': file not found in InMemoryFs: /lib/a/b.plk"
         );
     }
+
+    #[test]
+    fn diagnostic_displays_relative_path() {
+        let mut fs = InMemoryFs::new();
+        fs.add_file("/project/main.plk", "import foo::bar::Baz;\ninit {}\n".to_string());
+
+        let mut driver = Driver::new(&fs, PathBuf::from("/project"));
+        driver.load_project(Path::new("/project/main.plk"));
+
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: unresolved import
+ --> main.plk:1:8
+  |
+1 | import foo::bar::Baz;
+  |        ^^^ unknown module 'foo'"
+        );
+    }
+
+    #[test]
+    fn diagnostic_displays_dep_prefix_for_external_source() {
+        let mut fs = InMemoryFs::new();
+        fs.add_file("/project/main.plk", "import lib::sub::Thing;\ninit {}\n".to_string());
+        fs.add_file("/deps/lib/sub.plk", "const x = 1;\n".to_string());
+
+        let mut driver = Driver::new(&fs, PathBuf::from("/project"));
+        driver.register_module("lib", PathBuf::from("/deps/lib"));
+        let project = driver.load_project(Path::new("/project/main.plk")).unwrap();
+        driver.lower_hir(&project);
+
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: unresolved import
+ --> main.plk:1:18
+  |
+1 | import lib::sub::Thing;
+  |                  ^^^^^ 'Thing' not found in target module
+  |
+info: no definition of 'Thing' found in file
+ --> <lib>:sub.plk"
+        );
+    }
 }
