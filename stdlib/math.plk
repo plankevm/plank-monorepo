@@ -1,0 +1,7 @@
+const max = fn (a: u256, b: u256) u256 {
+    if gt(a, b) { a } else { b }
+};
+
+const min = fn (a: u256, b: u256) u256 {
+    if lt(a, b) { a } else { b }
+};

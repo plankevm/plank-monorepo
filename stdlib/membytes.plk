@@ -1,0 +1,62 @@
+import stdlib::option::Option;
+import stdlib::option::Some;
+import stdlib::option::None;
+
+const membytes = struct {
+    ptr: memptr,
+    len: u256
+};
+
+const membytes_new = fn (len: u256) membytes {
+    membytes { ptr: malloc_zeroed(len), len: len }
+};
+
+const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
+    membytes { ptr: ptr, len: len }
+};
+
+const membytes_write_u256_unchecked = fn (buf: membytes, offset: u256, value: u256) u256 {
+    mstore32(add(buf.ptr, offset), value);
+    32
+};
+
+const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
+    if gt(add(offset, 32), buf.len) {
+        return None(u256);
+    }
+    Some(u256, membytes_write_u256_unchecked(buf, offset, value))
+};
+
+// Assumes comptime builtins: is_struct, field_count, get_field_type, create_field_getter, eq on type
+// Assumes comptime features: inline while, comptime let mut
+// TODO: remove this comment once the above are implemented
+const membytes_write_unchecked = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
+    if !is_struct(T) {
+        if eq(T, bool) {
+            mstore32(add(buf.ptr, offset), if value { 1 } else { 0 });
+        } else {
+            mstore32(add(buf.ptr, offset), value);
+        }
+        return 32;
+    }
+    comptime let mut field_index = 0;
+    let mut bytes_written = 0;
+    inline while lt(field_index, field_count(T)) {
+        let getter = create_field_getter(T, field_index);
+        let written = membytes_write_unchecked(
+            get_field_type(T, field_index), buf, add(offset, bytes_written), getter(value)
+        );
+        bytes_written = add(bytes_written, written);
+        comptime field_index = add(field_index, 1);
+    }
+    bytes_written
+};
+
+// Assumes comptime builtin: sizeof
+// TODO: remove this comment once sizeof is implemented
+const membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) Option(u256) {
+    if gt(add(offset, sizeof(T)), buf.len) {
+        return None(u256);
+    }
+    Some(u256, membytes_write_unchecked(T, buf, offset, value))
+};
