@@ -1845,7 +1845,7 @@ fn test_comptime_block_struct_type() {
         ; init
         @fn0() -> never {
             %0 : u256 = 42
-            %1 : struct@3:9 = struct@3:9 { %0 }
+            %1 : struct@main.plk:3:9 = struct@main.plk:3:9 { %0 }
             %2 : never = evm_stop()
         }
         "#,

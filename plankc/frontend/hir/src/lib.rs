@@ -10,13 +10,12 @@ mod lowerer;
 pub mod operators;
 
 pub use lowerer::lower;
-use plank_values::ValueId;
+use plank_values::{FnDefId, ValueId};
 
 newtype_index! {
     pub struct ConstId;
     pub struct LocalId;
     pub struct BlockId;
-    pub struct FnDefId;
     pub struct StructDefId;
     pub struct CallArgsId;
     pub struct FieldsId;

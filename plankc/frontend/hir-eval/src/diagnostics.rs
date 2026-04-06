@@ -22,11 +22,11 @@ impl DiagCtx<'_> {
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
-            types.format(&self.session, expected_ty),
-            types.format(&self.session, actual_ty),
+            types.format(self.session, expected_ty),
+            types.format(self.session, actual_ty),
         );
         let secondary_label =
-            format!("`{}` expected because of this", types.format(&self.session, expected_ty),);
+            format!("`{}` expected because of this", types.format(self.session, expected_ty));
         let diagnostic = Diagnostic::error("mismatched types").cross_source_annotations(
             actual_loc,
             primary_label,
@@ -43,7 +43,7 @@ impl DiagCtx<'_> {
             format!(
                 "expected {}, got value of type `{}`",
                 builtin_names::TYPE,
-                types.format(&self.session, ty)
+                types.format(self.session, ty)
             ),
         );
         self.session.emit_diagnostic(diagnostic);
@@ -61,8 +61,8 @@ impl DiagCtx<'_> {
             loc.span,
             format!(
                 "expected `{}`, got `{}`",
-                types.format(&self.session, expected_ty),
-                types.format(&self.session, actual_ty),
+                types.format(self.session, expected_ty),
+                types.format(self.session, actual_ty),
             ),
         );
         self.session.emit_diagnostic(diagnostic);
@@ -72,7 +72,7 @@ impl DiagCtx<'_> {
         let diagnostic = Diagnostic::error("expected struct type").primary(
             loc.source,
             loc.span,
-            format!("`{}` is not a struct type", types.format(&self.session, ty)),
+            format!("`{}` is not a struct type", types.format(self.session, ty)),
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -81,7 +81,7 @@ impl DiagCtx<'_> {
         let diagnostic = Diagnostic::error("no fields on type").primary(
             loc.source,
             loc.span,
-            format!("value of type `{}` is not a struct type", types.format(&self.session, ty)),
+            format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -90,7 +90,7 @@ impl DiagCtx<'_> {
         let diagnostic = Diagnostic::error("expected function").primary(
             loc.source,
             loc.span,
-            format!("`{}` is not callable", types.format(&self.session, ty)),
+            format!("`{}` is not callable", types.format(self.session, ty)),
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -105,11 +105,11 @@ impl DiagCtx<'_> {
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
-            types.format(&self.session, ty1),
-            types.format(&self.session, ty2),
+            types.format(self.session, ty1),
+            types.format(self.session, ty2),
         );
         let secondary_label =
-            format!("`{}` expected because of this", types.format(&self.session, ty1));
+            format!("`{}` expected because of this", types.format(self.session, ty1));
         let diagnostic = Diagnostic::error("`if` and `else` have incompatible types")
             .cross_source_annotations(loc2, primary_label, loc1, secondary_label);
         self.session.emit_diagnostic(diagnostic);
@@ -188,7 +188,7 @@ impl DiagCtx<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
+    pub fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("not yet implemented")
             .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary));
         self.session.emit_diagnostic(diagnostic);
@@ -213,7 +213,7 @@ impl DiagCtx<'_> {
                 if j > 0 {
                     note.push_str(", ");
                 }
-                let _ = write!(note, "{}", types.format(&self.session, ty));
+                let _ = write!(note, "{}", types.format(self.session, ty));
             }
             note.push(')');
         }
@@ -224,7 +224,7 @@ impl DiagCtx<'_> {
                 if i > 0 {
                     args_str.push_str(", ");
                 }
-                let _ = write!(args_str, "{}", types.format(&self.session, ty));
+                let _ = write!(args_str, "{}", types.format(self.session, ty));
             }
             (
                 "no valid match for builtin signature",
@@ -267,7 +267,7 @@ impl DiagCtx<'_> {
         let diagnostic = Diagnostic::error("unexpected field").primary(
             lit_loc.source,
             field_span,
-            format!("`{}` has no field `{field}`", types.format(&self.session, struct_ty)),
+            format!("`{}` has no field `{field}`", types.format(self.session, struct_ty)),
         );
         self.session.emit_diagnostic(diagnostic);
     }
@@ -284,7 +284,7 @@ impl DiagCtx<'_> {
             expr_loc.span,
             format!(
                 "`{}` has no field `{}`",
-                types.format(&self.session, struct_ty),
+                types.format(self.session, struct_ty),
                 self.session.lookup_name(field_name),
             ),
         );
@@ -323,7 +323,7 @@ impl DiagCtx<'_> {
             format!(
                 "missing field `{}` in `{}`",
                 self.session.lookup_name(field_name),
-                types.format(&self.session, struct_ty),
+                types.format(self.session, struct_ty),
             ),
         );
         self.session.emit_diagnostic(diagnostic);

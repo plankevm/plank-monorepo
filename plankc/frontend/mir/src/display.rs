@@ -1,7 +1,7 @@
 use crate::{ArgsId, BlockId, Expr, FnId, Instruction, LocalId, Mir};
 use plank_core::Idx;
 use plank_session::Session;
-use plank_values::{TypeId, Value, ValueId, ValueInterner};
+use plank_values::{TypeId, Value, ValueId, ValueInterner, uint};
 use std::fmt::{self, Display, Formatter};
 
 pub struct DisplayMir<'a> {
@@ -39,7 +39,13 @@ impl<'a> DisplayMir<'a> {
         match self.values.lookup(vid) {
             Value::Error => write!(f, "<error>"),
             Value::Bool(b) => write!(f, "{}", b),
-            Value::BigNum(x) => write!(f, "{x:x}"),
+            Value::BigNum(x) => {
+                if x < uint!(100_000_U256) {
+                    write!(f, "{x}")
+                } else {
+                    write!(f, "{x:x}")
+                }
+            }
             Value::Void => write!(f, "void_unit"),
             Value::StructVal { ty, fields } => {
                 write!(f, "struct#{} {{", ty.get())?;
