@@ -19,11 +19,6 @@ use crate::diagnostics::DiagCtx;
 #[cfg(test)]
 mod tests;
 
-pub(crate) enum Local {
-    Runtime(mir::LocalId),
-    Comptime(ValueId),
-}
-
 pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) -> Mir {
     let mut evaluator = Evaluator {
         mir_blocks: ListOfLists::new(),
