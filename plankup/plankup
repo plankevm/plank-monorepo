@@ -3,7 +3,6 @@ set -euo pipefail
 
 PLANK_DIR="${PLANK_DIR:-$HOME/.plank}"
 PLANK_BIN_DIR="$PLANK_DIR/bin"
-PLANK_VERSIONS_DIR="$PLANK_DIR/versions"
 
 REPO="plankevm/plank-monorepo"
 GITHUB_API="https://api.github.com/repos/$REPO/releases"
@@ -97,50 +96,6 @@ verify_checksum() {
     say "checksum verified for $filename"
 }
 
-cmd_list() {
-    if [ ! -d "$PLANK_VERSIONS_DIR" ]; then
-        say "no versions installed"
-        return
-    fi
-
-    local active_version=""
-    if [ -L "$PLANK_BIN_DIR/plank" ]; then
-        local link_target
-        link_target=$(readlink "$PLANK_BIN_DIR/plank")
-        # Extract version from path like ../versions/v0.1.0/plank
-        active_version=$(echo "$link_target" | sed 's|.*/versions/\([^/]*\)/.*|\1|')
-    fi
-
-    say "installed versions:"
-    for version_dir in "$PLANK_VERSIONS_DIR"/*/; do
-        [ -d "$version_dir" ] || continue
-        local version
-        version=$(basename "$version_dir")
-        if [ "$version" = "$active_version" ]; then
-            printf "  %s (active)\n" "$version"
-        else
-            printf "  %s\n" "$version"
-        fi
-    done
-}
-
-usage() {
-    cat <<EOF
-plankup — the Plank compiler installer and updater
-
-USAGE:
-    plankup [OPTIONS]
-    plankup <COMMAND>
-
-OPTIONS:
-    --version <TAG>    Install a specific version (e.g., v0.1.0)
-    -h, --help         Print help
-
-COMMANDS:
-    list               List installed versions
-EOF
-}
-
 resolve_latest_version() {
     need_cmd curl
 
@@ -154,17 +109,31 @@ resolve_latest_version() {
     fi
 }
 
-update_symlink() {
-    local version="$1"
-    mkdir -p "$PLANK_BIN_DIR"
-    rm -f "$PLANK_BIN_DIR/plank"
-    ln -s "../versions/$version/plank" "$PLANK_BIN_DIR/plank"
-    say "plank $version is now active"
-    say "run 'plank --help' to get started"
+usage() {
+    cat <<EOF
+plankup — the Plank compiler installer and updater
+
+USAGE:
+    plankup
+    plankup -h | --help
+
+Running plankup without arguments installs the latest version of plank.
+EOF
 }
 
-cmd_install() {
-    local version="$1"
+main() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -h|--help)
+                usage
+                return
+                ;;
+            *)
+                err "unknown argument: $1"
+                ;;
+        esac
+        shift
+    done
 
     need_cmd curl
     need_cmd tar
@@ -173,21 +142,11 @@ cmd_install() {
     detect_platform
     detect_arch
 
-    # Resolve version
-    if [ -z "$version" ]; then
-        say "fetching latest release..."
-        resolve_latest_version
-        version="$LATEST_TAG"
-    fi
+    say "fetching latest release..."
+    resolve_latest_version
+    local version="$LATEST_TAG"
 
     say "installing plank $version ($PLATFORM/$ARCH)..."
-
-    # Check if already installed
-    if [ -d "$PLANK_VERSIONS_DIR/$version" ] && [ -x "$PLANK_VERSIONS_DIR/$version/plank" ]; then
-        say "plank $version is already installed"
-        update_symlink "$version"
-        return
-    fi
 
     # Set up temp directory for download
     local tmpdir
@@ -208,50 +167,20 @@ cmd_install() {
     # Verify checksum
     verify_checksum "$tmpdir/$asset_name" "$tmpdir/checksums.txt"
 
-    # Extract
-    mkdir -p "$PLANK_VERSIONS_DIR/$version"
-    tar -xzf "$tmpdir/$asset_name" -C "$PLANK_VERSIONS_DIR/$version"
+    # Extract to temp, then move binary into place
+    tar -xzf "$tmpdir/$asset_name" -C "$tmpdir"
 
-    # Verify the binary exists after extraction
-    if [ ! -f "$PLANK_VERSIONS_DIR/$version/plank" ]; then
-        rm -rf "$PLANK_VERSIONS_DIR/$version"
+    if [ ! -f "$tmpdir/plank" ]; then
         err "extracted archive does not contain 'plank' binary"
     fi
 
-    chmod +x "$PLANK_VERSIONS_DIR/$version/plank"
+    # Install binary
+    mkdir -p "$PLANK_BIN_DIR"
+    mv "$tmpdir/plank" "$PLANK_BIN_DIR/plank"
+    chmod +x "$PLANK_BIN_DIR/plank"
 
-    # Update symlink
-    update_symlink "$version"
-}
-
-main() {
-    local version=""
-
-    while [ $# -gt 0 ]; do
-        case "$1" in
-            list)
-                cmd_list
-                return
-                ;;
-            --version)
-                shift
-                if [ $# -eq 0 ]; then
-                    err "--version requires a value"
-                fi
-                version="$1"
-                ;;
-            -h|--help)
-                usage
-                return
-                ;;
-            *)
-                err "unknown argument: $1"
-                ;;
-        esac
-        shift
-    done
-
-    cmd_install "$version"
+    say "plank $version installed to $PLANK_BIN_DIR/plank"
+    say "run 'plank --help' to get started"
 }
 
 main "$@"
