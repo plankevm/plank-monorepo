@@ -218,10 +218,12 @@ fn test_run_missing_termination() {
         ",
         &[r#"
         error: entry point must diverge
-         --> main.plk:5:13
+         --> main.plk:4:1
           |
-        5 |     let x = 5;
-          |             ^ execution may reach end of entry point
+        4 | / run {
+        5 | |     let x = 5;
+        6 | | }
+          | |_^ execution may reach end of entry point
           |
           = help: entry points must end with a diverging expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
         "#],

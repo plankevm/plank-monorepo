@@ -160,6 +160,15 @@ impl DiagCtx<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
+    pub fn emit_type_not_comptime(&mut self, loc: SrcLoc) {
+        let diagnostic = Diagnostic::error("type must be known at compile time").primary(
+            loc.source,
+            loc.span,
+            "not known at compile time",
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
     pub fn emit_struct_type_index_not_comptime(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("struct definition requires compile-time values")
             .primary(loc.source, loc.span, "type index is not known at compile time");
@@ -191,7 +200,12 @@ impl DiagCtx<'_> {
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("entry point must diverge")
             .primary(loc.source, loc.span, "execution may reach end of entry point")
-            .help("entry points must end with a diverging expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)");
+            .help(format!(
+                "entry points must end with a diverging expression (e.g. `{}()`, `{}(...)`, `{}()`)",
+                builtin_names::STOP,
+                builtin_names::REVERT,
+                builtin_names::INVALID
+            ));
         self.session.emit_diagnostic(diagnostic);
     }
 
@@ -220,12 +234,12 @@ impl DiagCtx<'_> {
         use std::fmt::Write;
 
         let mut note = format!("`{builtin}` accepts ");
-        for (i, &(params, _ret)) in builtin.signatures().iter().enumerate() {
+        for (i, &sig) in builtin.signatures().iter().enumerate() {
             if i > 0 {
                 note.push_str(", ");
             }
             note.push('(');
-            for (j, &ty) in params.iter().enumerate() {
+            for (j, &ty) in sig.inputs.iter().enumerate() {
                 if j > 0 {
                     note.push_str(", ");
                 }
@@ -234,7 +248,7 @@ impl DiagCtx<'_> {
             note.push(')');
         }
 
-        let (title, label) = if builtin.signatures()[0].0.len() == arg_types.len() {
+        let (title, label) = if builtin.arg_count() == arg_types.len() {
             let mut args_str = String::new();
             for (i, &ty) in arg_types.iter().enumerate() {
                 if i > 0 {
@@ -247,7 +261,7 @@ impl DiagCtx<'_> {
                 format!("`{builtin}` cannot be called with ({args_str})"),
             )
         } else {
-            let expected = builtin.signatures()[0].0.len();
+            let expected = builtin.arg_count();
             (
                 "wrong number of arguments",
                 format!(

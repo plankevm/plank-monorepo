@@ -76,6 +76,12 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         unsafe { self.inner.get_unchecked_mut(key.idx()) }.replace(value)
     }
 
+    #[track_caller]
+    pub fn insert_no_prev(&mut self, key: I, value: V) {
+        let prev = self.insert(key, value);
+        assert!(prev.is_none(), "inserting but not first");
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (I, &V)> {
         self.inner
             .iter()
