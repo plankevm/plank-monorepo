@@ -2595,6 +2595,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "scheduler-harness"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "plank-core",
+]
+
+[[package]]
 name = "schemars"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,6 +1,17 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "frontend/*", "sir/crates/*", "sir/test-utils"]
+members = [
+    "crates/*",
+    "frontend/*",
+    "sir/crates/data",
+    "sir/crates/passes",
+    "sir/crates/parser",
+    "sir/crates/assembler",
+    "sir/crates/debug-backend",
+    "sir/crates/cli",
+    "sir/crates/scheduler/*",
+    "sir/test-utils",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -30,6 +41,7 @@ sir-passes = { path = "sir/crates/passes" }
 sir-parser = { path = "sir/crates/parser" }
 sir-assembler = { path = "sir/crates/assembler" }
 sir-debug-backend = { path = "sir/crates/debug-backend" }
+scheduler-harness = { path = "sir/crates/scheduler/harness" }
 
 # Shared Dependencies
 bumpalo = { version = "3.19.0", features = ["allocator-api2", "collections"] }
