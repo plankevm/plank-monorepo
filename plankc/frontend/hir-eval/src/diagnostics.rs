@@ -182,9 +182,31 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_comptime_local_not_available(&mut self, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error("comptime block capture must be known at compile time")
+        let diagnostic = Diagnostic::error("runtime reference in comptime context")
             .primary(loc.source, loc.span, "not known at compile time")
-            .note("comptime blocks can only reference values known at compile time");
+            .note("comptime contexts can only reference values known at compile time");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_runtime_eval_in_comptime(&mut self, expr: SrcLoc) {
+        let diagnostic =
+            Diagnostic::error("attmpting to evaluate runtime expression in comptime context")
+                .primary(expr.source, expr.span, "runtime expression");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_runtime_assign_from_comptime(
+        &mut self,
+        source: SourceId,
+        def: SourceSpan,
+        assign: SourceSpan,
+    ) {
+        let diagnostic = Diagnostic::error("assigning runtime variable in comptime context")
+            .element(
+                Annotations::new(source)
+                    .primary(assign, "assigned here")
+                    .secondary(def, "defined here"),
+            );
         self.session.emit_diagnostic(diagnostic);
     }
 
