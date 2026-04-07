@@ -1,6 +1,10 @@
 use crate::{Session, StrId, types::TypeId};
 
-pub type BuiltinSignature = (&'static [TypeId], TypeId);
+#[derive(Debug, Clone, Copy)]
+pub struct BuiltinSignature {
+    pub inputs: &'static [TypeId],
+    pub result: TypeId,
+}
 
 macro_rules! define_builtins {
     (
@@ -53,7 +57,13 @@ macro_rules! define_builtins {
                 })
             }
 
-            pub fn signatures(&self) -> &'static [BuiltinSignature] {
+            pub fn arg_count(self) -> usize {
+                // All sigs have the same arg count, guaranteed by compile time check in
+                // `signatures`.
+                self.signatures()[0].inputs.len()
+            }
+
+            pub fn signatures(self) -> &'static [BuiltinSignature] {
                 const U256: TypeId = TypeId::U256;
                 const BOOL: TypeId = TypeId::BOOL;
                 const MP: TypeId = TypeId::MEMORY_POINTER;
@@ -61,7 +71,23 @@ macro_rules! define_builtins {
                 const NEVER: TypeId = TypeId::NEVER;
 
                 match self {
-                    $(EvmBuiltin::$b_variant => &[ $( (&[$($arg),*], $ret) ),+ ]),*
+                    $(EvmBuiltin::$b_variant => {
+                        const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
+                            inputs: &[$($arg),*],
+                            result: $ret
+                        }),+];
+                        // Invariant: Each builtin has at least 1 sig and all sigs have the
+                        // same number of inputs.
+                        const {
+                            assert!(!SIGS.is_empty());
+                            let mut i = 1;
+                            while i < SIGS.len() {
+                                assert!(SIGS[0].inputs.len() == SIGS[i].inputs.len());
+                                i += 1;
+                            }
+                        };
+                        SIGS
+                    }),*
                 }
             }
         }
@@ -265,6 +291,51 @@ define_builtins! {
         RUNTIME_START_OFFSET "runtime_start_offset" => RuntimeStartOffset { [=> U256] };
         INIT_END_OFFSET "init_end_offset" => InitEndOffset { [=> U256] };
         RUNTIME_LENGTH "runtime_length" => RuntimeLength { [=> U256] };
+    }
+}
+
+impl EvmBuiltin {
+    pub fn is_pure(self) -> bool {
+        matches!(
+            self,
+            EvmBuiltin::Add
+                | EvmBuiltin::Mul
+                | EvmBuiltin::Sub
+                | EvmBuiltin::Div
+                | EvmBuiltin::SDiv
+                | EvmBuiltin::Mod
+                | EvmBuiltin::SMod
+                | EvmBuiltin::AddMod
+                | EvmBuiltin::MulMod
+                | EvmBuiltin::Exp
+                | EvmBuiltin::SignExtend
+                | EvmBuiltin::Lt
+                | EvmBuiltin::Gt
+                | EvmBuiltin::SLt
+                | EvmBuiltin::SGt
+                | EvmBuiltin::Eq
+                | EvmBuiltin::IsZero
+                | EvmBuiltin::And
+                | EvmBuiltin::Or
+                | EvmBuiltin::Xor
+                | EvmBuiltin::Not
+                | EvmBuiltin::Byte
+                | EvmBuiltin::Shl
+                | EvmBuiltin::Shr
+                | EvmBuiltin::Sar
+        )
+    }
+
+    pub fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
+        if self.arg_count() != arg_types.len() {
+            return None;
+        }
+        for &sig in self.signatures() {
+            if sig.inputs.iter().zip(arg_types).all(|(&sig_in, &arg_in)| sig_in == arg_in) {
+                return Some(sig.result);
+            }
+        }
+        None
     }
 }
 
