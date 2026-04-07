@@ -1,23 +1,6 @@
-// Assumes comptime builtins: is_struct, field_count, get_field_type
-// Assumes comptime features: inline while, comptime let mut
-// TODO: remove this comment once the above are implemented
-
 const is_abi_dynamic = fn (comptime T: type) bool {
     // All current Plank types are ABI-static.
     // When dynamic types (bytes, string, dynamic arrays) are added,
     // this should recursively check struct fields for dynamic types.
     false
-};
-
-const abi_static_size = fn (comptime T: type) u256 {
-    if !is_struct(T) {
-        return 32;
-    }
-    comptime let mut field_index = 0;
-    comptime let mut size = 0;
-    inline while lt(field_index, field_count(T)) {
-        size = add(size, abi_static_size(get_field_type(T, field_index)));
-        comptime field_index = add(field_index, 1);
-    }
-    size
 };

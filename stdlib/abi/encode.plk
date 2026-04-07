@@ -4,20 +4,20 @@ import stdlib::option::None;
 import stdlib::membytes::membytes;
 import stdlib::membytes::membytes_new;
 import stdlib::membytes::membytes_from_ptr;
-import stdlib::membytes::membytes_write_unchecked;
+import stdlib::membytes::unsafe_membytes_write;
 import stdlib::membytes::membytes_write;
-import stdlib::abi::helpers::abi_static_size;
 import stdlib::abi::helpers::is_abi_dynamic;
+import stdlib::type::type_size;
 
 // Assumes comptimeError builtin
 // TODO: remove this comment once comptimeError is implemented
 
-const abi_encode_unsafe = fn (comptime T: type, ptr: memptr, value: T) u256 {
+const unsafe_abi_encode = fn (comptime T: type, ptr: memptr, value: T) u256 {
     if is_abi_dynamic(T) {
         comptimeError("dynamic types not yet supported");
     }
-    let buf = membytes_from_ptr(ptr, abi_static_size(T));
-    membytes_write_unchecked(T, buf, 0, value)
+    let buf = membytes_from_ptr(ptr, type_size(T));
+    unsafe_membytes_write(T, buf, 0, value)
 };
 
 const abi_encode_try = fn (comptime T: type, buf: membytes, value: T) Option(u256) {
@@ -31,8 +31,8 @@ const abi_encode = fn (comptime T: type, value: T) membytes {
     if is_abi_dynamic(T) {
         comptimeError("dynamic types not yet supported");
     }
-    let size = abi_static_size(T);
+    let size = type_size(T);
     let buf = membytes_new(size);
-    membytes_write_unchecked(T, buf, 0, value);
+    unsafe_membytes_write(T, buf, 0, value);
     buf
 };
