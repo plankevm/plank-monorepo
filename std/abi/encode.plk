@@ -1,13 +1,13 @@
-import stdlib::option::Option;
-import stdlib::option::Some;
-import stdlib::option::None;
-import stdlib::membytes::membytes;
-import stdlib::membytes::membytes_new;
-import stdlib::membytes::membytes_from_ptr;
-import stdlib::membytes::unsafe_membytes_write_u256;
-import stdlib::abi::helpers::is_abi_dynamic;
-import stdlib::abi::helpers::abi_head_size;
-import stdlib::math::ceil32;
+import std::option::Option;
+import std::option::Some;
+import std::option::None;
+import std::membytes::membytes;
+import std::membytes::membytes_new;
+import std::membytes::membytes_from_ptr;
+import std::membytes::unsafe_membytes_write_u256;
+import std::abi::helpers::is_abi_dynamic;
+import std::abi::helpers::abi_head_size;
+import std::math::ceil32;
 
 // Core encoding function. Writes the ABI encoding of `value` into `buf` at `offset`.
 // Returns the total number of bytes written.

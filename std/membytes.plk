@@ -1,7 +1,7 @@
-import stdlib::option::Option;
-import stdlib::option::Some;
-import stdlib::option::None;
-import stdlib::type::type_size;
+import std::option::Option;
+import std::option::Some;
+import std::option::None;
+import std::type::type_size;
 
 // Invariant: the region [ptr, ptr + len) is allocated and exclusively owned.
 const membytes = struct {

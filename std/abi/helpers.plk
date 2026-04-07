@@ -1,4 +1,4 @@
-import stdlib::membytes::membytes;
+import std::membytes::membytes;
 
 const is_abi_dynamic = fn (comptime T: type) bool {
     if eq(T, membytes) { return true; }
