@@ -16,7 +16,11 @@ fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
 }
 
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (mir, big_nums, session) = try_lower(source);
+    assert_project_lowers_to(source, expected)
+}
+
+fn assert_project_lowers_to(project: impl Into<TestProject>, expected: &str) {
+    let (mir, big_nums, session) = try_lower(project);
 
     if session.has_errors() {
         let diags: Vec<String> =
@@ -1450,6 +1454,42 @@ fn test_cross_file_call_arg_count_mismatch() {
         1 | const f = fn(x: u256) u256 { return x; };
           |             --------- defined with 1 parameter
         "#],
+    );
+}
+
+#[test]
+fn test_import_group_symbols_accessible() {
+    assert_project_lowers_to(
+        TestProject::single(
+            "import m::other::{f, g as my_g};\ninit { let x = f(1); let y = my_g(2, 3); evm_stop(); }",
+        )
+        .add_file(
+            "other",
+            "const f = fn(x: u256) u256 { return x; };\nconst g = fn(a: u256, b: u256) u256 { return a; };",
+        )
+        .add_module("m", ""),
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        @fn1(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            ret %2
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : u256 = 1
+            %1 : u256 = call @fn0(%0)
+            %2 : u256 = 2
+            %3 : u256 = 3
+            %4 : u256 = call @fn1(%2, %3)
+            %5 : never = evm_stop()
+        }
+        "#,
     );
 }
 

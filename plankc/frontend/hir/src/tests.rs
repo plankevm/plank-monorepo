@@ -939,3 +939,87 @@ fn test_lone_slash_not_supported() {
     );
     pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
 }
+
+#[test]
+fn test_import_group_unresolved_item() {
+    let project = TestProject::single("import m::other::{a, b};\ninit { evm_stop(); }")
+        .add_file("other", "const a = 1;")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved import
+         --> main.plk:1:22
+          |
+        1 | import m::other::{a, b};
+          |                      ^ 'b' not found in target module
+          |
+        info: no definition of 'b' found in file
+         --> other.plk
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_import_group_collision_with_local() {
+    let project =
+        TestProject::single("const x = 1;\nimport m::other::{a, b as x};\ninit { evm_stop(); }")
+            .add_file("other", "const a = 1;\nconst b = 2;")
+            .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:2:22
+          |
+        1 | const x = 1;
+          | ------------ 'x' previously defined here
+        2 | import m::other::{a, b as x};
+          |                      ^^^^^^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_import_group_collision_with_other_import() {
+    let project =
+        TestProject::single("import m::a::x;\nimport m::b::{y, x};\ninit { evm_stop(); }")
+            .add_file("a", "const x = 1;")
+            .add_file("b", "const y = 2;\nconst x = 3;")
+            .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:2:18
+          |
+        1 | import m::a::x;
+          | --------------- 'x' previously imported here
+        2 | import m::b::{y, x};
+          |                  ^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_import_group_self_collision() {
+    let project = TestProject::single("import m::other::{a as x, b as x};\ninit { evm_stop(); }")
+        .add_file("other", "const a = 1;\nconst b = 2;")
+        .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:1:27
+          |
+        1 | import m::other::{a as x, b as x};
+          |                   ------  ^^^^^^ conflicting import
+          |                   |
+          |                   'x' previously imported here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}

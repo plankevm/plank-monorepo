@@ -478,3 +478,85 @@ fn test_error_in_block_no_ast_panic() {
     }
     assert!(session.has_errors());
 }
+
+// ==============================================================================
+// Import group diagnostics
+// ==============================================================================
+
+#[test]
+fn test_import_group_empty() {
+    assert_parser_errors(
+        "import foo::bar::{};",
+        &[r#"
+            error: empty import group
+             --> test.plk:1:18
+              |
+            1 | import foo::bar::{};
+              |                  ^^ import group must contain at least one item
+        "#],
+    );
+}
+
+#[test]
+fn test_import_group_nested_path() {
+    assert_parser_errors(
+        "import foo::{X, bar::Baz};",
+        &[r#"
+            error: path in import group
+             --> test.plk:1:17
+              |
+            1 | import foo::{X, bar::Baz};
+              |                 ^^^^^^^^ paths are not allowed inside import groups
+              |
+              = help: use a separate import statement for items from different submodules
+        "#],
+    );
+}
+
+#[test]
+fn test_import_group_unnecessary_braces() {
+    assert_parser_errors(
+        "import foo::bar::{X};",
+        &[r#"
+            warning: unnecessary braces in import
+             --> test.plk:1:18
+              |
+            1 | import foo::bar::{X};
+              |                  ^^^ this import group contains only one item
+              |
+              = help: remove the unnecessary braces
+        "#],
+    );
+}
+
+#[test]
+fn test_glob_inside_import_group() {
+    assert_parser_errors(
+        "import foo::{a, *};",
+        &[r#"
+            error: glob import inside import group
+             --> test.plk:1:17
+              |
+            1 | import foo::{a, *};
+              |                 ^ glob imports are not allowed inside import groups
+              |
+              = help: use a separate `import foo::*;` statement instead
+        "#],
+    );
+}
+
+#[test]
+fn test_import_group_unnecessary_braces_with_alias() {
+    assert_parser_errors(
+        "import foo::bar::{X as Y};",
+        &[r#"
+            warning: unnecessary braces in import
+             --> test.plk:1:18
+              |
+            1 | import foo::bar::{X as Y};
+              |                  ^^^^^^^^ this import group contains only one item
+              |
+              = help: remove the unnecessary braces
+        "#],
+    );
+}

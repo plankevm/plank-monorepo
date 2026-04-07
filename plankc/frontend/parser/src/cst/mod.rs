@@ -70,6 +70,8 @@ pub enum NodeKind {
     ConstDecl { typed: bool },
     ImportDecl { glob: bool },
     ImportAsDecl,
+    ImportGroupDecl,
+    ImportGroupItem,
     InitBlock,
     RunBlock,
 
@@ -125,6 +127,8 @@ impl std::fmt::Debug for NodeKind {
             Self::ConstDecl { typed } => f.debug_struct("ConstDecl").field("typed", typed).finish(),
             Self::ImportDecl { glob } => f.debug_struct("ImportDecl").field("glob", glob).finish(),
             Self::ImportAsDecl => write!(f, "ImportAsDecl"),
+            Self::ImportGroupDecl => write!(f, "ImportGroupDecl"),
+            Self::ImportGroupItem => write!(f, "ImportGroupItem"),
             Self::InitBlock => write!(f, "InitBlock"),
             Self::RunBlock => write!(f, "RunBlock"),
             Self::ComptimeBlock => write!(f, "ComptimeBlock"),

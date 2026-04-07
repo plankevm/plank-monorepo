@@ -159,11 +159,92 @@ impl<'cst> Import<'cst> {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct ImportGroupItemView<'cst> {
+    view: NodeView<'cst>,
+}
+
+impl<'cst> ImportGroupItemView<'cst> {
+    pub fn name(&self) -> Option<StrId> {
+        self.view.child(0)?.ident()
+    }
+
+    pub fn name_span(&self) -> Option<TokenSpan> {
+        Some(self.view.child(0)?.span())
+    }
+
+    pub fn alias(&self) -> Option<StrId> {
+        self.view.child(1)?.ident()
+    }
+
+    pub fn span(&self) -> TokenSpan {
+        self.view.span()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImportGroup<'cst> {
+    view: NodeView<'cst>,
+    first_child: NodeView<'cst>,
+}
+
+impl<'cst> ImportGroup<'cst> {
+    fn new(view: NodeView<'cst>) -> Option<Self> {
+        match view.kind() {
+            NodeKind::ImportGroupDecl => {
+                let first_child = view.child(0).filter(|c| c.ident().is_some())?;
+                Some(Self { view, first_child })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn node(&self) -> NodeView<'cst> {
+        self.view
+    }
+
+    pub fn collect_path_segments(&self, buf: &mut Vec<StrId>) {
+        for child in self.view.children() {
+            if child.kind() == NodeKind::ImportGroupItem {
+                break;
+            }
+            if let Some(ident) = child.ident() {
+                buf.push(ident);
+            }
+        }
+    }
+
+    pub fn items(&self) -> impl Iterator<Item = ImportGroupItemView<'cst>> {
+        self.view.children().filter_map(|child| match child.kind() {
+            NodeKind::ImportGroupItem => Some(ImportGroupItemView { view: child }),
+            _ => None,
+        })
+    }
+
+    pub fn first_path_segment_span(&self) -> TokenSpan {
+        self.first_child.span()
+    }
+
+    pub fn file_path_span(&self) -> TokenSpan {
+        let mut last_path_ident = self.first_child;
+        for child in self.view.children() {
+            if child.kind() == NodeKind::ImportGroupItem {
+                break;
+            }
+            if child.ident().is_some() {
+                last_path_ident = child;
+            }
+        }
+        Span::new(self.first_child.span().start, last_path_ident.span().end)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum TopLevelDef<'cst> {
     Init(InitBlock<'cst>),
     Run(RunBlock<'cst>),
     Const(ConstDecl<'cst>),
     Import(Import<'cst>),
+    ImportGroup(ImportGroup<'cst>),
     Error { span: TokenSpan },
 }
 
@@ -191,6 +272,9 @@ impl<'cst> File<'cst> {
             }
             if let Some(def) = Import::new(child) {
                 return TopLevelDef::Import(def);
+            }
+            if let Some(def) = ImportGroup::new(child) {
+                return TopLevelDef::ImportGroup(def);
             }
             TopLevelDef::Error { span: child.span() }
         })

@@ -787,6 +787,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                     }
                 }
                 TopLevelDef::Import(_) => {}
+                TopLevelDef::ImportGroup(_) => {}
                 TopLevelDef::Error { .. } => {}
             }
         }

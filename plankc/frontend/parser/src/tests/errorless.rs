@@ -2456,3 +2456,69 @@ fn test_import_multiple_declarations() {
         "#,
     );
 }
+
+#[test]
+fn test_import_group() {
+    assert_parses_to_cst_no_errors_dedented(
+        "import foo::bar::{X, Y as B};",
+        r#"
+        File
+            ImportGroupDecl
+                "import"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                Identifier
+                    "bar"
+                "::"
+                "{"
+                ImportGroupItem
+                    Identifier
+                        "X"
+                ","
+                " "
+                ImportGroupItem
+                    Identifier
+                        "Y"
+                    " "
+                    "as"
+                    " "
+                    Identifier
+                        "B"
+                "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_import_group_trailing_comma() {
+    assert_parses_to_cst_no_errors_dedented(
+        "import foo::bar::{X, Y,};",
+        r#"
+        File
+            ImportGroupDecl
+                "import"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                Identifier
+                    "bar"
+                "::"
+                "{"
+                ImportGroupItem
+                    Identifier
+                        "X"
+                ","
+                " "
+                ImportGroupItem
+                    Identifier
+                        "Y"
+                ","
+                "}"
+                ";"
+        "#,
+    );
+}
