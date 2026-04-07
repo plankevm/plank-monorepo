@@ -1,6 +1,32 @@
+import stdlib::membytes::membytes;
+
 const is_abi_dynamic = fn (comptime T: type) bool {
-    // All current Plank types are ABI-static.
-    // When dynamic types (bytes, string, dynamic arrays) are added,
-    // this should recursively check struct fields for dynamic types.
+    if eq(T, membytes) { return true; }
+    if !is_struct(T) { return false; }
+    comptime let mut field_index = 0;
+    inline while lt(field_index, field_count(T)) {
+        if is_abi_dynamic(get_field_type(T, field_index)) {
+            return true;
+        }
+        comptime field_index = add(field_index, 1);
+    }
     false
+};
+
+const abi_head_size = fn (comptime T: type) u256 {
+    if !is_struct(T) {
+        return 32;
+    }
+    comptime let mut field_index = 0;
+    comptime let mut size = 0;
+    inline while lt(field_index, field_count(T)) {
+        let field_type = get_field_type(T, field_index);
+        if is_abi_dynamic(field_type) {
+            size = add(size, 32);
+        } else {
+            size = add(size, abi_head_size(field_type));
+        }
+        comptime field_index = add(field_index, 1);
+    }
+    size
 };

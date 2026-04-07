@@ -1,0 +1,5 @@
+import stdlib::membytes::membytes;
+
+const string = struct {
+    bytes: membytes
+};
