@@ -29,6 +29,17 @@ const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option
     Some(u256, unsafe_membytes_write_u256(buf, offset, value))
 };
 
+const unsafe_membytes_read_u256 = fn (buf: membytes, offset: u256) u256 {
+    mload32(add(buf.ptr, offset))
+};
+
+const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
+    if gt(add(offset, 32), buf.len) {
+        return None(u256);
+    }
+    Some(u256, unsafe_membytes_read_u256(buf, offset))
+};
+
 // Assumes comptime builtins: is_struct, field_count, get_field_type, create_field_getter, eq on type
 // Assumes comptime features: inline while, comptime let mut
 // TODO: remove this comment once the above are implemented

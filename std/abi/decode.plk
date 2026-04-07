@@ -1,0 +1,94 @@
+import std::option::Option;
+import std::option::Some;
+import std::option::None;
+import std::membytes::membytes;
+import std::membytes::membytes_from_ptr;
+import std::membytes::unsafe_membytes_read_u256;
+import std::option::unwrap;
+import std::abi::helpers::is_abi_dynamic;
+import std::abi::helpers::abi_head_size;
+
+// Core decoding function. Reads the ABI encoding of type T from `buf` at `offset`.
+// Returns the decoded value.
+const unsafe_abi_decode_from = fn (comptime T: type, buf: membytes, offset: u256) T {
+    // membytes: read length from tail, then reference the data
+    if eq(T, membytes) {
+        let len = unsafe_membytes_read_u256(buf, offset);
+        return membytes_from_ptr(add(buf.ptr, add(offset, 32)), len);
+    }
+    // primitive
+    if !is_struct(T) {
+        if eq(T, bool) {
+            return neq(unsafe_membytes_read_u256(buf, offset), 0);
+        } else if eq(T, u256) {
+            return unsafe_membytes_read_u256(buf, offset);
+        } else {
+            comptimeError("unsupported primitive type");
+        }
+    }
+    // struct: read head, follow offsets for dynamic fields
+    let mut result = uninit(T);
+    let mut head_offset = offset;
+    comptime let mut field_index = 0;
+    inline while lt(field_index, field_count(T)) {
+        let field_type = get_field_type(T, field_index);
+        let setter = create_field_setter(T, field_index);
+        if is_abi_dynamic(field_type) {
+            let data_offset = add(offset, unsafe_membytes_read_u256(buf, head_offset));
+            result = setter(result, unsafe_abi_decode_from(field_type, buf, data_offset));
+            head_offset = add(head_offset, 32);
+        } else {
+            result = setter(result, unsafe_abi_decode_from(field_type, buf, head_offset));
+            head_offset = add(head_offset, abi_head_size(field_type));
+        }
+        comptime field_index = add(field_index, 1);
+    }
+    result
+};
+
+// Validates that `buf` contains valid ABI-encoded data of type T starting at `offset`.
+const is_abi_valid = fn (comptime T: type, buf: membytes, offset: u256) bool {
+    // membytes: need 32 bytes for length, then length bytes for data
+    if eq(T, membytes) {
+        if gt(add(offset, 32), buf.len) { return false; }
+        let len = unsafe_membytes_read_u256(buf, offset);
+        return !gt(add(add(offset, 32), len), buf.len);
+    }
+    // primitive: need 32 bytes
+    if !is_struct(T) {
+        return !gt(add(offset, 32), buf.len);
+    }
+    // struct: validate head fits, then validate each field
+    if gt(add(offset, abi_head_size(T)), buf.len) { return false; }
+    let mut head_offset = offset;
+    comptime let mut field_index = 0;
+    inline while lt(field_index, field_count(T)) {
+        let field_type = get_field_type(T, field_index);
+        if is_abi_dynamic(field_type) {
+            let data_offset = add(offset, unsafe_membytes_read_u256(buf, head_offset));
+            if !is_abi_valid(field_type, buf, data_offset) { return false; }
+            head_offset = add(head_offset, 32);
+        } else {
+            if !is_abi_valid(field_type, buf, head_offset) { return false; }
+            head_offset = add(head_offset, abi_head_size(field_type));
+        }
+        comptime field_index = add(field_index, 1);
+    }
+    true
+};
+
+const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, len: u256) T {
+    let buf = membytes_from_ptr(ptr, len);
+    unsafe_abi_decode_from(T, buf, 0)
+};
+
+const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
+    if !is_abi_valid(T, buf, 0) {
+        return None(T);
+    }
+    Some(T, unsafe_abi_decode_from(T, buf, 0))
+};
+
+const abi_decode = fn (comptime T: type, buf: membytes) T {
+    unwrap(T, abi_decode_try(T, buf))
+};
