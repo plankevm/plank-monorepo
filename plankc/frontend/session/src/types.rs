@@ -12,9 +12,8 @@ impl TypeId {
     pub const TYPE: TypeId = TypeId::new(4);
     pub const FUNCTION: TypeId = TypeId::new(5);
     pub const NEVER: TypeId = TypeId::new(6);
-    pub const ERROR: TypeId = TypeId::new(7);
 
-    pub const LAST_FIXED_ID: TypeId = Self::ERROR;
+    pub const LAST_FIXED_ID: TypeId = Self::NEVER;
     pub const STRUCT_IDS_OFFSET: u32 = Self::LAST_FIXED_ID.const_get() + 1;
 
     pub const fn is_struct(self) -> bool {
@@ -22,21 +21,14 @@ impl TypeId {
     }
 
     pub fn is_assignable_to(self, target: TypeId) -> bool {
-        self == target || self == TypeId::NEVER || self == TypeId::ERROR || target == TypeId::ERROR
+        self == target || self == TypeId::NEVER
     }
 
     pub fn unify(&mut self, other: TypeId) -> bool {
-        if *self == TypeId::ERROR || other == TypeId::ERROR {
-            return true;
-        }
         if *self == TypeId::NEVER {
             *self = other;
             return true;
         }
-        if other == TypeId::NEVER || *self == other {
-            // Keep `self` as is in case it's a more specific type.
-            return true;
-        }
-        false
+        other == TypeId::NEVER || *self == other
     }
 }

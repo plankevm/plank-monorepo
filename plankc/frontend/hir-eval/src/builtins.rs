@@ -1,10 +1,11 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{EvmBuiltin, SrcLoc};
+use plank_session::{EvmBuiltin, MaybePoisoned, SrcLoc};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
-use crate::scope::{BlockDiverge, EvalResult, Ref, Scope};
+use crate::scope::{BlockDiverge, EvalError, EvalResult, Ref, Scope};
+use plank_session::Poisoned;
 
 fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
     match values.lookup(vid) {
@@ -78,52 +79,55 @@ impl Scope<'_, '_> {
         args: hir::CallArgsId,
         expr_loc: SrcLoc,
     ) -> EvalResult {
-        let args = &self.hir.call_args[args];
-
         self.with_types_buf(|this, types_buf_offset| {
+            let args = &this.hir.call_args[args];
             for &arg in args {
-                this.eval.types_buf.push(this.binding_type(arg));
+                this.eval.types_buf.push(this.binding_type(arg)?);
             }
             let arg_types = &this.eval.types_buf[types_buf_offset..];
 
-            let result_type = builtin.resolve_result_type(arg_types).unwrap_or_else(|| {
-                this.eval.diag_ctx.emit_no_matching_builtin_signature(
-                    &this.eval.types,
-                    builtin,
-                    // ugly reslice because of rust borrow checker
-                    &this.eval.types_buf[types_buf_offset..],
-                    expr_loc,
-                );
-                TypeId::ERROR
-            });
+            let result_type = match builtin.resolve_result_type(arg_types) {
+                Some(ty) => ty,
+                None => {
+                    this.eval.diag_ctx.emit_no_matching_builtin_signature(
+                        &this.eval.types,
+                        builtin,
+                        &this.eval.types_buf[types_buf_offset..],
+                        expr_loc,
+                    );
+                    return Err(EvalError::Poisoned);
+                }
+            };
 
             if builtin.is_pure() {
-                let folded = this.with_values_buf(|this, values_buf_offset| {
+                let folded = this.with_values_buf::<MaybePoisoned<_>>(|this, values_buf_offset| {
                     for &arg in args {
-                        match this.bindings[arg].state {
+                        match this.bindings[arg].state? {
                             Ref::Comptime(vid) => this.values_buf.push(vid),
-                            Ref::Runtime(_) => return None,
+                            Ref::Runtime(_) => return Ok(None),
                         }
                     }
-                    Some(fold_pure_builtin(
+                    Ok(Some(fold_pure_builtin(
                         builtin,
                         &this.eval.values_buf[values_buf_offset..],
                         this.eval.values,
-                    ))
+                    )))
                 });
-                if let Some(folded) = folded {
+                if let Some(folded) = folded? {
                     return Ok(Ref::Comptime(folded));
                 }
             }
             if this.is_comptime() {
                 this.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
-                return Ok(Ref::ERROR);
+                return Err(Poisoned.into());
             }
 
-            // Not pure and not comptime.
             let args = this.with_locals_buf(|this, locals_buf_offset| {
                 for &arg in args {
-                    let arg = this.ensure_materialized(this.bindings[arg].state);
+                    let r#ref = this.bindings[arg]
+                        .state
+                        .expect("poisoned bindings filtered out during type collection above");
+                    let arg = this.ensure_materialized(r#ref);
                     this.locals_buf.push(arg);
                 }
                 this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
@@ -133,7 +137,7 @@ impl Scope<'_, '_> {
             this.instr_stack_buf.push(mir::Instruction::Set { target, expr });
 
             if result_type == TypeId::NEVER {
-                return Err(BlockDiverge::Never);
+                return Err(EvalError::NEVER);
             }
             Ok(Ref::Runtime(target))
         })

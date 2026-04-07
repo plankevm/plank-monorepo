@@ -1,7 +1,9 @@
 use plank_core::{
     IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
 };
-use plank_session::{EvmBuiltin, SourceByteOffset, SourceId, SourceSpan, StrId};
+use plank_session::{
+    EvmBuiltin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, StrId,
+};
 
 pub use plank_values;
 
@@ -32,7 +34,7 @@ pub enum ExprKind {
     ConstRef(ConstId),
     LocalRef(LocalId),
     FnDef(FnDefId),
-    Value(ValueId),
+    Value(MaybePoisoned<ValueId>),
 
     Call {
         callee: LocalId,
@@ -69,8 +71,8 @@ pub enum ExprKind {
 }
 
 impl ExprKind {
-    pub const VOID: Self = ExprKind::Value(ValueId::VOID);
-    pub const ERROR: Self = ExprKind::Value(ValueId::ERROR);
+    pub const VOID: Self = ExprKind::Value(Ok(ValueId::VOID));
+    pub const POISON: Self = ExprKind::Value(Err(Poisoned));
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -37,7 +37,6 @@ impl<'a> DisplayMir<'a> {
 
     fn fmt_value(&self, f: &mut Formatter<'_>, vid: ValueId, indent: usize) -> fmt::Result {
         match self.values.lookup(vid) {
-            Value::Error => write!(f, "<error>"),
             Value::Bool(b) => write!(f, "{}", b),
             Value::BigNum(x) => {
                 if x < uint!(100_000_U256) {

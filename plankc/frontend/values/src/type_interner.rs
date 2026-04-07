@@ -33,7 +33,6 @@ pub enum Type<'fields> {
     Type,
     Function,
     Never,
-    Error,
     Struct(StructInfo<'fields>),
 }
 
@@ -46,19 +45,15 @@ fn get_primitive_id(ty: Type<'_>) -> Result<TypeId, StructInfo<'_>> {
         Type::Type => Ok(TypeId::TYPE),
         Type::Function => Ok(TypeId::FUNCTION),
         Type::Never => Ok(TypeId::NEVER),
-        Type::Error => Ok(TypeId::ERROR),
         Type::Struct(r#struct) => Err(r#struct),
     }
 }
 
 const fn comptime_only_primitive(ty: TypeId) -> Result<bool, StructIdx> {
     match ty {
-        TypeId::VOID
-        | TypeId::U256
-        | TypeId::BOOL
-        | TypeId::NEVER
-        | TypeId::MEMORY_POINTER
-        | TypeId::ERROR => Ok(false),
+        TypeId::VOID | TypeId::U256 | TypeId::BOOL | TypeId::NEVER | TypeId::MEMORY_POINTER => {
+            Ok(false)
+        }
         TypeId::TYPE | TypeId::FUNCTION => Ok(true),
         _ => Err(StructIdx::new(ty.const_get() - TypeId::STRUCT_IDS_OFFSET)),
     }
@@ -73,7 +68,6 @@ const fn as_type(ty: TypeId) -> Result<Type<'static>, StructIdx> {
         TypeId::TYPE => Ok(Type::Type),
         TypeId::FUNCTION => Ok(Type::Function),
         TypeId::NEVER => Ok(Type::Never),
-        TypeId::ERROR => Ok(Type::Error),
         _ => Err(StructIdx::new(ty.const_get() - TypeId::STRUCT_IDS_OFFSET)),
     }
 }
@@ -196,7 +190,6 @@ impl TypeInterner {
             Type::Type => f.write_str(builtin_names::TYPE),
             Type::Function => f.write_str(builtin_names::FUNCTION),
             Type::Never => f.write_str(builtin_names::NEVER),
-            Type::Error => f.write_str("<error>"),
             Type::Struct(info) => match self.struct_name(type_id) {
                 Some(name) => f.write_str(session.lookup_name(name)),
                 None => {

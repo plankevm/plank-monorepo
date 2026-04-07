@@ -55,7 +55,8 @@ impl<'a> DisplayHir<'a> {
             Expr::ConstRef(id) => self.fmt_const_ref(f, id),
             Expr::LocalRef(id) => self.fmt_local(f, id),
             Expr::FnDef(id) => self.fmt_fn_ref(f, id),
-            Expr::Value(vid) => match self.values.lookup(vid) {
+            Expr::Value(Err(Poisoned)) => write!(f, "<poison>"),
+            Expr::Value(Ok(vid)) => match self.values.lookup(vid) {
                 Value::Bool(b) => write!(f, "{b}"),
                 Value::Void => write!(f, "void"),
                 Value::BigNum(x) => {
@@ -65,7 +66,6 @@ impl<'a> DisplayHir<'a> {
                         write!(f, "0x{x:x}")
                     }
                 }
-                Value::Error => write!(f, "<error>"),
                 Value::Type(id) => write!(f, "type#{}", id.get()),
                 other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")

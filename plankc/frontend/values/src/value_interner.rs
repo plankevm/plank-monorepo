@@ -13,7 +13,6 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StoredValue {
-    Error,
     Void,
     Bool(bool),
     BigNum(BigNumId),
@@ -24,7 +23,6 @@ enum StoredValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Value<'a> {
-    Error,
     Void,
     Bool(bool),
     BigNum(U256),
@@ -36,7 +34,6 @@ pub enum Value<'a> {
 impl Value<'_> {
     pub fn get_type(&self) -> TypeId {
         match self {
-            Value::Error => TypeId::ERROR,
             Value::Void => TypeId::VOID,
             Value::Bool(_) => TypeId::BOOL,
             Value::BigNum(_) => TypeId::U256,
@@ -69,7 +66,6 @@ fn stored_to_value<'a>(
     big_nums: &'a BigNumInterner,
 ) -> Value<'a> {
     match stored {
-        StoredValue::Error => Value::Error,
         StoredValue::Void => Value::Void,
         StoredValue::Bool(b) => Value::Bool(b),
         StoredValue::BigNum(bid) => Value::BigNum(big_nums.lookup(bid)),
@@ -96,7 +92,6 @@ impl ValueInterner {
         assert_eq!(new_interner.intern(Value::Void), ValueId::VOID);
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
         assert_eq!(new_interner.intern(Value::Bool(true)), ValueId::TRUE);
-        assert_eq!(new_interner.intern(Value::Error), ValueId::ERROR);
         new_interner
     }
 
@@ -137,7 +132,6 @@ impl ValueInterner {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let stored = match value {
-                    Value::Error => StoredValue::Error,
                     Value::Void => StoredValue::Void,
                     Value::Bool(b) => StoredValue::Bool(b),
                     Value::BigNum(n) => StoredValue::BigNum(self.big_nums.intern(n)),

@@ -70,7 +70,6 @@ impl LowerCtx<'_> {
         match self.mir.types.lookup(ty) {
             Type::Void | Type::Never => 0,
             Type::Bool | Type::Int | Type::MemoryPointer => 1,
-            Type::Error => unreachable!("error untransformable in MIR"),
             Type::Function => unreachable!("function unsizeable in SIR"),
             Type::Type => unreachable!("type unsizeable in SIR"),
             Type::Struct(r#struct) => {
@@ -177,7 +176,7 @@ fn lower_basic_block(
                             ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
                         current_bb.add_set_const_op(sets, x);
                     }
-                    Value::Error => unreachable!("attempting to lower MIR with error"),
+
                     Value::StructVal { fields, ty } => {
                         let size = ctx.size_in_locals(ty);
                         ctx.locals_map.ensure_many(
@@ -401,8 +400,8 @@ fn materialize_constant_struct_literal(
             Value::StructVal { ty: _, fields } => {
                 materialize_constant_struct_literal(values, bb, targets, fields);
             }
-            Value::Error | Value::Type(_) | Value::Closure { .. } => {
-                unreachable!("MIR: setting error / comptime-only value")
+            Value::Type(_) | Value::Closure { .. } => {
+                unreachable!("MIR: comptime-only value")
             }
         }
     }

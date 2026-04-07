@@ -1,9 +1,11 @@
 pub mod builtins;
 pub mod diagnostic;
+pub mod poison;
 pub mod types;
 
 pub use builtins::EvmBuiltin;
 pub use diagnostic::{AnnotationKind, Annotations, Claim, Diagnostic, Element, Level, SrcLoc};
+pub use poison::{MaybePoisoned, Poisoned};
 pub use types::TypeId;
 
 use plank_core::{Idx, IndexVec, Span, intern::StringInterner, newtype_index};

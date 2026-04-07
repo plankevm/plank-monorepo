@@ -7,7 +7,7 @@ use plank_parser::{
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
-use plank_session::{EvmBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
+use plank_session::{EvmBuiltin, Poisoned, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::ValueInterner;
 
@@ -307,12 +307,12 @@ impl BlockLowerer<'_> {
 
     fn resolve_name(&mut self, name: StrId, span: TokenSpan) -> ExprKind {
         if let Some(ty) = TypeId::resolve_primitive(name) {
-            return ExprKind::Value(self.values.intern_type(ty));
+            return ExprKind::Value(Ok(self.values.intern_type(ty)));
         }
 
         if EvmBuiltin::from_str_id(name).is_some() {
             self.error_non_call_reference_to_builtin(name, span);
-            return ExprKind::ERROR;
+            return ExprKind::POISON;
         }
 
         if let Some(entry) = self.find_local(name) {
@@ -328,22 +328,22 @@ impl BlockLowerer<'_> {
         }
 
         self.error_unresolved_identifier(name, span);
-        ExprKind::ERROR
+        ExprKind::POISON
     }
 
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
-            ast::Expr::Error { .. } => ExprKind::Value(ValueId::ERROR),
+            ast::Expr::Error { .. } => ExprKind::Value(Err(Poisoned)),
             ast::Expr::Ident { name, span } => self.resolve_name(name, span),
-            ast::Expr::BoolLiteral { value, .. } => ExprKind::Value(value.into()),
+            ast::Expr::BoolLiteral { value, .. } => ExprKind::Value(Ok(value.into())),
             ast::Expr::NumLiteral { id, span } => {
                 let limbs = &self.num_lit_limbs[id];
                 match plank_core::bigint::limbs_to_u256(limbs) {
-                    Some(value) => ExprKind::Value(self.values.intern_num(value)),
+                    Some(value) => ExprKind::Value(Ok(self.values.intern_num(value))),
                     None => {
                         self.error_number_out_of_range(span);
-                        ExprKind::ERROR
+                        ExprKind::POISON
                     }
                 }
             }
@@ -639,7 +639,7 @@ impl BlockLowerer<'_> {
                 ShortCircuitOp::And => false,
                 ShortCircuitOp::Or => true,
             };
-            let expr = this.expr(ExprKind::Value(short_circuit_value.into()), span);
+            let expr = this.expr(ExprKind::Value(Ok(short_circuit_value.into())), span);
             this.emit(InstructionKind::BranchSet { local: op_result_local, expr });
         });
 
