@@ -179,7 +179,8 @@ pub struct Hir {
     pub init: BlockId,
     pub run: Option<BlockId>,
 
-    pub blocks: ListOfLists<BlockId, Instruction>,
+    pub block_instrs: ListOfLists<BlockId, Instruction>,
+    pub block_spans: IndexVec<BlockId, Option<SourceSpan>>,
     pub consts: IndexVec<ConstId, ConstDef>,
 
     pub call_args: ListOfLists<CallArgsId, LocalId>,

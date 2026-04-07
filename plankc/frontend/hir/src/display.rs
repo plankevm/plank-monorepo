@@ -208,7 +208,7 @@ impl<'a> DisplayHir<'a> {
     }
 
     fn fmt_block(&self, f: &mut Formatter<'_>, block_id: BlockId, indent: usize) -> fmt::Result {
-        let instructions = &self.hir.blocks[block_id];
+        let instructions = &self.hir.block_instrs[block_id];
         for &instr in instructions {
             self.fmt_instr(f, instr.kind, indent)?;
         }
