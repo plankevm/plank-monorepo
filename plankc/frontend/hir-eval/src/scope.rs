@@ -41,10 +41,14 @@ impl From<BlockDiverge> for EvalError {
     }
 }
 
-pub(crate) type EvalResult = Result<Ref, EvalError>;
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum EvalValue {
+    Comptime(ValueId),
+    Runtime { expr: mir::Expr, result_type: TypeId },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Ref {
+pub(crate) enum LocalState {
     Runtime(mir::LocalId),
     Comptime(ValueId),
 }
@@ -56,12 +60,12 @@ pub(crate) enum BlockDiverge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
-    pub state: MaybePoisoned<Ref>,
+    pub state: MaybePoisoned<LocalState>,
     pub span: SourceSpan,
 }
 
 impl Local {
-    pub fn poisoned(self) -> MaybePoisoned<(Ref, SourceSpan)> {
+    pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan)> {
         let state = self.state?;
         Ok((state, self.span))
     }
@@ -100,15 +104,39 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         mir_block
     }
 
-    pub fn ref_type(&self, r#ref: Ref) -> TypeId {
-        match r#ref {
-            Ref::Runtime(mir) => self.mir_types[mir],
-            Ref::Comptime(vid) => self.values.type_of_value(vid),
+    pub fn state_type(&self, state: LocalState) -> TypeId {
+        match state {
+            LocalState::Runtime(mir) => self.mir_types[mir],
+            LocalState::Comptime(vid) => self.values.type_of_value(vid),
         }
     }
 
+    pub fn value_type(&self, value: EvalValue) -> TypeId {
+        match value {
+            EvalValue::Comptime(vid) => self.values.type_of_value(vid),
+            EvalValue::Runtime { expr: _, result_type } => result_type,
+        }
+    }
+
+    pub fn set_value_as_first_state(
+        &mut self,
+        local: hir::LocalId,
+        value: MaybePoisoned<EvalValue>,
+        span: SourceSpan,
+    ) {
+        let state = value.map(|value| match value {
+            EvalValue::Comptime(vid) => LocalState::Comptime(vid),
+            EvalValue::Runtime { expr, result_type } => {
+                let target = self.alloc_mir(result_type);
+                self.emit(mir::Instruction::Set { target, expr });
+                LocalState::Runtime(target)
+            }
+        });
+        self.bindings.insert_no_prev(local, Local { state, span });
+    }
+
     pub fn binding_type(&self, local: hir::LocalId) -> MaybePoisoned<TypeId> {
-        Ok(self.ref_type(self.bindings[local].state?))
+        Ok(self.state_type(self.bindings[local].state?))
     }
 
     pub fn with_instructions<R>(
@@ -124,7 +152,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub fn expect_type(&mut self, type_local: hir::LocalId) -> MaybePoisoned<TypeId> {
         let (state, span) = self.bindings[type_local].poisoned()?;
         let type_loc = self.loc(span);
-        let Ref::Comptime(vid) = state else {
+        let LocalState::Comptime(vid) = state else {
             self.diag_ctx.emit_type_not_comptime(type_loc);
             return Err(Poisoned);
         };
@@ -136,46 +164,67 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(ty)
     }
 
-    pub fn check_type_of(
+    pub fn eval_set(
         &mut self,
-        state: Ref,
-        expr_span: SourceSpan,
-        type_local: hir::LocalId,
-    ) -> MaybePoisoned<Ref> {
-        let expected_ty = self.expect_type(type_local)?;
-        let actual_ty = self.ref_type(state);
-        if !actual_ty.is_assignable_to(expected_ty) {
-            self.eval.diag_ctx.emit_type_mismatch_error(
-                &self.eval.types,
-                expected_ty,
-                self.loc(self.bindings[type_local].span),
-                actual_ty,
-                self.loc(expr_span),
-            );
-            return Err(Poisoned);
-        }
-        Ok(state)
+        local: hir::LocalId,
+        r#type: Option<hir::LocalId>,
+        expr: hir::Expr,
+    ) -> Result<(), BlockDiverge> {
+        let value = self.eval_expr(expr).value()?;
+        let value = r#type.map_or(value, |type_local| {
+            let expected_ty = self.expect_type(type_local)?;
+            let actual_ty = self.value_type(value?);
+            if !actual_ty.is_assignable_to(expected_ty) {
+                self.eval.diag_ctx.emit_type_mismatch_error(
+                    &self.eval.types,
+                    expected_ty,
+                    self.loc(self.bindings[type_local].span),
+                    actual_ty,
+                    self.loc(expr.span),
+                );
+                return Err(Poisoned);
+            }
+            value
+        });
+        self.set_value_as_first_state(local, value, expr.span);
+        Ok(())
     }
 
-    fn resolve_set_mut_type(
+    pub fn eval_set_mut(
         &mut self,
-        result: Ref,
-        expr_span: SourceSpan,
-        type_local: hir::LocalId,
-    ) -> MaybePoisoned<TypeId> {
-        let expected_ty = self.expect_type(type_local)?;
-        let actual_ty = self.ref_type(result);
-        if actual_ty.is_assignable_to(expected_ty) {
-            return Ok(expected_ty);
-        }
-        self.eval.diag_ctx.emit_type_mismatch_error(
-            &self.eval.types,
-            expected_ty,
-            self.loc(self.bindings[type_local].span),
-            actual_ty,
-            self.loc(expr_span),
-        );
-        Err(Poisoned)
+        local: hir::LocalId,
+        r#type: Option<hir::LocalId>,
+        expr: hir::Expr,
+    ) -> Result<(), BlockDiverge> {
+        let value = self.eval_expr(expr).value()?;
+        let value = r#type.map_or(value, |type_local| {
+            let expected_ty = self.expect_type(type_local)?;
+            let actual_ty = self.value_type(value?);
+            if !actual_ty.is_assignable_to(expected_ty) {
+                self.eval.diag_ctx.emit_type_mismatch_error(
+                    &self.eval.types,
+                    expected_ty,
+                    self.loc(self.bindings[type_local].span),
+                    actual_ty,
+                    self.loc(expr.span),
+                );
+                return Err(Poisoned);
+            }
+            value
+        });
+
+        let state = value.map(|value| {
+            let target = self.alloc_mir(self.value_type(value));
+            let expr = match value {
+                EvalValue::Comptime(vid) => mir::Expr::Const(vid),
+                EvalValue::Runtime { expr, result_type: _ } => expr,
+            };
+            self.emit(mir::Instruction::Set { target, expr });
+            LocalState::Runtime(target)
+        });
+
+        self.bindings.insert_no_prev(local, Local { state, span: expr.span });
+        Ok(())
     }
 
     pub fn eval_block(&mut self, block: hir::BlockId) -> (mir::BlockId, Result<(), BlockDiverge>) {
@@ -183,33 +232,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             for instr in &this.hir.block_instrs[block] {
                 match instr.kind {
                     InstructionKind::Set { local, r#type, expr } => {
-                        let result = this.eval_expr(expr).value()?;
-                        let state = result.and_then(|r#ref| match r#type {
-                            Some(type_local) => this.check_type_of(r#ref, expr.span, type_local),
-                            None => Ok(r#ref),
-                        });
-                        this.bindings.insert_no_prev(local, Local { state, span: expr.span });
+                        this.eval_set(local, r#type, expr)?
                     }
                     InstructionKind::SetMut { local, r#type, expr } => {
-                        let result = this.eval_expr(expr).value()?;
-                        let state: MaybePoisoned<Ref> = (|| {
-                            let r#ref = result?;
-                            let local_ty = match r#type {
-                                Some(type_local) => {
-                                    this.resolve_set_mut_type(r#ref, expr.span, type_local)?
-                                }
-                                None => this.ref_type(r#ref),
-                            };
-                            let mir_local = this.alloc_anon_mir(local_ty);
-                            let mir_expr = match r#ref {
-                                Ref::Comptime(vid) => mir::Expr::Const(vid),
-                                Ref::Runtime(source) => mir::Expr::LocalRef(source),
-                            };
-                            this.instr_stack_buf
-                                .push(mir::Instruction::Set { target: mir_local, expr: mir_expr });
-                            Ok(Ref::Runtime(mir_local))
-                        })();
-                        this.bindings.insert_no_prev(local, Local { state, span: expr.span });
+                        this.eval_set_mut(local, r#type, expr)?
                     }
                     InstructionKind::Eval(expr) => {
                         let _ = this.eval_expr(expr).value()?;
@@ -221,20 +247,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
-    pub fn ensure_materialized(&mut self, state: Ref) -> mir::LocalId {
+    pub fn ensure_materialized(&mut self, state: LocalState) -> mir::LocalId {
         match state {
-            Ref::Runtime(mir) => mir,
-            Ref::Comptime(vid) => self.materialize(vid),
+            LocalState::Runtime(mir) => mir,
+            LocalState::Comptime(vid) => self.materialize(vid),
         }
     }
 
-    pub fn alloc_anon_mir(&mut self, ty: TypeId) -> mir::LocalId {
+    pub fn alloc_mir(&mut self, ty: TypeId) -> mir::LocalId {
         self.mir_types.push(ty)
     }
 
     pub fn materialize(&mut self, vid: ValueId) -> mir::LocalId {
         let ty = self.values.type_of_value(vid);
-        let local = self.alloc_anon_mir(ty);
+        let local = self.alloc_mir(ty);
         self.instr_stack_buf
             .push(mir::Instruction::Set { target: local, expr: mir::Expr::Const(vid) });
         local
@@ -244,10 +270,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         SrcLoc::new(self.source, span)
     }
 
-    pub fn eval_expr(&mut self, expr: hir::Expr) -> EvalResult {
+    pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<EvalValue, EvalError> {
         let expr_loc = self.loc(expr.span);
         match expr.kind {
-            ExprKind::Value(maybe_vid) => Ok(Ref::Comptime(maybe_vid?)),
+            ExprKind::Value(maybe_vid) => Ok(EvalValue::Comptime(maybe_vid?)),
             ExprKind::EvmBuiltinCall { builtin, args } => {
                 self.eval_builtin(builtin, args, expr_loc)
             }

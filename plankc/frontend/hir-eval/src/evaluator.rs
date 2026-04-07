@@ -60,6 +60,10 @@ impl<'a> Evaluator<'a> {
         todo!()
     }
 
+    pub fn emit(&mut self, instr: mir::Instruction) {
+        self.instr_stack_buf.push(instr);
+    }
+
     pub fn lower_entrypoint(&mut self, block: hir::BlockId) -> mir::FnId {
         let source = self.hir.entry_source;
         let mut scope = Scope {

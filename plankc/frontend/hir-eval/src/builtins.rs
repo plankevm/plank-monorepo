@@ -4,7 +4,7 @@ use plank_mir as mir;
 use plank_session::{EvmBuiltin, MaybePoisoned, SrcLoc};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
-use crate::scope::{BlockDiverge, EvalError, EvalResult, Ref, Scope};
+use crate::scope::{EvalError, EvalValue, LocalState, Scope};
 use plank_session::Poisoned;
 
 fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
@@ -78,7 +78,7 @@ impl Scope<'_, '_> {
         builtin: EvmBuiltin,
         args: hir::CallArgsId,
         expr_loc: SrcLoc,
-    ) -> EvalResult {
+    ) -> Result<EvalValue, EvalError> {
         self.with_types_buf(|this, types_buf_offset| {
             let args = &this.hir.call_args[args];
             for &arg in args {
@@ -103,8 +103,8 @@ impl Scope<'_, '_> {
                 let folded = this.with_values_buf::<MaybePoisoned<_>>(|this, values_buf_offset| {
                     for &arg in args {
                         match this.bindings[arg].state? {
-                            Ref::Comptime(vid) => this.values_buf.push(vid),
-                            Ref::Runtime(_) => return Ok(None),
+                            LocalState::Comptime(vid) => this.values_buf.push(vid),
+                            LocalState::Runtime(_) => return Ok(None),
                         }
                     }
                     Ok(Some(fold_pure_builtin(
@@ -114,7 +114,7 @@ impl Scope<'_, '_> {
                     )))
                 });
                 if let Some(folded) = folded? {
-                    return Ok(Ref::Comptime(folded));
+                    return Ok(EvalValue::Comptime(folded));
                 }
             }
             if this.is_comptime() {
@@ -132,14 +132,16 @@ impl Scope<'_, '_> {
                 }
                 this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
             });
-            let target = this.alloc_anon_mir(result_type);
-            let expr = mir::Expr::BuiltinCall { builtin, args };
-            this.instr_stack_buf.push(mir::Instruction::Set { target, expr });
 
+            let expr = mir::Expr::BuiltinCall { builtin, args };
             if result_type == TypeId::NEVER {
+                // We diverge after this so we need to make sure the call is actually included.
+                let target = this.alloc_mir(result_type);
+                this.eval.emit(mir::Instruction::Set { target, expr });
                 return Err(EvalError::NEVER);
             }
-            Ok(Ref::Runtime(target))
+
+            Ok(EvalValue::Runtime { expr, result_type })
         })
     }
 }
