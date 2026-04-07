@@ -65,9 +65,34 @@ jobs:
           name: plank-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ env.ASSET_NAME }}
 
+  vscode-extension:
+    name: Build VS Code Extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install vsce
+        run: npm install -g @vscode/vsce
+
+      - name: Package extension
+        working-directory: plank-vscode
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          vsce package -o "plankevm-${TAG}.vsix"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: plank-vscode/plankevm-*.vsix
+
   release:
     name: Create Release
-    needs: build
+    needs: [build, vscode-extension]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -90,5 +115,6 @@ jobs:
         with:
           files: |
             artifacts/plank-*.tar.gz
+            artifacts/plankevm-*.vsix
             artifacts/checksums.txt
           generate_release_notes: true

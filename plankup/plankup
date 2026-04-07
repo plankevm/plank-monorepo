@@ -183,7 +183,100 @@ main() {
     chmod +x "$PLANK_BIN_DIR/plank"
 
     say "plank $version installed to $PLANK_BIN_DIR/plank"
+
+    # VS Code extension install/update
+    install_vscode_extension "$version" "$tmpdir"
+
     say "run 'plank --help' to get started"
+}
+
+editor_display_name() {
+    case "$1" in
+        *code)   echo "VS Code" ;;
+        *cursor) echo "Cursor" ;;
+        *codium) echo "VSCodium" ;;
+        *)       echo "$1" ;;
+    esac
+}
+
+resolve_editor_cmd() {
+    local cmd="$1"
+    if command -v "$cmd" > /dev/null 2>&1; then
+        echo "$cmd"
+        return
+    fi
+    # Fallback: find macOS .app bundles via Spotlight
+    if [ "$PLATFORM" = "darwin" ] && command -v mdfind > /dev/null 2>&1; then
+        local bundle_id=""
+        case "$cmd" in
+            code)   bundle_id="com.microsoft.VSCode" ;;
+            cursor) bundle_id="com.todesktop.230313mzl4w4u92" ;;
+            codium) bundle_id="com.vscodium" ;;
+        esac
+        if [ -n "$bundle_id" ]; then
+            local app_dir
+            app_dir=$(mdfind "kMDItemCFBundleIdentifier == '$bundle_id'" 2>/dev/null | head -1)
+            if [ -n "$app_dir" ]; then
+                local bin_path="$app_dir/Contents/Resources/app/bin/$cmd"
+                if [ -x "$bin_path" ]; then
+                    echo "$bin_path"
+                    return
+                fi
+            fi
+        fi
+    fi
+}
+
+is_extension_installed() {
+    local editor="$1"
+    "$editor" --list-extensions 2>/dev/null | grep -qi "^plankevm$"
+}
+
+should_install_extension() {
+    local editor="$1"
+    local editor_name=$(editor_display_name "$editor")
+
+    if is_extension_installed "$editor"; then
+        say "updating Plank extension for $editor_name..."
+        return 0
+    fi
+
+    printf "plankup: install Plank syntax highlighting for %s? [y/N] " "$editor_name"
+    read -r answer
+    if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
+        return 0
+    fi
+    return 1
+}
+
+install_vscode_extension() {
+    local version="$1"
+    local tmpdir="$2"
+    local downloaded=false
+
+    local vsix_name="plankevm-${version}.vsix"
+    local vsix_url="$GITHUB_DOWNLOAD/$version/$vsix_name"
+
+    for cmd in code cursor codium; do
+        local resolved=$(resolve_editor_cmd "$cmd")
+        if [ -z "$resolved" ]; then
+            continue
+        fi
+        if ! should_install_extension "$resolved"; then
+            continue
+        fi
+
+        local editor_name=$(editor_display_name "$resolved")
+
+        if [ "$downloaded" = false ]; then
+            download "$vsix_url" "$tmpdir/$vsix_name"
+            downloaded=true
+        fi
+
+        "$resolved" --install-extension "$tmpdir/$vsix_name" --force > /dev/null 2>&1 \
+            && say "Plank extension installed for $editor_name" \
+            || warn "failed to install extension for $editor_name"
+    done
 }
 
 main "$@"

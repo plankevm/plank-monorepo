@@ -6,6 +6,11 @@
   "engines": {
     "vscode": "^1.75.0"
   },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/plankevm/plank-monorepo"
+  },
   "categories": ["Programming Languages"],
   "contributes": {
     "languages": [

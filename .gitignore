@@ -1,3 +1,4 @@
 target/
 .DS_Store
 plank-tree-sitter/Cargo.lock
+*.vsix
