@@ -1,0 +1,33 @@
+{
+  "name": "plankevm",
+  "displayName": "Plank (plankevm)",
+  "description": "Syntax highlighting for Plank, a programming language for EVM smart contract development",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "plank",
+        "aliases": ["Plank", "plank", "plankevm"],
+        "extensions": [".plk"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "plank",
+        "scopeName": "source.plank",
+        "path": "./syntaxes/plank.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[plank]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+      }
+    }
+  }
+}
