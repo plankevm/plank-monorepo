@@ -350,6 +350,23 @@ impl DiagCtx<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
+    pub fn emit_struct_def_duplicate_field(
+        &mut self,
+        source: SourceId,
+        str_name: StrId,
+        first: SourceByteOffset,
+        duplicate: SourceByteOffset,
+    ) {
+        let (name, first) = self.session.lookup_name_spanned(str_name, first);
+        let (_, duplicate) = self.session.lookup_name_spanned(str_name, duplicate);
+        let diagnostic = Diagnostic::error("duplicate field name in struct definition").element(
+            Annotations::new(source)
+                .primary(duplicate, format!("`{name}` assigned more than once"))
+                .secondary(first, "first assigned here"),
+        );
+        self.session.emit_diagnostic(diagnostic);
+    }
+
     pub fn emit_struct_duplicate_field(
         &mut self,
         field_name: StrId,

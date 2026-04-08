@@ -1911,3 +1911,22 @@ fn test_comptime_block_type_result() {
         "#,
     );
 }
+
+#[test]
+fn test_struct_def_duplicate_field() {
+    assert_diagnostics(
+        r#"
+        const S = struct { x: u256, x: bool };
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: duplicate field name in struct definition
+         --> main.plk:1:29
+          |
+        1 | const S = struct { x: u256, x: bool };
+          |                    -        ^ `x` assigned more than once
+          |                    |
+          |                    first assigned here
+        "#],
+    );
+}

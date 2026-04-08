@@ -411,11 +411,23 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     });
 
                 let mut fields_poisoned = false;
-                for &field in &this.hir.fields[struct_def.fields] {
+                let fields = &this.hir.fields[struct_def.fields];
+                for (i, &field) in fields.iter().enumerate() {
                     let Ok(ty) = this.expect_type(field.value) else {
                         fields_poisoned = true;
                         continue;
                     };
+                    if let Some(first_offset) = fields[..i].iter().find_map(|prev_field| {
+                        (prev_field.name == field.name).then_some(prev_field.name_offset)
+                    }) {
+                        this.eval.diag_ctx.emit_struct_def_duplicate_field(
+                            this.source,
+                            field.name,
+                            first_offset,
+                            field.name_offset,
+                        );
+                        fields_poisoned = true;
+                    }
                     this.types_buf.push(ty);
                     this.strings_buf.push(field.name);
                 }
