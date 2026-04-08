@@ -28,7 +28,7 @@ pub fn run_test_cases<'a>(
         let schedule = scheduler.schedule(&case.operation_graph, &case.stack_config);
         let solve_time = start.elapsed();
 
-        let verifier = Verifier::new(&case.operation_graph, &case.stack_config, &schedule);
+        let mut verifier = Verifier::new(&case.operation_graph, &case.stack_config, &schedule);
         let verify_result = verifier.verify();
 
         BenchmarkResult { name: case.name.clone(), result: verify_result, solve_time }
