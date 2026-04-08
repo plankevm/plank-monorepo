@@ -1,17 +1,17 @@
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::Session;
+use plank_session::{MaybePoisoned, Session};
 use plank_values::{TypeId, TypeInterner, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
-    scope::{Function, Scope},
+    scope::{Function, LocalState, Scope},
 };
 
 enum ConstState {
     InProgress,
-    Evaluated(ValueId),
+    Evaluated(MaybePoisoned<ValueId>),
 }
 
 pub(crate) struct Evaluator<'a> {
@@ -56,12 +56,38 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    pub fn evaluate_const(&mut self, const_id: ConstId) -> ValueId {
-        todo!()
-    }
+    pub fn evaluate_const(&mut self, const_id: ConstId) -> MaybePoisoned<ValueId> {
+        match self.evaluated_consts.get(const_id) {
+            Some(&ConstState::Evaluated(vid)) => return vid,
+            Some(ConstState::InProgress) => todo!("cyclical const error"),
+            None => {}
+        };
 
-    pub fn emit(&mut self, instr: mir::Instruction) {
-        self.instr_stack_buf.push(instr);
+        self.evaluated_consts.insert_no_prev(const_id, ConstState::InProgress);
+
+        let const_def = self.hir.consts[const_id];
+        let mut scope = Scope {
+            eval: self,
+            source: const_def.source_id,
+            func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
+            comptime: true,
+            bindings: DenseIndexMap::new(),
+            mir_types: IndexVec::new(),
+        };
+
+        for &instr in &scope.hir.block_instrs[const_def.body] {
+            scope.eval_instr(instr).expect("todo: handle comptime diverge");
+        }
+
+        let value = scope.bindings[const_def.result].state.map(|state| match state {
+            LocalState::Comptime(vid) => vid,
+            LocalState::Runtime(_) => {
+                unreachable!("local in comptime set to runtime instead of poisoned")
+            }
+        });
+        self.evaluated_consts.insert(const_id, ConstState::Evaluated(value));
+
+        value
     }
 
     pub fn lower_entrypoint(&mut self, block: hir::BlockId) -> mir::FnId {
@@ -77,7 +103,7 @@ impl<'a> Evaluator<'a> {
 
         let body = scope.eval_fn_body(block);
 
-        let fn_id1 = self.mir_fn_locals.push_iter(std::iter::empty());
+        let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.mir_types);
         let fn_id2 =
             self.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::NEVER });
         assert_eq!(fn_id1, fn_id2);

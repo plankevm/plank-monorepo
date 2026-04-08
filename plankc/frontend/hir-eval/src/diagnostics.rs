@@ -12,7 +12,7 @@ impl<'a> DiagCtx<'a> {
 }
 
 impl DiagCtx<'_> {
-    pub fn emit_type_mismatch_error(
+    pub fn emit_type_mismatch(
         &mut self,
         types: &TypeInterner,
         expected_ty: TypeId,

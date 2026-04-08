@@ -38,10 +38,12 @@ fn render_project_diagnostics(test_project: TestProject) -> Vec<String> {
     session.diagnostics().iter().map(|d| d.render_plain(&session)).collect()
 }
 
+#[track_caller]
 fn assert_diagnostics(source: &str, expected: &[&str]) {
     assert_project_diagnostics(TestProject::root(source), expected)
 }
 
+#[track_caller]
 fn assert_project_diagnostics(test_project: TestProject, expected: &[&str]) {
     let actual = render_project_diagnostics(test_project);
     let expected: Vec<String> =

@@ -2,7 +2,7 @@ use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{
-    MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
+    EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
 };
 use plank_values::{TypeId, Value, ValueId};
 
@@ -55,6 +55,7 @@ pub(crate) enum LocalState {
     Comptime(ValueId),
 }
 
+#[derive(Debug)]
 pub(crate) enum BlockDiverge {
     Never,
     Return(ValueId),
@@ -102,6 +103,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         }
         mir_block
+    }
+
+    pub fn emit(&mut self, instr: mir::Instruction) {
+        assert!(!self.is_comptime());
+        self.eval.instr_stack_buf.push(instr);
     }
 
     pub fn state_type(&self, state: LocalState) -> TypeId {
@@ -198,7 +204,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if actual_ty.is_assignable_to(expected_ty) {
             Ok(())
         } else {
-            self.eval.diag_ctx.emit_type_mismatch_error(
+            self.eval.diag_ctx.emit_type_mismatch(
                 &self.eval.types,
                 expected_ty,
                 self.loc(expected_span),
@@ -282,7 +288,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
-    fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), BlockDiverge> {
+    pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), BlockDiverge> {
         match instr.kind {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr } => {
@@ -354,15 +360,55 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         SrcLoc::new(self.source, span)
     }
 
+    pub fn eval_logical_not(&mut self, local: hir::LocalId) -> MaybePoisoned<EvalValue> {
+        let binding = self.bindings[local];
+        let state = binding.state?;
+        let ty = self.state_type(state);
+        if !ty.is_assignable_to(TypeId::BOOL) {
+            self.eval.diag_ctx.emit_type_mismatch_simple(
+                &self.eval.types,
+                TypeId::BOOL,
+                ty,
+                self.loc(binding.span),
+            );
+            return Err(Poisoned);
+        }
+        let value = match state {
+            LocalState::Runtime(mir) => {
+                let args = self.mir_args.push_copy_slice(&[mir]);
+                EvalValue::Runtime {
+                    expr: mir::Expr::BuiltinCall { builtin: EvmBuiltin::IsZero, args },
+                    result_type: TypeId::BOOL,
+                }
+            }
+            LocalState::Comptime(ValueId::FALSE) => EvalValue::Comptime(ValueId::TRUE),
+            LocalState::Comptime(ValueId::TRUE) => EvalValue::Comptime(ValueId::FALSE),
+            LocalState::Comptime(_) => unreachable!("already type checked"),
+        };
+        Ok(value)
+    }
+
     pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, BlockDiverge> {
         let expr_loc = self.loc(expr.span);
-        match expr.kind {
-            ExprKind::Value(maybe_vid) => Ok(maybe_vid.map(EvalValue::Comptime)),
+        let value = match expr.kind {
+            ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
             ExprKind::EvmBuiltinCall { builtin, args } => {
-                Ok(self.eval_builtin(builtin, args, expr_loc).value()?)
+                self.eval_builtin(builtin, args, expr_loc).value()?
+            }
+            ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {
+                LocalState::Comptime(vid) => EvalValue::Comptime(vid),
+                LocalState::Runtime(local) => EvalValue::Runtime {
+                    expr: mir::Expr::LocalRef(local),
+                    result_type: self.mir_types[local],
+                },
+            }),
+            ExprKind::LogicalNot { input } => self.eval_logical_not(input),
+            ExprKind::ConstRef(const_id) => {
+                self.eval.evaluate_const(const_id).map(EvalValue::Comptime)
             }
             expr_kind => todo!("expr_kind: {expr_kind:?}"),
-        }
+        };
+        Ok(value)
     }
 
     pub fn with_values_buf<R>(&mut self, inner: impl FnOnce(&mut Self, usize) -> R) -> R {

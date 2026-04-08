@@ -137,7 +137,7 @@ impl Scope<'_, '_> {
             if result_type == TypeId::NEVER {
                 // We diverge after this so we need to make sure the call is actually included.
                 let target = this.alloc_mir(result_type);
-                this.eval.emit(mir::Instruction::Set { target, expr });
+                this.emit(mir::Instruction::Set { target, expr });
                 return Err(EvalError::NEVER);
             }
 
