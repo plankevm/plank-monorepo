@@ -390,15 +390,15 @@ impl BlockLowerer<'_> {
                 let source_id = self.source_id;
                 let span = struct_def.node().span();
                 let source_span = self.lexed.tokens_src_span(span);
-                let type_index = struct_def
-                    .index_expr()
-                    .map(|expr| self.lower_expr_to_local(expr))
-                    .unwrap_or_else(|| {
+                let type_index = match struct_def.index_expr() {
+                    Some(expr) => self.lower_expr_to_local(expr),
+                    None => {
                         let local = self.alloc_temp();
                         let expr = self.expr(ExprKind::VOID, struct_def.node().span());
                         self.emit(InstructionKind::Set { local, r#type: None, expr });
                         local
-                    });
+                    }
+                };
                 let buf_start = self.field_buf.len();
                 for result in struct_def.fields() {
                     let Ok(field) = result else { continue };
