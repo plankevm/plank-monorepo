@@ -1,5 +1,5 @@
 use crate::module::ModuleResolveError;
-use plank_session::{Diagnostic, Session, SourceId, SourceSpan, StrId};
+use plank_session::{ClaimBuilder, Diagnostic, Session, SourceId, SourceSpan, StrId};
 use std::path::Path;
 
 pub fn error_duplicate_module(session: &mut Session, name: StrId) {

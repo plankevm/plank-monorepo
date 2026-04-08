@@ -1,6 +1,7 @@
 use plank_parser::lexer::{Token, TokenSpan};
 use plank_session::{
-    Annotations, Claim, Diagnostic, Element, Level, Session, SourceId, SourceSpan, StrId,
+    Annotations, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId, SourceSpan,
+    StrId,
 };
 
 use super::BlockLowerer;
@@ -87,7 +88,7 @@ impl BlockLowerer<'_> {
                 self.lexed.tokens_src_span(span),
                 format!("only the entry file may contain `{kind}`"),
             )
-            .add_claim(
+            .claim(
                 Claim::new(Level::Note, "entry file")
                     .element(Element::Origin { path: SourceId::ROOT }),
             );
@@ -145,7 +146,7 @@ impl BlockLowerer<'_> {
                 self.lexed.tokens_src_span(span),
                 format!("'{name_str}' not found in target module"),
             )
-            .add_claim(
+            .claim(
                 Claim::new(Level::Info, format!("no definition of '{name_str}' found in file"))
                     .element(Element::Origin { path: target_source }),
             );

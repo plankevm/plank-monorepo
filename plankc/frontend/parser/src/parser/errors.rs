@@ -1,4 +1,4 @@
-use plank_session::{AnnotationKind, Annotations, Diagnostic, SourceSpan};
+use plank_session::{AnnotationKind, Annotations, ClaimBuilder, Diagnostic, SourceSpan};
 
 use crate::{
     lexer::{ErrorToken, Token, TokenIdx},

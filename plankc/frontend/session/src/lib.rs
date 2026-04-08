@@ -4,7 +4,7 @@ pub mod poison;
 pub mod types;
 
 pub use builtins::EvmBuiltin;
-pub use diagnostic::{AnnotationKind, Annotations, Claim, Diagnostic, Element, Level, SrcLoc};
+pub use diagnostic::*;
 pub use poison::{MaybePoisoned, Poisoned};
 pub use types::TypeId;
 
