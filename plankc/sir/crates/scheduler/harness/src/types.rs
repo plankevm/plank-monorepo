@@ -1,5 +1,7 @@
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use plank_core::{DenseIndexMap, IndexVec, newtype_index};
+
+use crate::intra_instr_scheduling::{IntraInstrError, IntraInstrStrategy};
 
 newtype_index! {
     pub struct ValueId;
@@ -50,8 +52,14 @@ pub enum StackConfig {
 pub trait Scheduler {
     fn schedule(&self, graph: &OperationGraph, config: &StackConfig) -> Schedule;
 
-    fn intra_instr_schedule(&self, current: &[ValueId], target: &[ValueId]) -> Vec<ScheduledOp> {
-        todo!()
+    fn intra_instr_schedule(
+        &self,
+        current: &[ValueId],
+        target: &[ValueId],
+        spilled: Option<&HashMap<u32, ValueId>>,
+        strategy: IntraInstrStrategy,
+    ) -> Result<Vec<ScheduledOp>, IntraInstrError> {
+        strategy.solve(current, target, spilled)
     }
 }
 
