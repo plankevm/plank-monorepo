@@ -154,9 +154,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         expr: hir::Expr,
     ) -> Result<(), BlockDiverge> {
         let value = self.eval_expr(expr)?;
-        let value = r#type.map_or(value, |type_local| {
+        let value = value.and_then(|value| {
+            let Some(type_local) = r#type else {
+                return Ok(value);
+            };
             let expected_ty = self.expect_type(type_local)?;
-            let actual_ty = self.value_type(value?);
+            let actual_ty = self.value_type(value);
             if !actual_ty.is_assignable_to(expected_ty) {
                 self.eval.diag_ctx.emit_type_mismatch_error(
                     &self.eval.types,
@@ -167,7 +170,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 );
                 return Err(Poisoned);
             }
-            value
+            Ok(value)
         });
         let state = value.and_then(|value| match value {
             EvalValue::Comptime(vid) => Ok(LocalState::Comptime(vid)),
@@ -210,19 +213,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let state = value.and_then(|value| {
             if self.is_comptime() {
-                match value {
-                    EvalValue::Comptime(vid) => Ok(LocalState::Comptime(vid)),
-                    EvalValue::Runtime { expr: _, result_type: _ } => {
-                        self.eval.diag_ctx.emit_comptime_local_not_available(self.loc(expr.span));
-                        Err(Poisoned)
-                    }
-                }
+                self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
             } else {
                 let target = self.alloc_mir(self.value_type(value));
-                let expr = match value {
-                    EvalValue::Comptime(vid) => mir::Expr::Const(vid),
-                    EvalValue::Runtime { expr, result_type: _ } => expr,
-                };
+                let expr = self.to_runtime_value(value);
                 self.emit(mir::Instruction::Set { target, expr });
                 Ok(LocalState::Runtime(target))
             }
@@ -241,6 +235,46 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
+    fn to_runtime_value(&mut self, value: EvalValue) -> mir::Expr {
+        match value {
+            EvalValue::Comptime(vid) => mir::Expr::Const(vid),
+            EvalValue::Runtime { result_type: _, expr } => expr,
+        }
+    }
+
+    fn expect_comptime_value(
+        &mut self,
+        value: EvalValue,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<ValueId> {
+        match value {
+            EvalValue::Comptime(vid) => Ok(vid),
+            EvalValue::Runtime { result_type: _, expr: _ } => {
+                self.eval.diag_ctx.emit_runtime_eval_in_comptime(self.loc(expr_span));
+                Err(Poisoned)
+            }
+        }
+    }
+
+    fn expect_comptime_state(
+        &mut self,
+        value: LocalState,
+        local_span: SourceSpan,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<ValueId> {
+        match value {
+            LocalState::Comptime(vid) => Ok(vid),
+            LocalState::Runtime(_) => {
+                self.eval.diag_ctx.emit_runtime_assign_from_comptime(
+                    self.source,
+                    local_span,
+                    expr_span,
+                );
+                Err(Poisoned)
+            }
+        }
+    }
+
     fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), BlockDiverge> {
         match instr.kind {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
@@ -250,86 +284,53 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::Assign { target, expr } => {
                 let value = self.eval_expr(expr)?;
                 let local = self.bindings[target];
+                let new_state = local.state.zip(value).and_then(|(state, value)| {
+                    let expected_ty = self.state_type(state);
+                    let actual_ty = self.value_type(value);
+                    let type_mismatch = !actual_ty.is_assignable_to(expected_ty);
+                    if type_mismatch {
+                        self.eval.diag_ctx.emit_type_mismatch_error(
+                            &self.eval.types,
+                            expected_ty,
+                            self.loc(local.span),
+                            actual_ty,
+                            self.loc(expr.span),
+                        );
+                        return Err(Poisoned);
+                    }
 
-                match (local.state.zip(value), self.is_comptime()) {
-                    (Err(Poisoned), _) => {
-                        // Already poisoned, so we don't even type check to supress
-                        // potential error cascades.
-                        self.bindings[target].state = Err(Poisoned);
+                    if self.is_comptime() {
+                        let state = self.expect_comptime_state(state, local.span, expr.span);
+                        let value = self.expect_comptime_value(value, expr.span);
+                        state.and(value).map(LocalState::Comptime)
+                    } else {
+                        let LocalState::Runtime(target) = state else {
+                            unreachable!("invariant: runtime assign to comptime state")
+                        };
+                        let expr = self.to_runtime_value(value);
+                        self.emit(mir::Instruction::Set { target, expr });
+                        Ok(LocalState::Runtime(target))
                     }
-                    (Ok((state, value)), true) => {
-                        let (state, expected_ty) = match state {
-                            LocalState::Comptime(vid) => (Ok(vid), self.values.type_of_value(vid)),
-                            LocalState::Runtime(mir_local) => {
-                                self.eval.diag_ctx.emit_runtime_assign_from_comptime(
-                                    self.source,
-                                    local.span,
-                                    expr.span,
-                                );
-                                (Err(Poisoned), self.mir_types[mir_local])
-                            }
-                        };
-                        let (value, actual_ty) = match value {
-                            EvalValue::Comptime(vid) => (Ok(vid), self.values.type_of_value(vid)),
-                            EvalValue::Runtime { result_type, expr: _ } => {
-                                self.eval
-                                    .diag_ctx
-                                    .emit_runtime_eval_in_comptime(self.loc(expr.span));
-                                (Err(Poisoned), result_type)
-                            }
-                        };
-                        if !actual_ty.is_assignable_to(expected_ty) {
-                            self.eval.diag_ctx.emit_type_mismatch_error(
-                                &self.eval.types,
-                                expected_ty,
-                                self.loc(local.span),
-                                actual_ty,
-                                self.loc(expr.span),
-                            );
-                        }
-                        self.bindings[target].state = match (state, value) {
-                            (Ok(_), Ok(value)) => Ok(LocalState::Comptime(value)),
-                            (Err(Poisoned), _) | (_, Err(Poisoned)) => Err(Poisoned),
-                        };
+                });
+                self.bindings[target].state = new_state;
+            }
+            InstructionKind::Eval(expr) => {
+                let value = self.eval_expr(expr)?;
+                if self.is_comptime() {
+                    if let Ok(value) = value {
+                        let _ = self.expect_comptime_value(value, expr.span);
                     }
-                    (Ok((state, value)), false) => {
-                        let LocalState::Runtime(mir_local) = state else {
-                            unreachable!("runtime assign to value with existing mutable state")
-                        };
-                        let (mir_expr, actual_ty) = match value {
-                            EvalValue::Comptime(vid) => {
-                                (mir::Expr::Const(vid), self.values.type_of_value(vid))
-                            }
-                            EvalValue::Runtime { expr, result_type } => (expr, result_type),
-                        };
-                        let expected_ty = self.mir_types[mir_local];
-                        if !actual_ty.is_assignable_to(expected_ty) {
-                            self.eval.diag_ctx.emit_type_mismatch_error(
-                                &self.eval.types,
-                                expected_ty,
-                                self.loc(local.span),
-                                actual_ty,
-                                self.loc(expr.span),
-                            );
-                            self.bindings[target].state = Err(Poisoned);
-                        }
-                        self.emit(mir::Instruction::Set { target: mir_local, expr: mir_expr });
+                } else {
+                    if let Ok(EvalValue::Runtime { expr, result_type }) = value {
+                        // Lower incase the expression has side effect.
+                        let target = self.alloc_mir(result_type);
+                        self.emit(mir::Instruction::Set { target, expr });
+                    } else {
+                        // In a runtime context don't have to lower comptime or poison as they have
+                        // no side effects.
                     }
                 }
             }
-            InstructionKind::Eval(expr) => match self.eval_expr(expr)? {
-                Ok(EvalValue::Runtime { .. }) if self.is_comptime() => {
-                    self.eval.diag_ctx.emit_runtime_eval_in_comptime(self.loc(expr.span));
-                }
-                Ok(EvalValue::Runtime { expr, result_type }) => {
-                    // Lower incase the expression has side effect.
-                    let target = self.alloc_mir(result_type);
-                    self.emit(mir::Instruction::Set { target, expr });
-                }
-                Err(Poisoned) | Ok(EvalValue::Comptime(_)) => {
-                    // Value with no side effect, do nothing.
-                }
-            },
             instr => todo!("instr: {instr:?}"),
         };
         Ok(())
