@@ -1,15 +1,15 @@
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Session};
-use plank_values::{TypeId, TypeInterner, ValueId, ValueInterner};
+use plank_session::{MaybePoisoned, Session, StrId};
+use plank_values::{TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
     scope::{Function, LocalState, Scope},
 };
 
-enum ConstState {
+pub(crate) enum ConstState {
     InProgress,
     Evaluated(MaybePoisoned<ValueId>),
 }
@@ -32,6 +32,7 @@ pub(crate) struct Evaluator<'a> {
     pub types_buf: Vec<TypeId>,
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
+    pub strings_buf: Vec<StrId>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -53,6 +54,7 @@ impl<'a> Evaluator<'a> {
             types_buf: Vec::new(),
             locals_buf: Vec::new(),
             values_buf: Vec::new(),
+            strings_buf: Vec::new(),
         }
     }
 
@@ -86,8 +88,15 @@ impl<'a> Evaluator<'a> {
             }
         });
         self.evaluated_consts.insert(const_id, ConstState::Evaluated(value));
+        self.try_name_type(const_def.name, value);
 
         value
+    }
+
+    fn try_name_type(&mut self, name: StrId, value: MaybePoisoned<ValueId>) {
+        if let Ok(Value::Type(ty)) = value.map(|vid| self.values.lookup(vid)) {
+            self.types.try_set_struct_name(ty, name);
+        }
     }
 
     pub fn lower_entrypoint(&mut self, block: hir::BlockId) -> mir::FnId {

@@ -36,7 +36,7 @@ impl DiagCtx<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_type_constraint_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
+    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("value used as type").primary(
             loc.source,
             loc.span,
@@ -175,9 +175,16 @@ impl DiagCtx<'_> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub fn emit_struct_field_type_not_comptime(&mut self, loc: SrcLoc) {
+    pub fn emit_struct_field_type_not_comptime(&mut self, name: StrId, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("struct definition requires compile-time values")
-            .primary(loc.source, loc.span, "field type is not known at compile time");
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "type for field `{}` not compile-time known",
+                    self.session.lookup_name(name)
+                ),
+            );
         self.session.emit_diagnostic(diagnostic);
     }
 

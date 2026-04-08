@@ -835,11 +835,11 @@ fn test_runtime_struct_def_field_type_not_comptime() {
         }
         "#,
         &[r#"
-        error: struct definition requires compile-time values
+        error: type must be known at compile time
          --> main.plk:3:25
           |
         3 |     let S = struct { x: T };
-          |                         ^ field type is not known at compile time
+          |                         ^ not known at compile time
         "#],
     );
 }

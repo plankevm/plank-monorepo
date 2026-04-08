@@ -1,10 +1,10 @@
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, InstructionKind};
+use plank_hir::{self as hir, ExprKind, InstructionKind, StructDef, StructDefId};
 use plank_mir as mir;
 use plank_session::{
     EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
 };
-use plank_values::{TypeId, Value, ValueId};
+use plank_values::{StructInfo, Type, TypeId, Value, ValueId};
 
 use crate::Evaluator;
 
@@ -147,7 +147,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
-            self.eval.diag_ctx.emit_type_constraint_not_type(&self.eval.types, actual_ty, type_loc);
+            self.eval.diag_ctx.emit_type_not_type(&self.eval.types, actual_ty, type_loc);
             return Err(Poisoned);
         };
         Ok(ty)
@@ -349,6 +349,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn materialize(&mut self, vid: ValueId) -> mir::LocalId {
+        // TODO: ensure comptime-only values cause diagnostic
         let ty = self.values.type_of_value(vid);
         let local = self.alloc_mir(ty);
         self.instr_stack_buf
@@ -388,6 +389,52 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(value)
     }
 
+    fn eval_struct_def(
+        &mut self,
+        struct_def_id: StructDefId,
+        def_expr_span: SourceSpan,
+    ) -> MaybePoisoned<TypeId> {
+        self.with_types_buf(|this, types_buf_offset| {
+            this.with_strings_buf(|this, strings_buf_offset| {
+                let struct_def = this.hir.struct_defs[struct_def_id];
+                let type_index =
+                    this.bindings[struct_def.type_index].poisoned().and_then(|(state, span)| {
+                        match state {
+                            LocalState::Comptime(vid) => Ok(vid),
+                            LocalState::Runtime(_) => {
+                                this.eval
+                                    .diag_ctx
+                                    .emit_struct_type_index_not_comptime(this.loc(span));
+                                Err(Poisoned)
+                            }
+                        }
+                    });
+
+                let mut fields_poisoned = false;
+                for &field in &this.hir.fields[struct_def.fields] {
+                    let Ok(ty) = this.expect_type(field.value) else {
+                        fields_poisoned = true;
+                        continue;
+                    };
+                    this.types_buf.push(ty);
+                    this.strings_buf.push(field.name);
+                }
+
+                if fields_poisoned {
+                    return Err(Poisoned);
+                }
+
+                let struct_ty = this.eval.types.intern(Type::Struct(StructInfo {
+                    loc: this.loc(def_expr_span),
+                    type_index: type_index?,
+                    field_types: &this.eval.types_buf[types_buf_offset..],
+                    field_names: &this.eval.strings_buf[strings_buf_offset..],
+                }));
+                Ok(struct_ty)
+            })
+        })
+    }
+
     pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, BlockDiverge> {
         let expr_loc = self.loc(expr.span);
         let value = match expr.kind {
@@ -406,6 +453,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::ConstRef(const_id) => {
                 self.eval.evaluate_const(const_id).map(EvalValue::Comptime)
             }
+            ExprKind::StructDef(struct_def_id) => self
+                .eval_struct_def(struct_def_id, expr.span)
+                .map(|ty| EvalValue::Comptime(self.values.intern(Value::Type(ty)))),
             expr_kind => todo!("expr_kind: {expr_kind:?}"),
         };
         Ok(value)
@@ -422,6 +472,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let buf_offset = self.types_buf.len();
         let res = inner(self, buf_offset);
         self.types_buf.truncate(buf_offset);
+        res
+    }
+
+    pub fn with_strings_buf<R>(&mut self, inner: impl FnOnce(&mut Self, usize) -> R) -> R {
+        let buf_offset = self.strings_buf.len();
+        let res = inner(self, buf_offset);
+        self.strings_buf.truncate(buf_offset);
         res
     }
 
