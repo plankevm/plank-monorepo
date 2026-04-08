@@ -1,5 +1,5 @@
-use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
-use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use hashbrown::{DefaultHashBuilder, HashSet, HashTable, hash_table::Entry};
+use plank_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_session::{Session, SrcLoc, StrId, TypeId, builtins::builtin_names};
 use std::{fmt, hash::BuildHasher};
 
@@ -86,7 +86,7 @@ pub struct TypeInterner {
 
 #[derive(Debug)]
 struct StructStorage {
-    comptime_only: DenseIndexSet<StructIdx>,
+    comptime_only: HashSet<StructIdx>,
     struct_fields: ListOfLists<StructIdx, TypeId>,
     struct_field_names: ListOfLists<StructIdx, StrId>,
     index_to_struct: IndexVec<StructIdx, StructExtraInfo>,
@@ -103,7 +103,7 @@ impl TypeInterner {
     pub fn new() -> Self {
         Self {
             storage: StructStorage {
-                comptime_only: DenseIndexSet::new(),
+                comptime_only: HashSet::new(),
                 struct_fields: Default::default(),
                 struct_field_names: Default::default(),
                 index_to_struct: Default::default(),
@@ -116,7 +116,7 @@ impl TypeInterner {
     pub fn with_capacity(structs: usize, fields: usize) -> Self {
         Self {
             storage: StructStorage {
-                comptime_only: DenseIndexSet::with_capacity_in_bits(structs),
+                comptime_only: HashSet::with_capacity(structs),
                 struct_fields: ListOfLists::with_capacities(structs, fields),
                 struct_field_names: ListOfLists::with_capacities(structs, fields),
                 index_to_struct: IndexVec::with_capacity(structs),
@@ -155,7 +155,7 @@ impl TypeInterner {
 
                 for &ty in r#struct.field_types {
                     if self.storage.comptime_only(ty) {
-                        self.storage.comptime_only.add(new_struct_idx);
+                        self.storage.comptime_only.insert(new_struct_idx);
                         break;
                     }
                 }
@@ -263,7 +263,7 @@ impl StructStorage {
             Ok(comptime_only) => return comptime_only,
             Err(struct_idx) => struct_idx,
         };
-        self.comptime_only.contains(struct_idx)
+        self.comptime_only.contains(&struct_idx)
     }
 }
 
