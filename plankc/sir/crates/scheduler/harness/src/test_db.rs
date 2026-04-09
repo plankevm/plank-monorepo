@@ -11,9 +11,9 @@ use crate::{
 
 pub fn entry_block_simple() -> TestCase {
     let mut builder = OperationGraphBuilder::new();
-    let op0 = builder.add_op(vec![], vec![ValueId::new(1)]);
-    let op1 = builder.add_op(vec![], vec![ValueId::new(2)]);
-    let op2 = builder.add_op(vec![ValueId::new(1), ValueId::new(2)], vec![ValueId::new(3)]);
+    let op0 = builder.add_op(vec![], vec![ValueId::new(1)], false);
+    let op1 = builder.add_op(vec![], vec![ValueId::new(2)], false);
+    let op2 = builder.add_op(vec![ValueId::new(1), ValueId::new(2)], vec![ValueId::new(3)], true);
     builder.must_precede(op0, op2);
     builder.must_precede(op1, op2);
 

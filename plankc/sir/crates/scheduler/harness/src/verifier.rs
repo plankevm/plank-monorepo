@@ -108,12 +108,22 @@ impl<'a> Verifier<'a> {
 
         let inputs = self.operation_graph.inputs(*op_idx);
         self.check_min_stack_depth(inputs.len(), idx)?;
-        for &expected in inputs {
-            let actual = self.stack.pop().unwrap();
-            if actual != expected {
-                return Err(VerifierError::OpInputMismatch { idx, op: *op_idx, expected, actual });
-            }
+        let inputs_start = self.stack.len() - inputs.len();
+        let mut actual = self.stack[inputs_start..].to_vec();
+        let mut expected = inputs.to_vec();
+        if self.operation_graph.commutative(*op_idx) {
+            actual.sort();
+            expected.sort();
         }
+        if let Some((expected, actual)) = expected.iter().zip(actual.iter()).find(|(e, a)| e != a) {
+            return Err(VerifierError::OpInputMismatch {
+                idx,
+                op: *op_idx,
+                expected: *expected,
+                actual: *actual,
+            });
+        }
+        self.stack.truncate(inputs_start);
 
         for &output in self.operation_graph.outputs(*op_idx) {
             self.stack.push(output);

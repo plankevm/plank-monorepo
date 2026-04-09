@@ -12,6 +12,7 @@ newtype_index! {
 struct OpNode {
     inputs: Vec<ValueId>,
     outputs: Vec<ValueId>,
+    commutative: bool,
 }
 
 pub struct OperationGraph {
@@ -36,6 +37,10 @@ impl OperationGraph {
         &self.operations[op].outputs
     }
 
+    pub fn commutative(&self, op: OpNodeIdx) -> bool {
+        self.operations[op].commutative
+    }
+
     pub fn must_precede(&self, op: OpNodeIdx) -> Option<&HashSet<OpNodeIdx>> {
         self.must_precede.get(op)
     }
@@ -52,8 +57,13 @@ impl OperationGraphBuilder {
         Self { operations: IndexVec::new(), must_precede: DenseIndexMap::new() }
     }
 
-    pub fn add_op(&mut self, inputs: Vec<ValueId>, outputs: Vec<ValueId>) -> OpNodeIdx {
-        self.operations.push(OpNode { inputs, outputs })
+    pub fn add_op(
+        &mut self,
+        inputs: Vec<ValueId>,
+        outputs: Vec<ValueId>,
+        commutative: bool,
+    ) -> OpNodeIdx {
+        self.operations.push(OpNode { inputs, outputs, commutative })
     }
 
     pub fn must_precede(&mut self, before: OpNodeIdx, after: OpNodeIdx) -> &mut Self {
