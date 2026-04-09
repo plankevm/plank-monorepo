@@ -22,10 +22,10 @@ fn pop_unneeded(
 ) -> Result<(), IntraInstrError> {
     // Scan bottom-to-top - we prioritize popping values closer to the top.
     let mut needed = vec![true; stack.len()];
-    for i in 0..stack.len() {
+    for (i, needed) in needed.iter_mut().enumerate() {
         match target_counts.get_mut(&stack.get(i)) {
             Some(count) if *count > 0 => *count -= 1,
-            _ => needed[i] = false,
+            _ => *needed = false,
         }
     }
     // Swap unneeded values to top and pop, working top-down.
@@ -50,8 +50,7 @@ fn fill_target(
 ) -> Result<(), IntraInstrError> {
     let mut stack_counts = stack.count_occurrences();
 
-    for pos in 0..target.len() {
-        let val = target[pos];
+    for (pos, &val) in target.iter().enumerate() {
         *target_counts.entry(val).or_default() -= 1;
 
         if pos < stack.len() && stack.get(pos) == val {

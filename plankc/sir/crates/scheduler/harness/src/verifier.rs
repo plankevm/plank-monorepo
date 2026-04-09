@@ -12,6 +12,17 @@ pub struct Metrics {
     gas_cost: u32,
 }
 
+impl Metrics {
+    pub fn instruction_count(&self) -> u32 {
+        self.instruction_count
+    }
+
+    pub fn gas_cost(&self) -> u32 {
+        self.gas_cost
+    }
+}
+
+#[derive(Debug)]
 pub enum VerifierError {
     InputStackMismatch { expected: Vec<ValueId>, actual: Vec<ValueId> },
     OutputStackMismatch { expected: Vec<ValueId>, actual: Vec<ValueId> },

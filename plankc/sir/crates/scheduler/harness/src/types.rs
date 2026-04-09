@@ -41,6 +41,31 @@ impl OperationGraph {
     }
 }
 
+#[derive(Default)]
+pub struct OperationGraphBuilder {
+    operations: IndexVec<OpNodeIdx, OpNode>,
+    must_precede: DenseIndexMap<OpNodeIdx, HashSet<OpNodeIdx>>,
+}
+
+impl OperationGraphBuilder {
+    pub fn new() -> Self {
+        Self { operations: IndexVec::new(), must_precede: DenseIndexMap::new() }
+    }
+
+    pub fn add_op(&mut self, inputs: Vec<ValueId>, outputs: Vec<ValueId>) -> OpNodeIdx {
+        self.operations.push(OpNode { inputs, outputs })
+    }
+
+    pub fn must_precede(&mut self, before: OpNodeIdx, after: OpNodeIdx) -> &mut Self {
+        self.must_precede.get_or_insert_with(after, HashSet::new).insert(before);
+        self
+    }
+
+    pub fn build(self) -> OperationGraph {
+        OperationGraph { operations: self.operations, must_precede: self.must_precede }
+    }
+}
+
 pub enum StackConfig {
     Flexible,
     Matching,
@@ -69,6 +94,10 @@ pub struct Schedule {
 }
 
 impl Schedule {
+    pub fn new(starting_stack: Vec<ValueId>, scheduled_ops: Vec<ScheduledOp>) -> Self {
+        Self { starting_stack, scheduled_ops: IndexVec::from_vec(scheduled_ops) }
+    }
+
     pub fn starting_stack(&self) -> &[ValueId] {
         &self.starting_stack
     }
