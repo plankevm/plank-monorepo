@@ -176,30 +176,36 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_struct_field_type_not_comptime(&mut self, name: StrId, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error("struct definition requires compile-time values")
+        let name = self.session.lookup_name(name);
+        Diagnostic::error("struct definition requires compile-time values")
             .primary(
                 loc.source,
                 loc.span,
-                format!(
-                    "type for field `{}` not compile-time known",
-                    self.session.lookup_name(name)
-                ),
-            );
-        self.session.emit_diagnostic(diagnostic);
+                format!("type for field `{name}` not compile-time known",),
+            )
+            .emit(self.session);
     }
 
-    pub fn emit_comptime_local_not_available(&mut self, loc: SrcLoc) {
-        let diagnostic = Diagnostic::error("runtime reference in comptime context")
-            .primary(loc.source, loc.span, "not known at compile time")
-            .note("comptime contexts can only reference values known at compile time");
-        self.session.emit_diagnostic(diagnostic);
+    pub fn emit_runtime_ref_in_comptime(
+        &mut self,
+        source: SourceId,
+        expr_span: SourceSpan,
+        runtime_def: SourceSpan,
+    ) {
+        Diagnostic::error("runtime reference in comptime context")
+            .element(
+                Annotations::new(source)
+                    .primary(expr_span, "expression with runtime reference")
+                    .secondary(runtime_def, "runtime value defined here"),
+            )
+            .note("comptime contexts can only reference values known at compile time")
+            .emit(self.session);
     }
 
     pub fn emit_runtime_eval_in_comptime(&mut self, expr: SrcLoc) {
-        let diagnostic =
-            Diagnostic::error("attmpting to evaluate runtime expression in comptime context")
-                .primary(expr.source, expr.span, "runtime expression");
-        self.session.emit_diagnostic(diagnostic);
+        Diagnostic::error("attempting to evaluate runtime expression in comptime context")
+            .primary(expr.source, expr.span, "runtime expression")
+            .emit(self.session);
     }
 
     pub fn emit_runtime_assign_from_comptime(
@@ -250,7 +256,15 @@ impl DiagCtx<'_> {
     pub fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
         let diagnostic = Diagnostic::error("not yet implemented")
             .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary));
+
         self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub fn emit_comptime_only_value_at_runtime(&mut self, use_loc: SrcLoc) {
+        Diagnostic::error("use of comptime only value at runtime")
+            .primary(use_loc.source, use_loc.span, "reference to comptime only value")
+            .info("`let mut` definitions and mutable assignments require runtime-compatible type")
+            .emit(self.session);
     }
 
     pub fn emit_no_matching_builtin_signature(

@@ -259,6 +259,10 @@ impl Diagnostic {
         self.render_with(session, Renderer::styled())
     }
 
+    pub fn emit(self, session: &mut Session) {
+        session.emit_diagnostic(self);
+    }
+
     fn render_with(&self, session: &Session, renderer: Renderer) -> String {
         let mut groups: Vec<Group<'_>> = Vec::new();
 
