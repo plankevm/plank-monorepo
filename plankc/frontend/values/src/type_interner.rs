@@ -20,8 +20,7 @@ pub struct StructExtraInfo {
 pub struct StructInfo<'a> {
     pub loc: SrcLoc,
     pub type_index: ValueId,
-    pub field_types: &'a [TypeId],
-    pub field_names: &'a [StrId],
+    pub fields: &'a [(StrId, TypeId)],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -87,8 +86,7 @@ pub struct TypeInterner {
 #[derive(Debug)]
 struct StructStorage {
     comptime_only: HashSet<StructIdx>,
-    struct_fields: ListOfLists<StructIdx, TypeId>,
-    struct_field_names: ListOfLists<StructIdx, StrId>,
+    struct_fields: ListOfLists<StructIdx, (StrId, TypeId)>,
     index_to_struct: IndexVec<StructIdx, StructExtraInfo>,
     hasher: DefaultHashBuilder,
 }
@@ -105,7 +103,6 @@ impl TypeInterner {
             storage: StructStorage {
                 comptime_only: HashSet::new(),
                 struct_fields: Default::default(),
-                struct_field_names: Default::default(),
                 index_to_struct: Default::default(),
                 hasher: Default::default(),
             },
@@ -118,7 +115,6 @@ impl TypeInterner {
             storage: StructStorage {
                 comptime_only: HashSet::with_capacity(structs),
                 struct_fields: ListOfLists::with_capacities(structs, fields),
-                struct_field_names: ListOfLists::with_capacities(structs, fields),
                 index_to_struct: IndexVec::with_capacity(structs),
                 hasher: Default::default(),
             },
@@ -143,25 +139,21 @@ impl TypeInterner {
         match entry {
             Entry::Occupied(occupied) => (*occupied.get()).into(),
             Entry::Vacant(vacant) => {
-                let field_struct_idx =
-                    self.storage.struct_fields.push_copy_slice(r#struct.field_types);
-                let name_struct_idx =
-                    self.storage.struct_field_names.push_copy_slice(r#struct.field_names);
+                let field_struct_idx = self.storage.struct_fields.push_copy_slice(r#struct.fields);
                 let new_struct_idx = self.storage.index_to_struct.push(StructExtraInfo {
                     loc: r#struct.loc,
                     type_index: r#struct.type_index,
                     name: None,
                 });
 
-                for &ty in r#struct.field_types {
+                for &(_name, ty) in r#struct.fields {
                     if self.storage.comptime_only(ty) {
                         self.storage.comptime_only.insert(new_struct_idx);
                         break;
                     }
                 }
 
-                debug_assert_eq!(new_struct_idx, field_struct_idx);
-                debug_assert_eq!(new_struct_idx, name_struct_idx);
+                assert_eq!(new_struct_idx, field_struct_idx);
                 vacant.insert(new_struct_idx);
                 new_struct_idx.into()
             }
@@ -211,11 +203,11 @@ impl TypeInterner {
         buf
     }
 
-    pub fn field_index_by_name(&self, type_id: TypeId, name: StrId) -> Option<u32> {
+    pub fn field_index_by_name(&self, type_id: TypeId, target_name: StrId) -> Option<u32> {
         let struct_idx = as_type(type_id).err()?;
-        self.storage.struct_field_names[struct_idx]
+        self.storage.struct_fields[struct_idx]
             .iter()
-            .position(|&n| n == name)
+            .position(|&(field_name, _ty)| field_name == target_name)
             .map(|i| i as u32)
     }
 
@@ -245,8 +237,7 @@ impl StructStorage {
         StructInfo {
             loc: stored.loc,
             type_index: stored.type_index,
-            field_types: &self.struct_fields[idx],
-            field_names: &self.struct_field_names[idx],
+            fields: &self.struct_fields[idx],
         }
     }
 

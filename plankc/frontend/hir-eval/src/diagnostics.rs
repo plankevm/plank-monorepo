@@ -1,3 +1,4 @@
+use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
 
@@ -28,26 +29,44 @@ impl DiagCtx<'_> {
         let secondary_label =
             format!("`{}` expected because of this", types.format(self.session, expected_ty));
         Diagnostic::error("mismatched types")
-            .cross_source_annotations(
-                actual_loc,
-                primary_label,
-                expected_loc,
-                secondary_label,
-            )
+            .cross_source_annotations(actual_loc, primary_label, expected_loc, secondary_label)
             .emit(self.session);
     }
 
     pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("value used as type").primary(
-            loc.source,
-            loc.span,
-            format!(
-                "expected {}, got value of type `{}`",
-                builtin_names::TYPE,
-                types.format(self.session, ty)
-            ),
-        )
-        .emit(self.session);
+        Diagnostic::error("value used as type")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "expected {}, got value of type `{}`",
+                    builtin_names::TYPE,
+                    types.format(self.session, ty)
+                ),
+            )
+            .emit(self.session);
+    }
+
+    pub fn emit_struct_literal_field_type_mismatch(
+        &mut self,
+        types: &TypeInterner,
+        expected_ty: TypeId,
+        actual_ty: TypeId,
+        field_value_loc: SrcLoc,
+        field_name: StrId,
+    ) {
+        let name = self.session.lookup_name(field_name);
+        Diagnostic::error("incorrect type for struct field")
+            .primary(
+                field_value_loc.source,
+                field_value_loc.span,
+                format!(
+                    "field `{name}` expects `{}`, got `{}`",
+                    types.format(self.session, expected_ty),
+                    types.format(self.session, actual_ty),
+                ),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_type_mismatch_simple(
@@ -57,43 +76,47 @@ impl DiagCtx<'_> {
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
-        Diagnostic::error("mismatched types").primary(
-            loc.source,
-            loc.span,
-            format!(
-                "expected `{}`, got `{}`",
-                types.format(self.session, expected_ty),
-                types.format(self.session, actual_ty),
-            ),
-        )
-        .emit(self.session);
+        Diagnostic::error("mismatched types")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "expected `{}`, got `{}`",
+                    types.format(self.session, expected_ty),
+                    types.format(self.session, actual_ty),
+                ),
+            )
+            .emit(self.session);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("expected struct type").primary(
-            loc.source,
-            loc.span,
-            format!("`{}` is not a struct type", types.format(self.session, ty)),
-        )
-        .emit(self.session);
+    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, ty_loc: SrcLoc) {
+        Diagnostic::error("expected struct type")
+            .primary(
+                ty_loc.source,
+                ty_loc.span,
+                format!("`{}` is not a struct type", types.format(self.session, ty)),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_member_on_non_struct(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("no fields on type").primary(
-            loc.source,
-            loc.span,
-            format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
-        )
-        .emit(self.session);
+        Diagnostic::error("no fields on type")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("expected function").primary(
-            loc.source,
-            loc.span,
-            format!("`{}` is not callable", types.format(self.session, ty)),
-        )
-        .emit(self.session);
+        Diagnostic::error("expected function")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`{}` is not callable", types.format(self.session, ty)),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_incompatible_branch_types(
@@ -149,41 +172,15 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_struct_field_not_comptime(&mut self, field_name: StrId, field_loc: SrcLoc) {
-        Diagnostic::error("struct field must be known at compile time").primary(
-            field_loc.source,
-            field_loc.span,
-            format!(
-                "value of `{}` is not known at compile time",
-                self.session.lookup_name(field_name),
-            ),
-        )
-        .emit(self.session);
-    }
-
     pub fn emit_type_not_comptime(&mut self, loc: SrcLoc) {
-        Diagnostic::error("type must be known at compile time").primary(
-            loc.source,
-            loc.span,
-            "not known at compile time",
-        )
-        .emit(self.session);
+        Diagnostic::error("type must be known at compile time")
+            .primary(loc.source, loc.span, "not known at compile time")
+            .emit(self.session);
     }
 
     pub fn emit_struct_type_index_not_comptime(&mut self, loc: SrcLoc) {
         Diagnostic::error("struct definition requires compile-time values")
             .primary(loc.source, loc.span, "type index is not known at compile time")
-            .emit(self.session);
-    }
-
-    pub fn emit_struct_field_type_not_comptime(&mut self, name: StrId, loc: SrcLoc) {
-        let name = self.session.lookup_name(name);
-        Diagnostic::error("struct definition requires compile-time values")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("type for field `{name}` not compile-time known"),
-            )
             .emit(self.session);
     }
 
@@ -224,15 +221,6 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_struct_type_not_comptime(&mut self, loc: SrcLoc) {
-        Diagnostic::error("struct type must be known at compile time").primary(
-            loc.source,
-            loc.span,
-            "not known at compile time",
-        )
-        .emit(self.session);
-    }
-
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
         Diagnostic::error("entry point must diverge")
             .primary(loc.source, loc.span, "execution may reach end of entry point")
@@ -246,12 +234,13 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_const_cycle(&mut self, name: StrId, loc: SrcLoc) {
-        Diagnostic::error("cycle in constant evaluation").primary(
-            loc.source,
-            loc.span,
-            format!("`{}` depends on itself", self.session.lookup_name(name)),
-        )
-        .emit(self.session);
+        Diagnostic::error("cycle in constant evaluation")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`{}` depends on itself", self.session.lookup_name(name)),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
@@ -263,7 +252,32 @@ impl DiagCtx<'_> {
     pub fn emit_comptime_only_value_at_runtime(&mut self, use_loc: SrcLoc) {
         Diagnostic::error("use of comptime only value at runtime")
             .primary(use_loc.source, use_loc.span, "reference to comptime only value")
-            .info("`let mut` definitions and mutable assignments require runtime-compatible type")
+            .info("`let mut` definitions and mutable assignments require runtime-compatible values")
+            .emit(self.session);
+    }
+    pub fn emit_mixed_comptime_runtime_struct(
+        &mut self,
+        source: SourceId,
+        struct_lit_span: SourceSpan,
+        comptime_only_field: hir::FieldInfo,
+        runtime_only_field: hir::FieldInfo,
+    ) {
+        let (comptime_only_field_name, comptime_only_span) = self
+            .session
+            .lookup_name_spanned(comptime_only_field.name, comptime_only_field.name_offset);
+        let (runtime_field_name, runtime_span) = self
+            .session
+            .lookup_name_spanned(runtime_only_field.name, runtime_only_field.name_offset);
+        Diagnostic::error("mixing comptime & runtime data in struct")
+            .element(
+                Annotations::new(source)
+                    .primary(struct_lit_span, "mixed struct literal")
+                    .secondary(
+                        comptime_only_span,
+                        format!("`{comptime_only_field_name}` is comptime only"),
+                    )
+                    .secondary(runtime_span, format!("`{runtime_field_name}` not comptime known")),
+            )
             .emit(self.session);
     }
 
@@ -315,19 +329,17 @@ impl DiagCtx<'_> {
             )
         };
 
-        Diagnostic::error(title)
-            .primary(loc.source, loc.span, label)
-            .note(note)
-            .emit(self.session);
+        Diagnostic::error(title).primary(loc.source, loc.span, label).note(note).emit(self.session);
     }
 
     pub fn emit_unsupported_eval_of_evm_builtin(&mut self, builtin: EvmBuiltin, loc: SrcLoc) {
-        Diagnostic::error("comptime evaluation not supported").primary(
-            loc.source,
-            loc.span,
-            format!("`{}` cannot be evaluated at compile time", builtin.name()),
-        )
-        .emit(self.session);
+        Diagnostic::error("comptime evaluation not supported")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`{}` cannot be evaluated at compile time", builtin.name()),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_struct_lit_unexpected_field(
@@ -335,16 +347,16 @@ impl DiagCtx<'_> {
         types: &TypeInterner,
         struct_ty: TypeId,
         lit_loc: SrcLoc,
-        field_name: StrId,
-        field_offset: SourceByteOffset,
+        field: hir::FieldInfo,
     ) {
-        let (field, field_span) = self.session.lookup_name_spanned(field_name, field_offset);
-        Diagnostic::error("unexpected field").primary(
-            lit_loc.source,
-            field_span,
-            format!("`{}` has no field `{field}`", types.format(self.session, struct_ty)),
-        )
-        .emit(self.session);
+        let (field, field_span) = self.session.lookup_name_spanned(field.name, field.name_offset);
+        Diagnostic::error("unexpected field")
+            .primary(
+                lit_loc.source,
+                field_span,
+                format!("`{}` has no field `{field}`", types.format(self.session, struct_ty)),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_struct_unknown_field_access(
@@ -354,16 +366,17 @@ impl DiagCtx<'_> {
         expr_loc: SrcLoc,
         field_name: StrId,
     ) {
-        Diagnostic::error("unknown field").primary(
-            expr_loc.source,
-            expr_loc.span,
-            format!(
-                "`{}` has no field `{}`",
-                types.format(self.session, struct_ty),
-                self.session.lookup_name(field_name),
-            ),
-        )
-        .emit(self.session);
+        Diagnostic::error("unknown field")
+            .primary(
+                expr_loc.source,
+                expr_loc.span,
+                format!(
+                    "`{}` has no field `{}`",
+                    types.format(self.session, struct_ty),
+                    self.session.lookup_name(field_name),
+                ),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_struct_def_duplicate_field(
@@ -375,12 +388,13 @@ impl DiagCtx<'_> {
     ) {
         let (name, first) = self.session.lookup_name_spanned(str_name, first);
         let (_, duplicate) = self.session.lookup_name_spanned(str_name, duplicate);
-        Diagnostic::error("duplicate field name in struct definition").element(
-            Annotations::new(source)
-                .primary(duplicate, format!("`{name}` assigned more than once"))
-                .secondary(first, "first assigned here"),
-        )
-        .emit(self.session);
+        Diagnostic::error("duplicate field name in struct definition")
+            .element(
+                Annotations::new(source)
+                    .primary(duplicate, format!("`{name}` assigned more than once"))
+                    .secondary(first, "first assigned here"),
+            )
+            .emit(self.session);
     }
 
     pub fn emit_struct_duplicate_field(
@@ -393,13 +407,14 @@ impl DiagCtx<'_> {
         let (field, first_span) = self.session.lookup_name_spanned(field_name, first);
         let (_, duplicate_span) = self.session.lookup_name_spanned(field_name, duplicate);
 
-        Diagnostic::error("duplicate field").cross_source_annotations(
-            SrcLoc::new(lit_loc.source, duplicate_span),
-            format!("`{field}` assigned more than once"),
-            SrcLoc::new(lit_loc.source, first_span),
-            "first assigned here",
-        )
-        .emit(self.session);
+        Diagnostic::error("duplicate field")
+            .cross_source_annotations(
+                SrcLoc::new(lit_loc.source, duplicate_span),
+                format!("`{field}` assigned more than once"),
+                SrcLoc::new(lit_loc.source, first_span),
+                "first assigned here",
+            )
+            .emit(self.session);
     }
 
     pub fn emit_struct_missing_field(
@@ -409,15 +424,16 @@ impl DiagCtx<'_> {
         field_name: StrId,
         lit_loc: SrcLoc,
     ) {
-        Diagnostic::error("missing field").primary(
-            lit_loc.source,
-            lit_loc.span,
-            format!(
-                "missing field `{}` in `{}`",
-                self.session.lookup_name(field_name),
-                types.format(self.session, struct_ty),
-            ),
-        )
-        .emit(self.session);
+        Diagnostic::error("missing field")
+            .primary(
+                lit_loc.source,
+                lit_loc.span,
+                format!(
+                    "missing field `{}` in `{}`",
+                    self.session.lookup_name(field_name),
+                    types.format(self.session, struct_ty),
+                ),
+            )
+            .emit(self.session);
     }
 }

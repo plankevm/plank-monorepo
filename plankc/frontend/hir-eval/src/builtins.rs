@@ -1,10 +1,13 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{EvmBuiltin, MaybePoisoned, SrcLoc};
+use plank_session::{EvmBuiltin, MaybePoisoned, SourceSpan, SrcLoc};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
-use crate::scope::{EvalError, EvalValue, LocalState, Scope};
+use crate::{
+    locals::LocalState,
+    scope::{EvalError, EvalValue, Scope},
+};
 use plank_session::Poisoned;
 
 fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
@@ -77,71 +80,94 @@ impl Scope<'_, '_> {
         &mut self,
         builtin: EvmBuiltin,
         args: hir::CallArgsId,
-        expr_loc: SrcLoc,
+        expr_span: SourceSpan,
     ) -> Result<EvalValue, EvalError> {
-        self.with_types_buf(|this, types_buf_offset| {
-            let args = &this.hir.call_args[args];
+        let args = &self.hir.call_args[args];
+        let expr_loc = self.loc(expr_span);
+
+        let result_type = self.with_types_buf(|this, types_buf_offset| {
             for &arg in args {
-                this.eval.types_buf.push(this.binding_type(arg)?);
+                let ty = this.state_type(this.bindings(arg).state?);
+                this.eval.types_buf.push(ty);
             }
             let arg_types = &this.eval.types_buf[types_buf_offset..];
 
-            let result_type = match builtin.resolve_result_type(arg_types) {
-                Some(ty) => ty,
-                None => {
-                    this.eval.diag_ctx.emit_no_matching_builtin_signature(
-                        &this.eval.types,
-                        builtin,
-                        &this.eval.types_buf[types_buf_offset..],
-                        expr_loc,
-                    );
-                    return Err(EvalError::Poisoned);
-                }
-            };
+            builtin.resolve_result_type(arg_types).ok_or_else(|| {
+                this.diag_ctx.emit_no_matching_builtin_signature(
+                    &this.eval.types,
+                    builtin,
+                    &this.eval.types_buf[types_buf_offset..],
+                    expr_loc,
+                );
+                EvalError::Poisoned
+            })
+        })?;
 
-            if builtin.is_pure() {
-                let folded = this.with_values_buf::<MaybePoisoned<_>>(|this, values_buf_offset| {
-                    for &arg in args {
-                        match this.bindings[arg].state? {
-                            LocalState::Comptime(vid) => this.values_buf.push(vid),
-                            LocalState::Runtime(_) => return Ok(None),
-                        }
-                    }
-                    Ok(Some(fold_pure_builtin(
-                        builtin,
-                        &this.eval.values_buf[values_buf_offset..],
-                        this.eval.values,
-                    )))
-                });
-                if let Some(folded) = folded? {
-                    return Ok(EvalValue::Comptime(folded));
-                }
-            }
-            if this.is_comptime() {
-                this.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
-                return Err(Poisoned.into());
-            }
-
-            let args = this.with_locals_buf(|this, locals_buf_offset| {
+        if builtin.is_pure() {
+            let folded = self.with_values_buf(|this, values_buf_offset| {
                 for &arg in args {
-                    let r#ref = this.bindings[arg]
-                        .state
-                        .expect("poisoned bindings filtered out during type collection above");
-                    let arg = this.ensure_materialized(r#ref);
-                    this.locals_buf.push(arg);
+                    let (state, arg_def_span) =
+                        this.bindings(arg).poisoned().expect("arg type check checks poison");
+                    match state {
+                        LocalState::Comptime(vid) => this.values_buf.push(vid),
+                        LocalState::Runtime(_) if this.is_comptime() => {
+                            this.diag_ctx.emit_runtime_ref_in_comptime(
+                                this.source,
+                                expr_span,
+                                arg_def_span,
+                            );
+                            return Err(Poisoned);
+                        }
+                        LocalState::Runtime(_) => return Ok(None),
+                    }
                 }
-                this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
-            });
-
-            let expr = mir::Expr::BuiltinCall { builtin, args };
-            if result_type == TypeId::NEVER {
-                // We diverge after this so we need to make sure the call is actually included.
-                let target = this.alloc_mir(result_type);
-                this.emit(mir::Instruction::Set { target, expr });
-                return Err(EvalError::NEVER);
+                Ok(Some(fold_pure_builtin(
+                    builtin,
+                    &this.eval.values_buf[values_buf_offset..],
+                    this.eval.values,
+                )))
+            })?;
+            if let Some(folded) = folded {
+                return Ok(EvalValue::Comptime(folded));
             }
+        }
 
-            Ok(EvalValue::Runtime { expr, result_type })
-        })
+        if self.is_comptime() {
+            self.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
+            return Err(EvalError::Poisoned);
+        }
+
+        let args = self.with_locals_buf(|this, locals_buf_offset| {
+            for &arg in args {
+                let state = this.bindings(arg).state.expect("arg type check checks poison");
+                let arg = match state {
+                    LocalState::Comptime(vid) => {
+                        assert!(
+                            !this.is_comptime_only(vid),
+                            "evm builtin typechecks for comptime only value"
+                        );
+                        let target = this.locals.mir_types.push(this.values.type_of_value(vid));
+                        this.emit(plank_mir::Instruction::Set {
+                            target,
+                            expr: mir::Expr::Const(vid),
+                        });
+                        target
+                    }
+                    LocalState::Runtime(local) => local,
+                };
+                this.locals_buf.push(arg);
+            }
+            this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
+        });
+
+        let expr = mir::Expr::BuiltinCall { builtin, args };
+        if result_type == TypeId::NEVER {
+            // We diverge after this so we need to make sure the call is actually included.
+            let target = self.locals.mir_types.push(result_type);
+            self.emit(mir::Instruction::Set { target, expr });
+            return Err(EvalError::NEVER);
+        }
+
+        Ok(EvalValue::Runtime { expr, result_type })
     }
 }

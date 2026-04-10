@@ -1,12 +1,13 @@
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Session, StrId};
+use plank_session::{MaybePoisoned, StrId};
 use plank_values::{TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
-    scope::{Function, LocalState, Scope},
+    locals::{LocalState, ScopeLocals},
+    scope::{Function, Scope},
 };
 
 pub(crate) enum ConstState {
@@ -26,17 +27,15 @@ pub(crate) struct Evaluator<'a> {
     pub values: &'a mut ValueInterner,
     pub hir: &'a Hir,
 
-    pub diag_ctx: DiagCtx<'a>,
-
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
-    pub strings_buf: Vec<StrId>,
+    pub fields_buf: Vec<(StrId, TypeId)>,
 }
 
 impl<'a> Evaluator<'a> {
-    pub fn new(hir: &'a Hir, values: &'a mut ValueInterner, session: &'a mut Session) -> Self {
+    pub fn new(hir: &'a Hir, values: &'a mut ValueInterner) -> Self {
         Evaluator {
             mir_blocks: ListOfLists::new(),
             mir_fns: IndexVec::new(),
@@ -48,40 +47,49 @@ impl<'a> Evaluator<'a> {
             values,
             hir,
 
-            diag_ctx: DiagCtx::new(session),
-
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
             locals_buf: Vec::new(),
             values_buf: Vec::new(),
-            strings_buf: Vec::new(),
+            fields_buf: Vec::new(),
         }
     }
 
-    pub fn evaluate_const(&mut self, const_id: ConstId) -> MaybePoisoned<ValueId> {
+    pub fn is_comptime_only(&self, value: ValueId) -> bool {
+        let ty = self.values.type_of_value(value);
+        self.types.comptime_only(ty)
+    }
+
+    pub fn evaluate_const(
+        &mut self,
+        const_id: ConstId,
+        diag_ctx: &mut DiagCtx<'a>,
+    ) -> MaybePoisoned<ValueId> {
+        let const_def = self.hir.consts[const_id];
         match self.evaluated_consts.get(const_id) {
             Some(&ConstState::Evaluated(vid)) => return vid,
-            Some(ConstState::InProgress) => todo!("cyclical const error"),
+            Some(ConstState::InProgress) => {
+                diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
+            }
             None => {}
         };
 
         self.evaluated_consts.insert_no_prev(const_id, ConstState::InProgress);
 
-        let const_def = self.hir.consts[const_id];
         let mut scope = Scope {
             eval: self,
+            diag_ctx,
             source: const_def.source_id,
             func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
             comptime: true,
-            bindings: DenseIndexMap::new(),
-            mir_types: IndexVec::new(),
+            locals: ScopeLocals::new(),
         };
 
         for &instr in &scope.hir.block_instrs[const_def.body] {
             scope.eval_instr(instr).expect("todo: handle comptime diverge");
         }
 
-        let value = scope.bindings[const_def.result].state.map(|state| match state {
+        let value = scope.bindings(const_def.result).state.map(|state| match state {
             LocalState::Comptime(vid) => vid,
             LocalState::Runtime(_) => {
                 unreachable!("local in comptime set to runtime instead of poisoned")
@@ -99,20 +107,24 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    pub fn lower_entrypoint(&mut self, block: hir::BlockId) -> mir::FnId {
+    pub fn lower_entrypoint(
+        &mut self,
+        block: hir::BlockId,
+        diag_ctx: &mut DiagCtx<'a>,
+    ) -> mir::FnId {
         let source = self.hir.entry_source;
         let mut scope = Scope {
             eval: self,
+            diag_ctx,
             source,
             func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
             comptime: false,
-            bindings: DenseIndexMap::new(),
-            mir_types: IndexVec::new(),
+            locals: ScopeLocals::new(),
         };
 
         let body = scope.eval_fn_body(block);
 
-        let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.mir_types);
+        let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.locals.mir_types);
         let fn_id2 =
             self.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::NEVER });
         assert_eq!(fn_id1, fn_id2);

@@ -10,7 +10,9 @@ use plank_values::ValueInterner;
 mod builtins;
 mod diagnostics;
 mod evaluator;
+mod locals;
 mod scope;
+mod structs;
 
 pub(crate) use evaluator::Evaluator;
 
@@ -18,13 +20,14 @@ pub(crate) use evaluator::Evaluator;
 mod tests;
 
 pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) -> Mir {
-    let mut evaluator = Evaluator::new(hir, values, session);
+    let mut evaluator = Evaluator::new(hir, values);
+    let mut diag_ctx = diagnostics::DiagCtx::new(session);
 
-    let init = evaluator.lower_entrypoint(hir.init);
-    let run = hir.run.map(|run| evaluator.lower_entrypoint(run));
+    let init = evaluator.lower_entrypoint(hir.init, &mut diag_ctx);
+    let run = hir.run.map(|run| evaluator.lower_entrypoint(run, &mut diag_ctx));
 
     for const_id in hir.consts.iter_idx() {
-        let _ = evaluator.evaluate_const(const_id);
+        let _ = evaluator.evaluate_const(const_id, &mut diag_ctx);
     }
 
     // 1. Eval init as fn

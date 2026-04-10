@@ -108,6 +108,14 @@ macro_rules! define_builtins {
                     _ => return None,
                 })
             }
+
+            pub fn primitive_name(self) -> Option<&'static str> {
+                match self {
+                    $(Self::$pt_const => Some($pt_str),)*
+                    _ => None
+                }
+
+            }
         }
     };
 }

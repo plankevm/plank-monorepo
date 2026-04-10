@@ -10,6 +10,8 @@ pub struct DisplayMir<'a> {
     session: &'a Session,
 }
 
+const PAD: &'static str = "    ";
+
 impl<'a> DisplayMir<'a> {
     pub fn new(mir: &'a Mir, values: &'a ValueInterner, session: &'a Session) -> Self {
         Self { mir, values, session }
@@ -51,14 +53,13 @@ impl<'a> DisplayMir<'a> {
                 if !fields.is_empty() {
                     write!(f, "\n")?;
                 }
+                let pad = PAD.repeat(indent);
                 for &field in fields {
-                    for _ in 0..indent {
-                        write!(f, " ")?;
-                    }
+                    write!(f, "{pad}{PAD}")?;
                     self.fmt_value(f, field, indent + 1)?;
-                    write!(f, ",")?;
+                    writeln!(f, ",")?;
                 }
-                write!(f, "}}")
+                write!(f, "{pad}}}")
             }
             Value::Type(_) | Value::Closure { .. } => {
                 unreachable!("comptime-only value in MIR")
@@ -108,7 +109,7 @@ impl<'a> DisplayMir<'a> {
         instr: Instruction,
         indent: usize,
     ) -> fmt::Result {
-        let pad = "    ".repeat(indent);
+        let pad = PAD.repeat(indent);
         match instr {
             Instruction::Set { target: local, expr } => {
                 write!(f, "{pad}")?;
