@@ -364,59 +364,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(value)
     }
 
-    fn eval_struct_def(
-        &mut self,
-        struct_def_id: StructDefId,
-        def_expr_span: SourceSpan,
-    ) -> MaybePoisoned<TypeId> {
-        self.with_fields_buf(|this, fields_buf_offset| {
-            let struct_def = this.hir.struct_defs[struct_def_id];
-            let type_index = this.bindings[struct_def.type_index].poisoned().and_then(
-                |(state, span)| match state {
-                    LocalState::Comptime(vid) => Ok(vid),
-                    LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_struct_type_index_not_comptime(this.loc(span));
-                        Err(Poisoned)
-                    }
-                },
-            );
-
-            // Poisoned flag instead of short-circuit to make sure we validate as many
-            // fields as possible.
-            let mut fields_poisoned = false;
-            let fields = &this.hir.fields[struct_def.fields];
-            for (i, &field) in fields.iter().enumerate() {
-                let Ok(ty) = this.expect_type(field.value) else {
-                    fields_poisoned = true;
-                    continue;
-                };
-                if let Some(first_offset) = fields[..i].iter().find_map(|prev_field| {
-                    (prev_field.name == field.name).then_some(prev_field.name_offset)
-                }) {
-                    this.diag_ctx.emit_struct_def_duplicate_field(
-                        this.source,
-                        field.name,
-                        first_offset,
-                        field.name_offset,
-                    );
-                    fields_poisoned = true;
-                }
-                this.fields_buf.push((field.name, ty));
-            }
-
-            if fields_poisoned {
-                return Err(Poisoned);
-            }
-
-            let struct_ty = this.eval.types.intern(Type::Struct(StructInfo {
-                loc: this.loc(def_expr_span),
-                type_index: type_index?,
-                fields: &this.eval.fields_buf[fields_buf_offset..],
-            }));
-            Ok(struct_ty)
-        })
-    }
-
     pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, BlockDiverge> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
