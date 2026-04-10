@@ -73,7 +73,7 @@ impl LowerCtx<'_> {
             Type::Function => unreachable!("function unsizeable in SIR"),
             Type::Type => unreachable!("type unsizeable in SIR"),
             Type::Struct(r#struct) => {
-                r#struct.field_types.iter().map(|&ty| self.size_in_locals(ty)).sum()
+                r#struct.fields.iter().map(|&(_name, ty)| self.size_in_locals(ty)).sum()
             }
         }
     }
@@ -440,15 +440,15 @@ fn lower_field_access(
     let Type::Struct(r#struct) = ctx.mir.types.lookup(object_type) else {
         unreachable!("MIR invariant: field access on non-struct");
     };
-    let field_type = r#struct.field_types[field_index as usize];
+    let (_field_name, field_type) = r#struct.fields[field_index as usize];
     let size = ctx.size_in_locals(field_type);
     if size == 0 {
         return;
     }
 
-    let flattened_fields_offset = r#struct.field_types[..field_index as usize]
+    let flattened_fields_offset = r#struct.fields[..field_index as usize]
         .iter()
-        .map(|&field_type| ctx.size_in_locals(field_type))
+        .map(|&(_name, field_type)| ctx.size_in_locals(field_type))
         .sum::<u32>() as usize;
 
     ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);
