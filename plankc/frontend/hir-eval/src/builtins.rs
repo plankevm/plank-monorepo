@@ -1,12 +1,12 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{EvmBuiltin, SourceSpan};
+use plank_session::{EvmBuiltin, MaybePoisoned, SourceSpan};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
 use crate::{
     locals::LocalState,
-    scope::{EvalError, EvalValue, Scope},
+    scope::{BlockDiverge, EvalValue, Scope},
 };
 use plank_session::Poisoned;
 
@@ -81,7 +81,7 @@ impl Scope<'_, '_> {
         builtin: EvmBuiltin,
         args: hir::CallArgsId,
         expr_span: SourceSpan,
-    ) -> Result<EvalValue, EvalError> {
+    ) -> MaybePoisoned<Result<EvalValue, BlockDiverge>> {
         let args = &self.hir.call_args[args];
         let expr_loc = self.loc(expr_span);
 
@@ -99,7 +99,7 @@ impl Scope<'_, '_> {
                     &this.eval.types_buf[types_buf_offset..],
                     expr_loc,
                 );
-                EvalError::Poisoned
+                Poisoned
             })
         })?;
 
@@ -127,14 +127,14 @@ impl Scope<'_, '_> {
                     this.eval.values,
                 )))
             })?;
-            if let Some(folded) = folded {
-                return Ok(EvalValue::Comptime(folded));
+            if let Some(value) = folded {
+                return Ok(Ok(EvalValue::Comptime(value)));
             }
-        }
-
-        if self.is_comptime() {
-            self.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
-            return Err(EvalError::Poisoned);
+        } else {
+            if self.is_comptime() {
+                self.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
+                return Err(Poisoned);
+            }
         }
 
         let args = self.with_locals_buf(|this, locals_buf_offset| {
@@ -165,9 +165,9 @@ impl Scope<'_, '_> {
             // We diverge after this so we need to make sure the call is actually included.
             let target = self.mir_types.push(result_type);
             self.emit(mir::Instruction::Set { target, expr });
-            return Err(EvalError::NEVER);
+            return Ok(Err(BlockDiverge::Never));
         }
 
-        Ok(EvalValue::Runtime { expr, result_type })
+        Ok(Ok(EvalValue::Runtime { expr, result_type }))
     }
 }

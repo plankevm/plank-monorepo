@@ -1,46 +1,11 @@
 use crate::{Evaluator, diagnostics::DiagCtx, locals::*};
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, InstructionKind, StructDefId};
+use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{
     EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
 };
-use plank_values::{StructInfo, Type, TypeId, Value, ValueId};
-
-pub(crate) enum EvalError {
-    Poisoned,
-    Diverge(BlockDiverge),
-}
-
-impl EvalError {
-    pub const NEVER: Self = EvalError::Diverge(BlockDiverge::Never);
-}
-
-trait EvalResultAsValue<T> {
-    fn value(self) -> Result<MaybePoisoned<T>, BlockDiverge>;
-}
-
-impl<T> EvalResultAsValue<T> for Result<T, EvalError> {
-    fn value(self) -> Result<MaybePoisoned<T>, BlockDiverge> {
-        match self {
-            Ok(value) => Ok(Ok(value)),
-            Err(EvalError::Poisoned) => Ok(Err(Poisoned)),
-            Err(EvalError::Diverge(diverge)) => Err(diverge),
-        }
-    }
-}
-
-impl From<Poisoned> for EvalError {
-    fn from(_: Poisoned) -> Self {
-        Self::Poisoned
-    }
-}
-
-impl From<BlockDiverge> for EvalError {
-    fn from(value: BlockDiverge) -> Self {
-        Self::Diverge(value)
-    }
-}
+use plank_values::{TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum EvalValue {
@@ -50,6 +15,7 @@ pub(crate) enum EvalValue {
 
 #[derive(Debug)]
 pub(crate) enum BlockDiverge {
+    PoisonedControlFlow,
     Never,
     ComptimeReturn(ValueId),
     RuntimeReturn(TypeId),
@@ -73,14 +39,14 @@ pub(crate) struct Scope<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
-    pub fn eval_fn_body(&mut self, hir_block: hir::BlockId) -> mir::BlockId {
+    pub fn eval_entry_point_body(&mut self, hir_block: hir::BlockId) -> mir::BlockId {
         let (mir_block, eval_res) = self.eval_block(hir_block);
         match eval_res {
             Err(BlockDiverge::ComptimeReturn(_) | BlockDiverge::RuntimeReturn(_)) | Ok(()) => {
                 let span = self.hir.block_spans[hir_block].expect("hir: fn body without span");
                 self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
             }
-            Err(BlockDiverge::Never) => {
+            Err(BlockDiverge::Never | BlockDiverge::PoisonedControlFlow) => {
                 // Desired termination
             }
         }
@@ -328,8 +294,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                 }
             }
-            instr => todo!("instr: {instr:?}"),
+            InstructionKind::If { condition, then_block, else_block } => {
+                self.eval_if(condition, then_block, else_block)?;
+            }
+            instr @ (InstructionKind::BranchSet { .. }
+            | InstructionKind::Return(_)
+            | InstructionKind::While { .. }) => todo!("instr: {instr:?}"),
         };
+        Ok(())
+    }
+
+    pub fn eval_if(
+        &mut self,
+        condition: hir::LocalId,
+        then: hir::BlockId,
+        r#else: hir::BlockId,
+    ) -> Result<(), BlockDiverge> {
         Ok(())
     }
 
@@ -368,7 +348,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
             ExprKind::EvmBuiltinCall { builtin, args } => {
-                self.eval_builtin(builtin, args, expr.span).value()?
+                match self.eval_builtin(builtin, args, expr.span) {
+                    Ok(Err(diverge)) => return Err(diverge),
+                    Err(Poisoned) => Err(Poisoned),
+                    Ok(Ok(result)) => Ok(result),
+                }
             }
             ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {
                 LocalState::Comptime(vid) => EvalValue::Comptime(vid),

@@ -124,7 +124,7 @@ impl<'a> Evaluator<'a> {
             mir_types: IndexVec::new(),
         };
 
-        let body = scope.eval_fn_body(block);
+        let body = scope.eval_entry_point_body(block);
 
         let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.mir_types);
         let fn_id2 =
