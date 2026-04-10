@@ -389,7 +389,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Poisoned)
             }
             ExprKind::StructLit { ty, fields } => self.eval_struct_lit(ty, fields, expr.span),
-            kind @ (ExprKind::FnDef(_) | ExprKind::Member { .. } | ExprKind::Call { .. }) => {
+            ExprKind::Member { object, member } => {
+                self.eval_struct_member_access(object, member, expr.span)
+            }
+            kind @ (ExprKind::FnDef(_) | ExprKind::Call { .. }) => {
                 todo!("expr_kind: {kind:?}")
             }
         };

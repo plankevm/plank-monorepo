@@ -4,7 +4,7 @@ use crate::{
 };
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc};
+use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId};
 use plank_values::{StructInfo, Type, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
@@ -59,6 +59,50 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             }));
             Ok(struct_ty)
         })
+    }
+
+    pub(crate) fn eval_struct_member_access(
+        &mut self,
+        object: hir::LocalId,
+        member: StrId,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<EvalValue> {
+        let (state, value_def_span) = self.bindings[object].poisoned()?;
+        let struct_ty = self.state_type(state);
+        let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
+            self.diag_ctx.emit_member_on_non_struct(
+                &self.eval.types,
+                struct_ty,
+                self.loc(value_def_span),
+            );
+            return Err(Poisoned);
+        };
+
+        let Some((field_index, &(_name, field_type))) = (0u32..)
+            .zip(struct_type_info.fields)
+            .find(|&(_i, &(field_name, _ty))| field_name == member)
+        else {
+            self.diag_ctx.emit_struct_unknown_field_access(
+                &self.eval.types,
+                struct_ty,
+                self.loc(expr_span),
+                member,
+            );
+            return Err(Poisoned);
+        };
+
+        match state {
+            LocalState::Comptime(vid) => {
+                let Value::StructVal { ty: _, fields } = self.values.lookup(vid) else {
+                    unreachable!("invariant: `state_type` != type of value")
+                };
+                Ok(EvalValue::Comptime(fields[field_index as usize]))
+            }
+            LocalState::Runtime(local) => Ok(EvalValue::Runtime {
+                expr: mir::Expr::FieldAccess { object: local, field_index },
+                result_type: field_type,
+            }),
+        }
     }
 
     pub(crate) fn eval_struct_lit(

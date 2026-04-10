@@ -427,12 +427,12 @@ fn test_struct_field_access() {
 
         init {
             let x = Pair { b: false, a : 34 };
-            let y: u256 = x.a;
-            let z: bool = x.b;
+            let mut y: u256 = x.a;
+            let mut z: bool = x.b;
 
-            let p = Pair { a: 49, b: true };
-            let pa = p.a;
-            let pb = p.b;
+            let mut p = Pair { a: 49, b: true };
+            let mut pa = p.a;
+            let mut pb = p.b;
 
             evm_stop();
         }
@@ -443,19 +443,15 @@ fn test_struct_field_access() {
         @fn0() -> never {
             %0 : u256 = 34
             %1 : bool = false
-            %2 : Pair = Pair { %0, %1 }
+            %2 : Pair = struct#7 {
+                49,
+                true,
+            }
             %3 : Pair = %2
             %4 : u256 = %3.0
             %5 : Pair = %2
             %6 : bool = %5.1
-            %7 : u256 = 49
-            %8 : bool = true
-            %9 : Pair = Pair { %7, %8 }
-            %10 : Pair = %9
-            %11 : u256 = %10.0
-            %12 : Pair = %9
-            %13 : bool = %12.1
-            %14 : never = evm_stop()
+            %7 : never = evm_stop()
         }
         "#,
     );

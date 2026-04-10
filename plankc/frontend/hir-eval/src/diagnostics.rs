@@ -99,11 +99,16 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_member_on_non_struct(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
+    pub fn emit_member_on_non_struct(
+        &mut self,
+        types: &TypeInterner,
+        ty: TypeId,
+        value_loc: SrcLoc,
+    ) {
         Diagnostic::error("no fields on type")
             .primary(
-                loc.source,
-                loc.span,
+                value_loc.source,
+                value_loc.span,
                 format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
             )
             .emit(self.session);
