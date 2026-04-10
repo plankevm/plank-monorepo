@@ -68,7 +68,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 validity = Err(Poisoned);
                 continue;
             };
-            let local = self.locals.bindings(lit_field.value);
+            let local = self.bindings[lit_field.value];
             let Ok(state) = local.state else {
                 // should've already been set if state poisoned but just incase.
                 validity = Err(Poisoned);
@@ -111,7 +111,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 validity = Err(Poisoned);
                 continue;
             };
-            let local = self.bindings(lit_field.value);
+            let local = self.bindings[lit_field.value];
             let Ok(state) = local.state else {
                 // should've already been set if state poisoned but just incase.
                 validity = Err(Poisoned);
@@ -142,7 +142,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                                 continue 'materialize_comptime;
                             }
 
-                            let tmp_local = self.locals.mir_types.push(value_ty);
+                            let tmp_local = self.mir_types.push(value_ty);
                             self.eval.instr_stack_buf.push(mir::Instruction::Set {
                                 target: tmp_local,
                                 expr: mir::Expr::Const(value),
@@ -170,7 +170,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                         validity = Err(Poisoned);
                         continue;
                     }
-                    let tmp_local = self.locals.mir_types.push(value_ty);
+                    let tmp_local = self.mir_types.push(value_ty);
                     self.eval.instr_stack_buf.push(mir::Instruction::Set {
                         target: tmp_local,
                         expr: mir::Expr::Const(value),
@@ -216,7 +216,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let mut validity = self.struct_lit_diagnose_duplicate_fields(lit_loc, lit_fields);
 
         // Retrieve struct type information.
-        let ty_loc = self.loc(self.bindings(struct_type_local).span);
+        let ty_loc = self.loc(self.bindings[struct_type_local].span);
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
             self.diag_ctx.emit_not_a_struct_type(&self.eval.types, struct_ty, ty_loc);
@@ -240,7 +240,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 continue;
             };
             let Ok((field_value_state, field_value_span)) =
-                self.bindings(lit_field.value).poisoned()
+                self.bindings[lit_field.value].poisoned()
             else {
                 validity = Err(Poisoned);
                 continue;

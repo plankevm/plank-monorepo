@@ -1,7 +1,7 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{EvmBuiltin, MaybePoisoned, SourceSpan, SrcLoc};
+use plank_session::{EvmBuiltin, SourceSpan};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
 use crate::{
@@ -87,7 +87,7 @@ impl Scope<'_, '_> {
 
         let result_type = self.with_types_buf(|this, types_buf_offset| {
             for &arg in args {
-                let ty = this.state_type(this.bindings(arg).state?);
+                let ty = this.state_type(this.bindings[arg].state?);
                 this.eval.types_buf.push(ty);
             }
             let arg_types = &this.eval.types_buf[types_buf_offset..];
@@ -107,7 +107,7 @@ impl Scope<'_, '_> {
             let folded = self.with_values_buf(|this, values_buf_offset| {
                 for &arg in args {
                     let (state, arg_def_span) =
-                        this.bindings(arg).poisoned().expect("arg type check checks poison");
+                        this.bindings[arg].poisoned().expect("arg type check checks poison");
                     match state {
                         LocalState::Comptime(vid) => this.values_buf.push(vid),
                         LocalState::Runtime(_) if this.is_comptime() => {
@@ -139,14 +139,14 @@ impl Scope<'_, '_> {
 
         let args = self.with_locals_buf(|this, locals_buf_offset| {
             for &arg in args {
-                let state = this.bindings(arg).state.expect("arg type check checks poison");
+                let state = this.bindings[arg].state.expect("arg type check checks poison");
                 let arg = match state {
                     LocalState::Comptime(vid) => {
                         assert!(
                             !this.is_comptime_only(vid),
                             "evm builtin typechecks for comptime only value"
                         );
-                        let target = this.locals.mir_types.push(this.values.type_of_value(vid));
+                        let target = this.mir_types.push(this.values.type_of_value(vid));
                         this.emit(plank_mir::Instruction::Set {
                             target,
                             expr: mir::Expr::Const(vid),
@@ -163,7 +163,7 @@ impl Scope<'_, '_> {
         let expr = mir::Expr::BuiltinCall { builtin, args };
         if result_type == TypeId::NEVER {
             // We diverge after this so we need to make sure the call is actually included.
-            let target = self.locals.mir_types.push(result_type);
+            let target = self.mir_types.push(result_type);
             self.emit(mir::Instruction::Set { target, expr });
             return Err(EvalError::NEVER);
         }

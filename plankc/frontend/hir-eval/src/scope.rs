@@ -1,10 +1,6 @@
-use crate::{
-    Evaluator,
-    diagnostics::DiagCtx,
-    locals::{Local, LocalState, ScopeLocals},
-};
+use crate::{Evaluator, diagnostics::DiagCtx, locals::*};
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, FieldsId, InstructionKind, StructDef, StructDefId};
+use plank_hir::{self as hir, ExprKind, InstructionKind, StructDefId};
 use plank_mir as mir;
 use plank_session::{
     EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
@@ -72,7 +68,8 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub func: Option<Function>,
     pub comptime: bool,
 
-    pub locals: ScopeLocals,
+    pub bindings: DenseIndexMap<hir::LocalId, Local>,
+    pub mir_types: IndexVec<mir::LocalId, TypeId>,
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
@@ -90,14 +87,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         mir_block
     }
 
-    pub fn mir_types(&self, local: mir::LocalId) -> TypeId {
-        self.locals.mir_types[local]
-    }
-
-    pub fn bindings(&self, local: hir::LocalId) -> Local {
-        self.locals.bindings[local]
-    }
-
     pub fn emit(&mut self, instr: mir::Instruction) {
         assert!(!self.is_comptime());
         self.eval.instr_stack_buf.push(instr);
@@ -105,7 +94,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     pub fn state_type(&self, state: LocalState) -> TypeId {
         match state {
-            LocalState::Runtime(mir) => self.mir_types(mir),
+            LocalState::Runtime(mir) => self.mir_types[mir],
             LocalState::Comptime(vid) => self.values.type_of_value(vid),
         }
     }
@@ -128,7 +117,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn expect_type(&mut self, type_local: hir::LocalId) -> MaybePoisoned<TypeId> {
-        let (state, span) = self.bindings(type_local).poisoned()?;
+        let (state, span) = self.bindings[type_local].poisoned()?;
         let type_loc = self.loc(span);
         let LocalState::Comptime(vid) = state else {
             self.diag_ctx.emit_type_not_comptime(type_loc);
@@ -223,7 +212,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            self.type_check(value, expected_ty, self.bindings(type_local).span, expr.span)?;
+            self.type_check(value, expected_ty, self.bindings[type_local].span, expr.span)?;
             Ok(value)
         });
         let state = value.and_then(|value| {
@@ -233,14 +222,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 match value {
                     EvalValue::Comptime(vid) => Ok(LocalState::Comptime(vid)),
                     EvalValue::Runtime { expr, result_type } => {
-                        let target = self.locals.mir_types.push(result_type);
+                        let target = self.mir_types.push(result_type);
                         self.emit(mir::Instruction::Set { target, expr });
                         Ok(LocalState::Runtime(target))
                     }
                 }
             }
         });
-        self.locals.bindings.insert_no_prev(local, Local { state, span: expr.span });
+        self.bindings.insert_no_prev(local, Local { state, span: expr.span });
         Ok(())
     }
 
@@ -256,7 +245,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            self.type_check(value, expected_ty, self.bindings(type_local).span, expr.span)?;
+            self.type_check(value, expected_ty, self.bindings[type_local].span, expr.span)?;
             Ok(value)
         });
 
@@ -265,14 +254,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
             } else {
                 self.to_runtime_value(value, expr.span).map(|expr| {
-                    let target = self.locals.mir_types.push(self.value_type(value));
+                    let target = self.mir_types.push(self.value_type(value));
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 })
             }
         });
 
-        self.locals.bindings.insert_no_prev(local, Local { state: new_state, span: expr.span });
+        self.bindings.insert_no_prev(local, Local { state: new_state, span: expr.span });
         Ok(())
     }
 
@@ -286,8 +275,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), BlockDiverge> {
-        println!("eval: {instr:?}");
-        println!("self.locals: {:?}", self.locals);
         match instr.kind {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr } => {
@@ -304,7 +291,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             InstructionKind::Assign { target, expr } => {
                 let value = self.eval_expr(expr)?;
-                let local = self.bindings(target);
+                let local = self.bindings[target];
                 let new_state = local.state.zip(value).and_then(|(state, value)| {
                     let expected_ty = self.state_type(state);
                     let type_check = self.type_check(value, expected_ty, local.span, expr.span);
@@ -322,7 +309,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         })
                     }
                 });
-                self.bindings(target).state = new_state;
+                self.bindings[target].state = new_state;
             }
             InstructionKind::Eval(expr) => {
                 let value = self.eval_expr(expr)?;
@@ -333,7 +320,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 } else {
                     if let Ok(EvalValue::Runtime { expr, result_type }) = value {
                         // Lower incase the expression has side effect.
-                        let target = self.locals.mir_types.push(result_type);
+                        let target = self.mir_types.push(result_type);
                         self.emit(mir::Instruction::Set { target, expr });
                     } else {
                         // In a runtime context don't have to lower comptime or poison as they have
@@ -351,15 +338,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_logical_not(&mut self, local: hir::LocalId) -> MaybePoisoned<EvalValue> {
-        let binding = self.bindings(local);
-        let state = binding.state?;
+        let (state, span) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
             self.diag_ctx.emit_type_mismatch_simple(
                 &self.eval.types,
                 TypeId::BOOL,
                 ty,
-                self.loc(binding.span),
+                self.loc(span),
             );
             return Err(Poisoned);
         }
@@ -385,7 +371,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<TypeId> {
         self.with_fields_buf(|this, fields_buf_offset| {
             let struct_def = this.hir.struct_defs[struct_def_id];
-            let type_index = this.bindings(struct_def.type_index).poisoned().and_then(
+            let type_index = this.bindings[struct_def.type_index].poisoned().and_then(
                 |(state, span)| match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
@@ -437,11 +423,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::EvmBuiltinCall { builtin, args } => {
                 self.eval_builtin(builtin, args, expr.span).value()?
             }
-            ExprKind::LocalRef(local) => self.bindings(local).state.map(|state| match state {
+            ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {
                 LocalState::Comptime(vid) => EvalValue::Comptime(vid),
                 LocalState::Runtime(local) => EvalValue::Runtime {
                     expr: mir::Expr::LocalRef(local),
-                    result_type: self.mir_types(local),
+                    result_type: self.mir_types[local],
                 },
             }),
             ExprKind::LogicalNot { input } => self.eval_logical_not(input),

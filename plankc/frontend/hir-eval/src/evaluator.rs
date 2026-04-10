@@ -6,7 +6,7 @@ use plank_values::{TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
-    locals::{LocalState, ScopeLocals},
+    locals::LocalState,
     scope::{Function, Scope},
 };
 
@@ -82,14 +82,15 @@ impl<'a> Evaluator<'a> {
             source: const_def.source_id,
             func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
             comptime: true,
-            locals: ScopeLocals::new(),
+            bindings: DenseIndexMap::new(),
+            mir_types: IndexVec::new(),
         };
 
         for &instr in &scope.hir.block_instrs[const_def.body] {
             scope.eval_instr(instr).expect("todo: handle comptime diverge");
         }
 
-        let value = scope.bindings(const_def.result).state.map(|state| match state {
+        let value = scope.bindings[const_def.result].state.map(|state| match state {
             LocalState::Comptime(vid) => vid,
             LocalState::Runtime(_) => {
                 unreachable!("local in comptime set to runtime instead of poisoned")
@@ -119,12 +120,13 @@ impl<'a> Evaluator<'a> {
             source,
             func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
             comptime: false,
-            locals: ScopeLocals::new(),
+            bindings: DenseIndexMap::new(),
+            mir_types: IndexVec::new(),
         };
 
         let body = scope.eval_fn_body(block);
 
-        let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.locals.mir_types);
+        let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.mir_types);
         let fn_id2 =
             self.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::NEVER });
         assert_eq!(fn_id1, fn_id2);
