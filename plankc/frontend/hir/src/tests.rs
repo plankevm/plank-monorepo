@@ -69,7 +69,7 @@ fn test_basic_init_builtin_calls() {
         %0 = 0
         %1 = calldataload(%0)
         %2 = 32
-        %4 = type#1
+        %4 = type:u256
         %3 : %4 = calldataload(%2)
         %5 = 32
         %6 = malloc_uninit(%5)
@@ -111,14 +111,14 @@ fn test_inline_closure_lowering() {
         ==== Functions ====
         @fn0() -> %0 {
             preamble:
-                %0 = type#6
+                %0 = type:never
             body:
                 eval evm_stop()
                 ret void
         }
         @fn1() -> %0 {
             preamble:
-                %0 = type#6
+                %0 = type:never
             body:
                 eval invalid()
                 ret void
@@ -126,7 +126,7 @@ fn test_inline_closure_lowering() {
         @fn2() -> %0 {
             captures: [%0 -> %1]
             preamble:
-                %0 = type#6
+                %0 = type:never
             body:
                 %2 = %1
                 eval call %2()
@@ -206,8 +206,8 @@ fn test_fn_struct_return() {
         ==== Constants ====
         ConstId(0) ("Pair") result=LocalId(0) {
             %1 = void
-            %2 = type#1
-            %3 = type#1
+            %2 = type:u256
+            %3 = type:u256
             %0 = struct#0 main.plk:1:14
         }
         ConstId(1) ("swap") result=LocalId(0) {
@@ -217,8 +217,8 @@ fn test_fn_struct_return() {
         ==== Functions ====
         @fn0(%1: %0, %3: %2) -> %4 {
             preamble:
-                %0 = type#1
-                %2 = type#1
+                %0 = type:u256
+                %2 = type:u256
                 %4 = $0
             body:
                 %5 = $0
@@ -668,7 +668,7 @@ fn test_and_desugaring() {
         ==== Functions ====
         @fn0() -> %0 {
             preamble:
-                %0 = type#2
+                %0 = type:bool
             body:
                 %1 = 0
                 %2 = 0

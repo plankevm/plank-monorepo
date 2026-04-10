@@ -66,7 +66,7 @@ impl<'a> DisplayHir<'a> {
                         write!(f, "0x{x:x}")
                     }
                 }
-                Value::Type(id) => write!(f, "type#{}", id.get()),
+                Value::Type(id) => write!(f, "type:{}", id.primitive_name().unwrap()),
                 other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")
                 }

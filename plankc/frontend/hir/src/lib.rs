@@ -2,7 +2,7 @@ use plank_core::{
     IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
 };
 use plank_session::{
-    EvmBuiltin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, StrId,
+    EvmBuiltin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId,
 };
 
 pub use plank_values;
@@ -173,6 +173,12 @@ pub struct ConstDef {
     pub source_span: SourceSpan,
     pub body: BlockId,
     pub result: LocalId,
+}
+
+impl ConstDef {
+    pub fn loc(&self) -> SrcLoc {
+        SrcLoc::new(self.source_id, self.source_span)
+    }
 }
 
 #[derive(Debug, Clone)]
