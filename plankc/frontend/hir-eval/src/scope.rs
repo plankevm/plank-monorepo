@@ -1,11 +1,30 @@
-use crate::{Evaluator, diagnostics::DiagCtx, locals::*};
+use crate::{Evaluator, diagnostics::DiagCtx};
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{
     EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
 };
-use plank_values::{TypeId, Value, ValueId};
+use plank_values::{DefOrigin, FnDefId, TypeId, Value, ValueId};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Local {
+    pub state: MaybePoisoned<LocalState>,
+    pub span: SourceSpan,
+}
+
+impl Local {
+    pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan)> {
+        let state = self.state?;
+        Ok((state, self.span))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LocalState {
+    Runtime(mir::LocalId),
+    Comptime(ValueId),
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum EvalValue {
@@ -509,7 +528,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)
-                .map(|ty| EvalValue::Comptime(self.values.intern(Value::Type(ty)))),
+                .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
             ExprKind::UnaryOpCall { .. } | ExprKind::BinaryOpCall { .. } => {
                 self.diag_ctx.emit_not_yet_implemented(self.loc(expr.span));
                 Err(Poisoned)
@@ -518,39 +537,45 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::Member { object, member } => {
                 self.eval_struct_member_access(object, member, expr.span)
             }
-            kind @ (ExprKind::FnDef(_) | ExprKind::Call { .. }) => {
-                todo!("expr_kind: {kind:?}")
-            }
+            ExprKind::FnDef(fn_def_id) => self.eval_fn_def(fn_def_id, expr.span),
+            ExprKind::Call { .. } => todo!("call"),
         };
         Ok(value)
     }
 
-    pub fn with_values_buf<R>(&mut self, inner: impl FnOnce(&mut Self, usize) -> R) -> R {
-        let buf_offset = self.values_buf.len();
-        let res = inner(self, buf_offset);
-        self.values_buf.truncate(buf_offset);
-        res
-    }
-
-    pub fn with_types_buf<R>(&mut self, inner: impl FnOnce(&mut Self, usize) -> R) -> R {
-        let buf_offset = self.types_buf.len();
-        let res = inner(self, buf_offset);
-        self.types_buf.truncate(buf_offset);
-        res
-    }
-
-    pub fn with_fields_buf<R>(&mut self, inner: impl FnOnce(&mut Self, usize) -> R) -> R {
-        let buf_offset = self.fields_buf.len();
-        let res = inner(self, buf_offset);
-        self.fields_buf.truncate(buf_offset);
-        res
-    }
-
-    pub fn with_locals_buf<R>(&mut self, inner: impl FnOnce(&mut Self, usize) -> R) -> R {
-        let buf_offset = self.locals_buf.len();
-        let res = inner(self, buf_offset);
-        self.locals_buf.truncate(buf_offset);
-        res
+    fn eval_fn_def(&mut self, id: FnDefId, _def_span: SourceSpan) -> MaybePoisoned<EvalValue> {
+        let def_captures = &self.hir.fn_captures[id];
+        self.with_captures_buf(|this, captures_buf_offset| {
+            let mut validity = Ok(());
+            for &capture in def_captures {
+                let Local { state, span: def_span } = this.bindings[capture.outer_local];
+                let Ok(state) = state else {
+                    validity = Err(Poisoned);
+                    continue;
+                };
+                let value = match state {
+                    LocalState::Comptime(value) => value,
+                    LocalState::Runtime(_) => {
+                        this.diag_ctx.emit_closure_capture_not_comptime(
+                            this.loc(capture.use_span),
+                            this.loc(def_span),
+                        );
+                        validity = Err(Poisoned);
+                        continue;
+                    }
+                };
+                this.captures_buf.push((value, DefOrigin::Local(def_span)));
+            }
+            validity.map(|()| {
+                let capture_values = &this.eval.captures_buf[captures_buf_offset..];
+                assert_eq!(capture_values.len(), def_captures.len());
+                let closure_value = this
+                    .eval
+                    .values
+                    .intern(Value::Closure { fn_def: id, captures: capture_values });
+                EvalValue::Comptime(closure_value)
+            })
+        })
     }
 
     pub fn is_comptime(&self) -> bool {

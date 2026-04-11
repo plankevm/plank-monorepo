@@ -7,10 +7,11 @@ use plank_mir::Mir;
 use plank_session::Session;
 use plank_values::ValueInterner;
 
+#[macro_use]
+mod bufs;
 mod builtins;
 mod diagnostics;
 mod evaluator;
-mod locals;
 mod scope;
 mod structs;
 

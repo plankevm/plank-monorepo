@@ -4,10 +4,7 @@ use plank_mir as mir;
 use plank_session::{EvmBuiltin, MaybePoisoned, SourceSpan};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
-use crate::{
-    locals::LocalState,
-    scope::{Diverge, EvalValue, Scope},
-};
+use crate::scope::{Diverge, EvalValue, LocalState, Scope};
 use plank_session::Poisoned;
 
 fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {

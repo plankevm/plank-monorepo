@@ -3,11 +3,8 @@ use plank_session::Session;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::ValueInterner;
 
-fn try_lower(source: &str) -> (Mir, ValueInterner, Session) {
-    try_lower_project(TestProject::root(source))
-}
-
-fn try_lower_project(project: TestProject) -> (Mir, ValueInterner, Session) {
+fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
+    let project = project.into();
     let mut session = Session::new();
     let project = project.build(&mut session);
 
@@ -34,7 +31,7 @@ fn assert_lowers_to(source: &str, expected: &str) {
 }
 
 fn render_project_diagnostics(test_project: TestProject) -> Vec<String> {
-    let (_, _, session) = try_lower_project(test_project);
+    let (_, _, session) = try_lower(test_project);
     session.diagnostics().iter().map(|d| d.render_plain(&session)).collect()
 }
 
@@ -1513,9 +1510,9 @@ fn test_closure_capture_not_comptime() {
          --> main.plk:3:25
           |
         2 |     let x = calldataload(0);
-          |             --------------- not known at compile time
+          |             --------------- defined here
         3 |     let f = fn() u256 { x };
-          |                         ^ captures a runtime value
+          |                         ^ capture of runtime value
           |
           = note: closures can only capture values known at compile time
         "#],

@@ -167,12 +167,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_closure_capture_not_comptime(&mut self, use_loc: SrcLoc, def_loc: SrcLoc) {
         Diagnostic::error("closure capture must be known at compile time")
-            .cross_source_annotations(
-                use_loc,
-                "captures a runtime value",
-                def_loc,
-                "not known at compile time",
-            )
+            .cross_source_annotations(use_loc, "capture of runtime value", def_loc, "defined here")
             .note("closures can only capture values known at compile time")
             .emit(self.session);
     }

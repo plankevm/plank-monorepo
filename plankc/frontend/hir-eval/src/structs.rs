@@ -1,7 +1,4 @@
-use crate::{
-    locals::LocalState,
-    scope::{EvalValue, Scope},
-};
+use crate::scope::{EvalValue, LocalState, Scope};
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId};

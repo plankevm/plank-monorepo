@@ -1,13 +1,12 @@
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, StrId};
-use plank_values::{TypeId, TypeInterner, Value, ValueId, ValueInterner};
+use plank_session::{MaybePoisoned, SourceSpan, StrId};
+use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
-    locals::LocalState,
-    scope::{Function, Scope},
+    scope::{Function, LocalState, Scope},
 };
 
 pub(crate) enum ConstState {
@@ -32,6 +31,7 @@ pub(crate) struct Evaluator<'a> {
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
     pub fields_buf: Vec<(StrId, TypeId)>,
+    pub captures_buf: Vec<(ValueId, DefOrigin)>,
 }
 
 impl<'a> Evaluator<'a> {
@@ -52,6 +52,7 @@ impl<'a> Evaluator<'a> {
             locals_buf: Vec::new(),
             values_buf: Vec::new(),
             fields_buf: Vec::new(),
+            captures_buf: Vec::new(),
         }
     }
 
@@ -118,7 +119,7 @@ impl<'a> Evaluator<'a> {
             eval: self,
             diag_ctx,
             source,
-            func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
+            func: None,
             comptime: false,
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
