@@ -5,17 +5,14 @@ use plank_session::{
     EvmBuiltin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId,
 };
 
-pub use plank_values;
-
 pub mod display;
 mod lowerer;
 pub mod operators;
 
 pub use lowerer::lower;
-use plank_values::{FnDefId, ValueId};
+pub use plank_values::{ConstId, FnDefId, ValueId};
 
 newtype_index! {
-    pub struct ConstId;
     pub struct LocalId;
     pub struct BlockId;
     pub struct StructDefId;

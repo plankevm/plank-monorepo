@@ -1,12 +1,11 @@
-use crate::{TypeId, ValueId, bignum_interner::*};
+use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::SrcLoc;
+use plank_session::SourceSpan;
 use std::hash::BuildHasher;
 
 newtype_index! {
-    pub struct FnDefId;
     struct CompoundIdx;
     struct CaptureIdx;
 }
@@ -27,7 +26,7 @@ pub enum Value<'a> {
     Bool(bool),
     BigNum(U256),
     Type(TypeId),
-    Closure { fn_def: FnDefId, captures: &'a [(ValueId, SrcLoc)] },
+    Closure { fn_def: FnDefId, captures: &'a [(ValueId, DefOrigin)] },
     StructVal { ty: TypeId, fields: &'a [ValueId] },
 }
 
@@ -49,7 +48,7 @@ pub struct ValueInterner {
     dedup: HashTable<ValueId>,
     hasher: DefaultHashBuilder,
     children: ListOfLists<CompoundIdx, ValueId>,
-    captures: ListOfLists<CaptureIdx, (ValueId, SrcLoc)>,
+    captures: ListOfLists<CaptureIdx, (ValueId, DefOrigin)>,
     big_nums: BigNumInterner,
 }
 
@@ -62,7 +61,7 @@ impl Default for ValueInterner {
 fn stored_to_value<'a>(
     stored: StoredValue,
     children: &'a ListOfLists<CompoundIdx, ValueId>,
-    captures: &'a ListOfLists<CaptureIdx, (ValueId, SrcLoc)>,
+    captures: &'a ListOfLists<CaptureIdx, (ValueId, DefOrigin)>,
     big_nums: &'a BigNumInterner,
 ) -> Value<'a> {
     match stored {
