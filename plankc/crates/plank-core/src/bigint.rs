@@ -127,7 +127,7 @@ pub fn limbs_to_u256(limbs: &[u32]) -> Option<U256> {
 
     let mut u64_limbs = [0u64; 4];
     let (full, remainder) = limbs.as_chunks::<2>();
-    let padded_remainder = remainder.get(0).map(|&last_lo| [last_lo, 0]);
+    let padded_remainder = remainder.first().map(|&last_lo| [last_lo, 0]);
     for ([lo, hi], limb) in full.iter().copied().chain(padded_remainder).zip(&mut u64_limbs) {
         *limb = (u64::from(hi) << 32) | u64::from(lo);
     }

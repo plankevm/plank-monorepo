@@ -109,6 +109,125 @@ fn test_type_annotation_type_mismatch() {
 }
 
 #[test]
+fn test_no_else_if_as_expr() {
+    assert_lowers_to(
+        "
+        init {
+            let cond = calldataload(0);
+            let y = if iszero(cond) {
+                revert(malloc_uninit(0), 0);
+            } else if gt(cond, 2) {
+                sstore(3, 4);
+            };
+            evm_stop();
+        }
+        ",
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = calldataload(%0)
+            %2 : u256 = %1
+            %3 : bool = iszero(%2)
+            if %3 {
+                %4 : u256 = 0
+                %5 : memptr = malloc_uninit(%4)
+                %6 : u256 = 0
+                %7 : never = revert(%5, %6)
+            } else {
+                %8 : u256 = %1
+                %9 : u256 = 2
+                %10 : bool = gt(%8, %9)
+                if %10 {
+                    %11 : u256 = 3
+                    %12 : u256 = 4
+                    %13 : void = sstore(%11, %12)
+                    %14 : void = void_unit
+                } else {
+                    %14 : void = void_unit
+                }
+            }
+            %15 : void = %14
+            %16 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_if_condition_folds_in_runtime() {
+    assert_lowers_to(
+        "
+        init {
+            let cond = false;
+            if cond {
+                revert(malloc_uninit(0), 0);
+            } else {
+                sstore(3, 4);
+            }
+            evm_stop();
+        }
+        ",
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 3
+            %1 : u256 = 4
+            %2 : void = sstore(%0, %1)
+            %3 : void = void_unit
+            %4 : void = %3
+            %5 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_if_three_branches() {
+    assert_lowers_to(
+        "
+        init {
+            let c = calldataload(0);
+            let x = if slt(c, 0)  {
+                334
+            } else if iszero(c) {
+                333
+            } else {
+                0
+            };
+            evm_stop();
+        }
+        ",
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = calldataload(%0)
+            %2 : u256 = %1
+            %3 : u256 = 0
+            %4 : bool = slt(%2, %3)
+            if %4 {
+                %5 : u256 = 334
+            } else {
+                %6 : u256 = %1
+                %7 : bool = iszero(%6)
+                if %7 {
+                    %5 : u256 = 333
+                } else {
+                    %5 : u256 = 0
+                }
+            }
+            %8 : u256 = %5
+            %9 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_if_two_branches_type_mismatch() {
     assert_diagnostics(
         "

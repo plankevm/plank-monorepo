@@ -93,7 +93,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(ty)
     }
 
-    pub fn to_runtime_expr(
+    pub fn value_to_runtime_expr(
         &mut self,
         value: EvalValue,
         use_span: SourceSpan,
@@ -199,7 +199,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if self.is_comptime() {
                 self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
             } else {
-                self.to_runtime_expr(value, expr.span).map(|(expr, _ty)| {
+                self.value_to_runtime_expr(value, expr.span).map(|(expr, _ty)| {
                     let target = self.mir_types.push(self.value_type(value));
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
@@ -221,7 +221,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Ok(());
         }
 
-        let mir_expr = value.and_then(|value| self.to_runtime_expr(value, expr.span));
+        let mir_expr = value.and_then(|value| self.value_to_runtime_expr(value, expr.span));
         match self.bindings.get(local).copied() {
             None => {
                 let state = mir_expr.map(|(expr, ty)| {
@@ -299,7 +299,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let LocalState::Runtime(target) = state else {
                     unreachable!("invariant: runtime assign to comptime state")
                 };
-                self.to_runtime_expr(value, expr.span).map(|(expr, _ty)| {
+                self.value_to_runtime_expr(value, expr.span).map(|(expr, _ty)| {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 })
@@ -505,7 +505,7 @@ impl<'a, 'ctx> std::ops::Deref for Scope<'a, 'ctx> {
     type Target = Evaluator<'ctx>;
 
     fn deref(&self) -> &Self::Target {
-        &self.eval
+        self.eval
     }
 }
 

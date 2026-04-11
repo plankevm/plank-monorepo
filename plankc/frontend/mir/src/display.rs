@@ -10,7 +10,7 @@ pub struct DisplayMir<'a> {
     session: &'a Session,
 }
 
-const PAD: &'static str = "    ";
+const PAD: &str = "    ";
 
 impl<'a> DisplayMir<'a> {
     pub fn new(mir: &'a Mir, values: &'a ValueInterner, session: &'a Session) -> Self {
@@ -51,7 +51,7 @@ impl<'a> DisplayMir<'a> {
             Value::StructVal { ty, fields } => {
                 write!(f, "struct#{} {{", ty.get())?;
                 if !fields.is_empty() {
-                    write!(f, "\n")?;
+                    writeln!(f)?;
                 }
                 let pad = PAD.repeat(indent);
                 for &field in fields {
