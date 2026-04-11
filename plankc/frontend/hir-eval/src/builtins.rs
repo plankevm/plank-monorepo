@@ -6,7 +6,7 @@ use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
 use crate::{
     locals::LocalState,
-    scope::{BlockDiverge, EvalValue, Scope},
+    scope::{Diverge, EvalValue, Scope},
 };
 use plank_session::Poisoned;
 
@@ -81,7 +81,7 @@ impl Scope<'_, '_> {
         builtin: EvmBuiltin,
         args: hir::CallArgsId,
         expr_span: SourceSpan,
-    ) -> MaybePoisoned<Result<EvalValue, BlockDiverge>> {
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let args = &self.hir.call_args[args];
         let expr_loc = self.loc(expr_span);
 
@@ -165,7 +165,7 @@ impl Scope<'_, '_> {
             // We diverge after this so we need to make sure the call is actually included.
             let target = self.mir_types.push(result_type);
             self.emit(mir::Instruction::Set { target, expr });
-            return Ok(Err(BlockDiverge::Never));
+            return Ok(Err(Diverge::BlockEnd));
         }
 
         Ok(Ok(EvalValue::Runtime { expr, result_type }))

@@ -13,12 +13,10 @@ pub(crate) enum EvalValue {
     Runtime { expr: mir::Expr, result_type: TypeId },
 }
 
-#[derive(Debug)]
-pub(crate) enum BlockDiverge {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Diverge {
     PoisonedControlFlow,
-    Never,
-    ComptimeReturn(ValueId),
-    RuntimeReturn(TypeId),
+    BlockEnd,
 }
 
 pub(crate) struct Function {
@@ -40,15 +38,13 @@ pub(crate) struct Scope<'a, 'ctx> {
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub fn eval_entry_point_body(&mut self, hir_block: hir::BlockId) -> mir::BlockId {
-        let (mir_block, eval_res) = self.eval_block(hir_block);
+        let (mir_block, eval_res) = self.eval_block_to_mir(hir_block);
         match eval_res {
-            Err(BlockDiverge::ComptimeReturn(_) | BlockDiverge::RuntimeReturn(_)) | Ok(()) => {
+            Ok(()) => {
                 let span = self.hir.block_spans[hir_block].expect("hir: fn body without span");
                 self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
             }
-            Err(BlockDiverge::Never | BlockDiverge::PoisonedControlFlow) => {
-                // Desired termination
-            }
+            Err(Diverge::BlockEnd | Diverge::PoisonedControlFlow) => {}
         }
         mir_block
     }
@@ -129,21 +125,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    pub fn expect_comptime_state(
-        &mut self,
-        value: LocalState,
-        local_span: SourceSpan,
-        expr_span: SourceSpan,
-    ) -> MaybePoisoned<ValueId> {
-        match value {
-            LocalState::Comptime(vid) => Ok(vid),
-            LocalState::Runtime(_) => {
-                self.diag_ctx.emit_runtime_ref_in_comptime(self.source, local_span, expr_span);
-                Err(Poisoned)
-            }
-        }
-    }
-
     pub fn type_check(
         &mut self,
         value: EvalValue,
@@ -166,12 +147,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    pub fn eval_set(
+    fn eval_set(
         &mut self,
         local: hir::LocalId,
         r#type: Option<hir::LocalId>,
         expr: hir::Expr,
-    ) -> Result<(), BlockDiverge> {
+    ) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let value = value.and_then(|value| {
             let Some(type_local) = r#type else {
@@ -199,12 +180,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    pub fn eval_set_mut(
+    fn eval_set_mut(
         &mut self,
         local: hir::LocalId,
         r#type: Option<hir::LocalId>,
         expr: hir::Expr,
-    ) -> Result<(), BlockDiverge> {
+    ) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let value = value.and_then(|value| {
             let Some(type_local) = r#type else {
@@ -231,52 +212,71 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    pub fn eval_block(&mut self, block: hir::BlockId) -> (mir::BlockId, Result<(), BlockDiverge>) {
-        self.with_instructions(|this| {
-            for &instr in &this.hir.block_instrs[block] {
-                this.eval_instr(instr)?;
-            }
-            Ok(())
-        })
+    fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
+        todo!("branch set")
     }
 
-    pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), BlockDiverge> {
+    pub fn eval_block_to_mir(
+        &mut self,
+        block: hir::BlockId,
+    ) -> (mir::BlockId, Result<(), Diverge>) {
+        self.with_instructions(|this| this.eval_block_inline(block))
+    }
+
+    pub fn eval_block_inline(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
+        for &instr in &self.hir.block_instrs[block] {
+            self.eval_instr(instr)?;
+        }
+        Ok(())
+    }
+
+    fn eval_assign(&mut self, target: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
+        let value = self.eval_expr(expr)?;
+        let local = self.bindings[target];
+        let new_state = local.state.zip(value).and_then(|(state, value)| {
+            let expected_ty = self.state_type(state);
+            let type_check = self.type_check(value, expected_ty, local.span, expr.span);
+            if self.is_comptime() {
+                let state = match state {
+                    LocalState::Comptime(vid) => Ok(vid),
+                    LocalState::Runtime(_) => {
+                        self.diag_ctx.emit_runtime_ref_in_comptime(
+                            self.source,
+                            local.span,
+                            expr.span,
+                        );
+                        Err(Poisoned)
+                    }
+                };
+                let value = self.expect_comptime_value(value, expr.span);
+                type_check.and(state).and(value).map(LocalState::Comptime)
+            } else {
+                let LocalState::Runtime(target) = state else {
+                    unreachable!("invariant: runtime assign to comptime state")
+                };
+                self.to_runtime_value(value, expr.span).map(|expr| {
+                    self.emit(mir::Instruction::Set { target, expr });
+                    LocalState::Runtime(target)
+                })
+            }
+        });
+        self.bindings[target].state = new_state;
+        Ok(())
+    }
+
+    pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), Diverge> {
         match instr.kind {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr } => {
                 self.eval_set_mut(local, r#type, expr)?
             }
+            InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
             InstructionKind::ComptimeBlock { body } => {
                 let parent_comptime = std::mem::replace(&mut self.comptime, true);
-
-                for &instr in &self.hir.block_instrs[body] {
-                    self.eval_instr(instr).expect("todo: comptime return");
-                }
-
+                self.eval_block_inline(body).expect("todo: comptime return");
                 self.comptime = parent_comptime;
             }
-            InstructionKind::Assign { target, expr } => {
-                let value = self.eval_expr(expr)?;
-                let local = self.bindings[target];
-                let new_state = local.state.zip(value).and_then(|(state, value)| {
-                    let expected_ty = self.state_type(state);
-                    let type_check = self.type_check(value, expected_ty, local.span, expr.span);
-                    if self.is_comptime() {
-                        let state = self.expect_comptime_state(state, local.span, expr.span);
-                        let value = self.expect_comptime_value(value, expr.span);
-                        type_check.and(state).and(value).map(LocalState::Comptime)
-                    } else {
-                        let LocalState::Runtime(target) = state else {
-                            unreachable!("invariant: runtime assign to comptime state")
-                        };
-                        self.to_runtime_value(value, expr.span).map(|expr| {
-                            self.emit(mir::Instruction::Set { target, expr });
-                            LocalState::Runtime(target)
-                        })
-                    }
-                });
-                self.bindings[target].state = new_state;
-            }
+            InstructionKind::Assign { target, expr } => self.eval_assign(target, expr)?,
             InstructionKind::Eval(expr) => {
                 let value = self.eval_expr(expr)?;
                 if self.is_comptime() {
@@ -297,9 +297,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::If { condition, then_block, else_block } => {
                 self.eval_if(condition, then_block, else_block)?;
             }
-            instr @ (InstructionKind::BranchSet { .. }
-            | InstructionKind::Return(_)
-            | InstructionKind::While { .. }) => todo!("instr: {instr:?}"),
+            instr @ (InstructionKind::Return(_) | InstructionKind::While { .. }) => {
+                todo!("instr: {instr:?}")
+            }
         };
         Ok(())
     }
@@ -309,8 +309,42 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         condition: hir::LocalId,
         then: hir::BlockId,
         r#else: hir::BlockId,
-    ) -> Result<(), BlockDiverge> {
-        Ok(())
+    ) -> Result<(), Diverge> {
+        let binding = self.bindings[condition];
+        match binding.state {
+            Ok(LocalState::Runtime(mir_local)) if self.mir_types[mir_local] == TypeId::BOOL => {
+                if self.is_comptime() {
+                    self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.span));
+                    return Err(Diverge::PoisonedControlFlow);
+                }
+                let (then, then_res) = self.eval_block_to_mir(then);
+                let (r#else, else_res) = self.eval_block_to_mir(r#else);
+                self.emit(mir::Instruction::If {
+                    condition: mir_local,
+                    then_block: then,
+                    else_block: r#else,
+                });
+                match (then_res, else_res) {
+                    (Err(Diverge::PoisonedControlFlow), _) => Err(Diverge::PoisonedControlFlow),
+                    (_, Err(Diverge::PoisonedControlFlow)) => Err(Diverge::PoisonedControlFlow),
+                    (Err(Diverge::BlockEnd), Err(Diverge::BlockEnd)) => Err(Diverge::BlockEnd),
+                    _ => Ok(()),
+                }
+            }
+            Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
+            Ok(LocalState::Comptime(ValueId::FALSE)) => self.eval_block_inline(r#else),
+            Ok(state) => {
+                let state_ty = self.state_type(state);
+                self.diag_ctx.emit_type_mismatch_simple(
+                    &self.eval.types,
+                    TypeId::BOOL,
+                    state_ty,
+                    self.loc(binding.span),
+                );
+                Err(Diverge::PoisonedControlFlow)
+            }
+            Err(Poisoned) => Err(Diverge::PoisonedControlFlow),
+        }
     }
 
     pub fn loc(&self, span: SourceSpan) -> SrcLoc {
@@ -344,7 +378,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(value)
     }
 
-    pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, BlockDiverge> {
+    pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, Diverge> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
             ExprKind::EvmBuiltinCall { builtin, args } => {
