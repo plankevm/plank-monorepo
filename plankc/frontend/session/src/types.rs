@@ -24,11 +24,14 @@ impl TypeId {
         self == target || self == TypeId::NEVER
     }
 
-    pub fn unify(&mut self, other: TypeId) -> bool {
+    pub fn unify(&mut self, other: TypeId) -> Result<(), TypeId> {
         if *self == TypeId::NEVER {
             *self = other;
-            return true;
+            return Ok(());
         }
-        other == TypeId::NEVER || *self == other
+        if other == TypeId::NEVER || *self == other {
+            return Ok(());
+        }
+        Err(*self)
     }
 }

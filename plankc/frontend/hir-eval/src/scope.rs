@@ -93,21 +93,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(ty)
     }
 
-    pub fn to_runtime_value(
+    pub fn to_runtime_expr(
         &mut self,
         value: EvalValue,
         use_span: SourceSpan,
-    ) -> MaybePoisoned<mir::Expr> {
+    ) -> MaybePoisoned<(mir::Expr, TypeId)> {
         match value {
             EvalValue::Comptime(vid) => {
                 if self.is_comptime_only(vid) {
                     self.diag_ctx.emit_comptime_only_value_at_runtime(self.loc(use_span));
                     Err(Poisoned)
                 } else {
-                    Ok(mir::Expr::Const(vid))
+                    Ok((mir::Expr::Const(vid), self.values.type_of_value(vid)))
                 }
             }
-            EvalValue::Runtime { result_type: _, expr } => Ok(expr),
+            EvalValue::Runtime { result_type, expr } => Ok((expr, result_type)),
         }
     }
 
@@ -164,15 +164,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         });
         let state = value.and_then(|value| {
             if self.is_comptime() {
-                self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
-            } else {
-                match value {
-                    EvalValue::Comptime(vid) => Ok(LocalState::Comptime(vid)),
-                    EvalValue::Runtime { expr, result_type } => {
-                        let target = self.mir_types.push(result_type);
-                        self.emit(mir::Instruction::Set { target, expr });
-                        Ok(LocalState::Runtime(target))
-                    }
+                return self.expect_comptime_value(value, expr.span).map(LocalState::Comptime);
+            }
+            match value {
+                EvalValue::Comptime(vid) => Ok(LocalState::Comptime(vid)),
+                EvalValue::Runtime { expr, result_type } => {
+                    let target = self.mir_types.push(result_type);
+                    self.emit(mir::Instruction::Set { target, expr });
+                    Ok(LocalState::Runtime(target))
                 }
             }
         });
@@ -200,7 +199,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if self.is_comptime() {
                 self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
             } else {
-                self.to_runtime_value(value, expr.span).map(|expr| {
+                self.to_runtime_expr(value, expr.span).map(|(expr, _ty)| {
                     let target = self.mir_types.push(self.value_type(value));
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
@@ -213,7 +212,53 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
-        todo!("branch set")
+        let value = self.eval_expr(expr)?;
+        if self.is_comptime() {
+            let state = value
+                .and_then(|value| self.expect_comptime_value(value, expr.span))
+                .map(LocalState::Comptime);
+            let _ = self.bindings.insert(local, Local { state, span: expr.span });
+            return Ok(());
+        }
+
+        let mir_expr = value.and_then(|value| self.to_runtime_expr(value, expr.span));
+        match self.bindings.get(local).copied() {
+            None => {
+                let state = mir_expr.map(|(expr, ty)| {
+                    let target = self.mir_types.push(ty);
+                    self.emit(mir::Instruction::Set { target, expr });
+                    LocalState::Runtime(target)
+                });
+                self.bindings.insert_no_prev(local, Local { state, span: expr.span });
+            }
+            Some(binding) => {
+                let new_state =
+                    binding.state.zip(mir_expr).and_then(|(prev_state, (mir_expr, ty))| {
+                        let LocalState::Runtime(target) = prev_state else {
+                            unreachable!(
+                                "invariant: runtime branch set overwriting comptime state"
+                            );
+                        };
+                        if let Err(existing_ty) = self.mir_types[target].unify(ty) {
+                            self.diag_ctx.emit_incompatible_branch_types(
+                                &self.eval.types,
+                                existing_ty,
+                                self.loc(binding.span),
+                                ty,
+                                self.loc(expr.span),
+                            );
+                            return Err(Poisoned);
+                        }
+
+                        self.emit(mir::Instruction::Set { target, expr: mir_expr });
+
+                        Ok(LocalState::Runtime(target))
+                    });
+                self.bindings[local] = Local { state: new_state, span: expr.span };
+            }
+        }
+
+        Ok(())
     }
 
     pub fn eval_block_to_mir(
@@ -254,7 +299,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let LocalState::Runtime(target) = state else {
                     unreachable!("invariant: runtime assign to comptime state")
                 };
-                self.to_runtime_value(value, expr.span).map(|expr| {
+                self.to_runtime_expr(value, expr.span).map(|(expr, _ty)| {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 })
@@ -273,7 +318,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
             InstructionKind::ComptimeBlock { body } => {
                 let parent_comptime = std::mem::replace(&mut self.comptime, true);
-                self.eval_block_inline(body).expect("todo: comptime return");
+                match self.eval_block_inline(body) {
+                    Ok(()) => {}
+                    Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
+                    Err(Diverge::BlockEnd) => todo!("comptime block end?"),
+                }
                 self.comptime = parent_comptime;
             }
             InstructionKind::Assign { target, expr } => self.eval_assign(target, expr)?,

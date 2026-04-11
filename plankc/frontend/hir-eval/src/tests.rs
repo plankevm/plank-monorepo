@@ -151,28 +151,16 @@ fn test_if_three_branches_type_mismatch() {
             evm_stop();
         }
         ",
-        &[
-            r#"
-                error: `if` and `else` have incompatible types
-                 --> main.plk:6:9
-                  |
-                4 |         3
-                  |         - `u256` expected because of this
-                5 |     } else if eq(c, 34) {
-                6 |         false
-                  |         ^^^^^ expected `u256`, got `bool`
-            "#,
-            r#"
-                error: `if` and `else` have incompatible types
-                 --> main.plk:8:9
-                  |
-                4 |         3
-                  |         - `u256` expected because of this
-                ...
-                8 |         true
-                  |         ^^^^ expected `u256`, got `bool`
-            "#,
-        ],
+        &[r#"
+            error: `if` and `else` have incompatible types
+             --> main.plk:6:9
+              |
+            4 |         3
+              |         - `u256` expected because of this
+            5 |     } else if eq(c, 34) {
+            6 |         false
+              |         ^^^^^ expected `u256`, got `bool`
+            "#],
     );
 }
 
@@ -374,12 +362,12 @@ fn test_if_mixed_never_and_value_branches() {
             %2 : u256 = %1
             %3 : bool = iszero(%2)
             if %3 {
-                %4 : u256 = evm_stop()
+                %4 : never = evm_stop()
             } else {
-                %4 : u256 = 42
+                %5 : u256 = 42
             }
-            %5 : u256 = %4
-            %6 : never = evm_stop()
+            %6 : u256 = %5
+            %7 : never = evm_stop()
         }
         "#,
     );
@@ -948,18 +936,23 @@ fn test_runtime_return_type_mismatch() {
 fn test_comptime_if_condition_not_bool() {
     assert_diagnostics(
         r#"
-        const f = fn() u256 {
-            if 42 { return 1; } else { return 2; }
-        };
-        const r = f();
-        init { evm_stop(); }
+        init {
+            comptime {
+                if 42 {
+                    add(3, 4);
+                } else {
+                    iszero(34);
+                }
+            }
+            evm_stop();
+        }
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:2:8
+         --> main.plk:3:12
           |
-        2 |     if 42 { return 1; } else { return 2; }
-          |        ^^ expected `bool`, got `u256`
+        3 |         if 42 {
+          |            ^^ expected `bool`, got `u256`
         "#],
     );
 }
