@@ -11,14 +11,14 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy)]
 pub struct StructExtraInfo {
-    pub loc: SrcLoc,
+    pub def_loc: SrcLoc,
     pub type_index: ValueId,
     pub name: Option<StrId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StructInfo<'a> {
-    pub loc: SrcLoc,
+    pub def_loc: SrcLoc,
     pub type_index: ValueId,
     pub fields: &'a [(StrId, TypeId)],
 }
@@ -141,7 +141,7 @@ impl TypeInterner {
             Entry::Vacant(vacant) => {
                 let field_struct_idx = self.storage.struct_fields.push_copy_slice(r#struct.fields);
                 let new_struct_idx = self.storage.index_to_struct.push(StructExtraInfo {
-                    loc: r#struct.loc,
+                    def_loc: r#struct.def_loc,
                     type_index: r#struct.type_index,
                     name: None,
                 });
@@ -186,11 +186,11 @@ impl TypeInterner {
                 Some(name) => f.write_str(session.lookup_name(name)),
                 None => {
                     let (line, col) =
-                        session.offset_to_line_col(info.loc.source, info.loc.span.start);
+                        session.offset_to_line_col(info.def_loc.source, info.def_loc.span.start);
                     write!(
                         f,
                         "struct@{}:{line}:{col}",
-                        &session.get_source(info.loc.source).path.to_str().unwrap()
+                        &session.get_source(info.def_loc.source).path.to_str().unwrap()
                     )
                 }
             },
@@ -235,7 +235,7 @@ impl StructStorage {
     fn get_info(&self, idx: StructIdx) -> StructInfo<'_> {
         let stored = &self.index_to_struct[idx];
         StructInfo {
-            loc: stored.loc,
+            def_loc: stored.def_loc,
             type_index: stored.type_index,
             fields: &self.struct_fields[idx],
         }

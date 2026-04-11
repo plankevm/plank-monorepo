@@ -53,7 +53,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             }
 
             let struct_ty = this.eval.types.intern(Type::Struct(StructInfo {
-                loc: this.loc(def_expr_span),
+                def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
                 fields: &this.eval.fields_buf[fields_buf_offset..],
             }));
