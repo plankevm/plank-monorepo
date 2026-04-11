@@ -41,8 +41,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (mir_block, eval_res) = self.eval_block_to_mir(hir_block);
         match eval_res {
             Ok(()) => {
-                let span = self.hir.block_spans[hir_block].expect("hir: fn body without span");
-                self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
+                if let Ok(span) = self.hir.block_spans[hir_block] {
+                    self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
+                }
             }
             Err(Diverge::BlockEnd | Diverge::PoisonedControlFlow) => {}
         }
@@ -344,16 +345,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
             InstructionKind::If { condition, then_block, else_block } => {
-                self.eval_if(condition, then_block, else_block)?;
+                self.eval_if(condition, then_block, else_block)?
             }
-            instr @ (InstructionKind::Return(_) | InstructionKind::While { .. }) => {
-                todo!("instr: {instr:?}")
+            InstructionKind::While { condition_block, condition, body } => {
+                self.eval_while(condition_block, condition, body)?
             }
+            InstructionKind::Return(_) => todo!("return"),
         };
         Ok(())
     }
 
-    pub fn eval_if(
+    fn eval_if(
         &mut self,
         condition: hir::LocalId,
         then: hir::BlockId,
@@ -394,6 +396,63 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Err(Poisoned) => Err(Diverge::PoisonedControlFlow),
         }
+    }
+
+    fn eval_while(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+        body: hir::BlockId,
+    ) -> Result<(), Diverge> {
+        if self.is_comptime() {
+            if let Ok(span) = self.hir.block_spans[condition_block] {
+                self.diag_ctx.emit_not_yet_implemented(self.loc(span));
+            }
+            return Err(Diverge::PoisonedControlFlow);
+        }
+
+        let (condition_block, mir_condition_local) = self.with_instructions(|this| {
+            this.eval_block_inline(condition_block)?;
+            let binding = this.bindings[condition];
+            let state = match binding.state {
+                Err(Poisoned) => return Err(Diverge::PoisonedControlFlow),
+                Ok(state) => state,
+            };
+            let state_ty = this.state_type(state);
+            if !state_ty.is_assignable_to(TypeId::BOOL) {
+                this.diag_ctx.emit_type_mismatch_simple(
+                    &this.eval.types,
+                    TypeId::BOOL,
+                    state_ty,
+                    this.loc(binding.span),
+                );
+                return Err(Diverge::PoisonedControlFlow);
+            }
+            match state {
+                LocalState::Runtime(local) => Ok(local),
+                LocalState::Comptime(value) => {
+                    if this.is_comptime_only(value) {
+                        this.diag_ctx.emit_comptime_only_value_at_runtime(this.loc(binding.span));
+                        return Err(Diverge::PoisonedControlFlow);
+                    }
+                    let condition = this.mir_types.push(this.values.type_of_value(value));
+                    this.emit(mir::Instruction::Set {
+                        target: condition,
+                        expr: mir::Expr::Const(value),
+                    });
+                    Ok(condition)
+                }
+            }
+        });
+        let condition = mir_condition_local?;
+        let (body, body_res) = self.eval_block_to_mir(body);
+        match body_res {
+            Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
+            Err(Diverge::BlockEnd) | Ok(()) => {}
+        }
+        self.emit(mir::Instruction::While { condition_block, condition, body });
+
+        Ok(())
     }
 
     pub fn loc(&self, span: SourceSpan) -> SrcLoc {

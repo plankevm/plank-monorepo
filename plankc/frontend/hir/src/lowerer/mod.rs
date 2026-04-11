@@ -29,7 +29,7 @@ struct ScopedLocal {
 
 struct HirBuilder {
     block_instrs: ListOfLists<BlockId, Instruction>,
-    block_spans: IndexVec<BlockId, Option<SourceSpan>>,
+    block_spans: IndexVec<BlockId, MaybePoisoned<SourceSpan>>,
 
     call_args: ListOfLists<CallArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
@@ -300,7 +300,7 @@ impl BlockLowerer<'_> {
 
     fn flush_instructions_from(&mut self, start: usize, span: SourceSpan) -> BlockId {
         let block_id = self.builder.block_instrs.push_iter(self.instructions_buf.drain(start..));
-        let span_id = self.builder.block_spans.push(Some(span));
+        let span_id = self.builder.block_spans.push(Ok(span));
         assert_eq!(block_id, span_id, "block_instrs and block_spans out of sync");
         block_id
     }
@@ -793,7 +793,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         None => {
             lowerer.error_missing_init_block();
             let block_id = builder.block_instrs.push_iter(std::iter::empty());
-            builder.block_spans.push(None);
+            builder.block_spans.push(Err(Poisoned));
             block_id
         }
     };
