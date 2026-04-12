@@ -74,6 +74,12 @@ impl ExprKind {
 
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {
+    Param {
+        comptime: bool,
+        arg: LocalId,
+        r#type: LocalId,
+        idx: u32,
+    },
     Set {
         local: LocalId,
         r#type: Option<LocalId>,

@@ -374,7 +374,7 @@ impl<'cst> FnDef<'cst> {
     }
 
     pub fn params(&self) -> impl Iterator<Item = Result<Param<'cst>, TokenSpan>> {
-        self.param_list.children().filter_map(Param::try_new)
+        self.param_list.children().filter_map(|child| Param::try_new(child).transpose())
     }
 
     pub fn return_type(&self) -> Expr<'cst> {
@@ -400,15 +400,15 @@ pub struct Param<'cst> {
 }
 
 impl<'cst> Param<'cst> {
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
-        let comptime = match view.kind() {
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
+        let is_comptime = match view.kind() {
             NodeKind::Parameter => false,
             NodeKind::ComptimeParameter => true,
-            _ => return None,
+            _ => return Ok(None),
         };
-        let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
-        let Some(name) = name_node.kind().as_ident() else { return Some(Err(view.span())) };
-        Some(Ok(Self { name, name_span: name_node.span(), is_comptime: comptime, view }))
+        let name_node = view.child(0).ok_or(view.span())?;
+        let name = name_node.kind().as_ident().ok_or(view.span())?;
+        Ok(Some(Self { name, name_span: name_node.span(), is_comptime, view }))
     }
 
     pub fn type_expr(&self) -> Expr<'cst> {

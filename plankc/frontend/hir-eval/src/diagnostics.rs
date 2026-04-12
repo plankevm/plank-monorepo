@@ -255,6 +255,7 @@ impl DiagCtx<'_> {
             .info("`let mut` definitions and mutable assignments require runtime-compatible values")
             .emit(self.session);
     }
+
     pub fn emit_mixed_comptime_runtime_struct(
         &mut self,
         source: SourceId,

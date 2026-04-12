@@ -2032,6 +2032,39 @@ fn test_comptime_block_runtime_capture() {
 }
 
 #[test]
+fn test_comptime_expr_runtime_dep() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = iszero(calldataload(0));
+            let T = if cond { u256 } else { bool };
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: use of comptime only value at runtime
+         --> main.plk:3:23
+          |
+        3 |     let T = if cond { u256 } else { bool };
+          |                       ^^^^ reference to comptime only value
+          |
+          = info: `let mut` definitions and mutable assignments require runtime-compatible values
+        "#,
+            r#"
+        error: use of comptime only value at runtime
+         --> main.plk:3:37
+          |
+        3 |     let T = if cond { u256 } else { bool };
+          |                                     ^^^^ reference to comptime only value
+          |
+          = info: `let mut` definitions and mutable assignments require runtime-compatible values
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_comptime_block_type_result() {
     assert_lowers_to(
         r#"

@@ -1,19 +1,23 @@
 use hashbrown::HashMap;
-use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
+use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, StrId};
+use plank_session::{MaybePoisoned, SourceSpan, StrId};
 use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
-    scope::{Function, LocalState, Scope},
+    scope::{EvalContext, Function, LocalState, Scope},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum State<T> {
     InProgress,
     Done(T),
+}
+
+newtype_index! {
+    pub(crate) struct CallArgSpansIdx;
 }
 
 pub(crate) struct Evaluator<'a> {
@@ -29,6 +33,8 @@ pub(crate) struct Evaluator<'a> {
     pub hir: &'a Hir,
 
     pub lowered_fns_cache: HashMap<ValueId, State<MaybePoisoned<mir::FnId>>>,
+
+    pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -52,6 +58,8 @@ impl<'a> Evaluator<'a> {
             hir,
 
             lowered_fns_cache: HashMap::new(),
+
+            call_arg_spans: ListOfLists::new(),
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
@@ -83,19 +91,8 @@ impl<'a> Evaluator<'a> {
 
         self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
-        let mut scope = Scope {
-            eval: self,
-            diag_ctx,
-            source: const_def.source_id,
-            func: Some(Function { ret_type: TypeId::NEVER, ret_type_span: None }),
-            comptime: true,
-            bindings: DenseIndexMap::new(),
-            mir_types: IndexVec::new(),
-        };
-
-        for &instr in &scope.hir.block_instrs[const_def.body] {
-            scope.eval_instr(instr).expect("todo: handle comptime diverge");
-        }
+        let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
+        scope.eval_comptime(const_def.body).expect("todo: handle comptime diverge");
 
         let value = scope.bindings[const_def.result].state.map(|state| match state {
             LocalState::Comptime(vid) => vid,
@@ -120,16 +117,8 @@ impl<'a> Evaluator<'a> {
         block: hir::BlockId,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> mir::FnId {
-        let source = self.hir.entry_source;
-        let mut scope = Scope {
-            eval: self,
-            diag_ctx,
-            source,
-            func: None,
-            comptime: false,
-            bindings: DenseIndexMap::new(),
-            mir_types: IndexVec::new(),
-        };
+        let mut scope =
+            Scope::new(self, diag_ctx, self.hir.entry_source, false, EvalContext::Other);
 
         let body = scope.eval_entry_point_body(block);
 

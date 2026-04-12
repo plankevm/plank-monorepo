@@ -522,8 +522,7 @@ impl BlockLowerer<'_> {
         let return_type;
         let type_preamble = {
             let preamble_block_start = self.instructions_buf.len();
-            for result in fn_def.params() {
-                let Ok(param) = result else { continue };
+            for param in fn_def.params().filter_map(Result::ok) {
                 let param_type = self.lower_expr_to_local(param.type_expr());
                 self.locals_buf.push(param_type);
                 let param_value = self.add_param_to_scope_as_local(param);

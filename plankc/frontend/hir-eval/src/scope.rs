@@ -1,4 +1,8 @@
-use crate::{Evaluator, diagnostics::DiagCtx, evaluator::State};
+use crate::{
+    Evaluator,
+    diagnostics::DiagCtx,
+    evaluator::{CallArgSpansIdx, State},
+};
 use hashbrown::hash_map::Entry;
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
@@ -39,9 +43,10 @@ pub(crate) enum Diverge {
     BlockEnd,
 }
 
-pub(crate) struct Function {
-    pub ret_type: TypeId,
-    pub ret_type_span: Option<SourceSpan>,
+pub(crate) enum EvalContext {
+    FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_span: SourceSpan },
+    FunctionPreamble { call_scope_source: SourceId, arg_spans: CallArgSpansIdx },
+    Other,
 }
 
 pub(crate) struct Scope<'a, 'ctx> {
@@ -49,7 +54,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub diag_ctx: &'a mut DiagCtx<'ctx>,
 
     pub source: SourceId,
-    pub func: Option<Function>,
+    pub ctx: EvalContext,
     pub comptime: bool,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
@@ -57,6 +62,26 @@ pub(crate) struct Scope<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
+    pub fn new(
+        eval: &'a mut Evaluator<'ctx>,
+        diag_ctx: &'a mut DiagCtx<'ctx>,
+        source: SourceId,
+        comptime: bool,
+        ctx: EvalContext,
+    ) -> Self {
+        Self {
+            eval,
+            diag_ctx,
+
+            source,
+            ctx,
+            comptime,
+
+            bindings: DenseIndexMap::new(),
+            mir_types: IndexVec::new(),
+        }
+    }
+
     pub fn eval_entry_point_body(&mut self, hir_block: hir::BlockId) -> mir::BlockId {
         let (mir_block, eval_res) = self.eval_block_to_mir(hir_block);
         match eval_res {
@@ -68,6 +93,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Err(Diverge::BlockEnd | Diverge::PoisonedControlFlow) => {}
         }
         mir_block
+    }
+
+    pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
+        let parent_comptime = std::mem::replace(&mut self.comptime, true);
+        let res = self.eval_block_inline(block);
+        self.comptime = parent_comptime;
+
+        match res {
+            Ok(()) | Err(Diverge::PoisonedControlFlow) => res,
+            Err(Diverge::BlockEnd) => todo!("comptime block end?"),
+        }
     }
 
     pub fn emit(&mut self, instr: mir::Instruction) {
@@ -337,15 +373,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval_set_mut(local, r#type, expr)?
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
-            InstructionKind::ComptimeBlock { body } => {
-                let parent_comptime = std::mem::replace(&mut self.comptime, true);
-                match self.eval_block_inline(body) {
-                    Ok(()) => {}
-                    Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
-                    Err(Diverge::BlockEnd) => todo!("comptime block end?"),
-                }
-                self.comptime = parent_comptime;
-            }
+            InstructionKind::ComptimeBlock { body } => self.eval_comptime(body)?,
             InstructionKind::Assign { target, expr } => self.eval_assign(target, expr)?,
             InstructionKind::Eval(expr) => {
                 let value = self.eval_expr(expr)?;
@@ -542,117 +570,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::Call { callee, args } => self.eval_call(callee, args, expr.span),
         };
         Ok(value)
-    }
-
-    fn eval_fn_def(&mut self, id: FnDefId) -> MaybePoisoned<EvalValue> {
-        let fn_def = self.hir.fns[id];
-        let def_captures = &self.hir.fn_captures[id];
-        let params = &self.hir.fn_params[id];
-
-        if let Some(param) = params.iter().find(|&param| param.is_comptime) {
-            self.diag_ctx.emit_not_yet_implemented("comptime parameters", fn_def.loc(param.span));
-            return Err(Poisoned);
-        }
-
-        self.with_captures_buf(|this, captures_buf_offset| {
-            let mut poisoned = false;
-            for &capture in def_captures {
-                let Local { state, span: def_span } = this.bindings[capture.outer_local];
-                let Ok(state) = state else {
-                    poisoned = true;
-                    continue;
-                };
-                let value = match state {
-                    LocalState::Comptime(value) => value,
-                    LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_closure_capture_not_comptime(
-                            this.loc(capture.use_span),
-                            this.loc(def_span),
-                        );
-                        poisoned = true;
-                        continue;
-                    }
-                };
-                this.captures_buf.push((value, DefOrigin::Local(def_span)));
-            }
-            if poisoned {
-                return Err(Poisoned);
-            }
-            let capture_values = &this.eval.captures_buf[captures_buf_offset..];
-            assert_eq!(capture_values.len(), def_captures.len());
-            let closure_value =
-                this.eval.values.intern(Value::Closure { fn_def: id, captures: capture_values });
-            Ok(EvalValue::Comptime(closure_value))
-        })
-    }
-
-    fn eval_call(
-        &mut self,
-        callee: hir::LocalId,
-        args_id: hir::CallArgsId,
-        call_span: SourceSpan,
-    ) -> MaybePoisoned<EvalValue> {
-        let (state, callee_def_span) = self.bindings[callee].poisoned()?;
-        let closure_vid = match state {
-            LocalState::Comptime(value) => value,
-            LocalState::Runtime(_) => {
-                self.diag_ctx.emit_call_target_not_comptime(self.loc(callee_def_span));
-                return Err(Poisoned);
-            }
-        };
-        let Value::Closure { fn_def: fn_def_id, captures } = self.values.lookup(closure_vid) else {
-            let ty = self.values.type_of_value(closure_vid);
-            self.diag_ctx.emit_not_callable(&self.eval.types, ty, self.loc(callee_def_span));
-            return Err(Poisoned);
-        };
-        let func = self.hir.fns[fn_def_id];
-        let params = &self.hir.fn_params[fn_def_id];
-        let args = &self.hir.call_args[args_id];
-        if params.len() != args.len() {
-            self.diag_ctx.emit_arg_count_mismatch(
-                params.len(),
-                args.len(),
-                self.loc(call_span),
-                func.loc(func.param_list_span),
-            );
-            return Err(Poisoned);
-        }
-
-        if self.is_comptime() {
-            // TODO
-            self.diag_ctx.emit_not_yet_implemented("comptime function calls", self.loc(call_span));
-            return Err(Poisoned);
-        }
-
-        // Comptime:
-        // - eval preamble
-        // - eval body with comptime context
-        // - return ends evaluation, bubbles up result as `EvalValue::Comptime`
-        //
-        // Runtime:
-        // - check lowered cache
-        // - no cache:
-        //     - comptime eval preamble
-        //     - runtime eval body
-        //     - `return` statements lowered to mir returns
-        // - result is `EvalValue::Runtime` with [`mir::Expr::Call`]
-
-        let lowered = match self.lowered_fns_cache.entry(closure_vid) {
-            Entry::Occupied(mut occupied) => match *occupied.get() {
-                State::Done(lowered) => lowered?,
-                State::InProgress => {
-                    occupied.insert(State::Done(Err(Poisoned)));
-                    self.diag_ctx.emit_runtime_call_with_recursion(self.loc(call_span));
-                    return Err(Poisoned);
-                }
-            },
-            Entry::Vacant(vacant) => {
-                vacant.insert(State::InProgress);
-                todo!("lowering")
-            }
-        };
-
-        todo!()
     }
 
     pub fn is_comptime(&self) -> bool {
