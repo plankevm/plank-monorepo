@@ -1,4 +1,4 @@
-use crate::{Evaluator, diagnostics::DiagCtx};
+use crate::{Evaluator, diagnostics::DiagCtx, evaluator::State};
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
@@ -425,7 +425,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> Result<(), Diverge> {
         if self.is_comptime() {
             if let Ok(span) = self.hir.block_spans[condition_block] {
-                self.diag_ctx.emit_not_yet_implemented(self.loc(span));
+                self.diag_ctx.emit_not_yet_implemented("comptime while", self.loc(span));
             }
             return Err(Diverge::PoisonedControlFlow);
         }
@@ -530,27 +530,35 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
             ExprKind::UnaryOpCall { .. } | ExprKind::BinaryOpCall { .. } => {
-                self.diag_ctx.emit_not_yet_implemented(self.loc(expr.span));
+                self.diag_ctx.emit_not_yet_implemented("operators", self.loc(expr.span));
                 Err(Poisoned)
             }
             ExprKind::StructLit { ty, fields } => self.eval_struct_lit(ty, fields, expr.span),
             ExprKind::Member { object, member } => {
                 self.eval_struct_member_access(object, member, expr.span)
             }
-            ExprKind::FnDef(fn_def_id) => self.eval_fn_def(fn_def_id, expr.span),
-            ExprKind::Call { .. } => todo!("call"),
+            ExprKind::FnDef(fn_def_id) => self.eval_fn_def(fn_def_id),
+            ExprKind::Call { callee, args } => self.eval_call(callee, args, expr.span),
         };
         Ok(value)
     }
 
-    fn eval_fn_def(&mut self, id: FnDefId, _def_span: SourceSpan) -> MaybePoisoned<EvalValue> {
+    fn eval_fn_def(&mut self, id: FnDefId) -> MaybePoisoned<EvalValue> {
+        let fn_def = self.hir.fns[id];
         let def_captures = &self.hir.fn_captures[id];
+        let params = &self.hir.fn_params[id];
+
+        if let Some(param) = params.iter().find(|&param| param.is_comptime) {
+            self.diag_ctx.emit_not_yet_implemented("comptime parameters", fn_def.loc(param.span));
+            return Err(Poisoned);
+        }
+
         self.with_captures_buf(|this, captures_buf_offset| {
-            let mut validity = Ok(());
+            let mut poisoned = false;
             for &capture in def_captures {
                 let Local { state, span: def_span } = this.bindings[capture.outer_local];
                 let Ok(state) = state else {
-                    validity = Err(Poisoned);
+                    poisoned = true;
                     continue;
                 };
                 let value = match state {
@@ -560,22 +568,81 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             this.loc(capture.use_span),
                             this.loc(def_span),
                         );
-                        validity = Err(Poisoned);
+                        poisoned = true;
                         continue;
                     }
                 };
                 this.captures_buf.push((value, DefOrigin::Local(def_span)));
             }
-            validity.map(|()| {
-                let capture_values = &this.eval.captures_buf[captures_buf_offset..];
-                assert_eq!(capture_values.len(), def_captures.len());
-                let closure_value = this
-                    .eval
-                    .values
-                    .intern(Value::Closure { fn_def: id, captures: capture_values });
-                EvalValue::Comptime(closure_value)
-            })
+            if poisoned {
+                return Err(Poisoned);
+            }
+            let capture_values = &this.eval.captures_buf[captures_buf_offset..];
+            assert_eq!(capture_values.len(), def_captures.len());
+            let closure_value =
+                this.eval.values.intern(Value::Closure { fn_def: id, captures: capture_values });
+            Ok(EvalValue::Comptime(closure_value))
         })
+    }
+
+    fn eval_call(
+        &mut self,
+        callee: hir::LocalId,
+        args_id: hir::CallArgsId,
+        call_span: SourceSpan,
+    ) -> MaybePoisoned<EvalValue> {
+        let (state, callee_def_span) = self.bindings[callee].poisoned()?;
+        let closure_vid = match state {
+            LocalState::Comptime(value) => value,
+            LocalState::Runtime(_) => {
+                self.diag_ctx.emit_call_target_not_comptime(self.loc(call_span));
+                return Err(Poisoned);
+            }
+        };
+        let Value::Closure { fn_def: fn_def_id, captures } = self.values.lookup(closure_vid) else {
+            let ty = self.values.type_of_value(closure_vid);
+            self.diag_ctx.emit_not_callable(&self.eval.types, ty, self.loc(callee_def_span));
+            return Err(Poisoned);
+        };
+        let params = &self.hir.fn_params[fn_def_id];
+        let args = &self.hir.call_args[args_id];
+        if params.len() != args.len() {
+            self.diag_ctx.emit_arg_count_mismatch(
+                params.len(),
+                args.len(),
+                self.loc(call_span),
+                self.loc(callee_def_span),
+            );
+            return Err(Poisoned);
+        }
+
+        if self.is_comptime() {}
+
+        // Comptime:
+        // - eval preamble
+        // - eval body with comptime context
+        // - return ends evaluation, bubbles up result as `EvalValue::Comptime`
+        //
+        // Runtime:
+        // - check lowered cache
+        // - no cache:
+        //     - comptime eval preamble
+        //     - runtime eval body
+        //     - `return` statements lowered to mir returns
+        // - result is `EvalValue::Runtime` with [`mir::Expr::Call`]
+
+        let lowered = match self.lowered_fns_cache.get(&closure_vid).copied() {
+            Some(State::Done(lowered)) => lowered?,
+            Some(State::InProgress) => {
+                self.diag_ctx.emit_runtime_call_with_recursion(self.loc(call_span));
+                return Err(Poisoned);
+            }
+            None => {
+                todo!("lowering")
+            }
+        };
+
+        todo!()
     }
 
     pub fn is_comptime(&self) -> bool {

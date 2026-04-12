@@ -158,9 +158,9 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_call_target_not_comptime(&mut self, loc: SrcLoc) {
+    pub fn emit_call_target_not_comptime(&mut self, call_loc: SrcLoc) {
         Diagnostic::error("call target must be known at compile time")
-            .primary(loc.source, loc.span, "not known at compile time")
+            .primary(call_loc.source, call_loc.span, "not known at compile time")
             .note("function calls are statically dispatched")
             .emit(self.session);
     }
@@ -243,8 +243,8 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_not_yet_implemented(&mut self, loc: SrcLoc) {
-        Diagnostic::error("not yet implemented")
+    pub fn emit_not_yet_implemented(&mut self, functionality: &str, loc: SrcLoc) {
+        Diagnostic::error(format!("{functionality} not yet implemented"))
             .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary))
             .emit(self.session);
     }
@@ -433,6 +433,16 @@ impl DiagCtx<'_> {
                     self.session.lookup_name(field_name),
                     types.format(self.session, struct_ty),
                 ),
+            )
+            .emit(self.session);
+    }
+
+    pub fn emit_runtime_call_with_recursion(&mut self, call_loc: SrcLoc) {
+        Diagnostic::error("runtime recursion not supported")
+            .primary(call_loc.source, call_loc.span, "runtime call that recurses")
+            .note(
+                "recursion is only allowed at compile time to ensure consistent\
+ performance and iteration bounds",
             )
             .emit(self.session);
     }

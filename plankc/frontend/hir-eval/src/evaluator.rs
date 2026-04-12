@@ -1,7 +1,8 @@
+use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, SourceSpan, StrId};
+use plank_session::{MaybePoisoned, StrId};
 use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
@@ -9,9 +10,10 @@ use crate::{
     scope::{Function, LocalState, Scope},
 };
 
-pub(crate) enum ConstState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum State<T> {
     InProgress,
-    Evaluated(MaybePoisoned<ValueId>),
+    Done(T),
 }
 
 pub(crate) struct Evaluator<'a> {
@@ -22,9 +24,11 @@ pub(crate) struct Evaluator<'a> {
     pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
     pub types: TypeInterner,
 
-    pub evaluated_consts: DenseIndexMap<ConstId, ConstState>,
+    pub evaluated_consts: DenseIndexMap<ConstId, State<MaybePoisoned<ValueId>>>,
     pub values: &'a mut ValueInterner,
     pub hir: &'a Hir,
+
+    pub lowered_fns_cache: HashMap<ValueId, State<MaybePoisoned<mir::FnId>>>,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -47,6 +51,8 @@ impl<'a> Evaluator<'a> {
             values,
             hir,
 
+            lowered_fns_cache: HashMap::new(),
+
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
             locals_buf: Vec::new(),
@@ -68,14 +74,14 @@ impl<'a> Evaluator<'a> {
     ) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
         match self.evaluated_consts.get(const_id) {
-            Some(&ConstState::Evaluated(vid)) => return vid,
-            Some(ConstState::InProgress) => {
+            Some(&State::Done(vid)) => return vid,
+            Some(State::InProgress) => {
                 diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
             }
             None => {}
         };
 
-        self.evaluated_consts.insert_no_prev(const_id, ConstState::InProgress);
+        self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
         let mut scope = Scope {
             eval: self,
@@ -97,7 +103,7 @@ impl<'a> Evaluator<'a> {
                 unreachable!("local in comptime set to runtime instead of poisoned")
             }
         });
-        self.evaluated_consts.insert(const_id, ConstState::Evaluated(value));
+        self.evaluated_consts.insert(const_id, State::Done(value));
         self.try_name_type(const_def.name, value);
 
         value

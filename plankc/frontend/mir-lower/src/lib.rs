@@ -3,7 +3,7 @@ mod builtins;
 #[cfg(test)]
 mod tests;
 
-use plank_core::{DenseIndexMap, DenseIndexSet, Idx};
+use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_values::{Type, TypeId, Value, ValueId, ValueInterner};
 use sir_data::{
@@ -59,7 +59,6 @@ struct LowerCtx<'a> {
     mir: &'a Mir,
 
     mir_to_sir_functions: DenseIndexMap<mir::FnId, sir::FunctionId>,
-    entered_functions: DenseIndexSet<mir::FnId>,
     locals_map: LocalMap,
 
     locals_buf: Vec<sir::LocalId>,
@@ -86,7 +85,6 @@ pub fn lower(mir: &Mir, values: &ValueInterner) -> EthIRProgram {
         mir,
 
         mir_to_sir_functions: DenseIndexMap::with_capacity(mir.fns.len()),
-        entered_functions: DenseIndexSet::with_capacity_in_bits(mir.fns.len()),
         locals_map: LocalMap::new(),
 
         locals_buf: Vec::new(),
@@ -108,12 +106,8 @@ fn lower_function(
         return sir_func;
     }
 
-    if !ctx.entered_functions.add(mir_func) {
-        todo!("diagnostic: cyclic call graph");
-    }
     let fn_def = ctx.mir.fns[mir_func];
     ensure_block_func_deps_lowered(ctx, values, builder, fn_def.body);
-    ctx.entered_functions.remove(mir_func);
 
     let mut new_func = builder.begin_function();
     ctx.locals_map.reset();

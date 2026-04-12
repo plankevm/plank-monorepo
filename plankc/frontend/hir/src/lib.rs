@@ -155,6 +155,12 @@ pub struct FnDef {
     pub param_list_span: SourceSpan,
 }
 
+impl FnDef {
+    pub fn loc(&self, span: SourceSpan) -> SrcLoc {
+        SrcLoc::new(self.source, span)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct StructDef {
     pub source_id: SourceId,
