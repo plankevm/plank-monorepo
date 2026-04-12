@@ -130,7 +130,11 @@ impl Scope<'_, '_> {
         } else {
             if self.is_comptime() {
                 self.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
-                return Err(Poisoned);
+                if result_type == TypeId::NEVER {
+                    return Ok(Err(Diverge::PoisonedControlFlow));
+                } else {
+                    return Err(Poisoned);
+                }
             }
         }
 
