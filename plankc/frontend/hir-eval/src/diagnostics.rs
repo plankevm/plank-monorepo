@@ -149,12 +149,12 @@ impl DiagCtx<'_> {
         expected: usize,
         actual: usize,
         call_loc: SrcLoc,
-        def_loc: SrcLoc,
+        param_def_loc: SrcLoc,
     ) {
         let call_label = format!("expected {}, got {actual}", fmt_count(expected, "argument"));
         let def_label = format!("defined with {}", fmt_count(expected, "parameter"));
         Diagnostic::error("wrong number of arguments")
-            .cross_source_annotations(call_loc, call_label, def_loc, def_label)
+            .cross_source_annotations(call_loc, call_label, param_def_loc, def_label)
             .emit(self.session);
     }
 

@@ -1,4 +1,5 @@
 use crate::{Evaluator, diagnostics::DiagCtx, evaluator::State};
+use hashbrown::hash_map::Entry;
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
@@ -595,7 +596,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let closure_vid = match state {
             LocalState::Comptime(value) => value,
             LocalState::Runtime(_) => {
-                self.diag_ctx.emit_call_target_not_comptime(self.loc(call_span));
+                self.diag_ctx.emit_call_target_not_comptime(self.loc(callee_def_span));
                 return Err(Poisoned);
             }
         };
@@ -604,6 +605,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.diag_ctx.emit_not_callable(&self.eval.types, ty, self.loc(callee_def_span));
             return Err(Poisoned);
         };
+        let func = self.hir.fns[fn_def_id];
         let params = &self.hir.fn_params[fn_def_id];
         let args = &self.hir.call_args[args_id];
         if params.len() != args.len() {
@@ -611,12 +613,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 params.len(),
                 args.len(),
                 self.loc(call_span),
-                self.loc(callee_def_span),
+                func.loc(func.param_list_span),
             );
             return Err(Poisoned);
         }
 
-        if self.is_comptime() {}
+        if self.is_comptime() {
+            // TODO
+            self.diag_ctx.emit_not_yet_implemented("comptime function calls", self.loc(call_span));
+            return Err(Poisoned);
+        }
 
         // Comptime:
         // - eval preamble
@@ -631,13 +637,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         //     - `return` statements lowered to mir returns
         // - result is `EvalValue::Runtime` with [`mir::Expr::Call`]
 
-        let lowered = match self.lowered_fns_cache.get(&closure_vid).copied() {
-            Some(State::Done(lowered)) => lowered?,
-            Some(State::InProgress) => {
-                self.diag_ctx.emit_runtime_call_with_recursion(self.loc(call_span));
-                return Err(Poisoned);
-            }
-            None => {
+        let lowered = match self.lowered_fns_cache.entry(closure_vid) {
+            Entry::Occupied(mut occupied) => match *occupied.get() {
+                State::Done(lowered) => lowered?,
+                State::InProgress => {
+                    occupied.insert(State::Done(Err(Poisoned)));
+                    self.diag_ctx.emit_runtime_call_with_recursion(self.loc(call_span));
+                    return Err(Poisoned);
+                }
+            },
+            Entry::Vacant(vacant) => {
+                vacant.insert(State::InProgress);
                 todo!("lowering")
             }
         };
