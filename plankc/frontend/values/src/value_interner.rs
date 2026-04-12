@@ -2,7 +2,6 @@ use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::SourceSpan;
 use std::hash::BuildHasher;
 
 newtype_index! {
