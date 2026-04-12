@@ -522,11 +522,17 @@ impl BlockLowerer<'_> {
         let return_type;
         let type_preamble = {
             let preamble_block_start = self.instructions_buf.len();
-            for param in fn_def.params().filter_map(Result::ok) {
+            for (idx, param) in fn_def.params().filter_map(Result::ok).enumerate() {
                 let param_type = self.lower_expr_to_local(param.type_expr());
                 self.locals_buf.push(param_type);
                 let param_value = self.add_param_to_scope_as_local(param);
                 self.locals_buf.push(param_value);
+                self.emit(InstructionKind::Param {
+                    comptime: param.is_comptime,
+                    arg: param_value,
+                    r#type: param_type,
+                    idx: idx as u32,
+                });
             }
             return_type = self.lower_expr_to_local(fn_def.return_type());
             let preamble_span = self.lexed.tokens_src_span(fn_def.param_list_span());

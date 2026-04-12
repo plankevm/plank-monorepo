@@ -218,7 +218,9 @@ fn test_fn_struct_return() {
         @fn0(%1: %0, %3: %2) -> %4 {
             preamble:
                 %0 = type:u256
+                param#0 %1 : %0
                 %2 = type:u256
+                param#1 %3 : %2
                 %4 = $0
             body:
                 %5 = $0
@@ -800,6 +802,70 @@ fn test_unary_op_lowering() {
         %3 = (-) %2
         %4 = %1
         %5 = (~) %4
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_dependent_param_type() {
+    assert_lowers_to(
+        r#"
+        init {
+            let f = fn (n: u256, x: n) u256 { x };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Functions ====
+        @fn0(%1: %0, %3: %2) -> %4 {
+            preamble:
+                %0 = type:u256
+                param#0 %1 : %0
+                %2 = %1
+                param#1 %3 : %2
+                %4 = type:u256
+            body:
+                ret %3
+        }
+
+        ==== Init ====
+        %0 = @fn0
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_chained_dependent_params_with_comptime() {
+    assert_lowers_to(
+        r#"
+        init {
+            let f = fn (comptime n: u256, y: n, z: y) n { z };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Functions ====
+        @fn0(comptime %1: %0, %3: %2, %5: %4) -> %6 {
+            preamble:
+                %0 = type:u256
+                [comptime] param#0 %1 : %0
+                %2 = %1
+                param#1 %3 : %2
+                %4 = %3
+                param#2 %5 : %4
+                %6 = %1
+            body:
+                ret %5
+        }
+
+        ==== Init ====
+        %0 = @fn0
         eval evm_stop()
         "#,
     );

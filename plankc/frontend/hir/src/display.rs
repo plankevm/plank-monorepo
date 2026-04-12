@@ -204,6 +204,17 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, body, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
+            InstructionKind::Param { comptime, arg, r#type, idx } => {
+                write!(f, "{pad}")?;
+                if comptime {
+                    write!(f, "[comptime] ")?;
+                }
+                write!(f, "param#{idx} ")?;
+                self.fmt_local(f, arg)?;
+                write!(f, " : ")?;
+                self.fmt_local(f, r#type)?;
+                writeln!(f)
+            }
         }
     }
 

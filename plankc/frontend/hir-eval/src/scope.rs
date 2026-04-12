@@ -399,6 +399,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval_while(condition_block, condition, body)?
             }
             InstructionKind::Return(_) => todo!("return"),
+            InstructionKind::Param { .. } => todo!("Param instruction evaluation"),
         };
         Ok(())
     }
