@@ -487,6 +487,7 @@
   {
     "type": "block_comment",
     "named": true,
+    "extra": true,
     "fields": {}
   },
   {
@@ -1133,9 +1134,28 @@
           {
             "type": "suffix_import_as",
             "named": true
+          },
+          {
+            "type": "suffix_import_group",
+            "named": true
           }
         ]
       }
+    }
+  },
+  {
+    "type": "import_group_item",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -1769,6 +1789,21 @@
       "types": [
         {
           "type": "identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "suffix_import_group",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "import_group_item",
           "named": true
         }
       ]
