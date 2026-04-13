@@ -13,6 +13,7 @@ fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
     (sir, session)
 }
 
+#[track_caller]
 fn assert_lowers_to(source: &str, expected: &str) {
     let (program, _session) = try_lower(source);
     let actual = sir_data::display_program(&program);
@@ -25,12 +26,12 @@ fn test_simple_set() {
     assert_lowers_to(
         r#"
         init {
-            let x = 3;
+            let mut x = 3;
             evm_stop();
         }
 
         run {
-            let y = false;
+            let mut y = false;
             evm_stop();
         }
         "#,
@@ -77,21 +78,13 @@ fn test_evm_builtins() {
 
         Basic Blocks:
             @0 {
-                $0 = const 0x3
-                $1 = const 0x4
-                $2 = const 0x3
-                $3 = const 0x4
-                $4 = add $2 $3
-                $5 = const 0x3
-                $6 = const 0x4
-                $7 = add $5 $6
-                $8 = callvalue
-                $9 = const 0x22
-                $10 = calldataload $9
-                $11 = mallocany $10
-                $12 = copy $0
-                $13 = copy $4
-                sstore $12 $13
+                $0 = callvalue
+                $1 = const 0x22
+                $2 = calldataload $1
+                $3 = mallocany $2
+                $4 = const 0x3
+                $5 = const 0x7
+                sstore $4 $5
                 stop
             }
         "#,
@@ -398,12 +391,8 @@ fn test_struct_lit() {
             @0 {
                 $0 = const 0x3
                 $1 = const 0x0
-                $2 = copy $0
-                $3 = copy $1
-                $4 = const 0x2
-                $5 = const 0x1
-                $2 = copy $4
-                $3 = copy $5
+                $0 = const 0x2
+                $1 = const 0x1
                 stop
             }
         "#,
@@ -429,20 +418,14 @@ fn test_struct_field_access() {
 
         Basic Blocks:
             @0 {
-                $0 = const 0x3
-                $1 = const 0x0
-                $2 = copy $0
-                $3 = copy $1
-                $4 = const 0x20
-                $5 = mallocany $4
-                $6 = copy $5
-                $7 = copy $2
-                $8 = copy $3
-                $9 = copy $7
-                mstore256 $6 $9
-                $10 = copy $5
-                $11 = const 0x20
-                return $10 $11
+                $0 = const 0x20
+                $1 = mallocany $0
+                $2 = copy $1
+                $3 = const 0x3
+                mstore256 $2 $3
+                $4 = copy $1
+                $5 = const 0x20
+                return $4 $5
             }
         "#,
     );
@@ -488,7 +471,7 @@ fn test_fn_struct_return() {
 }
 
 #[test]
-fn test_weird_error() {
+fn test_multi_entry_multi_function() {
     assert_lowers_to(
         r#"
         const return_runtime = fn() never {
@@ -552,8 +535,7 @@ fn test_weird_error() {
 
             @2 {
                 $15 = const 0x22
-                $16 = copy $15
-                $17 = icall @0 $16
+                $16 = icall @0 $15
                 icall @1
                 invalid
             }
