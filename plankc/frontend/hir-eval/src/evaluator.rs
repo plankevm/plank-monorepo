@@ -2,7 +2,7 @@ use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, SourceSpan, StrId};
+use plank_session::{MaybePoisoned, Poisoned, SourceSpan, StrId};
 use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
@@ -81,10 +81,12 @@ impl<'a> Evaluator<'a> {
         diag_ctx: &mut DiagCtx<'a>,
     ) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
-        match self.evaluated_consts.get(const_id) {
-            Some(&State::Done(vid)) => return vid,
-            Some(State::InProgress) => {
+        match self.evaluated_consts.get_mut(const_id) {
+            Some(State::Done(vid)) => return *vid,
+            Some(state @ State::InProgress) => {
                 diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
+                *state = State::Done(Err(Poisoned));
+                return Err(Poisoned);
             }
             None => {}
         };
@@ -100,8 +102,18 @@ impl<'a> Evaluator<'a> {
                 unreachable!("local in comptime set to runtime instead of poisoned")
             }
         });
-        self.evaluated_consts.insert(const_id, State::Done(value));
-        self.try_name_type(const_def.name, value);
+        match self.evaluated_consts.get_mut(const_id) {
+            Some(State::Done(Err(Poisoned))) => {
+                // Already poisoned, don't update
+            }
+            Some(state @ State::InProgress) => {
+                *state = State::Done(value);
+                self.try_name_type(const_def.name, value);
+            }
+            None | Some(State::Done(Ok(_))) => {
+                unreachable!("invariant: unset / set to value while evaluating")
+            }
+        }
 
         value
     }

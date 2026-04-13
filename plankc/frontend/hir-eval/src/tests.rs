@@ -2084,3 +2084,45 @@ fn test_struct_def_duplicate_field() {
         "#],
     );
 }
+
+#[test]
+fn test_const_self_cycle() {
+    assert_diagnostics(
+        r#"
+        const A = {
+            let x = 67;
+            A
+        };
+
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: cycle in constant evaluation
+         --> main.plk:1:1
+          |
+        1 | / const A = {
+        2 | |     let x = 67;
+        3 | |     A
+        4 | | };
+          | |__^ `A` depends on itself
+        "#],
+    );
+}
+
+#[test]
+fn test_const_mutual_cycle() {
+    assert_diagnostics(
+        r#"
+           const A = B;
+           const B = A;
+           init { evm_stop(); }
+           "#,
+        &[r#"
+        error: cycle in constant evaluation
+         --> main.plk:1:1
+          |
+        1 | const A = B;
+          | ^^^^^^^^^^^^ `A` depends on itself
+        "#],
+    );
+}

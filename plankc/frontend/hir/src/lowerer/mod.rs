@@ -758,8 +758,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                 TopLevelDef::Const(const_def) => {
                     let id = lowerer.consts[&const_def.name].const_id;
                     let hir_def = &mut consts[id];
-                    hir_def.result =
-                        lowerer.alloc_local(const_def.name, false, const_def.name_span());
+                    hir_def.result = lowerer.alloc_temp();
                     hir_def.body = lowerer.create_sub_block(const_def.span(), |this| {
                         let r#type =
                             const_def.r#type.map(|type_expr| this.lower_expr_to_local(type_expr));

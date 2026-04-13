@@ -872,6 +872,30 @@ fn test_chained_dependent_params_with_comptime() {
 }
 
 #[test]
+fn test_self_ref_lower() {
+    assert_lowers_to(
+        r#"
+        const A = {
+            let x = 3;
+            A
+        };
+        init { evm_stop(); }
+        "#,
+        r#"
+
+        ==== Constants ====
+        ConstId(0) ("A") result=LocalId(0) {
+            %1 = 3
+            %0 = $0
+        }
+
+        ==== Init ====
+        eval evm_stop()
+       "#,
+    );
+}
+
+#[test]
 fn test_lone_slash_not_supported() {
     let (hir, big_nums, session, _project) = try_lower(
         r#"
