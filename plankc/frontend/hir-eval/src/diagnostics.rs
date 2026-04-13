@@ -206,21 +206,6 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_runtime_assign_from_comptime(
-        &mut self,
-        source: SourceId,
-        def: SourceSpan,
-        assign: SourceSpan,
-    ) {
-        Diagnostic::error("assigning runtime variable in comptime context")
-            .element(
-                Annotations::new(source)
-                    .primary(assign, "assigned here")
-                    .secondary(def, "defined here"),
-            )
-            .emit(self.session);
-    }
-
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
         Diagnostic::error("entry point must diverge")
             .primary(loc.source, loc.span, "execution may reach end of entry point")

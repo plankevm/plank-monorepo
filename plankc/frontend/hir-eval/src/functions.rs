@@ -271,9 +271,7 @@ impl Scope<'_, '_> {
                 SrcLoc::new(call_scope_source, arg_span),
             );
             self.bindings[arg].state = Err(Poisoned);
-            return;
         }
-        ()
     }
 
     pub fn eval_return(&mut self, expr: hir::Expr) -> Result<(), Diverge> {
@@ -301,11 +299,6 @@ impl Scope<'_, '_> {
             else {
                 return Err(Diverge::BlockEnd(None));
             };
-            let ty = self.values.type_of_value(value);
-            let Ok(return_type) = ret_type else {
-                return Err(Diverge::BlockEnd(None));
-            };
-            if !ty.is_assignable_to(return_type) {}
             return Err(Diverge::BlockEnd(Some(value)));
         }
 
