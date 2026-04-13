@@ -235,8 +235,8 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_comptime_only_value_at_runtime(&mut self, use_loc: SrcLoc) {
-        Diagnostic::error("use of comptime only value at runtime")
-            .primary(use_loc.source, use_loc.span, "reference to comptime only value")
+        Diagnostic::error("use of comptime-only value at runtime")
+            .primary(use_loc.source, use_loc.span, "reference to comptime-only value")
             .info("`let mut` definitions and mutable assignments require runtime-compatible values")
             .emit(self.session);
     }
@@ -260,9 +260,9 @@ impl DiagCtx<'_> {
                     .primary(struct_lit_span, "mixed struct literal")
                     .secondary(
                         comptime_only_span,
-                        format!("`{comptime_only_field_name}` is comptime only"),
+                        format!("`{comptime_only_field_name}` is comptime-only"),
                     )
-                    .secondary(runtime_span, format!("`{runtime_field_name}` not comptime known")),
+                    .secondary(runtime_span, format!("`{runtime_field_name}` not comptime-known")),
             )
             .emit(self.session);
     }

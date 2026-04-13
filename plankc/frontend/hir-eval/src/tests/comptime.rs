@@ -302,20 +302,20 @@ fn test_comptime_expr_runtime_dep() {
         "#,
         &[
             r#"
-        error: use of comptime only value at runtime
+        error: use of comptime-only value at runtime
          --> main.plk:3:23
           |
         3 |     let T = if cond { u256 } else { bool };
-          |                       ^^^^ reference to comptime only value
+          |                       ^^^^ reference to comptime-only value
           |
           = info: `let mut` definitions and mutable assignments require runtime-compatible values
         "#,
             r#"
-        error: use of comptime only value at runtime
+        error: use of comptime-only value at runtime
          --> main.plk:3:37
           |
         3 |     let T = if cond { u256 } else { bool };
-          |                                     ^^^^ reference to comptime only value
+          |                                     ^^^^ reference to comptime-only value
           |
           = info: `let mut` definitions and mutable assignments require runtime-compatible values
         "#,

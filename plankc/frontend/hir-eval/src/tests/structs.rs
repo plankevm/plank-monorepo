@@ -251,9 +251,9 @@ fn test_mixed_comptime_runtime_struct() {
              --> main.plk:4:13
               |
             4 |       let w = Wrapper { t: u256, n: x,
-              |               ^         -        - `n` not comptime known
+              |               ^         -        - `n` not comptime-known
               |               |         |
-              |  _____________|         `t` is comptime only
+              |  _____________|         `t` is comptime-only
               | |
             5 | |         c: 34
             6 | |     };
