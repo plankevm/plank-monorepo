@@ -339,7 +339,12 @@ impl EvmBuiltin {
             return None;
         }
         for &sig in self.signatures() {
-            if sig.inputs.iter().zip(arg_types).all(|(&sig_in, &arg_in)| sig_in == arg_in) {
+            if sig
+                .inputs
+                .iter()
+                .zip(arg_types)
+                .all(|(&sig_in, &arg_in)| arg_in.is_assignable_to(sig_in))
+            {
                 return Some(sig.result);
             }
         }

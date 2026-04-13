@@ -5,25 +5,17 @@ pub struct Poisoned;
 /// A value that is valid or was poisoned by an earlier error.
 pub type MaybePoisoned<T> = Result<T, Poisoned>;
 
-mod sealed {
-    pub trait Sealed {}
+pub fn zip<T, B>(a: MaybePoisoned<T>, b: MaybePoisoned<B>) -> MaybePoisoned<(T, B)> {
+    match (a, b) {
+        (Ok(a), Ok(b)) => Ok((a, b)),
+        (Err(Poisoned), _) | (_, Err(Poisoned)) => Err(Poisoned),
+    }
 }
 
-pub trait MaybePoisonedResult: sealed::Sealed {
-    type I;
-
-    fn zip<B>(self, other: MaybePoisoned<B>) -> MaybePoisoned<(Self::I, B)>;
-}
-
-impl<T> sealed::Sealed for MaybePoisoned<T> {}
-
-impl<T> MaybePoisonedResult for MaybePoisoned<T> {
-    type I = T;
-
-    fn zip<B>(self, other: MaybePoisoned<B>) -> MaybePoisoned<(T, B)> {
-        match (self, other) {
-            (Ok(a), Ok(b)) => Ok((a, b)),
-            (Err(Poisoned), _) | (_, Err(Poisoned)) => Err(Poisoned),
-        }
+pub fn transpose<T, E>(p: MaybePoisoned<Result<T, E>>) -> Result<MaybePoisoned<T>, E> {
+    match p {
+        Ok(Err(err)) => Err(err),
+        Err(Poisoned) => Ok(Err(Poisoned)),
+        Ok(Ok(ok)) => Ok(Ok(ok)),
     }
 }

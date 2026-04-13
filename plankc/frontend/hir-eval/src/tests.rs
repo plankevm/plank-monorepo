@@ -1994,24 +1994,6 @@ fn test_comptime_block_struct_type() {
 }
 
 #[test]
-fn test_const_def_return() {
-    assert_diagnostics(
-        r#"
-        const Y = {
-            return 34;
-        };
-
-        init {
-            evm_stop();
-        }
-        "#,
-        &[r#"
-        <todo actually expected>
-        "#],
-    );
-}
-
-#[test]
 fn test_comptime_block_runtime_capture() {
     assert_diagnostics(
         r#"

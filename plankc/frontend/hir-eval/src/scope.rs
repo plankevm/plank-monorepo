@@ -1,16 +1,9 @@
-use crate::{
-    Evaluator,
-    diagnostics::DiagCtx,
-    evaluator::{CallArgSpansIdx, State},
-};
-use hashbrown::hash_map::Entry;
+use crate::{Evaluator, diagnostics::DiagCtx, evaluator::CallArgSpansIdx};
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
-use plank_session::{
-    EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison::MaybePoisonedResult,
-};
-use plank_values::{DefOrigin, FnDefId, TypeId, Value, ValueId};
+use plank_session::{EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
+use plank_values::{TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
@@ -19,6 +12,10 @@ pub(crate) struct Local {
 }
 
 impl Local {
+    pub fn comptime(value: ValueId, span: SourceSpan) -> Self {
+        Self { state: Ok(LocalState::Comptime(value)), span }
+    }
+
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan)> {
         let state = self.state?;
         Ok((state, self.span))
@@ -40,7 +37,7 @@ pub(crate) enum EvalValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Diverge {
     PoisonedControlFlow,
-    BlockEnd,
+    BlockEnd(Option<ValueId>),
 }
 
 pub(crate) enum EvalContext {
@@ -90,7 +87,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
                 }
             }
-            Err(Diverge::BlockEnd | Diverge::PoisonedControlFlow) => {}
+            Err(Diverge::BlockEnd(_) | Diverge::PoisonedControlFlow) => {}
         }
         mir_block
     }
@@ -99,11 +96,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
         let res = self.eval_block_inline(block);
         self.comptime = parent_comptime;
-
-        match res {
-            Ok(()) | Err(Diverge::PoisonedControlFlow) => res,
-            Err(Diverge::BlockEnd) => todo!("comptime block end?"),
-        }
+        res
     }
 
     pub fn emit(&mut self, instr: mir::Instruction) {
@@ -289,8 +282,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.bindings.insert_no_prev(local, Local { state, span: expr.span });
             }
             Some(binding) => {
-                let new_state =
-                    binding.state.zip(mir_expr).and_then(|(prev_state, (mir_expr, ty))| {
+                let new_state = poison::zip(binding.state, mir_expr).and_then(
+                    |(prev_state, (mir_expr, ty))| {
                         let LocalState::Runtime(target) = prev_state else {
                             unreachable!(
                                 "invariant: runtime branch set overwriting comptime state"
@@ -310,7 +303,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         self.emit(mir::Instruction::Set { target, expr: mir_expr });
 
                         Ok(LocalState::Runtime(target))
-                    });
+                    },
+                );
                 self.bindings[local] = Local { state: new_state, span: expr.span };
             }
         }
@@ -335,7 +329,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn eval_assign(&mut self, target: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let local = self.bindings[target];
-        let new_state = local.state.zip(value).and_then(|(state, value)| {
+        let new_state = poison::zip(local.state, value).and_then(|(state, value)| {
             let expected_ty = self.state_type(state);
             let type_check = self.type_check(value, expected_ty, local.span, expr.span);
             if self.is_comptime() {
@@ -398,8 +392,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::While { condition_block, condition, body } => {
                 self.eval_while(condition_block, condition, body)?
             }
-            InstructionKind::Return(_) => todo!("return"),
-            InstructionKind::Param { .. } => todo!("Param instruction evaluation"),
+            InstructionKind::Return(expr) => self.eval_return(expr)?,
+            InstructionKind::Param { comptime, arg, r#type, idx } => {
+                self.eval_param(comptime, arg, r#type, idx)
+            }
         };
         Ok(())
     }
@@ -412,7 +408,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> Result<(), Diverge> {
         let binding = self.bindings[condition];
         match binding.state {
-            Ok(LocalState::Runtime(mir_local)) if self.mir_types[mir_local] == TypeId::BOOL => {
+            Ok(LocalState::Runtime(mir_local))
+                if self.mir_types[mir_local].is_assignable_to(TypeId::BOOL) =>
+            {
                 if self.is_comptime() {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.span));
                     return Err(Diverge::PoisonedControlFlow);
@@ -427,7 +425,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 match (then_res, else_res) {
                     (Err(Diverge::PoisonedControlFlow), _) => Err(Diverge::PoisonedControlFlow),
                     (_, Err(Diverge::PoisonedControlFlow)) => Err(Diverge::PoisonedControlFlow),
-                    (Err(Diverge::BlockEnd), Err(Diverge::BlockEnd)) => Err(Diverge::BlockEnd),
+                    (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
+                        Err(Diverge::BlockEnd(None))
+                    }
                     _ => Ok(()),
                 }
             }
@@ -497,7 +497,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (body, body_res) = self.eval_block_to_mir(body);
         match body_res {
             Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
-            Err(Diverge::BlockEnd) | Ok(()) => {}
+            Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }
         self.emit(mir::Instruction::While { condition_block, condition, body });
 
@@ -539,11 +539,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
             ExprKind::EvmBuiltinCall { builtin, args } => {
-                match self.eval_builtin(builtin, args, expr.span) {
-                    Ok(Err(diverge)) => return Err(diverge),
-                    Err(Poisoned) => Err(Poisoned),
-                    Ok(Ok(result)) => Ok(result),
-                }
+                poison::transpose(self.eval_builtin(builtin, args, expr.span))?
             }
             ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {
                 LocalState::Comptime(vid) => EvalValue::Comptime(vid),
@@ -568,7 +564,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval_struct_member_access(object, member, expr.span)
             }
             ExprKind::FnDef(fn_def_id) => self.eval_fn_def(fn_def_id),
-            ExprKind::Call { callee, args } => self.eval_call(callee, args, expr.span),
+            ExprKind::Call { callee, args } => {
+                poison::transpose(self.eval_call(callee, args, expr.span))?
+            }
         };
         Ok(value)
     }

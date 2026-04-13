@@ -166,7 +166,7 @@ impl Scope<'_, '_> {
             // We diverge after this so we need to make sure the call is actually included.
             let target = self.mir_types.push(result_type);
             self.emit(mir::Instruction::Set { target, expr });
-            return Ok(Err(Diverge::BlockEnd));
+            return Ok(Err(Diverge::BlockEnd(None)));
         }
 
         Ok(Ok(EvalValue::Runtime { expr, result_type }))

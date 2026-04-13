@@ -7,7 +7,7 @@ use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterne
 
 use crate::{
     diagnostics::DiagCtx,
-    scope::{EvalContext, Function, LocalState, Scope},
+    scope::{EvalContext, LocalState, Scope},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
