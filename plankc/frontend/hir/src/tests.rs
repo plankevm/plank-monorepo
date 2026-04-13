@@ -5,10 +5,13 @@ use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::ValueInterner;
 
 fn try_lower(source: &str) -> (Hir, ValueInterner, Session, ParsedProject) {
-    try_lower_project(TestProject::root(source))
+    try_lower_project(source)
 }
 
-fn try_lower_project(project: TestProject) -> (Hir, ValueInterner, Session, ParsedProject) {
+fn try_lower_project(
+    project: impl Into<TestProject>,
+) -> (Hir, ValueInterner, Session, ParsedProject) {
+    let project = project.into();
     let mut session = Session::new();
     let project = project.build(&mut session);
 
@@ -45,7 +48,7 @@ fn format_session_diagnostics(session: &Session) -> String {
         .join("\n")
 }
 
-fn render_project_diagnostics(project: TestProject) -> String {
+fn render_project_diagnostics(project: impl Into<TestProject>) -> String {
     let (_hir, _big_nums, session, _project) = try_lower_project(project);
     format_session_diagnostics(&session)
 }
@@ -942,7 +945,7 @@ fn test_lone_slash_not_supported() {
 
 #[test]
 fn test_import_group_unresolved_item() {
-    let project = TestProject::single("import m::other::{a, b};\ninit { evm_stop(); }")
+    let project = TestProject::root("import m::other::{a, b};\ninit { evm_stop(); }")
         .add_file("other", "const a = 1;")
         .add_module("m", "");
     let rendered = render_project_diagnostics(project);
@@ -964,7 +967,7 @@ fn test_import_group_unresolved_item() {
 #[test]
 fn test_import_group_collision_with_local() {
     let project =
-        TestProject::single("const x = 1;\nimport m::other::{a, b as x};\ninit { evm_stop(); }")
+        TestProject::root("const x = 1;\nimport m::other::{a, b as x};\ninit { evm_stop(); }")
             .add_file("other", "const a = 1;\nconst b = 2;")
             .add_module("m", "");
     let rendered = render_project_diagnostics(project);
@@ -984,11 +987,10 @@ fn test_import_group_collision_with_local() {
 
 #[test]
 fn test_import_group_collision_with_other_import() {
-    let project =
-        TestProject::single("import m::a::x;\nimport m::b::{y, x};\ninit { evm_stop(); }")
-            .add_file("a", "const x = 1;")
-            .add_file("b", "const y = 2;\nconst x = 3;")
-            .add_module("m", "");
+    let project = TestProject::root("import m::a::x;\nimport m::b::{y, x};\ninit { evm_stop(); }")
+        .add_file("a", "const x = 1;")
+        .add_file("b", "const y = 2;\nconst x = 3;")
+        .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -1006,7 +1008,7 @@ fn test_import_group_collision_with_other_import() {
 
 #[test]
 fn test_import_group_self_collision() {
-    let project = TestProject::single("import m::other::{a as x, b as x};\ninit { evm_stop(); }")
+    let project = TestProject::root("import m::other::{a as x, b as x};\ninit { evm_stop(); }")
         .add_file("other", "const a = 1;\nconst b = 2;")
         .add_module("m", "");
     let rendered = render_project_diagnostics(project);

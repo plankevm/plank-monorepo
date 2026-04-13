@@ -34,7 +34,7 @@ fn assert_project_lowers_to(project: impl Into<TestProject>, expected: &str) {
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
 }
 
-fn render_project_diagnostics(test_project: TestProject) -> Vec<String> {
+fn render_project_diagnostics(test_project: impl Into<TestProject>) -> Vec<String> {
     let (_, _, session) = try_lower(test_project);
     session.diagnostics().iter().map(|d| d.render_plain(&session)).collect()
 }
@@ -45,7 +45,7 @@ fn assert_diagnostics(source: &str, expected: &[&str]) {
 }
 
 #[track_caller]
-fn assert_project_diagnostics(test_project: TestProject, expected: &[&str]) {
+fn assert_project_diagnostics(test_project: impl Into<TestProject>, expected: &[&str]) {
     let actual = render_project_diagnostics(test_project);
     let expected: Vec<String> =
         expected.iter().map(|s| dedent_preserve_blank_lines(s).trim().to_string()).collect();
@@ -1439,15 +1439,28 @@ fn test_comptime_call_arg_count_mismatch() {
 #[test]
 fn test_cross_file_call_arg_count_mismatch() {
     assert_project_diagnostics(
-        TestProject::root("import m::other::f;\ninit { f(1, 2); evm_stop(); }")
-            .add_file("other", "const f = fn(x: u256) u256 { return x; };")
-            .add_module("m", ""),
+        TestProject::root(
+            r#"
+            import m::other::f;
+            init {
+                f(1, 2);
+                evm_stop();
+            }
+        "#,
+        )
+        .add_file(
+            "other",
+            r#"
+                const f = fn(x: u256) u256 { return x; };
+            "#,
+        )
+        .add_module("m", ""),
         &[r#"
         error: wrong number of arguments
-         --> main.plk:2:8
+         --> main.plk:3:5
           |
-        2 | init { f(1, 2); evm_stop(); }
-          |        ^^^^^^^ expected 1 argument, got 2
+        3 |     f(1, 2);
+          |     ^^^^^^^ expected 1 argument, got 2
           |
          ::: other.plk:1:13
           |
@@ -1460,12 +1473,22 @@ fn test_cross_file_call_arg_count_mismatch() {
 #[test]
 fn test_import_group_symbols_accessible() {
     assert_project_lowers_to(
-        TestProject::single(
-            "import m::other::{f, g as my_g};\ninit { let x = f(1); let y = my_g(2, 3); evm_stop(); }",
+        TestProject::root(
+            r#"
+            import m::other::{f, g as my_g};
+            init {
+                let x = f(1);
+                let y = my_g(2, 3);
+                evm_stop();
+            }
+        "#,
         )
         .add_file(
             "other",
-            "const f = fn(x: u256) u256 { return x; };\nconst g = fn(a: u256, b: u256) u256 { return a; };",
+            r#"
+            const f = fn(x: u256) u256 { return x; };
+            const g = fn(a: u256, b: u256) u256 { return a; };
+            "#,
         )
         .add_module("m", ""),
         r#"
