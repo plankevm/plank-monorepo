@@ -31,10 +31,6 @@ pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) ->
         let _ = evaluator.evaluate_const(const_id, &mut diag_ctx);
     }
 
-    // 1. Eval init as fn
-    // 2. Eval run (if present) as fn
-    // 3. Ensure remaining constants are evaluated for diagnostics
-
     Mir {
         blocks: evaluator.mir_blocks,
         args: evaluator.mir_args,

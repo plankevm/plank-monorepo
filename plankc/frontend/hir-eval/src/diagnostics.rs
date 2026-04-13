@@ -207,10 +207,10 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
-        Diagnostic::error("entry point must diverge")
+        Diagnostic::error("entry point must end with explicit terminator")
             .primary(loc.source, loc.span, "execution may reach end of entry point")
             .help(format!(
-                "entry points must end with a diverging expression (e.g. `{}()`, `{}(...)`, `{}()`)",
+                "entry points must end with a terminating `never` expression (e.g. `{}()`, `{}(...)`, `{}()`)",
                 builtin_names::STOP,
                 builtin_names::REVERT,
                 builtin_names::INVALID
@@ -254,7 +254,7 @@ impl DiagCtx<'_> {
         let (runtime_field_name, runtime_span) = self
             .session
             .lookup_name_spanned(runtime_only_field.name, runtime_only_field.name_offset);
-        Diagnostic::error("mixing comptime & runtime data in struct")
+        Diagnostic::error("mixing comptime and runtime data in struct")
             .element(
                 Annotations::new(source)
                     .primary(struct_lit_span, "mixed struct literal")
@@ -319,7 +319,7 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_unsupported_eval_of_evm_builtin(&mut self, builtin: EvmBuiltin, loc: SrcLoc) {
-        Diagnostic::error("comptime evaluation not supported")
+        Diagnostic::error("builtin not supported at compile time")
             .primary(
                 loc.source,
                 loc.span,

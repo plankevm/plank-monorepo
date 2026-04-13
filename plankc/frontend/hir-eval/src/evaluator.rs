@@ -21,7 +21,6 @@ newtype_index! {
 }
 
 pub(crate) struct Evaluator<'a> {
-    // MIR
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,

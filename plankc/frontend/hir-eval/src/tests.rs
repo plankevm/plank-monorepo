@@ -323,7 +323,7 @@ fn test_run_missing_termination() {
         }
         ",
         &[r#"
-        error: entry point must diverge
+        error: entry point must end with explicit terminator
          --> main.plk:4:1
           |
         4 | / run {
@@ -331,7 +331,7 @@ fn test_run_missing_termination() {
         6 | | }
           | |_^ execution may reach end of entry point
           |
-          = help: entry points must end with a diverging expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
+          = help: entry points must end with a terminating `never` expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
         "#],
     );
 }
@@ -792,7 +792,7 @@ fn test_mixed_comptime_runtime_struct() {
               |         ^ `Wrapper` has no field `c`
             "#,
             r#"
-            error: mixing comptime & runtime data in struct
+            error: mixing comptime and runtime data in struct
              --> main.plk:4:13
               |
             4 |       let w = Wrapper { t: u256, n: x,
@@ -1849,7 +1849,7 @@ fn test_comptime_unsupported_evm_builtin() {
         init { evm_stop(); }
         "#,
         &[r#"
-        error: comptime evaluation not supported
+        error: builtin not supported at compile time
          --> main.plk:1:11
           |
         1 | const x = caller();
