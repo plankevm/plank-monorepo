@@ -2047,6 +2047,41 @@ fn test_comptime_expr_runtime_dep() {
 }
 
 #[test]
+fn test_comptime_recursion() {
+    assert_lowers_to(
+        r#"
+        const fib_inner = fn (n: u256, a: u256, b: u256) u256 {
+            if iszero(n) {
+                return a;
+            }
+            fib_inner(sub(n, 1), b, add(a, b))
+        };
+        const fib = fn (n: u256) u256 {
+            fib_inner(n, 0, 1)
+        };
+
+        init {
+            let mut f0 = comptime { fib(0) };
+            let mut f1 = comptime { fib(1) };
+            let mut f10 = comptime { fib(10) };
+            let mut f10 = comptime { fib(11) };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = 1
+            %2 : u256 = 55
+            %3 : never = evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_block_type_result() {
     assert_lowers_to(
         r#"
