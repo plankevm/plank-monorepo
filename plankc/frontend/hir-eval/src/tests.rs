@@ -2075,7 +2075,8 @@ fn test_comptime_recursion() {
             %0 : u256 = 0
             %1 : u256 = 1
             %2 : u256 = 55
-            %3 : never = evm_stop()
+            %3 : u256 = 89
+            %4 : never = evm_stop()
         }
         "#,
     );

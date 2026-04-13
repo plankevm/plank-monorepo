@@ -7,7 +7,7 @@ use plank_mir::Mir;
 use plank_session::Session;
 use plank_values::ValueInterner;
 
-mod bufs;
+mod buffers;
 mod builtins;
 mod diagnostics;
 mod evaluator;
