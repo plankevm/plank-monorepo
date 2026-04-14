@@ -230,6 +230,7 @@ fn test_if_three_branches() {
 
 #[test]
 fn test_type_annotation_not_comptime() {
+
     assert_diagnostics(
         "
         init {
@@ -362,6 +363,7 @@ fn test_run_missing_termination() {
 
 #[test]
 fn test_init_missing_termination() {
+
     assert_diagnostics(
         "
         init {
