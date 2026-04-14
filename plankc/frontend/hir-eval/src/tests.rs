@@ -881,6 +881,11 @@ fn test_comptime_struct_lit_type_not_type() {
           |
         2 | const x = T { };
           |           ^ expected type, got value of type `u256`
+          |
+         ::: main.plk:1:1
+          |
+        1 | const T = 42;
+          | ------------- defined here
         "#],
     );
 }
@@ -900,6 +905,11 @@ fn test_comptime_param_type_not_type() {
           |
         2 | const f = fn(x: forty_two) u256 { return x; };
           |                 ^^^^^^^^^ expected type, got value of type `u256`
+          |
+         ::: main.plk:1:1
+          |
+        1 | const forty_two = 42;
+          | --------------------- defined here
         "#],
     );
 }
@@ -920,6 +930,11 @@ fn test_struct_lit_value_as_type_in_init() {
           |
         3 |     let x = T { };
           |             ^ expected type, got value of type `u256`
+          |
+         ::: main.plk:1:1
+          |
+        1 | const T = 42;
+          | ------------- defined here
         "#],
     );
 }
@@ -1020,6 +1035,11 @@ fn test_runtime_fn_return_type_not_type() {
           |
         3 |     let f = fn() forty_two { return 1; };
           |                  ^^^^^^^^^ expected type, got value of type `u256`
+          |
+         ::: main.plk:1:1
+          |
+        1 | const forty_two = 42;
+          | --------------------- defined here
         "#],
     );
 }

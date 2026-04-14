@@ -1,3 +1,4 @@
+use crate::scope::LocalLoc;
 use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
@@ -33,18 +34,22 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("value used as type")
-            .primary(
-                loc.source,
-                loc.span,
-                format!(
-                    "expected {}, got value of type `{}`",
-                    builtin_names::TYPE,
-                    types.format(self.session, ty)
-                ),
-            )
-            .emit(self.session);
+    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: LocalLoc) {
+        let use_loc = loc.use_loc();
+        let mut diag = Diagnostic::error("value used as type").primary(
+            use_loc.source,
+            use_loc.span,
+            format!(
+                "expected {}, got value of type `{}`",
+                builtin_names::TYPE,
+                types.format(self.session, ty)
+            ),
+        );
+        if let LocalLoc::Ref { def_loc, .. } = loc {
+            diag = diag
+                .element(Annotations::new(def_loc.source).secondary(def_loc.span, "defined here"));
+        }
+        diag.emit(self.session);
     }
 
     pub fn emit_struct_literal_field_type_mismatch(

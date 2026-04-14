@@ -6,19 +6,37 @@ use plank_session::{EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, S
 use plank_values::{TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LocalLoc {
+    Inline(SrcLoc),
+    Ref { use_loc: SrcLoc, def_loc: SrcLoc },
+}
+
+impl LocalLoc {
+    pub fn use_loc(&self) -> SrcLoc {
+        match *self {
+            LocalLoc::Inline(loc) | LocalLoc::Ref { use_loc: loc, .. } => loc,
+        }
+    }
+
+    pub fn use_span(&self) -> SourceSpan {
+        self.use_loc().span
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
-    pub span: SourceSpan,
+    pub loc: LocalLoc,
 }
 
 impl Local {
-    pub fn comptime(value: ValueId, span: SourceSpan) -> Self {
-        Self { state: Ok(LocalState::Comptime(value)), span }
+    pub fn comptime(value: ValueId, loc: LocalLoc) -> Self {
+        Self { state: Ok(LocalState::Comptime(value)), loc }
     }
 
-    pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan)> {
+    pub fn poisoned(self) -> MaybePoisoned<(LocalState, SrcLoc)> {
         let state = self.state?;
-        Ok((state, self.span))
+        Ok((state, self.loc.use_loc()))
     }
 }
 
@@ -129,15 +147,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn expect_type(&mut self, type_local: hir::LocalId) -> MaybePoisoned<TypeId> {
-        let (state, span) = self.bindings[type_local].poisoned()?;
-        let type_loc = self.loc(span);
+        let loc = self.bindings[type_local].loc;
+        let (state, use_loc) = self.bindings[type_local].poisoned()?;
         let LocalState::Comptime(vid) = state else {
-            self.diag_ctx.emit_type_not_comptime(type_loc);
+            self.diag_ctx.emit_type_not_comptime(use_loc);
             return Err(Poisoned);
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
-            self.diag_ctx.emit_type_not_type(&self.eval.types, actual_ty, type_loc);
+            self.diag_ctx.emit_type_not_type(&self.eval.types, actual_ty, loc);
             return Err(Poisoned);
         };
         Ok(ty)
@@ -209,7 +227,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            self.type_check(value, expected_ty, self.bindings[type_local].span, expr.span)?;
+            self.type_check(
+                value,
+                expected_ty,
+                self.bindings[type_local].loc.use_span(),
+                expr.span,
+            )?;
             Ok(value)
         });
         let state = value.and_then(|value| {
@@ -225,7 +248,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings.insert_no_prev(local, Local { state, span: expr.span });
+        self.bindings.insert_no_prev(local, Local { state, loc: self.local_loc(expr) });
         Ok(())
     }
 
@@ -241,7 +264,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            self.type_check(value, expected_ty, self.bindings[type_local].span, expr.span)?;
+            self.type_check(
+                value,
+                expected_ty,
+                self.bindings[type_local].loc.use_span(),
+                expr.span,
+            )?;
             Ok(value)
         });
 
@@ -257,7 +285,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
 
-        self.bindings.insert_no_prev(local, Local { state: new_state, span: expr.span });
+        self.bindings.insert_no_prev(local, Local { state: new_state, loc: self.local_loc(expr) });
         Ok(())
     }
 
@@ -267,7 +295,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state = value
                 .and_then(|value| self.expect_comptime_value(value, expr.span))
                 .map(LocalState::Comptime);
-            let _ = self.bindings.insert(local, Local { state, span: expr.span });
+            let _ = self
+                .bindings
+                .insert(local, Local { state, loc: LocalLoc::Inline(self.loc(expr.span)) });
             return Ok(());
         }
 
@@ -279,7 +309,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 });
-                self.bindings.insert_no_prev(local, Local { state, span: expr.span });
+                self.bindings.insert_no_prev(
+                    local,
+                    Local { state, loc: LocalLoc::Inline(self.loc(expr.span)) },
+                );
             }
             Some(binding) => {
                 let new_state = poison::zip(binding.state, mir_expr).and_then(
@@ -293,7 +326,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             self.diag_ctx.emit_incompatible_branch_types(
                                 &self.eval.types,
                                 existing_ty,
-                                self.loc(binding.span),
+                                binding.loc.use_loc(),
                                 ty,
                                 self.loc(expr.span),
                             );
@@ -305,7 +338,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] = Local { state: new_state, span: expr.span };
+                self.bindings[local] =
+                    Local { state: new_state, loc: LocalLoc::Inline(self.loc(expr.span)) };
             }
         }
 
@@ -331,14 +365,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let local = self.bindings[target];
         let new_state = poison::zip(local.state, value).and_then(|(state, value)| {
             let expected_ty = self.state_type(state);
-            let type_check = self.type_check(value, expected_ty, local.span, expr.span);
+            let type_check = self.type_check(value, expected_ty, local.loc.use_span(), expr.span);
             if self.is_comptime() {
                 let state = match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
                         self.diag_ctx.emit_runtime_ref_in_comptime(
                             self.source,
-                            local.span,
+                            local.loc.use_span(),
                             expr.span,
                         );
                         Err(Poisoned)
@@ -412,7 +446,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 if self.mir_types[mir_local].is_assignable_to(TypeId::BOOL) =>
             {
                 if self.is_comptime() {
-                    self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.span));
+                    self.diag_ctx.emit_runtime_eval_in_comptime(binding.loc.use_loc());
                     return Err(Diverge::PoisonedControlFlow);
                 }
                 let (then, then_res) = self.eval_block_to_mir(then);
@@ -439,7 +473,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     &self.eval.types,
                     TypeId::BOOL,
                     state_ty,
-                    self.loc(binding.span),
+                    binding.loc.use_loc(),
                 );
                 Err(Diverge::PoisonedControlFlow)
             }
@@ -473,7 +507,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     &this.eval.types,
                     TypeId::BOOL,
                     state_ty,
-                    this.loc(binding.span),
+                    binding.loc.use_loc(),
                 );
                 return Err(Diverge::PoisonedControlFlow);
             }
@@ -481,7 +515,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 LocalState::Runtime(local) => Ok(local),
                 LocalState::Comptime(value) => {
                     if this.is_comptime_only(value) {
-                        this.diag_ctx.emit_comptime_only_value_at_runtime(this.loc(binding.span));
+                        this.diag_ctx.emit_comptime_only_value_at_runtime(binding.loc.use_loc());
                         return Err(Diverge::PoisonedControlFlow);
                     }
                     let condition = this.mir_types.push(this.values.type_of_value(value));
@@ -508,16 +542,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         SrcLoc::new(self.source, span)
     }
 
+    fn local_loc(&self, expr: hir::Expr) -> LocalLoc {
+        if let ExprKind::ConstRef(const_id) = expr.kind {
+            let const_def = self.hir.consts[const_id];
+            LocalLoc::Ref { use_loc: self.loc(expr.span), def_loc: const_def.loc() }
+        } else {
+            LocalLoc::Inline(self.loc(expr.span))
+        }
+    }
+
     pub fn eval_logical_not(&mut self, local: hir::LocalId) -> MaybePoisoned<EvalValue> {
-        let (state, span) = self.bindings[local].poisoned()?;
+        let (state, loc) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(
-                &self.eval.types,
-                TypeId::BOOL,
-                ty,
-                self.loc(span),
-            );
+            self.diag_ctx.emit_type_mismatch_simple(&self.eval.types, TypeId::BOOL, ty, loc);
             return Err(Poisoned);
         }
         let value = match state {
