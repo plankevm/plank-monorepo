@@ -58,11 +58,12 @@ impl Scope<'_, '_> {
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
-            let (state, callee_def_loc) = this.bindings[callee].poisoned()?;
+            let callee_loc = this.bindings[callee].loc;
+            let (state, callee_use_loc) = this.bindings[callee].poisoned()?;
             let closure_vid = match state {
                 LocalState::Comptime(value) => value,
                 LocalState::Runtime(_) => {
-                    this.diag_ctx.emit_call_target_not_comptime(callee_def_loc);
+                    this.diag_ctx.emit_call_target_not_comptime(callee_use_loc);
                     return Err(Poisoned);
                 }
             };
@@ -70,7 +71,7 @@ impl Scope<'_, '_> {
                 this.eval.values.lookup(closure_vid)
             else {
                 let ty = this.values.type_of_value(closure_vid);
-                this.diag_ctx.emit_not_callable(&this.eval.types, ty, callee_def_loc);
+                this.diag_ctx.emit_not_callable(&this.eval.types, ty, callee_loc);
                 return Err(Poisoned);
             };
             for &capture in captures {

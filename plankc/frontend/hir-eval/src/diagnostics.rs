@@ -94,39 +94,46 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, ty_loc: SrcLoc) {
-        Diagnostic::error("expected struct type")
-            .primary(
-                ty_loc.source,
-                ty_loc.span,
-                format!("`{}` is not a struct type", types.format(self.session, ty)),
-            )
-            .emit(self.session);
+    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, loc: LocalLoc) {
+        let use_loc = loc.use_loc();
+        let mut diag = Diagnostic::error("expected struct type").primary(
+            use_loc.source,
+            use_loc.span,
+            format!("`{}` is not a struct type", types.format(self.session, ty)),
+        );
+        if let LocalLoc::Ref { def_loc, .. } = loc {
+            diag = diag
+                .element(Annotations::new(def_loc.source).secondary(def_loc.span, "defined here"));
+        }
+        diag.emit(self.session);
     }
 
-    pub fn emit_member_on_non_struct(
-        &mut self,
-        types: &TypeInterner,
-        ty: TypeId,
-        value_loc: SrcLoc,
-    ) {
-        Diagnostic::error("no fields on type")
-            .primary(
-                value_loc.source,
-                value_loc.span,
-                format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
-            )
-            .emit(self.session);
+    pub fn emit_member_on_non_struct(&mut self, types: &TypeInterner, ty: TypeId, loc: LocalLoc) {
+        let use_loc = loc.use_loc();
+        let mut diag = Diagnostic::error("no fields on type").primary(
+            use_loc.source,
+            use_loc.span,
+            format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
+        );
+        if let LocalLoc::Ref { def_loc, .. } = loc {
+            diag = diag
+                .element(Annotations::new(def_loc.source).secondary(def_loc.span, "defined here"));
+        }
+        diag.emit(self.session);
     }
 
-    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("expected function")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`{}` is not callable", types.format(self.session, ty)),
-            )
-            .emit(self.session);
+    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: LocalLoc) {
+        let use_loc = loc.use_loc();
+        let mut diag = Diagnostic::error("expected function").primary(
+            use_loc.source,
+            use_loc.span,
+            format!("`{}` is not callable", types.format(self.session, ty)),
+        );
+        if let LocalLoc::Ref { def_loc, .. } = loc {
+            diag = diag
+                .element(Annotations::new(def_loc.source).secondary(def_loc.span, "defined here"));
+        }
+        diag.emit(self.session);
     }
 
     pub fn emit_incompatible_branch_types(

@@ -64,10 +64,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         member: StrId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
-        let (state, value_def_loc) = self.bindings[object].poisoned()?;
+        let state = self.bindings[object].state?;
         let struct_ty = self.state_type(state);
         let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_member_on_non_struct(&self.eval.types, struct_ty, value_def_loc);
+            self.diag_ctx.emit_member_on_non_struct(
+                &self.eval.types,
+                struct_ty,
+                self.bindings[object].loc,
+            );
             return Err(Poisoned);
         };
 
@@ -309,7 +313,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let mut validity = self.struct_lit_diagnose_duplicate_fields(lit_loc, lit_fields);
 
         // Retrieve struct type information.
-        let ty_loc = self.bindings[struct_type_local].loc.use_loc();
+        let ty_loc = self.bindings[struct_type_local].loc;
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
             self.diag_ctx.emit_not_a_struct_type(&self.eval.types, struct_ty, ty_loc);

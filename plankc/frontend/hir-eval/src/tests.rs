@@ -1251,6 +1251,35 @@ fn test_comptime_struct_lit_not_a_struct() {
 }
 
 #[test]
+fn test_cross_file_struct_lit_not_a_struct() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::T;
+            init {
+                let x = T { value: 1 };
+                evm_stop();
+            }
+            ",
+        )
+        .add_file("other", "const T = bool;")
+        .add_module("m", ""),
+        &[r#"
+        error: expected struct type
+         --> main.plk:3:13
+          |
+        3 |     let x = T { value: 1 };
+          |             ^ `bool` is not a struct type
+          |
+         ::: other.plk:1:1
+          |
+        1 | const T = bool;
+          | --------------- defined here
+        "#],
+    );
+}
+
+#[test]
 fn test_runtime_struct_lit_not_a_struct() {
     assert_diagnostics(
         r#"
@@ -1345,6 +1374,11 @@ fn test_comptime_member_on_non_struct() {
           |
         2 | const y = x.foo;
           |           ^ value of type `u256` is not a struct type
+          |
+         ::: main.plk:1:1
+          |
+        1 | const x: u256 = 5;
+          | ------------------ defined here
         "#],
     );
 }
@@ -1383,6 +1417,11 @@ fn test_comptime_call_on_non_function() {
           |
         2 | const y = x();
           |           ^ `u256` is not callable
+          |
+         ::: main.plk:1:1
+          |
+        1 | const x = 5;
+          | ------------ defined here
         "#],
     );
 }
