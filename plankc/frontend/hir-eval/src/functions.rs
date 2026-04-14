@@ -199,24 +199,23 @@ impl Scope<'_, '_> {
 
         let mut comptime_args_poisoned = false;
         for (&param, &arg) in params.iter().zip(args) {
-            if param.is_comptime {
-                let Ok((arg_state, arg_span)) = self.bindings[arg].poisoned() else {
+            if !param.is_comptime {
+                continue;
+            }
+            let Ok((arg_state, arg_span)) = self.bindings[arg].poisoned() else {
+                comptime_args_poisoned = true;
+                continue;
+            };
+            let arg_value = match arg_state {
+                LocalState::Comptime(value) => value,
+                LocalState::Runtime(_) => {
+                    self.diag_ctx
+                        .emit_comptime_param_got_runtime(self.loc(arg_span), func.loc(param.span));
                     comptime_args_poisoned = true;
                     continue;
-                };
-                let arg_value = match arg_state {
-                    LocalState::Comptime(value) => value,
-                    LocalState::Runtime(_) => {
-                        self.diag_ctx.emit_comptime_param_got_runtime(
-                            self.loc(arg_span),
-                            func.loc(param.span),
-                        );
-                        comptime_args_poisoned = true;
-                        continue;
-                    }
-                };
-                self.values_buf.push(arg_value);
-            }
+                }
+            };
+            self.values_buf.push(arg_value);
         }
 
         if comptime_args_poisoned {

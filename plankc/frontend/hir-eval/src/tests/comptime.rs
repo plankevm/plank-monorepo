@@ -478,11 +478,11 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
         };
 
         init {
-            let mut x = get_len(u256, (comptime { Gen(u256) }) {
+            let mut x = get_len(u256, comptime { Gen(u256) } {
                 inner: 0,
                 len: 34
             });
-            let mut y = get_len(bool, (comptime { Gen(bool) }) {
+            let mut y = get_len(bool, comptime { Gen(bool) } {
                 inner: false,
                 len: 33
             });
