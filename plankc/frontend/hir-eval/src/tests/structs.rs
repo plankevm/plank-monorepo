@@ -368,11 +368,11 @@ fn test_runtime_struct_def_type_index_not_comptime() {
         }
         "#,
         &[r#"
-        error: struct definition requires compile-time values
+        error: attempting to evaluate runtime expression in comptime context
          --> main.plk:3:20
           |
         3 |     let S = struct T { x: u256 };
-          |                    ^ type index is not known at compile time
+          |                    ^ runtime expression
         "#],
     );
 }
