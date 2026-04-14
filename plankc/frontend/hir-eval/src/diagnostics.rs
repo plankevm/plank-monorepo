@@ -1,3 +1,4 @@
+use plank_core::Span;
 use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
@@ -440,6 +441,19 @@ impl DiagCtx<'_> {
                 "runtime argument defined here",
                 param_def_loc,
                 "parameter defined as comptime here",
+            )
+            .claim(
+                Claim::new(
+                    Level::Help,
+                    "you can force compile time evaluation with a `comptime` block",
+                )
+                .element({
+                    let span = arg_def_loc.span;
+                    Patches::new(arg_def_loc.source)
+                        .patch(Span::new(span.start, span.start), "comptime { ")
+                        .patch(Span::new(span.end, span.end), " }")
+                })
+                .note("this only works if the expression is not fundamentally runtime"),
             )
             .emit(self.session);
     }

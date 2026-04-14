@@ -593,3 +593,38 @@ fn test_basic_polymorphic_function() {
         "#,
     );
 }
+
+#[test]
+fn test_comptime_param_not_eager() {
+    assert_diagnostics(
+        r#"
+        const ident = fn (x: u256) u256 { x };
+
+        const my_add = fn (comptime N: u256, x: u256) u256 {
+            add(N, x)
+        };
+
+        init {
+            let mut x = my_add(ident(4), 4);
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: attempted to pass runtime value as comptime parameter
+         --> main.plk:6:24
+          |
+        2 | const my_add = fn (comptime N: u256, x: u256) u256 {
+          |                    ---------------- parameter defined as comptime here
+        ...
+        6 |     let mut x = my_add(ident(4), 4);
+          |                        ^^^^^^^^ runtime argument defined here
+          |
+        help: you can force compile time evaluation with a `comptime` block
+          |
+        6 |     let mut x = my_add(comptime { ident(4) }, 4);
+          |                        ++++++++++          +
+          = note: this only works if the expression is not fundamentally runtime
+        "#],
+    );
+}
