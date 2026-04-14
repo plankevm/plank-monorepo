@@ -1,4 +1,3 @@
-use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
@@ -7,6 +6,7 @@ use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterne
 
 use crate::{
     diagnostics::DiagCtx,
+    functions::LoweredFunctionsCache,
     scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
@@ -31,7 +31,7 @@ pub(crate) struct Evaluator<'a> {
     pub values: &'a mut ValueInterner,
     pub hir: &'a Hir,
 
-    pub lowered_fns_cache: HashMap<ValueId, State<MaybePoisoned<mir::FnId>>>,
+    pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
@@ -56,7 +56,7 @@ impl<'a> Evaluator<'a> {
             values,
             hir,
 
-            lowered_fns_cache: HashMap::new(),
+            lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
 

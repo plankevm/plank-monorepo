@@ -432,4 +432,15 @@ impl DiagCtx<'_> {
             )
             .emit(self.session);
     }
+
+    pub fn emit_comptime_param_got_runtime(&mut self, arg_def_loc: SrcLoc, param_def_loc: SrcLoc) {
+        Diagnostic::error("attempted to pass runtime value as comptime parameter")
+            .cross_source_annotations(
+                arg_def_loc,
+                "runtime argument defined here",
+                param_def_loc,
+                "parameter defined as comptime here",
+            )
+            .emit(self.session);
+    }
 }

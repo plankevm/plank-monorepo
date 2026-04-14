@@ -261,7 +261,7 @@ fn test_comptime_block_struct_type() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : struct@main.plk:3:9 = struct#7 {
+            %0 : struct#7@main.plk:3:9 = struct#7 {
                 42,
             }
             %1 : never = evm_stop()
@@ -459,5 +459,65 @@ fn test_const_with_type_error_does_not_panic() {
           |            |
           |            `bool` expected because of this
         "#],
+    );
+}
+
+#[test]
+fn test_comptime_params_monomorphize_uniquely_at_runtime() {
+    assert_lowers_to(
+        r#"
+        const Gen = fn (comptime T: type) type {
+            struct {
+                inner: T,
+                len: u256
+            }
+        };
+
+        const get_len = fn (comptime T: type, arr: Gen(T)) u256 {
+            arr.len
+        };
+
+        init {
+            let mut x = get_len(u256, (comptime { Gen(u256) }) {
+                inner: 0,
+                len: 34
+            });
+            let mut y = get_len(bool, (comptime { Gen(bool) }) {
+                inner: false,
+                len: 33
+            });
+            evm_stop();
+        }
+        "#,
+        r#"
+
+        ==== Functions ====
+        @fn0(%0: struct#7@main.plk:2:5) -> u256 {
+            %1 : struct#7@main.plk:2:5 = %0
+            %2 : u256 = %1.1
+            ret %2
+        }
+
+        @fn1(%0: struct#8@main.plk:2:5) -> u256 {
+            %1 : struct#8@main.plk:2:5 = %0
+            %2 : u256 = %1.1
+            ret %2
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : struct#7@main.plk:2:5 = struct#7 {
+                0,
+                34,
+            }
+            %1 : u256 = call @fn0(%0)
+            %2 : struct#8@main.plk:2:5 = struct#8 {
+                false,
+                33,
+            }
+            %3 : u256 = call @fn1(%2)
+            %4 : never = evm_stop()
+        }
+        "#,
     );
 }

@@ -1,4 +1,5 @@
-use hashbrown::hash_map::Entry;
+use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
+use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, poison};
@@ -9,15 +10,92 @@ use crate::{
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
+newtype_index! {
+    pub(crate) struct LoweredFnIdx;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct UniqueFunction<'a> {
+    closure: ValueId,
+    comptime_params: &'a [ValueId],
+}
+
+struct LoweredFn {
+    state: State<MaybePoisoned<mir::FnId>>,
+    closure: ValueId,
+}
+
+pub(crate) struct LoweredFunctionsCache {
+    functions: IndexVec<LoweredFnIdx, LoweredFn>,
+    comptime_params: ListOfLists<LoweredFnIdx, ValueId>,
+    dedup: HashTable<LoweredFnIdx>,
+    hasher: DefaultHashBuilder,
+}
+
+impl LoweredFunctionsCache {
+    pub fn new() -> Self {
+        Self {
+            functions: IndexVec::new(),
+            comptime_params: ListOfLists::new(),
+            dedup: HashTable::new(),
+            hasher: DefaultHashBuilder::default(),
+        }
+    }
+
+    fn set_lowered(
+        &mut self,
+        id: LoweredFnIdx,
+        lowered: MaybePoisoned<mir::FnId>,
+    ) -> MaybePoisoned<mir::FnId> {
+        match &mut self.functions[id].state {
+            State::Done(Err(Poisoned)) => return Err(Poisoned),
+            State::Done(Ok(_)) => unreachable!("invariant: state corruped while lowering"),
+            state @ State::InProgress => *state = State::Done(lowered),
+        }
+        lowered
+    }
+
+    fn try_start_lower<'a>(
+        &mut self,
+        func: UniqueFunction<'a>,
+    ) -> Result<State<MaybePoisoned<mir::FnId>>, LoweredFnIdx> {
+        use std::hash::BuildHasher;
+        let hash = self.hasher.hash_one(func);
+        let entry = self.dedup.entry(
+            hash,
+            |&idx| {
+                let closure = self.functions[idx].closure;
+                closure == func.closure && func.comptime_params == &self.comptime_params[idx]
+            },
+            |&idx| {
+                let closure = self.functions[idx].closure;
+                let comptime_params = &self.comptime_params[idx];
+                self.hasher.hash_one(UniqueFunction { closure, comptime_params })
+            },
+        );
+        match entry {
+            Entry::Occupied(occupied) => {
+                let state = &mut self.functions[*occupied.get()].state;
+                if let State::InProgress = state {
+                    *state = State::Done(Err(Poisoned));
+                }
+                Ok(*state)
+            }
+            Entry::Vacant(vacant) => {
+                let id = self
+                    .functions
+                    .push(LoweredFn { state: State::InProgress, closure: func.closure });
+                let id2 = self.comptime_params.push_copy_slice(func.comptime_params);
+                assert_eq!(id, id2);
+                vacant.insert(id);
+                Err(id)
+            }
+        }
+    }
+}
+
 impl Scope<'_, '_> {
     pub(crate) fn eval_fn_def(&mut self, id: hir::FnDefId) -> MaybePoisoned<EvalValue> {
-        let fn_def = self.hir.fns[id];
-        let params = &self.hir.fn_params[id];
-        if let Some(&param) = params.iter().find(|param| param.is_comptime) {
-            self.diag_ctx.emit_not_yet_implemented("comptime parameters", fn_def.loc(param.span));
-            return Err(Poisoned);
-        }
-
         let def_captures = &self.hir.fn_captures[id];
         self.with_captures_buf(|this, captures_buf_offset| {
             let mut poisoned = false;
@@ -58,25 +136,38 @@ impl Scope<'_, '_> {
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
-            let (state, callee_def_span) = this.bindings[callee].poisoned()?;
-            let closure_vid = match state {
-                LocalState::Comptime(value) => value,
-                LocalState::Runtime(_) => {
-                    this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_def_span));
+            this.with_values_buf(|this, values_buf_offset: usize| {
+                let (state, callee_def_span) = this.bindings[callee].poisoned()?;
+                let closure_vid = match state {
+                    LocalState::Comptime(value) => value,
+                    LocalState::Runtime(_) => {
+                        this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_def_span));
+                        return Err(Poisoned);
+                    }
+                };
+                let Value::Closure { fn_def: fn_def_id, captures } =
+                    this.eval.values.lookup(closure_vid)
+                else {
+                    let ty = this.values.type_of_value(closure_vid);
+                    this.diag_ctx.emit_not_callable(
+                        &this.eval.types,
+                        ty,
+                        this.loc(callee_def_span),
+                    );
                     return Err(Poisoned);
+                };
+                for &capture in captures {
+                    this.eval.captures_buf.push(capture);
                 }
-            };
-            let Value::Closure { fn_def: fn_def_id, captures } =
-                this.eval.values.lookup(closure_vid)
-            else {
-                let ty = this.values.type_of_value(closure_vid);
-                this.diag_ctx.emit_not_callable(&this.eval.types, ty, this.loc(callee_def_span));
-                return Err(Poisoned);
-            };
-            for &capture in captures {
-                this.eval.captures_buf.push(capture);
-            }
-            this.eval_call_inner(closure_vid, fn_def_id, args_id, call_span, capture_buf_offset)
+                this.eval_call_inner(
+                    closure_vid,
+                    fn_def_id,
+                    args_id,
+                    call_span,
+                    capture_buf_offset,
+                    values_buf_offset,
+                )
+            })
         })
     }
 
@@ -87,6 +178,7 @@ impl Scope<'_, '_> {
         args_id: hir::CallArgsId,
         call_span: SourceSpan,
         capture_buf_offset: usize,
+        values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let func = self.hir.fns[fn_def_id];
         let params = &self.hir.fn_params[fn_def_id];
@@ -105,37 +197,57 @@ impl Scope<'_, '_> {
             return self.fold_comptime_call(fn_def_id, args_id, capture_buf_offset, call_span);
         }
 
-        let lowered = match self.lowered_fns_cache.entry(closure) {
-            Entry::Occupied(mut occupied) => match *occupied.get() {
-                State::Done(lowered) => lowered?,
-                State::InProgress => {
-                    occupied.insert(State::Done(Err(Poisoned)));
-                    self.diag_ctx.emit_runtime_call_with_recursion(self.loc(call_span));
-                    return Err(Poisoned);
-                }
-            },
-            Entry::Vacant(vacant) => {
-                vacant.insert(State::InProgress);
-                let lowered = self.lower_runtime_function(fn_def_id, args_id, capture_buf_offset);
-                match self.lowered_fns_cache.get_mut(&closure) {
-                    Some(state @ State::InProgress) => *state = State::Done(lowered),
-                    Some(State::Done(Err(Poisoned))) => return Err(Poisoned),
-                    Some(State::Done(Ok(_))) | None => {
-                        unreachable!("invariant: state corruped while lowering")
+        let mut comptime_args_poisoned = false;
+        for (&param, &arg) in params.iter().zip(args) {
+            if param.is_comptime {
+                let Ok((arg_state, arg_span)) = self.bindings[arg].poisoned() else {
+                    comptime_args_poisoned = true;
+                    continue;
+                };
+                let arg_value = match arg_state {
+                    LocalState::Comptime(value) => value,
+                    LocalState::Runtime(_) => {
+                        self.diag_ctx.emit_comptime_param_got_runtime(
+                            self.loc(arg_span),
+                            func.loc(param.span),
+                        );
+                        comptime_args_poisoned = true;
+                        continue;
                     }
                 };
-                lowered?
+                self.values_buf.push(arg_value);
+            }
+        }
+
+        if comptime_args_poisoned {
+            return Err(Poisoned);
+        }
+
+        let function =
+            UniqueFunction { closure, comptime_params: &self.eval.values_buf[values_buf_offset..] };
+
+        let lowered = match self.eval.lowered_fns_cache.try_start_lower(function) {
+            Ok(State::Done(lowered)) => lowered?,
+            Ok(State::InProgress) => {
+                self.diag_ctx.emit_runtime_call_with_recursion(self.loc(call_span));
+                return Err(Poisoned);
+            }
+            Err(lowered_id) => {
+                let lowered = self.lower_runtime_function(fn_def_id, args_id, capture_buf_offset);
+                self.eval.lowered_fns_cache.set_lowered(lowered_id, lowered)?
             }
         };
 
         let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
-            for &arg in args {
+            for (&param, &arg) in params.iter().zip(args) {
                 let state = self.bindings[arg].state?;
                 let local = match state {
                     LocalState::Runtime(local) => local,
                     LocalState::Comptime(value) => {
+                        if param.is_comptime {
+                            continue;
+                        }
                         let ty = self.eval.values.type_of_value(value);
-                        assert!(!self.eval.types.comptime_only(ty), "todo comptime params");
                         let target = self.mir_types.push(ty);
                         self.eval
                             .instr_stack_buf
@@ -193,15 +305,21 @@ impl Scope<'_, '_> {
         }
 
         for (&param, &arg) in params.iter().zip(args) {
-            assert!(!param.is_comptime, "todo: comptime parameters");
             let binding = parent_bindings[arg];
             let state = binding.state.map(|state| {
-                let ty = match state {
-                    LocalState::Runtime(outer_mir) => parent_mir_types[outer_mir],
-                    LocalState::Comptime(value) => fn_scope.eval.values.type_of_value(value),
-                };
-                let inner_mir = fn_scope.mir_types.push(ty);
-                LocalState::Runtime(inner_mir)
+                if param.is_comptime {
+                    let LocalState::Comptime(value) = state else {
+                        unreachable!("invariant: eval call should've validated comptime params");
+                    };
+                    LocalState::Comptime(value)
+                } else {
+                    let ty = match state {
+                        LocalState::Runtime(outer_mir) => parent_mir_types[outer_mir],
+                        LocalState::Comptime(value) => fn_scope.eval.values.type_of_value(value),
+                    };
+                    let inner_mir = fn_scope.mir_types.push(ty);
+                    LocalState::Runtime(inner_mir)
+                }
             });
             fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
         }
@@ -213,10 +331,13 @@ impl Scope<'_, '_> {
         }
 
         let return_type = fn_scope.expect_type(fn_def.return_type);
-        fn_scope.comptime = false;
         fn_scope.ctx = EvalContext::FunctionBody {
             ret_type: return_type,
             ret_type_span: fn_scope.bindings[fn_def.return_type].span,
+        };
+        fn_scope.comptime = match return_type {
+            Ok(ty) => fn_scope.types.comptime_only(ty),
+            Err(Poisoned) => false,
         };
 
         let (body, body_eval_res) = fn_scope.eval_block_to_mir(fn_def.body);
@@ -231,7 +352,7 @@ impl Scope<'_, '_> {
         let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
         let fn_id2 = fn_scope.eval.mir_fns.push(mir::FnDef {
             body,
-            param_count: params.len() as u32,
+            param_count: params.iter().filter(|param| !param.is_comptime).count() as u32,
             return_type,
         });
         assert_eq!(fn_id1, fn_id2);
@@ -249,7 +370,6 @@ impl Scope<'_, '_> {
         r#type: hir::LocalId,
         idx: u32,
     ) {
-        assert!(!comptime, "todo: comptime parameters");
         let EvalContext::FunctionPreamble { call_scope_source, arg_spans } = self.ctx else {
             unreachable!("invariant: param instr outside of fn preamable")
         };
@@ -260,6 +380,12 @@ impl Scope<'_, '_> {
         };
         let arg_binding = self.bindings[arg];
         let Ok(state) = arg_binding.state else { return };
+        if comptime {
+            assert!(
+                matches!(state, LocalState::Comptime(_)),
+                "invariant: comptime param not comptime in eval"
+            );
+        }
         let arg_ty = self.state_type(state);
         if !arg_ty.is_assignable_to(param_ty) {
             let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
@@ -358,7 +484,6 @@ impl Scope<'_, '_> {
         }
 
         for (&param, &arg) in params.iter().zip(args) {
-            assert!(!param.is_comptime, "todo: comptime parameters");
             let binding = parent_bindings[arg];
             let state = binding.state.and_then(|state| match state {
                 LocalState::Runtime(_) => {

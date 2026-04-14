@@ -189,7 +189,8 @@ impl TypeInterner {
                         session.offset_to_line_col(info.def_loc.source, info.def_loc.span.start);
                     write!(
                         f,
-                        "struct@{}:{line}:{col}",
+                        "struct#{}@{}:{line}:{col}",
+                        type_id.get(),
                         &session.get_source(info.def_loc.source).path.to_str().unwrap()
                     )
                 }
