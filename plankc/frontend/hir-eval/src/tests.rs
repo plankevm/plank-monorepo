@@ -357,6 +357,28 @@ fn test_run_missing_termination() {
 }
 
 #[test]
+fn test_init_missing_termination() {
+    assert_diagnostics(
+        "
+        init {
+            sstore(0, 1);
+        }
+        ",
+        &[r#"
+        error: entry point must end with explicit terminator
+         --> main.plk:1:1
+          |
+        1 | / init {
+        2 | |     sstore(0, 1);
+        3 | | }
+          | |_^ execution may reach end of entry point
+          |
+          = help: entry points must end with a terminating `never` expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
+        "#],
+    );
+}
+
+#[test]
 fn test_never_fn_missing_termination() {
     assert_diagnostics(
         "
@@ -2206,6 +2228,28 @@ fn test_const_mutual_cycle() {
           |
         1 | const A = B;
           | ^^^^^^^^^^^^ `A` depends on itself
+        "#],
+    );
+}
+
+#[test]
+fn test_const_with_type_error_does_not_panic() {
+    assert_diagnostics(
+        r#"
+        const x = {
+            let a: bool = 5;
+            a
+        };
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:19
+          |
+        2 |     let a: bool = 5;
+          |            ----   ^ expected `bool`, got `u256`
+          |            |
+          |            `bool` expected because of this
         "#],
     );
 }

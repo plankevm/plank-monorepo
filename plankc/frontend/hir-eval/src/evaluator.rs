@@ -7,7 +7,7 @@ use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterne
 
 use crate::{
     diagnostics::DiagCtx,
-    scope::{EvalContext, LocalState, Scope},
+    scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -93,7 +93,10 @@ impl<'a> Evaluator<'a> {
         self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
-        scope.eval_comptime(const_def.body).expect("todo: handle comptime diverge");
+        if let Err(Diverge::PoisonedControlFlow) = scope.eval_comptime(const_def.body) {
+            self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
+            return Err(Poisoned);
+        }
 
         let value = scope.bindings[const_def.result].state.map(|state| match state {
             LocalState::Comptime(vid) => vid,
