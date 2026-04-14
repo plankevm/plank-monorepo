@@ -571,3 +571,32 @@ fn test_struct_def_duplicate_field() {
         "#],
     );
 }
+
+#[test]
+fn test_type_index_expr_eagerly_evaluates() {
+    assert_lowers_to(
+        r#"
+        const ident = fn (x: u256) u256 { x };
+
+        init {
+            let y = 34;
+            let T = struct ident(y) {
+                wow: u256
+            };
+            let mut t = T { wow: 67 };
+
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : struct@main.plk:4:13 = struct#7 {
+                67,
+            }
+            %1 : never = evm_stop()
+        }
+        "#,
+    );
+}
