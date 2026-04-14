@@ -376,9 +376,8 @@ impl Scope<'_, '_> {
             let state = binding.state.and_then(|state| match state {
                 LocalState::Runtime(_) => {
                     fn_scope.diag_ctx.emit_runtime_ref_in_comptime(
-                        parent_source,
-                        call_span,
-                        binding.loc.use_span(),
+                        SrcLoc::new(parent_source, call_span),
+                        binding.loc.use_loc(),
                     );
                     Err(Poisoned)
                 }

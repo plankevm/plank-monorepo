@@ -189,17 +189,13 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_runtime_ref_in_comptime(
-        &mut self,
-        source: SourceId,
-        expr_span: SourceSpan,
-        runtime_def: SourceSpan,
-    ) {
+    pub fn emit_runtime_ref_in_comptime(&mut self, expr_loc: SrcLoc, runtime_def_loc: SrcLoc) {
         Diagnostic::error("runtime reference in comptime context")
-            .element(
-                Annotations::new(source)
-                    .primary(expr_span, "expression with runtime reference")
-                    .secondary(runtime_def, "runtime value defined here"),
+            .cross_source_annotations(
+                expr_loc,
+                "expression with runtime reference",
+                runtime_def_loc,
+                "runtime value defined here",
             )
             .note("comptime contexts can only reference values known at compile time")
             .emit(self.session);

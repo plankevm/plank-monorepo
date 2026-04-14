@@ -370,11 +370,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let state = match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
-                        self.diag_ctx.emit_runtime_ref_in_comptime(
-                            self.source,
-                            local.loc.use_span(),
-                            expr.span,
-                        );
+                        self.diag_ctx
+                            .emit_runtime_ref_in_comptime(local.loc.use_loc(), self.loc(expr.span));
                         Err(Poisoned)
                     }
                 };

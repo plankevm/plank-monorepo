@@ -109,11 +109,8 @@ impl Scope<'_, '_> {
                     match state {
                         LocalState::Comptime(vid) => this.values_buf.push(vid),
                         LocalState::Runtime(_) if this.is_comptime() => {
-                            this.diag_ctx.emit_runtime_ref_in_comptime(
-                                this.source,
-                                expr_span,
-                                arg_def_loc.span,
-                            );
+                            this.diag_ctx
+                                .emit_runtime_ref_in_comptime(this.loc(expr_span), arg_def_loc);
                             return Err(Poisoned);
                         }
                         LocalState::Runtime(_) => return Ok(None),

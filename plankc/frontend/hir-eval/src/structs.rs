@@ -165,11 +165,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 continue;
             };
             let LocalState::Comptime(value) = state else {
-                self.diag_ctx.emit_runtime_ref_in_comptime(
-                    self.source,
-                    lit_span,
-                    local.loc.use_span(),
-                );
+                self.diag_ctx.emit_runtime_ref_in_comptime(self.loc(lit_span), local.loc.use_loc());
                 validity = Err(Poisoned);
                 continue;
             };
