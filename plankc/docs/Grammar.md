@@ -14,7 +14,7 @@ suffix_import_as = "as" IDENT
 # Expressions
 expr = "comptime"? block | if_expr | expr_no_block
 expr_no_block =
-    IDENT | literal | member
+    IDENT | BUILTIN_IDENT | literal | member
     | fn_call | fn_def | struct_def | struct_lit
     | binary | unary | paren
 binary = expr binary_op expr
@@ -61,5 +61,6 @@ dec_literal = /-?[0-9][0-9_]*/
 
 # Helpers
 comma_separated{p} = (p ("," p)* ","?)
+BUILTIN_IDENT = /@[a-zA-Z_][a-zA-Z0-9_]*/
 line_comment = /\/\/[^\n]*/
 ```

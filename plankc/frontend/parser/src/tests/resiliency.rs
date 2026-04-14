@@ -8,24 +8,40 @@ use crate::tests::assert_parser_errors;
 fn test_lexer_error_invalid_char() {
     assert_parser_errors(
         r#"
-            run { @; }
+            run { #; }
         "#,
         &[
             r#"
             error: invalid character
              --> test.plk:1:7
               |
-            1 | run { @; }
-              |       ^ '@' is not part of any valid syntax construct
+            1 | run { #; }
+              |       ^ '#' is not part of any valid syntax construct
             "#,
             r#"
             error: unexpected `;`
              --> test.plk:1:8
               |
-            1 | run { @; }
+            1 | run { #; }
               |        ^ unexpected `;`, expected `}`
             "#,
         ],
+    );
+}
+
+#[test]
+fn test_lexer_error_at_followed_by_number() {
+    assert_parser_errors(
+        r#"
+            run { @123; }
+        "#,
+        &[r#"
+            error: invalid builtin name
+             --> test.plk:1:7
+              |
+            1 | run { @123; }
+              |       ^ expected identifier after `@`
+            "#],
     );
 }
 

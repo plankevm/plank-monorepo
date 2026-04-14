@@ -142,6 +142,27 @@ fn test_ident_simple() {
 }
 
 #[test]
+fn test_ident_builtin_at_prefix() {
+    assert_parses_to_cst_no_errors_dedented(
+        "const x = @foo;",
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                Identifier
+                    "@foo"
+                ";"
+        "#,
+    );
+}
+
+#[test]
 fn test_member_access_single() {
     assert_parses_to_cst_no_errors_dedented(
         "const x = a.b;",

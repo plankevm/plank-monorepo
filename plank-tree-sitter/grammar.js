@@ -160,7 +160,7 @@ module.exports = grammar({
     // Helpers
     block_comment: ($) => seq('/*', $._block_comment_content, '*/'),
     line_comment: (_) => /\/\/[^\n]*/,
-    identifier: (_) => /[a-zA-Z_][a-zA-Z0-9_]*/,
+    identifier: (_) => /@?[a-zA-Z_][a-zA-Z0-9_]*/,
   },
 });
 

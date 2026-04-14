@@ -33,6 +33,11 @@ impl<'a> Parser<'a> {
             .help("decimal literals may only contain digits 0-9 and '_'")
             .help("hex literals must begin with '0x' and may only contain 0-9, A-F, a-f and '_'")
             .help("binary literals must begin with '0b' and may only contain 0, 1 and '_'"),
+            ErrorToken::AtWithoutIdent => Diagnostic::error("invalid builtin name").primary(
+                self.source_id,
+                span,
+                "expected identifier after `@`",
+            ),
             ErrorToken::UnclosedBlockComment => {
                 let mut diag = Diagnostic::error("unclosed block comment").primary(
                     self.source_id,

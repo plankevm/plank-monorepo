@@ -190,7 +190,7 @@ pub enum Token {
     #[token("as")]
     As,
 
-    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex("@?[a-zA-Z_][a-zA-Z0-9_]*")]
     Identifier,
 
     #[regex("[0-9]", lex_number_literal::<10>)]
@@ -208,6 +208,9 @@ pub enum Token {
     #[token(r"/*", lex_block_comment)]
     BlockComment,
 
+    #[token("@")]
+    AtWithoutIdentError,
+
     #[default]
     InvalidCharError,
     MalformedIdentError,
@@ -221,6 +224,7 @@ pub enum ErrorToken {
     InvalidChar,
     MalformedIdent,
     UnclosedBlockComment,
+    AtWithoutIdent,
 }
 
 impl std::fmt::Display for Token {
@@ -240,6 +244,7 @@ impl Token {
             Token::InvalidCharError => Some(ErrorToken::InvalidChar),
             Token::MalformedIdentError => Some(ErrorToken::MalformedIdent),
             Token::UnclosedBlockCommentError => Some(ErrorToken::UnclosedBlockComment),
+            Token::AtWithoutIdentError => Some(ErrorToken::AtWithoutIdent),
             _ => None,
         }
     }
@@ -315,6 +320,7 @@ impl Token {
             | Token::InvalidCharError
             | Token::MalformedIdentError
             | Token::UnclosedBlockCommentError
+            | Token::AtWithoutIdentError
             | Token::Eof => return None,
         };
         Some(s)
@@ -390,6 +396,7 @@ impl Token {
             Token::InvalidCharError => "invalid character",
             Token::MalformedIdentError => "malformed literal",
             Token::UnclosedBlockCommentError => "unclosed block comment",
+            Token::AtWithoutIdentError => "invalid builtin name",
             Token::Eof => "EOF",
         }
     }
@@ -754,26 +761,19 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_char_at() {
+    fn test_at_without_ident() {
         let results = lex_all("@");
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0], (Token::InvalidCharError, 0..1, "@"));
-    }
-
-    #[test]
-    fn test_invalid_char_hash() {
-        let results = lex_all("#");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0], (Token::InvalidCharError, 0..1, "#"));
+        assert_eq!(results[0], (Token::AtWithoutIdentError, 0..1, "@"));
     }
 
     #[test]
     fn test_invalid_char_in_context() {
-        let results = lex_all("foo @ bar");
+        let results = lex_all("foo # bar");
         assert_eq!(results.len(), 5);
         assert_eq!(results[0], (Token::Identifier, 0..3, "foo"));
         assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
-        assert_eq!(results[2], (Token::InvalidCharError, 4..5, "@"));
+        assert_eq!(results[2], (Token::InvalidCharError, 4..5, "#"));
         assert_eq!(results[3], (Token::Whitespace, 5..6, " "));
         assert_eq!(results[4], (Token::Identifier, 6..9, "bar"));
     }
