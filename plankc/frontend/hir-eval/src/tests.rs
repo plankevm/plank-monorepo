@@ -2273,3 +2273,22 @@ fn test_const_with_type_error_does_not_panic() {
         "#],
     );
 }
+
+#[test]
+fn test_const_with_poisoned_control_flow() {
+    assert_diagnostics(
+        r#"
+        const x = {
+            if 34 { 1 } else { 2 }
+        };
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:8
+          |
+        2 |     if 34 { 1 } else { 2 }
+          |        ^^ expected `bool`, got `u256`
+        "#],
+    );
+}
