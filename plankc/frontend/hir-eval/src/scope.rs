@@ -1,6 +1,6 @@
 use crate::{Evaluator, diagnostics::DiagCtx, evaluator::CallArgSpansIdx};
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, InstructionKind};
+use plank_hir::{self as hir, ExprKind, InstructionKind, operators as hir_ops};
 use plank_mir as mir;
 use plank_session::{EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{TypeId, Value, ValueId};
@@ -555,8 +555,32 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
-            ExprKind::UnaryOpCall { .. } | ExprKind::BinaryOpCall { .. } => {
-                self.diag_ctx.emit_not_yet_implemented("operators", self.loc(expr.span));
+            ExprKind::BinaryOpCall { op: hir_ops::BinaryOp::Equals, lhs, rhs } => {
+                // TODO: Implement proper operator
+                let lhs = self.bindings[lhs].state.and_then(|lhs| {
+                    let LocalState::Comptime(value) = lhs else { return Err(Poisoned) };
+                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
+                    Ok(ty)
+                });
+                let rhs = self.bindings[rhs].state.and_then(|rhs| {
+                    let LocalState::Comptime(value) = rhs else { return Err(Poisoned) };
+                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
+                    Ok(ty)
+                });
+                let result = poison::zip(lhs, rhs)
+                    .map(|(lhs, rhs)| EvalValue::Comptime((lhs == rhs).into()));
+                if result.is_err() {
+                    self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
+                }
+                result
+            }
+            ExprKind::BinaryOpCall { op, .. } => {
+                println!("op: {:?}", op);
+                self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
+                Err(Poisoned)
+            }
+            ExprKind::UnaryOpCall { .. } => {
+                self.diag_ctx.emit_not_yet_implemented("unary operators", self.loc(expr.span));
                 Err(Poisoned)
             }
             ExprKind::StructLit { ty, fields } => self.eval_struct_lit(ty, fields, expr.span),

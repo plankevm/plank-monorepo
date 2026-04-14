@@ -521,3 +521,75 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
         "#,
     );
 }
+
+#[test]
+fn test_basic_polymorphic_function() {
+    assert_lowers_to(
+        r#"
+        const max = fn (comptime T: type, a: T, b: T) T {
+            if T == u256 {
+                return if gt(a, b) { a } else { b };
+            }
+            if T == bool {
+                return a or b;
+            }
+            let _error: void = true;
+        };
+
+        init {
+            let x = calldataload(0x00);
+            let y = calldataload(0x20);
+            let mut max_xy = max(u256, x, y);
+
+            let a = false;
+            let b = false;
+            let mut max_ab = max(bool, a, b);
+
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            %3 : u256 = %1
+            %4 : bool = gt(%2, %3)
+            if %4 {
+                %5 : u256 = %0
+            } else {
+                %5 : u256 = %1
+            }
+            %6 : u256 = %5
+            ret %6
+        }
+
+        @fn1(%0: bool, %1: bool) -> bool {
+            %2 : void = void_unit
+            %3 : void = %2
+            %4 : bool = %0
+            if %4 {
+                %5 : bool = true
+            } else {
+                %5 : bool = %1
+            }
+            %6 : bool = %5
+            ret %6
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : u256 = 0
+            %1 : u256 = calldataload(%0)
+            %2 : u256 = 32
+            %3 : u256 = calldataload(%2)
+            %4 : u256 = %1
+            %5 : u256 = %3
+            %6 : u256 = call @fn0(%4, %5)
+            %7 : bool = false
+            %8 : bool = false
+            %9 : bool = call @fn1(%7, %8)
+            %10 : never = evm_stop()
+        }
+        "#,
+    );
+}
