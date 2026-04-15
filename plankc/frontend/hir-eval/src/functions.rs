@@ -2,12 +2,11 @@ use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
+use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value};
 
 use crate::{
-    diagnostics::DiagCtx,
-    evaluator::{Evaluator, State},
+    evaluator::State,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -101,31 +100,28 @@ struct PreambleResult {
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
-    #[allow(clippy::too_many_arguments)]
-    fn create_fn_scope(
-        eval: &'a mut Evaluator<'ctx>,
-        diag_ctx: &'a mut DiagCtx<'ctx>,
-        parent_bindings: &DenseIndexMap<hir::LocalId, Local>,
-        parent_mir_types: &IndexVec<mir::LocalId, TypeId>,
-        parent_source: SourceId,
+    fn create_fn_scope<'s>(
+        &'s mut self,
         fn_def_id: hir::FnDefId,
         args_id: hir::CallArgsId,
         capture_buf_offset: usize,
-        is_comptime: bool,
-    ) -> Scope<'a, 'ctx> {
-        let fn_def = eval.hir.fns[fn_def_id];
-        let params = &eval.hir.fn_params[fn_def_id];
-        let args = &eval.hir.call_args[args_id];
+    ) -> (Scope<'s, 'ctx>, &'s DenseIndexMap<hir::LocalId, Local>) {
+        let fn_def = self.eval.hir.fns[fn_def_id];
+        let params = &self.eval.hir.fn_params[fn_def_id];
+        let args = &self.eval.hir.call_args[args_id];
+        let is_comptime = self.is_comptime();
+        let parent_bindings = &mut self.bindings;
+        let parent_mir_types = &mut self.mir_types;
 
         let arg_spans =
-            eval.call_arg_spans.push_iter(args.iter().map(|&arg| parent_bindings[arg].span));
+            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| parent_bindings[arg].span));
 
         let mut fn_scope = Scope::new(
-            eval,
-            diag_ctx,
+            self.eval,
+            self.diag_ctx,
             fn_def.source,
             false,
-            EvalContext::FunctionPreamble { call_scope_source: parent_source, arg_spans },
+            EvalContext::FunctionPreamble { call_scope_source: self.source, arg_spans },
         );
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
@@ -143,15 +139,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     };
                     Ok(LocalState::Comptime(value))
                 } else if is_comptime {
+                    // In comptime context, runtime non-comptime params are caught and
+                    // diagnosed by the validation loop in eval_call_inner (which has
+                    // access to call_span for a better diagnostic). Just poison here.
                     match state {
-                        LocalState::Runtime(_) => {
-                            fn_scope.diag_ctx.emit_runtime_ref_in_comptime(
-                                parent_source,
-                                binding.span,
-                                binding.span,
-                            );
-                            Err(Poisoned)
-                        }
+                        LocalState::Runtime(_) => Err(Poisoned),
                         LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
                     }
                 } else {
@@ -166,7 +158,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
         }
 
-        fn_scope
+        (fn_scope, parent_bindings)
     }
 
     fn eval_preamble(&mut self, fn_def_id: hir::FnDefId) -> MaybePoisoned<PreambleResult> {
@@ -310,20 +302,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let is_parent_comptime = self.is_comptime();
         let parent_source = self.source;
-        let parent_bindings = &self.bindings;
-
-        let mut fn_scope = Scope::create_fn_scope(
-            self.eval,
-            self.diag_ctx,
-            parent_bindings,
-            &self.mir_types,
-            parent_source,
-            fn_def_id,
-            args_id,
-            capture_buf_offset,
-            is_parent_comptime,
-        );
-        let parent_mir_types = &mut self.mir_types;
+        let (mut fn_scope, parent_bindings) =
+            self.create_fn_scope(fn_def_id, args_id, capture_buf_offset);
 
         let preamble = fn_scope.eval_preamble(fn_def_id)?;
 
@@ -410,19 +390,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         };
 
-        let (mir_args, validity) = fn_scope.eval.mir_args.push_with_res(|mut pusher| {
+        let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
             for (&param, &arg) in params.iter().zip(args) {
-                let state = parent_bindings[arg].state?;
+                let state = self.bindings[arg].state?;
                 let local = match state {
                     LocalState::Runtime(local) => local,
                     LocalState::Comptime(value) => {
                         if param.is_comptime {
                             continue;
                         }
-                        let ty = fn_scope.eval.values.type_of_value(value);
-                        let target = parent_mir_types.push(ty);
-                        fn_scope
-                            .eval
+                        let ty = self.eval.values.type_of_value(value);
+                        let target = self.mir_types.push(ty);
+                        self.eval
                             .instr_stack_buf
                             .push(mir::Instruction::Set { target, expr: mir::Expr::Const(value) });
                         target
@@ -437,10 +416,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         let expr = mir::Expr::Call { callee: lowered, args: mir_args };
-        let result_type = fn_scope.eval.mir_fns[lowered].return_type;
+        let result_type = self.eval.mir_fns[lowered].return_type;
         if result_type == TypeId::NEVER {
-            let target = parent_mir_types.push(result_type);
-            fn_scope.eval.instr_stack_buf.push(mir::Instruction::Set { target, expr });
+            let target = self.mir_types.push(result_type);
+            self.eval.instr_stack_buf.push(mir::Instruction::Set { target, expr });
             return Ok(Err(Diverge::BlockEnd(None)));
         }
 
