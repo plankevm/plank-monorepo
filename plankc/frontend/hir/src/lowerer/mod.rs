@@ -9,7 +9,7 @@ use plank_parser::{
 };
 use plank_session::{
     ComptimeBuiltin, Poisoned, PolymorphicBuiltin, RuntimeBuiltin, Session, SourceId, SourceSpan,
-    StrId, TypeId,
+    StrId, TypeId, builtins::is_builtin,
 };
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::ValueInterner;
@@ -182,7 +182,7 @@ impl BlockLowerer<'_> {
     fn alloc_local(&mut self, name: StrId, mutable: bool, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
-        } else if RuntimeBuiltin::from_str_id(name).is_some() {
+        } else if is_builtin(name) {
             self.error_shadowing_builtin(name, span);
         }
 
@@ -322,7 +322,7 @@ impl BlockLowerer<'_> {
             return ExprKind::Value(Ok(self.values.intern_type(ty)));
         }
 
-        if RuntimeBuiltin::from_str_id(name).is_some() {
+        if is_builtin(name) {
             self.error_non_call_reference_to_builtin(name, span);
             return ExprKind::POISON;
         }

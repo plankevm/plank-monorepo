@@ -2472,6 +2472,27 @@ fn test_comptime_get_field_out_of_bounds() {
 }
 
 #[test]
+fn test_get_field_instance_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        init {
+            let x: u256 = @evm_calldataload(0);
+            let val = @get_field(Pair, 0, x);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:4:15
+          |
+        4 |     let val = @get_field(Pair, 0, x);
+          |               ^^^^^^^^^^^^^^^^^^^^^^ expected `Pair`, got `u256`
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_set_field() {
     assert_lowers_to(
         r#"

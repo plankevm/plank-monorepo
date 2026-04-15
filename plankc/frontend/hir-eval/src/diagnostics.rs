@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use plank_hir as hir;
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
@@ -471,7 +469,7 @@ impl DiagCtx<'_> {
     pub fn emit_expected_struct_type_arg(
         &mut self,
         types: &TypeInterner,
-        builtin: impl Display,
+        builtin: impl Builtin,
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
@@ -490,7 +488,7 @@ impl DiagCtx<'_> {
     pub fn emit_expected_type_arg(
         &mut self,
         types: &TypeInterner,
-        builtin: impl Display,
+        builtin: impl Builtin,
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {

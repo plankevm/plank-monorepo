@@ -149,7 +149,7 @@ impl Scope<'_, '_> {
                     LocalState::Comptime(vid) => {
                         assert!(
                             !this.is_comptime_only(vid),
-                            "evm builtin typechecks for comptime only value"
+                            "runtime builtin typechecks for comptime only value"
                         );
                         let target = this.mir_types.push(this.values.type_of_value(vid));
                         this.emit(plank_mir::Instruction::Set {
@@ -186,20 +186,8 @@ impl Scope<'_, '_> {
         let expr_loc = self.loc(expr_span);
 
         if builtin.arg_count() != args.len() {
-            self.with_types_buf(|this, types_buf_offset| {
-                for &arg in args {
-                    let ty = this.state_type(this.bindings[arg].state?);
-                    this.eval.types_buf.push(ty);
-                }
-                let arg_types = &this.eval.types_buf[types_buf_offset..];
-                this.diag_ctx.emit_no_matching_builtin_signature(
-                    &this.eval.types,
-                    builtin,
-                    arg_types,
-                    expr_loc,
-                );
-                Err(Poisoned)
-            })?;
+            self.diag_ctx.emit_wrong_arg_count(&self.eval.types, builtin, args.len(), expr_loc);
+            return Err(Poisoned);
         }
 
         match builtin {
@@ -211,7 +199,7 @@ impl Scope<'_, '_> {
             ComptimeBuiltin::FieldCount => {
                 let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
                 self.validate_struct_type(ty, builtin, expr_span)?;
-                let count = U256::from(self.struct_field_count(ty));
+                let count = U256::from(self.struct_info(ty).fields.len());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
         }
@@ -226,31 +214,14 @@ impl Scope<'_, '_> {
         span: SourceSpan,
     ) -> MaybePoisoned<TypeId> {
         let state = self.bindings[arg_local].state?;
-        match state {
-            LocalState::Comptime(vid) => match self.values.lookup(vid) {
-                Value::Type(ty) => Ok(ty),
-                _ => {
-                    let actual_ty = self.state_type(state);
-                    self.diag_ctx.emit_expected_type_arg(
-                        &self.eval.types,
-                        builtin,
-                        actual_ty,
-                        self.loc(span),
-                    );
-                    Err(Poisoned)
-                }
-            },
-            LocalState::Runtime(_) => {
-                let actual_ty = self.state_type(state);
-                self.diag_ctx.emit_expected_type_arg(
-                    &self.eval.types,
-                    builtin,
-                    actual_ty,
-                    self.loc(span),
-                );
-                Err(Poisoned)
-            }
+        if let LocalState::Comptime(vid) = state
+            && let Value::Type(ty) = self.values.lookup(vid)
+        {
+            return Ok(ty);
         }
+        let actual_ty = self.state_type(state);
+        self.diag_ctx.emit_expected_type_arg(&self.eval.types, builtin, actual_ty, self.loc(span));
+        Err(Poisoned)
     }
 
     pub(crate) fn eval_polymorphic_builtin(
@@ -284,7 +255,7 @@ impl Scope<'_, '_> {
         let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
         let index = self.expect_comptime_field_index(args[1], builtin, expr_span)?;
         self.validate_struct_type(ty, builtin, expr_span)?;
-        let field_count = self.struct_field_count(ty);
+        let field_count = self.struct_info(ty).fields.len();
         if index >= field_count {
             self.diag_ctx.emit_field_index_out_of_bounds(
                 builtin,
@@ -304,7 +275,7 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (ty, index) = self.validate_struct_field_index(args, builtin, expr_span)?;
-        let (_name, field_ty) = self.struct_field(ty, index);
+        let (_name, field_ty) = self.struct_info(ty).fields[index];
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
 
@@ -315,9 +286,19 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (ty, index) = self.validate_struct_field_index(args, builtin, expr_span)?;
-        let (_name, field_type) = self.struct_field(ty, index);
+        let (_name, field_type) = self.struct_info(ty).fields[index];
         let field_index = index as u32;
         let instance_state = self.bindings[args[2]].state?;
+        let instance_type = self.state_type(instance_state);
+        if instance_type != ty {
+            self.diag_ctx.emit_type_mismatch_simple(
+                &self.eval.types,
+                ty,
+                instance_type,
+                self.loc(expr_span),
+            );
+            return Err(Poisoned);
+        }
 
         match instance_state {
             LocalState::Comptime(vid) => {
@@ -340,8 +321,8 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (ty, index) = self.validate_struct_field_index(args, builtin, expr_span)?;
-        let field_count = self.struct_field_count(ty);
-        let (_name, expected_field_type) = self.struct_field(ty, index);
+        let field_count = self.struct_info(ty).fields.len();
+        let (_name, expected_field_type) = self.struct_info(ty).fields[index];
 
         let new_value_state = self.bindings[args[3]].state?;
         let new_value_type = self.state_type(new_value_state);
@@ -356,6 +337,16 @@ impl Scope<'_, '_> {
         }
 
         let instance_state = self.bindings[args[2]].state?;
+        let instance_type = self.state_type(instance_state);
+        if instance_type != ty {
+            self.diag_ctx.emit_type_mismatch_simple(
+                &self.eval.types,
+                ty,
+                instance_type,
+                self.loc(expr_span),
+            );
+            return Err(Poisoned);
+        }
 
         // Both comptime: pure comptime fold.
         if let (LocalState::Comptime(instance_vid), LocalState::Comptime(new_value_vid)) =
@@ -386,31 +377,36 @@ impl Scope<'_, '_> {
             }
         };
 
-        let locals_buf_offset = self.eval.locals_buf.len();
-        for i in 0..field_count {
-            if i == index {
-                let local = match new_value_state {
-                    LocalState::Comptime(vid) => {
-                        let target = self.mir_types.push(expected_field_type);
-                        self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
-                        target
-                    }
-                    LocalState::Runtime(local) => local,
-                };
-                self.eval.locals_buf.push(local);
-            } else {
-                let (_fname, ftype) = self.struct_field(ty, i);
-                let target = self.mir_types.push(ftype);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::FieldAccess { object: instance_local, field_index: i as u32 },
-                });
-                self.eval.locals_buf.push(target);
+        let mir_fields = self.with_locals_buf(|this, locals_buf_offset| {
+            for i in 0..field_count {
+                if i == index {
+                    let local = match new_value_state {
+                        LocalState::Comptime(vid) => {
+                            let target = this.mir_types.push(expected_field_type);
+                            this.emit(mir::Instruction::Set {
+                                target,
+                                expr: mir::Expr::Const(vid),
+                            });
+                            target
+                        }
+                        LocalState::Runtime(local) => local,
+                    };
+                    this.locals_buf.push(local);
+                } else {
+                    let (_fname, ftype) = this.struct_info(ty).fields[i];
+                    let target = this.mir_types.push(ftype);
+                    this.emit(mir::Instruction::Set {
+                        target,
+                        expr: mir::Expr::FieldAccess {
+                            object: instance_local,
+                            field_index: i as u32,
+                        },
+                    });
+                    this.locals_buf.push(target);
+                }
             }
-        }
-        let field_locals = &self.eval.locals_buf[locals_buf_offset..];
-        let mir_fields = self.eval.mir_args.push_copy_slice(field_locals);
-        self.eval.locals_buf.truncate(locals_buf_offset);
+            this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
+        });
 
         Ok(Ok(EvalValue::Runtime {
             expr: mir::Expr::StructLit { ty, fields: mir_fields },
@@ -426,25 +422,15 @@ impl Scope<'_, '_> {
         span: SourceSpan,
     ) -> MaybePoisoned<usize> {
         let state = self.bindings[arg_local].state?;
-        match state {
-            LocalState::Comptime(vid) => match self.values.lookup(vid) {
-                // On overflow, return usize::MAX — the bounds check in
-                // validate_struct_field_index will catch it.
-                Value::BigNum(n) => Ok(usize::try_from(n).unwrap_or(usize::MAX)),
-                _ => {
-                    self.diag_ctx.emit_expected_comptime_arg(
-                        builtin,
-                        "field index",
-                        self.loc(span),
-                    );
-                    Err(Poisoned)
-                }
-            },
-            LocalState::Runtime(_) => {
-                self.diag_ctx.emit_expected_comptime_arg(builtin, "field index", self.loc(span));
-                Err(Poisoned)
-            }
+        if let LocalState::Comptime(vid) = state
+            && let Value::BigNum(n) = self.values.lookup(vid)
+        {
+            // On overflow, return usize::MAX — the bounds check in
+            // validate_struct_field_index will catch it.
+            return Ok(usize::try_from(n).unwrap_or(usize::MAX));
         }
+        self.diag_ctx.emit_expected_comptime_arg(builtin, "field index", self.loc(span));
+        Err(Poisoned)
     }
 
     /// Validates that a `TypeId` refers to a struct type.
@@ -467,17 +453,10 @@ impl Scope<'_, '_> {
         }
     }
 
-    fn struct_field_count(&self, ty: TypeId) -> usize {
+    fn struct_info(&self, ty: TypeId) -> plank_values::StructInfo<'_> {
         let Type::Struct(info) = self.eval.types.lookup(ty) else {
             unreachable!("invariant: already validated as struct")
         };
-        info.fields.len()
-    }
-
-    fn struct_field(&self, ty: TypeId, index: usize) -> (plank_session::StrId, TypeId) {
-        let Type::Struct(info) = self.eval.types.lookup(ty) else {
-            unreachable!("invariant: already validated as struct")
-        };
-        info.fields[index]
+        info
     }
 }

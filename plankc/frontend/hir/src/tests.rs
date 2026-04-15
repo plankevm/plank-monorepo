@@ -939,3 +939,81 @@ fn test_lone_slash_not_supported() {
     );
     pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
 }
+
+#[test]
+fn test_shadow_comptime_builtin() {
+    let rendered = render_diagnostics("init { let @is_struct = 1; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: shadowing built-in function
+         --> main.plk:1:12
+          |
+        1 | init { let @is_struct = 1; }
+          |            ^^^^^^^^^^ '@is_struct' is a built-in function
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_shadow_polymorphic_builtin() {
+    let rendered = render_diagnostics("init { let @field_type = 1; }");
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: shadowing built-in function
+         --> main.plk:1:12
+          |
+        1 | init { let @field_type = 1; }
+          |            ^^^^^^^^^^^ '@field_type' is a built-in function
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_non_call_reference_to_comptime_builtin() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let mut x = 0;
+            x = @is_struct;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: referencing built-in function as a value
+         --> main.plk:3:9
+          |
+        3 |     x = @is_struct;
+          |         ^^^^^^^^^^ '@is_struct' is a built-in function
+          |
+          = help: built-in functions must be called directly, wrap in a function if you wish to use it as a first-class value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_non_call_reference_to_polymorphic_builtin() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let mut x = 0;
+            x = @get_field;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: referencing built-in function as a value
+         --> main.plk:3:9
+          |
+        3 |     x = @get_field;
+          |         ^^^^^^^^^^ '@get_field' is a built-in function
+          |
+          = help: built-in functions must be called directly, wrap in a function if you wish to use it as a first-class value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}

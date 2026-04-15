@@ -92,18 +92,28 @@ macro_rules! define_builtins {
         }
 
         #[doc(hidden)]
+        #[allow(dead_code)]
         #[repr(u32)]
         enum BuiltinStrIdx {
             $($pt_type,)*
             $($b_variant,)*
             $($cb_variant,)*
             $($pb_variant,)*
+            _Count,
         }
 
         $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
         $(pub const $b_const: StrId = StrId::new(BuiltinStrIdx::$b_variant as u32);)*
         $(pub const $cb_const: StrId = StrId::new(BuiltinStrIdx::$cb_variant as u32);)*
         $(pub const $pb_const: StrId = StrId::new(BuiltinStrIdx::$pb_variant as u32);)*
+
+        /// Returns `true` if the given `StrId` refers to any builtin function
+        /// (runtime, comptime, or polymorphic). Automatically covers new
+        /// categories added to `define_builtins!`.
+        pub fn is_builtin(id: StrId) -> bool {
+            let idx = id.const_get();
+            idx >= [$($pt_const,)*].len() as u32 && idx < BuiltinStrIdx::_Count as u32
+        }
 
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
@@ -229,6 +239,9 @@ macro_rules! define_builtins {
                 }
             }
 
+            /// Polymorphic builtins resolve return types through comptime
+            /// evaluation, not signature matching — `resolve_result_type`
+            /// intentionally always returns `None`.
             fn signatures(self) -> &'static [BuiltinSignature] {
                 &[]
             }
