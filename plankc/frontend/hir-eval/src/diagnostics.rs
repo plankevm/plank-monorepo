@@ -434,6 +434,25 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
+    pub fn emit_comptime_only_return_with_runtime_arg(
+        &mut self,
+        arg_loc: SrcLoc,
+        call_loc: SrcLoc,
+    ) {
+        Diagnostic::error("runtime argument to function with comptime-only return type")
+            .cross_source_annotations(
+                arg_loc,
+                "runtime argument here",
+                call_loc,
+                "function called here",
+            )
+            .note(
+                "functions with comptime-only return types require all arguments \
+                 to be known at compile time",
+            )
+            .emit(self.session);
+    }
+
     pub fn emit_comptime_param_got_runtime(&mut self, arg_def_loc: SrcLoc, param_def_loc: SrcLoc) {
         Diagnostic::error("attempted to pass runtime value as comptime parameter")
             .cross_source_annotations(

@@ -1,5 +1,7 @@
+pub mod append_only_interner;
 mod bignum_interner;
 mod type_interner;
+mod types;
 mod value_interner;
 
 pub use alloy_primitives::{U256, uint};

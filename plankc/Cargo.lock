@@ -2003,6 +2003,7 @@ dependencies = [
 name = "plank-values"
 version = "0.1.0"
 dependencies = [
+ "allocator-api2",
  "alloy-primitives",
  "hashbrown 0.16.1",
  "plank-core",

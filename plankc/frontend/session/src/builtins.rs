@@ -1,4 +1,4 @@
-use crate::{Session, StrId, types::TypeId};
+use crate::{Session, StrId};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltinSignature {
@@ -98,23 +98,6 @@ macro_rules! define_builtins {
                     $(EvmBuiltin::$b_variant => builtin_names::$b_const,)*
                 };
                 f.write_str(name)
-            }
-        }
-
-        impl TypeId {
-            pub fn resolve_primitive(name: StrId) -> Option<TypeId> {
-                Some(match name {
-                    $($pt_const => TypeId::$pt_const,)*
-                    _ => return None,
-                })
-            }
-
-            pub fn primitive_name(self) -> Option<&'static str> {
-                match self {
-                    $(Self::$pt_const => Some($pt_str),)*
-                    _ => None
-                }
-
             }
         }
     };
