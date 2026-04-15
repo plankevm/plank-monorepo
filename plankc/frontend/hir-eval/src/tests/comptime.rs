@@ -628,3 +628,30 @@ fn test_comptime_param_not_eager() {
         "#],
     );
 }
+
+#[test]
+fn test_comptime_call_comptime_param_runtime() {
+    assert_diagnostics(
+        r#"
+        const my_add = fn (comptime N: u256, x: u256) u256 {
+            add(N, x)
+        };
+
+        init {
+            let mut x = 3;
+            let mut y = comptime {
+                my_add(x, 4)
+            };
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: attempting to evaluate runtime expression in comptime context
+         --> main.plk:7:16
+          |
+        7 |         my_add(x, 4)
+          |                ^ runtime expression
+        "#],
+    );
+}

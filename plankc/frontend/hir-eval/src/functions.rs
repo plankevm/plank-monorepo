@@ -32,6 +32,10 @@ pub(crate) struct LoweredFunctionsCache {
     hasher: DefaultHashBuilder,
 }
 
+/// Empty marker to track the invariant that arg/param comptimeness matching was already checked.
+#[derive(Clone, Copy)]
+struct ArgParamComptimenessMatch;
+
 impl LoweredFunctionsCache {
     pub fn new() -> Self {
         Self {
@@ -55,7 +59,7 @@ impl LoweredFunctionsCache {
         lowered
     }
 
-    fn try_start_lower<'a>(
+    fn retrieve_or_create_entry<'a>(
         &mut self,
         func: UniqueFunction<'a>,
     ) -> Result<State<MaybePoisoned<mir::FnId>>, LoweredFnIdx> {
@@ -105,6 +109,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         fn_def_id: hir::FnDefId,
         args_id: hir::CallArgsId,
         capture_buf_offset: usize,
+        validated: ArgParamComptimenessMatch,
     ) -> (Scope<'s, 'ctx>, &'s DenseIndexMap<hir::LocalId, Local>) {
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
@@ -132,8 +137,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         for (&param, &arg) in params.iter().zip(args) {
             let binding = parent_bindings[arg];
+            println!("param: {:?}", param);
+            println!("  state: {:?}", binding.state);
             let state = binding.state.and_then(|state| {
                 if param.is_comptime {
+                    println!("  [comptime param] state: {:?}", state);
+                    let ArgParamComptimenessMatch = validated;
                     let LocalState::Comptime(value) = state else {
                         unreachable!("invariant: comptime param validated before this point");
                     };
@@ -247,6 +256,35 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
+    fn validate_args_param_comptimeness_match(
+        &mut self,
+        func: hir::FnDef,
+        params: &[hir::ParamInfo],
+        args: &[hir::LocalId],
+    ) -> MaybePoisoned<ArgParamComptimenessMatch> {
+        let mut comptime_args_poisoned = false;
+        for (&param, &arg) in params.iter().zip(args) {
+            if !param.is_comptime {
+                continue;
+            }
+            let Ok((arg_state, arg_span)) = self.bindings[arg].poisoned() else {
+                comptime_args_poisoned = true;
+                continue;
+            };
+            let arg_value = match arg_state {
+                LocalState::Comptime(value) => value,
+                LocalState::Runtime(_) => {
+                    self.diag_ctx
+                        .emit_comptime_param_got_runtime(self.loc(arg_span), func.loc(param.span));
+                    comptime_args_poisoned = true;
+                    continue;
+                }
+            };
+            self.values_buf.push(arg_value);
+        }
+        if comptime_args_poisoned { Err(Poisoned) } else { Ok(ArgParamComptimenessMatch) }
+    }
+
     pub(crate) fn eval_call_inner(
         &mut self,
         closure: ValueId,
@@ -270,40 +308,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
-        if !self.is_comptime() {
-            // We can skip validating individual parameter comptimeness if caller context is
-            // comptime as we'll force all values to be comptime anyway.
-            let mut comptime_args_poisoned = false;
-            for (&param, &arg) in params.iter().zip(args) {
-                if !param.is_comptime {
-                    continue;
-                }
-                let Ok((arg_state, arg_span)) = self.bindings[arg].poisoned() else {
-                    comptime_args_poisoned = true;
-                    continue;
-                };
-                let arg_value = match arg_state {
-                    LocalState::Comptime(value) => value,
-                    LocalState::Runtime(_) => {
-                        self.diag_ctx.emit_comptime_param_got_runtime(
-                            self.loc(arg_span),
-                            func.loc(param.span),
-                        );
-                        comptime_args_poisoned = true;
-                        continue;
-                    }
-                };
-                self.values_buf.push(arg_value);
-            }
-            if comptime_args_poisoned {
-                return Err(Poisoned);
-            }
-        }
+        let validated = self.validate_args_param_comptimeness_match(func, params, args)?;
 
         let is_parent_comptime = self.is_comptime();
         let parent_source = self.source;
         let (mut fn_scope, parent_bindings) =
-            self.create_fn_scope(fn_def_id, args_id, capture_buf_offset);
+            self.create_fn_scope(fn_def_id, args_id, capture_buf_offset, validated);
 
         let preamble = fn_scope.eval_preamble(fn_def_id)?;
 
@@ -313,6 +323,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let mut poisoned = false;
             for (&param, &arg) in params.iter().zip(args) {
                 if param.is_comptime {
+                    let ArgParamComptimenessMatch = validated;
                     continue;
                 }
                 let Ok((state, span)) = parent_bindings[arg].poisoned() else {
@@ -335,22 +346,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         }
                         poisoned = true;
                     }
-                    LocalState::Comptime(value) => {
-                        // Rebind Runtime → Comptime only when create_fn_scope materialized them as
-                        // Runtime (i.e. runtime context with comptime-only return). In the
-                        // comptime-parent path the binding is already Comptime and may have been
-                        // poisoned by eval_param — overwriting would suppress the type error.
-                        if !is_parent_comptime {
-                            fn_scope.bindings[param.value].state = Ok(LocalState::Comptime(value));
-                        }
+                    LocalState::Comptime(value) if !is_parent_comptime => {
+                        // We optimistically "materialized" all bindings in `create_fn_scope`, so
+                        // now we have to undo that for the comptime ones.
+                        fn_scope.bindings[param.value].state = Ok(LocalState::Comptime(value));
                     }
+                    LocalState::Comptime(_) => { /* already bound in `create_fn_scope` */ }
                 }
             }
             if poisoned {
                 return Err(Poisoned);
             }
 
-            fn_scope.comptime = true;
             return match fn_scope.eval_comptime(func.body) {
                 Ok(()) => unreachable!("lowerer should guarantee return in function body"),
                 Err(Diverge::PoisonedControlFlow | Diverge::BlockEnd(None)) => Err(Poisoned),
@@ -359,19 +366,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         // --- Runtime path ---
-        // Non-comptime params are already bound as Runtime by create_fn_scope.
+        // Non-comptime params are already bound as Runtime in `create_fn_scope`.
 
         let function = UniqueFunction {
             closure,
             comptime_params: &fn_scope.eval.values_buf[values_buf_offset..],
         };
-        let lowered = match fn_scope.eval.lowered_fns_cache.try_start_lower(function) {
+        let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
             Ok(State::Done(lowered)) => lowered?,
             Ok(State::InProgress) => {
                 fn_scope.diag_ctx.emit_runtime_call_with_recursion(fn_scope.loc(call_span));
                 return Err(Poisoned);
             }
-            Err(lowered_id) => {
+            Err(new_entry_id) => {
                 let (body, body_eval_res) = fn_scope.eval_block_to_mir(func.body);
                 match body_eval_res {
                     Ok(()) => unreachable!("lowerer should guarantee return in function body"),
@@ -386,7 +393,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return_type,
                 });
                 assert_eq!(fn_id1, fn_id2);
-                fn_scope.eval.lowered_fns_cache.set_lowered(lowered_id, Ok(fn_id1))?
+                fn_scope.eval.lowered_fns_cache.set_lowered(new_entry_id, Ok(fn_id1))?
             }
         };
 
