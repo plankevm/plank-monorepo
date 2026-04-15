@@ -1,6 +1,8 @@
 use hashbrown::{DefaultHashBuilder, HashSet, HashTable, hash_table::Entry};
 use plank_core::{Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{Session, SrcLoc, StrId, TypeId, builtins::builtin_names};
+use plank_session::{Session, SrcLoc, StrId, builtins::builtin_names};
+
+use crate::TypeId;
 use std::{fmt, hash::BuildHasher};
 
 use crate::ValueId;

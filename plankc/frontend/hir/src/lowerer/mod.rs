@@ -7,9 +7,9 @@ use plank_parser::{
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
-use plank_session::{EvmBuiltin, Poisoned, Session, SourceId, SourceSpan, StrId, TypeId};
+use plank_session::{EvmBuiltin, Poisoned, Session, SourceId, SourceSpan, StrId};
 use plank_source::project::{FileImport, ImportKind};
-use plank_values::ValueInterner;
+use plank_values::{TypeId, ValueInterner};
 
 use crate::operators as hir_ops;
 

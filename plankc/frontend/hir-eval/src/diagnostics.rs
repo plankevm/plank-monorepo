@@ -1,7 +1,7 @@
 use plank_core::Span;
 use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
-use plank_values::TypeInterner;
+use plank_values::{TypeId, TypeInterner, builtins::{builtin_arg_count, builtin_signatures}};
 
 pub(crate) struct DiagCtx<'a> {
     pub session: &'a mut Session,
@@ -278,7 +278,7 @@ impl DiagCtx<'_> {
         use std::fmt::Write;
 
         let mut note = format!("`{builtin}` accepts ");
-        for (i, &sig) in builtin.signatures().iter().enumerate() {
+        for (i, &sig) in builtin_signatures(builtin).iter().enumerate() {
             if i > 0 {
                 note.push_str(", ");
             }
@@ -292,7 +292,7 @@ impl DiagCtx<'_> {
             note.push(')');
         }
 
-        let (title, label) = if builtin.arg_count() == arg_types.len() {
+        let (title, label) = if builtin_arg_count(builtin) == arg_types.len() {
             let mut args_str = String::new();
             for (i, &ty) in arg_types.iter().enumerate() {
                 if i > 0 {
@@ -305,7 +305,7 @@ impl DiagCtx<'_> {
                 format!("`{builtin}` cannot be called with ({args_str})"),
             )
         } else {
-            let expected = builtin.arg_count();
+            let expected = builtin_arg_count(builtin);
             (
                 "wrong number of arguments",
                 format!(

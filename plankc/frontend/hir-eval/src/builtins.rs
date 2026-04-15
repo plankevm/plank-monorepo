@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{EvmBuiltin, MaybePoisoned, SourceSpan};
-use plank_values::{TypeId, Value, ValueId, ValueInterner};
+use plank_values::{TypeId, Value, ValueId, ValueInterner, builtins::resolve_result_type};
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};
 use plank_session::Poisoned;
@@ -89,7 +89,7 @@ impl Scope<'_, '_> {
             }
             let arg_types = &this.eval.types_buf[types_buf_offset..];
 
-            builtin.resolve_result_type(arg_types).ok_or_else(|| {
+            resolve_result_type(builtin, arg_types).ok_or_else(|| {
                 this.diag_ctx.emit_no_matching_builtin_signature(
                     &this.eval.types,
                     builtin,

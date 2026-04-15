@@ -1,15 +1,12 @@
-use allocator_api2::alloc::{AllocError, Allocator, Global, handle_alloc_error};
-use core::ptr;
 use plank_core::chunked_arena::ChunkedArena;
 use std::{
-    alloc::Layout,
     cell::{Cell, UnsafeCell},
     mem::align_of,
-    ptr::NonNull,
+    num::NonZero,
 };
 
 use hashbrown::HashTable;
-use plank_session::{SrcLoc, StrId, TypeId};
+use plank_session::{SrcLoc, StrId};
 
 use crate::ValueId;
 
@@ -72,16 +69,25 @@ pub struct TypeInterner {
     arena: ChunkedArena<MIN_STRUCT_FIELD_ALIGN>,
 }
 
-impl TypeInterner {
-    pub fn new() -> Self {
-        Self::new_in(Global)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(pub(crate) NonZero<u32>);
 
 impl TypeId {
+    pub(crate) const fn new(value: u32) -> Self {
+        TypeId(unsafe {
+            let inner = value.checked_add(1).expect("overflow");
+            NonZero::new_unchecked(inner)
+        })
+    }
+
+    pub const fn const_get(self) -> u32 {
+        self.0.get() - 1
+    }
+
+    pub fn get(self) -> u32 {
+        self.const_get()
+    }
+
     pub const VOID: TypeId = TypeId::new(0);
     pub const U256: TypeId = TypeId::new(1);
     pub const BOOL: TypeId = TypeId::new(2);
@@ -111,6 +117,20 @@ impl TypeId {
         }
         Err(*self)
     }
+
+    pub fn primitive_name(self) -> Option<&'static str> {
+        use plank_session::builtins::builtin_names;
+        Some(match self {
+            TypeId::VOID => builtin_names::VOID,
+            TypeId::U256 => builtin_names::U256,
+            TypeId::BOOL => builtin_names::BOOL,
+            TypeId::MEMORY_POINTER => builtin_names::MEMORY_POINTER,
+            TypeId::TYPE => builtin_names::TYPE,
+            TypeId::FUNCTION => builtin_names::FUNCTION,
+            TypeId::NEVER => builtin_names::NEVER,
+            _ => return None,
+        })
+    }
 }
 
 impl TypeInterner {
@@ -124,7 +144,7 @@ impl TypeInterner {
 
         unsafe {
             // The `_HEADER_FIELD_ALIGN_EQ` const assert is what tells us that it's safe to cast to
-            // field & struct header pointers respectively.
+            // field & struct header pointers.
             _ = _HEADER_FIELD_ALIGN_EQ;
             let (offset, new_struct_ptr) = self.arena.alloc_append(required_space);
 
@@ -152,41 +172,5 @@ impl TypeInterner {
 
             (offset, interned)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_offset_to_chunk() {
-        assert_eq!(offset_to_chunk(0), (0, 0));
-        assert_eq!(offset_to_chunk(34), (0, 34));
-        assert_eq!(offset_to_chunk(1023), (0, 1023));
-
-        assert_eq!(offset_to_chunk(1024), (1, 0));
-        assert_eq!(offset_to_chunk(1060), (1, 36));
-        assert_eq!(offset_to_chunk(2047), (1, 1023));
-
-        assert_eq!(offset_to_chunk(2048), (2, 0));
-        assert_eq!(offset_to_chunk(3000), (2, 952));
-        assert_eq!(offset_to_chunk(3072), (2, 1024));
-        assert_eq!(offset_to_chunk(4095), (2, 2047));
-
-        assert_eq!(offset_to_chunk(4096), (3, 0));
-        assert_eq!(offset_to_chunk(8191), (3, 4095));
-
-        assert_eq!(offset_to_chunk(8192), (4, 0));
-    }
-
-    #[test]
-    fn test_chunk_index_to_size() {
-        assert_eq!(chunk_index_to_size(0), FIRST_CHUNK_SIZE_BYTES);
-        assert_eq!(chunk_index_to_size(1), FIRST_CHUNK_SIZE_BYTES);
-        assert_eq!(chunk_index_to_size(2), FIRST_CHUNK_SIZE_BYTES * 2);
-        assert_eq!(chunk_index_to_size(3), FIRST_CHUNK_SIZE_BYTES * 4);
-        assert_eq!(chunk_index_to_size(4), FIRST_CHUNK_SIZE_BYTES * 8);
-        assert_eq!(chunk_index_to_size(5), FIRST_CHUNK_SIZE_BYTES * 16);
     }
 }
