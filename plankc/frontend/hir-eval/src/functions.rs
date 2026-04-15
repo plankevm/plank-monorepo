@@ -237,11 +237,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     this.eval.values.lookup(closure_vid)
                 else {
                     let ty = this.values.type_of_value(closure_vid);
-                    this.diag_ctx.emit_not_callable(
-                        &this.eval.types,
-                        ty,
-                        this.loc(callee_def_span),
-                    );
+                    this.diag_ctx.emit_not_callable(this.eval.types, ty, this.loc(callee_def_span));
                     return Err(Poisoned);
                 };
                 for &capture in captures {
@@ -478,7 +474,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if !arg_ty.is_assignable_to(param_ty) {
             let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
             self.diag_ctx.emit_type_mismatch(
-                &self.eval.types,
+                self.eval.types,
                 param_ty,
                 self.loc(self.bindings[r#type].span),
                 arg_ty,
@@ -498,7 +494,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let ty = self.value_type(value);
             if !ty.is_assignable_to(return_type) {
                 self.diag_ctx.emit_type_mismatch(
-                    &self.eval.types,
+                    self.eval.types,
                     return_type,
                     self.loc(ret_type_span),
                     ty,

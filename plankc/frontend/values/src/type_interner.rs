@@ -28,7 +28,7 @@ const _HEADER_FIELD_ALIGN_EQ: () =
     const { assert!(align_of::<Field>() == align_of::<StructHeader>()) };
 
 const MIN_STRUCT_FIELD_ALIGN: usize = {
-    _ = _HEADER_FIELD_ALIGN_EQ;
+    let () = _HEADER_FIELD_ALIGN_EQ;
     align_of::<StructHeader>()
 };
 
@@ -101,6 +101,12 @@ pub struct TypeInterner {
     dedup: UnsafeCell<HashTable<StructRef>>,
     arena: ChunkedArena<MIN_STRUCT_FIELD_ALIGN>,
     hasher: DefaultHashBuilder,
+}
+
+impl Default for TypeInterner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -264,13 +270,13 @@ impl TypeInterner {
     }
 
     fn push_struct<'s, 'a>(&'s self, r#struct: StructInfo<'a>) -> StructRef {
-        let required_space = std::mem::size_of::<StructHeader>()
-            + std::mem::size_of::<Field>() * r#struct.fields.len();
+        let required_space =
+            std::mem::size_of::<StructHeader>() + std::mem::size_of_val(r#struct.fields);
 
         unsafe {
             // The `_HEADER_FIELD_ALIGN_EQ` const assert is what tells us that it's safe to cast to
             // field & struct header pointers.
-            _ = _HEADER_FIELD_ALIGN_EQ;
+            let () = _HEADER_FIELD_ALIGN_EQ;
             let (offset, new_struct_ptr) = self.arena.alloc_append(required_space);
 
             let fields_start = new_struct_ptr.byte_add(size_of::<StructHeader>()) as *mut Field;

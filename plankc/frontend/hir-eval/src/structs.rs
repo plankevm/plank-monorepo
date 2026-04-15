@@ -68,7 +68,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let struct_ty = self.state_type(state);
         let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
             self.diag_ctx.emit_member_on_non_struct(
-                &self.eval.types,
+                self.eval.types,
                 struct_ty,
                 self.loc(value_def_span),
             );
@@ -79,7 +79,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             (0u32..).zip(struct_type_info.fields).find(|&(_i, &field)| field.name == member)
         else {
             self.diag_ctx.emit_struct_unknown_field_access(
-                &self.eval.types,
+                self.eval.types,
                 struct_ty,
                 self.loc(expr_span),
                 member,
@@ -312,7 +312,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let ty_loc = self.loc(self.bindings[struct_type_local].span);
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_not_a_struct_type(&self.eval.types, struct_ty, ty_loc);
+            self.diag_ctx.emit_not_a_struct_type(self.eval.types, struct_ty, ty_loc);
             return Err(Poisoned);
         };
 

@@ -104,6 +104,11 @@ impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
     }
 
     /// Resolve a previously returned offset to a stable pointer.
+    ///
+    /// # Safety
+    /// Requires `offset` to be derived from `alloc_append` called on the same struct.
+    /// Furthermore data pointed to by the returned pointer which is part of the original
+    /// allocation *MUST NOT* by mutated.
     pub unsafe fn get(&self, offset: u32) -> *const u8 {
         let (chunk_index, rel_offset) = offset_to_chunk(offset as usize);
         let base = self.chunks[chunk_index].get().as_ptr();

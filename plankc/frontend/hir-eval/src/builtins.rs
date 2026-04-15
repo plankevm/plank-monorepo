@@ -91,7 +91,7 @@ impl Scope<'_, '_> {
 
             resolve_result_type(builtin, arg_types).ok_or_else(|| {
                 this.diag_ctx.emit_no_matching_builtin_signature(
-                    &this.eval.types,
+                    this.eval.types,
                     builtin,
                     &this.eval.types_buf[types_buf_offset..],
                     expr_loc,
