@@ -1,5 +1,5 @@
 use plank_hir as hir;
-use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
+use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
 
 pub(crate) struct DiagCtx<'a> {
@@ -270,14 +270,18 @@ impl DiagCtx<'_> {
     pub fn emit_no_matching_builtin_signature(
         &mut self,
         types: &TypeInterner,
-        builtin: RuntimeBuiltin,
+        builtin: impl Builtin,
         arg_types: &[TypeId],
         loc: SrcLoc,
     ) {
         use std::fmt::Write;
 
-        let mut note = format!("`{builtin}` accepts ");
-        for (i, &sig) in builtin.signatures().iter().enumerate() {
+        let name = builtin.name();
+        let signatures = builtin.signatures();
+        let arg_count = builtin.arg_count();
+
+        let mut note = format!("`{name}` accepts ");
+        for (i, sig) in signatures.iter().enumerate() {
             if i > 0 {
                 note.push_str(", ");
             }
@@ -291,7 +295,7 @@ impl DiagCtx<'_> {
             note.push(')');
         }
 
-        let (title, label) = if builtin.arg_count() == arg_types.len() {
+        let (title, label) = if arg_count == arg_types.len() {
             let mut args_str = String::new();
             for (i, &ty) in arg_types.iter().enumerate() {
                 if i > 0 {
@@ -301,16 +305,15 @@ impl DiagCtx<'_> {
             }
             (
                 "no valid match for builtin signature",
-                format!("`{builtin}` cannot be called with ({args_str})"),
+                format!("`{name}` cannot be called with ({args_str})"),
             )
         } else {
-            let expected = builtin.arg_count();
             (
                 "wrong number of arguments",
                 format!(
-                    "`{builtin}` called with {}, but requires {}",
+                    "`{name}` called with {}, but requires {}",
                     fmt_count(arg_types.len(), "argument"),
-                    expected,
+                    arg_count,
                 ),
             )
         };
@@ -422,6 +425,44 @@ impl DiagCtx<'_> {
                     "missing field `{}` in `{}`",
                     self.session.lookup_name(field_name),
                     types.format(self.session, struct_ty),
+                ),
+            )
+            .emit(self.session);
+    }
+
+    pub fn emit_expected_struct_type_arg(
+        &mut self,
+        types: &TypeInterner,
+        builtin: plank_session::ComptimeBuiltin,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("expected struct type")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` expects a struct type, got `{}`",
+                    types.format(self.session, actual_ty),
+                ),
+            )
+            .emit(self.session);
+    }
+
+    pub fn emit_expected_type_arg(
+        &mut self,
+        types: &TypeInterner,
+        builtin: plank_session::ComptimeBuiltin,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("expected type argument")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` expects a type argument, got a value of type `{}`",
+                    types.format(self.session, actual_ty),
                 ),
             )
             .emit(self.session);

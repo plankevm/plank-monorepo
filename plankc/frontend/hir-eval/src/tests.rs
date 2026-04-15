@@ -2258,3 +2258,101 @@ fn test_const_with_type_error_does_not_panic() {
         "#],
     );
 }
+
+#[test]
+fn test_comptime_is_struct_expects_type() {
+    assert_diagnostics(
+        r#"
+        const x = @is_struct(42);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected type argument
+         --> main.plk:1:11
+          |
+        1 | const x = @is_struct(42);
+          |           ^^^^^^^^^^^^^^ `@is_struct` expects a type argument, got a value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_is_struct() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const yes = @is_struct(Pair);
+        const no = @is_struct(u256);
+        init {
+            let mut x: bool = yes;
+            let mut y: bool = no;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = false
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_field_count_expects_type() {
+    assert_diagnostics(
+        r#"
+        const x = @field_count(true);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected struct type
+         --> main.plk:1:11
+          |
+        1 | const x = @field_count(true);
+          |           ^^^^^^^^^^^^^^^^^^ `@field_count` expects a struct type, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_field_count_expects_struct() {
+    assert_diagnostics(
+        r#"
+        const x = @field_count(u256);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected struct type
+         --> main.plk:1:11
+          |
+        1 | const x = @field_count(u256);
+          |           ^^^^^^^^^^^^^^^^^^ `@field_count` expects a struct type, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_field_count() {
+    assert_lowers_to(
+        r#"
+        const Triple = struct { a: u256, b: bool, c: u256 };
+        const count = @field_count(Triple);
+        init {
+            let mut x: u256 = count;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 3
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}

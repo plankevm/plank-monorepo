@@ -1,8 +1,8 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, RuntimeBuiltin, SourceSpan};
-use plank_values::{TypeId, Value, ValueId, ValueInterner};
+use plank_session::{Builtin, ComptimeBuiltin, MaybePoisoned, RuntimeBuiltin, SourceSpan};
+use plank_values::{Type, TypeId, Value, ValueId, ValueInterner};
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};
 use plank_session::Poisoned;
@@ -172,5 +172,111 @@ impl Scope<'_, '_> {
         }
 
         Ok(Ok(EvalValue::Runtime { expr, result_type }))
+    }
+
+    pub(crate) fn eval_comptime_builtin(
+        &mut self,
+        builtin: ComptimeBuiltin,
+        args: hir::CallArgsId,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let args = &self.hir.call_args[args];
+        let expr_loc = self.loc(expr_span);
+
+        if builtin.arg_count() != args.len() {
+            self.with_types_buf(|this, types_buf_offset| {
+                for &arg in args {
+                    let ty = this.state_type(this.bindings[arg].state?);
+                    this.eval.types_buf.push(ty);
+                }
+                let arg_types = &this.eval.types_buf[types_buf_offset..];
+                this.diag_ctx.emit_no_matching_builtin_signature(
+                    &this.eval.types,
+                    builtin,
+                    arg_types,
+                    expr_loc,
+                );
+                Err(Poisoned)
+            })?;
+        }
+
+        match builtin {
+            ComptimeBuiltin::IsStruct => {
+                let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
+                let is_struct = matches!(self.eval.types.lookup(ty), Type::Struct(_));
+                Ok(Ok(EvalValue::Comptime(is_struct.into())))
+            }
+            ComptimeBuiltin::FieldCount => {
+                let (_, info) = self.expect_struct_type_arg(args[0], builtin, expr_span)?;
+                let count = U256::from(info.fields.len());
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
+            }
+        }
+    }
+
+    /// Extracts a `TypeId` from an evaluated arg local.
+    /// Emits a diagnostic and returns `Err(Poisoned)` if the arg is not a type value.
+    fn expect_type_arg(
+        &mut self,
+        arg_local: hir::LocalId,
+        builtin: ComptimeBuiltin,
+        span: SourceSpan,
+    ) -> MaybePoisoned<TypeId> {
+        let state = self.bindings[arg_local].state?;
+        match state {
+            LocalState::Comptime(vid) => match self.values.lookup(vid) {
+                Value::Type(ty) => Ok(ty),
+                _ => {
+                    let actual_ty = self.state_type(state);
+                    self.diag_ctx.emit_expected_type_arg(
+                        &self.eval.types,
+                        builtin,
+                        actual_ty,
+                        self.loc(span),
+                    );
+                    Err(Poisoned)
+                }
+            },
+            LocalState::Runtime(_) => {
+                let actual_ty = self.state_type(state);
+                self.diag_ctx.emit_expected_type_arg(
+                    &self.eval.types,
+                    builtin,
+                    actual_ty,
+                    self.loc(span),
+                );
+                Err(Poisoned)
+            }
+        }
+    }
+
+    /// Extracts a struct `TypeId` and its `StructInfo` from an evaluated arg local.
+    /// Emits a diagnostic and returns `Err(Poisoned)` if the arg is not a struct type value.
+    fn expect_struct_type_arg(
+        &mut self,
+        arg_local: hir::LocalId,
+        builtin: ComptimeBuiltin,
+        span: SourceSpan,
+    ) -> MaybePoisoned<(TypeId, plank_values::StructInfo<'_>)> {
+        let state = self.bindings[arg_local].state?;
+        // For non-type values, fall through to get their type for a better
+        // "expected struct type, got `X`" error message.
+        let ty = match state {
+            LocalState::Comptime(vid) => match self.values.lookup(vid) {
+                Value::Type(ty) => ty,
+                _ => self.state_type(state),
+            },
+            _ => self.state_type(state),
+        };
+        let Type::Struct(info) = self.eval.types.lookup(ty) else {
+            self.diag_ctx.emit_expected_struct_type_arg(
+                &self.eval.types,
+                builtin,
+                ty,
+                self.loc(span),
+            );
+            return Err(Poisoned);
+        };
+        Ok((ty, info))
     }
 }

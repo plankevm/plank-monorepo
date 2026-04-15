@@ -1,3 +1,5 @@
+use std::fmt::{self, Display, Formatter};
+
 use crate::{Session, StrId, types::TypeId};
 
 #[derive(Debug, Clone, Copy)]
@@ -6,21 +8,87 @@ pub struct BuiltinSignature {
     pub result: TypeId,
 }
 
+pub trait Builtin: Display + Copy {
+    fn name(self) -> &'static str;
+    fn signatures(self) -> &'static [BuiltinSignature];
+
+    /// All sigs have the same arg count, guaranteed by compile time check in
+    /// `signatures`.
+    fn arg_count(self) -> usize {
+        self.signatures()[0].inputs.len()
+    }
+
+    fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
+        let signatures = self.signatures();
+        let expected_count = signatures[0].inputs.len();
+        if expected_count != arg_types.len() {
+            return None;
+        }
+        for sig in signatures {
+            if sig
+                .inputs
+                .iter()
+                .zip(arg_types)
+                .all(|(&sig_in, &arg_in)| arg_in.is_assignable_to(sig_in))
+            {
+                return Some(sig.result);
+            }
+        }
+        None
+    }
+}
+
+/// Generates match arms for `Builtin::signatures()`. Each arm builds a
+/// `&'static [BuiltinSignature]` with a compile-time check that all overloads
+/// share the same input count.
+macro_rules! builtin_signatures {
+    ($self:ident, $Enum:ident { $(
+        $variant:ident { $( [$($arg:ident),* => $ret:ident] ),+ };
+    )* }) => {
+        match $self {
+            $($Enum::$variant => {
+                const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
+                    inputs: &[$($arg),*],
+                    result: $ret
+                }),+];
+                // Invariant: Each builtin has at least 1 sig and all sigs have the
+                // same number of inputs.
+                const {
+                    assert!(!SIGS.is_empty());
+                    let mut i = 1;
+                    while i < SIGS.len() {
+                        assert!(SIGS[0].inputs.len() == SIGS[i].inputs.len());
+                        i += 1;
+                    }
+                };
+                SIGS
+            }),*
+        }
+    };
+}
+
 macro_rules! define_builtins {
     (
         primitive_types {
             $($pt_const:ident = $pt_str:literal => $pt_type:ident;)*
         }
-        builtins {
+        runtime_builtins {
             $(
                 $b_const:ident $b_str:literal => $b_variant:ident
                 { $( [$($arg:ident),* => $ret:ident] ),+ };
+            )*
+        }
+        comptime_builtins {
+            $(
+                $cb_const:ident $cb_str:literal => $cb_variant:ident
+                { $( [$($cb_arg:ident),* => $cb_ret:ident] ),+ };
             )*
         }
     ) => {
         pub mod builtin_names {
             $(pub const $pt_const: &str = $pt_str;)*
             $(pub const $b_const: &str = $b_str;)*
+            $(pub const $cb_const: &str = $cb_str;)*
         }
 
         #[doc(hidden)]
@@ -28,14 +96,17 @@ macro_rules! define_builtins {
         enum BuiltinStrIdx {
             $($pt_type,)*
             $($b_variant,)*
+            $($cb_variant,)*
         }
 
         $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
         $(pub const $b_const: StrId = StrId::new(BuiltinStrIdx::$b_variant as u32);)*
+        $(pub const $cb_const: StrId = StrId::new(BuiltinStrIdx::$cb_variant as u32);)*
 
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
             $(assert_eq!(interner.intern(builtin_names::$b_const), $b_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$cb_const), $cb_const);)*
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,60 +115,75 @@ macro_rules! define_builtins {
         }
 
         impl RuntimeBuiltin {
-            pub fn name(self) -> &'static str {
-                match self {
-                    $(Self::$b_variant => $b_str,)*
-                }
-            }
-
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
                     $($b_const => RuntimeBuiltin::$b_variant,)*
                     _ => return None,
                 })
             }
+        }
 
-            pub fn arg_count(self) -> usize {
-                // All sigs have the same arg count, guaranteed by compile time check in
-                // `signatures`.
-                self.signatures()[0].inputs.len()
+        impl Builtin for RuntimeBuiltin {
+            fn name(self) -> &'static str {
+                match self {
+                    $(Self::$b_variant => $b_str,)*
+                }
             }
 
-            pub fn signatures(self) -> &'static [BuiltinSignature] {
+            fn signatures(self) -> &'static [BuiltinSignature] {
                 const U256: TypeId = TypeId::U256;
                 const BOOL: TypeId = TypeId::BOOL;
                 const MP: TypeId = TypeId::MEMORY_POINTER;
                 const VOID: TypeId = TypeId::VOID;
                 const NEVER: TypeId = TypeId::NEVER;
 
-                match self {
-                    $(RuntimeBuiltin::$b_variant => {
-                        const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
-                            inputs: &[$($arg),*],
-                            result: $ret
-                        }),+];
-                        // Invariant: Each builtin has at least 1 sig and all sigs have the
-                        // same number of inputs.
-                        const {
-                            assert!(!SIGS.is_empty());
-                            let mut i = 1;
-                            while i < SIGS.len() {
-                                assert!(SIGS[0].inputs.len() == SIGS[i].inputs.len());
-                                i += 1;
-                            }
-                        };
-                        SIGS
-                    }),*
-                }
+                builtin_signatures!(self, RuntimeBuiltin {
+                    $($b_variant { $( [$($arg),* => $ret] ),+ };)*
+                })
             }
         }
 
-        impl ::std::fmt::Display for RuntimeBuiltin {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                let name = match self {
-                    $(RuntimeBuiltin::$b_variant => builtin_names::$b_const,)*
-                };
-                f.write_str(name)
+        impl Display for RuntimeBuiltin {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum ComptimeBuiltin {
+            $($cb_variant,)*
+        }
+
+        impl ComptimeBuiltin {
+            pub fn from_str_id(id: StrId) -> Option<Self> {
+                Some(match id {
+                    $($cb_const => ComptimeBuiltin::$cb_variant,)*
+                    _ => return None,
+                })
+            }
+        }
+
+        impl Builtin for ComptimeBuiltin {
+            fn name(self) -> &'static str {
+                match self {
+                    $(Self::$cb_variant => $cb_str,)*
+                }
+            }
+
+            fn signatures(self) -> &'static [BuiltinSignature] {
+                const U256: TypeId = TypeId::U256;
+                const BOOL: TypeId = TypeId::BOOL;
+                const TYPE: TypeId = TypeId::TYPE;
+
+                builtin_signatures!(self, ComptimeBuiltin {
+                    $($cb_variant { $( [$($cb_arg),* => $cb_ret] ),+ };)*
+                })
+            }
+        }
+
+        impl Display for ComptimeBuiltin {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
             }
         }
 
@@ -131,7 +217,7 @@ define_builtins! {
         NEVER = "never" => Never;
     }
 
-    builtins {
+    runtime_builtins {
         // EVM Arithmetic
         ADD  "@evm_add" => Add
             { [U256, U256 => U256], [MP, U256 => MP], [U256, MP => MP] };
@@ -300,6 +386,12 @@ define_builtins! {
         INIT_END_OFFSET "@init_end_offset" => InitEndOffset { [=> U256] };
         RUNTIME_LENGTH "@runtime_length" => RuntimeLength { [=> U256] };
     }
+
+    comptime_builtins {
+        // Type Reflection
+        IS_STRUCT "@is_struct" => IsStruct { [TYPE => BOOL] };
+        FIELD_COUNT "@field_count" => FieldCount { [TYPE => U256] };
+    }
 }
 
 impl RuntimeBuiltin {
@@ -332,23 +424,6 @@ impl RuntimeBuiltin {
                 | RuntimeBuiltin::Shr
                 | RuntimeBuiltin::Sar
         )
-    }
-
-    pub fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
-        if self.arg_count() != arg_types.len() {
-            return None;
-        }
-        for &sig in self.signatures() {
-            if sig
-                .inputs
-                .iter()
-                .zip(arg_types)
-                .all(|(&sig_in, &arg_in)| arg_in.is_assignable_to(sig_in))
-            {
-                return Some(sig.result);
-            }
-        }
-        None
     }
 }
 

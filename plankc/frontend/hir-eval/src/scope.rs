@@ -543,6 +543,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::RuntimeBuiltinCall { builtin, args } => {
                 poison::transpose(self.eval_builtin(builtin, args, expr.span))?
             }
+            ExprKind::ComptimeBuiltinCall { builtin, args } => {
+                poison::transpose(self.eval_comptime_builtin(builtin, args, expr.span))?
+            }
             ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {
                 LocalState::Comptime(vid) => EvalValue::Comptime(vid),
                 LocalState::Runtime(local) => EvalValue::Runtime {

@@ -7,7 +7,9 @@ use plank_parser::{
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
-use plank_session::{Poisoned, RuntimeBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
+use plank_session::{
+    ComptimeBuiltin, Poisoned, RuntimeBuiltin, Session, SourceId, SourceSpan, StrId, TypeId,
+};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::ValueInterner;
 
@@ -202,6 +204,15 @@ impl BlockLowerer<'_> {
         Expr { kind, span: self.lexed.tokens_src_span(span) }
     }
 
+    fn lower_call_args<'a>(&mut self, args: impl Iterator<Item = ast::Expr<'a>>) -> CallArgsId {
+        let buf_start = self.locals_buf.len();
+        for arg in args {
+            let local = self.lower_expr_to_local(arg);
+            self.locals_buf.push(local);
+        }
+        self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..))
+    }
+
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
         let expr = self.lower_expr(expr);
         let local = self.alloc_temp();
@@ -353,24 +364,21 @@ impl BlockLowerer<'_> {
             }
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
-                if let ast::Expr::Ident { name, span: _ } = callee
-                    && let Some(builtin) = RuntimeBuiltin::from_str_id(name)
-                {
-                    let buf_start = self.locals_buf.len();
-                    for arg in call_expr.args() {
-                        let local = self.lower_expr_to_local(arg);
-                        self.locals_buf.push(local);
+                if let ast::Expr::Ident { name, span: _ } = callee {
+                    if let Some(builtin) = ComptimeBuiltin::from_str_id(name) {
+                        let args = self.lower_call_args(call_expr.args());
+                        ExprKind::ComptimeBuiltinCall { builtin, args }
+                    } else if let Some(builtin) = RuntimeBuiltin::from_str_id(name) {
+                        let args = self.lower_call_args(call_expr.args());
+                        ExprKind::RuntimeBuiltinCall { builtin, args }
+                    } else {
+                        let callee = self.lower_expr_to_local(callee);
+                        let args = self.lower_call_args(call_expr.args());
+                        ExprKind::Call { callee, args }
                     }
-                    let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
-                    ExprKind::RuntimeBuiltinCall { builtin, args }
                 } else {
                     let callee = self.lower_expr_to_local(callee);
-                    let buf_start = self.locals_buf.len();
-                    for arg in call_expr.args() {
-                        let local = self.lower_expr_to_local(arg);
-                        self.locals_buf.push(local);
-                    }
-                    let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
+                    let args = self.lower_call_args(call_expr.args());
                     ExprKind::Call { callee, args }
                 }
             }
