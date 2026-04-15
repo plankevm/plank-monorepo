@@ -179,7 +179,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let return_type = self.expect_type(fn_def.return_type);
         let ret_type_span = self.bindings[fn_def.return_type].span;
         self.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_span };
-        let is_comptime_only = return_type.is_ok_and(|ty| self.types.comptime_only(ty));
+        let is_comptime_only = return_type.is_ok_and(|ty| self.types.is_comptime_only(ty));
         Ok(PreambleResult { return_type, is_comptime_only })
     }
 

@@ -1,14 +1,12 @@
-pub mod append_only_interner;
 mod bignum_interner;
 pub mod builtins;
 mod type_interner;
 mod value_interner;
 
 pub use alloy_primitives::{U256, uint};
-pub use append_only_interner::TypeId;
 use plank_core::{const_print::const_assert_mem_size, newtype_index};
 use plank_session::SourceSpan;
-pub use type_interner::{StructInfo, Type, TypeInterner};
+pub use type_interner::*;
 pub use value_interner::*;
 
 newtype_index! {

@@ -2,7 +2,7 @@ use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_in
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, StrId};
-use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
+use plank_values::{DefOrigin, Field, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
@@ -25,7 +25,7 @@ pub(crate) struct Evaluator<'a> {
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,
     pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
-    pub types: TypeInterner,
+    pub types: &'a TypeInterner,
 
     pub evaluated_consts: DenseIndexMap<ConstId, State<MaybePoisoned<ValueId>>>,
     pub values: &'a mut ValueInterner,
@@ -39,18 +39,18 @@ pub(crate) struct Evaluator<'a> {
     pub types_buf: Vec<TypeId>,
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
-    pub fields_buf: Vec<(StrId, TypeId)>,
+    pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
 }
 
 impl<'a> Evaluator<'a> {
-    pub fn new(hir: &'a Hir, values: &'a mut ValueInterner) -> Self {
+    pub fn new(hir: &'a Hir, types: &'a TypeInterner, values: &'a mut ValueInterner) -> Self {
         Evaluator {
             mir_blocks: ListOfLists::new(),
             mir_fns: IndexVec::new(),
             mir_fn_locals: ListOfLists::new(),
             mir_args: ListOfLists::new(),
-            types: TypeInterner::new(),
+            types,
 
             evaluated_consts: DenseIndexMap::new(),
             values,
@@ -71,7 +71,7 @@ impl<'a> Evaluator<'a> {
 
     pub fn is_comptime_only(&self, value: ValueId) -> bool {
         let ty = self.values.type_of_value(value);
-        self.types.comptime_only(ty)
+        self.types.is_comptime_only(ty)
     }
 
     pub fn evaluate_const(
@@ -121,8 +121,14 @@ impl<'a> Evaluator<'a> {
     }
 
     fn try_name_type(&mut self, name: StrId, value: MaybePoisoned<ValueId>) {
-        if let Ok(Value::Type(ty)) = value.map(|vid| self.values.lookup(vid)) {
-            self.types.try_set_struct_name(ty, name);
+        let Ok(Value::Type(ty)) = value.map(|vid| self.values.lookup(vid)) else {
+            return;
+        };
+        let Type::Struct(r#struct) = self.types.lookup(ty) else {
+            return;
+        };
+        if r#struct.name.get().is_none() {
+            r#struct.name.set(Some(name));
         }
     }
 

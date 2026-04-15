@@ -17,8 +17,8 @@ impl<'a> DisplayMir<'a> {
         Self { mir, values, session }
     }
 
-    fn fmt_type(&self, f: &mut Formatter<'_>, type_id: TypeId) -> fmt::Result {
-        self.mir.types.fmt_type(f, type_id, self.session)
+    fn fmt_type(&self, f: &mut Formatter<'_>, ty: TypeId) -> fmt::Result {
+        write!(f, "{}", self.mir.types.format(self.session, ty))
     }
 
     fn fmt_args(&self, f: &mut Formatter<'_>, args_id: ArgsId) -> fmt::Result {

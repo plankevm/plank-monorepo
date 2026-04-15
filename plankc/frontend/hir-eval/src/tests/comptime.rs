@@ -261,7 +261,7 @@ fn test_comptime_block_struct_type() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : struct#7@main.plk:3:9 = struct#7 {
+            %0 : struct#0@main.plk:3:9 = struct#0 {
                 42,
             }
             %1 : never = evm_stop()
@@ -492,26 +492,26 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
         r#"
 
         ==== Functions ====
-        @fn0(%0: struct#7@main.plk:2:5) -> u256 {
-            %1 : struct#7@main.plk:2:5 = %0
+        @fn0(%0: struct#0@main.plk:2:5) -> u256 {
+            %1 : struct#0@main.plk:2:5 = %0
             %2 : u256 = %1.1
             ret %2
         }
 
-        @fn1(%0: struct#8@main.plk:2:5) -> u256 {
-            %1 : struct#8@main.plk:2:5 = %0
+        @fn1(%0: struct#40@main.plk:2:5) -> u256 {
+            %1 : struct#40@main.plk:2:5 = %0
             %2 : u256 = %1.1
             ret %2
         }
 
         ; init
         @fn2() -> never {
-            %0 : struct#7@main.plk:2:5 = struct#7 {
+            %0 : struct#0@main.plk:2:5 = struct#0 {
                 0,
                 34,
             }
             %1 : u256 = call @fn0(%0)
-            %2 : struct#8@main.plk:2:5 = struct#8 {
+            %2 : struct#40@main.plk:2:5 = struct#40 {
                 false,
                 33,
             }

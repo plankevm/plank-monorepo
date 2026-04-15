@@ -2,7 +2,7 @@ use crate::scope::{EvalValue, LocalState, Scope};
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId};
-use plank_values::{StructInfo, Type, TypeId, Value};
+use plank_values::{Field, StructInfo, Type, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -42,19 +42,19 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     );
                     fields_poisoned = true;
                 }
-                this.fields_buf.push((field.name, ty));
+                this.fields_buf.push(Field { name: field.name, ty });
             }
 
             if fields_poisoned {
                 return Err(Poisoned);
             }
 
-            let struct_ty = this.eval.types.intern(Type::Struct(StructInfo {
+            let r#struct = this.eval.types.intern_struct(StructInfo {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
                 fields: &this.eval.fields_buf[fields_buf_offset..],
-            }));
-            Ok(struct_ty)
+            });
+            Ok(r#struct.into())
         })
     }
 
@@ -75,9 +75,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             return Err(Poisoned);
         };
 
-        let Some((field_index, &(_name, field_type))) = (0u32..)
-            .zip(struct_type_info.fields)
-            .find(|&(_i, &(field_name, _ty))| field_name == member)
+        let Some((field_index, &field)) =
+            (0u32..).zip(struct_type_info.fields).find(|&(_i, &field)| field.name == member)
         else {
             self.diag_ctx.emit_struct_unknown_field_access(
                 &self.eval.types,
@@ -97,7 +96,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             }
             LocalState::Runtime(local) => Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess { object: local, field_index },
-                result_type: field_type,
+                result_type: field.ty,
             }),
         }
     }
@@ -156,8 +155,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         values_buf_offset: usize,
     ) -> MaybePoisoned<EvalValue> {
         let def_fields = &self.eval.fields_buf[def_fields_buf_offset..];
-        for &(name, _ty) in def_fields {
-            let Some(lit_field) = lit_fields.iter().find(|lit_field| lit_field.name == name) else {
+        for &def_field in def_fields {
+            let Some(lit_field) =
+                lit_fields.iter().find(|lit_field| lit_field.name == def_field.name)
+            else {
                 // should've already been set above but just incase.
                 validity = Err(Poisoned);
                 continue;
@@ -201,8 +202,9 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let def_fields = &self.eval.fields_buf[def_fields_buf_offset..];
         let mut first_runtime_field = None;
 
-        for &(name, _ty) in def_fields {
-            let Some(&lit_field) = lit_fields.iter().find(|lit_field| lit_field.name == name)
+        for &def_field in def_fields {
+            let Some(&lit_field) =
+                lit_fields.iter().find(|lit_field| lit_field.name == def_field.name)
             else {
                 // should've already been set above but just incase.
                 validity = Err(Poisoned);
@@ -219,14 +221,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 LocalState::Runtime(mir_local) => {
                     if first_runtime_field.is_none() {
                         // One time conversion of already pushed values.
-                        'materialize_comptime: for (&value, &(name, _ty)) in
+                        'materialize_comptime: for (&value, &def_field) in
                             self.eval.values_buf[values_buf_offset..].iter().zip(def_fields)
                         {
                             let value_ty = self.values.type_of_value(value);
-                            if self.types.comptime_only(value_ty) {
+                            if self.types.is_comptime_only(value_ty) {
                                 let &comptime_lit_field = lit_fields
                                     .iter()
-                                    .find(|lit_field| lit_field.name == name)
+                                    .find(|lit_field| lit_field.name == def_field.name)
                                     .expect("pushed, but not skipped by lit_fields.find?");
                                 self.diag_ctx.emit_mixed_comptime_runtime_struct(
                                     self.source,
@@ -257,7 +259,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     };
 
                     let value_ty = self.values.type_of_value(value);
-                    if self.types.comptime_only(value_ty) {
+                    if self.types.is_comptime_only(value_ty) {
                         self.diag_ctx.emit_mixed_comptime_runtime_struct(
                             self.source,
                             lit_span,
@@ -324,11 +326,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         // Diagnose field existence and type match.
         for &lit_field in lit_fields {
-            let Some(&(_, expected_field_ty)) =
-                def.fields.iter().find(|&&(name, _ty)| name == lit_field.name)
+            let Some(&def_field) = def.fields.iter().find(|&&field| field.name == lit_field.name)
             else {
                 self.diag_ctx.emit_struct_lit_unexpected_field(
-                    &self.eval.types,
+                    self.eval.types,
                     struct_ty,
                     lit_loc,
                     lit_field,
@@ -343,10 +344,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 continue;
             };
             let field_value_ty = self.state_type(field_value_state);
-            if !field_value_ty.is_assignable_to(expected_field_ty) {
+            if !field_value_ty.is_assignable_to(def_field.ty) {
                 self.diag_ctx.emit_struct_literal_field_type_mismatch(
-                    &self.eval.types,
-                    expected_field_ty,
+                    self.eval.types,
+                    def_field.ty,
                     field_value_ty,
                     self.loc(field_value_span),
                     lit_field.name,
@@ -357,9 +358,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         }
 
         // Check for missing fields.
-        for &(name, _ty) in def.fields {
-            if !lit_fields.iter().any(|lit_field| lit_field.name == name) {
-                self.diag_ctx.emit_struct_missing_field(&self.eval.types, struct_ty, name, lit_loc);
+        for &def_field in def.fields {
+            if !lit_fields.iter().any(|lit_field| lit_field.name == def_field.name) {
+                self.diag_ctx.emit_struct_missing_field(
+                    self.eval.types,
+                    struct_ty,
+                    def_field.name,
+                    lit_loc,
+                );
                 validity = Err(Poisoned);
             };
         }

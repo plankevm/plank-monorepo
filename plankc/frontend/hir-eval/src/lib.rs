@@ -5,7 +5,7 @@ use plank_evm as _;
 use plank_hir::Hir;
 use plank_mir::Mir;
 use plank_session::Session;
-use plank_values::ValueInterner;
+use plank_values::{TypeInterner, ValueInterner};
 
 mod buffers;
 mod builtins;
@@ -21,7 +21,8 @@ pub(crate) use evaluator::Evaluator;
 mod tests;
 
 pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) -> Mir {
-    let mut evaluator = Evaluator::new(hir, values);
+    let types = TypeInterner::new();
+    let mut evaluator = Evaluator::new(hir, &types, values);
     let mut diag_ctx = diagnostics::DiagCtx::new(session);
 
     let init = evaluator.lower_entrypoint(hir.init, &mut diag_ctx);
@@ -36,7 +37,7 @@ pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) ->
         args: evaluator.mir_args,
         fns: evaluator.mir_fns,
         fn_locals: evaluator.mir_fn_locals,
-        types: evaluator.types,
+        types,
         init,
         run,
     }
