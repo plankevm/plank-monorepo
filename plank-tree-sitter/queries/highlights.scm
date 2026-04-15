@@ -19,45 +19,45 @@
 ((identifier) @function.builtin
  (#any-of? @function.builtin
   ; EVM Arithmetic
-  "add" "mul" "sub" "raw_div" "raw_sdiv" "raw_mod" "raw_smod"
-  "raw_addmod" "raw_mulmod" "exp" "signextend"
+  "@evm_add" "@evm_mul" "@evm_sub" "@evm_raw_div" "@evm_raw_sdiv" "@evm_raw_mod" "@evm_raw_smod"
+  "@evm_raw_addmod" "@evm_raw_mulmod" "@evm_exp" "@evm_signextend"
   ; EVM Comparison & Bitwise Logic
-  "lt" "gt" "slt" "sgt" "eq" "iszero"
-  "bitwise_and" "bitwise_or" "bitwise_xor" "bitwise_not"
-  "byte" "shl" "shr" "sar"
+  "@evm_lt" "@evm_gt" "@evm_slt" "@evm_sgt" "@evm_eq" "@evm_iszero"
+  "@evm_bitwise_and" "@evm_bitwise_or" "@evm_bitwise_xor" "@evm_bitwise_not"
+  "@evm_byte" "@evm_shl" "@evm_shr" "@evm_sar"
   ; EVM Keccak-256
-  "keccak256"
+  "@evm_keccak256"
   ; EVM Environment Information
-  "address_this" "balance" "origin" "caller" "callvalue"
-  "calldataload" "calldatasize" "calldatacopy"
-  "codesize" "codecopy" "gasprice"
-  "extcodesize" "extcodecopy" "returndatasize" "returndatacopy"
-  "extcodehash" "gas"
+  "@evm_address_this" "@evm_balance" "@evm_origin" "@evm_caller" "@evm_callvalue"
+  "@evm_calldataload" "@evm_calldatasize" "@evm_calldatacopy"
+  "@evm_codesize" "@evm_codecopy" "@evm_gasprice"
+  "@evm_extcodesize" "@evm_extcodecopy" "@evm_returndatasize" "@evm_returndatacopy"
+  "@evm_extcodehash" "@evm_gas"
   ; EVM Block Information
-  "blockhash" "coinbase" "timestamp" "number" "difficulty"
-  "gaslimit" "chainid" "selfbalance" "basefee"
-  "blobhash" "blobbasefee"
+  "@evm_blockhash" "@evm_coinbase" "@evm_timestamp" "@evm_number" "@evm_difficulty"
+  "@evm_gaslimit" "@evm_chainid" "@evm_selfbalance" "@evm_basefee"
+  "@evm_blobhash" "@evm_blobbasefee"
   ; EVM State Manipulation
-  "sload" "sstore" "tload" "tstore"
+  "@evm_sload" "@evm_sstore" "@evm_tload" "@evm_tstore"
   ; EVM Logging Operations
-  "log0" "log1" "log2" "log3" "log4"
+  "@evm_log0" "@evm_log1" "@evm_log2" "@evm_log3" "@evm_log4"
   ; EVM System Calls
-  "create" "create2" "call" "callcode" "delegatecall" "staticcall"
-  "evm_return" "evm_stop" "revert" "invalid" "selfdestruct"
+  "@evm_create" "@evm_create2" "@evm_call" "@evm_callcode" "@evm_delegatecall" "@evm_staticcall"
+  "@evm_return" "@evm_stop" "@evm_revert" "@evm_invalid" "@evm_selfdestruct"
   ; IR Memory Primitives
-  "malloc_zeroed" "malloc_uninit"
+  "@malloc_zeroed" "@malloc_uninit"
   ; Memory Manipulation
-  "mcopy"
-  "mload1" "mload2" "mload3" "mload4" "mload5" "mload6" "mload7" "mload8"
-  "mload9" "mload10" "mload11" "mload12" "mload13" "mload14" "mload15" "mload16"
-  "mload17" "mload18" "mload19" "mload20" "mload21" "mload22" "mload23" "mload24"
-  "mload25" "mload26" "mload27" "mload28" "mload29" "mload30" "mload31" "mload32"
-  "mstore1" "mstore2" "mstore3" "mstore4" "mstore5" "mstore6" "mstore7" "mstore8"
-  "mstore9" "mstore10" "mstore11" "mstore12" "mstore13" "mstore14" "mstore15" "mstore16"
-  "mstore17" "mstore18" "mstore19" "mstore20" "mstore21" "mstore22" "mstore23" "mstore24"
-  "mstore25" "mstore26" "mstore27" "mstore28" "mstore29" "mstore30" "mstore31" "mstore32"
+  "@mcopy"
+  "@mload1" "@mload2" "@mload3" "@mload4" "@mload5" "@mload6" "@mload7" "@mload8"
+  "@mload9" "@mload10" "@mload11" "@mload12" "@mload13" "@mload14" "@mload15" "@mload16"
+  "@mload17" "@mload18" "@mload19" "@mload20" "@mload21" "@mload22" "@mload23" "@mload24"
+  "@mload25" "@mload26" "@mload27" "@mload28" "@mload29" "@mload30" "@mload31" "@mload32"
+  "@mstore1" "@mstore2" "@mstore3" "@mstore4" "@mstore5" "@mstore6" "@mstore7" "@mstore8"
+  "@mstore9" "@mstore10" "@mstore11" "@mstore12" "@mstore13" "@mstore14" "@mstore15" "@mstore16"
+  "@mstore17" "@mstore18" "@mstore19" "@mstore20" "@mstore21" "@mstore22" "@mstore23" "@mstore24"
+  "@mstore25" "@mstore26" "@mstore27" "@mstore28" "@mstore29" "@mstore30" "@mstore31" "@mstore32"
   ; Bytecode Introspection
-  "runtime_start_offset" "init_end_offset" "runtime_length"))
+  "@runtime_start_offset" "@init_end_offset" "@runtime_length"))
 
 ; Function calls
 

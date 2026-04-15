@@ -27,12 +27,12 @@ fn test_simple_set() {
         r#"
         init {
             let mut x = 3;
-            evm_stop();
+            @evm_stop();
         }
 
         run {
             let mut y = false;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -63,12 +63,12 @@ fn test_evm_builtins() {
         init {
             let x = 3;
             let y = 4;
-            let z = add(3, 4);
-            add(3, 4);
-            let w = callvalue();
-            let a: memptr = malloc_uninit(calldataload(34));
-            sstore(x, z);
-            evm_stop();
+            let z = @evm_add(3, 4);
+            @evm_add(3, 4);
+            let w = @evm_callvalue();
+            let a: memptr = @malloc_uninit(@evm_calldataload(34));
+            @evm_sstore(x, z);
+            @evm_stop();
         }
         "#,
         r#"
@@ -98,7 +98,7 @@ fn test_assign() {
         init {
             let mut x = 3;
             x = 34;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -121,8 +121,8 @@ fn test_explicit_terminator() {
     assert_lowers_to(
         r#"
         init {
-            let ptr = malloc_uninit(0);
-            evm_return(ptr, 0);
+            let ptr = @malloc_uninit(0);
+            @evm_return(ptr, 0);
         }
         "#,
         r#"
@@ -147,12 +147,12 @@ fn test_simple_call() {
     assert_lowers_to(
         r#"
         const dangling = fn () memptr {
-            malloc_uninit(0)
+            @malloc_uninit(0)
         };
 
         init {
             let ptr = dangling();
-            evm_return(ptr, 0);
+            @evm_return(ptr, 0);
         }
         "#,
         r#"
@@ -183,13 +183,13 @@ fn test_call_with_args() {
     assert_lowers_to(
         r#"
         const safe_add = fn (x: u256, y: u256) u256 {
-            let z = add(x, y);
+            let z = @evm_add(x, y);
             z
         };
 
         init {
             let z = safe_add(3, 4);
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -222,11 +222,11 @@ fn test_simple_if() {
     assert_lowers_to(
         r#"
         init {
-            let x = calldataload(0);
-            if slt(x, 0) {
-                revert(malloc_uninit(0), 0);
+            let x = @evm_calldataload(0);
+            if @evm_slt(x, 0) {
+                @evm_revert(@malloc_uninit(0), 0);
             }
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -267,15 +267,15 @@ fn test_nested_if_assign() {
     assert_lowers_to(
         r#"
         init {
-            let x = calldataload(0);
-            let z = if slt(x, 0) {
+            let x = @evm_calldataload(0);
+            let z = if @evm_slt(x, 0) {
                 0
-            } else if lt(x, 237) {
+            } else if @evm_lt(x, 237) {
                 1
             } else {
                 2
             };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -333,10 +333,10 @@ fn test_while() {
         r#"
         init {
             let mut i = 0;
-            while lt(i, 10) {
-                i = add(i, 1);
+            while @evm_lt(i, 10) {
+                i = @evm_add(i, 1);
             }
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -379,7 +379,7 @@ fn test_struct_lit() {
         init {
             let mut a = A { a: 3, b: false };
             a = A { a: 2, b: true };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -406,9 +406,9 @@ fn test_struct_field_access() {
         const A = struct { a: u256, wow: void,  b: bool };
         init {
             let a = A { a: 3, wow: {}, b: false };
-            let buf = malloc_uninit(32);
-            mstore32(buf, a.a);
-            evm_return(buf, 32);
+            let buf = @malloc_uninit(32);
+            @mstore32(buf, a.a);
+            @evm_return(buf, 32);
         }
         "#,
         r#"
@@ -442,7 +442,7 @@ fn test_fn_struct_return() {
 
         init {
             let x = swap(3, 4);
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -475,16 +475,16 @@ fn test_multi_entry_multi_function() {
     assert_lowers_to(
         r#"
         const return_runtime = fn() never {
-            let runtime: memptr = malloc_uninit(runtime_length());
-            codecopy(runtime, runtime_start_offset(), runtime_length());
-            evm_return(runtime, runtime_length());
+            let runtime: memptr = @malloc_uninit(@runtime_length());
+            @evm_codecopy(runtime, @runtime_start_offset(), @runtime_length());
+            @evm_return(runtime, @runtime_length());
         };
 
 
         const get_balance_slot = fn (owner: u256) u256 {
-            let buf = malloc_uninit(32);
-            mstore32(buf, owner);
-            keccak256(buf, 32)
+            let buf = @malloc_uninit(32);
+            @mstore32(buf, owner);
+            @evm_keccak256(buf, 32)
         };
 
         init {
@@ -496,7 +496,7 @@ fn test_multi_entry_multi_function() {
 
 
         run {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -552,12 +552,12 @@ fn test_logical_not() {
     assert_lowers_to(
         r#"
         init {
-            let c = calldataload(0);
-            let b = iszero(c);
+            let c = @evm_calldataload(0);
+            let b = @evm_iszero(c);
             if !b {
-                revert(malloc_uninit(0), 0);
+                @evm_revert(@malloc_uninit(0), 0);
             }
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"

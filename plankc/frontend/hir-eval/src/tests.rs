@@ -62,9 +62,9 @@ fn test_simple_malloc_mstore_return() {
     assert_lowers_to(
         r#"
         init {
-            let buf = malloc_uninit(0x20);
-            mstore32(buf, 0x05);
-            evm_return(buf, 0x20);
+            let buf = @malloc_uninit(0x20);
+            @mstore32(buf, 0x05);
+            @evm_return(buf, 0x20);
         }
         "#,
         r#"
@@ -72,13 +72,13 @@ fn test_simple_malloc_mstore_return() {
         ; init
         @fn0() -> never {
             %0 : u256 = 32
-            %1 : memptr = malloc_uninit(%0)
+            %1 : memptr = @malloc_uninit(%0)
             %2 : memptr = %1
             %3 : u256 = 5
-            %4 : void = mstore32(%2, %3)
+            %4 : void = @mstore32(%2, %3)
             %5 : memptr = %1
             %6 : u256 = 32
-            %7 : never = evm_return(%5, %6)
+            %7 : never = @evm_return(%5, %6)
         }
         "#,
     );
@@ -90,7 +90,7 @@ fn test_type_annotation_type_mismatch() {
         "
         init {
             let x: u256 = false;
-            evm_stop();
+            @evm_stop();
         }
         ",
         &[r#"
@@ -110,13 +110,13 @@ fn test_no_else_if_as_expr() {
     assert_lowers_to(
         "
         init {
-            let cond = calldataload(0);
-            let y = if iszero(cond) {
-                revert(malloc_uninit(0), 0);
-            } else if gt(cond, 2) {
-                sstore(3, 4);
+            let cond = @evm_calldataload(0);
+            let y = if @evm_iszero(cond) {
+                @evm_revert(@malloc_uninit(0), 0);
+            } else if @evm_gt(cond, 2) {
+                @evm_sstore(3, 4);
             };
-            evm_stop();
+            @evm_stop();
         }
         ",
         r#"
@@ -124,29 +124,29 @@ fn test_no_else_if_as_expr() {
         ; init
         @fn0() -> never {
             %0 : u256 = 0
-            %1 : u256 = calldataload(%0)
+            %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : bool = iszero(%2)
+            %3 : bool = @evm_iszero(%2)
             if %3 {
                 %4 : u256 = 0
-                %5 : memptr = malloc_uninit(%4)
+                %5 : memptr = @malloc_uninit(%4)
                 %6 : u256 = 0
-                %7 : never = revert(%5, %6)
+                %7 : never = @evm_revert(%5, %6)
             } else {
                 %8 : u256 = %1
                 %9 : u256 = 2
-                %10 : bool = gt(%8, %9)
+                %10 : bool = @evm_gt(%8, %9)
                 if %10 {
                     %11 : u256 = 3
                     %12 : u256 = 4
-                    %13 : void = sstore(%11, %12)
+                    %13 : void = @evm_sstore(%11, %12)
                     %14 : void = void_unit
                 } else {
                     %14 : void = void_unit
                 }
             }
             %15 : void = %14
-            %16 : never = evm_stop()
+            %16 : never = @evm_stop()
         }
         "#,
     );
@@ -159,11 +159,11 @@ fn test_comptime_if_condition_folds_in_runtime() {
         init {
             let cond = false;
             if cond {
-                revert(malloc_uninit(0), 0);
+                @evm_revert(@malloc_uninit(0), 0);
             } else {
-                sstore(3, 4);
+                @evm_sstore(3, 4);
             }
-            evm_stop();
+            @evm_stop();
         }
         ",
         r#"
@@ -172,10 +172,10 @@ fn test_comptime_if_condition_folds_in_runtime() {
         @fn0() -> never {
             %0 : u256 = 3
             %1 : u256 = 4
-            %2 : void = sstore(%0, %1)
+            %2 : void = @evm_sstore(%0, %1)
             %3 : void = void_unit
             %4 : void = %3
-            %5 : never = evm_stop()
+            %5 : never = @evm_stop()
         }
         "#,
     );
@@ -186,15 +186,15 @@ fn test_if_three_branches() {
     assert_lowers_to(
         "
         init {
-            let c = calldataload(0);
-            let x = if slt(c, 0)  {
+            let c = @evm_calldataload(0);
+            let x = if @evm_slt(c, 0)  {
                 334
-            } else if iszero(c) {
+            } else if @evm_iszero(c) {
                 333
             } else {
                 0
             };
-            evm_stop();
+            @evm_stop();
         }
         ",
         r#"
@@ -202,15 +202,15 @@ fn test_if_three_branches() {
         ; init
         @fn0() -> never {
             %0 : u256 = 0
-            %1 : u256 = calldataload(%0)
+            %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
             %3 : u256 = 0
-            %4 : bool = slt(%2, %3)
+            %4 : bool = @evm_slt(%2, %3)
             if %4 {
                 %5 : u256 = 334
             } else {
                 %6 : u256 = %1
-                %7 : bool = iszero(%6)
+                %7 : bool = @evm_iszero(%6)
                 if %7 {
                     %5 : u256 = 333
                 } else {
@@ -218,7 +218,7 @@ fn test_if_three_branches() {
                 }
             }
             %8 : u256 = %5
-            %9 : never = evm_stop()
+            %9 : never = @evm_stop()
         }
         "#,
     );
@@ -229,9 +229,9 @@ fn test_type_annotation_not_comptime() {
     assert_diagnostics(
         "
         init {
-            let T = calldataload(0);
+            let T = @evm_calldataload(0);
             let x: T = 5;
-            evm_stop();
+            @evm_stop();
         }
         ",
         &[r#"
@@ -249,13 +249,13 @@ fn test_if_two_branches_type_mismatch() {
     assert_diagnostics(
         "
         init {
-            let c = calldataload(0);
-            let x = if slt(c, 0)  {
+            let c = @evm_calldataload(0);
+            let x = if @evm_slt(c, 0)  {
                 334
             } else {
                 false
             };
-            evm_stop();
+            @evm_stop();
         }
         ",
         &[r#"
@@ -276,15 +276,15 @@ fn test_if_three_branches_type_mismatch() {
     assert_diagnostics(
         "
         init {
-            let c = calldataload(0);
-            let x = if slt(c, 0) {
+            let c = @evm_calldataload(0);
+            let x = if @evm_slt(c, 0) {
                 3
-            } else if eq(c, 34) {
+            } else if @evm_eq(c, 34) {
                 false
             } else {
                 true
             };
-            evm_stop();
+            @evm_stop();
         }
         ",
         &[r#"
@@ -293,7 +293,7 @@ fn test_if_three_branches_type_mismatch() {
               |
             4 |         3
               |         - `u256` expected because of this
-            5 |     } else if eq(c, 34) {
+            5 |     } else if @evm_eq(c, 34) {
             6 |         false
               |         ^^^^^ expected `u256`, got `bool`
             "#],
@@ -305,20 +305,20 @@ fn test_if_type_mismatch() {
     assert_diagnostics(
         "
         init {
-            let c = calldataload(0);
-            let x: u256 = if slt(c, 0)  {
+            let c = @evm_calldataload(0);
+            let x: u256 = if @evm_slt(c, 0)  {
                 true
             } else {
                 false
             };
-            evm_stop();
+            @evm_stop();
         }
         ",
         &[r#"
             error: mismatched types
              --> main.plk:3:19
               |
-            3 |       let x: u256 = if slt(c, 0)  {
+            3 |       let x: u256 = if @evm_slt(c, 0)  {
               |  ____________----___^
               | |            |
               | |            `u256` expected because of this
@@ -336,7 +336,7 @@ fn test_run_missing_termination() {
     assert_diagnostics(
         "
         init {
-            evm_stop();
+            @evm_stop();
         }
         run {
             let x = 5;
@@ -351,7 +351,7 @@ fn test_run_missing_termination() {
         6 | | }
           | |_^ execution may reach end of entry point
           |
-          = help: entry points must end with a terminating `never` expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
+          = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
         "#],
     );
 }
@@ -361,7 +361,7 @@ fn test_init_missing_termination() {
     assert_diagnostics(
         "
         init {
-            sstore(0, 1);
+            @evm_sstore(0, 1);
         }
         ",
         &[r#"
@@ -369,11 +369,11 @@ fn test_init_missing_termination() {
          --> main.plk:1:1
           |
         1 | / init {
-        2 | |     sstore(0, 1);
+        2 | |     @evm_sstore(0, 1);
         3 | | }
           | |_^ execution may reach end of entry point
           |
-          = help: entry points must end with a terminating `never` expression (e.g. `evm_stop()`, `revert(...)`, `invalid()`)
+          = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
         "#],
     );
 }
@@ -410,13 +410,13 @@ fn test_init_run_with_never_fn() {
         "
         init {
             let halt = fn() never {
-                evm_stop();
+                @evm_stop();
             };
             halt();
         }
         run {
             let halt = fn() never {
-                invalid();
+                @evm_invalid();
             };
             let abort = fn() never {
                 halt();
@@ -427,7 +427,7 @@ fn test_init_run_with_never_fn() {
         "
         ==== Functions ====
         @fn0() -> never {
-            %0 : never = evm_stop()
+            %0 : never = @evm_stop()
         }
 
         ; init
@@ -436,7 +436,7 @@ fn test_init_run_with_never_fn() {
         }
 
         @fn2() -> never {
-            %0 : never = invalid()
+            %0 : never = @evm_invalid()
         }
 
         @fn3() -> never {
@@ -456,7 +456,7 @@ fn test_diverging_block_middle() {
     assert_lowers_to(
         r#"
         init {
-            evm_stop();
+            @evm_stop();
             let x = 42;
         }
         "#,
@@ -464,7 +464,7 @@ fn test_diverging_block_middle() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : never = evm_stop()
+            %0 : never = @evm_stop()
         }
         "#,
     );
@@ -476,21 +476,21 @@ fn test_builtin_call_with_never_arg() {
         r#"
         init {
             let halt = fn() never {
-                evm_stop();
+                @evm_stop();
             };
-            mstore32(malloc_uninit(0x20), halt());
+            @mstore32(@malloc_uninit(0x20), halt());
         }
         "#,
         r#"
         ==== Functions ====
         @fn0() -> never {
-            %0 : never = evm_stop()
+            %0 : never = @evm_stop()
         }
 
         ; init
         @fn1() -> never {
             %0 : u256 = 32
-            %1 : memptr = malloc_uninit(%0)
+            %1 : memptr = @malloc_uninit(%0)
             %2 : never = call @fn0()
         }
         "#,
@@ -502,13 +502,13 @@ fn test_if_mixed_never_and_value_branches() {
     assert_lowers_to(
         r#"
         init {
-            let c = calldataload(0);
-            let x = if iszero(c) {
-                evm_stop()
+            let c = @evm_calldataload(0);
+            let x = if @evm_iszero(c) {
+                @evm_stop()
             } else {
                 42
             };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -516,16 +516,16 @@ fn test_if_mixed_never_and_value_branches() {
         ; init
         @fn0() -> never {
             %0 : u256 = 0
-            %1 : u256 = calldataload(%0)
+            %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : bool = iszero(%2)
+            %3 : bool = @evm_iszero(%2)
             if %3 {
-                %4 : never = evm_stop()
+                %4 : never = @evm_stop()
             } else {
                 %5 : u256 = 42
             }
             %6 : u256 = %5
-            %7 : never = evm_stop()
+            %7 : never = @evm_stop()
         }
         "#,
     );
@@ -542,7 +542,7 @@ fn test_fn_struct_return() {
 
         init {
             let x = swap(3, 4);
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -559,7 +559,7 @@ fn test_fn_struct_return() {
             %0 : u256 = 3
             %1 : u256 = 4
             %2 : Pair = call @fn0(%0, %1)
-            %3 : never = evm_stop()
+            %3 : never = @evm_stop()
         }
         "#,
     );
@@ -580,7 +580,7 @@ fn test_struct_field_access() {
             let mut pa = p.a;
             let mut pb = p.b;
 
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -597,7 +597,7 @@ fn test_struct_field_access() {
             %4 : u256 = %3.0
             %5 : Pair = %2
             %6 : bool = %5.1
-            %7 : never = evm_stop()
+            %7 : never = @evm_stop()
         }
         "#,
     );
@@ -612,7 +612,7 @@ fn test_invalid_field_access() {
         init {
             let x = Pair { b: false, a : 34 };
             let y: u256 = x.hey;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -634,7 +634,7 @@ fn test_comptime_invalid_field_access() {
         const x = p.hey;
 
         init {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -659,7 +659,7 @@ fn test_comptime_struct_field_ordering() {
         init {
             let mut x: u256 = a_val;
             let mut y: bool = b_val;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -668,7 +668,7 @@ fn test_comptime_struct_field_ordering() {
         @fn0() -> never {
             %0 : u256 = 42
             %1 : bool = true
-            %2 : never = evm_stop()
+            %2 : never = @evm_stop()
         }
         "#,
     );
@@ -682,7 +682,7 @@ fn test_comptime_struct_missing_field() {
         const my_pair = Pair { a: 42 };
 
         init {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -703,7 +703,7 @@ fn test_comptime_struct_unknown_field() {
         const my_pair = Pair { a: 42, c: true, b: false };
 
         init {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -724,7 +724,7 @@ fn test_comptime_struct_duplicate_field() {
         const my_pair = Pair { a: 42, a: 99, b: false };
 
         init {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -747,7 +747,7 @@ fn test_comptime_struct_unknown_and_missing() {
         const my_pair = Pair { a: 42, c: true };
 
         init {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[
@@ -776,7 +776,7 @@ fn test_assign_type_mismatch() {
         init {
             let mut x = 1;
             x = false;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -799,7 +799,7 @@ fn test_comptime_struct_field_type_mismatch() {
         const my_pair = Pair { a: false, b: false };
 
         init {
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -818,11 +818,11 @@ fn test_mixed_comptime_runtime_struct() {
         r#"
         const Wrapper = struct { t: type, n: u256 };
         init {
-            let x = calldataload(0);
+            let x = @evm_calldataload(0);
             let w = Wrapper { t: u256, n: x,
                 c: 34
             };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[
@@ -855,7 +855,7 @@ fn test_comptime_struct_def_field_not_type() {
     assert_diagnostics(
         r#"
         const S = struct { x: 42 };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: value used as type
@@ -873,7 +873,7 @@ fn test_comptime_struct_lit_type_not_type() {
         r#"
         const T = 42;
         const x = T { };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: value used as type
@@ -892,7 +892,7 @@ fn test_comptime_param_type_not_type() {
         const forty_two = 42;
         const f = fn(x: forty_two) u256 { return x; };
         const r = f(1);
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: value used as type
@@ -911,7 +911,7 @@ fn test_struct_lit_value_as_type_in_init() {
         const T = 42;
         init {
             let x = T { };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -929,9 +929,9 @@ fn test_struct_type_not_comptime_known() {
     assert_diagnostics(
         r#"
         init {
-            let T = calldataload(0);
+            let T = @evm_calldataload(0);
             let x = T { };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -950,7 +950,7 @@ fn test_runtime_struct_def_field_not_type() {
         r#"
         init {
             let S = struct { x: 42 };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -968,9 +968,9 @@ fn test_runtime_struct_def_type_index_not_comptime() {
     assert_diagnostics(
         r#"
         init {
-            let T = calldataload(0);
+            let T = @evm_calldataload(0);
             let S = struct T { x: u256 };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -988,9 +988,9 @@ fn test_runtime_struct_def_field_type_not_comptime() {
     assert_diagnostics(
         r#"
         init {
-            let T = calldataload(0);
+            let T = @evm_calldataload(0);
             let S = struct { x: T };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1011,7 +1011,7 @@ fn test_runtime_fn_return_type_not_type() {
         init {
             let f = fn() forty_two { return 1; };
             f();
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1034,7 +1034,7 @@ fn test_comptime_assign_type_mismatch() {
             return x;
         };
         const r = f();
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: mismatched types
@@ -1054,7 +1054,7 @@ fn test_comptime_call_arg_type_mismatch() {
         r#"
         const f = fn(x: u256) u256 { return x; };
         const r = f(false);
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: mismatched types
@@ -1075,7 +1075,7 @@ fn test_runtime_return_type_mismatch() {
         init {
             let f = fn() u256 { return false; };
             f();
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1097,12 +1097,12 @@ fn test_comptime_if_condition_not_bool() {
         init {
             comptime {
                 if 42 {
-                    add(3, 4);
+                    @evm_add(3, 4);
                 } else {
-                    iszero(34);
+                    @evm_iszero(34);
                 }
             }
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1122,7 +1122,7 @@ fn test_runtime_struct_lit_field_type_mismatch() {
         const Pair = struct { a: u256, b: bool };
         init {
             let x = Pair { a: false, b: false };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1140,7 +1140,7 @@ fn test_runtime_call_arg_type_mismatch() {
     assert_diagnostics(
         r#"
         init {
-            let f = fn(x: u256) never { evm_stop(); };
+            let f = fn(x: u256) never { @evm_stop(); };
             f(false);
         }
         "#,
@@ -1148,7 +1148,7 @@ fn test_runtime_call_arg_type_mismatch() {
         error: mismatched types
          --> main.plk:3:7
           |
-        2 |     let f = fn(x: u256) never { evm_stop(); };
+        2 |     let f = fn(x: u256) never { @evm_stop(); };
           |                   ---- `u256` expected because of this
         3 |     f(false);
           |       ^^^^^ expected `u256`, got `bool`
@@ -1161,14 +1161,14 @@ fn test_runtime_if_condition_comptime_not_bool() {
     assert_diagnostics(
         "
         init {
-            if 42 { evm_stop(); } else { evm_stop(); }
+            if 42 { @evm_stop(); } else { @evm_stop(); }
         }
         ",
         &[r#"
         error: mismatched types
          --> main.plk:2:8
           |
-        2 |     if 42 { evm_stop(); } else { evm_stop(); }
+        2 |     if 42 { @evm_stop(); } else { @evm_stop(); }
           |        ^^ expected `bool`, got `u256`
         "#],
     );
@@ -1179,15 +1179,15 @@ fn test_runtime_if_condition_runtime_not_bool() {
     assert_diagnostics(
         "
         init {
-            let c = calldataload(0);
-            if c { evm_stop(); } else { evm_stop(); }
+            let c = @evm_calldataload(0);
+            if c { @evm_stop(); } else { @evm_stop(); }
         }
         ",
         &[r#"
         error: mismatched types
          --> main.plk:3:8
           |
-        3 |     if c { evm_stop(); } else { evm_stop(); }
+        3 |     if c { @evm_stop(); } else { @evm_stop(); }
           |        ^ expected `bool`, got `u256`
         "#],
     );
@@ -1198,9 +1198,9 @@ fn test_runtime_while_condition_not_bool() {
     assert_diagnostics(
         "
         init {
-            let c = calldataload(0);
+            let c = @evm_calldataload(0);
             while c { }
-            evm_stop();
+            @evm_stop();
         }
         ",
         &[r#"
@@ -1218,7 +1218,7 @@ fn test_comptime_struct_lit_not_a_struct() {
     assert_diagnostics(
         r#"
         const x = u256 { };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: expected struct type
@@ -1236,7 +1236,7 @@ fn test_runtime_struct_lit_not_a_struct() {
         r#"
         init {
             let x = u256 { };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1256,7 +1256,7 @@ fn test_runtime_struct_lit_unknown_field() {
         const Pair = struct { a: u256, b: bool };
         init {
             let x = Pair { a: 42, c: true, b: false };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1276,7 +1276,7 @@ fn test_runtime_struct_lit_duplicate_field() {
         const Pair = struct { a: u256, b: bool };
         init {
             let x = Pair { a: 42, a: 99, b: false };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1298,7 +1298,7 @@ fn test_runtime_struct_lit_missing_field() {
         const Pair = struct { a: u256, b: bool };
         init {
             let x = Pair { a: 42 };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1317,7 +1317,7 @@ fn test_comptime_member_on_non_struct() {
         r#"
         const x: u256 = 5;
         const y = x.foo;
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: no fields on type
@@ -1334,9 +1334,9 @@ fn test_runtime_member_on_non_struct() {
     assert_diagnostics(
         r#"
         init {
-            let x: u256 = calldataload(0);
+            let x: u256 = @evm_calldataload(0);
             let y = x.foo;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1355,7 +1355,7 @@ fn test_comptime_call_on_non_function() {
         r#"
         const x = 5;
         const y = x();
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: expected function
@@ -1374,7 +1374,7 @@ fn test_diagnostic_renders_struct_name() {
         const Pair = struct { a: u256, b: bool };
         init {
             let x: Pair = 42;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1394,9 +1394,9 @@ fn test_call_target_not_comptime() {
     assert_diagnostics(
         r#"
         init {
-            let f = calldataload(0);
+            let f = @evm_calldataload(0);
             f();
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1418,7 +1418,7 @@ fn test_runtime_call_on_non_function() {
         init {
             let x = 5;
             x();
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1438,7 +1438,7 @@ fn test_runtime_call_arg_count_mismatch() {
         const foo = fn(x: u256) u256 { return x; };
         init {
             foo(1, 2);
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1460,7 +1460,7 @@ fn test_comptime_call_arg_count_mismatch() {
         r#"
         const f = fn(x: u256) u256 { return x; };
         const r = f(1, 2);
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: wrong number of arguments
@@ -1481,7 +1481,7 @@ fn test_cross_file_type_mismatch() {
             "
             import m::other::f;
             const y = f(true);
-            init { evm_stop(); }
+            init { @evm_stop(); }
             ",
         )
         .add_file("other", "const f = fn(x: u256) u256 { return x; };")
@@ -1504,14 +1504,19 @@ fn test_cross_file_type_mismatch() {
 #[test]
 fn test_cross_file_call_arg_count_mismatch() {
     assert_project_diagnostics(
-        TestProject::root("import m::other::f;\ninit { f(1, 2); evm_stop(); }")
-            .add_file("other", "const f = fn(x: u256) u256 { return x; };")
-            .add_module("m", ""),
+        TestProject::root(
+            r#"
+            import m::other::f;
+            init { f(1, 2); @evm_stop(); }
+            "#,
+        )
+        .add_file("other", "const f = fn(x: u256) u256 { return x; };")
+        .add_module("m", ""),
         &[r#"
         error: wrong number of arguments
          --> main.plk:2:8
           |
-        2 | init { f(1, 2); evm_stop(); }
+        2 | init { f(1, 2); @evm_stop(); }
           |        ^^^^^^^ expected 1 argument, got 2
           |
          ::: other.plk:1:13
@@ -1527,18 +1532,18 @@ fn test_no_matching_builtin_signature() {
     assert_diagnostics(
         r#"
         init {
-            add(true, false);
-            evm_stop();
+            @evm_add(true, false);
+            @evm_stop();
         }
         "#,
         &[r#"
         error: no valid match for builtin signature
          --> main.plk:2:5
           |
-        2 |     add(true, false);
-          |     ^^^^^^^^^^^^^^^^ `add` cannot be called with (bool, bool)
+        2 |     @evm_add(true, false);
+          |     ^^^^^^^^^^^^^^^^^^^^^ `@evm_add` cannot be called with (bool, bool)
           |
-          = note: `add` accepts (u256, u256), (memptr, u256), (u256, memptr)
+          = note: `@evm_add` accepts (u256, u256), (memptr, u256), (u256, memptr)
         "#],
     );
 }
@@ -1548,18 +1553,18 @@ fn test_builtin_wrong_arg_count() {
     assert_diagnostics(
         r#"
         init {
-            add(1);
-            evm_stop();
+            @evm_add(1);
+            @evm_stop();
         }
         "#,
         &[r#"
         error: wrong number of arguments
          --> main.plk:2:5
           |
-        2 |     add(1);
-          |     ^^^^^^ `add` called with 1 argument, but requires 2
+        2 |     @evm_add(1);
+          |     ^^^^^^^^^^^ `@evm_add` called with 1 argument, but requires 2
           |
-          = note: `add` accepts (u256, u256), (memptr, u256), (u256, memptr)
+          = note: `@evm_add` accepts (u256, u256), (memptr, u256), (u256, memptr)
         "#],
     );
 }
@@ -1569,17 +1574,17 @@ fn test_closure_capture_not_comptime() {
     assert_diagnostics(
         r#"
         init {
-            let x = calldataload(0);
+            let x = @evm_calldataload(0);
             let f = fn() u256 { x };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
         error: closure capture must be known at compile time
          --> main.plk:3:25
           |
-        2 |     let x = calldataload(0);
-          |             --------------- defined here
+        2 |     let x = @evm_calldataload(0);
+          |             -------------------- defined here
         3 |     let f = fn() u256 { x };
           |                         ^ capture of runtime value
           |
@@ -1593,10 +1598,10 @@ fn test_logical_not_runtime() {
     assert_lowers_to(
         r#"
         init {
-            let c = calldataload(0);
-            let b = iszero(c);
+            let c = @evm_calldataload(0);
+            let b = @evm_iszero(c);
             let nb = !b;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1604,12 +1609,12 @@ fn test_logical_not_runtime() {
         ; init
         @fn0() -> never {
             %0 : u256 = 0
-            %1 : u256 = calldataload(%0)
+            %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : bool = iszero(%2)
+            %3 : bool = @evm_iszero(%2)
             %4 : bool = %3
-            %5 : bool = iszero(%4)
-            %6 : never = evm_stop()
+            %5 : bool = @evm_iszero(%4)
+            %6 : never = @evm_stop()
         }
         "#,
     );
@@ -1622,7 +1627,7 @@ fn test_logical_not_comptime_true() {
         const x = !true;
         init {
             let mut v: bool = x;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1630,7 +1635,7 @@ fn test_logical_not_comptime_true() {
         ; init
         @fn0() -> never {
             %0 : bool = false
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -1643,7 +1648,7 @@ fn test_logical_not_comptime_false() {
         const x = !false;
         init {
             let mut v: bool = x;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1651,7 +1656,7 @@ fn test_logical_not_comptime_false() {
         ; init
         @fn0() -> never {
             %0 : bool = true
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -1662,12 +1667,12 @@ fn test_logical_not_in_if_condition() {
     assert_lowers_to(
         r#"
         init {
-            let c = calldataload(0);
-            let b = iszero(c);
+            let c = @evm_calldataload(0);
+            let b = @evm_iszero(c);
             if !b {
-                evm_stop();
+                @evm_stop();
             } else {
-                revert(malloc_uninit(0), 0);
+                @evm_revert(@malloc_uninit(0), 0);
             }
         }
         "#,
@@ -1676,18 +1681,18 @@ fn test_logical_not_in_if_condition() {
         ; init
         @fn0() -> never {
             %0 : u256 = 0
-            %1 : u256 = calldataload(%0)
+            %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : bool = iszero(%2)
+            %3 : bool = @evm_iszero(%2)
             %4 : bool = %3
-            %5 : bool = iszero(%4)
+            %5 : bool = @evm_iszero(%4)
             if %5 {
-                %6 : never = evm_stop()
+                %6 : never = @evm_stop()
             } else {
                 %7 : u256 = 0
-                %8 : memptr = malloc_uninit(%7)
+                %8 : memptr = @malloc_uninit(%7)
                 %9 : u256 = 0
-                %10 : never = revert(%8, %9)
+                %10 : never = @evm_revert(%8, %9)
             }
         }
         "#,
@@ -1699,9 +1704,9 @@ fn test_logical_not_type_mismatch_runtime() {
     assert_diagnostics(
         r#"
         init {
-            let c = calldataload(0);
+            let c = @evm_calldataload(0);
             let x = !c;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1719,7 +1724,7 @@ fn test_logical_not_type_mismatch_comptime() {
     assert_diagnostics(
         r#"
         const x = !42;
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: mismatched types
@@ -1738,7 +1743,7 @@ fn test_and_comptime_short_circuit_false() {
         const x = false and true;
         init {
             let mut v: bool = x;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1746,7 +1751,7 @@ fn test_and_comptime_short_circuit_false() {
         ; init
         @fn0() -> never {
             %0 : bool = false
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -1757,9 +1762,9 @@ fn test_and_condition_type_mismatch() {
     assert_diagnostics(
         r#"
         init {
-            let c = calldataload(0);
+            let c = @evm_calldataload(0);
             let x = c and true;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1777,9 +1782,9 @@ fn test_or_condition_type_mismatch() {
     assert_diagnostics(
         r#"
         init {
-            let c = calldataload(0);
+            let c = @evm_calldataload(0);
             let x = c or true;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -1796,32 +1801,32 @@ fn test_or_condition_type_mismatch() {
 fn test_comptime_evm_builtins() {
     assert_lowers_to(
         r#"
-        const add_res = add(10, 7);
-        const mul_res = mul(3, 4);
-        const sub_res = sub(10, 3);
-        const div_res = raw_div(10, 3);
-        const mod_res = raw_mod(10, 3);
-        const sdiv_res = raw_sdiv(10, 3);
-        const smod_res = raw_smod(10, 3);
-        const exp_res = exp(2, 10);
-        const div_zero = raw_div(5, 0);
-        const signext_res = signextend(0, 0x7F);
-        const and_res = bitwise_and(0xFF, 0x0F);
-        const or_res = bitwise_or(0xF0, 0x0F);
-        const xor_res = bitwise_xor(0xFF, 0x0F);
-        const byte_res = byte(31, 0x42);
-        const shl_res = shl(4, 1);
-        const shr_res = shr(1, 16);
-        const sar_res = sar(1, 8);
-        const lt_res = lt(3, 5);
-        const gt_res = gt(5, 3);
-        const slt_res = slt(3, 5);
-        const sgt_res = sgt(5, 3);
-        const eq_res = eq(5, 5);
-        const iszero_t = iszero(0);
-        const iszero_f = iszero(1);
-        const addmod_res = raw_addmod(5, 7, 10);
-        const mulmod_res = raw_mulmod(3, 4, 5);
+        const add_res = @evm_add(10, 7);
+        const mul_res = @evm_mul(3, 4);
+        const sub_res = @evm_sub(10, 3);
+        const div_res = @evm_raw_div(10, 3);
+        const mod_res = @evm_raw_mod(10, 3);
+        const sdiv_res = @evm_raw_sdiv(10, 3);
+        const smod_res = @evm_raw_smod(10, 3);
+        const exp_res = @evm_exp(2, 10);
+        const div_zero = @evm_raw_div(5, 0);
+        const signext_res = @evm_signextend(0, 0x7F);
+        const and_res = @evm_bitwise_and(0xFF, 0x0F);
+        const or_res = @evm_bitwise_or(0xF0, 0x0F);
+        const xor_res = @evm_bitwise_xor(0xFF, 0x0F);
+        const byte_res = @evm_byte(31, 0x42);
+        const shl_res = @evm_shl(4, 1);
+        const shr_res = @evm_shr(1, 16);
+        const sar_res = @evm_sar(1, 8);
+        const lt_res = @evm_lt(3, 5);
+        const gt_res = @evm_gt(5, 3);
+        const slt_res = @evm_slt(3, 5);
+        const sgt_res = @evm_sgt(5, 3);
+        const eq_res = @evm_eq(5, 5);
+        const iszero_t = @evm_iszero(0);
+        const iszero_f = @evm_iszero(1);
+        const addmod_res = @evm_raw_addmod(5, 7, 10);
+        const mulmod_res = @evm_raw_mulmod(3, 4, 5);
         init {
             let mut a: u256 = add_res;
             let mut b: u256 = mul_res;
@@ -1849,7 +1854,7 @@ fn test_comptime_evm_builtins() {
             let mut x: bool = iszero_f;
             let mut y: u256 = addmod_res;
             let mut z: u256 = mulmod_res;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1882,7 +1887,7 @@ fn test_comptime_evm_builtins() {
             %23 : bool = false
             %24 : u256 = 2
             %25 : u256 = 2
-            %26 : never = evm_stop()
+            %26 : never = @evm_stop()
         }
         "#,
     );
@@ -1892,11 +1897,11 @@ fn test_comptime_evm_builtins() {
 fn test_comptime_evm_const_chain() {
     assert_lowers_to(
         r#"
-        const a = add(5, 10);
-        const b = mul(a, 3);
+        const a = @evm_add(5, 10);
+        const b = @evm_mul(a, 3);
         init {
             let mut x: u256 = b;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1904,7 +1909,7 @@ fn test_comptime_evm_const_chain() {
         ; init
         @fn0() -> never {
             %0 : u256 = 45
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -1914,15 +1919,15 @@ fn test_comptime_evm_const_chain() {
 fn test_comptime_unsupported_evm_builtin() {
     assert_diagnostics(
         r#"
-        const x = caller();
-        init { evm_stop(); }
+        const x = @evm_caller();
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: builtin not supported at compile time
          --> main.plk:1:11
           |
-        1 | const x = caller();
-          |           ^^^^^^^^ `caller` cannot be evaluated at compile time
+        1 | const x = @evm_caller();
+          |           ^^^^^^^^^^^^^ `@evm_caller` cannot be evaluated at compile time
         "#],
     );
 }
@@ -1931,17 +1936,17 @@ fn test_comptime_unsupported_evm_builtin() {
 fn test_comptime_evm_wrong_arg_type_in_const() {
     assert_diagnostics(
         r#"
-        const y = mul(true, 5);
-        init { evm_stop(); }
+        const y = @evm_mul(true, 5);
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: no valid match for builtin signature
          --> main.plk:1:11
           |
-        1 | const y = mul(true, 5);
-          |           ^^^^^^^^^^^^ `mul` cannot be called with (bool, u256)
+        1 | const y = @evm_mul(true, 5);
+          |           ^^^^^^^^^^^^^^^^^ `@evm_mul` cannot be called with (bool, u256)
           |
-          = note: `mul` accepts (u256, u256)
+          = note: `@evm_mul` accepts (u256, u256)
         "#],
     );
 }
@@ -1958,7 +1963,7 @@ fn test_comptime_block_multi_statement() {
                 a = y;
                 a
             };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1966,7 +1971,7 @@ fn test_comptime_block_multi_statement() {
         ; init
         @fn0() -> never {
             %0 : u256 = 15
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -1979,7 +1984,7 @@ fn test_comptime_block_with_const_ref() {
         const N = 42;
         init {
             let mut x: u256 = comptime { N };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -1987,7 +1992,7 @@ fn test_comptime_block_with_const_ref() {
         ; init
         @fn0() -> never {
             %0 : u256 = 42
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -2001,7 +2006,7 @@ fn test_out_of_order_const_ref() {
         const A = 34;
         init {
             let mut x: u256 = comptime { B };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -2009,7 +2014,7 @@ fn test_out_of_order_const_ref() {
         ; init
         @fn0() -> never {
             %0 : u256 = 34
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -2023,7 +2028,7 @@ fn test_comptime_block_nested_const() {
         const B = comptime { A };
         init {
             let mut x: u256 = comptime { B };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -2031,7 +2036,7 @@ fn test_comptime_block_nested_const() {
         ; init
         @fn0() -> never {
             %0 : u256 = 10
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -2046,7 +2051,7 @@ fn test_comptime_block_struct_type() {
                 struct { x: u256 }
             };
             let mut val = T { x: 42 };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -2056,7 +2061,7 @@ fn test_comptime_block_struct_type() {
             %0 : struct@main.plk:3:9 = struct#7 {
                 42,
             }
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -2067,9 +2072,9 @@ fn test_comptime_block_runtime_capture() {
     assert_diagnostics(
         r#"
         init {
-            let x = calldataload(0);
+            let x = @evm_calldataload(0);
             let y = comptime { x };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[r#"
@@ -2087,9 +2092,9 @@ fn test_comptime_expr_runtime_dep() {
     assert_diagnostics(
         r#"
         init {
-            let cond = iszero(calldataload(0));
+            let cond = @evm_iszero(@evm_calldataload(0));
             let T = if cond { u256 } else { bool };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         &[
@@ -2120,10 +2125,10 @@ fn test_comptime_recursion() {
     assert_lowers_to(
         r#"
         const fib_inner = fn (n: u256, a: u256, b: u256) u256 {
-            if iszero(n) {
+            if @evm_iszero(n) {
                 return a;
             }
-            fib_inner(sub(n, 1), b, add(a, b))
+            fib_inner(@evm_sub(n, 1), b, @evm_add(a, b))
         };
         const fib = fn (n: u256) u256 {
             fib_inner(n, 0, 1)
@@ -2134,7 +2139,7 @@ fn test_comptime_recursion() {
             let mut f1 = comptime { fib(1) };
             let mut f10 = comptime { fib(10) };
             let mut f10 = comptime { fib(11) };
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -2145,7 +2150,7 @@ fn test_comptime_recursion() {
             %1 : u256 = 1
             %2 : u256 = 55
             %3 : u256 = 89
-            %4 : never = evm_stop()
+            %4 : never = @evm_stop()
         }
         "#,
     );
@@ -2157,7 +2162,7 @@ fn test_comptime_block_type_result() {
         r#"
         init {
             let mut x: comptime { u256 } = 5;
-            evm_stop();
+            @evm_stop();
         }
         "#,
         r#"
@@ -2165,7 +2170,7 @@ fn test_comptime_block_type_result() {
         ; init
         @fn0() -> never {
             %0 : u256 = 5
-            %1 : never = evm_stop()
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -2176,7 +2181,7 @@ fn test_struct_def_duplicate_field() {
     assert_diagnostics(
         r#"
         const S = struct { x: u256, x: bool };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: duplicate field name in struct definition
@@ -2199,7 +2204,7 @@ fn test_const_self_cycle() {
             A
         };
 
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: cycle in constant evaluation
@@ -2220,7 +2225,7 @@ fn test_const_mutual_cycle() {
         r#"
            const A = B;
            const B = A;
-           init { evm_stop(); }
+           init { @evm_stop(); }
            "#,
         &[r#"
         error: cycle in constant evaluation
@@ -2240,7 +2245,7 @@ fn test_const_with_type_error_does_not_panic() {
             let a: bool = 5;
             a
         };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         &[r#"
         error: mismatched types
