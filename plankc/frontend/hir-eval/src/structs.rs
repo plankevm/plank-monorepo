@@ -2,7 +2,7 @@ use crate::scope::{EvalValue, LocalState, Scope};
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId};
-use plank_values::{Field, StructInfo, Type, TypeId, Value};
+use plank_values::{Field, StructInfo, StructView, Type, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -109,16 +109,13 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     ) -> MaybePoisoned<EvalValue> {
         self.with_values_buf(|this, values_buf_offset| {
             this.with_locals_buf(|this, locals_buf_offset| {
-                this.with_fields_buf(|this, fields_buf_offset| {
-                    this.eval_struct_lit_inner(
-                        struct_type_local,
-                        fields,
-                        lit_span,
-                        values_buf_offset,
-                        locals_buf_offset,
-                        fields_buf_offset,
-                    )
-                })
+                this.eval_struct_lit_inner(
+                    struct_type_local,
+                    fields,
+                    lit_span,
+                    values_buf_offset,
+                    locals_buf_offset,
+                )
             })
         })
     }
@@ -149,13 +146,12 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         &mut self,
         mut validity: MaybePoisoned<()>,
         struct_ty: TypeId,
-        def_fields_buf_offset: usize,
+        def: StructView<'_>,
         lit_fields: &[hir::FieldInfo],
         lit_span: SourceSpan,
         values_buf_offset: usize,
     ) -> MaybePoisoned<EvalValue> {
-        let def_fields = &self.eval.fields_buf[def_fields_buf_offset..];
-        for &def_field in def_fields {
+        for &def_field in def.fields {
             let Some(lit_field) =
                 lit_fields.iter().find(|lit_field| lit_field.name == def_field.name)
             else {
@@ -179,7 +175,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         validity.map(|()| {
             let field_values = &self.eval.values_buf[values_buf_offset..];
-            assert_eq!(field_values.len(), def_fields.len());
+            assert_eq!(field_values.len(), def.fields.len());
             EvalValue::Comptime(
                 self.eval.values.intern(Value::StructVal { ty: struct_ty, fields: field_values }),
             )
@@ -193,16 +189,15 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         &mut self,
         mut validity: MaybePoisoned<()>,
         struct_ty: TypeId,
+        def: StructView<'_>,
         values_buf_offset: usize,
-        def_fields_buf_offset: usize,
         locals_buf_offset: usize,
         lit_fields: &[hir::FieldInfo],
         lit_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
-        let def_fields = &self.eval.fields_buf[def_fields_buf_offset..];
         let mut first_runtime_field = None;
 
-        for &def_field in def_fields {
+        for &def_field in def.fields {
             let Some(&lit_field) =
                 lit_fields.iter().find(|lit_field| lit_field.name == def_field.name)
             else {
@@ -222,7 +217,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     if first_runtime_field.is_none() {
                         // One time conversion of already pushed values.
                         'materialize_comptime: for (&value, &def_field) in
-                            self.eval.values_buf[values_buf_offset..].iter().zip(def_fields)
+                            self.eval.values_buf[values_buf_offset..].iter().zip(def.fields)
                         {
                             let value_ty = self.values.type_of_value(value);
                             if self.types.is_comptime_only(value_ty) {
@@ -281,7 +276,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         validity.map(|()| match first_runtime_field {
             None => {
                 let field_values = &self.eval.values_buf[values_buf_offset..];
-                assert_eq!(field_values.len(), def_fields.len());
+                assert_eq!(field_values.len(), def.fields.len());
                 EvalValue::Comptime(
                     self.eval
                         .values
@@ -290,7 +285,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             }
             Some(_) => {
                 let locals = &self.eval.locals_buf[locals_buf_offset..];
-                assert_eq!(locals.len(), def_fields.len());
+                assert_eq!(locals.len(), def.fields.len());
                 let fields = self.eval.mir_args.push_copy_slice(locals);
                 EvalValue::Runtime {
                     expr: mir::Expr::StructLit { ty: struct_ty, fields },
@@ -307,7 +302,6 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         lit_span: SourceSpan,
         values_buf_offset: usize,
         locals_buf_offset: usize,
-        fields_buf_offset: usize,
     ) -> MaybePoisoned<EvalValue> {
         let lit_fields = &self.eval.hir.fields[fields];
         let lit_loc = self.loc(lit_span);
@@ -321,8 +315,6 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             self.diag_ctx.emit_not_a_struct_type(&self.eval.types, struct_ty, ty_loc);
             return Err(Poisoned);
         };
-        // Save to temporary buffer because Rust borrow checker is a f***ing ****
-        self.eval.fields_buf.extend_from_slice(def.fields);
 
         // Diagnose field existence and type match.
         for &lit_field in lit_fields {
@@ -375,7 +367,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             self.force_fold_struct_lit(
                 validity,
                 struct_ty,
-                fields_buf_offset,
+                def,
                 lit_fields,
                 lit_span,
                 values_buf_offset,
@@ -384,8 +376,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             self.runtime_eval_struct_lit(
                 validity,
                 struct_ty,
+                def,
                 values_buf_offset,
-                fields_buf_offset,
                 locals_buf_offset,
                 lit_fields,
                 lit_span,
