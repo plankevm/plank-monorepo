@@ -2,8 +2,8 @@ use plank_core::{
     IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
 };
 use plank_session::{
-    ComptimeBuiltin, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceByteOffset, SourceId,
-    SourceSpan, SrcLoc, StrId,
+    ComptimeBuiltin, MaybePoisoned, Poisoned, PolymorphicBuiltin, RuntimeBuiltin, SourceByteOffset,
+    SourceId, SourceSpan, SrcLoc, StrId,
 };
 
 pub mod display;
@@ -44,6 +44,10 @@ pub enum ExprKind {
     },
     ComptimeBuiltinCall {
         builtin: ComptimeBuiltin,
+        args: CallArgsId,
+    },
+    PolymorphicBuiltinCall {
+        builtin: PolymorphicBuiltin,
         args: CallArgsId,
     },
     UnaryOpCall {

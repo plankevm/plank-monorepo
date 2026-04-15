@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use plank_hir as hir;
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
@@ -267,20 +269,19 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_no_matching_builtin_signature(
-        &mut self,
+    fn format_signatures_note(
+        &self,
         types: &TypeInterner,
         builtin: impl Builtin,
-        arg_types: &[TypeId],
-        loc: SrcLoc,
-    ) {
+    ) -> Option<String> {
         use std::fmt::Write;
 
-        let name = builtin.name();
         let signatures = builtin.signatures();
-        let arg_count = builtin.arg_count();
+        if signatures.is_empty() {
+            return None;
+        }
 
-        let mut note = format!("`{name}` accepts ");
+        let mut note = format!("`{}` accepts ", builtin.name());
         for (i, sig) in signatures.iter().enumerate() {
             if i > 0 {
                 note.push_str(", ");
@@ -294,31 +295,68 @@ impl DiagCtx<'_> {
             }
             note.push(')');
         }
+        Some(note)
+    }
 
-        let (title, label) = if arg_count == arg_types.len() {
-            let mut args_str = String::new();
-            for (i, &ty) in arg_types.iter().enumerate() {
-                if i > 0 {
-                    args_str.push_str(", ");
-                }
-                let _ = write!(args_str, "{}", types.format(self.session, ty));
+    pub fn emit_wrong_arg_count(
+        &mut self,
+        types: &TypeInterner,
+        builtin: impl Builtin,
+        actual: usize,
+        loc: SrcLoc,
+    ) {
+        let name = builtin.name();
+        let expected = builtin.arg_count();
+
+        let mut diag = Diagnostic::error("wrong number of arguments").primary(
+            loc.source,
+            loc.span,
+            format!(
+                "`{name}` called with {}, but requires {expected}",
+                fmt_count(actual, "argument"),
+            ),
+        );
+
+        if let Some(note) = self.format_signatures_note(types, builtin) {
+            diag = diag.note(note);
+        }
+
+        diag.emit(self.session);
+    }
+
+    pub fn emit_no_matching_builtin_signature(
+        &mut self,
+        types: &TypeInterner,
+        builtin: impl Builtin,
+        arg_types: &[TypeId],
+        loc: SrcLoc,
+    ) {
+        use std::fmt::Write;
+
+        if builtin.arg_count() != arg_types.len() {
+            return self.emit_wrong_arg_count(types, builtin, arg_types.len(), loc);
+        }
+
+        let name = builtin.name();
+        let mut args_str = String::new();
+        for (i, &ty) in arg_types.iter().enumerate() {
+            if i > 0 {
+                args_str.push_str(", ");
             }
-            (
-                "no valid match for builtin signature",
-                format!("`{name}` cannot be called with ({args_str})"),
-            )
-        } else {
-            (
-                "wrong number of arguments",
-                format!(
-                    "`{name}` called with {}, but requires {}",
-                    fmt_count(arg_types.len(), "argument"),
-                    arg_count,
-                ),
-            )
-        };
+            let _ = write!(args_str, "{}", types.format(self.session, ty));
+        }
 
-        Diagnostic::error(title).primary(loc.source, loc.span, label).note(note).emit(self.session);
+        let mut diag = Diagnostic::error("no valid match for builtin signature").primary(
+            loc.source,
+            loc.span,
+            format!("`{name}` cannot be called with ({args_str})"),
+        );
+
+        if let Some(note) = self.format_signatures_note(types, builtin) {
+            diag = diag.note(note);
+        }
+
+        diag.emit(self.session);
     }
 
     pub fn emit_unsupported_eval_of_runtime_builtin(
@@ -433,7 +471,7 @@ impl DiagCtx<'_> {
     pub fn emit_expected_struct_type_arg(
         &mut self,
         types: &TypeInterner,
-        builtin: plank_session::ComptimeBuiltin,
+        builtin: impl Display,
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
@@ -452,7 +490,7 @@ impl DiagCtx<'_> {
     pub fn emit_expected_type_arg(
         &mut self,
         types: &TypeInterner,
-        builtin: plank_session::ComptimeBuiltin,
+        builtin: impl Display,
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
@@ -464,6 +502,40 @@ impl DiagCtx<'_> {
                     "`{builtin}` expects a type argument, got a value of type `{}`",
                     types.format(self.session, actual_ty),
                 ),
+            )
+            .emit(self.session);
+    }
+
+    pub fn emit_field_index_out_of_bounds(
+        &mut self,
+        builtin: impl Builtin,
+        index: usize,
+        field_count: usize,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("field index out of bounds")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}`: field index {index} is out of bounds for struct with {}",
+                    diagnostic::fmt_count(field_count, "field"),
+                ),
+            )
+            .emit(self.session);
+    }
+
+    pub fn emit_expected_comptime_arg(
+        &mut self,
+        builtin: impl Builtin,
+        arg_name: &str,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("expected compile-time argument")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`{builtin}` requires {arg_name} to be compile-time known"),
             )
             .emit(self.session);
     }

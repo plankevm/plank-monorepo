@@ -8,7 +8,8 @@ use plank_parser::{
     lexer::{Lexed, TokenSpan},
 };
 use plank_session::{
-    ComptimeBuiltin, Poisoned, RuntimeBuiltin, Session, SourceId, SourceSpan, StrId, TypeId,
+    ComptimeBuiltin, Poisoned, PolymorphicBuiltin, RuntimeBuiltin, Session, SourceId, SourceSpan,
+    StrId, TypeId,
 };
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::ValueInterner;
@@ -368,6 +369,9 @@ impl BlockLowerer<'_> {
                     if let Some(builtin) = ComptimeBuiltin::from_str_id(name) {
                         let args = self.lower_call_args(call_expr.args());
                         ExprKind::ComptimeBuiltinCall { builtin, args }
+                    } else if let Some(builtin) = PolymorphicBuiltin::from_str_id(name) {
+                        let args = self.lower_call_args(call_expr.args());
+                        ExprKind::PolymorphicBuiltinCall { builtin, args }
                     } else if let Some(builtin) = RuntimeBuiltin::from_str_id(name) {
                         let args = self.lower_call_args(call_expr.args());
                         ExprKind::RuntimeBuiltinCall { builtin, args }

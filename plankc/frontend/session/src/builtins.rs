@@ -10,18 +10,12 @@ pub struct BuiltinSignature {
 
 pub trait Builtin: Display + Copy {
     fn name(self) -> &'static str;
+    fn arg_count(self) -> usize;
     fn signatures(self) -> &'static [BuiltinSignature];
-
-    /// All sigs have the same arg count, guaranteed by compile time check in
-    /// `signatures`.
-    fn arg_count(self) -> usize {
-        self.signatures()[0].inputs.len()
-    }
 
     fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
         let signatures = self.signatures();
-        let expected_count = signatures[0].inputs.len();
-        if expected_count != arg_types.len() {
+        if signatures.is_empty() || signatures[0].inputs.len() != arg_types.len() {
             return None;
         }
         for sig in signatures {
@@ -84,11 +78,17 @@ macro_rules! define_builtins {
                 { $( [$($cb_arg:ident),* => $cb_ret:ident] ),+ };
             )*
         }
+        polymorphic_builtins {
+            $(
+                $pb_const:ident $pb_str:literal => $pb_variant:ident($pb_arg_count:literal);
+            )*
+        }
     ) => {
         pub mod builtin_names {
             $(pub const $pt_const: &str = $pt_str;)*
             $(pub const $b_const: &str = $b_str;)*
             $(pub const $cb_const: &str = $cb_str;)*
+            $(pub const $pb_const: &str = $pb_str;)*
         }
 
         #[doc(hidden)]
@@ -97,16 +97,19 @@ macro_rules! define_builtins {
             $($pt_type,)*
             $($b_variant,)*
             $($cb_variant,)*
+            $($pb_variant,)*
         }
 
         $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
         $(pub const $b_const: StrId = StrId::new(BuiltinStrIdx::$b_variant as u32);)*
         $(pub const $cb_const: StrId = StrId::new(BuiltinStrIdx::$cb_variant as u32);)*
+        $(pub const $pb_const: StrId = StrId::new(BuiltinStrIdx::$pb_variant as u32);)*
 
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
             $(assert_eq!(interner.intern(builtin_names::$b_const), $b_const);)*
             $(assert_eq!(interner.intern(builtin_names::$cb_const), $cb_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$pb_const), $pb_const);)*
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +131,12 @@ macro_rules! define_builtins {
                 match self {
                     $(Self::$b_variant => $b_str,)*
                 }
+            }
+
+            /// All sigs have the same arg count, guaranteed by compile time check in
+            /// `signatures`.
+            fn arg_count(self) -> usize {
+                self.signatures()[0].inputs.len()
             }
 
             fn signatures(self) -> &'static [BuiltinSignature] {
@@ -170,6 +179,12 @@ macro_rules! define_builtins {
                 }
             }
 
+            /// All sigs have the same arg count, guaranteed by compile time check in
+            /// `signatures`.
+            fn arg_count(self) -> usize {
+                self.signatures()[0].inputs.len()
+            }
+
             fn signatures(self) -> &'static [BuiltinSignature] {
                 const U256: TypeId = TypeId::U256;
                 const BOOL: TypeId = TypeId::BOOL;
@@ -182,6 +197,44 @@ macro_rules! define_builtins {
         }
 
         impl Display for ComptimeBuiltin {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum PolymorphicBuiltin {
+            $($pb_variant,)*
+        }
+
+        impl PolymorphicBuiltin {
+            pub fn from_str_id(id: StrId) -> Option<Self> {
+                Some(match id {
+                    $($pb_const => PolymorphicBuiltin::$pb_variant,)*
+                    _ => return None,
+                })
+            }
+        }
+
+        impl Builtin for PolymorphicBuiltin {
+            fn name(self) -> &'static str {
+                match self {
+                    $(Self::$pb_variant => $pb_str,)*
+                }
+            }
+
+            fn arg_count(self) -> usize {
+                match self {
+                    $(Self::$pb_variant => $pb_arg_count,)*
+                }
+            }
+
+            fn signatures(self) -> &'static [BuiltinSignature] {
+                &[]
+            }
+        }
+
+        impl Display for PolymorphicBuiltin {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
                 f.write_str(self.name())
             }
@@ -391,6 +444,12 @@ define_builtins! {
         // Type Reflection
         IS_STRUCT "@is_struct" => IsStruct { [TYPE => BOOL] };
         FIELD_COUNT "@field_count" => FieldCount { [TYPE => U256] };
+    }
+
+    polymorphic_builtins {
+        FIELD_TYPE "@field_type" => FieldType(2);
+        GET_FIELD "@get_field" => GetField(3);
+        SET_FIELD "@set_field" => SetField(4);
     }
 }
 

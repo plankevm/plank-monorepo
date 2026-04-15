@@ -2309,11 +2309,11 @@ fn test_comptime_field_count_expects_type() {
         init { @evm_stop(); }
         "#,
         &[r#"
-        error: expected struct type
+        error: expected type argument
          --> main.plk:1:11
           |
         1 | const x = @field_count(true);
-          |           ^^^^^^^^^^^^^^^^^^ `@field_count` expects a struct type, got `bool`
+          |           ^^^^^^^^^^^^^^^^^^ `@field_count` expects a type argument, got a value of type `bool`
         "#],
     );
 }
@@ -2354,5 +2354,229 @@ fn test_comptime_field_count() {
             %1 : never = @evm_stop()
         }
         "#,
+    );
+}
+
+#[test]
+fn test_comptime_field_type() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const T0 = @field_type(Pair, 0);
+        const T1 = @field_type(Pair, 1);
+        init {
+            let mut x: T0 = 42;
+            let mut y: T1 = true;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 42
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_field_type_expects_struct() {
+    assert_diagnostics(
+        r#"
+        const T = @field_type(u256, 0);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected struct type
+         --> main.plk:1:11
+          |
+        1 | const T = @field_type(u256, 0);
+          |           ^^^^^^^^^^^^^^^^^^^^ `@field_type` expects a struct type, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_get_field() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const p = Pair { a: 42, b: true };
+        const val = @get_field(Pair, 0, p);
+        init {
+            let mut x = val;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 42
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_runtime_get_field() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        init {
+            let s = Pair { a: @evm_calldataload(0), b: @evm_calldataload(0x20) };
+            let val = @get_field(Pair, 1, s);
+            let mut x: u256 = val;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = 32
+            %3 : u256 = @evm_calldataload(%2)
+            %4 : Pair = Pair { %1, %3 }
+            %5 : Pair = %4
+            %6 : u256 = %5.1
+            %7 : u256 = %6
+            %8 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_get_field_out_of_bounds() {
+    assert_diagnostics(
+        r#"
+        const S = struct { a: u256 };
+        const s = S { a: 1 };
+        const val = @get_field(S, 3, s);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: field index out of bounds
+         --> main.plk:3:13
+          |
+        3 | const val = @get_field(S, 3, s);
+          |             ^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 3 is out of bounds for struct with 1 field
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_set_field() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        const p = Pair { a: 1, b: 2 };
+        const p2 = @set_field(Pair, 0, p, 99);
+        const val = p2.a;
+        init {
+            let mut x: u256 = val;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 99
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_runtime_set_field() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        init {
+            let s = Pair { a: @evm_calldataload(0), b: @evm_calldataload(0x20) };
+            let s2 = @set_field(Pair, 0, s, 99);
+            let mut x: u256 = s2.a;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = 32
+            %3 : u256 = @evm_calldataload(%2)
+            %4 : Pair = Pair { %1, %3 }
+            %5 : Pair = %4
+            %6 : u256 = 99
+            %7 : u256 = %5.1
+            %8 : Pair = Pair { %6, %7 }
+            %9 : Pair = %8
+            %10 : u256 = %9.0
+            %11 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_set_field_comptime_struct_runtime_value() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        const p = Pair { a: 1, b: 2 };
+        init {
+            let val: u256 = @evm_calldataload(0);
+            let p2 = @set_field(Pair, 0, p, val);
+            let mut x: u256 = p2.a;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = %1
+            %3 : Pair = struct#7 {
+                1,
+                2,
+            }
+            %4 : u256 = %3.1
+            %5 : Pair = Pair { %2, %4 }
+            %6 : Pair = %5
+            %7 : u256 = %6.0
+            %8 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_set_field_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const p = Pair { a: 1, b: true };
+        const p2 = @set_field(Pair, 1, p, 42);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:12
+          |
+        3 | const p2 = @set_field(Pair, 1, p, 42);
+          |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `bool`, got `u256`
+        "#],
     );
 }

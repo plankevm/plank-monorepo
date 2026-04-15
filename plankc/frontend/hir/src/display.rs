@@ -84,6 +84,10 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "{builtin}")?;
                 self.fmt_args(f, args)
             }
+            Expr::PolymorphicBuiltinCall { builtin, args } => {
+                write!(f, "{builtin}")?;
+                self.fmt_args(f, args)
+            }
             Expr::Member { object, member, .. } => {
                 self.fmt_local(f, object)?;
                 let name = &self.session.lookup_name(member);
