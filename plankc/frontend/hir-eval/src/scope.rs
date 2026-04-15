@@ -137,7 +137,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
-            self.diag_ctx.emit_type_not_type(self.eval.types, actual_ty, type_loc);
+            self.diag_ctx.emit_type_not_type(actual_ty, type_loc);
             return Err(Poisoned);
         };
         Ok(ty)
@@ -187,7 +187,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         } else {
             self.diag_ctx.emit_type_mismatch(
-                self.eval.types,
                 expected_ty,
                 self.loc(expected_span),
                 actual_ty,
@@ -291,7 +290,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         };
                         if let Err(existing_ty) = self.mir_types[target].unify(ty) {
                             self.diag_ctx.emit_incompatible_branch_types(
-                                self.eval.types,
                                 existing_ty,
                                 self.loc(binding.span),
                                 ty,
@@ -436,7 +434,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state) => {
                 let state_ty = self.state_type(state);
                 self.diag_ctx.emit_type_mismatch_simple(
-                    self.eval.types,
                     TypeId::BOOL,
                     state_ty,
                     self.loc(binding.span),
@@ -470,7 +467,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state_ty = this.state_type(state);
             if !state_ty.is_assignable_to(TypeId::BOOL) {
                 this.diag_ctx.emit_type_mismatch_simple(
-                    this.eval.types,
                     TypeId::BOOL,
                     state_ty,
                     this.loc(binding.span),
@@ -512,12 +508,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (state, span) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(
-                self.eval.types,
-                TypeId::BOOL,
-                ty,
-                self.loc(span),
-            );
+            self.diag_ctx.emit_type_mismatch_simple(TypeId::BOOL, ty, self.loc(span));
             return Err(Poisoned);
         }
         let value = match state {

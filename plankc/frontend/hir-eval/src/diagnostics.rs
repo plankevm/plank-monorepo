@@ -8,18 +8,18 @@ use plank_values::{
 
 pub(crate) struct DiagCtx<'a> {
     pub session: &'a mut Session,
+    pub types: &'a TypeInterner,
 }
 
 impl<'a> DiagCtx<'a> {
-    pub fn new(session: &'a mut Session) -> Self {
-        Self { session }
+    pub fn new(session: &'a mut Session, types: &'a TypeInterner) -> Self {
+        Self { session, types }
     }
 }
 
 impl DiagCtx<'_> {
     pub fn emit_type_mismatch(
         &mut self,
-        types: &TypeInterner,
         expected_ty: TypeId,
         expected_loc: SrcLoc,
         actual_ty: TypeId,
@@ -27,17 +27,17 @@ impl DiagCtx<'_> {
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
-            types.format(self.session, expected_ty),
-            types.format(self.session, actual_ty),
+            self.types.format(self.session, expected_ty),
+            self.types.format(self.session, actual_ty),
         );
         let secondary_label =
-            format!("`{}` expected because of this", types.format(self.session, expected_ty));
+            format!("`{}` expected because of this", self.types.format(self.session, expected_ty));
         Diagnostic::error("mismatched types")
             .cross_source_annotations(actual_loc, primary_label, expected_loc, secondary_label)
             .emit(self.session);
     }
 
-    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
+    pub fn emit_type_not_type(&mut self, ty: TypeId, loc: SrcLoc) {
         Diagnostic::error("value used as type")
             .primary(
                 loc.source,
@@ -45,7 +45,7 @@ impl DiagCtx<'_> {
                 format!(
                     "expected {}, got value of type `{}`",
                     builtin_names::TYPE,
-                    types.format(self.session, ty)
+                    self.types.format(self.session, ty)
                 ),
             )
             .emit(self.session);
@@ -53,7 +53,6 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_literal_field_type_mismatch(
         &mut self,
-        types: &TypeInterner,
         expected_ty: TypeId,
         actual_ty: TypeId,
         field_value_loc: SrcLoc,
@@ -66,8 +65,8 @@ impl DiagCtx<'_> {
                 field_value_loc.span,
                 format!(
                     "field `{name}` expects `{}`, got `{}`",
-                    types.format(self.session, expected_ty),
-                    types.format(self.session, actual_ty),
+                    self.types.format(self.session, expected_ty),
+                    self.types.format(self.session, actual_ty),
                 ),
             )
             .emit(self.session);
@@ -75,7 +74,6 @@ impl DiagCtx<'_> {
 
     pub fn emit_type_mismatch_simple(
         &mut self,
-        types: &TypeInterner,
         expected_ty: TypeId,
         actual_ty: TypeId,
         loc: SrcLoc,
@@ -86,51 +84,48 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "expected `{}`, got `{}`",
-                    types.format(self.session, expected_ty),
-                    types.format(self.session, actual_ty),
+                    self.types.format(self.session, expected_ty),
+                    self.types.format(self.session, actual_ty),
                 ),
             )
             .emit(self.session);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, ty_loc: SrcLoc) {
+    pub fn emit_not_a_struct_type(&mut self, ty: TypeId, ty_loc: SrcLoc) {
         Diagnostic::error("expected struct type")
             .primary(
                 ty_loc.source,
                 ty_loc.span,
-                format!("`{}` is not a struct type", types.format(self.session, ty)),
+                format!("`{}` is not a struct type", self.types.format(self.session, ty)),
             )
             .emit(self.session);
     }
 
-    pub fn emit_member_on_non_struct(
-        &mut self,
-        types: &TypeInterner,
-        ty: TypeId,
-        value_loc: SrcLoc,
-    ) {
+    pub fn emit_member_on_non_struct(&mut self, ty: TypeId, value_loc: SrcLoc) {
         Diagnostic::error("no fields on type")
             .primary(
                 value_loc.source,
                 value_loc.span,
-                format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
+                format!(
+                    "value of type `{}` is not a struct type",
+                    self.types.format(self.session, ty)
+                ),
             )
             .emit(self.session);
     }
 
-    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
+    pub fn emit_not_callable(&mut self, ty: TypeId, loc: SrcLoc) {
         Diagnostic::error("expected function")
             .primary(
                 loc.source,
                 loc.span,
-                format!("`{}` is not callable", types.format(self.session, ty)),
+                format!("`{}` is not callable", self.types.format(self.session, ty)),
             )
             .emit(self.session);
     }
 
     pub fn emit_incompatible_branch_types(
         &mut self,
-        types: &TypeInterner,
         ty1: TypeId,
         loc1: SrcLoc,
         ty2: TypeId,
@@ -138,11 +133,11 @@ impl DiagCtx<'_> {
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
-            types.format(self.session, ty1),
-            types.format(self.session, ty2),
+            self.types.format(self.session, ty1),
+            self.types.format(self.session, ty2),
         );
         let secondary_label =
-            format!("`{}` expected because of this", types.format(self.session, ty1));
+            format!("`{}` expected because of this", self.types.format(self.session, ty1));
         Diagnostic::error("`if` and `else` have incompatible types")
             .cross_source_annotations(loc2, primary_label, loc1, secondary_label)
             .emit(self.session);
@@ -273,7 +268,6 @@ impl DiagCtx<'_> {
 
     pub fn emit_no_matching_builtin_signature(
         &mut self,
-        types: &TypeInterner,
         builtin: EvmBuiltin,
         arg_types: &[TypeId],
         loc: SrcLoc,
@@ -290,7 +284,7 @@ impl DiagCtx<'_> {
                 if j > 0 {
                     note.push_str(", ");
                 }
-                let _ = write!(note, "{}", types.format(self.session, ty));
+                write!(note, "{}", self.types.format(self.session, ty)).unwrap();
             }
             note.push(')');
         }
@@ -301,7 +295,7 @@ impl DiagCtx<'_> {
                 if i > 0 {
                     args_str.push_str(", ");
                 }
-                let _ = write!(args_str, "{}", types.format(self.session, ty));
+                write!(args_str, "{}", self.types.format(self.session, ty)).unwrap();
             }
             (
                 "no valid match for builtin signature",
@@ -334,7 +328,6 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_lit_unexpected_field(
         &mut self,
-        types: &TypeInterner,
         struct_ty: TypeId,
         lit_loc: SrcLoc,
         field: hir::FieldInfo,
@@ -344,14 +337,13 @@ impl DiagCtx<'_> {
             .primary(
                 lit_loc.source,
                 field_span,
-                format!("`{}` has no field `{field}`", types.format(self.session, struct_ty)),
+                format!("`{}` has no field `{field}`", self.types.format(self.session, struct_ty)),
             )
             .emit(self.session);
     }
 
     pub fn emit_struct_unknown_field_access(
         &mut self,
-        types: &TypeInterner,
         struct_ty: TypeId,
         expr_loc: SrcLoc,
         field_name: StrId,
@@ -362,7 +354,7 @@ impl DiagCtx<'_> {
                 expr_loc.span,
                 format!(
                     "`{}` has no field `{}`",
-                    types.format(self.session, struct_ty),
+                    self.types.format(self.session, struct_ty),
                     self.session.lookup_name(field_name),
                 ),
             )
@@ -409,7 +401,6 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_missing_field(
         &mut self,
-        types: &TypeInterner,
         struct_ty: TypeId,
         field_name: StrId,
         lit_loc: SrcLoc,
@@ -421,7 +412,7 @@ impl DiagCtx<'_> {
                 format!(
                     "missing field `{}` in `{}`",
                     self.session.lookup_name(field_name),
-                    types.format(self.session, struct_ty),
+                    self.types.format(self.session, struct_ty),
                 ),
             )
             .emit(self.session);

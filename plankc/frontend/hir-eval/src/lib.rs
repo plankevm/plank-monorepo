@@ -23,7 +23,7 @@ mod tests;
 pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) -> Mir {
     let types = TypeInterner::new();
     let mut evaluator = Evaluator::new(hir, &types, values);
-    let mut diag_ctx = diagnostics::DiagCtx::new(session);
+    let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
     let init = evaluator.lower_entrypoint(hir.init, &mut diag_ctx);
     let run = hir.run.map(|run| evaluator.lower_entrypoint(run, &mut diag_ctx));

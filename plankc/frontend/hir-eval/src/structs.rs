@@ -67,23 +67,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let (state, value_def_span) = self.bindings[object].poisoned()?;
         let struct_ty = self.state_type(state);
         let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_member_on_non_struct(
-                self.eval.types,
-                struct_ty,
-                self.loc(value_def_span),
-            );
+            self.diag_ctx.emit_member_on_non_struct(struct_ty, self.loc(value_def_span));
             return Err(Poisoned);
         };
 
         let Some((field_index, &field)) =
             (0u32..).zip(struct_type_info.fields).find(|&(_i, &field)| field.name == member)
         else {
-            self.diag_ctx.emit_struct_unknown_field_access(
-                self.eval.types,
-                struct_ty,
-                self.loc(expr_span),
-                member,
-            );
+            self.diag_ctx.emit_struct_unknown_field_access(struct_ty, self.loc(expr_span), member);
             return Err(Poisoned);
         };
 
@@ -312,7 +303,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let ty_loc = self.loc(self.bindings[struct_type_local].span);
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_not_a_struct_type(self.eval.types, struct_ty, ty_loc);
+            self.diag_ctx.emit_not_a_struct_type(struct_ty, ty_loc);
             return Err(Poisoned);
         };
 
@@ -320,12 +311,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         for &lit_field in lit_fields {
             let Some(&def_field) = def.fields.iter().find(|&&field| field.name == lit_field.name)
             else {
-                self.diag_ctx.emit_struct_lit_unexpected_field(
-                    self.eval.types,
-                    struct_ty,
-                    lit_loc,
-                    lit_field,
-                );
+                self.diag_ctx.emit_struct_lit_unexpected_field(struct_ty, lit_loc, lit_field);
                 validity = Err(Poisoned);
                 continue;
             };
@@ -338,7 +324,6 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let field_value_ty = self.state_type(field_value_state);
             if !field_value_ty.is_assignable_to(def_field.ty) {
                 self.diag_ctx.emit_struct_literal_field_type_mismatch(
-                    self.eval.types,
                     def_field.ty,
                     field_value_ty,
                     self.loc(field_value_span),
@@ -352,12 +337,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         // Check for missing fields.
         for &def_field in def.fields {
             if !lit_fields.iter().any(|lit_field| lit_field.name == def_field.name) {
-                self.diag_ctx.emit_struct_missing_field(
-                    self.eval.types,
-                    struct_ty,
-                    def_field.name,
-                    lit_loc,
-                );
+                self.diag_ctx.emit_struct_missing_field(struct_ty, def_field.name, lit_loc);
                 validity = Err(Poisoned);
             };
         }

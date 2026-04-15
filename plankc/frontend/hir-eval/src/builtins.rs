@@ -90,12 +90,7 @@ impl Scope<'_, '_> {
             let arg_types = &this.eval.types_buf[types_buf_offset..];
 
             resolve_result_type(builtin, arg_types).ok_or_else(|| {
-                this.diag_ctx.emit_no_matching_builtin_signature(
-                    this.eval.types,
-                    builtin,
-                    &this.eval.types_buf[types_buf_offset..],
-                    expr_loc,
-                );
+                this.diag_ctx.emit_no_matching_builtin_signature(builtin, arg_types, expr_loc);
                 Poisoned
             })
         })?;
