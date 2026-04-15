@@ -457,8 +457,8 @@ impl BlockLowerer<'_> {
                         break 'binary self.lower_short_circuit_op(binary, ShortCircuitOp::Or);
                     }
                     // Comparison
-                    cst::BinaryOp::DoubleEquals => hir_ops::BinaryOp::NotEquals,
-                    cst::BinaryOp::BangEquals => hir_ops::BinaryOp::Equals,
+                    cst::BinaryOp::DoubleEquals => hir_ops::BinaryOp::Equals,
+                    cst::BinaryOp::BangEquals => hir_ops::BinaryOp::NotEquals,
                     cst::BinaryOp::LessThan => hir_ops::BinaryOp::LessThan,
                     cst::BinaryOp::GreaterThan => hir_ops::BinaryOp::GreaterThan,
                     cst::BinaryOp::LessEquals => hir_ops::BinaryOp::LessEquals,

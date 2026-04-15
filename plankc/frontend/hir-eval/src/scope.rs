@@ -555,6 +555,24 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
+            ExprKind::BinaryOpCall { op: hir::operators::BinaryOp::Equals, lhs, rhs } => {
+                let lhs = self.bindings[lhs].state.and_then(|lhs| {
+                    let LocalState::Comptime(value) = lhs else { return Err(Poisoned) };
+                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
+                    Ok(ty)
+                });
+                let rhs = self.bindings[rhs].state.and_then(|rhs| {
+                    let LocalState::Comptime(value) = rhs else { return Err(Poisoned) };
+                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
+                    Ok(ty)
+                });
+                let result = poison::zip(lhs, rhs)
+                    .map(|(lhs, rhs)| EvalValue::Comptime((lhs == rhs).into()));
+                if result.is_err() {
+                    self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
+                }
+                result
+            }
             ExprKind::UnaryOpCall { .. } | ExprKind::BinaryOpCall { .. } => {
                 self.diag_ctx.emit_not_yet_implemented("operators", self.loc(expr.span));
                 Err(Poisoned)
