@@ -39,11 +39,11 @@ macro_rules! define_builtins {
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum EvmBuiltin {
+        pub enum RuntimeBuiltin {
             $($b_variant,)*
         }
 
-        impl EvmBuiltin {
+        impl RuntimeBuiltin {
             pub fn name(self) -> &'static str {
                 match self {
                     $(Self::$b_variant => $b_str,)*
@@ -52,7 +52,7 @@ macro_rules! define_builtins {
 
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
-                    $($b_const => EvmBuiltin::$b_variant,)*
+                    $($b_const => RuntimeBuiltin::$b_variant,)*
                     _ => return None,
                 })
             }
@@ -71,7 +71,7 @@ macro_rules! define_builtins {
                 const NEVER: TypeId = TypeId::NEVER;
 
                 match self {
-                    $(EvmBuiltin::$b_variant => {
+                    $(RuntimeBuiltin::$b_variant => {
                         const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
                             inputs: &[$($arg),*],
                             result: $ret
@@ -92,10 +92,10 @@ macro_rules! define_builtins {
             }
         }
 
-        impl ::std::fmt::Display for EvmBuiltin {
+        impl ::std::fmt::Display for RuntimeBuiltin {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 let name = match self {
-                    $(EvmBuiltin::$b_variant => builtin_names::$b_const,)*
+                    $(RuntimeBuiltin::$b_variant => builtin_names::$b_const,)*
                 };
                 f.write_str(name)
             }
@@ -302,35 +302,35 @@ define_builtins! {
     }
 }
 
-impl EvmBuiltin {
+impl RuntimeBuiltin {
     pub fn is_pure(self) -> bool {
         matches!(
             self,
-            EvmBuiltin::Add
-                | EvmBuiltin::Mul
-                | EvmBuiltin::Sub
-                | EvmBuiltin::Div
-                | EvmBuiltin::SDiv
-                | EvmBuiltin::Mod
-                | EvmBuiltin::SMod
-                | EvmBuiltin::AddMod
-                | EvmBuiltin::MulMod
-                | EvmBuiltin::Exp
-                | EvmBuiltin::SignExtend
-                | EvmBuiltin::Lt
-                | EvmBuiltin::Gt
-                | EvmBuiltin::SLt
-                | EvmBuiltin::SGt
-                | EvmBuiltin::Eq
-                | EvmBuiltin::IsZero
-                | EvmBuiltin::And
-                | EvmBuiltin::Or
-                | EvmBuiltin::Xor
-                | EvmBuiltin::Not
-                | EvmBuiltin::Byte
-                | EvmBuiltin::Shl
-                | EvmBuiltin::Shr
-                | EvmBuiltin::Sar
+            RuntimeBuiltin::Add
+                | RuntimeBuiltin::Mul
+                | RuntimeBuiltin::Sub
+                | RuntimeBuiltin::Div
+                | RuntimeBuiltin::SDiv
+                | RuntimeBuiltin::Mod
+                | RuntimeBuiltin::SMod
+                | RuntimeBuiltin::AddMod
+                | RuntimeBuiltin::MulMod
+                | RuntimeBuiltin::Exp
+                | RuntimeBuiltin::SignExtend
+                | RuntimeBuiltin::Lt
+                | RuntimeBuiltin::Gt
+                | RuntimeBuiltin::SLt
+                | RuntimeBuiltin::SGt
+                | RuntimeBuiltin::Eq
+                | RuntimeBuiltin::IsZero
+                | RuntimeBuiltin::And
+                | RuntimeBuiltin::Or
+                | RuntimeBuiltin::Xor
+                | RuntimeBuiltin::Not
+                | RuntimeBuiltin::Byte
+                | RuntimeBuiltin::Shl
+                | RuntimeBuiltin::Shr
+                | RuntimeBuiltin::Sar
         )
     }
 
@@ -364,9 +364,9 @@ mod tests {
 
     #[test]
     fn test_builtin_roundtrip() {
-        assert_eq!(EvmBuiltin::from_str_id(ADD), Some(EvmBuiltin::Add));
-        assert_eq!(EvmBuiltin::from_str_id(KECCAK256), Some(EvmBuiltin::Keccak256));
-        assert_eq!(EvmBuiltin::from_str_id(VOID), None);
+        assert_eq!(RuntimeBuiltin::from_str_id(ADD), Some(RuntimeBuiltin::Add));
+        assert_eq!(RuntimeBuiltin::from_str_id(KECCAK256), Some(RuntimeBuiltin::Keccak256));
+        assert_eq!(RuntimeBuiltin::from_str_id(VOID), None);
     }
 
     #[test]

@@ -270,7 +270,7 @@ impl DiagCtx<'_> {
     pub fn emit_no_matching_builtin_signature(
         &mut self,
         types: &TypeInterner,
-        builtin: EvmBuiltin,
+        builtin: RuntimeBuiltin,
         arg_types: &[TypeId],
         loc: SrcLoc,
     ) {
@@ -318,7 +318,11 @@ impl DiagCtx<'_> {
         Diagnostic::error(title).primary(loc.source, loc.span, label).note(note).emit(self.session);
     }
 
-    pub fn emit_unsupported_eval_of_evm_builtin(&mut self, builtin: EvmBuiltin, loc: SrcLoc) {
+    pub fn emit_unsupported_eval_of_runtime_builtin(
+        &mut self,
+        builtin: RuntimeBuiltin,
+        loc: SrcLoc,
+    ) {
         Diagnostic::error("builtin not supported at compile time")
             .primary(
                 loc.source,

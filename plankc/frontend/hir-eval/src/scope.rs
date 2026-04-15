@@ -2,7 +2,9 @@ use crate::{Evaluator, diagnostics::DiagCtx, evaluator::CallArgSpansIdx};
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
-use plank_session::{EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
+use plank_session::{
+    MaybePoisoned, Poisoned, RuntimeBuiltin, SourceId, SourceSpan, SrcLoc, poison,
+};
 use plank_values::{TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,7 +526,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Runtime(mir) => {
                 let args = self.mir_args.push_copy_slice(&[mir]);
                 EvalValue::Runtime {
-                    expr: mir::Expr::BuiltinCall { builtin: EvmBuiltin::IsZero, args },
+                    expr: mir::Expr::BuiltinCall { builtin: RuntimeBuiltin::IsZero, args },
                     result_type: TypeId::BOOL,
                 }
             }
@@ -538,7 +540,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, Diverge> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
-            ExprKind::EvmBuiltinCall { builtin, args } => {
+            ExprKind::RuntimeBuiltinCall { builtin, args } => {
                 poison::transpose(self.eval_builtin(builtin, args, expr.span))?
             }
             ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {

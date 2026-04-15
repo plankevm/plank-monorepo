@@ -1,7 +1,7 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{EvmBuiltin, MaybePoisoned, SourceSpan};
+use plank_session::{MaybePoisoned, RuntimeBuiltin, SourceSpan};
 use plank_values::{TypeId, Value, ValueId, ValueInterner};
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};
@@ -15,11 +15,11 @@ fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
 }
 
 pub(crate) fn fold_pure_builtin(
-    builtin: EvmBuiltin,
+    builtin: RuntimeBuiltin,
     args: &[ValueId],
     values: &mut ValueInterner,
 ) -> ValueId {
-    use EvmBuiltin::*;
+    use RuntimeBuiltin::*;
 
     match *args {
         [a] => {
@@ -75,7 +75,7 @@ pub(crate) fn fold_pure_builtin(
 impl Scope<'_, '_> {
     pub(crate) fn eval_builtin(
         &mut self,
-        builtin: EvmBuiltin,
+        builtin: RuntimeBuiltin,
         args: hir::CallArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
@@ -130,7 +130,7 @@ impl Scope<'_, '_> {
             }
         } else {
             if self.is_comptime() {
-                self.diag_ctx.emit_unsupported_eval_of_evm_builtin(builtin, expr_loc);
+                self.diag_ctx.emit_unsupported_eval_of_runtime_builtin(builtin, expr_loc);
                 if result_type == TypeId::NEVER {
                     return Ok(Err(Diverge::PoisonedControlFlow));
                 } else {

@@ -4,7 +4,7 @@ use plank_core::{
     Idx, IndexVec, Span, const_print::const_assert_mem_size, list_of_lists::ListOfLists,
     newtype_index,
 };
-use plank_session::EvmBuiltin;
+use plank_session::RuntimeBuiltin;
 use plank_values::{TypeId, TypeInterner, ValueId};
 
 newtype_index! {
@@ -19,7 +19,7 @@ pub enum Expr {
     LocalRef(LocalId),
     Const(ValueId),
     Call { callee: FnId, args: ArgsId },
-    BuiltinCall { builtin: EvmBuiltin, args: ArgsId },
+    BuiltinCall { builtin: RuntimeBuiltin, args: ArgsId },
     FieldAccess { object: LocalId, field_index: u32 },
     StructLit { ty: TypeId, fields: ArgsId },
 }

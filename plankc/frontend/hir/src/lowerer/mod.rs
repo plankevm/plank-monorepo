@@ -7,7 +7,7 @@ use plank_parser::{
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
-use plank_session::{EvmBuiltin, Poisoned, Session, SourceId, SourceSpan, StrId, TypeId};
+use plank_session::{Poisoned, RuntimeBuiltin, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::ValueInterner;
 
@@ -179,7 +179,7 @@ impl BlockLowerer<'_> {
     fn alloc_local(&mut self, name: StrId, mutable: bool, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
-        } else if EvmBuiltin::from_str_id(name).is_some() {
+        } else if RuntimeBuiltin::from_str_id(name).is_some() {
             self.error_shadowing_builtin(name, span);
         }
 
@@ -310,7 +310,7 @@ impl BlockLowerer<'_> {
             return ExprKind::Value(Ok(self.values.intern_type(ty)));
         }
 
-        if EvmBuiltin::from_str_id(name).is_some() {
+        if RuntimeBuiltin::from_str_id(name).is_some() {
             self.error_non_call_reference_to_builtin(name, span);
             return ExprKind::POISON;
         }
@@ -354,7 +354,7 @@ impl BlockLowerer<'_> {
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
                 if let ast::Expr::Ident { name, span: _ } = callee
-                    && let Some(builtin) = EvmBuiltin::from_str_id(name)
+                    && let Some(builtin) = RuntimeBuiltin::from_str_id(name)
                 {
                     let buf_start = self.locals_buf.len();
                     for arg in call_expr.args() {
@@ -362,7 +362,7 @@ impl BlockLowerer<'_> {
                         self.locals_buf.push(local);
                     }
                     let args = self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..));
-                    ExprKind::EvmBuiltinCall { builtin, args }
+                    ExprKind::RuntimeBuiltinCall { builtin, args }
                 } else {
                     let callee = self.lower_expr_to_local(callee);
                     let buf_start = self.locals_buf.len();
