@@ -2,7 +2,7 @@ use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, StrId};
+use plank_session::{MaybePoisoned, Poisoned, SrcLoc, StrId};
 use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
@@ -33,7 +33,7 @@ pub(crate) struct Evaluator<'a> {
 
     pub lowered_fns_cache: HashMap<ValueId, State<MaybePoisoned<mir::FnId>>>,
 
-    pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
+    pub call_arg_spans: ListOfLists<CallArgSpansIdx, SrcLoc>,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,

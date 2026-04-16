@@ -2,6 +2,11 @@ use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
 
+pub(crate) enum DiagnosticLoc {
+    Inline(SrcLoc),
+    CrossFile { use_loc: SrcLoc, def_loc: SrcLoc },
+}
+
 pub(crate) struct DiagCtx<'a> {
     pub session: &'a mut Session,
 }
@@ -33,18 +38,22 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("value used as type")
-            .primary(
-                loc.source,
-                loc.span,
-                format!(
-                    "expected {}, got value of type `{}`",
-                    builtin_names::TYPE,
-                    types.format(self.session, ty)
-                ),
-            )
-            .emit(self.session);
+    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: DiagnosticLoc) {
+        let primary_label = format!(
+            "expected {}, got value of type `{}`",
+            builtin_names::TYPE,
+            types.format(self.session, ty),
+        );
+        let diag = Diagnostic::error("value used as type");
+        let diag = match loc {
+            DiagnosticLoc::Inline(primary_loc) => {
+                diag.primary(primary_loc.source, primary_loc.span, primary_label)
+            }
+            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+            }
+        };
+        diag.emit(self.session);
     }
 
     pub fn emit_struct_literal_field_type_mismatch(
@@ -89,34 +98,52 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("expected struct type")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`{}` is not a struct type", types.format(self.session, ty)),
-            )
-            .emit(self.session);
+    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, loc: DiagnosticLoc) {
+        let primary_label = format!("`{}` is not a struct type", types.format(self.session, ty));
+        let diag = Diagnostic::error("expected struct type");
+        let diag = match loc {
+            DiagnosticLoc::Inline(primary_loc) => {
+                diag.primary(primary_loc.source, primary_loc.span, primary_label)
+            }
+            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+            }
+        };
+        diag.emit(self.session);
     }
 
-    pub fn emit_member_on_non_struct(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("no fields on type")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("value of type `{}` is not a struct type", types.format(self.session, ty)),
-            )
-            .emit(self.session);
+    pub fn emit_member_on_non_struct(
+        &mut self,
+        types: &TypeInterner,
+        ty: TypeId,
+        loc: DiagnosticLoc,
+    ) {
+        let primary_label =
+            format!("value of type `{}` is not a struct type", types.format(self.session, ty));
+        let diag = Diagnostic::error("no fields on type");
+        let diag = match loc {
+            DiagnosticLoc::Inline(primary_loc) => {
+                diag.primary(primary_loc.source, primary_loc.span, primary_label)
+            }
+            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+            }
+        };
+        diag.emit(self.session);
     }
 
-    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("expected function")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`{}` is not callable", types.format(self.session, ty)),
-            )
-            .emit(self.session);
+    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: DiagnosticLoc) {
+        let primary_label = format!("`{}` is not callable", types.format(self.session, ty));
+        let diag = Diagnostic::error("expected function");
+        let diag = match loc {
+            DiagnosticLoc::Inline(primary_loc) => {
+                diag.primary(primary_loc.source, primary_loc.span, primary_label)
+            }
+            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+            }
+        };
+        diag.emit(self.session);
     }
 
     pub fn emit_incompatible_branch_types(

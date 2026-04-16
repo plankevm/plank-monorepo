@@ -1250,6 +1250,11 @@ fn test_cross_file_struct_lit_not_a_struct() {
           |
         3 |     let x = T { value: 1 };
           |             ^ `bool` is not a struct type
+          |
+         ::: other.plk:1:1
+          |
+        1 | const T = bool;
+          | --------------- defined here
         "#],
     );
 }
@@ -1269,6 +1274,91 @@ fn test_runtime_struct_lit_not_a_struct() {
           |
         2 |     let x = u256 { };
           |             ^^^^ `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_cross_file_type_not_type() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::T;
+            init {
+                let x = T { };
+                evm_stop();
+            }
+            ",
+        )
+        .add_file("other", "const T = 42;")
+        .add_module("m", ""),
+        &[r#"
+        error: value used as type
+         --> main.plk:3:13
+          |
+        3 |     let x = T { };
+          |             ^ expected type, got value of type `u256`
+          |
+         ::: other.plk:1:1
+          |
+        1 | const T = 42;
+          | ------------- defined here
+        "#],
+    );
+}
+
+#[test]
+fn test_cross_file_member_on_non_struct() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::x;
+            const y = x.foo;
+            init { evm_stop(); }
+            ",
+        )
+        .add_file("other", "const x: u256 = 5;")
+        .add_module("m", ""),
+        &[r#"
+        error: no fields on type
+         --> main.plk:2:11
+          |
+        2 | const y = x.foo;
+          |           ^ value of type `u256` is not a struct type
+          |
+         ::: other.plk:1:1
+          |
+        1 | const x: u256 = 5;
+          | ------------------ defined here
+        "#],
+    );
+}
+
+#[test]
+fn test_cross_file_not_callable() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::x;
+            init {
+                x();
+                evm_stop();
+            }
+            ",
+        )
+        .add_file("other", "const x = 5;")
+        .add_module("m", ""),
+        &[r#"
+        error: expected function
+         --> main.plk:3:5
+          |
+        3 |     x();
+          |     ^ `u256` is not callable
+          |
+         ::: other.plk:1:1
+          |
+        1 | const x = 5;
+          | ------------ defined here
         "#],
     );
 }
