@@ -109,6 +109,15 @@ impl Default for TypeInterner {
     }
 }
 
+/// ID that uniquely identifies every Plank type. Should only be created by the `TypeInterner` or
+/// the primitive type constants.
+///
+/// # Representation
+/// For structs the [`ChunkedArena`] offset is stored verbatim. Thanks to the guarantees from
+/// [`alloc_append`](ChunkedArena::alloc_append) we know that offsets will be a multiple of our
+/// chosen alignment ([`MIN_STRUCT_FIELD_ALIGN`]). This lets us uniquely identify primitive types
+/// by ensuring they are *not* multiples of [`MIN_STRUCT_FIELD_ALIGN`], this is done by setting the
+/// lower bit via [`IS_PRIMITIVE_FLAG`](TypeId::IS_PRIMITIVE_FLAG).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(pub(crate) NonZero<u32>);
 
