@@ -237,3 +237,49 @@ fn test_cross_file_type_mismatch() {
         "#],
     );
 }
+
+#[test]
+fn test_import_group_symbols_accessible() {
+    assert_project_lowers_to(
+        TestProject::root(
+            r#"
+            import m::other::{f, g as my_g};
+            init {
+                let x = f(1);
+                let y = my_g(2, 3);
+                evm_stop();
+            }
+        "#,
+        )
+        .add_file(
+            "other",
+            r#"
+            const f = fn(x: u256) u256 { return x; };
+            const g = fn(a: u256, b: u256) u256 { return a; };
+            "#,
+        )
+        .add_module("m", ""),
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        @fn1(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            ret %2
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : u256 = 1
+            %1 : u256 = call @fn0(%0)
+            %2 : u256 = 2
+            %3 : u256 = 3
+            %4 : u256 = call @fn1(%2, %3)
+            %5 : never = evm_stop()
+        }
+        "#,
+    );
+}

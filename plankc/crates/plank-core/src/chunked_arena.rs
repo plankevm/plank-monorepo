@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn single_allocation_and_get() {
+    fn test_single_allocation_and_get() {
         let arena: ChunkedArena<8> = ChunkedArena::new();
         let (offset, ptr) = unsafe { arena.alloc_append(16) };
         assert_eq!(offset, 0);
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_allocations_stable_pointers() {
+    fn test_multiple_allocations_stable_pointers() {
         let arena: ChunkedArena<8> = ChunkedArena::new();
 
         let (off1, ptr1) = unsafe { arena.alloc_append(8) };
@@ -208,5 +208,25 @@ mod tests {
             assert_eq!(arena.get(off2), ptr2);
             assert_eq!(arena.get(off3), ptr3);
         }
+    }
+
+    #[test]
+    fn test_alloc_after_filling_chunk_must_not_return_dangling() {
+        let arena: ChunkedArena<8> = ChunkedArena::new();
+
+        // Fill chunk 0 exactly.
+        let (_, _p1) = unsafe { arena.alloc_append(1024) };
+
+        // Allocate again. Should land at start of chunk 1. Chunk 1 was never
+        // allocated, so if the arena doesn't lazily allocate it, this returns
+        // the sentinel dangling pointer.
+        let (offset2, p2) = unsafe { arena.alloc_append(8) };
+        assert_eq!(offset2, 1024);
+
+        let dangling = std::ptr::NonNull::<u8>::dangling().as_ptr();
+        assert_ne!(
+            p2, dangling,
+            "alloc_append returned a dangling pointer: chunk 1 was never allocated"
+        );
     }
 }
