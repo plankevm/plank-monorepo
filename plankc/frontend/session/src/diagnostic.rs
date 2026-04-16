@@ -73,18 +73,6 @@ pub struct SrcLoc {
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Tracked<T> {
-    pub inner: T,
-    pub loc: SrcLoc,
-}
-
-impl<T> Tracked<T> {
-    pub fn new(inner: T, loc: SrcLoc) -> Self {
-        Self { inner, loc }
-    }
-}
-
 impl SrcLoc {
     pub fn new(source: SourceId, span: SourceSpan) -> Self {
         Self { source, span }
