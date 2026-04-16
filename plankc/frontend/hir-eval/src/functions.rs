@@ -137,11 +137,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         for (&param, &arg) in params.iter().zip(args) {
             let binding = parent_bindings[arg];
-            println!("param: {:?}", param);
-            println!("  state: {:?}", binding.state);
             let state = binding.state.and_then(|state| {
                 if param.is_comptime {
-                    println!("  [comptime param] state: {:?}", state);
                     let ArgParamComptimenessMatch = validated;
                     let LocalState::Comptime(value) = state else {
                         unreachable!("invariant: comptime param validated before this point");

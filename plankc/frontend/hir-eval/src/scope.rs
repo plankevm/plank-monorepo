@@ -565,8 +565,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 result
             }
-            ExprKind::BinaryOpCall { op, .. } => {
-                println!("op: {:?}", op);
+            ExprKind::BinaryOpCall { .. } => {
                 self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
                 Err(Poisoned)
             }
