@@ -457,6 +457,22 @@ fn test_missing_semicolon_unexpected_garbage() {
 }
 
 #[test]
+fn test_at_identifier_no_double_emission_missing_as() {
+    assert_parser_errors(
+        r#"
+            import foo @bar;
+        "#,
+        &[r#"
+            error: unexpected @identifier
+             --> test.plk:1:12
+              |
+            1 | import foo @bar;
+              |            ^^^^ unexpected @identifier, expected one of `::`, `;`, `as`
+        "#],
+    );
+}
+
+#[test]
 fn test_syntax_error_causes_no_ast_panic() {
     let source = "5;\ninit { }";
     let mut session = plank_session::Session::new();

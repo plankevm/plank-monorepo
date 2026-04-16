@@ -57,7 +57,9 @@
   "@mstore17" "@mstore18" "@mstore19" "@mstore20" "@mstore21" "@mstore22" "@mstore23" "@mstore24"
   "@mstore25" "@mstore26" "@mstore27" "@mstore28" "@mstore29" "@mstore30" "@mstore31" "@mstore32"
   ; Bytecode Introspection
-  "@runtime_start_offset" "@init_end_offset" "@runtime_length"))
+  "@runtime_start_offset" "@init_end_offset" "@runtime_length"
+  ; Comptime Type Reflection
+  "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field"))
 
 ; Function calls
 

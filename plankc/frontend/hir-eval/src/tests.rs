@@ -2472,6 +2472,46 @@ fn test_comptime_get_field_out_of_bounds() {
 }
 
 #[test]
+fn test_comptime_get_field_index_overflow() {
+    assert_diagnostics(
+        r#"
+        const S = struct { a: u256 };
+        const s = S { a: 1 };
+        const val = @get_field(S, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, s);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: field index out of bounds
+         --> main.plk:3:13
+          |
+        3 | const val = @get_field(S, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, s);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is too large
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_get_field_runtime_index() {
+    assert_diagnostics(
+        r#"
+        const S = struct { a: u256 };
+        init {
+            let s = S { a: 1 };
+            let val = @get_field(S, @evm_calldataload(0), s);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: expected comptime argument
+         --> main.plk:4:15
+          |
+        4 |     let val = @get_field(S, @evm_calldataload(0), s);
+          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field index to be known at comptime
+        "#],
+    );
+}
+
+#[test]
 fn test_get_field_instance_type_mismatch() {
     assert_diagnostics(
         r#"
@@ -2598,6 +2638,55 @@ fn test_comptime_set_field_type_mismatch() {
           |
         3 | const p2 = @set_field(Pair, 1, p, 42);
           |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `bool`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_get_field_comptime_only_field_flows_to_comptime_use() {
+    assert_lowers_to(
+        r#"
+        const Wrapper = struct { t: type, n: u256 };
+        const w = Wrapper { t: u256, n: 7 };
+        init {
+            let t = @get_field(Wrapper, 0, w);
+            let s = @is_struct(t);
+            let mut x: bool = s;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_set_field_comptime_only_struct_runtime_value() {
+    assert_diagnostics(
+        r#"
+        const Wrapper = struct { t: type, n: u256 };
+        const w = Wrapper { t: u256, n: 7 };
+        init {
+            let v: u256 = @evm_calldataload(0);
+            let w2 = @set_field(Wrapper, 1, w, v);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mixing comptime and runtime data in struct
+         --> main.plk:5:14
+          |
+        1 | const Wrapper = struct { t: type, n: u256 };
+          |                 --------------------------- `Wrapper` is comptime-only
+        ...
+        5 |     let w2 = @set_field(Wrapper, 1, w, v);
+          |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@set_field` would spill comptime-only struct `Wrapper` to runtime
         "#],
     );
 }

@@ -1,7 +1,7 @@
 use plank_parser::lexer::{Token, TokenSpan};
 use plank_session::{
-    Annotations, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId, SourceSpan,
-    StrId,
+    Annotations, Builtin, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId,
+    SourceSpan, StrId,
 };
 
 use super::BlockLowerer;
@@ -28,11 +28,12 @@ impl BlockLowerer<'_> {
     pub(crate) fn error_unresolved_identifier(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
-        let diagnostic = Diagnostic::error(format!("unresolved identifier '{name_str}'")).primary(
-            self.source_id,
-            source_span,
-            "not found in this scope",
-        );
+        let mut diagnostic = Diagnostic::error(format!("unresolved identifier '{name_str}'"))
+            .primary(self.source_id, source_span, "not found in this scope");
+        let at_name = self.session.borrow_mut().intern(&format!("@{name_str}"));
+        if let Some(builtin) = Builtin::from_str_id(at_name) {
+            diagnostic = diagnostic.help(format!("if you meant the builtin, use `{builtin}`"));
+        }
         self.emit_diagnostic(diagnostic);
     }
 

@@ -10,21 +10,15 @@ pub struct BuiltinSignature {
 
 #[derive(Debug, Clone, Copy)]
 pub enum BuiltinKind {
-    /// Runtime builtin with no side effects; can be constant-folded when all
-    /// inputs are comptime, otherwise emitted to MIR.
     RuntimeFoldable(&'static [BuiltinSignature]),
-    /// Runtime builtin with side effects; always emitted to MIR, rejected in
-    /// comptime context.
     RuntimeOnly(&'static [BuiltinSignature]),
-    /// Comptime-only builtin with static signatures (e.g. type reflection).
     Comptime(&'static [BuiltinSignature]),
-    /// Comptime-only builtin whose result type is determined by evaluation,
-    /// not by static signatures.
     ComptimePolymorphic { arg_count: usize },
 }
 
-/// Builds a `BuiltinKind::$variant(SIGS)` value, wrapping the signature
-/// list in a compile-time check that all overloads share the same arg count.
+/// Builds a `BuiltinKind::$variant(SIGS)` value for signature-carrying
+/// variants (not `ComptimePolymorphic`), wrapping the signature list in a
+/// compile-time check that all overloads share the same arg count.
 macro_rules! sig_kind {
     ($variant:ident, $( [ $($arg:ident),* => $ret:ident ] ),+) => {{
         const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
@@ -52,87 +46,85 @@ macro_rules! define_builtins {
         }
         runtime_foldable_builtins {
             $(
-                $pure_const:ident $pure_str:literal => $pure_variant:ident
-                { $( [$($pure_arg:ident),* => $pure_ret:ident] ),+ };
+                $rf_const:ident $rf_str:literal => $rf_variant:ident
+                { $( [$($rf_arg:ident),* => $rf_ret:ident] ),+ };
             )*
         }
         runtime_only_builtins {
             $(
-                $imp_const:ident $imp_str:literal => $imp_variant:ident
-                { $( [$($imp_arg:ident),* => $imp_ret:ident] ),+ };
+                $ro_const:ident $ro_str:literal => $ro_variant:ident
+                { $( [$($ro_arg:ident),* => $ro_ret:ident] ),+ };
             )*
         }
         comptime_builtins {
             $(
-                $cb_const:ident $cb_str:literal => $cb_variant:ident
-                { $( [$($cb_arg:ident),* => $cb_ret:ident] ),+ };
+                $ct_const:ident $ct_str:literal => $ct_variant:ident
+                { $( [$($ct_arg:ident),* => $ct_ret:ident] ),+ };
             )*
         }
         comptime_polymorphic_builtins {
             $(
-                $pb_const:ident $pb_str:literal => $pb_variant:ident($pb_arg_count:literal);
+                $cp_const:ident $cp_str:literal => $cp_variant:ident($cp_arg_count:literal);
             )*
         }
     ) => {
         pub mod builtin_names {
             $(pub const $pt_const: &str = $pt_str;)*
-            $(pub const $pure_const: &str = $pure_str;)*
-            $(pub const $imp_const: &str = $imp_str;)*
-            $(pub const $cb_const: &str = $cb_str;)*
-            $(pub const $pb_const: &str = $pb_str;)*
+            $(pub const $rf_const: &str = $rf_str;)*
+            $(pub const $ro_const: &str = $ro_str;)*
+            $(pub const $ct_const: &str = $ct_str;)*
+            $(pub const $cp_const: &str = $cp_str;)*
         }
 
         #[doc(hidden)]
-        #[allow(dead_code)]
         #[repr(u32)]
         enum BuiltinStrIdx {
             $($pt_type,)*
-            $($pure_variant,)*
-            $($imp_variant,)*
-            $($cb_variant,)*
-            $($pb_variant,)*
-            _Count,
+            $($rf_variant,)*
+            $($ro_variant,)*
+            $($ct_variant,)*
+            $($cp_variant,)*
         }
 
         $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
-        $(pub const $pure_const: StrId = StrId::new(BuiltinStrIdx::$pure_variant as u32);)*
-        $(pub const $imp_const: StrId = StrId::new(BuiltinStrIdx::$imp_variant as u32);)*
-        $(pub const $cb_const: StrId = StrId::new(BuiltinStrIdx::$cb_variant as u32);)*
-        $(pub const $pb_const: StrId = StrId::new(BuiltinStrIdx::$pb_variant as u32);)*
+        $(pub const $rf_const: StrId = StrId::new(BuiltinStrIdx::$rf_variant as u32);)*
+        $(pub const $ro_const: StrId = StrId::new(BuiltinStrIdx::$ro_variant as u32);)*
+        $(pub const $ct_const: StrId = StrId::new(BuiltinStrIdx::$ct_variant as u32);)*
+        $(pub const $cp_const: StrId = StrId::new(BuiltinStrIdx::$cp_variant as u32);)*
 
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
-            $(assert_eq!(interner.intern(builtin_names::$pure_const), $pure_const);)*
-            $(assert_eq!(interner.intern(builtin_names::$imp_const), $imp_const);)*
-            $(assert_eq!(interner.intern(builtin_names::$cb_const), $cb_const);)*
-            $(assert_eq!(interner.intern(builtin_names::$pb_const), $pb_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$rf_const), $rf_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$ro_const), $ro_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$ct_const), $ct_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$cp_const), $cp_const);)*
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum Builtin {
-            $($pure_variant,)*
-            $($imp_variant,)*
-            $($cb_variant,)*
-            $($pb_variant,)*
+            $($rf_variant,)*
+            $($ro_variant,)*
+            $($ct_variant,)*
+            $($cp_variant,)*
         }
 
         impl Builtin {
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
-                    $($pure_const => Builtin::$pure_variant,)*
-                    $($imp_const => Builtin::$imp_variant,)*
-                    $($cb_const => Builtin::$cb_variant,)*
-                    $($pb_const => Builtin::$pb_variant,)*
+                    $($rf_const => Builtin::$rf_variant,)*
+                    $($ro_const => Builtin::$ro_variant,)*
+                    $($ct_const => Builtin::$ct_variant,)*
+                    $($cp_const => Builtin::$cp_variant,)*
                     _ => return None,
                 })
             }
 
             pub fn name(self) -> &'static str {
                 match self {
-                    $(Self::$pure_variant => $pure_str,)*
-                    $(Self::$imp_variant => $imp_str,)*
-                    $(Self::$cb_variant => $cb_str,)*
-                    $(Self::$pb_variant => $pb_str,)*
+                    $(Self::$rf_variant => $rf_str,)*
+                    $(Self::$ro_variant => $ro_str,)*
+                    $(Self::$ct_variant => $ct_str,)*
+                    $(Self::$cp_variant => $cp_str,)*
                 }
             }
 
@@ -145,10 +137,10 @@ macro_rules! define_builtins {
                 const TYPE: TypeId = TypeId::TYPE;
 
                 match self {
-                    $(Self::$pure_variant => sig_kind!(RuntimeFoldable, $([$($pure_arg),* => $pure_ret]),+),)*
-                    $(Self::$imp_variant => sig_kind!(RuntimeOnly, $([$($imp_arg),* => $imp_ret]),+),)*
-                    $(Self::$cb_variant => sig_kind!(Comptime, $([$($cb_arg),* => $cb_ret]),+),)*
-                    $(Self::$pb_variant => BuiltinKind::ComptimePolymorphic { arg_count: $pb_arg_count },)*
+                    $(Self::$rf_variant => sig_kind!(RuntimeFoldable, $([$($rf_arg),* => $rf_ret]),+),)*
+                    $(Self::$ro_variant => sig_kind!(RuntimeOnly, $([$($ro_arg),* => $ro_ret]),+),)*
+                    $(Self::$ct_variant => sig_kind!(Comptime, $([$($ct_arg),* => $ct_ret]),+),)*
+                    $(Self::$cp_variant => BuiltinKind::ComptimePolymorphic { arg_count: $cp_arg_count },)*
                 }
             }
 
@@ -197,16 +189,14 @@ macro_rules! define_builtins {
             }
         }
 
-        /// Newtype around [`Builtin`], statically known to hold a runtime
-        /// builtin (Pure or Impure kind). Used by MIR to enforce at the
-        /// HIR→MIR boundary that only runtime builtins reach code generation.
+        /// A [`Builtin`] that is statically known to be runtime-only.
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub struct RuntimeBuiltin(Builtin);
 
         #[allow(non_upper_case_globals)]
         impl RuntimeBuiltin {
-            $(pub const $pure_variant: Self = Self(Builtin::$pure_variant);)*
-            $(pub const $imp_variant: Self = Self(Builtin::$imp_variant);)*
+            $(pub const $rf_variant: Self = Self(Builtin::$rf_variant);)*
+            $(pub const $ro_variant: Self = Self(Builtin::$ro_variant);)*
 
             pub fn inner(self) -> Builtin { self.0 }
         }
@@ -436,6 +426,7 @@ define_builtins! {
     }
 
     comptime_polymorphic_builtins {
+        // Type Reflection
         FIELD_TYPE "@field_type" => FieldType(2);
         GET_FIELD "@get_field" => GetField(3);
         SET_FIELD "@set_field" => SetField(4);

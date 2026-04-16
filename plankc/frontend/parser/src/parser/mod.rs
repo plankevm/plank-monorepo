@@ -405,9 +405,12 @@ impl<'a> Parser<'a> {
             return ident;
         }
         if self.check(Token::AtIdentifier) {
-            let (_, span) = self.tokens.peek();
-            self.emit_unexpected_at_identifier(span);
-            self.expected.clear();
+            if !self.at_last_unexpected() {
+                let (_, span) = self.tokens.peek();
+                self.emit_unexpected_at_identifier(span);
+                self.last_unexpected = Some(self.tokens.current());
+                self.expected.clear();
+            }
             self.advance();
             return self.alloc_last_token_as_node(NodeKind::Error);
         }

@@ -339,7 +339,11 @@ impl BlockLowerer<'_> {
             ast::Expr::Error { .. } => ExprKind::Value(Err(Poisoned)),
             ast::Expr::Ident { name, span } => self.resolve_name(name, span),
             ast::Expr::AtIdent { name, span } => {
-                self.error_non_call_reference_to_builtin(name, span);
+                if Builtin::from_str_id(name).is_some() {
+                    self.error_non_call_reference_to_builtin(name, span);
+                } else {
+                    self.error_unknown_builtin(name, span);
+                }
                 ExprKind::POISON
             }
             ast::Expr::BoolLiteral { value, .. } => ExprKind::Value(Ok(value.into())),
@@ -360,8 +364,8 @@ impl BlockLowerer<'_> {
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
                 if let ast::Expr::AtIdent { name, span } = callee {
+                    let args = self.lower_call_args(call_expr.args());
                     if let Some(builtin) = Builtin::from_str_id(name) {
-                        let args = self.lower_call_args(call_expr.args());
                         ExprKind::BuiltinCall { builtin, args }
                     } else {
                         self.error_unknown_builtin(name, span);

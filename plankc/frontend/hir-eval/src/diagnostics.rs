@@ -267,6 +267,24 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
+    pub fn emit_set_field_on_comptime_only_struct(
+        &mut self,
+        types: &TypeInterner,
+        struct_ty: TypeId,
+        call_loc: SrcLoc,
+        struct_def_loc: SrcLoc,
+    ) {
+        let struct_name = types.format(self.session, struct_ty);
+        Diagnostic::error("mixing comptime and runtime data in struct")
+            .cross_source_annotations(
+                call_loc,
+                format!("`@set_field` would spill comptime-only struct `{struct_name}` to runtime"),
+                struct_def_loc,
+                format!("`{struct_name}` is comptime-only"),
+            )
+            .emit(self.session);
+    }
+
     fn format_signatures_note(&self, types: &TypeInterner, builtin: Builtin) -> Option<String> {
         use std::fmt::Write;
 
@@ -515,12 +533,23 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
+    pub fn emit_field_index_overflow(
+        &mut self,
+        builtin: Builtin,
+        index: alloy_primitives::U256,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("field index out of bounds")
+            .primary(loc.source, loc.span, format!("`{builtin}`: field index {index} is too large"))
+            .emit(self.session);
+    }
+
     pub fn emit_expected_comptime_arg(&mut self, builtin: Builtin, arg_name: &str, loc: SrcLoc) {
-        Diagnostic::error("expected compile-time argument")
+        Diagnostic::error("expected comptime argument")
             .primary(
                 loc.source,
                 loc.span,
-                format!("`{builtin}` requires {arg_name} to be compile-time known"),
+                format!("`{builtin}` requires {arg_name} to be known at comptime"),
             )
             .emit(self.session);
     }

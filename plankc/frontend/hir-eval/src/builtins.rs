@@ -98,8 +98,8 @@ impl Scope<'_, '_> {
                 let ty = this.state_type(this.bindings[arg].state?);
                 this.eval.types_buf.push(ty);
             }
-            let arg_types = &this.eval.types_buf[types_buf_offset..];
 
+            let arg_types = &this.eval.types_buf[types_buf_offset..];
             builtin.resolve_result_type(arg_types).ok_or_else(|| {
                 this.diag_ctx.emit_no_matching_builtin_signature(
                     &this.eval.types,
@@ -123,22 +123,15 @@ impl Scope<'_, '_> {
             for &arg in hir_args {
                 let state =
                     this.bindings[arg].state.expect("invariant: arg type check checks poison");
-                let arg = match state {
-                    LocalState::Comptime(vid) => {
-                        assert!(
-                            !this.is_comptime_only(vid),
-                            "runtime builtin typechecks for comptime only value"
-                        );
-                        let target = this.mir_types.push(this.values.type_of_value(vid));
-                        this.emit(plank_mir::Instruction::Set {
-                            target,
-                            expr: mir::Expr::Const(vid),
-                        });
-                        target
-                    }
-                    LocalState::Runtime(local) => local,
-                };
-                this.locals_buf.push(arg);
+                if let LocalState::Comptime(vid) = state {
+                    assert!(
+                        !this.is_comptime_only(vid),
+                        "runtime builtin typechecks for comptime only value"
+                    );
+                }
+                let ty = this.state_type(state);
+                let local = this.materialize_as_local(state, ty);
+                this.locals_buf.push(local);
             }
             this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
         });
@@ -255,16 +248,12 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (ty, index) = self.resolve_struct_field_index(args, builtin, expr_span)?;
-        let field_count = self.struct_info(ty).fields.len();
-        let (_, expected_field_type) = self.struct_info(ty).fields[index];
-
         let instance_state = self.bindings[args[2]].state?;
-        let instance_type = self.state_type(instance_state);
-        self.check_type_match(ty, instance_type, expr_span)?;
+        self.check_type_match(ty, self.state_type(instance_state), expr_span)?;
 
         let new_value_state = self.bindings[args[3]].state?;
-        let new_value_type = self.state_type(new_value_state);
-        self.check_type_match(expected_field_type, new_value_type, expr_span)?;
+        let (_, expected_field_type) = self.struct_info(ty).fields[index];
+        self.check_type_match(expected_field_type, self.state_type(new_value_state), expr_span)?;
 
         // Both comptime: pure comptime fold.
         if let (LocalState::Comptime(instance_vid), LocalState::Comptime(new_value_vid)) =
@@ -286,42 +275,36 @@ impl Scope<'_, '_> {
         }
 
         // At least one side is runtime: emit MIR.
-        let instance_local = match instance_state {
-            LocalState::Runtime(local) => local,
-            LocalState::Comptime(vid) => {
-                let target = self.mir_types.push(ty);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
-                target
-            }
-        };
+        if self.eval.types.comptime_only(ty) {
+            let struct_def_loc = self.struct_info(ty).def_loc;
+            self.diag_ctx.emit_set_field_on_comptime_only_struct(
+                &self.eval.types,
+                ty,
+                self.loc(expr_span),
+                struct_def_loc,
+            );
+            return Err(Poisoned);
+        }
 
+        let field_count = self.struct_info(ty).fields.len();
+        let instance_local = self.materialize_as_local(instance_state, ty);
         let mir_fields = self.with_locals_buf(|this, locals_buf_offset| {
-            for i in 0..field_count {
-                if i == index {
-                    let local = match new_value_state {
-                        LocalState::Comptime(vid) => {
-                            let target = this.mir_types.push(expected_field_type);
-                            this.emit(mir::Instruction::Set {
-                                target,
-                                expr: mir::Expr::Const(vid),
-                            });
-                            target
-                        }
-                        LocalState::Runtime(local) => local,
-                    };
-                    this.locals_buf.push(local);
+            for field_idx in 0..field_count {
+                let local = if field_idx == index {
+                    this.materialize_as_local(new_value_state, expected_field_type)
                 } else {
-                    let (_, ftype) = this.struct_info(ty).fields[i];
+                    let (_, ftype) = this.struct_info(ty).fields[field_idx];
                     let target = this.mir_types.push(ftype);
                     this.emit(mir::Instruction::Set {
                         target,
                         expr: mir::Expr::FieldAccess {
                             object: instance_local,
-                            field_index: u32::try_from(i).expect("field index fits in u32"),
+                            field_index: u32::try_from(field_idx).expect("field index fits in u32"),
                         },
                     });
-                    this.locals_buf.push(target);
-                }
+                    target
+                };
+                this.locals_buf.push(local);
             }
             this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
         });
@@ -381,9 +364,13 @@ impl Scope<'_, '_> {
         if let LocalState::Comptime(vid) = state
             && let Value::BigNum(n) = self.values.lookup(vid)
         {
-            // On overflow, return usize::MAX — the bounds check in
-            // resolve_struct_field_index will catch it.
-            return Ok(usize::try_from(n).unwrap_or(usize::MAX));
+            return match usize::try_from(n) {
+                Ok(index) => Ok(index),
+                Err(_) => {
+                    self.diag_ctx.emit_field_index_overflow(builtin, n, self.loc(span));
+                    Err(Poisoned)
+                }
+            };
         }
         self.diag_ctx.emit_expected_comptime_arg(builtin, "field index", self.loc(span));
         Err(Poisoned)
@@ -424,6 +411,17 @@ impl Scope<'_, '_> {
             return Err(Poisoned);
         }
         Ok(())
+    }
+
+    fn materialize_as_local(&mut self, state: LocalState, ty: TypeId) -> mir::LocalId {
+        match state {
+            LocalState::Runtime(local) => local,
+            LocalState::Comptime(vid) => {
+                let target = self.mir_types.push(ty);
+                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
+                target
+            }
+        }
     }
 
     fn struct_info(&self, ty: TypeId) -> plank_values::StructInfo<'_> {

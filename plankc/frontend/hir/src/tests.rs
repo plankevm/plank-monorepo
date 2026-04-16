@@ -518,7 +518,7 @@ fn test_shadow_builtin() {
         1 | init { let @evm_add = 1; }
           |            ^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
           |
-          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
+          = help: `@name` syntax is reserved for builtins and cannot be used as an identifier
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -583,6 +583,58 @@ fn test_unknown_builtin_call() {
 }
 
 #[test]
+fn test_unknown_builtin_call_still_lowers_args() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let _ = @nonexistent(@other_unknown(1), foo);
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unknown builtin '@other_unknown'
+         --> main.plk:2:26
+          |
+        2 |     let _ = @nonexistent(@other_unknown(1), foo);
+          |                          ^^^^^^^^^^^^^^ no built-in function with this name
+        error: unresolved identifier 'foo'
+         --> main.plk:2:45
+          |
+        2 |     let _ = @nonexistent(@other_unknown(1), foo);
+          |                                             ^^^ not found in this scope
+        error: unknown builtin '@nonexistent'
+         --> main.plk:2:13
+          |
+        2 |     let _ = @nonexistent(@other_unknown(1), foo);
+          |             ^^^^^^^^^^^^ no built-in function with this name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_unknown_builtin_non_call() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let _ = @skibidi;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unknown builtin '@skibidi'
+         --> main.plk:2:13
+          |
+        2 |     let _ = @skibidi;
+          |             ^^^^^^^^ no built-in function with this name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_at_ident_not_allowed_as_binding() {
     let rendered = render_diagnostics(
         r#"
@@ -599,7 +651,7 @@ fn test_at_ident_not_allowed_as_binding() {
         2 |     let @skibidi = 1;
           |         ^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
           |
-          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
+          = help: `@name` syntax is reserved for builtins and cannot be used as an identifier
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -987,82 +1039,42 @@ fn test_lone_slash_not_supported() {
 }
 
 #[test]
-fn test_shadow_comptime_builtin() {
-    let rendered = render_diagnostics("init { let @is_struct = 1; }");
-    let expected = dedent_preserve_blank_lines(
+fn test_builtin_name_without_at_is_valid_identifier() {
+    assert_lowers_to(
         r#"
-        error: unexpected @identifier
-         --> main.plk:1:12
-          |
-        1 | init { let @is_struct = 1; }
-          |            ^^^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
-          |
-          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
+        init {
+            let is_struct = 1;
+            let field_count = is_struct;
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 1
+        %1 = %0
         "#,
     );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
 
 #[test]
-fn test_shadow_polymorphic_builtin() {
-    let rendered = render_diagnostics("init { let @field_type = 1; }");
-    let expected = dedent_preserve_blank_lines(
-        r#"
-        error: unexpected @identifier
-         --> main.plk:1:12
-          |
-        1 | init { let @field_type = 1; }
-          |            ^^^^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
-          |
-          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
-        "#,
-    );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
-}
-
-#[test]
-fn test_non_call_reference_to_comptime_builtin() {
+fn test_unresolved_bare_builtin_name_suggests_at() {
     let rendered = render_diagnostics(
         r#"
         init {
-            let mut x = 0;
-            x = @is_struct;
+            let x = evm_add(1, 2);
         }
         "#,
     );
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: referencing built-in function as a value
-         --> main.plk:3:9
+        error: unresolved identifier 'evm_add'
+         --> main.plk:2:13
           |
-        3 |     x = @is_struct;
-          |         ^^^^^^^^^^ '@is_struct' is a built-in function
+        2 |     let x = evm_add(1, 2);
+          |             ^^^^^^^ not found in this scope
           |
-          = help: built-in functions must be called directly, wrap in a function if you wish to use it as a first-class value
-        "#,
-    );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
-}
-
-#[test]
-fn test_non_call_reference_to_polymorphic_builtin() {
-    let rendered = render_diagnostics(
-        r#"
-        init {
-            let mut x = 0;
-            x = @get_field;
-        }
-        "#,
-    );
-    let expected = dedent_preserve_blank_lines(
-        r#"
-        error: referencing built-in function as a value
-         --> main.plk:3:9
-          |
-        3 |     x = @get_field;
-          |         ^^^^^^^^^^ '@get_field' is a built-in function
-          |
-          = help: built-in functions must be called directly, wrap in a function if you wish to use it as a first-class value
+          = help: if you meant the builtin, use `@evm_add`
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

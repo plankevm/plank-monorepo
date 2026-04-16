@@ -108,8 +108,64 @@
     "builtins": {
       "patterns": [
         {
+          "comment": "EVM Arithmetic",
           "name": "support.function.builtin.plank",
-          "match": "@[a-zA-Z_][a-zA-Z0-9_]*"
+          "match": "@(?:evm_add|evm_mul|evm_sub|evm_div|evm_sdiv|evm_mod|evm_smod|evm_addmod|evm_mulmod|evm_exp|evm_signextend)\\b"
+        },
+        {
+          "comment": "EVM Comparison & Bitwise Logic",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:evm_lt|evm_gt|evm_slt|evm_sgt|evm_eq|evm_iszero|evm_and|evm_or|evm_xor|evm_not|evm_byte|evm_shl|evm_shr|evm_sar)\\b"
+        },
+        {
+          "comment": "EVM Keccak-256",
+          "name": "support.function.builtin.plank",
+          "match": "@evm_keccak256\\b"
+        },
+        {
+          "comment": "EVM Environment Information",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:evm_address_this|evm_balance|evm_origin|evm_caller|evm_callvalue|evm_calldataload|evm_calldatasize|evm_calldatacopy|evm_codesize|evm_codecopy|evm_gasprice|evm_extcodesize|evm_extcodecopy|evm_returndatasize|evm_returndatacopy|evm_extcodehash|evm_gas)\\b"
+        },
+        {
+          "comment": "EVM Block Information",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:evm_blockhash|evm_coinbase|evm_timestamp|evm_number|evm_difficulty|evm_gaslimit|evm_chainid|evm_selfbalance|evm_basefee|evm_blobhash|evm_blobbasefee)\\b"
+        },
+        {
+          "comment": "EVM State Manipulation",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:evm_sload|evm_sstore|evm_tload|evm_tstore)\\b"
+        },
+        {
+          "comment": "EVM Logging Operations",
+          "name": "support.function.builtin.plank",
+          "match": "@evm_log[0-4]\\b"
+        },
+        {
+          "comment": "EVM System Calls",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:evm_create2?|evm_callcode|evm_delegatecall|evm_staticcall|evm_call|evm_return|evm_stop|evm_revert|evm_invalid|evm_selfdestruct)\\b"
+        },
+        {
+          "comment": "IR Memory Primitives",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:malloc_zeroed|malloc_uninit)\\b"
+        },
+        {
+          "comment": "Memory Manipulation",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:mcopy|mload(?:[1-9]|[12][0-9]|3[0-2])|mstore(?:[1-9]|[12][0-9]|3[0-2]))\\b"
+        },
+        {
+          "comment": "Bytecode Introspection",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:runtime_start_offset|init_end_offset|runtime_length)\\b"
+        },
+        {
+          "comment": "Comptime Type Reflection",
+          "name": "support.function.builtin.plank",
+          "match": "@(?:is_struct|field_count|field_type|get_field|set_field)\\b"
         }
       ]
     },
