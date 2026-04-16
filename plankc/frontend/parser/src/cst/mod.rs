@@ -100,6 +100,7 @@ pub enum NodeKind {
     BoolLiteral(bool),
     NumLiteral { id: NumLitId },
     Identifier { ident: StrId },
+    AtIdentifier { ident: StrId },
 
     // Function Definition
     FnDef,
@@ -149,6 +150,7 @@ impl std::fmt::Debug for NodeKind {
             Self::BoolLiteral(value) => write!(f, "BoolLiteral({value})"),
             Self::NumLiteral { .. } => write!(f, "NumLiteral"),
             Self::Identifier { .. } => write!(f, "Identifier"),
+            Self::AtIdentifier { .. } => write!(f, "AtIdentifier"),
             Self::FnDef => write!(f, "FnDef"),
             Self::ParamList => write!(f, "ParamList"),
             Self::Parameter => write!(f, "Parameter"),
@@ -177,7 +179,8 @@ impl NodeKind {
             | Self::StructLit
             | Self::BoolLiteral(_)
             | Self::NumLiteral { .. }
-            | Self::Identifier { .. } => Some(true),
+            | Self::Identifier { .. }
+            | Self::AtIdentifier { .. } => Some(true),
             _ => None,
         }
     }

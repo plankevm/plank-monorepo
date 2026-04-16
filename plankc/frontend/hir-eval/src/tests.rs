@@ -1804,16 +1804,16 @@ fn test_comptime_evm_builtins() {
         const add_res = @evm_add(10, 7);
         const mul_res = @evm_mul(3, 4);
         const sub_res = @evm_sub(10, 3);
-        const div_res = @evm_raw_div(10, 3);
-        const mod_res = @evm_raw_mod(10, 3);
-        const sdiv_res = @evm_raw_sdiv(10, 3);
-        const smod_res = @evm_raw_smod(10, 3);
+        const div_res = @evm_div(10, 3);
+        const mod_res = @evm_mod(10, 3);
+        const sdiv_res = @evm_sdiv(10, 3);
+        const smod_res = @evm_smod(10, 3);
         const exp_res = @evm_exp(2, 10);
-        const div_zero = @evm_raw_div(5, 0);
+        const div_zero = @evm_div(5, 0);
         const signext_res = @evm_signextend(0, 0x7F);
-        const and_res = @evm_bitwise_and(0xFF, 0x0F);
-        const or_res = @evm_bitwise_or(0xF0, 0x0F);
-        const xor_res = @evm_bitwise_xor(0xFF, 0x0F);
+        const and_res = @evm_and(0xFF, 0x0F);
+        const or_res = @evm_or(0xF0, 0x0F);
+        const xor_res = @evm_xor(0xFF, 0x0F);
         const byte_res = @evm_byte(31, 0x42);
         const shl_res = @evm_shl(4, 1);
         const shr_res = @evm_shr(1, 16);
@@ -1825,8 +1825,8 @@ fn test_comptime_evm_builtins() {
         const eq_res = @evm_eq(5, 5);
         const iszero_t = @evm_iszero(0);
         const iszero_f = @evm_iszero(1);
-        const addmod_res = @evm_raw_addmod(5, 7, 10);
-        const mulmod_res = @evm_raw_mulmod(3, 4, 5);
+        const addmod_res = @evm_addmod(5, 7, 10);
+        const mulmod_res = @evm_mulmod(3, 4, 5);
         init {
             let mut a: u256 = add_res;
             let mut b: u256 = mul_res;

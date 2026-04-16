@@ -2,8 +2,7 @@ use plank_core::{
     IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
 };
 use plank_session::{
-    ComptimeBuiltin, MaybePoisoned, Poisoned, PolymorphicBuiltin, RuntimeBuiltin, SourceByteOffset,
-    SourceId, SourceSpan, SrcLoc, StrId,
+    Builtin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId,
 };
 
 pub mod display;
@@ -38,16 +37,8 @@ pub enum ExprKind {
         callee: LocalId,
         args: CallArgsId,
     },
-    RuntimeBuiltinCall {
-        builtin: RuntimeBuiltin,
-        args: CallArgsId,
-    },
-    ComptimeBuiltinCall {
-        builtin: ComptimeBuiltin,
-        args: CallArgsId,
-    },
-    PolymorphicBuiltinCall {
-        builtin: PolymorphicBuiltin,
+    BuiltinCall {
+        builtin: Builtin,
         args: CallArgsId,
     },
     UnaryOpCall {

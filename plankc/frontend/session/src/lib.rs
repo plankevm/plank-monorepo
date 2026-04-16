@@ -3,7 +3,7 @@ pub mod diagnostic;
 pub mod poison;
 pub mod types;
 
-pub use builtins::{Builtin, ComptimeBuiltin, PolymorphicBuiltin, RuntimeBuiltin};
+pub use builtins::{Builtin, RuntimeBuiltin};
 pub use diagnostic::*;
 pub use poison::{MaybePoisoned, Poisoned};
 pub use types::TypeId;

@@ -376,9 +376,10 @@ impl<'a> Parser<'a> {
 
     fn intern(&mut self, ti: TokenIdx) -> StrId {
         let span = self.tokens.token_src_span(ti);
-        debug_assert!(
-            matches!(self.tokens.get_prev(), Some((Token::Identifier, p_span)) if p_span == span)
-        );
+        debug_assert!(matches!(
+            self.tokens.get_prev(),
+            Some((Token::Identifier | Token::AtIdentifier, p_span)) if p_span == span
+        ));
         let source = &self.source[span.usize_range()];
         self.session.intern(source)
     }
@@ -391,12 +392,28 @@ impl<'a> Parser<'a> {
         None
     }
 
+    fn try_parse_at_ident(&mut self) -> Option<NodeIdx> {
+        if self.eat(Token::AtIdentifier) {
+            let ident = self.intern(self.tokens.current() - 1);
+            return Some(self.alloc_last_token_as_node(NodeKind::AtIdentifier { ident }));
+        }
+        None
+    }
+
     fn expect_ident(&mut self) -> NodeIdx {
-        self.try_parse_ident().unwrap_or_else(|| {
-            self.emit_unexpected();
-            let error = self.alloc_node(NodeKind::Error);
-            self.close_node(error)
-        })
+        if let Some(ident) = self.try_parse_ident() {
+            return ident;
+        }
+        if self.check(Token::AtIdentifier) {
+            let (_, span) = self.tokens.peek();
+            self.emit_unexpected_at_identifier(span);
+            self.expected.clear();
+            self.advance();
+            return self.alloc_last_token_as_node(NodeKind::Error);
+        }
+        self.emit_unexpected();
+        let error = self.alloc_node(NodeKind::Error);
+        self.close_node(error)
     }
 
     // ========================== EXPRESSION PARSING ==========================
@@ -467,6 +484,10 @@ impl<'a> Parser<'a> {
 
         if let Some(identifier) = self.try_parse_ident() {
             return Some(identifier);
+        }
+
+        if let Some(at_identifier) = self.try_parse_at_ident() {
+            return Some(at_identifier);
         }
 
         if self.eat(Token::LeftRound) {

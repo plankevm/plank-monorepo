@@ -76,15 +76,7 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_local(f, callee)?;
                 self.fmt_args(f, args)
             }
-            Expr::RuntimeBuiltinCall { builtin, args } => {
-                write!(f, "{builtin}")?;
-                self.fmt_args(f, args)
-            }
-            Expr::ComptimeBuiltinCall { builtin, args } => {
-                write!(f, "{builtin}")?;
-                self.fmt_args(f, args)
-            }
-            Expr::PolymorphicBuiltinCall { builtin, args } => {
+            Expr::BuiltinCall { builtin, args } => {
                 write!(f, "{builtin}")?;
                 self.fmt_args(f, args)
             }

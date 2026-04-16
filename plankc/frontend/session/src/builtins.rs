@@ -8,57 +8,41 @@ pub struct BuiltinSignature {
     pub result: TypeId,
 }
 
-pub trait Builtin: Display + Copy {
-    fn name(self) -> &'static str;
-    fn arg_count(self) -> usize;
-    fn signatures(self) -> &'static [BuiltinSignature];
-
-    fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
-        let signatures = self.signatures();
-        if signatures.is_empty() || signatures[0].inputs.len() != arg_types.len() {
-            return None;
-        }
-        for sig in signatures {
-            if sig
-                .inputs
-                .iter()
-                .zip(arg_types)
-                .all(|(&sig_in, &arg_in)| arg_in.is_assignable_to(sig_in))
-            {
-                return Some(sig.result);
-            }
-        }
-        None
-    }
+#[derive(Debug, Clone, Copy)]
+pub enum BuiltinKind {
+    /// Runtime builtin with no side effects; can be constant-folded when all
+    /// inputs are comptime, otherwise emitted to MIR.
+    RuntimeFoldable(&'static [BuiltinSignature]),
+    /// Runtime builtin with side effects; always emitted to MIR, rejected in
+    /// comptime context.
+    RuntimeOnly(&'static [BuiltinSignature]),
+    /// Comptime-only builtin with static signatures (e.g. type reflection).
+    Comptime(&'static [BuiltinSignature]),
+    /// Comptime-only builtin whose result type is determined by evaluation,
+    /// not by static signatures.
+    ComptimePolymorphic { arg_count: usize },
 }
 
-/// Generates match arms for `Builtin::signatures()`. Each arm builds a
-/// `&'static [BuiltinSignature]` with a compile-time check that all overloads
-/// share the same input count.
-macro_rules! builtin_signatures {
-    ($self:ident, $Enum:ident { $(
-        $variant:ident { $( [$($arg:ident),* => $ret:ident] ),+ };
-    )* }) => {
-        match $self {
-            $($Enum::$variant => {
-                const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
-                    inputs: &[$($arg),*],
-                    result: $ret
-                }),+];
-                // Invariant: Each builtin has at least 1 sig and all sigs have the
-                // same number of inputs.
-                const {
-                    assert!(!SIGS.is_empty());
-                    let mut i = 1;
-                    while i < SIGS.len() {
-                        assert!(SIGS[0].inputs.len() == SIGS[i].inputs.len());
-                        i += 1;
-                    }
-                };
-                SIGS
-            }),*
-        }
-    };
+/// Builds a `BuiltinKind::$variant(SIGS)` value, wrapping the signature
+/// list in a compile-time check that all overloads share the same arg count.
+macro_rules! sig_kind {
+    ($variant:ident, $( [ $($arg:ident),* => $ret:ident ] ),+) => {{
+        const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
+            inputs: &[$($arg),*],
+            result: $ret
+        }),+];
+        // Invariant: Each builtin has at least 1 sig and all sigs have the
+        // same number of inputs.
+        const {
+            assert!(!SIGS.is_empty());
+            let mut i = 1;
+            while i < SIGS.len() {
+                assert!(SIGS[0].inputs.len() == SIGS[i].inputs.len());
+                i += 1;
+            }
+        };
+        BuiltinKind::$variant(SIGS)
+    }};
 }
 
 macro_rules! define_builtins {
@@ -66,10 +50,16 @@ macro_rules! define_builtins {
         primitive_types {
             $($pt_const:ident = $pt_str:literal => $pt_type:ident;)*
         }
-        runtime_builtins {
+        runtime_foldable_builtins {
             $(
-                $b_const:ident $b_str:literal => $b_variant:ident
-                { $( [$($arg:ident),* => $ret:ident] ),+ };
+                $pure_const:ident $pure_str:literal => $pure_variant:ident
+                { $( [$($pure_arg:ident),* => $pure_ret:ident] ),+ };
+            )*
+        }
+        runtime_only_builtins {
+            $(
+                $imp_const:ident $imp_str:literal => $imp_variant:ident
+                { $( [$($imp_arg:ident),* => $imp_ret:ident] ),+ };
             )*
         }
         comptime_builtins {
@@ -78,7 +68,7 @@ macro_rules! define_builtins {
                 { $( [$($cb_arg:ident),* => $cb_ret:ident] ),+ };
             )*
         }
-        polymorphic_builtins {
+        comptime_polymorphic_builtins {
             $(
                 $pb_const:ident $pb_str:literal => $pb_variant:ident($pb_arg_count:literal);
             )*
@@ -86,7 +76,8 @@ macro_rules! define_builtins {
     ) => {
         pub mod builtin_names {
             $(pub const $pt_const: &str = $pt_str;)*
-            $(pub const $b_const: &str = $b_str;)*
+            $(pub const $pure_const: &str = $pure_str;)*
+            $(pub const $imp_const: &str = $imp_str;)*
             $(pub const $cb_const: &str = $cb_str;)*
             $(pub const $pb_const: &str = $pb_str;)*
         }
@@ -96,160 +87,143 @@ macro_rules! define_builtins {
         #[repr(u32)]
         enum BuiltinStrIdx {
             $($pt_type,)*
-            $($b_variant,)*
+            $($pure_variant,)*
+            $($imp_variant,)*
             $($cb_variant,)*
             $($pb_variant,)*
             _Count,
         }
 
         $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
-        $(pub const $b_const: StrId = StrId::new(BuiltinStrIdx::$b_variant as u32);)*
+        $(pub const $pure_const: StrId = StrId::new(BuiltinStrIdx::$pure_variant as u32);)*
+        $(pub const $imp_const: StrId = StrId::new(BuiltinStrIdx::$imp_variant as u32);)*
         $(pub const $cb_const: StrId = StrId::new(BuiltinStrIdx::$cb_variant as u32);)*
         $(pub const $pb_const: StrId = StrId::new(BuiltinStrIdx::$pb_variant as u32);)*
 
-        /// Returns `true` if the given `StrId` refers to any builtin function
-        /// (runtime, comptime, or polymorphic). Automatically covers new
-        /// categories added to `define_builtins!`.
-        pub fn is_builtin(id: StrId) -> bool {
-            let idx = id.const_get();
-            idx >= [$($pt_const,)*].len() as u32 && idx < BuiltinStrIdx::_Count as u32
-        }
-
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
-            $(assert_eq!(interner.intern(builtin_names::$b_const), $b_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$pure_const), $pure_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$imp_const), $imp_const);)*
             $(assert_eq!(interner.intern(builtin_names::$cb_const), $cb_const);)*
             $(assert_eq!(interner.intern(builtin_names::$pb_const), $pb_const);)*
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum RuntimeBuiltin {
-            $($b_variant,)*
+        pub enum Builtin {
+            $($pure_variant,)*
+            $($imp_variant,)*
+            $($cb_variant,)*
+            $($pb_variant,)*
         }
 
-        impl RuntimeBuiltin {
+        impl Builtin {
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
-                    $($b_const => RuntimeBuiltin::$b_variant,)*
+                    $($pure_const => Builtin::$pure_variant,)*
+                    $($imp_const => Builtin::$imp_variant,)*
+                    $($cb_const => Builtin::$cb_variant,)*
+                    $($pb_const => Builtin::$pb_variant,)*
                     _ => return None,
                 })
             }
-        }
 
-        impl Builtin for RuntimeBuiltin {
-            fn name(self) -> &'static str {
+            pub fn name(self) -> &'static str {
                 match self {
-                    $(Self::$b_variant => $b_str,)*
+                    $(Self::$pure_variant => $pure_str,)*
+                    $(Self::$imp_variant => $imp_str,)*
+                    $(Self::$cb_variant => $cb_str,)*
+                    $(Self::$pb_variant => $pb_str,)*
                 }
             }
 
-            /// All sigs have the same arg count, guaranteed by compile time check in
-            /// `signatures`.
-            fn arg_count(self) -> usize {
-                self.signatures()[0].inputs.len()
-            }
-
-            fn signatures(self) -> &'static [BuiltinSignature] {
+            pub fn kind(self) -> BuiltinKind {
                 const U256: TypeId = TypeId::U256;
                 const BOOL: TypeId = TypeId::BOOL;
                 const MP: TypeId = TypeId::MEMORY_POINTER;
                 const VOID: TypeId = TypeId::VOID;
                 const NEVER: TypeId = TypeId::NEVER;
+                const TYPE: TypeId = TypeId::TYPE;
 
-                builtin_signatures!(self, RuntimeBuiltin {
-                    $($b_variant { $( [$($arg),* => $ret] ),+ };)*
-                })
+                match self {
+                    $(Self::$pure_variant => sig_kind!(RuntimeFoldable, $([$($pure_arg),* => $pure_ret]),+),)*
+                    $(Self::$imp_variant => sig_kind!(RuntimeOnly, $([$($imp_arg),* => $imp_ret]),+),)*
+                    $(Self::$cb_variant => sig_kind!(Comptime, $([$($cb_arg),* => $cb_ret]),+),)*
+                    $(Self::$pb_variant => BuiltinKind::ComptimePolymorphic { arg_count: $pb_arg_count },)*
+                }
+            }
+
+            pub fn signatures(self) -> &'static [BuiltinSignature] {
+                match self.kind() {
+                    BuiltinKind::RuntimeFoldable(s)
+                    | BuiltinKind::RuntimeOnly(s)
+                    | BuiltinKind::Comptime(s) => s,
+                    BuiltinKind::ComptimePolymorphic { .. } => &[],
+                }
+            }
+
+            /// All sigs have the same arg count, guaranteed by compile time check in
+            /// `kind`.
+            pub fn arg_count(self) -> usize {
+                match self.kind() {
+                    BuiltinKind::RuntimeFoldable(s)
+                    | BuiltinKind::RuntimeOnly(s)
+                    | BuiltinKind::Comptime(s) => s[0].inputs.len(),
+                    BuiltinKind::ComptimePolymorphic { arg_count } => arg_count,
+                }
+            }
+
+            pub fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
+                let signatures = self.signatures();
+                if signatures.is_empty() || signatures[0].inputs.len() != arg_types.len() {
+                    return None;
+                }
+                for sig in signatures {
+                    if sig
+                        .inputs
+                        .iter()
+                        .zip(arg_types)
+                        .all(|(&sig_in, &arg_in)| arg_in.is_assignable_to(sig_in))
+                    {
+                        return Some(sig.result);
+                    }
+                }
+                None
+            }
+        }
+
+        impl Display for Builtin {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        /// Newtype around [`Builtin`], statically known to hold a runtime
+        /// builtin (Pure or Impure kind). Used by MIR to enforce at the
+        /// HIR→MIR boundary that only runtime builtins reach code generation.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub struct RuntimeBuiltin(Builtin);
+
+        #[allow(non_upper_case_globals)]
+        impl RuntimeBuiltin {
+            $(pub const $pure_variant: Self = Self(Builtin::$pure_variant);)*
+            $(pub const $imp_variant: Self = Self(Builtin::$imp_variant);)*
+
+            pub fn inner(self) -> Builtin { self.0 }
+        }
+
+        impl TryFrom<Builtin> for RuntimeBuiltin {
+            type Error = ();
+            fn try_from(b: Builtin) -> Result<Self, Self::Error> {
+                match b.kind() {
+                    BuiltinKind::RuntimeFoldable(_) | BuiltinKind::RuntimeOnly(_) => Ok(Self(b)),
+                    BuiltinKind::Comptime(_) | BuiltinKind::ComptimePolymorphic { .. } => Err(()),
+                }
             }
         }
 
         impl Display for RuntimeBuiltin {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(self.name())
-            }
-        }
-
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum ComptimeBuiltin {
-            $($cb_variant,)*
-        }
-
-        impl ComptimeBuiltin {
-            pub fn from_str_id(id: StrId) -> Option<Self> {
-                Some(match id {
-                    $($cb_const => ComptimeBuiltin::$cb_variant,)*
-                    _ => return None,
-                })
-            }
-        }
-
-        impl Builtin for ComptimeBuiltin {
-            fn name(self) -> &'static str {
-                match self {
-                    $(Self::$cb_variant => $cb_str,)*
-                }
-            }
-
-            /// All sigs have the same arg count, guaranteed by compile time check in
-            /// `signatures`.
-            fn arg_count(self) -> usize {
-                self.signatures()[0].inputs.len()
-            }
-
-            fn signatures(self) -> &'static [BuiltinSignature] {
-                const U256: TypeId = TypeId::U256;
-                const BOOL: TypeId = TypeId::BOOL;
-                const TYPE: TypeId = TypeId::TYPE;
-
-                builtin_signatures!(self, ComptimeBuiltin {
-                    $($cb_variant { $( [$($cb_arg),* => $cb_ret] ),+ };)*
-                })
-            }
-        }
-
-        impl Display for ComptimeBuiltin {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(self.name())
-            }
-        }
-
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum PolymorphicBuiltin {
-            $($pb_variant,)*
-        }
-
-        impl PolymorphicBuiltin {
-            pub fn from_str_id(id: StrId) -> Option<Self> {
-                Some(match id {
-                    $($pb_const => PolymorphicBuiltin::$pb_variant,)*
-                    _ => return None,
-                })
-            }
-        }
-
-        impl Builtin for PolymorphicBuiltin {
-            fn name(self) -> &'static str {
-                match self {
-                    $(Self::$pb_variant => $pb_str,)*
-                }
-            }
-
-            fn arg_count(self) -> usize {
-                match self {
-                    $(Self::$pb_variant => $pb_arg_count,)*
-                }
-            }
-
-            /// Polymorphic builtins resolve return types through comptime
-            /// evaluation, not signature matching — `resolve_result_type`
-            /// intentionally always returns `None`.
-            fn signatures(self) -> &'static [BuiltinSignature] {
-                &[]
-            }
-        }
-
-        impl Display for PolymorphicBuiltin {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(self.name())
+                self.0.fmt(f)
             }
         }
 
@@ -283,19 +257,19 @@ define_builtins! {
         NEVER = "never" => Never;
     }
 
-    runtime_builtins {
+    runtime_foldable_builtins {
         // EVM Arithmetic
         ADD  "@evm_add" => Add
             { [U256, U256 => U256], [MP, U256 => MP], [U256, MP => MP] };
         MUL "@evm_mul" => Mul { [U256, U256 => U256] };
         SUB "@evm_sub" => Sub
             { [U256, U256 => U256], [MP, U256 => MP], [MP, MP => U256] };
-        DIV "@evm_raw_div" => Div { [U256, U256 => U256] };
-        SDIV "@evm_raw_sdiv" => SDiv { [U256, U256 => U256] };
-        MOD "@evm_raw_mod" => Mod { [U256, U256 => U256] };
-        SMOD "@evm_raw_smod" => SMod { [U256, U256 => U256] };
-        ADDMOD "@evm_raw_addmod" => AddMod { [U256, U256, U256 => U256] };
-        MULMOD "@evm_raw_mulmod" => MulMod { [U256, U256, U256 => U256] };
+        DIV "@evm_div" => Div { [U256, U256 => U256] };
+        SDIV "@evm_sdiv" => SDiv { [U256, U256 => U256] };
+        MOD "@evm_mod" => Mod { [U256, U256 => U256] };
+        SMOD "@evm_smod" => SMod { [U256, U256 => U256] };
+        ADDMOD "@evm_addmod" => AddMod { [U256, U256, U256 => U256] };
+        MULMOD "@evm_mulmod" => MulMod { [U256, U256, U256 => U256] };
         EXP "@evm_exp" => Exp { [U256, U256 => U256] };
         SIGNEXTEND "@evm_signextend" => SignExtend { [U256, U256 => U256] };
 
@@ -306,15 +280,17 @@ define_builtins! {
         SGT "@evm_sgt" => SGt { [U256, U256 => BOOL] };
         EQ "@evm_eq" => Eq { [U256, U256 => BOOL], [MP, MP => BOOL] };
         ISZERO "@evm_iszero" => IsZero { [U256 => BOOL] };
-        AND "@evm_bitwise_and" => And { [U256, U256 => U256] };
-        OR "@evm_bitwise_or" => Or { [U256, U256 => U256] };
-        XOR "@evm_bitwise_xor" => Xor { [U256, U256 => U256] };
-        NOT "@evm_bitwise_not" => Not { [U256 => U256] };
+        AND "@evm_and" => And { [U256, U256 => U256] };
+        OR "@evm_or" => Or { [U256, U256 => U256] };
+        XOR "@evm_xor" => Xor { [U256, U256 => U256] };
+        NOT "@evm_not" => Not { [U256 => U256] };
         BYTE "@evm_byte" => Byte { [U256, U256 => U256] };
         SHL "@evm_shl" => Shl { [U256, U256 => U256] };
         SHR "@evm_shr" => Shr { [U256, U256 => U256] };
         SAR "@evm_sar" => Sar { [U256, U256 => U256] };
+    }
 
+    runtime_only_builtins {
         // EVM Keccak-256
         KECCAK256 "@evm_keccak256" => Keccak256 { [MP, U256 => U256] };
 
@@ -459,43 +435,10 @@ define_builtins! {
         FIELD_COUNT "@field_count" => FieldCount { [TYPE => U256] };
     }
 
-    polymorphic_builtins {
+    comptime_polymorphic_builtins {
         FIELD_TYPE "@field_type" => FieldType(2);
         GET_FIELD "@get_field" => GetField(3);
         SET_FIELD "@set_field" => SetField(4);
-    }
-}
-
-impl RuntimeBuiltin {
-    pub fn is_pure(self) -> bool {
-        matches!(
-            self,
-            RuntimeBuiltin::Add
-                | RuntimeBuiltin::Mul
-                | RuntimeBuiltin::Sub
-                | RuntimeBuiltin::Div
-                | RuntimeBuiltin::SDiv
-                | RuntimeBuiltin::Mod
-                | RuntimeBuiltin::SMod
-                | RuntimeBuiltin::AddMod
-                | RuntimeBuiltin::MulMod
-                | RuntimeBuiltin::Exp
-                | RuntimeBuiltin::SignExtend
-                | RuntimeBuiltin::Lt
-                | RuntimeBuiltin::Gt
-                | RuntimeBuiltin::SLt
-                | RuntimeBuiltin::SGt
-                | RuntimeBuiltin::Eq
-                | RuntimeBuiltin::IsZero
-                | RuntimeBuiltin::And
-                | RuntimeBuiltin::Or
-                | RuntimeBuiltin::Xor
-                | RuntimeBuiltin::Not
-                | RuntimeBuiltin::Byte
-                | RuntimeBuiltin::Shl
-                | RuntimeBuiltin::Shr
-                | RuntimeBuiltin::Sar
-        )
     }
 }
 
@@ -511,9 +454,9 @@ mod tests {
 
     #[test]
     fn test_builtin_roundtrip() {
-        assert_eq!(RuntimeBuiltin::from_str_id(ADD), Some(RuntimeBuiltin::Add));
-        assert_eq!(RuntimeBuiltin::from_str_id(KECCAK256), Some(RuntimeBuiltin::Keccak256));
-        assert_eq!(RuntimeBuiltin::from_str_id(VOID), None);
+        assert_eq!(Builtin::from_str_id(ADD), Some(Builtin::Add));
+        assert_eq!(Builtin::from_str_id(KECCAK256), Some(Builtin::Keccak256));
+        assert_eq!(Builtin::from_str_id(VOID), None);
     }
 
     #[test]

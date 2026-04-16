@@ -19,11 +19,11 @@
 ((identifier) @function.builtin
  (#any-of? @function.builtin
   ; EVM Arithmetic
-  "@evm_add" "@evm_mul" "@evm_sub" "@evm_raw_div" "@evm_raw_sdiv" "@evm_raw_mod" "@evm_raw_smod"
-  "@evm_raw_addmod" "@evm_raw_mulmod" "@evm_exp" "@evm_signextend"
+  "@evm_add" "@evm_mul" "@evm_sub" "@evm_div" "@evm_sdiv" "@evm_mod" "@evm_smod"
+  "@evm_addmod" "@evm_mulmod" "@evm_exp" "@evm_signextend"
   ; EVM Comparison & Bitwise Logic
   "@evm_lt" "@evm_gt" "@evm_slt" "@evm_sgt" "@evm_eq" "@evm_iszero"
-  "@evm_bitwise_and" "@evm_bitwise_or" "@evm_bitwise_xor" "@evm_bitwise_not"
+  "@evm_and" "@evm_or" "@evm_xor" "@evm_not"
   "@evm_byte" "@evm_shl" "@evm_shr" "@evm_sar"
   ; EVM Keccak-256
   "@evm_keccak256"

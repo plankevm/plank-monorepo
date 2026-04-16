@@ -7,10 +7,7 @@ use plank_parser::{
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
-use plank_session::{
-    ComptimeBuiltin, Poisoned, PolymorphicBuiltin, RuntimeBuiltin, Session, SourceId, SourceSpan,
-    StrId, TypeId, builtins::is_builtin,
-};
+use plank_session::{Builtin, Poisoned, Session, SourceId, SourceSpan, StrId, TypeId};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::ValueInterner;
 
@@ -182,8 +179,6 @@ impl BlockLowerer<'_> {
     fn alloc_local(&mut self, name: StrId, mutable: bool, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
-        } else if is_builtin(name) {
-            self.error_shadowing_builtin(name, span);
         }
 
         let id = self.next_local_id.get_and_inc();
@@ -322,11 +317,6 @@ impl BlockLowerer<'_> {
             return ExprKind::Value(Ok(self.values.intern_type(ty)));
         }
 
-        if is_builtin(name) {
-            self.error_non_call_reference_to_builtin(name, span);
-            return ExprKind::POISON;
-        }
-
         if let Some(entry) = self.find_local(name) {
             return ExprKind::LocalRef(entry.id);
         }
@@ -348,6 +338,10 @@ impl BlockLowerer<'_> {
             ast::Expr::Block(block) => return self.lower_scope(block),
             ast::Expr::Error { .. } => ExprKind::Value(Err(Poisoned)),
             ast::Expr::Ident { name, span } => self.resolve_name(name, span),
+            ast::Expr::AtIdent { name, span } => {
+                self.error_non_call_reference_to_builtin(name, span);
+                ExprKind::POISON
+            }
             ast::Expr::BoolLiteral { value, .. } => ExprKind::Value(Ok(value.into())),
             ast::Expr::NumLiteral { id, span } => {
                 let limbs = &self.num_lit_limbs[id];
@@ -365,20 +359,13 @@ impl BlockLowerer<'_> {
             }
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
-                if let ast::Expr::Ident { name, span: _ } = callee {
-                    if let Some(builtin) = ComptimeBuiltin::from_str_id(name) {
+                if let ast::Expr::AtIdent { name, span } = callee {
+                    if let Some(builtin) = Builtin::from_str_id(name) {
                         let args = self.lower_call_args(call_expr.args());
-                        ExprKind::ComptimeBuiltinCall { builtin, args }
-                    } else if let Some(builtin) = PolymorphicBuiltin::from_str_id(name) {
-                        let args = self.lower_call_args(call_expr.args());
-                        ExprKind::PolymorphicBuiltinCall { builtin, args }
-                    } else if let Some(builtin) = RuntimeBuiltin::from_str_id(name) {
-                        let args = self.lower_call_args(call_expr.args());
-                        ExprKind::RuntimeBuiltinCall { builtin, args }
+                        ExprKind::BuiltinCall { builtin, args }
                     } else {
-                        let callee = self.lower_expr_to_local(callee);
-                        let args = self.lower_call_args(call_expr.args());
-                        ExprKind::Call { callee, args }
+                        self.error_unknown_builtin(name, span);
+                        ExprKind::POISON
                     }
                 } else {
                     let callee = self.lower_expr_to_local(callee);

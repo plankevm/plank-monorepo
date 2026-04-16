@@ -190,8 +190,11 @@ pub enum Token {
     #[token("as")]
     As,
 
-    #[regex("@?[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Identifier,
+
+    #[regex("@[a-zA-Z_][a-zA-Z0-9_]*")]
+    AtIdentifier,
 
     #[regex("[0-9]", lex_number_literal::<10>)]
     DecimalLiteral,
@@ -311,6 +314,7 @@ impl Token {
             Token::DoubleColon => "::",
 
             Token::Identifier
+            | Token::AtIdentifier
             | Token::DecimalLiteral
             | Token::HexLiteral
             | Token::BinLiteral
@@ -387,6 +391,7 @@ impl Token {
             Token::As => "`as`",
             Token::DoubleColon => "`::`",
             Token::Identifier => "identifier",
+            Token::AtIdentifier => "@identifier",
             Token::DecimalLiteral => "decimal literal",
             Token::HexLiteral => "hex literal",
             Token::BinLiteral => "binary literal",
@@ -765,6 +770,28 @@ mod tests {
         let results = lex_all("@");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], (Token::AtWithoutIdentError, 0..1, "@"));
+    }
+
+    #[test]
+    fn test_at_identifier() {
+        let results = lex_all("@foo @_bar @evm_add @skibidi");
+        assert_eq!(results.len(), 7);
+        assert_eq!(results[0], (Token::AtIdentifier, 0..4, "@foo"));
+        assert_eq!(results[1], (Token::Whitespace, 4..5, " "));
+        assert_eq!(results[2], (Token::AtIdentifier, 5..10, "@_bar"));
+        assert_eq!(results[3], (Token::Whitespace, 10..11, " "));
+        assert_eq!(results[4], (Token::AtIdentifier, 11..19, "@evm_add"));
+        assert_eq!(results[5], (Token::Whitespace, 19..20, " "));
+        assert_eq!(results[6], (Token::AtIdentifier, 20..28, "@skibidi"));
+    }
+
+    #[test]
+    fn test_at_not_adjacent_to_identifier() {
+        let results = lex_all("@ foo");
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0], (Token::AtWithoutIdentError, 0..1, "@"));
+        assert_eq!(results[1], (Token::Whitespace, 1..2, " "));
+        assert_eq!(results[2], (Token::Identifier, 2..5, "foo"));
     }
 
     #[test]

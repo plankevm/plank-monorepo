@@ -267,11 +267,7 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    fn format_signatures_note(
-        &self,
-        types: &TypeInterner,
-        builtin: impl Builtin,
-    ) -> Option<String> {
+    fn format_signatures_note(&self, types: &TypeInterner, builtin: Builtin) -> Option<String> {
         use std::fmt::Write;
 
         let signatures = builtin.signatures();
@@ -299,7 +295,7 @@ impl DiagCtx<'_> {
     pub fn emit_wrong_arg_count(
         &mut self,
         types: &TypeInterner,
-        builtin: impl Builtin,
+        builtin: Builtin,
         actual: usize,
         loc: SrcLoc,
     ) {
@@ -325,7 +321,7 @@ impl DiagCtx<'_> {
     pub fn emit_no_matching_builtin_signature(
         &mut self,
         types: &TypeInterner,
-        builtin: impl Builtin,
+        builtin: Builtin,
         arg_types: &[TypeId],
         loc: SrcLoc,
     ) {
@@ -357,11 +353,7 @@ impl DiagCtx<'_> {
         diag.emit(self.session);
     }
 
-    pub fn emit_unsupported_eval_of_runtime_builtin(
-        &mut self,
-        builtin: RuntimeBuiltin,
-        loc: SrcLoc,
-    ) {
+    pub fn emit_unsupported_eval_of_runtime_builtin(&mut self, builtin: Builtin, loc: SrcLoc) {
         Diagnostic::error("builtin not supported at compile time")
             .primary(
                 loc.source,
@@ -469,7 +461,7 @@ impl DiagCtx<'_> {
     pub fn emit_expected_struct_type_arg(
         &mut self,
         types: &TypeInterner,
-        builtin: impl Builtin,
+        builtin: Builtin,
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
@@ -488,7 +480,7 @@ impl DiagCtx<'_> {
     pub fn emit_expected_type_arg(
         &mut self,
         types: &TypeInterner,
-        builtin: impl Builtin,
+        builtin: Builtin,
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
@@ -506,7 +498,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_field_index_out_of_bounds(
         &mut self,
-        builtin: impl Builtin,
+        builtin: Builtin,
         index: usize,
         field_count: usize,
         loc: SrcLoc,
@@ -523,12 +515,7 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_expected_comptime_arg(
-        &mut self,
-        builtin: impl Builtin,
-        arg_name: &str,
-        loc: SrcLoc,
-    ) {
+    pub fn emit_expected_comptime_arg(&mut self, builtin: Builtin, arg_name: &str, loc: SrcLoc) {
         Diagnostic::error("expected compile-time argument")
             .primary(
                 loc.source,

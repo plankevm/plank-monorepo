@@ -526,7 +526,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Runtime(mir) => {
                 let args = self.mir_args.push_copy_slice(&[mir]);
                 EvalValue::Runtime {
-                    expr: mir::Expr::BuiltinCall { builtin: RuntimeBuiltin::IsZero, args },
+                    expr: mir::Expr::RuntimeBuiltinCall { builtin: RuntimeBuiltin::IsZero, args },
                     result_type: TypeId::BOOL,
                 }
             }
@@ -540,14 +540,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, Diverge> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
-            ExprKind::RuntimeBuiltinCall { builtin, args } => {
-                poison::transpose(self.eval_builtin(builtin, args, expr.span))?
-            }
-            ExprKind::ComptimeBuiltinCall { builtin, args } => {
-                poison::transpose(self.eval_comptime_builtin(builtin, args, expr.span))?
-            }
-            ExprKind::PolymorphicBuiltinCall { builtin, args } => {
-                poison::transpose(self.eval_polymorphic_builtin(builtin, args, expr.span))?
+            ExprKind::BuiltinCall { builtin, args } => {
+                poison::transpose(self.eval_builtin_call(builtin, args, expr.span))?
             }
             ExprKind::LocalRef(local) => self.bindings[local].state.map(|state| match state {
                 LocalState::Comptime(vid) => EvalValue::Comptime(vid),

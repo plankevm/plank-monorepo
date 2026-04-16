@@ -66,6 +66,18 @@ impl<'a> Parser<'a> {
     }
 
     pub(crate) fn emit_unexpected_token(&mut self, found: Token, span: SourceSpan) {
+        let diagnostic = self.build_unexpected_diagnostic(found, span);
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    pub(crate) fn emit_unexpected_at_identifier(&mut self, span: SourceSpan) {
+        let diagnostic = self
+            .build_unexpected_diagnostic(Token::AtIdentifier, span)
+            .help("`@name` syntax is reserved for built-in function calls and cannot be used as a defined name");
+        self.session.emit_diagnostic(diagnostic);
+    }
+
+    fn build_unexpected_diagnostic(&self, found: Token, span: SourceSpan) -> Diagnostic {
         use std::fmt::Write;
         let mut label = String::with_capacity(30 + self.expected.len() * 12);
         write!(&mut label, "unexpected {}, expected ", found).unwrap();
@@ -79,9 +91,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let diagnostic =
-            Diagnostic::error(format!("unexpected {}", found)).primary(self.source_id, span, label);
-        self.session.emit_diagnostic(diagnostic);
+        Diagnostic::error(format!("unexpected {}", found)).primary(self.source_id, span, label)
     }
 
     pub(crate) fn emit_missing_token(&mut self, missing: Token, span: SourceSpan) {

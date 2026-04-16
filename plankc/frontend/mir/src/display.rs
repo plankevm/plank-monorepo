@@ -75,7 +75,7 @@ impl<'a> DisplayMir<'a> {
                 write!(f, "call @fn{}", callee.get())?;
                 self.fmt_args(f, args)
             }
-            Expr::BuiltinCall { builtin, args } => {
+            Expr::RuntimeBuiltinCall { builtin, args } => {
                 write!(f, "{builtin}")?;
                 self.fmt_args(f, args)
             }

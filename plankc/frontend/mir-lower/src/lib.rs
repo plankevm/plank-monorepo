@@ -206,7 +206,7 @@ fn lower_basic_block(
                         }));
                     }
                 }
-                Expr::BuiltinCall { builtin, args } => {
+                Expr::RuntimeBuiltinCall { builtin, args } => {
                     let ty = ctx.mir.fn_locals[mir_func][target.idx()];
                     let output = (ctx.size_in_locals(ty) > 0).then(|| {
                         ctx.locals_map.get_or_create_single(target, || current_bb.new_local())

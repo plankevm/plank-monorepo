@@ -512,11 +512,13 @@ fn test_shadow_builtin() {
     let rendered = render_diagnostics("init { let @evm_add = 1; }");
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: shadowing built-in function
+        error: unexpected @identifier
          --> main.plk:1:12
           |
         1 | init { let @evm_add = 1; }
-          |            ^^^^^^^^ '@evm_add' is a built-in function
+          |            ^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
+          |
+          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -554,6 +556,50 @@ fn test_non_call_reference_to_builtin() {
           |         ^^^^^^^^ '@evm_add' is a built-in function
           |
           = help: built-in functions must be called directly, wrap in a function if you wish to use it as a first-class value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_unknown_builtin_call() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let _ = @skibidi(1, 2);
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unknown builtin '@skibidi'
+         --> main.plk:2:13
+          |
+        2 |     let _ = @skibidi(1, 2);
+          |             ^^^^^^^^ no built-in function with this name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_at_ident_not_allowed_as_binding() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let @skibidi = 1;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unexpected @identifier
+         --> main.plk:2:9
+          |
+        2 |     let @skibidi = 1;
+          |         ^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
+          |
+          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -945,11 +991,13 @@ fn test_shadow_comptime_builtin() {
     let rendered = render_diagnostics("init { let @is_struct = 1; }");
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: shadowing built-in function
+        error: unexpected @identifier
          --> main.plk:1:12
           |
         1 | init { let @is_struct = 1; }
-          |            ^^^^^^^^^^ '@is_struct' is a built-in function
+          |            ^^^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
+          |
+          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -960,11 +1008,13 @@ fn test_shadow_polymorphic_builtin() {
     let rendered = render_diagnostics("init { let @field_type = 1; }");
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: shadowing built-in function
+        error: unexpected @identifier
          --> main.plk:1:12
           |
         1 | init { let @field_type = 1; }
-          |            ^^^^^^^^^^^ '@field_type' is a built-in function
+          |            ^^^^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
+          |
+          = help: `@name` syntax is reserved for built-in function calls and cannot be used as a defined name
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

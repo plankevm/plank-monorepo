@@ -19,7 +19,7 @@ pub enum Expr {
     LocalRef(LocalId),
     Const(ValueId),
     Call { callee: FnId, args: ArgsId },
-    BuiltinCall { builtin: RuntimeBuiltin, args: ArgsId },
+    RuntimeBuiltinCall { builtin: RuntimeBuiltin, args: ArgsId },
     FieldAccess { object: LocalId, field_index: u32 },
     StructLit { ty: TypeId, fields: ArgsId },
 }

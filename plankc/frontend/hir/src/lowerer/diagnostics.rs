@@ -96,20 +96,23 @@ impl BlockLowerer<'_> {
     }
 
     pub(crate) fn error_shadowing_primitive_type(&self, name: StrId, span: TokenSpan) {
-        self.error_shadowing("primitive type", name, span);
-    }
-
-    pub(crate) fn error_shadowing_builtin(&self, name: StrId, span: TokenSpan) {
-        self.error_shadowing("built-in function", name, span);
-    }
-
-    fn error_shadowing(&self, kind: &str, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
-        let diagnostic = Diagnostic::error(format!("shadowing {kind}")).primary(
+        let diagnostic = Diagnostic::error("shadowing primitive type").primary(
             self.source_id,
             source_span,
-            format!("'{name_str}' is a {kind}"),
+            format!("'{name_str}' is a primitive type"),
+        );
+        self.emit_diagnostic(diagnostic);
+    }
+
+    pub(crate) fn error_unknown_builtin(&self, name: StrId, span: TokenSpan) {
+        let source_span = self.lexed.tokens_src_span(span);
+        let name_str = self.lookup_name(name);
+        let diagnostic = Diagnostic::error(format!("unknown builtin '{name_str}'")).primary(
+            self.source_id,
+            source_span,
+            "no built-in function with this name",
         );
         self.emit_diagnostic(diagnostic);
     }
