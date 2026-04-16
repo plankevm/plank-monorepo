@@ -341,11 +341,7 @@ mod tests {
     }
 
     fn dummy_struct_info(fields: &[Field]) -> StructInfo<'_> {
-        StructInfo {
-            type_index: ValueId::VOID,
-            def_loc: dummy_src_loc(0),
-            fields,
-        }
+        StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields }
     }
 
     #[test]
@@ -381,7 +377,7 @@ mod tests {
 
         for r#struct in [a, b, c] {
             let raw = TypeId::from_struct(r#struct).get();
-            assert_eq!(raw % MIN_STRUCT_FIELD_ALIGN as u32, 0);
+            assert!(raw.is_multiple_of(MIN_STRUCT_FIELD_ALIGN as u32));
         }
     }
 
@@ -390,16 +386,10 @@ mod tests {
         let interner = TypeInterner::new();
         let fields = [Field { name: StrId::new(0), ty: TypeId::U256 }];
 
-        let a_info = StructInfo {
-            type_index: ValueId::VOID,
-            def_loc: dummy_src_loc(0),
-            fields: &fields,
-        };
-        let b_info = StructInfo {
-            type_index: ValueId::VOID,
-            def_loc: dummy_src_loc(1),
-            fields: &fields,
-        };
+        let a_info =
+            StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields: &fields };
+        let b_info =
+            StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(1), fields: &fields };
 
         let a = interner.intern_struct(a_info);
         let b = interner.intern_struct(b_info);
