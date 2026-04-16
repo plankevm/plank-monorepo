@@ -6,6 +6,7 @@
 |--------|----|-----------|
 |Diagnostics|Use of `session.emit_diagnostic(diagnostic)` for concrete diagnostic methods|Use `diagnostic.emit(session)` instead, its more concise and chains nicely with the other diagnostic builder methods|
 |General|Debug statements in Business logic|Ensure debug statements such as `println`, `dbg`, `eprintln`, etc. are not present in finished business logic. Only specific test helpers and CLI text rendering logic should have prints.|
+|Grammar|Grammar Definitions Out of Sync|Ensure that when parser/grammar changes are made the plankc parser, `docs/Grammar.md`, tree-sitter (`../plank-tree-sitter`) & vscode extension grammar (`../plank-vscode`) are kept in sync|
 
 ## Test Strings
 
