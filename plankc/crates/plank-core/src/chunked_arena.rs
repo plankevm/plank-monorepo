@@ -1,15 +1,22 @@
 use allocator_api2::alloc::{AllocError, Allocator, Global, handle_alloc_error};
 use std::{alloc::Layout, cell::Cell, ptr::NonNull};
 
-const MAX_CHUNKS: usize = 22;
+const MAX_CHUNKS: u32 = 22;
 const FIRST_CHUNK_SIZE_BYTES: usize = 1024;
 
 const _MAX_BYTES_FITS_IN_U32: () =
-    assert!(FIRST_CHUNK_SIZE_BYTES * 2usize.pow(MAX_CHUNKS as u32) == 2usize.pow(u32::BITS));
+    assert!(FIRST_CHUNK_SIZE_BYTES as u64 * 2u64.pow(MAX_CHUNKS) == 2u64.pow(u32::BITS));
 
 fn chunk_index_to_size(chunk_index: u32) -> usize {
     let size_exponent = chunk_index.saturating_sub(1);
     FIRST_CHUNK_SIZE_BYTES << size_exponent
+}
+
+fn chunk_index_to_start_offset(chunk_index: u32) -> usize {
+    if chunk_index == 0 {
+        return 0;
+    }
+    FIRST_CHUNK_SIZE_BYTES << (chunk_index - 1)
 }
 
 fn offset_to_chunk(offset: usize) -> (usize, usize) {
@@ -34,29 +41,36 @@ fn chunk_layout(chunk_index: u32, align: usize) -> Layout {
 /// allocate as well as a stable `u32` offset you can store and then use to retrieve the associated
 /// pointer later.
 pub struct ChunkedArena<const ALIGN: usize, A: Allocator = Global> {
-    next_free_offset: Cell<u32>,
-    chunks: [Cell<NonNull<u8>>; MAX_CHUNKS],
+    chunk_index: Cell<u32>,
+    chunk_rel_offset: Cell<u32>,
+    chunk_bytes_remaining: Cell<u32>,
+    chunks: [Cell<Option<NonNull<u8>>>; MAX_CHUNKS as usize],
     alloc: A,
 }
 
+impl<const ALIGN: usize> Default for ChunkedArena<ALIGN> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const ALIGN: usize> ChunkedArena<ALIGN> {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self::new_in(Global)
     }
 }
 
 impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
-    pub fn new_in(alloc: A) -> Self {
+    pub const fn new_in(alloc: A) -> Self {
         const { assert!(ALIGN > 0 && ALIGN.is_power_of_two(), "invalid alignment") };
         const { assert!(FIRST_CHUNK_SIZE_BYTES.is_multiple_of(ALIGN), "alignment too large") };
-        let chunks: [Cell<NonNull<u8>>; _] = [const { Cell::new(NonNull::dangling()) }; MAX_CHUNKS];
-        let layout = chunk_layout(0, ALIGN);
-        let first_chunk =
-            alloc.allocate(layout).unwrap_or_else(|AllocError| handle_alloc_error(layout));
-        chunks[0].set(first_chunk.cast());
-
-        Self { next_free_offset: Cell::new(0), chunks, alloc }
+        Self {
+            chunk_index: Cell::new(0),
+            chunk_rel_offset: Cell::new(0),
+            chunk_bytes_remaining: Cell::new(1024),
+            chunks: [const { Cell::new(None) }; MAX_CHUNKS as usize],
+            alloc,
+        }
     }
 
     /// Allocate `size` bytes of append-only storage.
@@ -74,33 +88,55 @@ impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
     pub unsafe fn alloc_append(&self, size: usize) -> (u32, *mut u8) {
         debug_assert!(size.is_multiple_of(ALIGN));
 
-        let mut next_free_offset = self.next_free_offset.get();
-        let (chunk_index, mut chunk_rel_offset) = offset_to_chunk(next_free_offset as usize);
-        let mut chunk_index = chunk_index as u32;
-        let mut remaining = chunk_index_to_size(chunk_index) - chunk_rel_offset;
+        let mut chunk_index = self.chunk_index.get();
+        let mut chunk_rel_offset = self.chunk_rel_offset.get();
+        let mut chunk_bytes_remaining = self.chunk_bytes_remaining.get() as usize;
 
-        while size > remaining {
-            if chunk_index as usize >= MAX_CHUNKS - 1 {
-                panic!("attempting to allocate more than `MAX_CHUNKS`");
-            }
-            next_free_offset += remaining as u32;
+        while size > chunk_bytes_remaining {
             chunk_index += 1;
+            assert!(chunk_index < MAX_CHUNKS, "out of chunks");
+            self.chunk_index.set(chunk_index);
             chunk_rel_offset = 0;
-            remaining = chunk_index_to_size(chunk_index);
-
-            let layout = chunk_layout(chunk_index, ALIGN);
-            let chunk =
-                self.alloc.allocate(layout).unwrap_or_else(|AllocError| handle_alloc_error(layout));
-            self.chunks[chunk_index as usize].set(chunk.cast());
+            chunk_bytes_remaining = chunk_index_to_size(chunk_index);
         }
 
-        // We know `size as u32` can't overflow `u32` because the `size > remaining` should've
-        // errored first by running out of chunks if it didn't fit.
-        self.next_free_offset.set(next_free_offset + size as u32);
+        let chunk_base = if chunk_rel_offset == 0 {
+            if size == 0 {
+                NonNull::dangling()
+            } else {
+                unsafe { self.allocate_chunk(chunk_index) }
+            }
+        } else {
+            // Safety: This branch is only reached if `chunk_rel_offset` is non-zero which is only
+            // possible if the same chunk was already allocated.
+            unsafe { self.chunks[chunk_index as usize].get().unwrap_unchecked() }
+        };
 
-        let base = self.chunks[chunk_index as usize].get();
-        let write_ptr = unsafe { base.as_ptr().byte_add(chunk_rel_offset) };
-        (next_free_offset, write_ptr)
+        let write_ptr = unsafe { chunk_base.as_ptr().byte_add(chunk_rel_offset as usize) };
+        self.chunk_rel_offset.set(chunk_rel_offset + size as u32);
+        self.chunk_bytes_remaining.set(chunk_bytes_remaining as u32 - size as u32);
+        let chunk_start_offset = chunk_index_to_start_offset(chunk_index);
+        (chunk_start_offset as u32 + chunk_rel_offset, write_ptr)
+    }
+
+    /// # Safety
+    /// Expects a valid `chunk_index` less than [`MAX_CHUNKS`] and has not been allocated yet.
+    unsafe fn allocate_chunk(&self, chunk_index: u32) -> NonNull<u8> {
+        unsafe {
+            let layout = chunk_layout(chunk_index, ALIGN);
+            let new_ptr = self
+                .alloc
+                .allocate(layout)
+                .unwrap_or_else(|AllocError| handle_alloc_error(layout))
+                .cast();
+            let prev_ptr = self.chunks[chunk_index as usize].replace(Some(new_ptr));
+            #[cfg(debug_assertions)]
+            if let Some(prev_ptr) = prev_ptr {
+                self.alloc.deallocate(prev_ptr, layout);
+                unreachable!("invariant: chunk reallocated");
+            }
+            new_ptr
+        }
     }
 
     /// Resolve a previously returned offset to a stable pointer.
@@ -110,20 +146,26 @@ impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
     /// Furthermore data pointed to by the returned pointer which is part of the original
     /// allocation *MUST NOT* by mutated.
     pub unsafe fn get(&self, offset: u32) -> *const u8 {
-        let (chunk_index, rel_offset) = offset_to_chunk(offset as usize);
-        let base = self.chunks[chunk_index].get().as_ptr();
-        unsafe { base.byte_add(rel_offset) }
+        unsafe {
+            let (chunk_index, rel_offset) = offset_to_chunk(offset as usize);
+            match self.chunks[chunk_index].get() {
+                Some(chunk_base_ptr) => chunk_base_ptr.as_ptr().byte_add(rel_offset),
+                None => core::ptr::null(),
+            }
+        }
     }
 }
 
 impl<const ALIGN: usize, A: Allocator> Drop for ChunkedArena<ALIGN, A> {
     fn drop(&mut self) {
-        let (last_chunk_index, _) = offset_to_chunk(self.next_free_offset.get() as usize);
-        for i in 0..=last_chunk_index {
-            let layout = chunk_layout(i as u32, ALIGN);
-            unsafe {
-                let ptr = self.chunks[i].get();
-                self.alloc.deallocate(ptr, layout)
+        let last_chunk_index = self.chunk_index.get();
+        for chunk_index in 0..=last_chunk_index {
+            if let Some(ptr) = self.chunks[chunk_index as usize].get() {
+                // Safety: We only set a chunk's pointer to be `Some` upon successful allocation
+                unsafe {
+                    let layout = chunk_layout(chunk_index, ALIGN);
+                    self.alloc.deallocate(ptr, layout)
+                }
             }
         }
     }
@@ -228,5 +270,36 @@ mod tests {
             p2, dangling,
             "alloc_append returned a dangling pointer: chunk 1 was never allocated"
         );
+    }
+
+    #[test]
+    fn test_zero_size_alloc_does_not_allocate_chunk() {
+        let arena: ChunkedArena<8> = ChunkedArena::new();
+
+        let (off, ptr) = unsafe { arena.alloc_append(0) };
+        assert_eq!(off, 0);
+
+        // Zero-size allocation returns dangling — no chunk materialized.
+        assert_eq!(ptr, NonNull::<u8>::dangling().as_ptr());
+
+        // get() for an offset that was never backed by a real allocation returns null.
+        assert!(unsafe { arena.get(off) }.is_null());
+
+        // A subsequent real allocation should work normally and return the same offset
+        // since the zero-size alloc didn't advance into any chunk.
+        let (off2, ptr2) = unsafe { arena.alloc_append(8) };
+        assert_eq!(off2, 0);
+        assert_ne!(ptr2, NonNull::<u8>::dangling().as_ptr());
+        unsafe { ptr2.cast::<u64>().write(0xDEAD_BEEF) };
+        assert_eq!(unsafe { *arena.get(off2).cast::<u64>() }, 0xDEAD_BEEF);
+    }
+
+    #[test]
+    fn test_chunk_index_to_start_offset() {
+        let mut offset = 0usize;
+        for chunk_index in 0..MAX_CHUNKS {
+            assert_eq!(offset, chunk_index_to_start_offset(chunk_index));
+            offset = offset.checked_add(chunk_index_to_size(chunk_index)).unwrap();
+        }
     }
 }
