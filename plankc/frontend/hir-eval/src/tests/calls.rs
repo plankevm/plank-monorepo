@@ -296,6 +296,13 @@ fn test_runtime_recursion_emits_recursion_diagnostic() {
         }
         "#,
         &[r#"
+        error: runtime recursion not supported
+         --> main.plk:2:5
+          |
+        2 |     f()
+          |     ^^^ runtime call that recurses
+          |
+          = note: recursion is only allowed at compile time to ensure consistentperformance and iteration bounds
         "#],
     );
 }
@@ -314,6 +321,13 @@ fn test_runtime_recursion_with_terminator_still_emits_recursion_diagnostic() {
         }
         "#,
         &[r#"
+        error: runtime recursion not supported
+         --> main.plk:2:5
+          |
+        2 |     f();
+          |     ^^^ runtime call that recurses
+          |
+          = note: recursion is only allowed at compile time to ensure consistentperformance and iteration bounds
         "#],
     );
 }
