@@ -881,11 +881,6 @@ fn test_comptime_struct_lit_type_not_type() {
           |
         2 | const x = T { };
           |           ^ expected type, got value of type `u256`
-          |
-         ::: main.plk:1:1
-          |
-        1 | const T = 42;
-          | ------------- defined here
         "#],
     );
 }
@@ -905,11 +900,6 @@ fn test_comptime_param_type_not_type() {
           |
         2 | const f = fn(x: forty_two) u256 { return x; };
           |                 ^^^^^^^^^ expected type, got value of type `u256`
-          |
-         ::: main.plk:1:1
-          |
-        1 | const forty_two = 42;
-          | --------------------- defined here
         "#],
     );
 }
@@ -930,11 +920,6 @@ fn test_struct_lit_value_as_type_in_init() {
           |
         3 |     let x = T { };
           |             ^ expected type, got value of type `u256`
-          |
-         ::: main.plk:1:1
-          |
-        1 | const T = 42;
-          | ------------- defined here
         "#],
     );
 }
@@ -1035,11 +1020,6 @@ fn test_runtime_fn_return_type_not_type() {
           |
         3 |     let f = fn() forty_two { return 1; };
           |                  ^^^^^^^^^ expected type, got value of type `u256`
-          |
-         ::: main.plk:1:1
-          |
-        1 | const forty_two = 42;
-          | --------------------- defined here
         "#],
     );
 }
@@ -1270,11 +1250,6 @@ fn test_cross_file_struct_lit_not_a_struct() {
           |
         3 |     let x = T { value: 1 };
           |             ^ `bool` is not a struct type
-          |
-         ::: other.plk:1:1
-          |
-        1 | const T = bool;
-          | --------------- defined here
         "#],
     );
 }
@@ -1374,11 +1349,6 @@ fn test_comptime_member_on_non_struct() {
           |
         2 | const y = x.foo;
           |           ^ value of type `u256` is not a struct type
-          |
-         ::: main.plk:1:1
-          |
-        1 | const x: u256 = 5;
-          | ------------------ defined here
         "#],
     );
 }
@@ -1417,11 +1387,6 @@ fn test_comptime_call_on_non_function() {
           |
         2 | const y = x();
           |           ^ `u256` is not callable
-          |
-         ::: main.plk:1:1
-          |
-        1 | const x = 5;
-          | ------------ defined here
         "#],
     );
 }

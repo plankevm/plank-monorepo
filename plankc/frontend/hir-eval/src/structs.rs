@@ -13,10 +13,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         self.with_fields_buf(|this, fields_buf_offset| {
             let struct_def = this.hir.struct_defs[struct_def_id];
             let type_index = this.bindings[struct_def.type_index].poisoned().and_then(
-                |(state, loc)| match state {
+                |(state, span)| match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_struct_type_index_not_comptime(loc);
+                        this.diag_ctx.emit_struct_type_index_not_comptime(this.loc(span));
                         Err(Poisoned)
                     }
                 },
@@ -67,11 +67,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let state = self.bindings[object].state?;
         let struct_ty = self.state_type(state);
         let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_member_on_non_struct(
-                &self.eval.types,
-                struct_ty,
-                self.bindings[object].loc,
-            );
+            let object_loc = self.loc(self.bindings[object].span);
+            self.diag_ctx.emit_member_on_non_struct(&self.eval.types, struct_ty, object_loc);
             return Err(Poisoned);
         };
 
@@ -169,7 +166,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 continue;
             };
             let LocalState::Comptime(value) = state else {
-                self.diag_ctx.emit_runtime_ref_in_comptime(self.loc(lit_span), local.loc.use_loc());
+                self.diag_ctx
+                    .emit_runtime_ref_in_comptime(self.loc(lit_span), self.loc(local.span));
                 validity = Err(Poisoned);
                 continue;
             };
@@ -313,7 +311,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let mut validity = self.struct_lit_diagnose_duplicate_fields(lit_loc, lit_fields);
 
         // Retrieve struct type information.
-        let ty_loc = self.bindings[struct_type_local].loc;
+        let ty_loc = self.loc(self.bindings[struct_type_local].span);
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
             self.diag_ctx.emit_not_a_struct_type(&self.eval.types, struct_ty, ty_loc);
@@ -336,7 +334,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 validity = Err(Poisoned);
                 continue;
             };
-            let Ok((field_value_state, field_value_loc)) =
+            let Ok((field_value_state, field_value_span)) =
                 self.bindings[lit_field.value].poisoned()
             else {
                 validity = Err(Poisoned);
@@ -348,7 +346,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     &self.eval.types,
                     expected_field_ty,
                     field_value_ty,
-                    field_value_loc,
+                    self.loc(field_value_span),
                     lit_field.name,
                 );
                 validity = Err(Poisoned);

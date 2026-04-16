@@ -6,7 +6,7 @@ use plank_values::{DefOrigin, TypeId, Value};
 
 use crate::{
     evaluator::State,
-    scope::{Diverge, EvalContext, EvalValue, Local, LocalLoc, LocalState, Scope},
+    scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
 impl Scope<'_, '_> {
@@ -22,7 +22,7 @@ impl Scope<'_, '_> {
         self.with_captures_buf(|this, captures_buf_offset| {
             let mut poisoned = false;
             for &capture in def_captures {
-                let Local { state, loc: def_loc } = this.bindings[capture.outer_local];
+                let Local { state, span: def_span } = this.bindings[capture.outer_local];
                 let Ok(state) = state else {
                     poisoned = true;
                     continue;
@@ -32,13 +32,13 @@ impl Scope<'_, '_> {
                     LocalState::Runtime(_) => {
                         this.diag_ctx.emit_closure_capture_not_comptime(
                             this.loc(capture.use_span),
-                            def_loc.use_loc(),
+                            this.loc(def_span),
                         );
                         poisoned = true;
                         continue;
                     }
                 };
-                this.captures_buf.push((value, DefOrigin::Local(def_loc.use_span())));
+                this.captures_buf.push((value, DefOrigin::Local(def_span)));
             }
             if poisoned {
                 return Err(Poisoned);
@@ -58,12 +58,12 @@ impl Scope<'_, '_> {
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
-            let callee_loc = this.bindings[callee].loc;
-            let (state, callee_use_loc) = this.bindings[callee].poisoned()?;
+            let (state, callee_span) = this.bindings[callee].poisoned()?;
+            let callee_loc = this.loc(callee_span);
             let closure_vid = match state {
                 LocalState::Comptime(value) => value,
                 LocalState::Runtime(_) => {
-                    this.diag_ctx.emit_call_target_not_comptime(callee_use_loc);
+                    this.diag_ctx.emit_call_target_not_comptime(callee_loc);
                     return Err(Poisoned);
                 }
             };
@@ -173,10 +173,8 @@ impl Scope<'_, '_> {
         let params = &self.hir.fn_params[fn_def_id];
         let args = &self.hir.call_args[args_id];
 
-        let arg_spans = self
-            .eval
-            .call_arg_spans
-            .push_iter(args.iter().map(|&arg| self.bindings[arg].loc.use_span()));
+        let arg_spans =
+            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| self.bindings[arg].span));
 
         let parent_bindings = &mut self.bindings;
         let parent_mir_types = &mut self.mir_types;
@@ -192,10 +190,7 @@ impl Scope<'_, '_> {
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
         for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
-            fn_scope.bindings.insert_no_prev(
-                def.inner_local,
-                Local::comptime(value, LocalLoc::Inline(fn_scope.loc(def.use_span))),
-            )
+            fn_scope.bindings.insert_no_prev(def.inner_local, Local::comptime(value, def.use_span))
         }
 
         for (&param, &arg) in params.iter().zip(args) {
@@ -209,10 +204,7 @@ impl Scope<'_, '_> {
                 let inner_mir = fn_scope.mir_types.push(ty);
                 LocalState::Runtime(inner_mir)
             });
-            fn_scope.bindings.insert_no_prev(
-                param.value,
-                Local { state, loc: LocalLoc::Inline(fn_scope.loc(param.span)) },
-            );
+            fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
         }
 
         match fn_scope.eval_comptime(fn_def.type_preamble) {
@@ -225,7 +217,7 @@ impl Scope<'_, '_> {
         fn_scope.comptime = false;
         fn_scope.ctx = EvalContext::FunctionBody {
             ret_type: return_type,
-            ret_type_span: fn_scope.bindings[fn_def.return_type].loc.use_span(),
+            ret_type_span: fn_scope.bindings[fn_def.return_type].span,
         };
 
         let (body, body_eval_res) = fn_scope.eval_block_to_mir(fn_def.body);
@@ -275,7 +267,7 @@ impl Scope<'_, '_> {
             self.diag_ctx.emit_type_mismatch(
                 &self.eval.types,
                 param_ty,
-                self.bindings[r#type].loc.use_loc(),
+                self.loc(self.bindings[r#type].span),
                 arg_ty,
                 SrcLoc::new(call_scope_source, arg_span),
             );
@@ -346,10 +338,8 @@ impl Scope<'_, '_> {
         let params = &self.hir.fn_params[fn_def_id];
         let args = &self.hir.call_args[args_id];
 
-        let arg_spans = self
-            .eval
-            .call_arg_spans
-            .push_iter(args.iter().map(|&arg| self.bindings[arg].loc.use_span()));
+        let arg_spans =
+            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| self.bindings[arg].span));
 
         let parent_source = self.source;
         let parent_bindings = &mut self.bindings;
@@ -365,10 +355,7 @@ impl Scope<'_, '_> {
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
         for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
-            fn_scope.bindings.insert_no_prev(
-                def.inner_local,
-                Local::comptime(value, LocalLoc::Inline(fn_scope.loc(def.use_span))),
-            )
+            fn_scope.bindings.insert_no_prev(def.inner_local, Local::comptime(value, def.use_span))
         }
 
         for (&param, &arg) in params.iter().zip(args) {
@@ -378,16 +365,13 @@ impl Scope<'_, '_> {
                 LocalState::Runtime(_) => {
                     fn_scope.diag_ctx.emit_runtime_ref_in_comptime(
                         SrcLoc::new(parent_source, call_span),
-                        binding.loc.use_loc(),
+                        SrcLoc::new(parent_source, binding.span),
                     );
                     Err(Poisoned)
                 }
                 LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
             });
-            fn_scope.bindings.insert_no_prev(
-                param.value,
-                Local { state, loc: LocalLoc::Inline(fn_scope.loc(param.span)) },
-            );
+            fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
         }
 
         match fn_scope.eval_comptime(fn_def.type_preamble) {
@@ -397,7 +381,7 @@ impl Scope<'_, '_> {
         }
 
         let return_type = fn_scope.expect_type(fn_def.return_type);
-        let ret_type_span = fn_scope.bindings[fn_def.return_type].loc.use_span();
+        let ret_type_span = fn_scope.bindings[fn_def.return_type].span;
         fn_scope.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_span };
         fn_scope.comptime = true;
 
