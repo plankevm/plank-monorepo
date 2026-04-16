@@ -66,5 +66,5 @@ fn assert_project_diagnostics(test_project: impl Into<TestProject>, expected: &[
     let actual_joined = actual.join("\n\n---\n\n");
     let expected_joined = expected.join("\n\n---\n\n");
     pretty_assertions::assert_str_eq!(actual_joined, expected_joined, "{}", message);
-    assert_eq!(actual.len(), expected.len(), "length mismatch");
+    assert_eq!(actual.len(), expected.len(), "length mismatch, actual != expected");
 }

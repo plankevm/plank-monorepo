@@ -37,6 +37,7 @@ pub(crate) enum EvalValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Diverge {
     PoisonedControlFlow,
+    PoisonedNever,
     BlockEnd(Option<ValueId>),
 }
 
@@ -87,7 +88,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
                 }
             }
-            Err(Diverge::BlockEnd(_) | Diverge::PoisonedControlFlow) => {}
+            Err(Diverge::BlockEnd(_) | Diverge::PoisonedControlFlow | Diverge::PoisonedNever) => {}
         }
         mir_block
     }
@@ -492,6 +493,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let condition = mir_condition_local?;
         let (body, body_res) = self.eval_block_to_mir(body);
         match body_res {
+            Err(Diverge::PoisonedNever) => return Err(Diverge::PoisonedNever),
             Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
             Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }

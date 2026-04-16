@@ -283,3 +283,37 @@ fn test_import_group_symbols_accessible() {
         "#,
     );
 }
+
+#[test]
+fn test_runtime_recursion_emits_recursion_diagnostic() {
+    assert_diagnostics(
+        r#"
+        const f = fn() never {
+            f()
+        };
+        init {
+            f()
+        }
+        "#,
+        &[r#"
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_recursion_with_terminator_still_emits_recursion_diagnostic() {
+    assert_diagnostics(
+        r#"
+        const f = fn() never {
+            f();
+            evm_stop();
+        };
+        init {
+            f();
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        "#],
+    );
+}

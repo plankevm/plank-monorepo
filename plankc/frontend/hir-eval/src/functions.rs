@@ -46,23 +46,21 @@ impl LoweredFunctionsCache {
         }
     }
 
-    fn set_lowered(
-        &mut self,
-        id: LoweredFnIdx,
-        lowered: MaybePoisoned<mir::FnId>,
-    ) -> MaybePoisoned<mir::FnId> {
+    fn set_lowered(&mut self, id: LoweredFnIdx, mir_func: mir::FnId) -> MaybePoisoned<mir::FnId> {
         match &mut self.functions[id].state {
             State::Done(Err(Poisoned)) => return Err(Poisoned),
             State::Done(Ok(_)) => unreachable!("invariant: state corrupted while lowering"),
-            state @ State::InProgress => *state = State::Done(lowered),
+            state @ State::InProgress => {
+                *state = State::Done(Ok(mir_func));
+                Ok(mir_func)
+            }
         }
-        lowered
     }
 
     fn retrieve_or_create_entry<'a>(
         &mut self,
         func: UniqueFunction<'a>,
-    ) -> Result<State<MaybePoisoned<mir::FnId>>, LoweredFnIdx> {
+    ) -> Result<&mut State<MaybePoisoned<mir::FnId>>, LoweredFnIdx> {
         use std::hash::BuildHasher;
         let hash = self.hasher.hash_one(func);
         let entry = self.dedup.entry(
@@ -79,25 +77,23 @@ impl LoweredFunctionsCache {
         );
         match entry {
             Entry::Occupied(occupied) => {
-                let state = &mut self.functions[*occupied.get()].state;
-                if let State::InProgress = state {
-                    *state = State::Done(Err(Poisoned));
-                }
-                Ok(*state)
+                let id = *occupied.get();
+                Ok(&mut self.functions[id].state)
             }
             Entry::Vacant(vacant) => {
-                let id = self
+                let new_entry_id = self
                     .functions
                     .push(LoweredFn { state: State::InProgress, closure: func.closure });
                 let id2 = self.comptime_params.push_copy_slice(func.comptime_params);
-                assert_eq!(id, id2);
-                vacant.insert(id);
-                Err(id)
+                assert_eq!(new_entry_id, id2);
+                vacant.insert(new_entry_id);
+                Err(new_entry_id)
             }
         }
     }
 }
 
+#[derive(Debug)]
 struct PreambleResult {
     return_type: MaybePoisoned<TypeId>,
     is_comptime_only: bool,
@@ -171,7 +167,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let fn_def = self.hir.fns[fn_def_id];
         match self.eval_comptime(fn_def.type_preamble) {
             Ok(()) => {}
-            Err(Diverge::PoisonedControlFlow) => return Err(Poisoned),
+            Err(Diverge::PoisonedControlFlow | Diverge::PoisonedNever) => return Err(Poisoned),
             Err(Diverge::BlockEnd(_)) => unreachable!("invariant: block end in preamble?"),
         }
         let return_type = self.expect_type(fn_def.return_type);
@@ -357,6 +353,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
             return match fn_scope.eval_comptime(func.body) {
                 Ok(()) => unreachable!("lowerer should guarantee return in function body"),
+                Err(Diverge::PoisonedNever) => return Ok(Err(Diverge::PoisonedNever)),
                 Err(Diverge::PoisonedControlFlow | Diverge::BlockEnd(None)) => Err(Poisoned),
                 Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(EvalValue::Comptime(ret_value))),
             };
@@ -369,16 +366,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             closure,
             comptime_params: &fn_scope.eval.values_buf[values_buf_offset..],
         };
+
+        let call_loc = fn_scope.loc(call_span);
         let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
-            Ok(State::Done(lowered)) => lowered?,
-            Ok(State::InProgress) => {
-                fn_scope.diag_ctx.emit_runtime_call_with_recursion(fn_scope.loc(call_span));
-                return Err(Poisoned);
+            Ok(&mut State::Done(lowered)) => lowered?,
+            Ok(state @ State::InProgress) => {
+                fn_scope.diag_ctx.emit_runtime_call_with_recursion(call_loc);
+                *state = State::Done(Err(Poisoned));
+                return if preamble.return_type == Ok(TypeId::NEVER) {
+                    Ok(Err(Diverge::PoisonedNever))
+                } else {
+                    // If the returned type was poisoned we can't know if the user intended to
+                    // have a terminating function or not, but they are rare & usually simple
+                    // so we default to a poisoned value instead of control flow.
+                    Err(Poisoned)
+                };
             }
             Err(new_entry_id) => {
                 let (body, body_eval_res) = fn_scope.eval_block_to_mir(func.body);
                 match body_eval_res {
                     Ok(()) => unreachable!("lowerer should guarantee return in function body"),
+                    Err(Diverge::PoisonedNever) => return Ok(Err(Diverge::PoisonedNever)),
                     Err(Diverge::PoisonedControlFlow) => return Err(Poisoned),
                     Err(Diverge::BlockEnd(_)) => {}
                 }
@@ -390,7 +398,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return_type,
                 });
                 assert_eq!(fn_id1, fn_id2);
-                fn_scope.eval.lowered_fns_cache.set_lowered(new_entry_id, Ok(fn_id1))?
+                fn_scope.eval.lowered_fns_cache.set_lowered(new_entry_id, fn_id1)?
             }
         };
 
