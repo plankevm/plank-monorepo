@@ -57,7 +57,7 @@ impl<'a> Parser<'a> {
             }
         };
 
-        self.session.emit_diagnostic(diag);
+        diag.emit(self.session);
     }
 
     pub(crate) fn emit_unexpected_token(&mut self, found: Token, span: SourceSpan) {
@@ -74,9 +74,9 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let diagnostic =
-            Diagnostic::error(format!("unexpected {}", found)).primary(self.source_id, span, label);
-        self.session.emit_diagnostic(diagnostic);
+        Diagnostic::error(format!("unexpected {}", found))
+            .primary(self.source_id, span, label)
+            .emit(self.session);
     }
 
     pub(crate) fn emit_missing_token(&mut self, missing: Token, span: SourceSpan) {
@@ -93,59 +93,60 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let diagnostic =
-            Diagnostic::error(format!("missing {}", missing)).primary(self.source_id, span, label);
-        self.session.emit_diagnostic(diagnostic);
+        Diagnostic::error(format!("missing {}", missing))
+            .primary(self.source_id, span, label)
+            .emit(self.session);
     }
 
     pub(crate) fn emit_missing_specific(&mut self, missing: Token, span: SourceSpan) {
-        let diagnostic = Diagnostic::error(format!("missing {}", missing))
-            .element(Annotations::new(self.source_id).no_label(span, AnnotationKind::Primary));
-        self.session.emit_diagnostic(diagnostic);
+        Diagnostic::error(format!("missing {}", missing))
+            .element(Annotations::new(self.source_id).no_label(span, AnnotationKind::Primary))
+            .emit(self.session);
     }
 
     pub(crate) fn emit_empty_import_group(&mut self, brace_start: TokenIdx) {
         let start = self.tokens.token_src_span(brace_start).start;
         let end = self.last_src_span.end;
-        let diag = Diagnostic::warning("empty import group").primary(
-            self.source_id,
-            Span::new(start, end),
-            "import group must contain at least one item",
-        );
-        self.session.emit_diagnostic(diag);
+        Diagnostic::warning("empty import group")
+            .primary(
+                self.source_id,
+                Span::new(start, end),
+                "import group must contain at least one item",
+            )
+            .emit(self.session);
     }
 
     pub(crate) fn emit_path_in_import_group(&mut self, path_start: TokenIdx) {
         let start = self.tokens.token_src_span(path_start).start;
         let end = self.last_src_span.end;
-        let diag = Diagnostic::error("path in import group")
+        Diagnostic::error("path in import group")
             .primary(
                 self.source_id,
                 Span::new(start, end),
                 "paths are not allowed inside import groups",
             )
-            .help("use a separate import statement for items from different submodules");
-        self.session.emit_diagnostic(diag);
+            .help("use a separate import statement for items from different submodules")
+            .emit(self.session);
     }
 
     pub(crate) fn emit_glob_in_import_group(&mut self) {
-        let diag = Diagnostic::error("glob import inside import group")
+        Diagnostic::error("glob import inside import group")
             .primary(
                 self.source_id,
                 self.last_src_span,
                 "glob imports are not allowed inside import groups",
             )
-            .help("use a separate `import foo::*;` statement instead");
-        self.session.emit_diagnostic(diag);
+            .help("use a separate `import foo::*;` statement instead")
+            .emit(self.session);
     }
 
     pub(super) fn emit_unnecessary_braces(&mut self, brace_start: TokenIdx) {
         let start_span = self.tokens.token_src_span(brace_start);
         let end_span = self.last_src_span;
         let src_span = Span::new(start_span.start, end_span.end);
-        let diag = Diagnostic::warning("unnecessary braces in import")
+        Diagnostic::warning("unnecessary braces in import")
             .primary(self.source_id, src_span, "this import group contains only one item")
-            .help("remove the unnecessary braces");
-        self.session.emit_diagnostic(diag);
+            .help("remove the unnecessary braces")
+            .emit(self.session);
     }
 }
