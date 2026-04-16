@@ -54,6 +54,7 @@ pub struct StructInfo<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(test, derive(enum_iterator::Sequence))]
 pub enum PrimitiveType {
     Void,
     U256,
@@ -327,5 +328,100 @@ impl std::fmt::Display for FmtType<'_> {
 impl fmt::Debug for TypeInterner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TypeInterner {{ <opaque> }}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plank_session::{SourceId, SrcLoc, StrId, ZERO_SPAN};
+
+    fn dummy_src_loc(id: u32) -> SrcLoc {
+        SrcLoc::new(SourceId::new(id), ZERO_SPAN)
+    }
+
+    fn dummy_struct_info(fields: &[Field]) -> StructInfo<'_> {
+        StructInfo {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields,
+        }
+    }
+
+    #[test]
+    fn primitive_types_have_unique_ids() {
+        use std::collections::HashSet;
+        let ids: HashSet<TypeId> =
+            enum_iterator::all::<PrimitiveType>().map(TypeId::from_primitive).collect();
+        assert_eq!(ids.len(), enum_iterator::all::<PrimitiveType>().count());
+    }
+
+    #[test]
+    fn struct_intern_deduplication() {
+        let interner = TypeInterner::new();
+        let fields = [Field { name: StrId::new(0), ty: TypeId::U256 }];
+
+        let a = interner.intern_struct(dummy_struct_info(&fields));
+        let b = interner.intern_struct(dummy_struct_info(&fields));
+        assert_eq!(a, b);
+
+        let different = [Field { name: StrId::new(1), ty: TypeId::BOOL }];
+        let c = interner.intern_struct(dummy_struct_info(&different));
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn struct_refs_are_aligned() {
+        let interner = TypeInterner::new();
+        let f = Field { name: StrId::new(0), ty: TypeId::U256 };
+
+        let a = interner.intern_struct(dummy_struct_info(&[f]));
+        let b = interner.intern_struct(dummy_struct_info(&[f, f]));
+        let c = interner.intern_struct(dummy_struct_info(&[f, f, f]));
+
+        for r#struct in [a, b, c] {
+            let raw = TypeId::from_struct(r#struct).get();
+            assert_eq!(raw % MIN_STRUCT_FIELD_ALIGN as u32, 0);
+        }
+    }
+
+    #[test]
+    fn struct_different_src_loc_interns_separately() {
+        let interner = TypeInterner::new();
+        let fields = [Field { name: StrId::new(0), ty: TypeId::U256 }];
+
+        let a_info = StructInfo {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields: &fields,
+        };
+        let b_info = StructInfo {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(1),
+            fields: &fields,
+        };
+
+        let a = interner.intern_struct(a_info);
+        let b = interner.intern_struct(b_info);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn is_comptime_only_nested_struct() {
+        let interner = TypeInterner::new();
+
+        let inner_fields = [Field { name: StrId::new(0), ty: TypeId::TYPE }];
+        let inner = interner.intern_struct(dummy_struct_info(&inner_fields));
+        let inner_ty = TypeId::from_struct(inner);
+        assert!(interner.is_comptime_only(inner_ty));
+
+        let outer_fields = [Field { name: StrId::new(1), ty: inner_ty }];
+        let outer = interner.intern_struct(dummy_struct_info(&outer_fields));
+        let outer_ty = TypeId::from_struct(outer);
+        assert!(interner.is_comptime_only(outer_ty));
+
+        let runtime_fields = [Field { name: StrId::new(2), ty: TypeId::U256 }];
+        let runtime = interner.intern_struct(dummy_struct_info(&runtime_fields));
+        assert!(!interner.is_comptime_only(TypeId::from_struct(runtime)));
     }
 }
