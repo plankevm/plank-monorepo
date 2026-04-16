@@ -9,7 +9,7 @@ const _MAX_BYTES_FITS_IN_U32: () =
 
 fn chunk_index_to_size(chunk_index: u32) -> usize {
     let size_exponent = chunk_index.saturating_sub(1);
-    FIRST_CHUNK_SIZE_BYTES * 2usize.pow(size_exponent)
+    FIRST_CHUNK_SIZE_BYTES << size_exponent
 }
 
 fn offset_to_chunk(offset: usize) -> (usize, usize) {
@@ -19,7 +19,7 @@ fn offset_to_chunk(offset: usize) -> (usize, usize) {
     let first_chunk_size_multiples = offset / FIRST_CHUNK_SIZE_BYTES;
     let chunk_index = first_chunk_size_multiples.ilog2() + 1;
     let size_exponent = first_chunk_size_multiples.ilog2();
-    let chunk_start_offset = FIRST_CHUNK_SIZE_BYTES * 2usize.pow(size_exponent);
+    let chunk_start_offset = FIRST_CHUNK_SIZE_BYTES << size_exponent;
     (chunk_index as usize, offset - chunk_start_offset)
 }
 
