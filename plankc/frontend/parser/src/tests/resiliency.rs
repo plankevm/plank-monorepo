@@ -498,11 +498,11 @@ fn test_import_group_empty() {
         import foo::bar::{};
         "#,
         &[r#"
-            error: empty import group
-             --> test.plk:1:18
-              |
-            1 | import foo::bar::{};
-              |                  ^^ import group must contain at least one item
+        warning: empty import group
+         --> test.plk:1:18
+          |
+        1 | import foo::bar::{};
+          |                  ^^ import group must contain at least one item
         "#],
     );
 }

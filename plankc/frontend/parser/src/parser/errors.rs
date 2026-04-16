@@ -107,7 +107,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn emit_empty_import_group(&mut self, brace_start: TokenIdx) {
         let start = self.tokens.token_src_span(brace_start).start;
         let end = self.last_src_span.end;
-        let diag = Diagnostic::error("empty import group").primary(
+        let diag = Diagnostic::warning("empty import group").primary(
             self.source_id,
             Span::new(start, end),
             "import group must contain at least one item",
