@@ -119,8 +119,23 @@ impl Default for TypeInterner {
 /// chosen alignment ([`MIN_STRUCT_FIELD_ALIGN`]). This lets us uniquely identify primitive types
 /// by ensuring they are *not* multiples of [`MIN_STRUCT_FIELD_ALIGN`], this is done by setting the
 /// lower bit via [`IS_PRIMITIVE_FLAG`](TypeId::IS_PRIMITIVE_FLAG).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(pub(crate) NonZero<u32>);
+
+impl std::fmt::Debug for TypeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            TypeId::VOID => write!(f, "TypeId::VOID"),
+            TypeId::U256 => write!(f, "TypeId::U256"),
+            TypeId::BOOL => write!(f, "TypeId::BOOL"),
+            TypeId::MEMORY_POINTER => write!(f, "TypeId::MEMORY_POINTER"),
+            TypeId::TYPE => write!(f, "TypeId::TYPE"),
+            TypeId::FUNCTION => write!(f, "TypeId::FUNCTION"),
+            TypeId::NEVER => write!(f, "TypeId::NEVER"),
+            other => write!(f, "TypeId({})", other.get()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StructRef(u32);
