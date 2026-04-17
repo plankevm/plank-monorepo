@@ -280,7 +280,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         return Err(Poisoned);
                     }
                     State::Done(value) => {
-                        return value.map(|value| Ok(EvalValue::Comptime(value)));
+                        return match value {
+                            Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
+                            Err(Poisoned) => {
+                                // Cache collapses PoisonedNever into Err(Poisoned);
+                                // reconstruct the diverge when the return type was never.
+                                if preamble.return_type == Ok(TypeId::NEVER) {
+                                    Ok(Err(Diverge::PoisonedNever))
+                                } else {
+                                    Err(Poisoned)
+                                }
+                            }
+                        };
                     }
                 },
             };
