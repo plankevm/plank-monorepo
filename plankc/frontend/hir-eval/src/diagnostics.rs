@@ -515,4 +515,10 @@ impl DiagCtx<'_> {
             )
             .emit(self);
     }
+
+    pub fn emit_infinite_comptime_recursion(&mut self, call: SrcLoc) {
+        Diagnostic::error("infinite comptime recursion detected")
+            .primary(call.source, call.span, "call that recurses with identical arguments")
+            .emit(self.session);
+    }
 }

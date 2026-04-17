@@ -661,3 +661,28 @@ fn test_comptime_call_comptime_param_runtime() {
         "#],
     );
 }
+
+#[test]
+fn test_comptime_infinite_recursion_diagnostic() {
+    assert_diagnostics(
+        r#"
+        const bomb = fn (x: u256) u256 { bomb(x) };
+
+        init {
+            comptime {
+                bomb(67_67);
+            }
+
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: infinite comptime recursion detected
+         --> main.plk:1:34
+          |
+        1 | const bomb = fn (x: u256) u256 { bomb(x) };
+          |                                  ^^^^^^^ call that recurses with identical arguments
+        "#],
+    );
+}

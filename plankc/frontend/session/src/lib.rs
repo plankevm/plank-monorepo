@@ -31,6 +31,7 @@ pub struct Source {
 pub struct Session {
     name_interner: StringInterner<StrId>,
     source_map: IndexVec<SourceId, Source>,
+    total_errors: u32,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -39,10 +40,15 @@ impl Session {
         let mut this = Self {
             name_interner: StringInterner::new(),
             source_map: IndexVec::new(),
+            total_errors: 0,
             diagnostics: Vec::new(),
         };
         builtins::inject_builtins(&mut this);
         this
+    }
+
+    pub fn total_errors(&self) -> u32 {
+        self.total_errors
     }
 
     pub fn intern(&mut self, name: &str) -> StrId {
@@ -75,7 +81,7 @@ impl Session {
     }
 
     pub fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(|d| d.is_error())
+        self.total_errors() > 0
     }
 
     pub fn interner(&self) -> &plank_core::intern::StringInterner<StrId> {
@@ -105,6 +111,9 @@ impl Session {
 
 impl DiagEmitter for Session {
     fn emit_diagnostic(&mut self, diagnostic: Diagnostic) {
+        if diagnostic.level == Level::Error {
+            self.total_errors += 1;
+        }
         self.diagnostics.push(diagnostic);
     }
 }

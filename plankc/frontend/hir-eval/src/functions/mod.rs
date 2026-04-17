@@ -5,32 +5,15 @@ use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value};
 
+mod cache;
+
+use cache::*;
+pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
+
 use crate::{
     evaluator::State,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
-
-newtype_index! {
-    pub(crate) struct LoweredFnIdx;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct UniqueFunction<'a> {
-    closure: ValueId,
-    comptime_params: &'a [ValueId],
-}
-
-struct LoweredFn {
-    state: State<MaybePoisoned<mir::FnId>>,
-    closure: ValueId,
-}
-
-pub(crate) struct LoweredFunctionsCache {
-    functions: IndexVec<LoweredFnIdx, LoweredFn>,
-    comptime_params: ListOfLists<LoweredFnIdx, ValueId>,
-    dedup: HashTable<LoweredFnIdx>,
-    hasher: DefaultHashBuilder,
-}
 
 /// Empty marker to track the invariant that arg/param comptimeness matching was already checked.
 #[derive(Clone, Copy)]
@@ -45,67 +28,6 @@ enum RuntimeLowerError {
 impl From<Poisoned> for RuntimeLowerError {
     fn from(_value: Poisoned) -> Self {
         Self::PoisonResult
-    }
-}
-
-impl LoweredFunctionsCache {
-    pub fn new() -> Self {
-        Self {
-            functions: IndexVec::new(),
-            comptime_params: ListOfLists::new(),
-            dedup: HashTable::new(),
-            hasher: DefaultHashBuilder::default(),
-        }
-    }
-
-    fn set_lowered(
-        &mut self,
-        id: LoweredFnIdx,
-        lowered_res: MaybePoisoned<mir::FnId>,
-    ) -> MaybePoisoned<mir::FnId> {
-        match &mut self.functions[id].state {
-            State::Done(Err(Poisoned)) => return Err(Poisoned),
-            State::Done(Ok(_)) => unreachable!("invariant: state corrupted while lowering"),
-            state @ State::InProgress => {
-                *state = State::Done(lowered_res);
-                lowered_res
-            }
-        }
-    }
-
-    fn retrieve_or_create_entry<'a>(
-        &mut self,
-        func: UniqueFunction<'a>,
-    ) -> Result<&mut State<MaybePoisoned<mir::FnId>>, LoweredFnIdx> {
-        use std::hash::BuildHasher;
-        let hash = self.hasher.hash_one(func);
-        let entry = self.dedup.entry(
-            hash,
-            |&idx| {
-                let closure = self.functions[idx].closure;
-                closure == func.closure && func.comptime_params == &self.comptime_params[idx]
-            },
-            |&idx| {
-                let closure = self.functions[idx].closure;
-                let comptime_params = &self.comptime_params[idx];
-                self.hasher.hash_one(UniqueFunction { closure, comptime_params })
-            },
-        );
-        match entry {
-            Entry::Occupied(occupied) => {
-                let id = *occupied.get();
-                Ok(&mut self.functions[id].state)
-            }
-            Entry::Vacant(vacant) => {
-                let new_entry_id = self
-                    .functions
-                    .push(LoweredFn { state: State::InProgress, closure: func.closure });
-                let id2 = self.comptime_params.push_copy_slice(func.comptime_params);
-                assert_eq!(new_entry_id, id2);
-                vacant.insert(new_entry_id);
-                Err(new_entry_id)
-            }
-        }
     }
 }
 
@@ -151,9 +73,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let binding = parent_bindings[arg];
             let state = binding.state.and_then(|state| {
                 if param.is_comptime {
-                    let ArgParamComptimenessMatch = validated;
                     let LocalState::Comptime(value) = state else {
-                        unreachable!("invariant: comptime param validated before this point");
+                        let ArgParamComptimenessMatch = validated;
+                        unreachable!("invariant: already validated");
                     };
                     Ok(LocalState::Comptime(value))
                 } else if is_comptime {
@@ -234,7 +156,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
-            this.with_values_buf(|this, values_buf_offset: usize| {
+            this.with_maybe_values_buf(|this, values_buf_offset: usize| {
                 let (state, callee_def_span) = this.bindings[callee].poisoned()?;
                 let closure_vid = match state {
                     LocalState::Comptime(value) => value,
@@ -265,6 +187,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
+    fn comptime_args(
+        is_comptime: bool,
+        params: &[hir::ParamInfo],
+        args: &[hir::LocalId],
+    ) -> impl Iterator<Item = (hir::ParamInfo, hir::LocalId)> {
+        params.iter().zip(args).filter_map(move |(&param, &arg)| {
+            (param.is_comptime || is_comptime).then_some((param, arg))
+        })
+    }
+
     fn validate_args_param_comptimeness_match(
         &mut self,
         func: hir::FnDef,
@@ -272,24 +204,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
     ) -> MaybePoisoned<ArgParamComptimenessMatch> {
         let mut comptime_args_poisoned = false;
-        for (&param, &arg) in params.iter().zip(args) {
-            if !param.is_comptime {
-                continue;
-            }
-            let Ok((arg_state, arg_span)) = self.bindings[arg].poisoned() else {
+        for (param, arg) in Self::comptime_args(self.is_comptime(), params, args) {
+            let arg = self.bindings[arg];
+            if let Ok(LocalState::Runtime(_)) = arg.state {
+                self.diag_ctx
+                    .emit_comptime_param_got_runtime(self.loc(arg.span), func.loc(param.span));
                 comptime_args_poisoned = true;
                 continue;
             };
-            let arg_value = match arg_state {
-                LocalState::Comptime(value) => value,
-                LocalState::Runtime(_) => {
-                    self.diag_ctx
-                        .emit_comptime_param_got_runtime(self.loc(arg_span), func.loc(param.span));
-                    comptime_args_poisoned = true;
-                    continue;
-                }
-            };
-            self.values_buf.push(arg_value);
         }
         if comptime_args_poisoned { Err(Poisoned) } else { Ok(ArgParamComptimenessMatch) }
     }
@@ -306,6 +228,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let func = self.hir.fns[fn_def_id];
         let params = &self.hir.fn_params[fn_def_id];
         let args = &self.hir.call_args[args_id];
+        let call_loc = self.loc(call_span);
 
         if params.len() != args.len() {
             self.diag_ctx.emit_arg_count_mismatch(
@@ -324,14 +247,48 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (mut fn_scope, parent_bindings) =
             self.create_fn_scope(fn_def_id, args_id, capture_buf_offset, validated);
 
-        let restore =
-            fn_scope.diag_ctx.set_preamble_call_site(SrcLoc::new(parent_source, call_span));
-        let preamble = fn_scope.eval_preamble(fn_def_id);
-        fn_scope.diag_ctx.restore_preamble_call_site(restore);
-        let preamble = preamble?;
+        let preamble = {
+            let restore =
+                fn_scope.diag_ctx.set_preamble_call_site(SrcLoc::new(parent_source, call_span));
+            let preamble = fn_scope.eval_preamble(fn_def_id);
+            fn_scope.diag_ctx.restore_preamble_call_site(restore);
+            preamble?
+        };
+
+        // Assemble comptime parameters for the key.
+        for (param, _arg) in Self::comptime_args(is_parent_comptime, params, args) {
+            let value = fn_scope.bindings[param.value].state.map(|state| match state {
+                LocalState::Comptime(value) => value,
+                LocalState::Runtime(_) => {
+                    let ArgParamComptimenessMatch = validated;
+                    unreachable!("already validated?");
+                }
+            });
+            fn_scope.eval.maybe_values_buf.push(value);
+        }
 
         if is_parent_comptime || preamble.is_comptime_only {
+            let function =
+                FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
+            println!("function: {:?}", function);
             preamble.return_type?;
+
+            let new_fn_eval_cache_entry = match fn_scope.eval.evaluated_fns_cache.lookup(function) {
+                Err(new_entry) => new_entry,
+                Ok(state) => match state.get() {
+                    State::InProgress => {
+                        fn_scope.diag_ctx.emit_infinite_comptime_recursion(call_loc);
+                        state.set(State::Done(Err(Poisoned)));
+                        return Err(Poisoned);
+                    }
+                    State::Done(value) => {
+                        return value.map(|value| Ok(EvalValue::Comptime(value)));
+                    }
+                },
+            };
+
+            // Pessimistically set result incase we short-circuit before evaluating the body.
+            new_fn_eval_cache_entry.result.set(State::Done(Err(Poisoned)));
 
             let mut poisoned = false;
             for (&param, &arg) in params.iter().zip(args) {
@@ -371,23 +328,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Err(Poisoned);
             }
 
-            return match fn_scope.eval_comptime(func.body) {
+            // Undo pessimistic result poison (allows recursion detection).
+            new_fn_eval_cache_entry.result.set(State::InProgress);
+
+            let eval_res = match fn_scope.eval_comptime(func.body) {
                 Ok(()) => unreachable!("lowerer should guarantee return in function body"),
-                Err(Diverge::PoisonedNever) => return Ok(Err(Diverge::PoisonedNever)),
+                Err(Diverge::PoisonedNever) => Ok(Err(Diverge::PoisonedNever)),
                 Err(Diverge::PoisonedControlFlow | Diverge::BlockEnd(None)) => Err(Poisoned),
-                Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(EvalValue::Comptime(ret_value))),
+                Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
             };
+            new_fn_eval_cache_entry.result.set(State::Done(match eval_res {
+                Ok(Ok(value)) => Ok(value),
+                Err(Poisoned) | Ok(Err(_)) => Err(Poisoned),
+            }));
+            return eval_res.map(|value_or_diverge| value_or_diverge.map(EvalValue::Comptime));
         }
 
         // --- Runtime path ---
         // Non-comptime params are already bound as Runtime in `create_fn_scope`.
+        let function =
+            FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
 
-        let function = UniqueFunction {
-            closure,
-            comptime_params: &fn_scope.eval.values_buf[values_buf_offset..],
-        };
-
-        let call_loc = fn_scope.loc(call_span);
         let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
             Ok(&mut State::Done(lowered)) => lowered?,
             Ok(state @ State::InProgress) => {

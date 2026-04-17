@@ -17,12 +17,15 @@ mod structs;
 
 pub(crate) use evaluator::Evaluator;
 
+use crate::functions::EvaluatedFunctionCache;
+
 #[cfg(test)]
 mod tests;
 
 pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) -> Mir {
     let types = TypeInterner::new();
-    let mut evaluator = Evaluator::new(hir, &types, values);
+    let evaluated_fns_cache = EvaluatedFunctionCache::new();
+    let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values);
     let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
     let init = evaluator.lower_entrypoint(hir.init, &mut diag_ctx);

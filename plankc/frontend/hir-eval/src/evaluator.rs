@@ -1,3 +1,4 @@
+use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
@@ -6,7 +7,7 @@ use plank_values::{DefOrigin, Field, Type, TypeId, TypeInterner, Value, ValueId,
 
 use crate::{
     diagnostics::DiagCtx,
-    functions::LoweredFunctionsCache,
+    functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
@@ -31,7 +32,9 @@ pub(crate) struct Evaluator<'a> {
     pub values: &'a mut ValueInterner,
     pub hir: &'a Hir,
 
+    pub evaluated_fns_cache: &'a EvaluatedFunctionCache,
     pub lowered_fns_cache: LoweredFunctionsCache,
+    pub early_fail_fns: HashSet<ValueId>,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
@@ -39,12 +42,18 @@ pub(crate) struct Evaluator<'a> {
     pub types_buf: Vec<TypeId>,
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
+    pub maybe_values_buf: Vec<MaybePoisoned<ValueId>>,
     pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
 }
 
 impl<'a> Evaluator<'a> {
-    pub fn new(hir: &'a Hir, types: &'a TypeInterner, values: &'a mut ValueInterner) -> Self {
+    pub fn new(
+        hir: &'a Hir,
+        types: &'a TypeInterner,
+        evaluated_fns_cache: &'a EvaluatedFunctionCache,
+        values: &'a mut ValueInterner,
+    ) -> Self {
         Evaluator {
             mir_blocks: ListOfLists::new(),
             mir_fns: IndexVec::new(),
@@ -56,7 +65,9 @@ impl<'a> Evaluator<'a> {
             values,
             hir,
 
+            evaluated_fns_cache,
             lowered_fns_cache: LoweredFunctionsCache::new(),
+            early_fail_fns: HashSet::new(),
 
             call_arg_spans: ListOfLists::new(),
 
@@ -64,6 +75,7 @@ impl<'a> Evaluator<'a> {
             types_buf: Vec::new(),
             locals_buf: Vec::new(),
             values_buf: Vec::new(),
+            maybe_values_buf: Vec::new(),
             fields_buf: Vec::new(),
             captures_buf: Vec::new(),
         }

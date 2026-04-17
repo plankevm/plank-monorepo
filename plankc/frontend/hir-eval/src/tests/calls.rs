@@ -512,3 +512,102 @@ fn test_inconsistent_premable() {
         "#],
     );
 }
+
+#[test]
+fn test_duplicate_body_error_runtime() {
+    assert_diagnostics(
+        r#"
+        const simple = fn () void {
+            let x: bool = 0;
+        };
+
+
+        init {
+            simple();
+            simple();
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:19
+          |
+        2 |     let x: bool = 0;
+          |            ----   ^ expected `bool`, got `u256`
+          |            |
+          |            `bool` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_duplicate_body_error_comptime() {
+    assert_diagnostics(
+        r#"
+        const simple = fn () void {
+            let x: bool = 0;
+        };
+
+
+        init {
+            comptime {
+                simple();
+                simple();
+
+            }
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:19
+          |
+        2 |     let x: bool = 0;
+          |            ----   ^ expected `bool`, got `u256`
+          |            |
+          |            `bool` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_calls_cache_correctly() {
+    assert_lowers_to(
+        r#"
+        const fib_inner = fn (n: u256, a: u256, b: u256) u256 {
+            if iszero(n) {
+                return a;
+            }
+            fib_inner(sub(n, 1), b, add(a, b))
+        };
+        const fib = fn (n: u256) u256 {
+            fib_inner(n, 0, 1)
+        };
+
+        init {
+            let mut f0 = comptime { fib(0) };
+            let mut f1 = comptime { fib(1) };
+            let mut f10 = comptime { fib(10) };
+            let mut f10 = comptime { fib(11) };
+            let mut f10 = comptime { fib(11) };
+            let mut f10 = comptime { fib(11) };
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = 1
+            %2 : u256 = 55
+            %3 : u256 = 89
+            %4 : u256 = 89
+            %5 : u256 = 89
+            %6 : never = evm_stop()
+        }
+        "#,
+    );
+}

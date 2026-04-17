@@ -81,12 +81,11 @@ impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
     ///
     /// # Safety
     ///
-    /// The caller must:
-    /// - Pass a `size` that is a multiple of `ALIGN`.
-    /// - Fully initialize `size` bytes at the returned pointer before the arena is dropped or
-    ///   before the returned offset is used with [`get`](Self::get).
-    pub unsafe fn alloc_append(&self, size: usize) -> (u32, *mut u8) {
-        debug_assert!(size.is_multiple_of(ALIGN));
+    /// The caller must not assume that the returned pointer points to initialized bytes.
+    /// Furthermore the caller may only assume that the pointer returned by [`get`](Self::get)
+    /// using the given offset points to initialized data if they've initialized it.
+    pub unsafe fn alloc_append(&self, min_size: usize) -> (u32, *mut u8) {
+        let size = min_size.next_multiple_of(ALIGN);
 
         let mut chunk_index = self.chunk_index.get();
         let mut chunk_rel_offset = self.chunk_rel_offset.get();
