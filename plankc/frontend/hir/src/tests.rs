@@ -1154,3 +1154,79 @@ fn test_import_group_self_collision() {
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
+
+#[test]
+fn test_explicit_return_in_function() {
+    assert_lowers_to(
+        r#"
+        const add_one = fn (x: u256) u256 {
+            return add(x, 1);
+        };
+        init { evm_stop(); }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("add_one") result=LocalId(0) {
+            %0 = @fn0
+        }
+
+        ==== Functions ====
+        @fn0(%1: %0) -> %2 {
+            preamble:
+                %0 = type:u256
+                param#0 %1 : %0
+                %2 = type:u256
+            body:
+                %3 = %1
+                %4 = 1
+                ret add(%3, %4)
+                ret void
+        }
+
+        ==== Init ====
+        eval evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_return_outside_function_body() {
+    let source = r#"
+        init {
+            let a = add(1, 2);
+            return a;
+            let b = add(3, 4);
+        }
+    "#;
+
+    let (hir, big_nums, session, _project) = try_lower(source);
+
+    let diagnostics = format_session_diagnostics(&session);
+    let expected_diagnostics = dedent_preserve_blank_lines(
+        r#"
+        error: return is not allowed outside of function bodies
+         --> main.plk:3:5
+          |
+        3 |     return a;
+          |     ^^^^^^^^^ not allowed here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected_diagnostics.trim());
+
+    let actual_hir = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
+    let expected_hir = dedent_preserve_blank_lines(
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 1
+        %1 = 2
+        %2 = add(%0, %1)
+        eval %2
+        %3 = 3
+        %4 = 4
+        %5 = add(%3, %4)
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
+}

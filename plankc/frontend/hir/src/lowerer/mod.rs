@@ -73,6 +73,7 @@ struct BlockLowerer<'a> {
     scoped_locals_stack: Vec<ScopedLocal>,
     fn_scope_start: usize,
     fn_captures_start: usize,
+    in_function_body: bool,
     next_local_id: LocalId,
 
     instructions_buf: Vec<Instruction>,
@@ -170,6 +171,7 @@ impl BlockLowerer<'_> {
 
         debug_assert_eq!(self.fn_scope_start, 0);
         debug_assert_eq!(self.fn_captures_start, 0);
+        assert!(!self.in_function_body);
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
@@ -526,6 +528,8 @@ impl BlockLowerer<'_> {
             std::mem::replace(&mut self.fn_scope_start, self.scoped_locals_stack.len());
         let saved_captures_start =
             std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
+        let saved_in_function_body = self.in_function_body;
+        self.in_function_body = true;
 
         let param_locals_start = self.locals_buf.len();
         let return_type;
@@ -579,6 +583,7 @@ impl BlockLowerer<'_> {
         self.next_local_id = saved_next_local;
         self.fn_scope_start = saved_fn_scope_start;
         self.fn_captures_start = saved_captures_start;
+        self.in_function_body = saved_in_function_body;
 
         fn_def_id
     }
@@ -686,7 +691,12 @@ impl BlockLowerer<'_> {
             }
             Statement::Return(return_stmt) => {
                 let value = self.lower_expr(return_stmt.value());
-                self.emit(InstructionKind::Return(value));
+                if self.in_function_body {
+                    self.emit(InstructionKind::Return(value));
+                } else {
+                    self.emit_return_not_allowed_here(return_stmt.node().span());
+                    self.emit(InstructionKind::Eval(value))
+                }
             }
             Statement::Assign(assign_stmt) => {
                 let ast::Expr::Ident { name, span } = assign_stmt.target() else {
@@ -743,6 +753,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         scoped_locals_stack: Vec::new(),
         fn_scope_start: 0,
         fn_captures_start: 0,
+        in_function_body: false,
         next_local_id: LocalId::ZERO,
 
         instructions_buf: Vec::new(),

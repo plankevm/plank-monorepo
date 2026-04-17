@@ -204,6 +204,12 @@ impl BlockLowerer<'_> {
             ))
             .emit(*self.session.borrow_mut());
     }
+
+    pub fn emit_return_not_allowed_here(&self, span: TokenSpan) {
+        Diagnostic::error("return is not allowed outside of function bodies")
+            .primary(self.source_id, self.lexed.tokens_src_span(span), "not allowed here")
+            .emit(*self.session.borrow_mut());
+    }
 }
 
 pub(super) fn error_duplicate_const(
