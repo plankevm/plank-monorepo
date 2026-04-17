@@ -17,19 +17,17 @@ pub struct Driver<'a, F: SourceFs> {
 impl<'a, F: SourceFs> Driver<'a, F> {
     pub fn new(fs: &'a F, root: PathBuf) -> Self {
         Self {
-            session: Session::new(root),
+            session: Session::new(),
             values: ValueInterner::new(),
-            module_resolver: ModuleResolver::default(),
+            module_resolver: ModuleResolver::new(root),
             fs,
         }
     }
 
     pub fn register_module(&mut self, name: &str, root: PathBuf) {
         let name_id = self.session.intern(name);
-        if self.module_resolver.register(name_id, root.clone()).is_err() {
+        if self.module_resolver.register(name_id, root).is_err() {
             diagnostics::error_duplicate_module(&mut self.session, name_id);
-        } else if root != self.session.root() {
-            self.session.register_dep_root(name_id, root);
         }
     }
 
@@ -191,7 +189,7 @@ error: unresolved import
   |                  ^^^^^ 'Thing' not found in target module
   |
 info: no definition of 'Thing' found in file
- --> <lib>:sub.plk"
+ --> [lib] sub.plk"
         );
     }
 }

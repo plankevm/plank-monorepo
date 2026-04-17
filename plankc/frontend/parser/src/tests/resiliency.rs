@@ -446,7 +446,7 @@ fn test_syntax_error_causes_no_ast_panic() {
     5;
     init { }
     "#;
-    let mut session = plank_session::Session::new(std::path::PathBuf::new());
+    let mut session = plank_session::Session::new();
     let cst = super::parse_single_source(source, &mut session);
 
     let file = cst.as_file();
@@ -461,7 +461,7 @@ fn test_malformed_const_no_ast_panic() {
     const x =
     init { }
     "#;
-    let mut session = plank_session::Session::new(std::path::PathBuf::new());
+    let mut session = plank_session::Session::new();
     let cst = super::parse_single_source(source, &mut session);
 
     let file = cst.as_file();
@@ -475,7 +475,7 @@ fn test_error_in_block_no_ast_panic() {
     let source = r#"
     run { 1 + ; }
     "#;
-    let mut session = plank_session::Session::new(std::path::PathBuf::new());
+    let mut session = plank_session::Session::new();
     let cst = super::parse_single_source(source, &mut session);
 
     let file = cst.as_file();

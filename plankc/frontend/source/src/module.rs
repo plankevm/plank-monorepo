@@ -2,10 +2,10 @@ use crate::{FILE_EXTENSION, project::ImportKind};
 use hashbrown::HashMap;
 use plank_parser::ast::{Import, ImportSuffix};
 use plank_session::{Session, StrId};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-#[derive(Default)]
 pub struct ModuleResolver {
+    root: PathBuf,
     modules: HashMap<StrId, PathBuf>,
 }
 
@@ -19,6 +19,25 @@ pub enum ModuleResolveError {
 pub struct ModuleRegisterError;
 
 impl ModuleResolver {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root, modules: HashMap::new() }
+    }
+
+    pub fn display_path(&self, path: &Path, session: &Session) -> String {
+        if let Ok(relative) = path.strip_prefix(&self.root) {
+            return relative.display().to_string();
+        }
+
+        for (&name_id, dep_root) in &self.modules {
+            if let Ok(relative) = path.strip_prefix(dep_root) {
+                let name = session.lookup_name(name_id);
+                return format!("[{name}] {}", relative.display());
+            }
+        }
+
+        path.display().to_string()
+    }
+
     pub fn register(&mut self, name: StrId, root: PathBuf) -> Result<(), ModuleRegisterError> {
         match self.modules.insert(name, root) {
             Some(_) => Err(ModuleRegisterError),
@@ -92,5 +111,20 @@ impl ModuleResolver {
         let (module_root, import_path_segments) = self.lookup_module(segments)?;
         Self::build_file_path(module_root, import_path_segments, session, import_file_path);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_path_falls_back_to_full_path() {
+        let session = Session::new();
+        let resolver = ModuleResolver::new(PathBuf::from("/project"));
+        assert_eq!(
+            resolver.display_path(Path::new("/other/dir/foo.plk"), &session),
+            "/other/dir/foo.plk"
+        );
     }
 }

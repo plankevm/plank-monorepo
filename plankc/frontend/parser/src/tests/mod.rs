@@ -1,20 +1,20 @@
 use crate::{cst::display::DisplayCST, lexer::Lexed, parser::parse};
 use plank_session::Session;
 use plank_test_utils::{dedent, dedent_preserve_indent};
-use std::path::PathBuf;
 
 mod errorless;
 mod resiliency;
 
 fn parse_single_source(source: &str, session: &mut Session) -> crate::cst::ConcreteSyntaxTree {
-    let source_id = session.register_source("test.plk".into(), source.to_string());
+    let source_id =
+        session.register_source("test.plk".into(), "test.plk".into(), source.to_string());
     let lexed = Lexed::lex(source);
     parse(session, &lexed, source, source_id)
 }
 
 pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let source = dedent(source);
-    let mut session = Session::new(PathBuf::new());
+    let mut session = Session::new();
     let _cst = parse_single_source(&source, &mut session);
 
     let actual: Vec<String> =
@@ -28,7 +28,7 @@ pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
 }
 
 pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {
-    let mut session = Session::new(PathBuf::new());
+    let mut session = Session::new();
     let cst = parse_single_source(source, &mut session);
 
     if session.has_errors() {

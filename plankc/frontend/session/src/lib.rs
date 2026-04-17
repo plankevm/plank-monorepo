@@ -9,7 +9,7 @@ pub use poison::{MaybePoisoned, Poisoned};
 pub use types::TypeId;
 
 use plank_core::{Idx, IndexVec, Span, intern::StringInterner, newtype_index};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 newtype_index! {
     pub struct StrId;
@@ -35,51 +35,17 @@ pub struct Session {
     name_interner: StringInterner<StrId>,
     source_map: IndexVec<SourceId, Source>,
     diagnostics: Vec<Diagnostic>,
-    root: PathBuf,
-    dep_roots: Vec<(StrId, PathBuf)>,
 }
 
 impl Session {
-    pub fn new(root: PathBuf) -> Self {
+    pub fn new() -> Self {
         let mut this = Self {
             name_interner: StringInterner::new(),
             source_map: IndexVec::new(),
             diagnostics: Vec::new(),
-            root,
-            dep_roots: Vec::new(),
         };
         builtins::inject_builtins(&mut this);
         this
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn register_dep_root(&mut self, name: StrId, root: PathBuf) {
-        self.dep_roots.push((name, root));
-    }
-
-    pub fn display_path(&self, path: &Path) -> String {
-        fn expect_utf8(p: &Path) -> &str {
-            p.to_str().expect("source path is not valid UTF-8")
-        }
-
-        if let Ok(relative) = path.strip_prefix(&self.root) {
-            return expect_utf8(relative).to_owned();
-        }
-
-        for &(name_id, ref dep_root) in &self.dep_roots {
-            if let Ok(relative) = path.strip_prefix(dep_root) {
-                let name = self.lookup_name(name_id);
-                return format!("<{name}>:{}", expect_utf8(relative));
-            }
-        }
-
-        unreachable!(
-            "source path '{}' is not under the project root or any registered dependency",
-            path.display()
-        )
     }
 
     pub fn intern(&mut self, name: &str) -> StrId {
@@ -99,8 +65,12 @@ impl Session {
         self.source_map.next_idx()
     }
 
-    pub fn register_source(&mut self, path: PathBuf, content: String) -> SourceId {
-        let display_path = self.display_path(&path);
+    pub fn register_source(
+        &mut self,
+        path: PathBuf,
+        display_path: String,
+        content: String,
+    ) -> SourceId {
         self.source_map.push(Source { path, display_path, content })
     }
 
@@ -145,21 +115,8 @@ impl Session {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn display_path_relative_to_root() {
-        let session = Session::new(PathBuf::from("/project"));
-        assert_eq!(session.display_path(Path::new("/project/src/foo.plk")), "src/foo.plk");
-    }
-
-    #[test]
-    fn display_path_dep_outside_root() {
-        let mut session = Session::new(PathBuf::from("/project"));
-        let name = session.intern("std");
-        session.register_dep_root(name, PathBuf::from("/lib/std"));
-        assert_eq!(session.display_path(Path::new("/lib/std/math.plk")), "<std>:math.plk");
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
     }
 }

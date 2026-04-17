@@ -51,15 +51,19 @@ fn main() {
     let root = Path::new(&args.file_path)
         .parent()
         .expect("file path has no parent directory")
-        .to_path_buf();
+        .canonicalize()
+        .expect("failed to canonicalize project root");
     let mut driver = Driver::new(&RealFs, root.clone());
 
     if let Some(name) = &args.module_name {
-        let module_root = args.module_root.map_or(root, PathBuf::from);
+        let module_root = args.module_root.map_or(root, |p| {
+            PathBuf::from(p).canonicalize().expect("failed to canonicalize module root")
+        });
         driver.register_module(name, module_root);
     }
     for (name, path) in &args.deps {
-        driver.register_module(name, path.clone());
+        let path = path.canonicalize().expect("failed to canonicalize dependency path");
+        driver.register_module(name, path);
     }
 
     let project = match driver.load_project(Path::new(&args.file_path)) {

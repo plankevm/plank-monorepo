@@ -73,7 +73,8 @@ impl<F: SourceFs> ProjectParser<'_, F> {
         let cst = parse(self.session, &lexed, &content, source_id);
         let prev = self.path_to_source.insert(path.clone(), source_id);
         assert!(prev.is_none());
-        assert_eq!(self.session.register_source(path, content), source_id);
+        let display_path = self.module_resolver.display_path(&path, self.session);
+        assert_eq!(self.session.register_source(path, display_path, content), source_id);
 
         assert_eq!(self.parsed_sources.push((lexed, None)), source_id);
         let file = cst.as_file();

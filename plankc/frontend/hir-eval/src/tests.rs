@@ -2,11 +2,10 @@ use plank_mir::{Mir, display::DisplayMir};
 use plank_session::Session;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::ValueInterner;
-use std::path::PathBuf;
 
 fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
     let project = project.into();
-    let mut session = Session::new(PathBuf::new());
+    let mut session = Session::new();
     let project = project.build(&mut session);
 
     let mut big_nums = ValueInterner::new();
