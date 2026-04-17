@@ -176,16 +176,10 @@ impl Scope<'_, '_> {
         let params = &self.hir.fn_params[fn_def_id];
         let args = &self.hir.call_args[args_id];
 
-        let source = self.source;
-        let hir = self.eval.hir;
         let bindings = &self.bindings;
         let arg_spans =
-            self.eval.call_arg_spans.push_iter(args.iter().map(
-                |&arg| match bindings[arg].origin {
-                    DefOrigin::Local(span) => SrcLoc::new(source, span),
-                    DefOrigin::Const(id) => hir.consts[id].loc(),
-                },
-            ));
+            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| bindings[arg].use_span));
+        let call_source = self.source;
 
         let parent_bindings = &mut self.bindings;
         let parent_mir_types = &mut self.mir_types;
@@ -195,7 +189,7 @@ impl Scope<'_, '_> {
             self.diag_ctx,
             fn_def.source,
             true,
-            EvalContext::FunctionPreamble { arg_spans },
+            EvalContext::FunctionPreamble { arg_spans, call_source },
         );
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
@@ -266,11 +260,12 @@ impl Scope<'_, '_> {
         idx: u32,
     ) {
         assert!(!comptime, "todo: comptime parameters");
-        let EvalContext::FunctionPreamble { arg_spans } = self.ctx else {
+        let EvalContext::FunctionPreamble { arg_spans, call_source } = self.ctx else {
             unreachable!("invariant: param instr outside of fn preamable")
         };
 
-        let arg_loc = self.eval.call_arg_spans[arg_spans][idx as usize];
+        let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
+        let arg_loc = SrcLoc::new(call_source, arg_span);
         let Ok(param_ty) = self.expect_type(r#type) else {
             self.bindings[arg].state = Err(Poisoned);
             return;
@@ -353,16 +348,10 @@ impl Scope<'_, '_> {
         let params = &self.hir.fn_params[fn_def_id];
         let args = &self.hir.call_args[args_id];
 
-        let parent_source = self.source;
-        let hir = self.eval.hir;
         let bindings_ref = &self.bindings;
         let arg_spans =
-            self.eval.call_arg_spans.push_iter(args.iter().map(
-                |&arg| match bindings_ref[arg].origin {
-                    DefOrigin::Local(span) => SrcLoc::new(parent_source, span),
-                    DefOrigin::Const(id) => hir.consts[id].loc(),
-                },
-            ));
+            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| bindings_ref[arg].use_span));
+        let call_source = self.source;
 
         let parent_bindings = &mut self.bindings;
 
@@ -371,7 +360,7 @@ impl Scope<'_, '_> {
             self.diag_ctx,
             fn_def.source,
             true,
-            EvalContext::FunctionPreamble { arg_spans },
+            EvalContext::FunctionPreamble { arg_spans, call_source },
         );
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
@@ -389,11 +378,11 @@ impl Scope<'_, '_> {
             let state = binding.state.and_then(|state| match state {
                 LocalState::Runtime(_) => {
                     let binding_loc = match binding.origin {
-                        DefOrigin::Local(span) => SrcLoc::new(parent_source, span),
+                        DefOrigin::Local(span) => SrcLoc::new(call_source, span),
                         DefOrigin::Const(id) => fn_scope.eval.hir.consts[id].loc(),
                     };
                     fn_scope.diag_ctx.emit_runtime_ref_in_comptime(
-                        SrcLoc::new(parent_source, call_span),
+                        SrcLoc::new(call_source, call_span),
                         binding_loc,
                     );
                     Err(Poisoned)

@@ -1,6 +1,6 @@
 use crate::{
     Evaluator,
-    diagnostics::{DiagCtx, DiagnosticLoc},
+    diagnostics::{BindingLoc, DiagCtx},
     evaluator::CallArgSpansIdx,
 };
 use plank_core::{DenseIndexMap, IndexVec};
@@ -47,7 +47,7 @@ pub(crate) enum Diverge {
 
 pub(crate) enum EvalContext {
     FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_loc: SrcLoc },
-    FunctionPreamble { arg_spans: CallArgSpansIdx },
+    FunctionPreamble { arg_spans: CallArgSpansIdx, call_source: SourceId },
     Other,
 }
 
@@ -550,15 +550,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    pub fn diag_loc(&self, use_span: SourceSpan, origin: DefOrigin) -> DiagnosticLoc {
+    pub fn diag_loc(&self, use_span: SourceSpan, origin: DefOrigin) -> BindingLoc {
         let use_loc = self.loc(use_span);
         match origin {
-            DefOrigin::Local(_) => DiagnosticLoc::Inline(use_loc),
+            DefOrigin::Local(_) => BindingLoc::Inline(use_loc),
             DefOrigin::Const(id) if self.hir.consts[id].source_id == self.source => {
-                DiagnosticLoc::Inline(use_loc)
+                BindingLoc::Inline(use_loc)
             }
             DefOrigin::Const(id) => {
-                DiagnosticLoc::CrossFile { use_loc, def_loc: self.hir.consts[id].loc() }
+                BindingLoc::WithDef { use_loc, def_loc: self.hir.consts[id].loc() }
             }
         }
     }

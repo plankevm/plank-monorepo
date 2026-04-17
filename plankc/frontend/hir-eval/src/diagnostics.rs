@@ -2,9 +2,9 @@ use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::TypeInterner;
 
-pub(crate) enum DiagnosticLoc {
+pub(crate) enum BindingLoc {
     Inline(SrcLoc),
-    CrossFile { use_loc: SrcLoc, def_loc: SrcLoc },
+    WithDef { use_loc: SrcLoc, def_loc: SrcLoc },
 }
 
 pub(crate) struct DiagCtx<'a> {
@@ -38,7 +38,7 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: DiagnosticLoc) {
+    pub fn emit_type_not_type(&mut self, types: &TypeInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label = format!(
             "expected {}, got value of type `{}`",
             builtin_names::TYPE,
@@ -46,10 +46,10 @@ impl DiagCtx<'_> {
         );
         let diag = Diagnostic::error("value used as type");
         let diag = match loc {
-            DiagnosticLoc::Inline(primary_loc) => {
+            BindingLoc::Inline(primary_loc) => {
                 diag.primary(primary_loc.source, primary_loc.span, primary_label)
             }
-            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+            BindingLoc::WithDef { use_loc, def_loc } => {
                 diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
             }
         };
@@ -98,48 +98,43 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, loc: DiagnosticLoc) {
+    pub fn emit_not_a_struct_type(&mut self, types: &TypeInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label = format!("`{}` is not a struct type", types.format(self.session, ty));
         let diag = Diagnostic::error("expected struct type");
         let diag = match loc {
-            DiagnosticLoc::Inline(primary_loc) => {
+            BindingLoc::Inline(primary_loc) => {
                 diag.primary(primary_loc.source, primary_loc.span, primary_label)
             }
-            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+            BindingLoc::WithDef { use_loc, def_loc } => {
                 diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
             }
         };
         diag.emit(self.session);
     }
 
-    pub fn emit_member_on_non_struct(
-        &mut self,
-        types: &TypeInterner,
-        ty: TypeId,
-        loc: DiagnosticLoc,
-    ) {
+    pub fn emit_member_on_non_struct(&mut self, types: &TypeInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label =
             format!("value of type `{}` is not a struct type", types.format(self.session, ty));
         let diag = Diagnostic::error("no fields on type");
         let diag = match loc {
-            DiagnosticLoc::Inline(primary_loc) => {
+            BindingLoc::Inline(primary_loc) => {
                 diag.primary(primary_loc.source, primary_loc.span, primary_label)
             }
-            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+            BindingLoc::WithDef { use_loc, def_loc } => {
                 diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
             }
         };
         diag.emit(self.session);
     }
 
-    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: DiagnosticLoc) {
+    pub fn emit_not_callable(&mut self, types: &TypeInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label = format!("`{}` is not callable", types.format(self.session, ty));
         let diag = Diagnostic::error("expected function");
         let diag = match loc {
-            DiagnosticLoc::Inline(primary_loc) => {
+            BindingLoc::Inline(primary_loc) => {
                 diag.primary(primary_loc.source, primary_loc.span, primary_label)
             }
-            DiagnosticLoc::CrossFile { use_loc, def_loc } => {
+            BindingLoc::WithDef { use_loc, def_loc } => {
                 diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
             }
         };
