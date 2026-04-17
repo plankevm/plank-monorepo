@@ -302,7 +302,7 @@ fn test_runtime_recursion_emits_recursion_diagnostic() {
         2 |     f()
           |     ^^^ runtime call that recurses
           |
-          = note: recursion is only allowed at compile time to ensure consistentperformance and iteration bounds
+          = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
         "#],
     );
 }
@@ -327,7 +327,188 @@ fn test_runtime_recursion_with_terminator_still_emits_recursion_diagnostic() {
         2 |     f();
           |     ^^^ runtime call that recurses
           |
-          = note: recursion is only allowed at compile time to ensure consistentperformance and iteration bounds
+          = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
+        "#],
+    );
+}
+
+#[test]
+fn test_repeat_call_after_failed_first_call_emits_spurious_recursion() {
+    assert_diagnostics(
+        r#"
+        const not_a_type = 42;
+        const f = fn() not_a_type { return 0; };
+        init {
+            f();
+            f();
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:4:5
+          |
+        4 |     f();
+          |     ^^^
+        "#,
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:5:5
+          |
+        5 |     f();
+          |     ^^^
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_preamble_error_emitted_once_per_signature_not_per_call_site() {
+    assert_diagnostics(
+        r#"
+        const not_a_type = 42;
+        const f = fn() not_a_type { return 0; };
+        init {
+            f();
+            f();
+            f();
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:4:5
+          |
+        4 |     f();
+          |     ^^^
+        "#,
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:5:5
+          |
+        5 |     f();
+          |     ^^^
+        "#,
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:6:5
+          |
+        6 |     f();
+          |     ^^^
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_nested_preamble_errors_point_at_correct_call_sites() {
+    assert_diagnostics(
+        r#"
+        const bad = 42;
+        const inner = fn() bad { return 0; };
+        const outer = fn() bad {
+            inner();
+            return 0;
+        };
+        init {
+            outer();
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: value used as type
+         --> main.plk:3:20
+          |
+        3 | const outer = fn() bad {
+          |                    ^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:8:5
+          |
+        8 |     outer();
+          |     ^^^^^^^
+        "#,
+            r#"
+        error: value used as type
+         --> main.plk:2:20
+          |
+        2 | const inner = fn() bad { return 0; };
+          |                    ^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:4:5
+          |
+        4 |     inner();
+          |     ^^^^^^^
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_inconsistent_premable() {
+    assert_diagnostics(
+        r#"
+        const even = fn (x: u256) bool { eq(raw_mod(x, 2), 0) };
+
+        const not_a_type = {};
+
+        const weird = fn (comptime N: u256) (if even(N) { not_a_type } else { bool }) {
+            false
+        };
+
+        init {
+            let mut fine = weird(3);
+            let mut nope = weird(2);
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: value used as type
+         --> main.plk:3:38
+          |
+        3 | const weird = fn (comptime N: u256) (if even(N) { not_a_type } else { bool }) {
+          |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected type, got value of type `void`
+          |
+        note: called here
+         --> main.plk:8:20
+          |
+        8 |     let mut nope = weird(2);
+          |                    ^^^^^^^^
         "#],
     );
 }

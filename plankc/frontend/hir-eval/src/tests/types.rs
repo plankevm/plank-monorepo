@@ -147,6 +147,12 @@ fn test_runtime_fn_return_type_not_type() {
           |
         3 |     let f = fn() forty_two { return 1; };
           |                  ^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:4:5
+          |
+        4 |     f();
+          |     ^^^
         "#],
     );
 }

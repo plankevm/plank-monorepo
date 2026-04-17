@@ -70,10 +70,6 @@ impl Session {
         &self.source_map[source]
     }
 
-    pub fn emit_diagnostic(&mut self, diagnostic: Diagnostic) {
-        self.diagnostics.push(diagnostic);
-    }
-
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
@@ -104,6 +100,12 @@ impl Session {
             }
         }
         (line, col)
+    }
+}
+
+impl DiagEmitter for Session {
+    fn emit_diagnostic(&mut self, diagnostic: Diagnostic) {
+        self.diagnostics.push(diagnostic);
     }
 }
 

@@ -196,6 +196,10 @@ impl ClaimBuilder for Claim {
     }
 }
 
+pub trait DiagEmitter {
+    fn emit_diagnostic(&mut self, diagnostic: Diagnostic);
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub level: Level,
@@ -247,8 +251,8 @@ impl Diagnostic {
         self.render_with(session, Renderer::styled())
     }
 
-    pub fn emit(self, session: &mut Session) {
-        session.emit_diagnostic(self);
+    pub fn emit(self, emitter: &mut impl DiagEmitter) {
+        emitter.emit_diagnostic(self);
     }
 
     fn render_with(&self, session: &Session, renderer: Renderer) -> String {

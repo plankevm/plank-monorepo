@@ -36,6 +36,18 @@ pub(crate) struct LoweredFunctionsCache {
 #[derive(Clone, Copy)]
 struct ArgParamComptimenessMatch;
 
+#[derive(Clone, Copy)]
+enum RuntimeLowerError {
+    PoisonResult,
+    PoisonedNever,
+}
+
+impl From<Poisoned> for RuntimeLowerError {
+    fn from(_value: Poisoned) -> Self {
+        Self::PoisonResult
+    }
+}
+
 impl LoweredFunctionsCache {
     pub fn new() -> Self {
         Self {
@@ -46,13 +58,17 @@ impl LoweredFunctionsCache {
         }
     }
 
-    fn set_lowered(&mut self, id: LoweredFnIdx, mir_func: mir::FnId) -> MaybePoisoned<mir::FnId> {
+    fn set_lowered(
+        &mut self,
+        id: LoweredFnIdx,
+        lowered_res: MaybePoisoned<mir::FnId>,
+    ) -> MaybePoisoned<mir::FnId> {
         match &mut self.functions[id].state {
             State::Done(Err(Poisoned)) => return Err(Poisoned),
             State::Done(Ok(_)) => unreachable!("invariant: state corrupted while lowering"),
             state @ State::InProgress => {
-                *state = State::Done(Ok(mir_func));
-                Ok(mir_func)
+                *state = State::Done(lowered_res);
+                lowered_res
             }
         }
     }
@@ -308,7 +324,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (mut fn_scope, parent_bindings) =
             self.create_fn_scope(fn_def_id, args_id, capture_buf_offset, validated);
 
-        let preamble = fn_scope.eval_preamble(fn_def_id)?;
+        let restore =
+            fn_scope.diag_ctx.set_preamble_call_site(SrcLoc::new(parent_source, call_span));
+        let preamble = fn_scope.eval_preamble(fn_def_id);
+        fn_scope.diag_ctx.restore_preamble_call_site(restore);
+        let preamble = preamble?;
 
         if is_parent_comptime || preamble.is_comptime_only {
             preamble.return_type?;
@@ -383,22 +403,39 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 };
             }
             Err(new_entry_id) => {
-                let (body, body_eval_res) = fn_scope.eval_block_to_mir(func.body);
-                match body_eval_res {
-                    Ok(()) => unreachable!("lowerer should guarantee return in function body"),
-                    Err(Diverge::PoisonedNever) => return Ok(Err(Diverge::PoisonedNever)),
-                    Err(Diverge::PoisonedControlFlow) => return Err(Poisoned),
-                    Err(Diverge::BlockEnd(_)) => {}
+                let fn_id = (|| {
+                    let (body, body_eval_res) = fn_scope.eval_block_to_mir(func.body);
+                    match body_eval_res {
+                        Ok(()) => unreachable!("lowerer should guarantee return in function body"),
+                        Err(Diverge::PoisonedNever) => {
+                            return Err(RuntimeLowerError::PoisonedNever);
+                        }
+                        Err(Diverge::PoisonedControlFlow) => {
+                            return Err(RuntimeLowerError::PoisonResult);
+                        }
+                        Err(Diverge::BlockEnd(_)) => {}
+                    }
+                    let return_type = preamble.return_type?;
+                    let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
+                    let fn_id2 = fn_scope.eval.mir_fns.push(mir::FnDef {
+                        body,
+                        param_count: params.iter().filter(|p| !p.is_comptime).count() as u32,
+                        return_type,
+                    });
+                    assert_eq!(fn_id1, fn_id2);
+                    Ok(fn_id1)
+                })();
+                let set_res = fn_scope
+                    .eval
+                    .lowered_fns_cache
+                    .set_lowered(new_entry_id, fn_id.map_err(|_| Poisoned));
+                match fn_id {
+                    Err(RuntimeLowerError::PoisonResult) => return Err(Poisoned),
+                    Err(RuntimeLowerError::PoisonedNever) => {
+                        return Ok(Err(Diverge::PoisonedNever));
+                    }
+                    Ok(_) => set_res?,
                 }
-                let return_type = preamble.return_type?;
-                let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
-                let fn_id2 = fn_scope.eval.mir_fns.push(mir::FnDef {
-                    body,
-                    param_count: params.iter().filter(|p| !p.is_comptime).count() as u32,
-                    return_type,
-                });
-                assert_eq!(fn_id1, fn_id2);
-                fn_scope.eval.lowered_fns_cache.set_lowered(new_entry_id, fn_id1)?
             }
         };
 
@@ -469,6 +506,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.loc(self.bindings[r#type].span),
                 arg_ty,
                 SrcLoc::new(call_scope_source, arg_span),
+                false,
             );
             self.bindings[arg].state = Err(Poisoned);
         }
@@ -488,6 +526,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.loc(ret_type_span),
                     ty,
                     self.loc(expr.span),
+                    true,
                 );
                 return Err(Diverge::BlockEnd(None));
             }

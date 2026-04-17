@@ -1,4 +1,4 @@
-use plank_core::Span;
+use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir as hir;
 use plank_session::{builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
@@ -9,11 +9,45 @@ use plank_values::{
 pub(crate) struct DiagCtx<'a> {
     pub session: &'a mut Session,
     pub types: &'a TypeInterner,
+    preamble_call_site: Option<SrcLoc>,
+}
+
+#[must_use = "Must return to `DiagCtx` via `restore_preamble_call_site`, will panic if left unused"]
+pub(crate) struct DiagCallSiteRestoreObligation {
+    prev: Option<SrcLoc>,
+    must_use: MustUseStrict,
 }
 
 impl<'a> DiagCtx<'a> {
     pub fn new(session: &'a mut Session, types: &'a TypeInterner) -> Self {
-        Self { session, types }
+        Self { session, types, preamble_call_site: None }
+    }
+
+    pub fn set_preamble_call_site(&mut self, call_site: SrcLoc) -> DiagCallSiteRestoreObligation {
+        DiagCallSiteRestoreObligation {
+            prev: self.preamble_call_site.replace(call_site),
+            must_use: MustUseStrict,
+        }
+    }
+
+    pub fn restore_preamble_call_site(&mut self, restore: DiagCallSiteRestoreObligation) {
+        let DiagCallSiteRestoreObligation { prev, must_use } = restore;
+        self.preamble_call_site = prev;
+        must_use.unchecked_destroy();
+    }
+}
+
+impl DiagEmitter for DiagCtx<'_> {
+    fn emit_diagnostic(&mut self, mut diagnostic: Diagnostic) {
+        if let Some(call_site) = self.preamble_call_site {
+            diagnostic = diagnostic.claim(
+                Claim::new(Level::Note, "called here").element(
+                    Annotations::new(call_site.source)
+                        .no_label(call_site.span, AnnotationKind::Primary),
+                ),
+            );
+        }
+        self.session.emit_diagnostic(diagnostic);
     }
 }
 
@@ -24,6 +58,7 @@ impl DiagCtx<'_> {
         expected_loc: SrcLoc,
         actual_ty: TypeId,
         actual_loc: SrcLoc,
+        add_called_here: bool,
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
@@ -32,9 +67,19 @@ impl DiagCtx<'_> {
         );
         let secondary_label =
             format!("`{}` expected because of this", self.types.format(self.session, expected_ty));
-        Diagnostic::error("mismatched types")
-            .cross_source_annotations(actual_loc, primary_label, expected_loc, secondary_label)
-            .emit(self.session);
+        // Bypass augmented emission: type mismatches from eval_param already
+        // annotate the call-site argument, so "instantiated here" would be redundant.
+        let diagnostic = Diagnostic::error("mismatched types").cross_source_annotations(
+            actual_loc,
+            primary_label,
+            expected_loc,
+            secondary_label,
+        );
+        if add_called_here {
+            diagnostic.emit(self)
+        } else {
+            diagnostic.emit(self.session);
+        }
     }
 
     pub fn emit_type_not_type(&mut self, ty: TypeId, loc: SrcLoc) {
@@ -48,7 +93,7 @@ impl DiagCtx<'_> {
                     self.types.format(self.session, ty)
                 ),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_literal_field_type_mismatch(
@@ -69,7 +114,7 @@ impl DiagCtx<'_> {
                     self.types.format(self.session, actual_ty),
                 ),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_type_mismatch_simple(
@@ -88,7 +133,7 @@ impl DiagCtx<'_> {
                     self.types.format(self.session, actual_ty),
                 ),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_not_a_struct_type(&mut self, ty: TypeId, ty_loc: SrcLoc) {
@@ -98,7 +143,7 @@ impl DiagCtx<'_> {
                 ty_loc.span,
                 format!("`{}` is not a struct type", self.types.format(self.session, ty)),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_member_on_non_struct(&mut self, ty: TypeId, value_loc: SrcLoc) {
@@ -111,7 +156,7 @@ impl DiagCtx<'_> {
                     self.types.format(self.session, ty)
                 ),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_not_callable(&mut self, ty: TypeId, loc: SrcLoc) {
@@ -121,7 +166,7 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!("`{}` is not callable", self.types.format(self.session, ty)),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_incompatible_branch_types(
@@ -140,7 +185,7 @@ impl DiagCtx<'_> {
             format!("`{}` expected because of this", self.types.format(self.session, ty1));
         Diagnostic::error("`if` and `else` have incompatible types")
             .cross_source_annotations(loc2, primary_label, loc1, secondary_label)
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_arg_count_mismatch(
@@ -154,33 +199,33 @@ impl DiagCtx<'_> {
         let def_label = format!("defined with {}", fmt_count(expected, "parameter"));
         Diagnostic::error("wrong number of arguments")
             .cross_source_annotations(call_loc, call_label, param_def_loc, def_label)
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_call_target_not_comptime(&mut self, call_loc: SrcLoc) {
         Diagnostic::error("call target must be known at compile time")
             .primary(call_loc.source, call_loc.span, "not known at compile time")
             .note("function calls are statically dispatched")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_closure_capture_not_comptime(&mut self, use_loc: SrcLoc, def_loc: SrcLoc) {
         Diagnostic::error("closure capture must be known at compile time")
             .cross_source_annotations(use_loc, "capture of runtime value", def_loc, "defined here")
             .note("closures can only capture values known at compile time")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_type_not_comptime(&mut self, loc: SrcLoc) {
         Diagnostic::error("type must be known at compile time")
             .primary(loc.source, loc.span, "not known at compile time")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_type_index_not_comptime(&mut self, loc: SrcLoc) {
         Diagnostic::error("struct definition requires compile-time values")
             .primary(loc.source, loc.span, "type index is not known at compile time")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_runtime_ref_in_comptime(
@@ -196,13 +241,13 @@ impl DiagCtx<'_> {
                     .secondary(runtime_def, "runtime value defined here"),
             )
             .note("comptime contexts can only reference values known at compile time")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_runtime_eval_in_comptime(&mut self, expr: SrcLoc) {
         Diagnostic::error("attempting to evaluate runtime expression in comptime context")
             .primary(expr.source, expr.span, "runtime expression")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
@@ -214,7 +259,7 @@ impl DiagCtx<'_> {
                 builtin_names::REVERT,
                 builtin_names::INVALID
             ))
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_const_cycle(&mut self, name: StrId, loc: SrcLoc) {
@@ -224,20 +269,20 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!("`{}` depends on itself", self.session.lookup_name(name)),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_not_yet_implemented(&mut self, functionality: &str, loc: SrcLoc) {
         Diagnostic::error(format!("{functionality} not yet implemented"))
             .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary))
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_comptime_only_value_at_runtime(&mut self, use_loc: SrcLoc) {
         Diagnostic::error("use of comptime-only value at runtime")
             .primary(use_loc.source, use_loc.span, "reference to comptime-only value")
             .info("`let mut` definitions and mutable assignments require runtime-compatible values")
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_mixed_comptime_runtime_struct(
@@ -263,7 +308,7 @@ impl DiagCtx<'_> {
                     )
                     .secondary(runtime_span, format!("`{runtime_field_name}` not comptime-known")),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_no_matching_builtin_signature(
@@ -313,7 +358,7 @@ impl DiagCtx<'_> {
             )
         };
 
-        Diagnostic::error(title).primary(loc.source, loc.span, label).note(note).emit(self.session);
+        Diagnostic::error(title).primary(loc.source, loc.span, label).note(note).emit(self);
     }
 
     pub fn emit_unsupported_eval_of_evm_builtin(&mut self, builtin: EvmBuiltin, loc: SrcLoc) {
@@ -323,7 +368,7 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!("`{}` cannot be evaluated at compile time", builtin.name()),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_lit_unexpected_field(
@@ -339,7 +384,7 @@ impl DiagCtx<'_> {
                 field_span,
                 format!("`{}` has no field `{field}`", self.types.format(self.session, struct_ty)),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_unknown_field_access(
@@ -358,7 +403,7 @@ impl DiagCtx<'_> {
                     self.session.lookup_name(field_name),
                 ),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_def_duplicate_field(
@@ -376,7 +421,7 @@ impl DiagCtx<'_> {
                     .primary(duplicate, format!("`{name}` assigned more than once"))
                     .secondary(first, "first assigned here"),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_duplicate_field(
@@ -396,7 +441,7 @@ impl DiagCtx<'_> {
                 SrcLoc::new(lit_loc.source, first_span),
                 "first assigned here",
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_struct_missing_field(
@@ -415,17 +460,17 @@ impl DiagCtx<'_> {
                     self.types.format(self.session, struct_ty),
                 ),
             )
-            .emit(self.session);
+            .emit(self);
     }
 
     pub fn emit_runtime_call_with_recursion(&mut self, call_loc: SrcLoc) {
         Diagnostic::error("runtime recursion not supported")
             .primary(call_loc.source, call_loc.span, "runtime call that recurses")
-            .note(
-                "recursion is only allowed at compile time to ensure consistent\
- performance and iteration bounds",
-            )
-            .emit(self.session);
+            .note(concat!(
+                "recursion is only allowed at compile time to ensure consistent performance and",
+                " iteration bounds"
+            ))
+            .emit(self);
     }
 
     pub fn emit_comptime_only_return_with_runtime_arg(
@@ -440,11 +485,11 @@ impl DiagCtx<'_> {
                 call_loc,
                 "function called here",
             )
-            .note(
-                "functions with comptime-only return types require all arguments \
-                 to be known at compile time",
-            )
-            .emit(self.session);
+            .note(concat!(
+                "functions with comptime-only return types require all arguments to be known at",
+                " compile time"
+            ))
+            .emit(self);
     }
 
     pub fn emit_comptime_param_got_runtime(&mut self, arg_def_loc: SrcLoc, param_def_loc: SrcLoc) {
@@ -468,6 +513,6 @@ impl DiagCtx<'_> {
                 })
                 .note("this only works if the expression is not fundamentally runtime"),
             )
-            .emit(self.session);
+            .emit(self);
     }
 }

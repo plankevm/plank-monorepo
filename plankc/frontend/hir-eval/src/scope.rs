@@ -192,6 +192,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.loc(expected_span),
                 actual_ty,
                 self.loc(actual_span),
+                true,
             );
             Err(Poisoned)
         }

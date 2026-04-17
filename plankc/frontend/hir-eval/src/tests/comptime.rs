@@ -394,6 +394,12 @@ fn test_comptime_param_type_not_type() {
           |
         2 | const f = fn(x: forty_two) u256 { return x; };
           |                 ^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:3:11
+          |
+        3 | const r = f(1);
+          |           ^^^^
         "#],
     );
 }
