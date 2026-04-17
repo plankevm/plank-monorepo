@@ -629,3 +629,31 @@ fn test_comptime_calls_cache_correctly() {
         "#,
     );
 }
+
+#[test]
+fn test_comptime_diverge_prevents_cascade() {
+    assert_diagnostics(
+        r#"
+        const stop = fn () never { evm_stop() };
+
+        const a = stop();
+
+        init {
+            let _ = a;
+            comptime {
+                stop();
+            }
+            let x: u256 = false;
+
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: builtin not supported at compile time
+         --> main.plk:1:28
+          |
+        1 | const stop = fn () never { evm_stop() };
+          |                            ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
+        "#],
+    );
+}
