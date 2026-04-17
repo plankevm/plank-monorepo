@@ -56,7 +56,7 @@ impl LoweredFunctionsCache {
         lowered_res: MaybePoisoned<mir::FnId>,
     ) -> MaybePoisoned<mir::FnId> {
         match &mut self.functions[id].state {
-            State::Done(Err(Poisoned)) => return Err(Poisoned),
+            State::Done(Err(Poisoned)) => Err(Poisoned),
             State::Done(Ok(_)) => unreachable!("invariant: state corrupted while lowering"),
             state @ State::InProgress => {
                 *state = State::Done(lowered_res);

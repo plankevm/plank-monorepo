@@ -1,5 +1,4 @@
-use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
-use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_core::DenseIndexMap;
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, poison};
@@ -270,7 +269,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if is_parent_comptime || preamble.is_comptime_only {
             let function =
                 FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
-            println!("function: {:?}", function);
             preamble.return_type?;
 
             let new_fn_eval_cache_entry = match fn_scope.eval.evaluated_fns_cache.lookup(function) {

@@ -105,6 +105,24 @@ fn test_runtime_call_arg_count_mismatch() {
 }
 
 #[test]
+fn test_const_poisoned_never_crashes() {
+    assert_diagnostics(
+        r#"
+        const f = fn() never { evm_stop(); };
+        const x = f();
+        init { evm_stop(); }
+        "#,
+        &[r#"
+        error: builtin not supported at compile time
+         --> main.plk:1:24
+          |
+        1 | const f = fn() never { evm_stop(); };
+          |                        ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_call_arg_count_mismatch() {
     assert_diagnostics(
         r#"

@@ -1,4 +1,3 @@
-use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
@@ -34,7 +33,6 @@ pub(crate) struct Evaluator<'a> {
 
     pub evaluated_fns_cache: &'a EvaluatedFunctionCache,
     pub lowered_fns_cache: LoweredFunctionsCache,
-    pub early_fail_fns: HashSet<ValueId>,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
@@ -67,7 +65,6 @@ impl<'a> Evaluator<'a> {
 
             evaluated_fns_cache,
             lowered_fns_cache: LoweredFunctionsCache::new(),
-            early_fail_fns: HashSet::new(),
 
             call_arg_spans: ListOfLists::new(),
 
@@ -105,9 +102,13 @@ impl<'a> Evaluator<'a> {
         self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
-        if let Err(Diverge::PoisonedControlFlow) = scope.eval_comptime(const_def.body) {
-            self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
-            return Err(Poisoned);
+        match scope.eval_comptime(const_def.body) {
+            Err(Diverge::PoisonedControlFlow | Diverge::PoisonedNever) => {
+                self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
+                return Err(Poisoned);
+            }
+            Err(Diverge::BlockEnd(_)) => unreachable!("invariant(hir): return in const def block"),
+            Ok(_) => {}
         }
 
         let value = scope.bindings[const_def.result].state.map(|state| match state {
