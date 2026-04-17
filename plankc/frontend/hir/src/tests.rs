@@ -1207,6 +1207,9 @@ fn test_return_outside_function_body() {
         error: return is not allowed outside of function bodies
          --> main.plk:3:5
           |
+        1 | init {
+          | ---- inside this block
+        2 |     let a = add(1, 2);
         3 |     return a;
           |     ^^^^^^^^^ not allowed here
         "#,

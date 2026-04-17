@@ -63,6 +63,12 @@ struct ScopedConst {
     imported: bool,
 }
 
+#[derive(Clone, Copy)]
+enum BodyContext {
+    Function,
+    Other { keyword_span: TokenSpan },
+}
+
 struct BlockLowerer<'a> {
     consts: HashMap<StrId, ScopedConst>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
@@ -73,7 +79,7 @@ struct BlockLowerer<'a> {
     scoped_locals_stack: Vec<ScopedLocal>,
     fn_scope_start: usize,
     fn_captures_start: usize,
-    in_function_body: bool,
+    body_context: BodyContext,
     next_local_id: LocalId,
 
     instructions_buf: Vec<Instruction>,
@@ -171,7 +177,7 @@ impl BlockLowerer<'_> {
 
         debug_assert_eq!(self.fn_scope_start, 0);
         debug_assert_eq!(self.fn_captures_start, 0);
-        assert!(!self.in_function_body);
+        debug_assert!(matches!(self.body_context, BodyContext::Other { .. }));
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
@@ -528,8 +534,8 @@ impl BlockLowerer<'_> {
             std::mem::replace(&mut self.fn_scope_start, self.scoped_locals_stack.len());
         let saved_captures_start =
             std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
-        let saved_in_function_body = self.in_function_body;
-        self.in_function_body = true;
+        let saved_body_context = self.body_context;
+        self.body_context = BodyContext::Function;
 
         let param_locals_start = self.locals_buf.len();
         let return_type;
@@ -583,7 +589,7 @@ impl BlockLowerer<'_> {
         self.next_local_id = saved_next_local;
         self.fn_scope_start = saved_fn_scope_start;
         self.fn_captures_start = saved_captures_start;
-        self.in_function_body = saved_in_function_body;
+        self.body_context = saved_body_context;
 
         fn_def_id
     }
@@ -691,11 +697,12 @@ impl BlockLowerer<'_> {
             }
             Statement::Return(return_stmt) => {
                 let value = self.lower_expr(return_stmt.value());
-                if self.in_function_body {
-                    self.emit(InstructionKind::Return(value));
-                } else {
-                    self.emit_return_not_allowed_here(return_stmt.node().span());
-                    self.emit(InstructionKind::Eval(value))
+                match self.body_context {
+                    BodyContext::Function => self.emit(InstructionKind::Return(value)),
+                    BodyContext::Other { keyword_span: span } => {
+                        self.emit_return_not_allowed_here(return_stmt.node().span(), span);
+                        self.emit(InstructionKind::Eval(value))
+                    }
                 }
             }
             Statement::Assign(assign_stmt) => {
@@ -753,7 +760,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         scoped_locals_stack: Vec::new(),
         fn_scope_start: 0,
         fn_captures_start: 0,
-        in_function_body: false,
+        body_context: BodyContext::Other { keyword_span: TokenSpan::dummy() },
         next_local_id: LocalId::ZERO,
 
         instructions_buf: Vec::new(),
@@ -779,6 +786,10 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                     let id = lowerer.consts[&const_def.name].const_id;
                     let hir_def = &mut consts[id];
                     hir_def.result = lowerer.alloc_temp();
+                    let span = const_def.span();
+                    lowerer.body_context = BodyContext::Other {
+                        keyword_span: TokenSpan::new(span.start, span.start + 1),
+                    };
                     hir_def.body = lowerer.create_sub_block(const_def.span(), |this| {
                         let r#type =
                             const_def.r#type.map(|type_expr| this.lower_expr_to_local(type_expr));
@@ -793,6 +804,9 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                     } else if let Some((_, prev_span)) = init {
                         lowerer.error_multiple_init_blocks(span, prev_span);
                     } else {
+                        lowerer.body_context = BodyContext::Other {
+                            keyword_span: TokenSpan::new(span.start, span.start + 1),
+                        };
                         init = Some((lowerer.lower_body_to_block(init_def.body()), span));
                     }
                 }
@@ -803,6 +817,9 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                     } else if let Some((_, prev_span)) = run {
                         lowerer.error_multiple_run_blocks(span, prev_span);
                     } else {
+                        lowerer.body_context = BodyContext::Other {
+                            keyword_span: TokenSpan::new(span.start, span.start + 1),
+                        };
                         run = Some((lowerer.lower_body_to_block(run_def.body()), span));
                     }
                 }
