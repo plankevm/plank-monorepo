@@ -67,7 +67,7 @@ impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
         Self {
             chunk_index: Cell::new(0),
             chunk_rel_offset: Cell::new(0),
-            chunk_bytes_remaining: Cell::new(1024),
+            chunk_bytes_remaining: Cell::new(FIRST_CHUNK_SIZE_BYTES as u32),
             chunks: [const { Cell::new(None) }; MAX_CHUNKS as usize],
             alloc,
         }
