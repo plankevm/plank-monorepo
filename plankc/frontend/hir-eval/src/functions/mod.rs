@@ -1,7 +1,7 @@
 use plank_core::DenseIndexMap;
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, poison};
+use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value};
 
 mod cache;
@@ -22,6 +22,36 @@ struct ArgParamComptimenessMatch;
 struct PreambleResult {
     return_type: MaybePoisoned<TypeId>,
     is_comptime_only: bool,
+}
+
+struct Call<'a> {
+    source: SourceId,
+    caller_comptime: bool,
+    caller_bindings: &'a DenseIndexMap<hir::LocalId, Local>,
+    span: SourceSpan,
+
+    closure: ValueId,
+    func: hir::FnDef,
+    args: &'a [hir::LocalId],
+    params: &'a [hir::ParamInfo],
+
+    validated: ArgParamComptimenessMatch,
+}
+
+fn comptime_args(
+    is_comptime: bool,
+    params: &[hir::ParamInfo],
+    args: &[hir::LocalId],
+) -> impl Iterator<Item = (hir::ParamInfo, hir::LocalId)> {
+    params.iter().zip(args).filter_map(move |(&param, &arg)| {
+        (param.is_comptime || is_comptime).then_some((param, arg))
+    })
+}
+
+impl Call<'_> {
+    fn loc(&self) -> SrcLoc {
+        SrcLoc::new(self.source, self.span)
+    }
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
@@ -199,16 +229,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
-    fn comptime_args(
-        is_comptime: bool,
-        params: &[hir::ParamInfo],
-        args: &[hir::LocalId],
-    ) -> impl Iterator<Item = (hir::ParamInfo, hir::LocalId)> {
-        params.iter().zip(args).filter_map(move |(&param, &arg)| {
-            (param.is_comptime || is_comptime).then_some((param, arg))
-        })
-    }
-
     fn validate_args_param_comptimeness_match(
         &mut self,
         func: hir::FnDef,
@@ -216,7 +236,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
     ) -> MaybePoisoned<ArgParamComptimenessMatch> {
         let mut comptime_args_poisoned = false;
-        for (param, arg) in Self::comptime_args(self.is_comptime(), params, args) {
+        for (param, arg) in comptime_args(self.is_comptime(), params, args) {
             let arg = self.bindings[arg];
             if let Ok(LocalState::Runtime(_)) = arg.state {
                 self.diag_ctx
@@ -254,21 +274,34 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let validated = self.validate_args_param_comptimeness_match(func, params, args)?;
 
-        let is_parent_comptime = self.is_comptime();
-        let parent_source = self.source;
-        let (mut fn_scope, parent_bindings) =
-            self.create_fn_scope(fn_def_id, args_id, capture_buf_offset, validated);
+        let (mut fn_scope, call) = {
+            let caller_comptime = self.is_comptime();
+            let call_source = self.source;
+            let (fn_scope, caller_bindings) =
+                self.create_fn_scope(fn_def_id, args_id, capture_buf_offset, validated);
+            let call = Call {
+                source: call_source,
+                caller_comptime,
+                caller_bindings,
+                span: call_span,
+                closure,
+                func,
+                args,
+                params,
+                validated,
+            };
+            (fn_scope, call)
+        };
 
         let preamble = {
-            let restore =
-                fn_scope.diag_ctx.set_preamble_call_site(SrcLoc::new(parent_source, call_span));
+            let restore = fn_scope.diag_ctx.set_preamble_call_site(call.loc());
             let preamble = fn_scope.eval_preamble(fn_def_id);
             fn_scope.diag_ctx.restore_preamble_call_site(restore);
             preamble?
         };
 
         // Assemble comptime parameters for the key.
-        for (param, _arg) in Self::comptime_args(is_parent_comptime, params, args) {
+        for (param, _arg) in comptime_args(call.caller_comptime, params, args) {
             let value = fn_scope.bindings[param.value].state.map(|state| match state {
                 LocalState::Comptime(value) => value,
                 LocalState::Runtime(_) => {
@@ -279,91 +312,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             fn_scope.eval.maybe_values_buf.push(value);
         }
 
-        if is_parent_comptime || preamble.is_comptime_only {
-            let function =
-                FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
-            preamble.return_type?;
-
-            let new_fn_eval_cache_entry = match fn_scope.eval.evaluated_fns_cache.lookup(function) {
-                Err(new_entry) => new_entry,
-                Ok(state) => match state.get() {
-                    State::InProgress => {
-                        fn_scope.diag_ctx.emit_infinite_comptime_recursion(call_loc);
-                        state.set(State::Done(Err(Poisoned)));
-                        return Err(Poisoned);
-                    }
-                    State::Done(value) => {
-                        return match value {
-                            Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
-                            Err(Poisoned) => {
-                                // Cache collapses `Diverge` into Err(Poisoned);
-                                // reconstruct the diverge when the return type was never.
-                                if preamble.return_type == Ok(TypeId::NEVER) {
-                                    Ok(Err(Diverge::END))
-                                } else {
-                                    Err(Poisoned)
-                                }
-                            }
-                        };
-                    }
-                },
-            };
-
-            // Pessimistically set result incase we short-circuit before evaluating the body.
-            new_fn_eval_cache_entry.result.set(State::Done(Err(Poisoned)));
-
-            let mut poisoned = false;
-            for (&param, &arg) in params.iter().zip(args) {
-                if param.is_comptime {
-                    let ArgParamComptimenessMatch = validated;
-                    continue;
-                }
-                let Ok((state, span)) = parent_bindings[arg].poisoned() else {
-                    poisoned = true;
-                    continue;
-                };
-                match state {
-                    LocalState::Runtime(_) => {
-                        if is_parent_comptime {
-                            fn_scope.diag_ctx.emit_runtime_ref_in_comptime(
-                                parent_source,
-                                call_span,
-                                span,
-                            );
-                        } else {
-                            fn_scope.diag_ctx.emit_comptime_only_return_with_runtime_arg(
-                                SrcLoc::new(parent_source, span),
-                                SrcLoc::new(parent_source, call_span),
-                            );
-                        }
-                        poisoned = true;
-                    }
-                    LocalState::Comptime(value) if !is_parent_comptime => {
-                        // We optimistically "materialized" all bindings in `create_fn_scope`, so
-                        // now we have to undo that for the comptime ones.
-                        fn_scope.bindings[param.value].state = Ok(LocalState::Comptime(value));
-                    }
-                    LocalState::Comptime(_) => { /* already bound in `create_fn_scope` */ }
-                }
-            }
-            if poisoned {
-                return Err(Poisoned);
-            }
-
-            // Undo pessimistic result poison (allows recursion detection).
-            new_fn_eval_cache_entry.result.set(State::InProgress);
-
-            let eval_res = match fn_scope.eval_comptime(func.body) {
-                Ok(()) => unreachable!("lowerer should guarantee return in function body"),
-                Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
-                Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
-                Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
-            };
-            new_fn_eval_cache_entry.result.set(State::Done(match eval_res {
-                Ok(Ok(value)) => Ok(value),
-                Err(Poisoned) | Ok(Err(_)) => Err(Poisoned),
-            }));
-            return eval_res.map(|value_or_diverge| value_or_diverge.map(EvalValue::Comptime));
+        if call.caller_comptime || preamble.is_comptime_only {
+            return fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
         }
 
         // --- Runtime path ---
@@ -444,6 +394,93 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         Ok(Ok(EvalValue::Runtime { expr, result_type }))
+    }
+
+    fn fold_comptime_call(
+        &mut self,
+        call: &Call<'_>,
+        preamble: PreambleResult,
+        values_buf_offset: usize,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let function =
+            FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
+        preamble.return_type?;
+
+        let new_fn_eval_cache_entry = match self.eval.evaluated_fns_cache.lookup(function) {
+            Err(new_entry) => new_entry,
+            Ok(state) => match state.get() {
+                State::InProgress => {
+                    self.diag_ctx.emit_infinite_comptime_recursion(call.loc());
+                    state.set(State::Done(Err(Poisoned)));
+                    return Err(Poisoned);
+                }
+                State::Done(value) => {
+                    return match value {
+                        Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
+                        Err(Poisoned) => {
+                            // Cache collapses `Diverge` into Err(Poisoned);
+                            // reconstruct the diverge when the return type was never.
+                            if preamble.return_type == Ok(TypeId::NEVER) {
+                                Ok(Err(Diverge::END))
+                            } else {
+                                Err(Poisoned)
+                            }
+                        }
+                    };
+                }
+            },
+        };
+
+        // Pessimistically set result incase we short-circuit before evaluating the body.
+        new_fn_eval_cache_entry.result.set(State::Done(Err(Poisoned)));
+
+        let mut poisoned = false;
+        for (&param, &arg) in call.params.iter().zip(call.args) {
+            if param.is_comptime {
+                let &ArgParamComptimenessMatch = &call.validated;
+                continue;
+            }
+            let Ok((state, arg_span)) = call.caller_bindings[arg].poisoned() else {
+                poisoned = true;
+                continue;
+            };
+            match state {
+                LocalState::Runtime(_) => {
+                    if call.caller_comptime {
+                        self.diag_ctx.emit_runtime_ref_in_comptime(
+                            call.source,
+                            call.span,
+                            arg_span,
+                        );
+                    } else {
+                        self.diag_ctx.emit_comptime_only_return_with_runtime_arg(
+                            SrcLoc::new(call.source, arg_span),
+                            call.loc(),
+                        );
+                    }
+                    poisoned = true;
+                }
+                LocalState::Comptime(_) => { /* already bound in `create_self` */ }
+            }
+        }
+        if poisoned {
+            return Err(Poisoned);
+        }
+
+        // Undo pessimistic result poison (allows recursion detection).
+        new_fn_eval_cache_entry.result.set(State::InProgress);
+
+        let eval_res = match self.eval_comptime(call.func.body) {
+            Ok(()) => unreachable!("lowerer should guarantee return in function body"),
+            Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
+            Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
+            Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
+        };
+        new_fn_eval_cache_entry.result.set(State::Done(match eval_res {
+            Ok(Ok(value)) => Ok(value),
+            Err(Poisoned) | Ok(Err(_)) => Err(Poisoned),
+        }));
+        eval_res.map(|value_or_diverge| value_or_diverge.map(EvalValue::Comptime))
     }
 
     pub fn eval_param(

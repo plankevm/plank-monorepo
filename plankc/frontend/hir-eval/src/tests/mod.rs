@@ -47,8 +47,8 @@ fn render_project_diagnostics(test_project: impl Into<TestProject>) -> Vec<Strin
 }
 
 #[track_caller]
-fn assert_diagnostics(source: &str, expected: &[&str]) {
-    assert_project_diagnostics(TestProject::root(source), expected)
+fn assert_diagnostics(source: impl Into<TestProject>, expected: &[&str]) {
+    assert_project_diagnostics(source, expected)
 }
 
 #[track_caller]
