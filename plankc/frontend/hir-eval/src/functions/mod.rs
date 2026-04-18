@@ -10,7 +10,7 @@ use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
-    evaluator::State,
+    evaluator::{CallArgSpansIdx, State},
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -174,14 +174,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 for &capture in captures {
                     this.eval.captures_buf.push(capture);
                 }
-                this.eval_call_inner(
+
+                let arg_span_groups_before = this.eval.call_arg_spans.len();
+                let eval_res = this.eval_call_inner(
                     closure_vid,
                     fn_def_id,
                     args_id,
                     call_span,
                     capture_buf_offset,
                     values_buf_offset,
-                )
+                );
+                let arg_span_groups_after = this.eval.call_arg_spans.len();
+
+                let diff = arg_span_groups_after
+                    .checked_sub(arg_span_groups_before)
+                    .expect("inconsistent arg spans cleanup");
+                assert!(diff <= 1);
+                if diff == 1 {
+                    this.eval.call_arg_spans.pop();
+                }
+
+                eval_res
             })
         })
     }

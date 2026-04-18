@@ -1,7 +1,5 @@
 use super::*;
 
-// When a `never`-returning function has a return type mismatch, the diverge should
-// propagate as PoisonedNever so callers don't see reachable code after the call.
 #[test]
 fn test_never_fn_return_type_mismatch_diverges() {
     assert_diagnostics(
@@ -29,8 +27,6 @@ fn test_never_fn_return_type_mismatch_diverges() {
     );
 }
 
-// When both branches of a runtime if call never-returning functions, the if-statement
-// should diverge and subsequent code should not be evaluated.
 #[test]
 fn test_if_both_branches_never_function_diverges() {
     assert_diagnostics(
@@ -60,8 +56,6 @@ fn test_if_both_branches_never_function_diverges() {
     );
 }
 
-// When a never-returning function body produces PoisonedNever, subsequent calls to the
-// same function (from a different branch of a runtime if) should still diverge.
 #[test]
 fn test_runtime_never_fn_call_diverges_on_cached_hit() {
     assert_diagnostics(
@@ -91,8 +85,6 @@ fn test_runtime_never_fn_call_diverges_on_cached_hit() {
     );
 }
 
-// A non-comptime parameter of comptime-only type (e.g. `type`) passed a value at runtime
-// should be diagnosed, not silently lowered into MIR.
 #[test]
 fn test_comptime_only_param_value_diagnosed_at_runtime() {
     assert_diagnostics(
