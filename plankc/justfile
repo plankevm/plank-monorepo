@@ -22,3 +22,6 @@ ci-clippy:
 
 ci-all: test-all ci-clippy ci-fmt
 
+docs:
+    mdbook serve ../plank-doc
+

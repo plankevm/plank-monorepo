@@ -1,0 +1,5 @@
+[book]
+authors = ["Plank Contributors"]
+language = "en"
+src = "src"
+title = "The Plank Book"
