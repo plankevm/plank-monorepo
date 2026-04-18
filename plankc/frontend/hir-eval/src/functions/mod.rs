@@ -10,7 +10,7 @@ use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
-    evaluator::{CallArgSpansIdx, State},
+    evaluator::State,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
