@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_consistent_caching_when_runtime_call_forced_to_be_comptime() {
+fn test_comptime_only_return_caches_per_non_comptime_arg_value() {
     assert_lowers_to(
         r#"
         const f = fn(comptime T: type, x: T) type {
@@ -20,12 +20,13 @@ fn test_consistent_caching_when_runtime_call_forced_to_be_comptime() {
         @fn0() -> never {
             %0 : u256 = 34
             %1 : bool = false
-            %2 : bool = 22
+            %2 : u256 = 22
             %3 : never = evm_stop()
         }
         "#,
     );
 }
+
 #[test]
 fn test_comptime_evm_builtins() {
     assert_lowers_to(

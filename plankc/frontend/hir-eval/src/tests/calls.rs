@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn test_preamble_error_per_call_site() {
+    assert_diagnostics(
+        r#"
+        const not_a_type = 42;
+        const f = fn() not_a_type { return 0; };
+        init {
+            f();
+            f();
+            f();
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:4:5
+          |
+        4 |     f();
+          |     ^^^
+        "#,
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:5:5
+          |
+        5 |     f();
+          |     ^^^
+        "#,
+            r#"
+        error: value used as type
+         --> main.plk:2:16
+          |
+        2 | const f = fn() not_a_type { return 0; };
+          |                ^^^^^^^^^^ expected type, got value of type `u256`
+          |
+        note: called here
+         --> main.plk:6:5
+          |
+        6 |     f();
+          |     ^^^
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_never_fn_return_type_mismatch_diverges() {
     assert_diagnostics(
         r#"
@@ -432,106 +489,6 @@ fn test_runtime_recursion_with_terminator_still_emits_recursion_diagnostic() {
           |
           = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
         "#],
-    );
-}
-
-#[test]
-fn test_repeat_call_after_failed_first_call_emits_spurious_recursion() {
-    assert_diagnostics(
-        r#"
-        const not_a_type = 42;
-        const f = fn() not_a_type { return 0; };
-        init {
-            f();
-            f();
-            evm_stop();
-        }
-        "#,
-        &[
-            r#"
-        error: value used as type
-         --> main.plk:2:16
-          |
-        2 | const f = fn() not_a_type { return 0; };
-          |                ^^^^^^^^^^ expected type, got value of type `u256`
-          |
-        note: called here
-         --> main.plk:4:5
-          |
-        4 |     f();
-          |     ^^^
-        "#,
-            r#"
-        error: value used as type
-         --> main.plk:2:16
-          |
-        2 | const f = fn() not_a_type { return 0; };
-          |                ^^^^^^^^^^ expected type, got value of type `u256`
-          |
-        note: called here
-         --> main.plk:5:5
-          |
-        5 |     f();
-          |     ^^^
-        "#,
-        ],
-    );
-}
-
-#[test]
-fn test_preamble_error_emitted_once_per_signature_not_per_call_site() {
-    assert_diagnostics(
-        r#"
-        const not_a_type = 42;
-        const f = fn() not_a_type { return 0; };
-        init {
-            f();
-            f();
-            f();
-            evm_stop();
-        }
-        "#,
-        &[
-            r#"
-        error: value used as type
-         --> main.plk:2:16
-          |
-        2 | const f = fn() not_a_type { return 0; };
-          |                ^^^^^^^^^^ expected type, got value of type `u256`
-          |
-        note: called here
-         --> main.plk:4:5
-          |
-        4 |     f();
-          |     ^^^
-        "#,
-            r#"
-        error: value used as type
-         --> main.plk:2:16
-          |
-        2 | const f = fn() not_a_type { return 0; };
-          |                ^^^^^^^^^^ expected type, got value of type `u256`
-          |
-        note: called here
-         --> main.plk:5:5
-          |
-        5 |     f();
-          |     ^^^
-        "#,
-            r#"
-        error: value used as type
-         --> main.plk:2:16
-          |
-        2 | const f = fn() not_a_type { return 0; };
-          |                ^^^^^^^^^^ expected type, got value of type `u256`
-          |
-        note: called here
-         --> main.plk:6:5
-          |
-        6 |     f();
-          |     ^^^
-        "#,
-        ],
     );
 }
 
