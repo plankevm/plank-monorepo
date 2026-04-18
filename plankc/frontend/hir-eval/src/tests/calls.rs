@@ -101,8 +101,6 @@ fn test_comptime_only_param_value_diagnosed_at_runtime() {
           |
         3 |     f(u256);
           |       ^^^^ reference to comptime-only value
-          |
-          = info: `let mut` definitions and mutable assignments require runtime-compatible values
         "#],
     );
 }

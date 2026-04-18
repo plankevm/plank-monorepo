@@ -281,7 +281,6 @@ impl DiagCtx<'_> {
     pub fn emit_comptime_only_value_at_runtime(&mut self, use_loc: SrcLoc) {
         Diagnostic::error("use of comptime-only value at runtime")
             .primary(use_loc.source, use_loc.span, "reference to comptime-only value")
-            .info("`let mut` definitions and mutable assignments require runtime-compatible values")
             .emit(self);
     }
 
