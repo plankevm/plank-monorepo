@@ -66,7 +66,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let params = &self.eval.hir.fn_params[fn_def_id];
         let args = &self.eval.hir.call_args[args_id];
         let is_comptime = self.is_comptime();
-        let caller_source = self.source;
         let caller_bindings = &mut self.bindings;
         let caller_mir_types = &mut self.mir_types;
 
@@ -89,44 +88,49 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         for (&param, &arg) in params.iter().zip(args) {
             let binding = caller_bindings[arg];
-            let state = binding.state.and_then(|state| {
-                if param.is_comptime {
-                    let LocalState::Comptime(value) = state else {
+            let state = match binding.state {
+                Ok(state) => state,
+                Err(Poisoned) => {
+                    fn_scope.bindings.insert_no_prev(
+                        param.value,
+                        Local { state: Err(Poisoned), span: param.span },
+                    );
+                    continue;
+                }
+            };
+
+            let state = if param.is_comptime {
+                let LocalState::Comptime(value) = state else {
+                    let ArgParamComptimenessMatch = validated;
+                    unreachable!("invariant: already validated");
+                };
+                Ok(LocalState::Comptime(value))
+            } else if is_comptime {
+                match state {
+                    LocalState::Runtime(_) => {
                         let ArgParamComptimenessMatch = validated;
-                        unreachable!("invariant: already validated");
-                    };
-                    Ok(LocalState::Comptime(value))
-                } else if is_comptime {
-                    match state {
-                        LocalState::Runtime(_) => {
-                            let ArgParamComptimenessMatch = validated;
-                            Err(Poisoned)
-                        }
-                        LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
+                        Err(Poisoned)
                     }
-                } else {
-                    match state {
-                        LocalState::Runtime(outer_mir) => {
-                            let ty = caller_mir_types[outer_mir];
-                            let inner_mir = fn_scope.mir_types.push(ty);
-                            Ok(LocalState::Runtime(inner_mir))
-                        }
+                    LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
+                }
+            } else {
+                'state: {
+                    let ty = match state {
+                        LocalState::Runtime(outer_mir) => caller_mir_types[outer_mir],
                         LocalState::Comptime(value) => {
                             let ty = fn_scope.eval.values.type_of_value(value);
+                            // If value is comptime-only, even for a runtime call we treat it as a
+                            // comptime argument.
                             if fn_scope.eval.types.is_comptime_only(ty) {
-                                fn_scope.diag_ctx.emit_comptime_only_value_at_runtime(SrcLoc::new(
-                                    caller_source,
-                                    binding.span,
-                                ));
-                                Err(Poisoned)
-                            } else {
-                                let inner_mir = fn_scope.mir_types.push(ty);
-                                Ok(LocalState::Runtime(inner_mir))
+                                break 'state Ok(LocalState::Comptime(value));
                             }
+                            ty
                         }
-                    }
+                    };
+                    let inner_mir = fn_scope.mir_types.push(ty);
+                    Ok(LocalState::Runtime(inner_mir))
                 }
-            });
+            };
             fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
         }
 
@@ -302,15 +306,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             preamble?
         };
 
-        // Assemble comptime parameters for the key.
-        for (param, _arg) in comptime_args(call.caller_comptime, params, args) {
-            let value = fn_scope.bindings[param.value].state.map(|state| match state {
-                LocalState::Comptime(value) => value,
-                LocalState::Runtime(_) => {
+        // Assemble comptime parameters for the function key.
+        for &param in params {
+            let value = match fn_scope.bindings[param.value].state {
+                Ok(LocalState::Comptime(value)) => Ok(value),
+                Err(Poisoned) => Err(Poisoned),
+                Ok(LocalState::Runtime(_)) => {
                     let ArgParamComptimenessMatch = validated;
-                    unreachable!("already validated?");
+                    continue;
                 }
-            });
+            };
             fn_scope.eval.maybe_values_buf.push(value);
         }
 
@@ -322,6 +327,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Non-comptime params are already bound as Runtime in `create_fn_scope`.
         let function =
             FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
+        let param_count = (params.len() - function.params.len()) as u32;
 
         let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
             Ok(&mut State::Done(fn_id)) => fn_id,
@@ -340,11 +346,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     let return_type = preamble.return_type?;
                     let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
-                    let fn_id2 = fn_scope.eval.mir_fns.push(mir::FnDef {
-                        body,
-                        param_count: params.iter().filter(|p| !p.is_comptime).count() as u32,
-                        return_type,
-                    });
+                    let fn_id2 =
+                        fn_scope.eval.mir_fns.push(mir::FnDef { body, param_count, return_type });
                     assert_eq!(fn_id1, fn_id2);
                     Ok(fn_id1)
                 })();
@@ -372,6 +375,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             continue;
                         }
                         let ty = self.eval.values.type_of_value(value);
+                        if self.eval.types.is_comptime_only(ty) {
+                            continue;
+                        }
                         let target = self.mir_types.push(ty);
                         self.eval
                             .instr_stack_buf
@@ -439,7 +445,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let mut poisoned = false;
         for (&param, &arg) in call.params.iter().zip(call.args) {
             if param.is_comptime {
-                let &ArgParamComptimenessMatch = &call.validated;
+                let ArgParamComptimenessMatch = call.validated;
                 continue;
             }
             let Ok((state, arg_span)) = call.caller_bindings[arg].poisoned() else {
@@ -462,7 +468,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     poisoned = true;
                 }
-                LocalState::Comptime(_) => { /* already bound in `create_self` */ }
+                LocalState::Comptime(value) => {
+                    // If the calling context was runtime we need to un-materialize any comptime
+                    // values it turned into runtime in `create_fn_scope`.
+                    if let Ok(state) = self.bindings[param.value].state.as_mut() {
+                        *state = LocalState::Comptime(value);
+                    }
+                }
             }
         }
         if poisoned {

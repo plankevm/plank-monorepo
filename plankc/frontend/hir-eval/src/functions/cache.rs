@@ -18,8 +18,8 @@ pub(crate) type Param = MaybePoisoned<ValueId>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct FunctionKey<'a> {
-    closure: ValueId,
-    params: &'a [Param],
+    pub closure: ValueId,
+    pub params: &'a [Param],
 }
 
 impl<'a> FunctionKey<'a> {

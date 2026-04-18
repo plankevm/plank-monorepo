@@ -86,26 +86,6 @@ fn test_runtime_never_fn_call_diverges_on_cached_hit() {
 }
 
 #[test]
-fn test_comptime_only_param_value_diagnosed_at_runtime() {
-    assert_diagnostics(
-        r#"
-        const f = fn(x: type) void {};
-        init {
-            f(u256);
-            evm_stop();
-        }
-        "#,
-        &[r#"
-        error: use of comptime-only value at runtime
-         --> main.plk:3:7
-          |
-        3 |     f(u256);
-          |       ^^^^ reference to comptime-only value
-        "#],
-    );
-}
-
-#[test]
 fn test_runtime_call_arg_type_mismatch() {
     assert_diagnostics(
         r#"
@@ -764,63 +744,62 @@ fn test_comptime_diverge_prevents_cascade() {
 }
 
 #[test]
-fn test_cross_file_comptime_only_arg() {
-    assert_diagnostics(
-        TestProject::root(
-            r#"
-            import m::other::f;
-            init {
-                f(type);
-                evm_stop();
-            }
-            "#,
-        )
-        .add_file("other", "const f = fn(x: type) void {};")
-        .add_module("m", ""),
-        &[r#"
-        error: use of comptime-only value at runtime
-         --> main.plk:3:7
-          |
-        3 |     f(type);
-          |       ^^^^ reference to comptime-only value
-        "#],
+fn test_runtime_comptime_only_arg() {
+    assert_lowers_to(
+        r#"
+        const f = fn(x: type, y: u256) u256 { y };
+        init {
+            f(type, 3);
+            f(type, 4);
+            f(u256, 5);
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        @fn1(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : u256 = 3
+            %1 : u256 = call @fn0(%0)
+            %2 : u256 = 4
+            %3 : u256 = call @fn0(%2)
+            %4 : u256 = 5
+            %5 : u256 = call @fn1(%4)
+            %6 : never = evm_stop()
+        }
+        "#,
     );
 }
 
 #[test]
-fn test_runtime_comptime_only_arg() {
-    assert_diagnostics(
+fn test_comptime_ret_forces_arg_comptime() {
+    assert_lowers_to(
         r#"
-        const f = fn(x: type) void {};
+        const f = fn(comptime T: type, x: u256) type {
+            if eq(x, 0) { T } else { bool }
+        };
         init {
-            f(type);
-            f(type);
-            f(type);
+            let mut a: f(u256, comptime { 0 }) = 34;
             evm_stop();
         }
         "#,
-        &[
-            r#"
-        error: use of comptime-only value at runtime
-         --> main.plk:3:7
-          |
-        3 |     f(type);
-          |       ^^^^ reference to comptime-only value
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 34
+            %1 : never = evm_stop()
+        }
         "#,
-            r#"
-        error: use of comptime-only value at runtime
-         --> main.plk:4:7
-          |
-        4 |     f(type);
-          |       ^^^^ reference to comptime-only value
-        "#,
-            r#"
-        error: use of comptime-only value at runtime
-         --> main.plk:5:7
-          |
-        5 |     f(type);
-          |       ^^^^ reference to comptime-only value
-        "#,
-        ],
     );
 }
