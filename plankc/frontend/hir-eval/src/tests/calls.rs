@@ -93,15 +93,6 @@ fn test_runtime_never_fn_call_diverges_on_cached_hit() {
         2 |     comptime { evm_stop(); }
           |                ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
         "#,
-            r#"
-        error: mismatched types
-          --> main.plk:11:23
-           |
-        11 |         let y: bool = 0;
-           |                ----   ^ expected `bool`, got `u256`
-           |                |
-           |                `bool` expected because of this
-        "#,
         ],
     );
 }

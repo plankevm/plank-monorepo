@@ -8,6 +8,7 @@ mod cache;
 
 use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
+use cache::LoweredState;
 
 use crate::{
     evaluator::State,
@@ -359,16 +360,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
 
         let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
-            Ok(&mut State::Done(lowered)) => lowered?,
+            Ok(&mut State::Done(LoweredState::PoisonedNever)) => {
+                return Ok(Err(Diverge::PoisonedNever));
+            }
+            Ok(&mut State::Done(LoweredState::Poisoned)) => {
+                return Err(Poisoned);
+            }
+            Ok(&mut State::Done(LoweredState::Lowered(fn_id))) => fn_id,
             Ok(state @ State::InProgress) => {
                 fn_scope.diag_ctx.emit_runtime_call_with_recursion(call_loc);
-                *state = State::Done(Err(Poisoned));
+                *state = State::Done(LoweredState::Poisoned);
                 return if preamble.return_type == Ok(TypeId::NEVER) {
                     Ok(Err(Diverge::PoisonedNever))
                 } else {
-                    // If the returned type was poisoned we can't know if the user intended to
-                    // have a terminating function or not, but they are rare & usually simple
-                    // so we default to a poisoned value instead of control flow.
                     Err(Poisoned)
                 };
             }
@@ -395,16 +399,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     assert_eq!(fn_id1, fn_id2);
                     Ok(fn_id1)
                 })();
-                let set_res = fn_scope
-                    .eval
-                    .lowered_fns_cache
-                    .set_lowered(new_entry_id, fn_id.map_err(|_| Poisoned));
+                let cache_state = match fn_id {
+                    Ok(id) => LoweredState::Lowered(id),
+                    Err(RuntimeLowerError::PoisonResult) => LoweredState::Poisoned,
+                    Err(RuntimeLowerError::PoisonedNever) => LoweredState::PoisonedNever,
+                };
+                fn_scope.eval.lowered_fns_cache.set_lowered(new_entry_id, cache_state);
                 match fn_id {
                     Err(RuntimeLowerError::PoisonResult) => return Err(Poisoned),
                     Err(RuntimeLowerError::PoisonedNever) => {
                         return Ok(Err(Diverge::PoisonedNever));
                     }
-                    Ok(_) => set_res?,
+                    Ok(id) => id,
                 }
             }
         };
