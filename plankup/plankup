@@ -3,6 +3,7 @@ set -euo pipefail
 
 PLANK_DIR="${PLANK_DIR:-$HOME/.plank}"
 PLANK_BIN_DIR="$PLANK_DIR/bin"
+PLANK_DOC_DIR="$PLANK_DIR/share/doc"
 
 REPO="plankevm/plank-monorepo"
 GITHUB_API="https://api.github.com/repos/$REPO/releases"
@@ -183,6 +184,14 @@ main() {
     chmod +x "$PLANK_BIN_DIR/plank"
 
     say "plank $version installed to $PLANK_BIN_DIR/plank"
+
+    # Install documentation
+    if [ -d "$tmpdir/book" ]; then
+        mkdir -p "$(dirname "$PLANK_DOC_DIR")"
+        rm -rf "$PLANK_DOC_DIR"
+        mv "$tmpdir/book" "$PLANK_DOC_DIR"
+        say "documentation installed to $PLANK_DOC_DIR"
+    fi
 
     # VS Code extension install/update
     install_vscode_extension "$version" "$tmpdir"
