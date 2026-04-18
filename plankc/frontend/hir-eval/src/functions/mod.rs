@@ -488,6 +488,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let value = self.eval_expr(expr)?;
 
+        let effective_ret_type = ret_type;
+
         if let Ok((return_type, value)) = poison::zip(ret_type, value) {
             let ty = self.value_type(value);
             if !ty.is_assignable_to(return_type) {
@@ -498,14 +500,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.loc(expr.span),
                     true,
                 );
-                return Err(Diverge::BlockEnd(None));
+                return if effective_ret_type == Ok(TypeId::NEVER) {
+                    Err(Diverge::PoisonedNever)
+                } else {
+                    Err(Diverge::BlockEnd(None))
+                };
             }
         }
 
         if self.is_comptime() {
             let Ok(value) = value.and_then(|value| self.expect_comptime_value(value, expr.span))
             else {
-                return Err(Diverge::BlockEnd(None));
+                return if effective_ret_type == Ok(TypeId::NEVER) {
+                    Err(Diverge::PoisonedNever)
+                } else {
+                    Err(Diverge::BlockEnd(None))
+                };
             };
             return Err(Diverge::BlockEnd(Some(value)));
         }

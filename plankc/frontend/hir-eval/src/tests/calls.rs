@@ -27,15 +27,6 @@ fn test_never_fn_return_type_mismatch_diverges() {
         2 |     return 0;
           |            ^ expected `never`, got `u256`
         "#,
-            r#"
-        error: mismatched types
-         --> main.plk:8:19
-          |
-        8 |     let x: u256 = false;
-          |            ----   ^^^^^ expected `u256`, got `bool`
-          |            |
-          |            `u256` expected because of this
-        "#,
         ],
     );
 }
