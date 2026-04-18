@@ -6,8 +6,8 @@ use plank_values::{DefOrigin, TypeId, Value};
 
 mod cache;
 
+use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
-use cache::{LoweredState, *};
 
 use crate::{
     evaluator::State,
@@ -17,18 +17,6 @@ use crate::{
 /// Empty marker to track the invariant that arg/param comptimeness matching was already checked.
 #[derive(Clone, Copy)]
 struct ArgParamComptimenessMatch;
-
-#[derive(Clone, Copy)]
-enum RuntimeLowerError {
-    PoisonResult,
-    PoisonedNever,
-}
-
-impl From<Poisoned> for RuntimeLowerError {
-    fn from(_value: Poisoned) -> Self {
-        Self::PoisonResult
-    }
-}
 
 #[derive(Debug)]
 struct PreambleResult {
@@ -117,8 +105,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let fn_def = self.hir.fns[fn_def_id];
         match self.eval_comptime(fn_def.type_preamble) {
             Ok(()) => {}
-            Err(Diverge::PoisonedControlFlow | Diverge::PoisonedNever) => return Err(Poisoned),
-            Err(Diverge::BlockEnd(_)) => unreachable!("invariant: block end in preamble?"),
+            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => return Err(Poisoned),
         }
         let return_type = self.expect_type(fn_def.return_type);
         let ret_type_span = self.bindings[fn_def.return_type].span;
@@ -296,10 +283,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         return match value {
                             Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
                             Err(Poisoned) => {
-                                // Cache collapses PoisonedNever into Err(Poisoned);
+                                // Cache collapses `Diverge` into Err(Poisoned);
                                 // reconstruct the diverge when the return type was never.
                                 if preamble.return_type == Ok(TypeId::NEVER) {
-                                    Ok(Err(Diverge::PoisonedNever))
+                                    Ok(Err(Diverge::END))
                                 } else {
                                     Err(Poisoned)
                                 }
@@ -355,8 +342,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
             let eval_res = match fn_scope.eval_comptime(func.body) {
                 Ok(()) => unreachable!("lowerer should guarantee return in function body"),
-                Err(Diverge::PoisonedNever) => Ok(Err(Diverge::PoisonedNever)),
-                Err(Diverge::PoisonedControlFlow | Diverge::BlockEnd(None)) => Err(Poisoned),
+                Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
+                Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
                 Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
             };
             new_fn_eval_cache_entry.result.set(State::Done(match eval_res {
@@ -372,34 +359,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
 
         let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
-            Ok(&mut State::Done(LoweredState::PoisonedNever)) => {
-                return Ok(Err(Diverge::PoisonedNever));
-            }
-            Ok(&mut State::Done(LoweredState::Poisoned)) => {
-                return Err(Poisoned);
-            }
-            Ok(&mut State::Done(LoweredState::Lowered(fn_id))) => fn_id,
+            Ok(&mut State::Done(fn_id)) => fn_id,
             Ok(state @ State::InProgress) => {
                 fn_scope.diag_ctx.emit_runtime_call_with_recursion(call_loc);
-                *state = State::Done(LoweredState::Poisoned);
-                return if preamble.return_type == Ok(TypeId::NEVER) {
-                    Ok(Err(Diverge::PoisonedNever))
-                } else {
-                    Err(Poisoned)
-                };
+                *state = State::Done(Err(Poisoned));
+                Err(Poisoned)
             }
             Err(new_entry_id) => {
                 let fn_id = (|| {
                     let (body, body_eval_res) = fn_scope.eval_block_to_mir(func.body);
                     match body_eval_res {
                         Ok(()) => unreachable!("lowerer should guarantee return in function body"),
-                        Err(Diverge::PoisonedNever) => {
-                            return Err(RuntimeLowerError::PoisonedNever);
-                        }
-                        Err(Diverge::PoisonedControlFlow) => {
-                            return Err(RuntimeLowerError::PoisonResult);
-                        }
                         Err(Diverge::BlockEnd(_)) => {}
+                        Err(Diverge::ControlFlowPoisoned) => return Err(Poisoned),
                     }
                     let return_type = preamble.return_type?;
                     let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
@@ -411,19 +383,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     assert_eq!(fn_id1, fn_id2);
                     Ok(fn_id1)
                 })();
-                let cache_state = match fn_id {
-                    Ok(id) => LoweredState::Lowered(id),
-                    Err(RuntimeLowerError::PoisonResult) => LoweredState::Poisoned,
-                    Err(RuntimeLowerError::PoisonedNever) => LoweredState::PoisonedNever,
+                fn_scope.eval.lowered_fns_cache.try_set_lowered(new_entry_id, fn_id)
+            }
+        };
+        let lowered = match lowered {
+            Ok(lowered) => lowered,
+            Err(Poisoned) => {
+                return if preamble.return_type == Ok(TypeId::NEVER) {
+                    Ok(Err(Diverge::END))
+                } else {
+                    Err(Poisoned)
                 };
-                fn_scope.eval.lowered_fns_cache.set_lowered(new_entry_id, cache_state);
-                match fn_id {
-                    Err(RuntimeLowerError::PoisonResult) => return Err(Poisoned),
-                    Err(RuntimeLowerError::PoisonedNever) => {
-                        return Ok(Err(Diverge::PoisonedNever));
-                    }
-                    Ok(id) => id,
-                }
             }
         };
 
@@ -457,7 +427,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if result_type == TypeId::NEVER {
             let target = self.mir_types.push(result_type);
             self.eval.instr_stack_buf.push(mir::Instruction::Set { target, expr });
-            return Ok(Err(Diverge::BlockEnd(None)));
+            return Ok(Err(Diverge::END));
         }
 
         Ok(Ok(EvalValue::Runtime { expr, result_type }))
@@ -506,8 +476,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let value = self.eval_expr(expr)?;
 
-        let effective_ret_type = ret_type;
-
         if let Ok((return_type, value)) = poison::zip(ret_type, value) {
             let ty = self.value_type(value);
             if !ty.is_assignable_to(return_type) {
@@ -518,28 +486,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.loc(expr.span),
                     true,
                 );
-                return if effective_ret_type == Ok(TypeId::NEVER) {
-                    Err(Diverge::PoisonedNever)
-                } else {
-                    Err(Diverge::BlockEnd(None))
-                };
+                return Err(Diverge::END);
             }
         }
 
         if self.is_comptime() {
             let Ok(value) = value.and_then(|value| self.expect_comptime_value(value, expr.span))
             else {
-                return if effective_ret_type == Ok(TypeId::NEVER) {
-                    Err(Diverge::PoisonedNever)
-                } else {
-                    Err(Diverge::BlockEnd(None))
-                };
+                return Err(Diverge::END);
             };
             return Err(Diverge::BlockEnd(Some(value)));
         }
 
         let Ok(value) = value else {
-            return Err(Diverge::BlockEnd(None));
+            return Err(Diverge::END);
         };
         let local = match value {
             EvalValue::Runtime { expr, result_type } => {
@@ -550,7 +510,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             EvalValue::Comptime(value) => {
                 if self.is_comptime_only(value) {
                     self.diag_ctx.emit_comptime_only_value_at_runtime(self.loc(expr.span));
-                    return Err(Diverge::BlockEnd(None));
+                    return Err(Diverge::END);
                 }
                 let ty = self.values.type_of_value(value);
                 let target = self.mir_types.push(ty);
@@ -559,6 +519,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         };
         self.emit(mir::Instruction::Return(local));
-        Err(Diverge::BlockEnd(None))
+        Err(Diverge::END)
     }
 }

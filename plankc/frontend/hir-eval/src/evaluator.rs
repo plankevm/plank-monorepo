@@ -103,11 +103,10 @@ impl<'a> Evaluator<'a> {
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
         match scope.eval_comptime(const_def.body) {
-            Err(Diverge::PoisonedControlFlow | Diverge::PoisonedNever) => {
+            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
                 self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
                 return Err(Poisoned);
             }
-            Err(Diverge::BlockEnd(_)) => unreachable!("invariant(hir): return in const def block"),
             Ok(_) => {}
         }
 

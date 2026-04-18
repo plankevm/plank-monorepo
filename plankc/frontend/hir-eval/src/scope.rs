@@ -36,9 +36,12 @@ pub(crate) enum EvalValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Diverge {
-    PoisonedControlFlow,
-    PoisonedNever,
+    ControlFlowPoisoned,
     BlockEnd(Option<ValueId>),
+}
+
+impl Diverge {
+    pub const END: Self = Self::BlockEnd(None);
 }
 
 pub(crate) enum EvalContext {
@@ -88,7 +91,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
                 }
             }
-            Err(Diverge::BlockEnd(_) | Diverge::PoisonedControlFlow | Diverge::PoisonedNever) => {}
+            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {}
         }
         mir_block
     }
@@ -413,7 +416,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             {
                 if self.is_comptime() {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.span));
-                    return Err(Diverge::PoisonedControlFlow);
+                    return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) = self.eval_block_to_mir(then);
                 let (r#else, else_res) = self.eval_block_to_mir(r#else);
@@ -423,15 +426,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     else_block: r#else,
                 });
                 match (then_res, else_res) {
-                    (Err(Diverge::PoisonedControlFlow), _) => Err(Diverge::PoisonedControlFlow),
-                    (_, Err(Diverge::PoisonedControlFlow)) => Err(Diverge::PoisonedControlFlow),
-                    (Err(Diverge::PoisonedNever), _) | (_, Err(Diverge::PoisonedNever)) => {
-                        Err(Diverge::PoisonedNever)
-                    }
+                    // Control flow was poisoned in either branch so we have to assume everything
+                    // was poisoned and bubble up
+                    (Err(Diverge::ControlFlowPoisoned), _)
+                    | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
                     (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
                         Err(Diverge::BlockEnd(None))
                     }
-                    _ => Ok(()),
+                    (Ok(()), Ok(()))
+                    | (Err(Diverge::BlockEnd(_)), Ok(()))
+                    | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
                 }
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
@@ -443,9 +447,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     state_ty,
                     self.loc(binding.span),
                 );
-                Err(Diverge::PoisonedControlFlow)
+                Err(Diverge::ControlFlowPoisoned)
             }
-            Err(Poisoned) => Err(Diverge::PoisonedControlFlow),
+            Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
         }
     }
 
@@ -459,14 +463,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if let Ok(span) = self.hir.block_spans[condition_block] {
                 self.diag_ctx.emit_not_yet_implemented("comptime while", self.loc(span));
             }
-            return Err(Diverge::PoisonedControlFlow);
+            return Err(Diverge::ControlFlowPoisoned);
         }
 
         let (condition_block, mir_condition_local) = self.with_instructions(|this| {
             this.eval_block_inline(condition_block)?;
             let binding = this.bindings[condition];
             let state = match binding.state {
-                Err(Poisoned) => return Err(Diverge::PoisonedControlFlow),
+                Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
                 Ok(state) => state,
             };
             let state_ty = this.state_type(state);
@@ -476,14 +480,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     state_ty,
                     this.loc(binding.span),
                 );
-                return Err(Diverge::PoisonedControlFlow);
+                return Err(Diverge::ControlFlowPoisoned);
             }
             match state {
                 LocalState::Runtime(local) => Ok(local),
                 LocalState::Comptime(value) => {
                     if this.is_comptime_only(value) {
                         this.diag_ctx.emit_comptime_only_value_at_runtime(this.loc(binding.span));
-                        return Err(Diverge::PoisonedControlFlow);
+                        return Err(Diverge::ControlFlowPoisoned);
                     }
                     let condition = this.mir_types.push(this.values.type_of_value(value));
                     this.emit(mir::Instruction::Set {
@@ -497,8 +501,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let condition = mir_condition_local?;
         let (body, body_res) = self.eval_block_to_mir(body);
         match body_res {
-            Err(Diverge::PoisonedNever) => return Err(Diverge::PoisonedNever),
-            Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
+            Err(Diverge::ControlFlowPoisoned) => {
+                return Err(Diverge::ControlFlowPoisoned);
+            }
             Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }
         self.emit(mir::Instruction::While { condition_block, condition, body });

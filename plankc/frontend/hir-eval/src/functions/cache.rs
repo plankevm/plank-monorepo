@@ -29,25 +29,8 @@ impl<'a> FunctionKey<'a> {
 }
 
 struct LoweredFn {
-    state: State<LoweredState>,
+    state: State<MaybePoisoned<mir::FnId>>,
     closure: ValueId,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum LoweredState {
-    Lowered(mir::FnId),
-    Poisoned,
-    PoisonedNever,
-}
-
-impl LoweredState {
-    fn as_fn_id(self) -> MaybePoisoned<mir::FnId> {
-        match self {
-            LoweredState::Lowered(id) => Ok(id),
-            LoweredState::Poisoned => Err(Poisoned),
-            LoweredState::PoisonedNever => Err(Poisoned),
-        }
-    }
 }
 
 pub(crate) struct LoweredFunctionsCache {
@@ -67,15 +50,19 @@ impl LoweredFunctionsCache {
         }
     }
 
-    pub fn set_lowered(&mut self, id: LoweredFnIdx, state: LoweredState) -> LoweredState {
+    pub fn try_set_lowered(
+        &mut self,
+        id: LoweredFnIdx,
+        fn_id: MaybePoisoned<mir::FnId>,
+    ) -> MaybePoisoned<mir::FnId> {
         match &mut self.functions[id].state {
-            State::Done(LoweredState::Poisoned | LoweredState::PoisonedNever) => state,
-            State::Done(LoweredState::Lowered(_)) => {
-                unreachable!("invariant: state corrupted while lowering")
+            State::Done(Err(Poisoned)) => Err(Poisoned),
+            State::Done(Ok(_)) => {
+                unreachable!("invariant: cache corrupted")
             }
             s @ State::InProgress => {
-                *s = State::Done(state);
-                state
+                *s = State::Done(fn_id);
+                fn_id
             }
         }
     }
@@ -83,7 +70,7 @@ impl LoweredFunctionsCache {
     pub fn retrieve_or_create_entry<'a>(
         &mut self,
         func: FunctionKey<'a>,
-    ) -> Result<&mut State<LoweredState>, LoweredFnIdx> {
+    ) -> Result<&mut State<MaybePoisoned<mir::FnId>>, LoweredFnIdx> {
         use std::hash::BuildHasher;
         let hash = self.hasher.hash_one(func);
         let entry = self.dedup.entry(
