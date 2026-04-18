@@ -1,5 +1,151 @@
 use super::*;
 
+// When a `never`-returning function has a return type mismatch, the diverge should
+// propagate as PoisonedNever so callers don't see reachable code after the call.
+#[test]
+fn test_never_fn_return_type_mismatch_diverges() {
+    assert_diagnostics(
+        r#"
+        const bad_ret = fn() never {
+            return 0;
+        };
+        init {
+            comptime {
+                bad_ret();
+            }
+            let x: u256 = false;
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: mismatched types
+         --> main.plk:2:12
+          |
+        1 | const bad_ret = fn() never {
+          |                      ----- `never` expected because of this
+        2 |     return 0;
+          |            ^ expected `never`, got `u256`
+        "#,
+            r#"
+        error: mismatched types
+         --> main.plk:8:19
+          |
+        8 |     let x: u256 = false;
+          |            ----   ^^^^^ expected `u256`, got `bool`
+          |            |
+          |            `u256` expected because of this
+        "#,
+        ],
+    );
+}
+
+// When both branches of a runtime if call never-returning functions, the if-statement
+// should diverge and subsequent code should not be evaluated.
+#[test]
+fn test_if_both_branches_never_function_diverges() {
+    assert_diagnostics(
+        r#"
+        const bad_stop = fn() never {
+            comptime { evm_stop(); }
+            evm_stop();
+        };
+        init {
+            let x = calldataload(0);
+            if eq(x, 0) {
+                bad_stop();
+            } else {
+                bad_stop();
+            }
+            let y: bool = 0;
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: builtin not supported at compile time
+         --> main.plk:2:16
+          |
+        2 |     comptime { evm_stop(); }
+          |                ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
+        "#,
+            r#"
+        error: mismatched types
+          --> main.plk:12:19
+           |
+        12 |     let y: bool = 0;
+           |            ----   ^ expected `bool`, got `u256`
+           |            |
+           |            `bool` expected because of this
+        "#,
+        ],
+    );
+}
+
+// When a never-returning function body produces PoisonedNever, subsequent calls to the
+// same function (from a different branch of a runtime if) should still diverge.
+#[test]
+fn test_runtime_never_fn_call_diverges_on_cached_hit() {
+    assert_diagnostics(
+        r#"
+        const bad_stop = fn() never {
+            comptime { evm_stop(); }
+            evm_stop();
+        };
+        init {
+            let x = calldataload(0);
+            if eq(x, 0) {
+                bad_stop();
+            } else {
+                bad_stop();
+                let y: bool = 0;
+            }
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: builtin not supported at compile time
+         --> main.plk:2:16
+          |
+        2 |     comptime { evm_stop(); }
+          |                ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
+        "#,
+            r#"
+        error: mismatched types
+          --> main.plk:11:23
+           |
+        11 |         let y: bool = 0;
+           |                ----   ^ expected `bool`, got `u256`
+           |                |
+           |                `bool` expected because of this
+        "#,
+        ],
+    );
+}
+
+// A non-comptime parameter of comptime-only type (e.g. `type`) passed a value at runtime
+// should be diagnosed, not silently lowered into MIR.
+#[test]
+fn test_comptime_only_param_value_diagnosed_at_runtime() {
+    let (_, _, session) = try_lower(TestProject::root(
+        r#"
+        const f = fn(x: type) void {};
+        init {
+            f(u256);
+            evm_stop();
+        }
+        "#,
+    ));
+
+    // No diagnostic is emitted — demonstrating the bug.
+    assert_eq!(
+        session.diagnostics().len(),
+        0,
+        "expected no diagnostics (demonstrating the bug: there SHOULD be one)"
+    );
+}
+
 #[test]
 fn test_runtime_call_arg_type_mismatch() {
     assert_diagnostics(
