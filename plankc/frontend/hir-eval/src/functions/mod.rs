@@ -66,11 +66,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     };
                     Ok(LocalState::Comptime(value))
                 } else if is_comptime {
-                    // In comptime context, runtime non-comptime params are caught and
-                    // diagnosed by the validation loop in eval_call_inner (which has
-                    // access to call_span for a better diagnostic). Just poison here.
                     match state {
-                        LocalState::Runtime(_) => Err(Poisoned),
+                        LocalState::Runtime(_) => {
+                            let ArgParamComptimenessMatch = validated;
+                            Err(Poisoned)
+                        }
                         LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
                     }
                 } else {
