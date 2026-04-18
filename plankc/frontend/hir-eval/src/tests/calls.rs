@@ -762,3 +762,65 @@ fn test_comptime_diverge_prevents_cascade() {
         "#],
     );
 }
+
+#[test]
+fn test_cross_file_comptime_only_arg() {
+    assert_diagnostics(
+        TestProject::root(
+            r#"
+            import m::other::f;
+            init {
+                f(type);
+                evm_stop();
+            }
+            "#,
+        )
+        .add_file("other", "const f = fn(x: type) void {};")
+        .add_module("m", ""),
+        &[r#"
+        error: use of comptime-only value at runtime
+         --> main.plk:3:7
+          |
+        3 |     f(type);
+          |       ^^^^ reference to comptime-only value
+        "#],
+    );
+}
+
+#[test]
+fn runtime_comptime_only_arg_error_not_deduplicated_across_calls() {
+    assert_diagnostics(
+        r#"
+        const f = fn(x: type) void {};
+        init {
+            f(type);
+            f(type);
+            f(type);
+            evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: use of comptime-only value at runtime
+         --> main.plk:3:7
+          |
+        3 |     f(type);
+          |       ^^^^ reference to comptime-only value
+        "#,
+            r#"
+        error: use of comptime-only value at runtime
+         --> main.plk:4:7
+          |
+        4 |     f(type);
+          |       ^^^^ reference to comptime-only value
+        "#,
+            r#"
+        error: use of comptime-only value at runtime
+         --> main.plk:5:7
+          |
+        5 |     f(type);
+          |       ^^^^ reference to comptime-only value
+        "#,
+        ],
+    );
+}

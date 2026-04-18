@@ -66,11 +66,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let params = &self.eval.hir.fn_params[fn_def_id];
         let args = &self.eval.hir.call_args[args_id];
         let is_comptime = self.is_comptime();
-        let parent_bindings = &mut self.bindings;
-        let parent_mir_types = &mut self.mir_types;
+        let caller_source = self.source;
+        let caller_bindings = &mut self.bindings;
+        let caller_mir_types = &mut self.mir_types;
 
         let arg_spans =
-            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| parent_bindings[arg].span));
+            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| caller_bindings[arg].span));
 
         let mut fn_scope = Scope::new(
             self.eval,
@@ -87,7 +88,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         for (&param, &arg) in params.iter().zip(args) {
-            let binding = parent_bindings[arg];
+            let binding = caller_bindings[arg];
             let state = binding.state.and_then(|state| {
                 if param.is_comptime {
                     let LocalState::Comptime(value) = state else {
@@ -106,16 +107,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 } else {
                     match state {
                         LocalState::Runtime(outer_mir) => {
-                            let ty = parent_mir_types[outer_mir];
+                            let ty = caller_mir_types[outer_mir];
                             let inner_mir = fn_scope.mir_types.push(ty);
                             Ok(LocalState::Runtime(inner_mir))
                         }
                         LocalState::Comptime(value) => {
                             let ty = fn_scope.eval.values.type_of_value(value);
                             if fn_scope.eval.types.is_comptime_only(ty) {
-                                fn_scope.diag_ctx.emit_comptime_only_value_at_runtime(
-                                    fn_scope.loc(binding.span),
-                                );
+                                fn_scope.diag_ctx.emit_comptime_only_value_at_runtime(SrcLoc::new(
+                                    caller_source,
+                                    binding.span,
+                                ));
                                 Err(Poisoned)
                             } else {
                                 let inner_mir = fn_scope.mir_types.push(ty);
@@ -128,7 +130,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
         }
 
-        (fn_scope, parent_bindings)
+        (fn_scope, caller_bindings)
     }
 
     fn eval_preamble(&mut self, fn_def_id: hir::FnDefId) -> MaybePoisoned<PreambleResult> {
