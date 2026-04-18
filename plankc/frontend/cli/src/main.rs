@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use plank_driver::Driver;
 use plank_hir::display::DisplayHir;
 use plank_mir::display::DisplayMir;
@@ -6,7 +6,10 @@ use plank_parser::cst::display::DisplayCST;
 use plank_session::SourceId;
 use plank_source::source_fs::RealFs;
 use sir_passes::{OPTIMIZE_HELP, parse_optimizations_string};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process,
+};
 
 const VERSION: &str = match option_env!("PLANK_VERSION") {
     Some(v) => v,
@@ -15,7 +18,24 @@ const VERSION: &str = match option_env!("PLANK_VERSION") {
 
 #[derive(Parser)]
 #[command(name = "plank", about = "Plank compiler frontend", version = VERSION)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    action: Action,
+}
+
+#[derive(Subcommand)]
+enum Action {
+    /// Compile a Plank project
+    Build(BuildArgs),
+    /// Open Plank documentation in the browser
+    Doc {
+        /// Topic to open (e.g., 'comptime', 'getting-started')
+        topic: Option<String>,
+    },
+}
+
+#[derive(Parser)]
+struct BuildArgs {
     file_path: String,
 
     #[arg(short = 'c', long = "show-cst", help = "show CST")]
@@ -47,7 +67,38 @@ fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {
 }
 
 fn main() {
-    let args = Args::parse();
+    let cli = Cli::parse();
+
+    match cli.action {
+        Action::Build(args) => build(args),
+        Action::Doc { topic } => doc(topic),
+    }
+}
+
+fn doc(topic: Option<String>) {
+    let plank_dir = std::env::var("PLANK_DIR")
+        .unwrap_or_else(|_| format!("{}/.plank", std::env::var("HOME").expect("HOME not set")));
+    let doc_dir = PathBuf::from(plank_dir).join("share/doc");
+
+    let file = match &topic {
+        Some(t) => doc_dir.join(format!("{t}.html")),
+        None => doc_dir.join("index.html"),
+    };
+
+    if !file.exists() {
+        if let Some(t) = &topic {
+            eprintln!("no docs found for '{t}'. Run 'plank doc' to browse all docs.");
+        } else {
+            eprintln!("docs not installed. Run 'plankup' to install the latest version with docs.");
+        }
+        process::exit(1);
+    }
+
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    process::Command::new(opener).arg(&file).status().expect("failed to open documentation");
+}
+
+fn build(args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
 
     if let Some(name) = &args.module_name {
