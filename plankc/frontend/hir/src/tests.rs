@@ -211,9 +211,7 @@ fn test_return_in_fn_param_type_expression() {
          --> main.plk:1:20
           |
         1 | const f = fn (x: { return 0; u256 }) void {
-          | -----              ^^^^^^^^^ not allowed here
-          | |
-          | inside this block
+          |                    ^^^^^^^^^ not allowed here
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -1231,9 +1229,6 @@ fn test_return_outside_function_body() {
         error: return is not allowed outside of function bodies
          --> main.plk:3:5
           |
-        1 | init {
-          | ---- inside this block
-        2 |     let a = add(1, 2);
         3 |     return a;
           |     ^^^^^^^^^ not allowed here
         "#,
