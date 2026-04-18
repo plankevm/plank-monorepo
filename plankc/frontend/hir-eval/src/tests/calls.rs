@@ -17,8 +17,7 @@ fn test_never_fn_return_type_mismatch_diverges() {
             evm_stop();
         }
         "#,
-        &[
-            r#"
+        &[r#"
         error: mismatched types
          --> main.plk:2:12
           |
@@ -26,8 +25,7 @@ fn test_never_fn_return_type_mismatch_diverges() {
           |                      ----- `never` expected because of this
         2 |     return 0;
           |            ^ expected `never`, got `u256`
-        "#,
-        ],
+        "#],
     );
 }
 
@@ -52,15 +50,13 @@ fn test_if_both_branches_never_function_diverges() {
             evm_stop();
         }
         "#,
-        &[
-            r#"
+        &[r#"
         error: builtin not supported at compile time
          --> main.plk:2:16
           |
         2 |     comptime { evm_stop(); }
           |                ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
-        "#,
-        ],
+        "#],
     );
 }
 
@@ -85,15 +81,13 @@ fn test_runtime_never_fn_call_diverges_on_cached_hit() {
             evm_stop();
         }
         "#,
-        &[
-            r#"
+        &[r#"
         error: builtin not supported at compile time
          --> main.plk:2:16
           |
         2 |     comptime { evm_stop(); }
           |                ^^^^^^^^^^ `evm_stop` cannot be evaluated at compile time
-        "#,
-        ],
+        "#],
     );
 }
 
@@ -101,7 +95,7 @@ fn test_runtime_never_fn_call_diverges_on_cached_hit() {
 // should be diagnosed, not silently lowered into MIR.
 #[test]
 fn test_comptime_only_param_value_diagnosed_at_runtime() {
-    let (_, _, session) = try_lower(TestProject::root(
+    assert_diagnostics(
         r#"
         const f = fn(x: type) void {};
         init {
@@ -109,13 +103,15 @@ fn test_comptime_only_param_value_diagnosed_at_runtime() {
             evm_stop();
         }
         "#,
-    ));
-
-    // No diagnostic is emitted — demonstrating the bug.
-    assert_eq!(
-        session.diagnostics().len(),
-        0,
-        "expected no diagnostics (demonstrating the bug: there SHOULD be one)"
+        &[r#"
+        error: use of comptime-only value at runtime
+         --> main.plk:3:7
+          |
+        3 |     f(u256);
+          |       ^^^^ reference to comptime-only value
+          |
+          = info: `let mut` definitions and mutable assignments require runtime-compatible values
+        "#],
     );
 }
 

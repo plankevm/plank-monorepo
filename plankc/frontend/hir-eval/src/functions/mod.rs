@@ -6,9 +6,8 @@ use plank_values::{DefOrigin, TypeId, Value};
 
 mod cache;
 
-use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
-use cache::LoweredState;
+use cache::{LoweredState, *};
 
 use crate::{
     evaluator::State,
@@ -87,12 +86,25 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
                     }
                 } else {
-                    let ty = match state {
-                        LocalState::Runtime(outer_mir) => parent_mir_types[outer_mir],
-                        LocalState::Comptime(value) => fn_scope.eval.values.type_of_value(value),
-                    };
-                    let inner_mir = fn_scope.mir_types.push(ty);
-                    Ok(LocalState::Runtime(inner_mir))
+                    match state {
+                        LocalState::Runtime(outer_mir) => {
+                            let ty = parent_mir_types[outer_mir];
+                            let inner_mir = fn_scope.mir_types.push(ty);
+                            Ok(LocalState::Runtime(inner_mir))
+                        }
+                        LocalState::Comptime(value) => {
+                            let ty = fn_scope.eval.values.type_of_value(value);
+                            if fn_scope.eval.types.is_comptime_only(ty) {
+                                fn_scope.diag_ctx.emit_comptime_only_value_at_runtime(
+                                    fn_scope.loc(binding.span),
+                                );
+                                Err(Poisoned)
+                            } else {
+                                let inner_mir = fn_scope.mir_types.push(ty);
+                                Ok(LocalState::Runtime(inner_mir))
+                            }
+                        }
+                    }
                 }
             });
             fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
