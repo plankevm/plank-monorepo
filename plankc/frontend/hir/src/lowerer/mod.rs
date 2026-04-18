@@ -534,8 +534,6 @@ impl BlockLowerer<'_> {
             std::mem::replace(&mut self.fn_scope_start, self.scoped_locals_stack.len());
         let saved_captures_start =
             std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
-        let saved_body_context = self.body_context;
-        self.body_context = BodyContext::Function;
 
         let param_locals_start = self.locals_buf.len();
         let return_type;
@@ -557,6 +555,9 @@ impl BlockLowerer<'_> {
             let preamble_span = self.lexed.tokens_src_span(fn_def.param_list_span());
             self.flush_instructions_from(preamble_block_start, preamble_span)
         };
+
+        let saved_body_context = self.body_context;
+        self.body_context = BodyContext::Function;
 
         let body = self.lower_fn_body_block(fn_def.body());
         let param_list_span = self.lexed.tokens_src_span(fn_def.param_list_span());

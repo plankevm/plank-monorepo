@@ -196,6 +196,30 @@ fn test_assign_to_immutable_let() {
 }
 
 #[test]
+fn test_return_in_fn_param_type_expression() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn (x: { return 0; u256 }) void {
+            evm_stop();
+        };
+        init { evm_stop(); }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: return is not allowed outside of function bodies
+         --> main.plk:1:20
+          |
+        1 | const f = fn (x: { return 0; u256 }) void {
+          | -----              ^^^^^^^^^ not allowed here
+          | |
+          | inside this block
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_fn_struct_return() {
     assert_lowers_to(
         r#"
