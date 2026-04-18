@@ -788,7 +788,7 @@ fn test_cross_file_comptime_only_arg() {
 }
 
 #[test]
-fn runtime_comptime_only_arg_error_not_deduplicated_across_calls() {
+fn test_runtime_comptime_only_arg() {
     assert_diagnostics(
         r#"
         const f = fn(x: type) void {};
