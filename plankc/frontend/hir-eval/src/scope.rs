@@ -425,6 +425,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 match (then_res, else_res) {
                     (Err(Diverge::PoisonedControlFlow), _) => Err(Diverge::PoisonedControlFlow),
                     (_, Err(Diverge::PoisonedControlFlow)) => Err(Diverge::PoisonedControlFlow),
+                    (Err(Diverge::PoisonedNever), _) | (_, Err(Diverge::PoisonedNever)) => {
+                        Err(Diverge::PoisonedNever)
+                    }
                     (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
                         Err(Diverge::BlockEnd(None))
                     }
