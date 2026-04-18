@@ -307,14 +307,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
 
         // Assemble comptime parameters for the function key.
-        for &param in params {
+        for (&param, &arg) in params.iter().zip(args) {
             let value = match fn_scope.bindings[param.value].state {
                 Ok(LocalState::Comptime(value)) => Ok(value),
                 Err(Poisoned) => Err(Poisoned),
-                Ok(LocalState::Runtime(_)) => {
-                    let ArgParamComptimenessMatch = validated;
-                    continue;
-                }
+                Ok(LocalState::Runtime(_)) => match call.caller_bindings[arg].state {
+                    // `create_fn_scope` optimistically makes params runtime in runtime contexts,
+                    // if we find out we need to evaluate as comptime we need to make sure all
+                    // arguments are added to the key.
+                    Ok(LocalState::Comptime(value)) if preamble.is_comptime_only => Ok(value),
+                    _ => {
+                        let ArgParamComptimenessMatch = validated;
+                        continue;
+                    }
+                },
             };
             fn_scope.eval.maybe_values_buf.push(value);
         }

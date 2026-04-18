@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn test_consistent_caching_when_runtime_call_forced_to_be_comptime() {
+    assert_lowers_to(
+        r#"
+        const f = fn(comptime T: type, x: T) type {
+            if eq(x, 0) { T } else { bool }
+        };
+        init {
+            let mut a: f(u256, 0) = 34;
+            let mut b: f(u256, 1) = false;
+            let mut c: f(u256, 0) = 22;
+            evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 34
+            %1 : bool = false
+            %2 : bool = 22
+            %3 : never = evm_stop()
+        }
+        "#,
+    );
+}
+#[test]
 fn test_comptime_evm_builtins() {
     assert_lowers_to(
         r#"
