@@ -120,7 +120,10 @@ fn doc(topic: Option<String>) {
 fn build(args: BuildArgs) {
     let root = match &args.module_root {
         Some(root) => PathBuf::from(root).canonicalize().unwrap_or_else(|_| {
-            cli_error_and_exit(format!("failed to canonicalize module root {:?}", root))
+            cli_error_and_exit(format!(
+                "could not resolve module root {:?}, check that the path exists",
+                root,
+            ))
         }),
         None => Path::new(&args.file_path)
             .parent()
@@ -133,7 +136,7 @@ fn build(args: BuildArgs) {
             .canonicalize()
             .unwrap_or_else(|_| {
                 cli_error_and_exit(format!(
-                    "failed to canonicalize project root for {:?}",
+                    "could not resolve project root for {:?}, check that the path exists",
                     args.file_path,
                 ))
             }),
@@ -145,7 +148,10 @@ fn build(args: BuildArgs) {
     }
     for (name, path) in &args.deps {
         let path = path.canonicalize().unwrap_or_else(|_| {
-            cli_error_and_exit(format!("failed to canonicalize dependency path {:?}", path))
+            cli_error_and_exit(format!(
+                "could not resolve dependency path {:?}, check that the path exists",
+                path,
+            ))
         });
         driver.register_module(name, path);
     }
