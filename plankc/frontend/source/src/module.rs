@@ -26,19 +26,41 @@ impl ModuleResolver {
         }
     }
 
-    pub fn resolve(
+    fn lookup_module<'a>(
+        &self,
+        segments: &'a [StrId],
+    ) -> Result<(&PathBuf, &'a [StrId]), ModuleResolveError> {
+        let Some((&module_name, import_path_segments)) = segments.split_first() else {
+            return Err(ModuleResolveError::NotEnoughSegments);
+        };
+        let Some(module_root) = self.modules.get(&module_name) else {
+            return Err(ModuleResolveError::UnknownModule(module_name));
+        };
+        Ok((module_root, import_path_segments))
+    }
+
+    fn build_file_path(
+        module_root: &PathBuf,
+        import_path_segments: &[StrId],
+        session: &Session,
+        import_file_path: &mut PathBuf,
+    ) {
+        import_file_path.clone_from(module_root);
+        for &seg in import_path_segments {
+            import_file_path.push(session.lookup_name(seg));
+        }
+        import_file_path.set_extension(FILE_EXTENSION);
+    }
+
+    /// Resolves a single import: determines both the target file and what to import from it.
+    pub fn resolve_import(
         &self,
         segments: &[StrId],
         import: Import<'_>,
         session: &Session,
         import_file_path: &mut PathBuf,
     ) -> Result<ImportKind, ModuleResolveError> {
-        let Some((&module_name, mut import_path_segments)) = segments.split_first() else {
-            return Err(ModuleResolveError::NotEnoughSegments);
-        };
-        let Some(module_root) = self.modules.get(&module_name) else {
-            return Err(ModuleResolveError::UnknownModule(module_name));
-        };
+        let (module_root, mut import_path_segments) = self.lookup_module(segments)?;
 
         let kind = match import.suffix {
             ImportSuffix::As(alias) => {
@@ -55,12 +77,20 @@ impl ModuleResolver {
             ImportSuffix::All => ImportKind::All,
         };
 
-        import_file_path.clone_from(module_root);
-        for &seg in import_path_segments {
-            import_file_path.push(session.lookup_name(seg));
-        }
-        import_file_path.set_extension(FILE_EXTENSION);
-
+        Self::build_file_path(module_root, import_path_segments, session, import_file_path);
         Ok(kind)
+    }
+
+    /// Resolves just the target file for a grouped import. The individual items
+    /// determine what to import, so no `ImportKind` is returned.
+    pub fn resolve_group_import(
+        &self,
+        segments: &[StrId],
+        session: &Session,
+        import_file_path: &mut PathBuf,
+    ) -> Result<(), ModuleResolveError> {
+        let (module_root, import_path_segments) = self.lookup_module(segments)?;
+        Self::build_file_path(module_root, import_path_segments, session, import_file_path);
+        Ok(())
     }
 }

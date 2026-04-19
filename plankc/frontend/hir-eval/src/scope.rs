@@ -4,7 +4,7 @@ use crate::{
     evaluator::CallArgSpansIdx,
 };
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, InstructionKind};
+use plank_hir::{self as hir, ExprKind, InstructionKind, operators as hir_ops};
 use plank_mir as mir;
 use plank_session::{EvmBuiltin, MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
@@ -41,8 +41,12 @@ pub(crate) enum EvalValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Diverge {
-    PoisonedControlFlow,
+    ControlFlowPoisoned,
     BlockEnd(Option<ValueId>),
+}
+
+impl Diverge {
+    pub const END: Self = Self::BlockEnd(None);
 }
 
 pub(crate) enum EvalContext {
@@ -92,7 +96,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
                 }
             }
-            Err(Diverge::BlockEnd(_) | Diverge::PoisonedControlFlow) => {}
+            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {}
         }
         mir_block
     }
@@ -142,11 +146,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
-            self.diag_ctx.emit_type_not_type(
-                &self.eval.types,
-                actual_ty,
-                self.diag_loc(use_span, origin),
-            );
+            self.diag_ctx.emit_type_not_type(actual_ty, self.binding_loc(use_span, origin));
             return Err(Poisoned);
         };
         Ok(ty)
@@ -196,11 +196,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         } else {
             self.diag_ctx.emit_type_mismatch(
-                &self.eval.types,
                 expected_ty,
                 expected_loc,
                 actual_ty,
                 self.loc(actual_span),
+                true,
             );
             Err(Poisoned)
         }
@@ -314,7 +314,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         };
                         if let Err(existing_ty) = self.mir_types[target].unify(ty) {
                             self.diag_ctx.emit_incompatible_branch_types(
-                                &self.eval.types,
                                 existing_ty,
                                 self.origin_loc(binding.origin),
                                 ty,
@@ -437,7 +436,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             {
                 if self.is_comptime() {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
-                    return Err(Diverge::PoisonedControlFlow);
+                    return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) = self.eval_block_to_mir(then);
                 let (r#else, else_res) = self.eval_block_to_mir(r#else);
@@ -447,12 +446,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     else_block: r#else,
                 });
                 match (then_res, else_res) {
-                    (Err(Diverge::PoisonedControlFlow), _) => Err(Diverge::PoisonedControlFlow),
-                    (_, Err(Diverge::PoisonedControlFlow)) => Err(Diverge::PoisonedControlFlow),
+                    // Control flow was poisoned in either branch so we have to assume everything
+                    // was poisoned and bubble up
+                    (Err(Diverge::ControlFlowPoisoned), _)
+                    | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
                     (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
                         Err(Diverge::BlockEnd(None))
                     }
-                    _ => Ok(()),
+                    (Ok(()), Ok(()))
+                    | (Err(Diverge::BlockEnd(_)), Ok(()))
+                    | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
                 }
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
@@ -460,14 +463,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state) => {
                 let state_ty = self.state_type(state);
                 self.diag_ctx.emit_type_mismatch_simple(
-                    &self.eval.types,
                     TypeId::BOOL,
                     state_ty,
                     self.loc(binding.use_span),
                 );
-                Err(Diverge::PoisonedControlFlow)
+                Err(Diverge::ControlFlowPoisoned)
             }
-            Err(Poisoned) => Err(Diverge::PoisonedControlFlow),
+            Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
         }
     }
 
@@ -481,25 +483,24 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if let Ok(span) = self.hir.block_spans[condition_block] {
                 self.diag_ctx.emit_not_yet_implemented("comptime while", self.loc(span));
             }
-            return Err(Diverge::PoisonedControlFlow);
+            return Err(Diverge::ControlFlowPoisoned);
         }
 
         let (condition_block, mir_condition_local) = self.with_instructions(|this| {
             this.eval_block_inline(condition_block)?;
             let binding = this.bindings[condition];
             let state = match binding.state {
-                Err(Poisoned) => return Err(Diverge::PoisonedControlFlow),
+                Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
                 Ok(state) => state,
             };
             let state_ty = this.state_type(state);
             if !state_ty.is_assignable_to(TypeId::BOOL) {
                 this.diag_ctx.emit_type_mismatch_simple(
-                    &this.eval.types,
                     TypeId::BOOL,
                     state_ty,
                     this.loc(binding.use_span),
                 );
-                return Err(Diverge::PoisonedControlFlow);
+                return Err(Diverge::ControlFlowPoisoned);
             }
             match state {
                 LocalState::Runtime(local) => Ok(local),
@@ -507,7 +508,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     if this.is_comptime_only(value) {
                         this.diag_ctx
                             .emit_comptime_only_value_at_runtime(this.loc(binding.use_span));
-                        return Err(Diverge::PoisonedControlFlow);
+                        return Err(Diverge::ControlFlowPoisoned);
                     }
                     let condition = this.mir_types.push(this.values.type_of_value(value));
                     this.emit(mir::Instruction::Set {
@@ -521,7 +522,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let condition = mir_condition_local?;
         let (body, body_res) = self.eval_block_to_mir(body);
         match body_res {
-            Err(Diverge::PoisonedControlFlow) => return Err(Diverge::PoisonedControlFlow),
+            Err(Diverge::ControlFlowPoisoned) => {
+                return Err(Diverge::ControlFlowPoisoned);
+            }
             Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }
         self.emit(mir::Instruction::While { condition_block, condition, body });
@@ -550,7 +553,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    pub fn diag_loc(&self, use_span: SourceSpan, origin: DefOrigin) -> BindingLoc {
+    pub fn binding_loc(&self, use_span: SourceSpan, origin: DefOrigin) -> BindingLoc {
         let use_loc = self.loc(use_span);
         match origin {
             DefOrigin::Local(_) => BindingLoc::Inline(use_loc),
@@ -567,12 +570,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (state, use_span, _origin) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(
-                &self.eval.types,
-                TypeId::BOOL,
-                ty,
-                self.loc(use_span),
-            );
+            self.diag_ctx.emit_type_mismatch_simple(TypeId::BOOL, ty, self.loc(use_span));
             return Err(Poisoned);
         }
         let value = match state {
@@ -610,8 +608,31 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
-            ExprKind::UnaryOpCall { .. } | ExprKind::BinaryOpCall { .. } => {
-                self.diag_ctx.emit_not_yet_implemented("operators", self.loc(expr.span));
+            ExprKind::BinaryOpCall { op: hir_ops::BinaryOp::Equals, lhs, rhs } => {
+                // TODO: Implement proper operator
+                let lhs = self.bindings[lhs].state.and_then(|lhs| {
+                    let LocalState::Comptime(value) = lhs else { return Err(Poisoned) };
+                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
+                    Ok(ty)
+                });
+                let rhs = self.bindings[rhs].state.and_then(|rhs| {
+                    let LocalState::Comptime(value) = rhs else { return Err(Poisoned) };
+                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
+                    Ok(ty)
+                });
+                let result = poison::zip(lhs, rhs)
+                    .map(|(lhs, rhs)| EvalValue::Comptime((lhs == rhs).into()));
+                if result.is_err() {
+                    self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
+                }
+                result
+            }
+            ExprKind::BinaryOpCall { .. } => {
+                self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
+                Err(Poisoned)
+            }
+            ExprKind::UnaryOpCall { .. } => {
+                self.diag_ctx.emit_not_yet_implemented("unary operators", self.loc(expr.span));
                 Err(Poisoned)
             }
             ExprKind::StructLit { ty, fields } => self.eval_struct_lit(ty, fields, expr.span),

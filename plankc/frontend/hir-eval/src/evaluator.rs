@@ -1,12 +1,12 @@
-use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, StrId};
-use plank_values::{DefOrigin, TypeId, TypeInterner, Value, ValueId, ValueInterner};
+use plank_values::{DefOrigin, Field, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
     diagnostics::DiagCtx,
+    functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
@@ -25,13 +25,14 @@ pub(crate) struct Evaluator<'a> {
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,
     pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
-    pub types: TypeInterner,
+    pub types: &'a TypeInterner,
 
     pub evaluated_consts: DenseIndexMap<ConstId, State<MaybePoisoned<ValueId>>>,
     pub values: &'a mut ValueInterner,
     pub hir: &'a Hir,
 
-    pub lowered_fns_cache: HashMap<ValueId, State<MaybePoisoned<mir::FnId>>>,
+    pub evaluated_fns_cache: &'a EvaluatedFunctionCache,
+    pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
@@ -39,24 +40,31 @@ pub(crate) struct Evaluator<'a> {
     pub types_buf: Vec<TypeId>,
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
-    pub fields_buf: Vec<(StrId, TypeId)>,
+    pub maybe_values_buf: Vec<MaybePoisoned<ValueId>>,
+    pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
 }
 
 impl<'a> Evaluator<'a> {
-    pub fn new(hir: &'a Hir, values: &'a mut ValueInterner) -> Self {
+    pub fn new(
+        hir: &'a Hir,
+        types: &'a TypeInterner,
+        evaluated_fns_cache: &'a EvaluatedFunctionCache,
+        values: &'a mut ValueInterner,
+    ) -> Self {
         Evaluator {
             mir_blocks: ListOfLists::new(),
             mir_fns: IndexVec::new(),
             mir_fn_locals: ListOfLists::new(),
             mir_args: ListOfLists::new(),
-            types: TypeInterner::new(),
+            types,
 
             evaluated_consts: DenseIndexMap::new(),
             values,
             hir,
 
-            lowered_fns_cache: HashMap::new(),
+            evaluated_fns_cache,
+            lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
 
@@ -64,6 +72,7 @@ impl<'a> Evaluator<'a> {
             types_buf: Vec::new(),
             locals_buf: Vec::new(),
             values_buf: Vec::new(),
+            maybe_values_buf: Vec::new(),
             fields_buf: Vec::new(),
             captures_buf: Vec::new(),
         }
@@ -71,7 +80,7 @@ impl<'a> Evaluator<'a> {
 
     pub fn is_comptime_only(&self, value: ValueId) -> bool {
         let ty = self.values.type_of_value(value);
-        self.types.comptime_only(ty)
+        self.types.is_comptime_only(ty)
     }
 
     pub fn evaluate_const(
@@ -93,9 +102,12 @@ impl<'a> Evaluator<'a> {
         self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
-        if let Err(Diverge::PoisonedControlFlow) = scope.eval_comptime(const_def.body) {
-            self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
-            return Err(Poisoned);
+        match scope.eval_comptime(const_def.body) {
+            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
+                self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
+                return Err(Poisoned);
+            }
+            Ok(_) => {}
         }
 
         let value = scope.bindings[const_def.result].state.map(|state| match state {
@@ -121,8 +133,14 @@ impl<'a> Evaluator<'a> {
     }
 
     fn try_name_type(&mut self, name: StrId, value: MaybePoisoned<ValueId>) {
-        if let Ok(Value::Type(ty)) = value.map(|vid| self.values.lookup(vid)) {
-            self.types.try_set_struct_name(ty, name);
+        let Ok(Value::Type(ty)) = value.map(|vid| self.values.lookup(vid)) else {
+            return;
+        };
+        let Type::Struct(r#struct) = self.types.lookup(ty) else {
+            return;
+        };
+        if r#struct.name.get().is_none() {
+            r#struct.name.set(Some(name));
         }
     }
 

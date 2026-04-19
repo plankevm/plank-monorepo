@@ -14,7 +14,9 @@ fn assert_parses_to_cst_no_errors_dedented(source: &str, expected: &str) {
 #[test]
 fn test_literal_bool_true() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = true;",
+        r#"
+        const x = true;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -35,7 +37,9 @@ fn test_literal_bool_true() {
 #[test]
 fn test_literal_bool_false() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = false;",
+        r#"
+        const x = false;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -56,7 +60,9 @@ fn test_literal_bool_false() {
 #[test]
 fn test_literal_hex() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = 0xFF;",
+        r#"
+        const x = 0xFF;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -77,7 +83,9 @@ fn test_literal_hex() {
 #[test]
 fn test_literal_binary() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = 0b1010;",
+        r#"
+        const x = 0b1010;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -98,7 +106,9 @@ fn test_literal_binary() {
 #[test]
 fn test_literal_decimal() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = 3469;",
+        r#"
+        const x = 3469;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -123,7 +133,9 @@ fn test_literal_decimal() {
 #[test]
 fn test_ident_simple() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = foo;",
+        r#"
+        const x = foo;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -144,7 +156,9 @@ fn test_ident_simple() {
 #[test]
 fn test_member_access_single() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a.b;",
+        r#"
+        const x = a.b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -169,7 +183,9 @@ fn test_member_access_single() {
 #[test]
 fn test_member_priority() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = 3 * a.b;",
+        r#"
+        const x = 3 * a.b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -201,7 +217,9 @@ fn test_member_priority() {
 #[test]
 fn test_member_access_chain() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a.b.c;",
+        r#"
+        const x = a.b.c;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -234,7 +252,9 @@ fn test_member_access_chain() {
 #[test]
 fn test_paren_expr_simple() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = (42);",
+        r#"
+        const x = (42);
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -258,7 +278,9 @@ fn test_paren_expr_simple() {
 #[test]
 fn test_paren_expr_nested() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = ((a));",
+        r#"
+        const x = ((a));
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -289,7 +311,9 @@ fn test_paren_expr_nested() {
 #[test]
 fn test_unary_minus() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = -a;",
+        r#"
+        const x = -a;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -312,7 +336,9 @@ fn test_unary_minus() {
 #[test]
 fn test_unary_not() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = !a;",
+        r#"
+        const x = !a;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -335,7 +361,9 @@ fn test_unary_not() {
 #[test]
 fn test_unary_tilde() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = ~a;",
+        r#"
+        const x = ~a;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -358,7 +386,9 @@ fn test_unary_tilde() {
 #[test]
 fn test_unary_nested() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = -~a;",
+        r#"
+        const x = -~a;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -387,7 +417,9 @@ fn test_unary_nested() {
 #[test]
 fn test_binary_plus() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a + b;",
+        r#"
+        const x = a + b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -415,7 +447,9 @@ fn test_binary_plus() {
 #[test]
 fn test_binary_minus() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a - b;",
+        r#"
+        const x = a - b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -443,7 +477,9 @@ fn test_binary_minus() {
 #[test]
 fn test_binary_minus_no_spaces() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a-3;",
+        r#"
+        const x = a-3;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -469,7 +505,9 @@ fn test_binary_minus_no_spaces() {
 #[test]
 fn test_binary_double_equals() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a == b;",
+        r#"
+        const x = a == b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -497,7 +535,9 @@ fn test_binary_double_equals() {
 #[test]
 fn test_binary_not_equals() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a != b;",
+        r#"
+        const x = a != b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -525,7 +565,9 @@ fn test_binary_not_equals() {
 #[test]
 fn test_binary_greater_than() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a > b;",
+        r#"
+        const x = a > b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -553,7 +595,9 @@ fn test_binary_greater_than() {
 #[test]
 fn test_binary_and() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a and b;",
+        r#"
+        const x = a and b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -581,7 +625,9 @@ fn test_binary_and() {
 #[test]
 fn test_binary_ampersand() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a & b;",
+        r#"
+        const x = a & b;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -609,7 +655,9 @@ fn test_binary_ampersand() {
 #[test]
 fn test_binary_precedence_mul_add() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = 1 + 2 * 3;",
+        r#"
+        const x = 1 + 2 * 3;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -644,7 +692,9 @@ fn test_binary_precedence_mul_add() {
 #[test]
 fn test_binary_precedence_cmp_and() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = a < b and c > d;",
+        r#"
+        const x = a < b and c > d;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -690,7 +740,9 @@ fn test_binary_precedence_cmp_and() {
 #[test]
 fn test_if_expr_if_else() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = if a { b; } else { c; };",
+        r#"
+        const x = if a { b; } else { c; };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -737,7 +789,9 @@ fn test_if_expr_if_else() {
 #[test]
 fn test_if_expr_if_elseif_else() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = if a { b; } else if c { d; } else { e; };",
+        r#"
+        const x = if a { b; } else if c { d; } else { e; };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -806,7 +860,9 @@ fn test_if_expr_if_elseif_else() {
 #[test]
 fn test_fn_call_zero_args() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = f();",
+        r#"
+        const x = f();
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -830,7 +886,9 @@ fn test_fn_call_zero_args() {
 #[test]
 fn test_fn_call_one_arg() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = f(a);",
+        r#"
+        const x = f(a);
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -856,7 +914,9 @@ fn test_fn_call_one_arg() {
 #[test]
 fn test_fn_call_two_args() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = f(a, b);",
+        r#"
+        const x = f(a, b);
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -886,7 +946,9 @@ fn test_fn_call_two_args() {
 #[test]
 fn test_fn_call_trailing_comma() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = f(a, b,);",
+        r#"
+        const x = f(a, b,);
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -921,7 +983,9 @@ fn test_fn_call_trailing_comma() {
 #[test]
 fn test_fn_def_zero_params() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn() void {};",
+        r#"
+        const f = fn() void {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -953,7 +1017,9 @@ fn test_fn_def_zero_params() {
 #[test]
 fn test_fn_def_one_param() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(x: T) void {};",
+        r#"
+        const f = fn(x: T) void {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -992,7 +1058,9 @@ fn test_fn_def_one_param() {
 #[test]
 fn test_fn_def_trailing_comma() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(x: S,) void {};",
+        r#"
+        const f = fn(x: S,) void {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1032,7 +1100,9 @@ fn test_fn_def_trailing_comma() {
 #[test]
 fn test_fn_def_two_params() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(x: T(void), y: U) void {};",
+        r#"
+        const f = fn(x: T(void), y: U) void {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1085,7 +1155,9 @@ fn test_fn_def_two_params() {
 #[test]
 fn test_fn_def_with_return_type() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn() Wow(32) {};",
+        r#"
+        const f = fn() Wow(32) {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1122,7 +1194,9 @@ fn test_fn_def_with_return_type() {
 #[test]
 fn test_fn_def_full() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(x: T) U { x; };",
+        r#"
+        const f = fn(x: T) U { x; };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1166,7 +1240,9 @@ fn test_fn_def_full() {
 #[test]
 fn test_fn_def_one_comptime_param() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(comptime T: type) void {};",
+        r#"
+        const f = fn(comptime T: type) void {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1207,7 +1283,9 @@ fn test_fn_def_one_comptime_param() {
 #[test]
 fn test_fn_def_two_comptime_params() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(comptime T: type, comptime U: type) void {};",
+        r#"
+        const f = fn(comptime T: type, comptime U: type) void {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1259,7 +1337,9 @@ fn test_fn_def_two_comptime_params() {
 #[test]
 fn test_fn_def_mixed_comptime_and_runtime_params() {
     assert_parses_to_cst_no_errors_dedented(
-        "const f = fn(comptime T: type, x: T) T {};",
+        r#"
+        const f = fn(comptime T: type, x: T) T {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1313,7 +1393,9 @@ fn test_fn_def_mixed_comptime_and_runtime_params() {
 #[test]
 fn test_struct_def_zero_fields() {
     assert_parses_to_cst_no_errors_dedented(
-        "const S = struct {};",
+        r#"
+        const S = struct {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1337,7 +1419,9 @@ fn test_struct_def_zero_fields() {
 #[test]
 fn test_struct_def_one_field() {
     assert_parses_to_cst_no_errors_dedented(
-        "const S = struct I { x: T };",
+        r#"
+        const S = struct I { x: T };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1373,7 +1457,9 @@ fn test_struct_def_one_field() {
 #[test]
 fn test_struct_def_two_fields() {
     assert_parses_to_cst_no_errors_dedented(
-        "const S = struct B(34) { x: T, y: U };",
+        r#"
+        const S = struct B(34) { x: T, y: U };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1423,7 +1509,9 @@ fn test_struct_def_two_fields() {
 #[test]
 fn test_struct_def_trailing_comma() {
     assert_parses_to_cst_no_errors_dedented(
-        "const S = struct { x: T, };",
+        r#"
+        const S = struct { x: T, };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1461,7 +1549,9 @@ fn test_struct_def_trailing_comma() {
 #[test]
 fn test_struct_lit_zero_fields() {
     assert_parses_to_cst_no_errors_dedented(
-        "const s = S {};",
+        r#"
+        const s = S {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1486,7 +1576,9 @@ fn test_struct_lit_zero_fields() {
 #[test]
 fn test_struct_lit_one_field() {
     assert_parses_to_cst_no_errors_dedented(
-        "const s = S { x: 1 };",
+        r#"
+        const s = S { x: 1 };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1520,13 +1612,13 @@ fn test_struct_lit_one_field() {
 #[test]
 fn test_struct_lit_in_parenthesized_if() {
     assert_parses_to_cst_no_errors_dedented(
-        "
+        r#"
         init {
             if (S { b: false }.b) {
                 wow();
             }
         }
-        ",
+        "#,
         r#"
         File
             InitBlock
@@ -1583,7 +1675,9 @@ fn test_struct_lit_in_parenthesized_if() {
 #[test]
 fn test_struct_lit_two_fields() {
     assert_parses_to_cst_no_errors_dedented(
-        "const s = S { x: 1, y: 2 };",
+        r#"
+        const s = S { x: 1, y: 2 };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1626,7 +1720,9 @@ fn test_struct_lit_two_fields() {
 #[test]
 fn test_struct_lit_trailing_comma() {
     assert_parses_to_cst_no_errors_dedented(
-        "const s = S { x: 1, };",
+        r#"
+        const s = S { x: 1, };
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -1665,7 +1761,9 @@ fn test_struct_lit_trailing_comma() {
 #[test]
 fn test_block_atom_expr_stmt() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { 34; }",
+        r#"
+        init { 34; }
+        "#,
         r#"
         File
             InitBlock
@@ -1686,7 +1784,9 @@ fn test_block_atom_expr_stmt() {
 #[test]
 fn test_block_end_expr() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { 34; 35; bob }",
+        r#"
+        init { 34; 35; bob }
+        "#,
         r#"
         File
             InitBlock
@@ -1718,7 +1818,9 @@ fn test_block_end_expr() {
 #[test]
 fn test_let_basic() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { let x = 1; }",
+        r#"
+        init { let x = 1; }
+        "#,
         r#"
         File
             InitBlock
@@ -1747,7 +1849,9 @@ fn test_let_basic() {
 #[test]
 fn test_let_with_mut() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { let mut x = 1; }",
+        r#"
+        init { let mut x = 1; }
+        "#,
         r#"
         File
             InitBlock
@@ -1778,7 +1882,9 @@ fn test_let_with_mut() {
 #[test]
 fn test_let_with_type() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { let x: T = 1; }",
+        r#"
+        init { let x: T = 1; }
+        "#,
         r#"
         File
             InitBlock
@@ -1811,7 +1917,9 @@ fn test_let_with_type() {
 #[test]
 fn test_let_full() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { let mut x: T = 1; }",
+        r#"
+        init { let mut x: T = 1; }
+        "#,
         r#"
         File
             InitBlock
@@ -1850,11 +1958,11 @@ fn test_let_full() {
 #[test]
 fn test_return_stmt() {
     assert_parses_to_cst_no_errors_dedented(
-        "
+        r#"
         init {
             return 42;
         }
-        ",
+        "#,
         r#"
         File
             InitBlock
@@ -1878,7 +1986,9 @@ fn test_return_stmt() {
 #[test]
 fn test_assign_stmt() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { x = 1; }",
+        r#"
+        init { x = 1; }
+        "#,
         r#"
         File
             InitBlock
@@ -1905,7 +2015,9 @@ fn test_assign_stmt() {
 #[test]
 fn test_assign_stmt_member_expr() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { a.b.c = 34; }",
+        r#"
+        init { a.b.c = 34; }
+        "#,
         r#"
         File
             InitBlock
@@ -1940,7 +2052,9 @@ fn test_assign_stmt_member_expr() {
 #[test]
 fn test_assign_stmt_complex_rhs() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { x = a + b; }",
+        r#"
+        init { x = a + b; }
+        "#,
         r#"
         File
             InitBlock
@@ -1974,7 +2088,9 @@ fn test_assign_stmt_complex_rhs() {
 #[test]
 fn test_while_basic() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { while x { y; } }",
+        r#"
+        init { while x { y; } }
+        "#,
         r#"
         File
             InitBlock
@@ -2007,7 +2123,9 @@ fn test_while_basic() {
 #[test]
 fn test_while_inline() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { inline while x { y; } }",
+        r#"
+        init { inline while x { y; } }
+        "#,
         r#"
         File
             InitBlock
@@ -2042,7 +2160,9 @@ fn test_while_inline() {
 #[test]
 fn test_if_stmt_if_only() {
     assert_parses_to_cst_no_errors_dedented(
-        "init { if x { y; } }",
+        r#"
+        init { if x { y; } }
+        "#,
         r#"
         File
             InitBlock
@@ -2182,7 +2302,9 @@ fn test_empty_init_run() {
 #[test]
 fn test_untyped_const_decl() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = 42;",
+        r#"
+        const x = 42;
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -2203,7 +2325,9 @@ fn test_untyped_const_decl() {
 #[test]
 fn test_typed_const_decl() {
     assert_parses_to_cst_no_errors_dedented(
-        "const y: comptime_int = 67;",
+        r#"
+        const y: comptime_int = 67;
+        "#,
         r#"
         File
             ConstDecl { typed: true }
@@ -2228,7 +2352,9 @@ fn test_typed_const_decl() {
 #[test]
 fn test_empty_block_expr() {
     assert_parses_to_cst_no_errors_dedented(
-        "const x = {};",
+        r#"
+        const x = {};
+        "#,
         r#"
         File
             ConstDecl { typed: false }
@@ -2255,7 +2381,9 @@ fn test_empty_block_expr() {
 #[test]
 fn test_import_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo;",
+        r#"
+        import foo;
+        "#,
         r#"
         File
             ImportDecl { glob: false }
@@ -2271,7 +2399,9 @@ fn test_import_single_segment() {
 #[test]
 fn test_import_two_segments() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo::bar;",
+        r#"
+        import foo::bar;
+        "#,
         r#"
         File
             ImportDecl { glob: false }
@@ -2290,7 +2420,9 @@ fn test_import_two_segments() {
 #[test]
 fn test_import_three_segments() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo::bar::baz;",
+        r#"
+        import foo::bar::baz;
+        "#,
         r#"
         File
             ImportDecl { glob: false }
@@ -2312,7 +2444,9 @@ fn test_import_three_segments() {
 #[test]
 fn test_import_glob_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo::*;",
+        r#"
+        import foo::*;
+        "#,
         r#"
         File
             ImportDecl { glob: true }
@@ -2330,7 +2464,9 @@ fn test_import_glob_single_segment() {
 #[test]
 fn test_import_glob_multi_segment() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo::bar::*;",
+        r#"
+        import foo::bar::*;
+        "#,
         r#"
         File
             ImportDecl { glob: true }
@@ -2351,7 +2487,9 @@ fn test_import_glob_multi_segment() {
 #[test]
 fn test_import_as_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo as bar;",
+        r#"
+        import foo as bar;
+        "#,
         r#"
         File
             ImportAsDecl
@@ -2373,7 +2511,9 @@ fn test_import_as_single_segment() {
 #[test]
 fn test_import_as_multi_segment() {
     assert_parses_to_cst_no_errors_dedented(
-        "import foo::bar::baz as qux;",
+        r#"
+        import foo::bar::baz as qux;
+        "#,
         r#"
         File
             ImportAsDecl
@@ -2401,12 +2541,12 @@ fn test_import_as_multi_segment() {
 #[test]
 fn test_import_multiple_declarations() {
     assert_parses_to_cst_no_errors_dedented(
-        "
+        r#"
         import std;
         import std::io;
         import std::io::*;
         import std::io as io_lib;
-        ",
+        "#,
         r#"
         File
             ImportDecl { glob: false }
@@ -2452,6 +2592,76 @@ fn test_import_multiple_declarations() {
                 " "
                 Identifier
                     "io_lib"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_import_group() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        import foo::bar::{X, Y as B};
+        "#,
+        r#"
+        File
+            ImportGroupDecl
+                "import"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                Identifier
+                    "bar"
+                "::"
+                "{"
+                ImportGroupItem
+                    Identifier
+                        "X"
+                ","
+                " "
+                ImportGroupItem
+                    Identifier
+                        "Y"
+                    " "
+                    "as"
+                    " "
+                    Identifier
+                        "B"
+                "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_import_group_trailing_comma() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        import foo::bar::{X, Y,};
+        "#,
+        r#"
+        File
+            ImportGroupDecl
+                "import"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                Identifier
+                    "bar"
+                "::"
+                "{"
+                ImportGroupItem
+                    Identifier
+                        "X"
+                ","
+                " "
+                ImportGroupItem
+                    Identifier
+                        "Y"
+                ","
+                "}"
                 ";"
         "#,
     );

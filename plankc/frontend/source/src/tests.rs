@@ -18,9 +18,27 @@ fn source_content_matches_source_manager_path() {
     write_files(
         dir.path(),
         &[
-            ("main", "import m::a::A;\nimport m::b::B;\n\ninit {}\n"),
-            ("a", "const A = 1;\n"),
-            ("b", "const B = 2;\n"),
+            (
+                "main",
+                r#"
+                import m::a::A;
+                import m::b::B;
+
+                init {}
+                "#,
+            ),
+            (
+                "a",
+                r#"
+                const A = 1;
+                "#,
+            ),
+            (
+                "b",
+                r#"
+                const B = 2;
+                "#,
+            ),
         ],
     );
 

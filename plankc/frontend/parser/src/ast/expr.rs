@@ -49,9 +49,10 @@ impl<'cst> Expr<'cst> {
                 },
                 NodeKind::UnaryExpr(op) => Expr::Unary(UnaryExpr { op, view }),
                 NodeKind::CallExpr => Expr::Call(CallExpr { view }),
-                NodeKind::MemberExpr => match MemberExpr::new(view) {
-                    Some(member) => Expr::Member(member),
-                    None => Expr::Error { span },
+                NodeKind::MemberExpr => match MemberExpr::try_new(view) {
+                    Ok(Some(member)) => Expr::Member(member),
+                    Err(_) => Expr::Error { span },
+                    Ok(None) => unreachable!("invariant: kind already matched MemberExpr"),
                 },
                 NodeKind::StructDef => Expr::StructDef(StructDef { view }),
                 NodeKind::StructLit => Expr::StructLit(StructLit { view }),
@@ -169,12 +170,13 @@ pub struct MemberExpr<'cst> {
 }
 
 impl<'cst> MemberExpr<'cst> {
-    pub fn new(view: NodeView<'cst>) -> Option<Self> {
+    /// Returns `Ok(None)` for non-MemberExpr nodes, `Err(span)` for malformed MemberExpr nodes.
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         if view.kind() != NodeKind::MemberExpr {
-            return None;
+            return Ok(None);
         }
-        let member = view.child(1).and_then(NodeView::ident)?;
-        Some(Self { member, view })
+        let member = view.child(1).and_then(NodeView::ident).ok_or(view.span())?;
+        Ok(Some(Self { member, view }))
     }
 
     pub fn object(&self) -> Expr<'cst> {
@@ -202,7 +204,7 @@ impl<'cst> StructDef<'cst> {
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Result<FieldDef<'cst>, TokenSpan>> {
-        self.view.children().filter_map(FieldDef::try_new)
+        self.view.children().filter_map(|child| FieldDef::try_new(child).transpose())
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -219,15 +221,15 @@ pub struct FieldDef<'cst> {
 }
 
 impl<'cst> FieldDef<'cst> {
-    /// Returns `None` for non-FieldDef nodes, `Some(Err(span))` for malformed FieldDef nodes.
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
+    /// Returns `Ok(None)` for non-FieldDef nodes, `Err(span)` for malformed FieldDef nodes.
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         match view.kind() {
             NodeKind::FieldDef => {
-                let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
-                let Some(name) = name_node.kind().as_ident() else { return Some(Err(view.span())) };
-                Some(Ok(Self { name, name_span: name_node.span(), view }))
+                let name_node = view.child(0).ok_or(view.span())?;
+                let name = name_node.kind().as_ident().ok_or(view.span())?;
+                Ok(Some(Self { name, name_span: name_node.span(), view }))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -256,7 +258,7 @@ impl<'cst> StructLit<'cst> {
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Result<FieldAssign<'cst>, TokenSpan>> {
-        self.view.children().skip(1).filter_map(FieldAssign::try_new)
+        self.view.children().skip(1).filter_map(|child| FieldAssign::try_new(child).transpose())
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -273,14 +275,15 @@ pub struct FieldAssign<'cst> {
 }
 
 impl<'cst> FieldAssign<'cst> {
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
+    /// Returns `Ok(None)` for non-FieldAssign nodes, `Err(span)` for malformed FieldAssign nodes.
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         match view.kind() {
             NodeKind::FieldAssign => {
-                let Some(name_node) = view.child(0) else { return Some(Err(view.span())) };
-                let Some(name) = name_node.kind().as_ident() else { return Some(Err(view.span())) };
-                Some(Ok(Self { name, name_span: name_node.span(), view }))
+                let name_node = view.child(0).ok_or(view.span())?;
+                let name = name_node.kind().as_ident().ok_or(view.span())?;
+                Ok(Some(Self { name, name_span: name_node.span(), view }))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -316,7 +319,10 @@ impl<'cst> IfExpr<'cst> {
     /// Returns an iterator over the else-if branches.
     pub fn else_if_branches(&self) -> impl Iterator<Item = Result<ElseIfBranch<'cst>, TokenSpan>> {
         let else_if_list = self.view.child(2);
-        else_if_list.into_iter().flat_map(|list| list.children()).filter_map(ElseIfBranch::try_new)
+        else_if_list
+            .into_iter()
+            .flat_map(|list| list.children())
+            .filter_map(|child| ElseIfBranch::try_new(child).transpose())
     }
 
     /// Returns the else body if present.
@@ -337,13 +343,14 @@ pub struct ElseIfBranch<'cst> {
 }
 
 impl<'cst> ElseIfBranch<'cst> {
-    fn try_new(view: NodeView<'cst>) -> Option<Result<Self, TokenSpan>> {
+    /// Returns `Ok(None)` for non-ElseIfBranch nodes, `Err(span)` for malformed ElseIfBranch nodes.
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         match view.kind() {
             NodeKind::ElseIfBranch => {
-                let Some(body_node) = view.child(1) else { return Some(Err(view.span())) };
-                Some(Ok(Self { body_node, view }))
+                let body_node = view.child(1).ok_or(view.span())?;
+                Ok(Some(Self { body_node, view }))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -400,6 +407,7 @@ pub struct Param<'cst> {
 }
 
 impl<'cst> Param<'cst> {
+    /// Returns `Ok(None)` for non-Parameter nodes, `Err(span)` for malformed Parameter nodes.
     fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         let is_comptime = match view.kind() {
             NodeKind::Parameter => false,
@@ -439,17 +447,18 @@ pub struct LetStmt<'cst> {
 }
 
 impl<'cst> LetStmt<'cst> {
-    pub fn new(view: NodeView<'cst>) -> Option<Self> {
+    /// Returns `Ok(None)` for non-LetStmt nodes, `Err(span)` for malformed LetStmt nodes.
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         let NodeKind::LetStmt { mutable, typed } = view.kind() else {
-            return None;
+            return Ok(None);
         };
         let mut children = view.children();
-        let name_view = children.next()?;
+        let name_view = children.next().ok_or(view.span())?;
         let name_span = name_view.span();
-        let name = name_view.ident()?;
-        let type_view = if typed { Some(children.next()?) } else { None };
-        let value_view = children.next()?;
-        Some(Self { name, name_span, mutable, type_view, value_view })
+        let name = name_view.ident().ok_or(view.span())?;
+        let type_view = if typed { Some(children.next().ok_or(view.span())?) } else { None };
+        let value_view = children.next().ok_or(view.span())?;
+        Ok(Some(Self { name, name_span, mutable, type_view, value_view }))
     }
 
     pub fn type_expr(&self) -> Option<Expr<'cst>> {
@@ -520,14 +529,15 @@ pub struct WhileStmt<'cst> {
 }
 
 impl<'cst> WhileStmt<'cst> {
-    fn new(view: NodeView<'cst>) -> Option<Self> {
+    /// Returns `Ok(None)` for non-WhileStmt nodes, `Err(span)` for malformed WhileStmt nodes.
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         let inline = match view.kind() {
             NodeKind::WhileStmt => false,
             NodeKind::InlineWhileStmt => true,
-            _ => return None,
+            _ => return Ok(None),
         };
-        let body_node = view.child(1)?;
-        Some(Self { inline, body_node, view })
+        let body_node = view.child(1).ok_or(view.span())?;
+        Ok(Some(Self { inline, body_node, view }))
     }
 
     pub fn condition(&self) -> Expr<'cst> {
@@ -555,8 +565,10 @@ pub enum Statement<'cst> {
 
 impl<'cst> Statement<'cst> {
     pub fn new(view: NodeView<'cst>) -> Option<Self> {
-        if let Some(let_stmt) = LetStmt::new(view) {
-            return Some(Statement::Let(let_stmt));
+        match LetStmt::try_new(view) {
+            Ok(Some(stmt)) => return Some(Statement::Let(stmt)),
+            Err(span) => return Some(Statement::Error { span }),
+            Ok(None) => {}
         }
         if let Some(return_stmt) = ReturnStmt::new(view) {
             return Some(Statement::Return(return_stmt));
@@ -564,8 +576,10 @@ impl<'cst> Statement<'cst> {
         if let Some(assign_stmt) = AssignStmt::new(view) {
             return Some(Statement::Assign(assign_stmt));
         }
-        if let Some(while_stmt) = WhileStmt::new(view) {
-            return Some(Statement::While(while_stmt));
+        match WhileStmt::try_new(view) {
+            Ok(Some(stmt)) => return Some(Statement::While(stmt)),
+            Err(span) => return Some(Statement::Error { span }),
+            Ok(None) => {}
         }
         if let Some(expr) = Expr::new(view) {
             return Some(Statement::Expr(expr));

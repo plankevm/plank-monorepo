@@ -1977,6 +1977,7 @@ name = "plank-session"
 version = "0.1.0"
 dependencies = [
  "annotate-snippets",
+ "enum-iterator",
  "plank-core",
 ]
 
@@ -2004,6 +2005,7 @@ name = "plank-values"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "enum-iterator",
  "hashbrown 0.16.1",
  "plank-core",
  "plank-session",

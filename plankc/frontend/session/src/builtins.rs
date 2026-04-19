@@ -1,10 +1,4 @@
-use crate::{Session, StrId, types::TypeId};
-
-#[derive(Debug, Clone, Copy)]
-pub struct BuiltinSignature {
-    pub inputs: &'static [TypeId],
-    pub result: TypeId,
-}
+use crate::{Session, StrId};
 
 macro_rules! define_builtins {
     (
@@ -12,10 +6,7 @@ macro_rules! define_builtins {
             $($pt_const:ident = $pt_str:literal => $pt_type:ident;)*
         }
         builtins {
-            $(
-                $b_const:ident $b_str:literal => $b_variant:ident
-                { $( [$($arg:ident),* => $ret:ident] ),+ };
-            )*
+            $($b_const:ident $b_str:literal => $b_variant:ident;)*
         }
     ) => {
         pub mod builtin_names {
@@ -38,7 +29,7 @@ macro_rules! define_builtins {
             $(assert_eq!(interner.intern(builtin_names::$b_const), $b_const);)*
         }
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, enum_iterator::Sequence)]
         pub enum EvmBuiltin {
             $($b_variant,)*
         }
@@ -56,39 +47,38 @@ macro_rules! define_builtins {
                     _ => return None,
                 })
             }
+        }
 
-            pub fn arg_count(self) -> usize {
-                // All sigs have the same arg count, guaranteed by compile time check in
-                // `signatures`.
-                self.signatures()[0].inputs.len()
-            }
-
-            pub fn signatures(self) -> &'static [BuiltinSignature] {
-                const U256: TypeId = TypeId::U256;
-                const BOOL: TypeId = TypeId::BOOL;
-                const MP: TypeId = TypeId::MEMORY_POINTER;
-                const VOID: TypeId = TypeId::VOID;
-                const NEVER: TypeId = TypeId::NEVER;
-
-                match self {
-                    $(EvmBuiltin::$b_variant => {
-                        const SIGS: &[BuiltinSignature] = &[$(BuiltinSignature {
-                            inputs: &[$($arg),*],
-                            result: $ret
-                        }),+];
-                        // Invariant: Each builtin has at least 1 sig and all sigs have the
-                        // same number of inputs.
-                        const {
-                            assert!(!SIGS.is_empty());
-                            let mut i = 1;
-                            while i < SIGS.len() {
-                                assert!(SIGS[0].inputs.len() == SIGS[i].inputs.len());
-                                i += 1;
-                            }
-                        };
-                        SIGS
-                    }),*
-                }
+        impl EvmBuiltin {
+            pub fn is_pure(self) -> bool {
+                matches!(
+                    self,
+                    EvmBuiltin::Add
+                        | EvmBuiltin::Mul
+                        | EvmBuiltin::Sub
+                        | EvmBuiltin::Div
+                        | EvmBuiltin::SDiv
+                        | EvmBuiltin::Mod
+                        | EvmBuiltin::SMod
+                        | EvmBuiltin::AddMod
+                        | EvmBuiltin::MulMod
+                        | EvmBuiltin::Exp
+                        | EvmBuiltin::SignExtend
+                        | EvmBuiltin::Lt
+                        | EvmBuiltin::Gt
+                        | EvmBuiltin::SLt
+                        | EvmBuiltin::SGt
+                        | EvmBuiltin::Eq
+                        | EvmBuiltin::IsZero
+                        | EvmBuiltin::And
+                        | EvmBuiltin::Or
+                        | EvmBuiltin::Xor
+                        | EvmBuiltin::Not
+                        | EvmBuiltin::Byte
+                        | EvmBuiltin::Shl
+                        | EvmBuiltin::Shr
+                        | EvmBuiltin::Sar
+                )
             }
         }
 
@@ -98,23 +88,6 @@ macro_rules! define_builtins {
                     $(EvmBuiltin::$b_variant => builtin_names::$b_const,)*
                 };
                 f.write_str(name)
-            }
-        }
-
-        impl TypeId {
-            pub fn resolve_primitive(name: StrId) -> Option<TypeId> {
-                Some(match name {
-                    $($pt_const => TypeId::$pt_const,)*
-                    _ => return None,
-                })
-            }
-
-            pub fn primitive_name(self) -> Option<&'static str> {
-                match self {
-                    $(Self::$pt_const => Some($pt_str),)*
-                    _ => None
-                }
-
             }
         }
     };
@@ -133,222 +106,170 @@ define_builtins! {
 
     builtins {
         // EVM Arithmetic
-        ADD  "add" => Add
-            { [U256, U256 => U256], [MP, U256 => MP], [U256, MP => MP] };
-        MUL "mul" => Mul { [U256, U256 => U256] };
-        SUB "sub" => Sub
-            { [U256, U256 => U256], [MP, U256 => MP], [MP, MP => U256] };
-        DIV "raw_div" => Div { [U256, U256 => U256] };
-        SDIV "raw_sdiv" => SDiv { [U256, U256 => U256] };
-        MOD "raw_mod" => Mod { [U256, U256 => U256] };
-        SMOD "raw_smod" => SMod { [U256, U256 => U256] };
-        ADDMOD "raw_addmod" => AddMod { [U256, U256, U256 => U256] };
-        MULMOD "raw_mulmod" => MulMod { [U256, U256, U256 => U256] };
-        EXP "exp" => Exp { [U256, U256 => U256] };
-        SIGNEXTEND "signextend" => SignExtend { [U256, U256 => U256] };
+        ADD  "add" => Add;
+        MUL "mul" => Mul;
+        SUB "sub" => Sub;
+        DIV "raw_div" => Div;
+        SDIV "raw_sdiv" => SDiv;
+        MOD "raw_mod" => Mod;
+        SMOD "raw_smod" => SMod;
+        ADDMOD "raw_addmod" => AddMod;
+        MULMOD "raw_mulmod" => MulMod;
+        EXP "exp" => Exp;
+        SIGNEXTEND "signextend" => SignExtend;
 
         // EVM Comparison & Bitwise Logic
-        LT "lt" => Lt { [U256, U256 => BOOL], [MP, MP => BOOL] };
-        GT "gt" => Gt { [U256, U256 => BOOL], [MP, MP => BOOL] };
-        SLT "slt" => SLt { [U256, U256 => BOOL] };
-        SGT "sgt" => SGt { [U256, U256 => BOOL] };
-        EQ "eq" => Eq { [U256, U256 => BOOL], [MP, MP => BOOL] };
-        ISZERO "iszero" => IsZero { [U256 => BOOL] };
-        AND "bitwise_and" => And { [U256, U256 => U256] };
-        OR "bitwise_or" => Or { [U256, U256 => U256] };
-        XOR "bitwise_xor" => Xor { [U256, U256 => U256] };
-        NOT "bitwise_not" => Not { [U256 => U256] };
-        BYTE "byte" => Byte { [U256, U256 => U256] };
-        SHL "shl" => Shl { [U256, U256 => U256] };
-        SHR "shr" => Shr { [U256, U256 => U256] };
-        SAR "sar" => Sar { [U256, U256 => U256] };
+        LT "lt" => Lt;
+        GT "gt" => Gt;
+        SLT "slt" => SLt;
+        SGT "sgt" => SGt;
+        EQ "eq" => Eq;
+        ISZERO "iszero" => IsZero;
+        AND "bitwise_and" => And;
+        OR "bitwise_or" => Or;
+        XOR "bitwise_xor" => Xor;
+        NOT "bitwise_not" => Not;
+        BYTE "byte" => Byte;
+        SHL "shl" => Shl;
+        SHR "shr" => Shr;
+        SAR "sar" => Sar;
 
         // EVM Keccak-256
-        KECCAK256 "keccak256" => Keccak256 { [MP, U256 => U256] };
+        KECCAK256 "keccak256" => Keccak256;
 
         // EVM Environment Information
-        ADDRESS "address_this" => Address { [=> U256] };
-        BALANCE "balance" => Balance { [U256 => U256] };
-        ORIGIN "origin" => Origin { [=> U256] };
-        CALLER "caller" => Caller { [=> U256] };
-        CALLVALUE "callvalue" => CallValue { [=> U256] };
-        CALLDATALOAD "calldataload" => CallDataLoad { [U256 => U256] };
-        CALLDATASIZE "calldatasize" => CallDataSize { [=> U256] };
-        CALLDATACOPY "calldatacopy" => CallDataCopy { [MP, U256, U256 => VOID] };
-        CODESIZE "codesize" => CodeSize { [=> U256] };
-        CODECOPY "codecopy" => CodeCopy { [MP, U256, U256 => VOID] };
-        GASPRICE "gasprice" => GasPrice { [=> U256] };
-        EXTCODESIZE "extcodesize" => ExtCodeSize { [U256 => U256] };
-        EXTCODECOPY "extcodecopy" => ExtCodeCopy { [U256, MP, U256, U256 => VOID] };
-        RETURNDATASIZE "returndatasize" => ReturnDataSize { [=> U256] };
-        RETURNDATACOPY "returndatacopy" => ReturnDataCopy { [MP, U256, U256 => VOID] };
-        EXTCODEHASH "extcodehash" => ExtCodeHash { [U256 => U256] };
-        GAS "gas" => Gas { [=> U256] };
+        ADDRESS "address_this" => Address;
+        BALANCE "balance" => Balance;
+        ORIGIN "origin" => Origin;
+        CALLER "caller" => Caller;
+        CALLVALUE "callvalue" => CallValue;
+        CALLDATALOAD "calldataload" => CallDataLoad;
+        CALLDATASIZE "calldatasize" => CallDataSize;
+        CALLDATACOPY "calldatacopy" => CallDataCopy;
+        CODESIZE "codesize" => CodeSize;
+        CODECOPY "codecopy" => CodeCopy;
+        GASPRICE "gasprice" => GasPrice;
+        EXTCODESIZE "extcodesize" => ExtCodeSize;
+        EXTCODECOPY "extcodecopy" => ExtCodeCopy;
+        RETURNDATASIZE "returndatasize" => ReturnDataSize;
+        RETURNDATACOPY "returndatacopy" => ReturnDataCopy;
+        EXTCODEHASH "extcodehash" => ExtCodeHash;
+        GAS "gas" => Gas;
 
         // EVM Block Information
-        BLOCKHASH "blockhash" => BlockHash { [U256 => U256] };
-        COINBASE "coinbase" => Coinbase { [=> U256] };
-        TIMESTAMP "timestamp" => Timestamp { [=> U256] };
-        NUMBER "number" => Number { [=> U256] };
-        DIFFICULTY "difficulty" => Difficulty { [=> U256] };
-        GASLIMIT "gaslimit" => GasLimit { [=> U256] };
-        CHAINID "chainid" => ChainId { [=> U256] };
-        SELFBALANCE "selfbalance" => SelfBalance { [=> U256] };
-        BASEFEE "basefee" => BaseFee { [=> U256] };
-        BLOBHASH "blobhash" => BlobHash { [U256 => U256] };
-        BLOBBASEFEE "blobbasefee" => BlobBaseFee { [=> U256] };
+        BLOCKHASH "blockhash" => BlockHash;
+        COINBASE "coinbase" => Coinbase;
+        TIMESTAMP "timestamp" => Timestamp;
+        NUMBER "number" => Number;
+        DIFFICULTY "difficulty" => Difficulty;
+        GASLIMIT "gaslimit" => GasLimit;
+        CHAINID "chainid" => ChainId;
+        SELFBALANCE "selfbalance" => SelfBalance;
+        BASEFEE "basefee" => BaseFee;
+        BLOBHASH "blobhash" => BlobHash;
+        BLOBBASEFEE "blobbasefee" => BlobBaseFee;
 
         // EVM State Manipulation
-        SLOAD "sload" => SLoad { [U256 => U256] };
-        SSTORE "sstore" => SStore { [U256, U256 => VOID] };
-        TLOAD "tload" => TLoad { [U256 => U256] };
-        TSTORE "tstore" => TStore { [U256, U256 => VOID] };
+        SLOAD "sload" => SLoad;
+        SSTORE "sstore" => SStore;
+        TLOAD "tload" => TLoad;
+        TSTORE "tstore" => TStore;
 
         // EVM Logging Operations
-        LOG0 "log0" => Log0 { [MP, U256 => VOID] };
-        LOG1 "log1" => Log1 { [MP, U256, U256 => VOID] };
-        LOG2 "log2" => Log2 { [MP, U256, U256, U256 => VOID] };
-        LOG3 "log3" => Log3 { [MP, U256, U256, U256, U256 => VOID] };
-        LOG4 "log4" => Log4 { [MP, U256, U256, U256, U256, U256 => VOID] };
+        LOG0 "log0" => Log0;
+        LOG1 "log1" => Log1;
+        LOG2 "log2" => Log2;
+        LOG3 "log3" => Log3;
+        LOG4 "log4" => Log4;
 
         // EVM System Calls
-        CREATE "create" => Create { [U256, MP, U256 => U256] };
-        CREATE2 "create2" => Create2 { [U256, MP, U256, U256 => U256] };
-        CALL "call" => Call { [U256, U256, U256, MP, U256, MP, U256 => BOOL] };
-        CALLCODE "callcode" => CallCode { [U256, U256, U256, MP, U256, MP, U256 => BOOL] };
-        DELEGATECALL "delegatecall" => DelegateCall { [U256, U256, MP, U256, MP, U256 => BOOL] };
-        STATICCALL "staticcall" => StaticCall { [U256, U256, MP, U256, MP, U256 => BOOL] };
-        RETURN "evm_return" => Return { [MP, U256 => NEVER] };
-        STOP "evm_stop" => Stop { [=> NEVER] };
-        REVERT "revert" => Revert { [MP, U256 => NEVER] };
-        INVALID "invalid" => Invalid { [=> NEVER] };
-        SELFDESTRUCT "selfdestruct" => SelfDestruct { [U256 => NEVER] };
+        CREATE "create" => Create;
+        CREATE2 "create2" => Create2;
+        CALL "call" => Call;
+        CALLCODE "callcode" => CallCode;
+        DELEGATECALL "delegatecall" => DelegateCall;
+        STATICCALL "staticcall" => StaticCall;
+        RETURN "evm_return" => Return;
+        STOP "evm_stop" => Stop;
+        REVERT "revert" => Revert;
+        INVALID "invalid" => Invalid;
+        SELFDESTRUCT "selfdestruct" => SelfDestruct;
 
         // IR Memory Primitives
-        DYNAMIC_ALLOC_ZEROED "malloc_zeroed" => DynamicAllocZeroed { [U256 => MP] };
-        DYNAMIC_ALLOC_ANY_BYTES "malloc_uninit" => DynamicAllocAnyBytes { [U256 => MP] };
+        DYNAMIC_ALLOC_ZEROED "malloc_zeroed" => DynamicAllocZeroed;
+        DYNAMIC_ALLOC_ANY_BYTES "malloc_uninit" => DynamicAllocAnyBytes;
 
         // Memory Manipulation
-        MEMORY_COPY "mcopy" => MemoryCopy { [MP, MP, U256 => VOID] };
-        MLOAD1 "mload1" => MLoad1 { [MP => U256] };
-        MLOAD2 "mload2" => MLoad2 { [MP => U256] };
-        MLOAD3 "mload3" => MLoad3 { [MP => U256] };
-        MLOAD4 "mload4" => MLoad4 { [MP => U256] };
-        MLOAD5 "mload5" => MLoad5 { [MP => U256] };
-        MLOAD6 "mload6" => MLoad6 { [MP => U256] };
-        MLOAD7 "mload7" => MLoad7 { [MP => U256] };
-        MLOAD8 "mload8" => MLoad8 { [MP => U256] };
-        MLOAD9 "mload9" => MLoad9 { [MP => U256] };
-        MLOAD10 "mload10" => MLoad10 { [MP => U256] };
-        MLOAD11 "mload11" => MLoad11 { [MP => U256] };
-        MLOAD12 "mload12" => MLoad12 { [MP => U256] };
-        MLOAD13 "mload13" => MLoad13 { [MP => U256] };
-        MLOAD14 "mload14" => MLoad14 { [MP => U256] };
-        MLOAD15 "mload15" => MLoad15 { [MP => U256] };
-        MLOAD16 "mload16" => MLoad16 { [MP => U256] };
-        MLOAD17 "mload17" => MLoad17 { [MP => U256] };
-        MLOAD18 "mload18" => MLoad18 { [MP => U256] };
-        MLOAD19 "mload19" => MLoad19 { [MP => U256] };
-        MLOAD20 "mload20" => MLoad20 { [MP => U256] };
-        MLOAD21 "mload21" => MLoad21 { [MP => U256] };
-        MLOAD22 "mload22" => MLoad22 { [MP => U256] };
-        MLOAD23 "mload23" => MLoad23 { [MP => U256] };
-        MLOAD24 "mload24" => MLoad24 { [MP => U256] };
-        MLOAD25 "mload25" => MLoad25 { [MP => U256] };
-        MLOAD26 "mload26" => MLoad26 { [MP => U256] };
-        MLOAD27 "mload27" => MLoad27 { [MP => U256] };
-        MLOAD28 "mload28" => MLoad28 { [MP => U256] };
-        MLOAD29 "mload29" => MLoad29 { [MP => U256] };
-        MLOAD30 "mload30" => MLoad30 { [MP => U256] };
-        MLOAD31 "mload31" => MLoad31 { [MP => U256] };
-        MLOAD32 "mload32" => MLoad32 { [MP => U256] };
-        MSTORE1 "mstore1" => MStore1 { [MP, U256 => VOID] };
-        MSTORE2 "mstore2" => MStore2 { [MP, U256 => VOID] };
-        MSTORE3 "mstore3" => MStore3 { [MP, U256 => VOID] };
-        MSTORE4 "mstore4" => MStore4 { [MP, U256 => VOID] };
-        MSTORE5 "mstore5" => MStore5 { [MP, U256 => VOID] };
-        MSTORE6 "mstore6" => MStore6 { [MP, U256 => VOID] };
-        MSTORE7 "mstore7" => MStore7 { [MP, U256 => VOID] };
-        MSTORE8 "mstore8" => MStore8 { [MP, U256 => VOID] };
-        MSTORE9 "mstore9" => MStore9 { [MP, U256 => VOID] };
-        MSTORE10 "mstore10" => MStore10 { [MP, U256 => VOID] };
-        MSTORE11 "mstore11" => MStore11 { [MP, U256 => VOID] };
-        MSTORE12 "mstore12" => MStore12 { [MP, U256 => VOID] };
-        MSTORE13 "mstore13" => MStore13 { [MP, U256 => VOID] };
-        MSTORE14 "mstore14" => MStore14 { [MP, U256 => VOID] };
-        MSTORE15 "mstore15" => MStore15 { [MP, U256 => VOID] };
-        MSTORE16 "mstore16" => MStore16 { [MP, U256 => VOID] };
-        MSTORE17 "mstore17" => MStore17 { [MP, U256 => VOID] };
-        MSTORE18 "mstore18" => MStore18 { [MP, U256 => VOID] };
-        MSTORE19 "mstore19" => MStore19 { [MP, U256 => VOID] };
-        MSTORE20 "mstore20" => MStore20 { [MP, U256 => VOID] };
-        MSTORE21 "mstore21" => MStore21 { [MP, U256 => VOID] };
-        MSTORE22 "mstore22" => MStore22 { [MP, U256 => VOID] };
-        MSTORE23 "mstore23" => MStore23 { [MP, U256 => VOID] };
-        MSTORE24 "mstore24" => MStore24 { [MP, U256 => VOID] };
-        MSTORE25 "mstore25" => MStore25 { [MP, U256 => VOID] };
-        MSTORE26 "mstore26" => MStore26 { [MP, U256 => VOID] };
-        MSTORE27 "mstore27" => MStore27 { [MP, U256 => VOID] };
-        MSTORE28 "mstore28" => MStore28 { [MP, U256 => VOID] };
-        MSTORE29 "mstore29" => MStore29 { [MP, U256 => VOID] };
-        MSTORE30 "mstore30" => MStore30 { [MP, U256 => VOID] };
-        MSTORE31 "mstore31" => MStore31 { [MP, U256 => VOID] };
-        MSTORE32 "mstore32" => MStore32 { [MP, U256 => VOID] };
+        MEMORY_COPY "mcopy" => MemoryCopy;
+        MLOAD1 "mload1" => MLoad1;
+        MLOAD2 "mload2" => MLoad2;
+        MLOAD3 "mload3" => MLoad3;
+        MLOAD4 "mload4" => MLoad4;
+        MLOAD5 "mload5" => MLoad5;
+        MLOAD6 "mload6" => MLoad6;
+        MLOAD7 "mload7" => MLoad7;
+        MLOAD8 "mload8" => MLoad8;
+        MLOAD9 "mload9" => MLoad9;
+        MLOAD10 "mload10" => MLoad10;
+        MLOAD11 "mload11" => MLoad11;
+        MLOAD12 "mload12" => MLoad12;
+        MLOAD13 "mload13" => MLoad13;
+        MLOAD14 "mload14" => MLoad14;
+        MLOAD15 "mload15" => MLoad15;
+        MLOAD16 "mload16" => MLoad16;
+        MLOAD17 "mload17" => MLoad17;
+        MLOAD18 "mload18" => MLoad18;
+        MLOAD19 "mload19" => MLoad19;
+        MLOAD20 "mload20" => MLoad20;
+        MLOAD21 "mload21" => MLoad21;
+        MLOAD22 "mload22" => MLoad22;
+        MLOAD23 "mload23" => MLoad23;
+        MLOAD24 "mload24" => MLoad24;
+        MLOAD25 "mload25" => MLoad25;
+        MLOAD26 "mload26" => MLoad26;
+        MLOAD27 "mload27" => MLoad27;
+        MLOAD28 "mload28" => MLoad28;
+        MLOAD29 "mload29" => MLoad29;
+        MLOAD30 "mload30" => MLoad30;
+        MLOAD31 "mload31" => MLoad31;
+        MLOAD32 "mload32" => MLoad32;
+        MSTORE1 "mstore1" => MStore1;
+        MSTORE2 "mstore2" => MStore2;
+        MSTORE3 "mstore3" => MStore3;
+        MSTORE4 "mstore4" => MStore4;
+        MSTORE5 "mstore5" => MStore5;
+        MSTORE6 "mstore6" => MStore6;
+        MSTORE7 "mstore7" => MStore7;
+        MSTORE8 "mstore8" => MStore8;
+        MSTORE9 "mstore9" => MStore9;
+        MSTORE10 "mstore10" => MStore10;
+        MSTORE11 "mstore11" => MStore11;
+        MSTORE12 "mstore12" => MStore12;
+        MSTORE13 "mstore13" => MStore13;
+        MSTORE14 "mstore14" => MStore14;
+        MSTORE15 "mstore15" => MStore15;
+        MSTORE16 "mstore16" => MStore16;
+        MSTORE17 "mstore17" => MStore17;
+        MSTORE18 "mstore18" => MStore18;
+        MSTORE19 "mstore19" => MStore19;
+        MSTORE20 "mstore20" => MStore20;
+        MSTORE21 "mstore21" => MStore21;
+        MSTORE22 "mstore22" => MStore22;
+        MSTORE23 "mstore23" => MStore23;
+        MSTORE24 "mstore24" => MStore24;
+        MSTORE25 "mstore25" => MStore25;
+        MSTORE26 "mstore26" => MStore26;
+        MSTORE27 "mstore27" => MStore27;
+        MSTORE28 "mstore28" => MStore28;
+        MSTORE29 "mstore29" => MStore29;
+        MSTORE30 "mstore30" => MStore30;
+        MSTORE31 "mstore31" => MStore31;
+        MSTORE32 "mstore32" => MStore32;
 
         // Bytecode Introspection
-        RUNTIME_START_OFFSET "runtime_start_offset" => RuntimeStartOffset { [=> U256] };
-        INIT_END_OFFSET "init_end_offset" => InitEndOffset { [=> U256] };
-        RUNTIME_LENGTH "runtime_length" => RuntimeLength { [=> U256] };
-    }
-}
-
-impl EvmBuiltin {
-    pub fn is_pure(self) -> bool {
-        matches!(
-            self,
-            EvmBuiltin::Add
-                | EvmBuiltin::Mul
-                | EvmBuiltin::Sub
-                | EvmBuiltin::Div
-                | EvmBuiltin::SDiv
-                | EvmBuiltin::Mod
-                | EvmBuiltin::SMod
-                | EvmBuiltin::AddMod
-                | EvmBuiltin::MulMod
-                | EvmBuiltin::Exp
-                | EvmBuiltin::SignExtend
-                | EvmBuiltin::Lt
-                | EvmBuiltin::Gt
-                | EvmBuiltin::SLt
-                | EvmBuiltin::SGt
-                | EvmBuiltin::Eq
-                | EvmBuiltin::IsZero
-                | EvmBuiltin::And
-                | EvmBuiltin::Or
-                | EvmBuiltin::Xor
-                | EvmBuiltin::Not
-                | EvmBuiltin::Byte
-                | EvmBuiltin::Shl
-                | EvmBuiltin::Shr
-                | EvmBuiltin::Sar
-        )
-    }
-
-    pub fn resolve_result_type(self, arg_types: &[TypeId]) -> Option<TypeId> {
-        if self.arg_count() != arg_types.len() {
-            return None;
-        }
-        for &sig in self.signatures() {
-            if sig
-                .inputs
-                .iter()
-                .zip(arg_types)
-                .all(|(&sig_in, &arg_in)| arg_in.is_assignable_to(sig_in))
-            {
-                return Some(sig.result);
-            }
-        }
-        None
+        RUNTIME_START_OFFSET "runtime_start_offset" => RuntimeStartOffset;
+        INIT_END_OFFSET "init_end_offset" => InitEndOffset;
+        RUNTIME_LENGTH "runtime_length" => RuntimeLength;
     }
 }
 
@@ -367,12 +288,5 @@ mod tests {
         assert_eq!(EvmBuiltin::from_str_id(ADD), Some(EvmBuiltin::Add));
         assert_eq!(EvmBuiltin::from_str_id(KECCAK256), Some(EvmBuiltin::Keccak256));
         assert_eq!(EvmBuiltin::from_str_id(VOID), None);
-    }
-
-    #[test]
-    fn test_resolve_primitive() {
-        assert_eq!(TypeId::resolve_primitive(VOID), Some(TypeId::VOID));
-        assert_eq!(TypeId::resolve_primitive(U256), Some(TypeId::U256));
-        assert_eq!(TypeId::resolve_primitive(ADD), None);
     }
 }

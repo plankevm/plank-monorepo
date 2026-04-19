@@ -406,11 +406,11 @@ fn test_paren_expr_empty() {
 #[test]
 fn test_missing_semicolon_after_fn_const() {
     assert_parser_errors(
-        "
+        r#"
         const to_addr = fn (raw: u256) u256 { raw }
         init { }
-        ",
-        &["
+        "#,
+        &[r#"
             error: missing `;`
              --> test.plk:1:44
               |
@@ -418,31 +418,34 @@ fn test_missing_semicolon_after_fn_const() {
               |  ____________________________________________^
             2 | | init { }
               | |_^ missing `;`
-        "],
+        "#],
     );
 }
 
 #[test]
 fn test_missing_semicolon_unexpected_garbage() {
     assert_parser_errors(
-        "
+        r#"
         const to_addr = {}
         bob
         init { }
-        ",
-        &["
+        "#,
+        &[r#"
             error: unexpected identifier
              --> test.plk:2:1
               |
             2 | bob
               | ^^^ unexpected identifier, expected `;`
-        "],
+        "#],
     );
 }
 
 #[test]
 fn test_syntax_error_causes_no_ast_panic() {
-    let source = "5;\ninit { }";
+    let source = r#"
+    5;
+    init { }
+    "#;
     let mut session = plank_session::Session::new();
     let cst = super::parse_single_source(source, &mut session);
 
@@ -454,7 +457,10 @@ fn test_syntax_error_causes_no_ast_panic() {
 
 #[test]
 fn test_malformed_const_no_ast_panic() {
-    let source = "const x =\ninit { }";
+    let source = r#"
+    const x =
+    init { }
+    "#;
     let mut session = plank_session::Session::new();
     let cst = super::parse_single_source(source, &mut session);
 
@@ -466,7 +472,9 @@ fn test_malformed_const_no_ast_panic() {
 
 #[test]
 fn test_error_in_block_no_ast_panic() {
-    let source = "run { 1 + ; }";
+    let source = r#"
+    run { 1 + ; }
+    "#;
     let mut session = plank_session::Session::new();
     let cst = super::parse_single_source(source, &mut session);
 
@@ -477,4 +485,96 @@ fn test_error_in_block_no_ast_panic() {
         }
     }
     assert!(session.has_errors());
+}
+
+// ==============================================================================
+// Import group diagnostics
+// ==============================================================================
+
+#[test]
+fn test_import_group_empty() {
+    assert_parser_errors(
+        r#"
+        import foo::bar::{};
+        "#,
+        &[r#"
+        warning: empty import group
+         --> test.plk:1:18
+          |
+        1 | import foo::bar::{};
+          |                  ^^ import group must contain at least one item
+        "#],
+    );
+}
+
+#[test]
+fn test_import_group_nested_path() {
+    assert_parser_errors(
+        r#"
+        import foo::{X, bar::Baz};
+        "#,
+        &[r#"
+            error: path in import group
+             --> test.plk:1:17
+              |
+            1 | import foo::{X, bar::Baz};
+              |                 ^^^^^^^^ paths are not allowed inside import groups
+              |
+              = help: use a separate import statement for items from different submodules
+        "#],
+    );
+}
+
+#[test]
+fn test_import_group_unnecessary_braces() {
+    assert_parser_errors(
+        r#"
+        import foo::bar::{X};
+        "#,
+        &[r#"
+            warning: unnecessary braces in import
+             --> test.plk:1:18
+              |
+            1 | import foo::bar::{X};
+              |                  ^^^ this import group contains only one item
+              |
+              = help: remove the unnecessary braces
+        "#],
+    );
+}
+
+#[test]
+fn test_glob_inside_import_group() {
+    assert_parser_errors(
+        r#"
+        import foo::{a, *};
+        "#,
+        &[r#"
+            error: glob import inside import group
+             --> test.plk:1:17
+              |
+            1 | import foo::{a, *};
+              |                 ^ glob imports are not allowed inside import groups
+              |
+              = help: use a separate `import foo::*;` statement instead
+        "#],
+    );
+}
+
+#[test]
+fn test_import_group_unnecessary_braces_with_alias() {
+    assert_parser_errors(
+        r#"
+        import foo::bar::{X as Y};
+        "#,
+        &[r#"
+            warning: unnecessary braces in import
+             --> test.plk:1:18
+              |
+            1 | import foo::bar::{X as Y};
+              |                  ^^^^^^^^ this import group contains only one item
+              |
+              = help: remove the unnecessary braces
+        "#],
+    );
 }

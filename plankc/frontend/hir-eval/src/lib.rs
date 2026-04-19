@@ -5,7 +5,7 @@ use plank_evm as _;
 use plank_hir::Hir;
 use plank_mir::Mir;
 use plank_session::Session;
-use plank_values::ValueInterner;
+use plank_values::{TypeInterner, ValueInterner};
 
 mod buffers;
 mod builtins;
@@ -17,12 +17,16 @@ mod structs;
 
 pub(crate) use evaluator::Evaluator;
 
+use crate::functions::EvaluatedFunctionCache;
+
 #[cfg(test)]
 mod tests;
 
 pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) -> Mir {
-    let mut evaluator = Evaluator::new(hir, values);
-    let mut diag_ctx = diagnostics::DiagCtx::new(session);
+    let types = TypeInterner::new();
+    let evaluated_fns_cache = EvaluatedFunctionCache::new();
+    let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values);
+    let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
     let init = evaluator.lower_entrypoint(hir.init, &mut diag_ctx);
     let run = hir.run.map(|run| evaluator.lower_entrypoint(run, &mut diag_ctx));
@@ -36,7 +40,7 @@ pub fn evaluate(hir: &Hir, values: &mut ValueInterner, session: &mut Session) ->
         args: evaluator.mir_args,
         fns: evaluator.mir_fns,
         fn_locals: evaluator.mir_fn_locals,
-        types: evaluator.types,
+        types,
         init,
         run,
     }

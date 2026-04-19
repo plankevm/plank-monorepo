@@ -891,6 +891,11 @@ impl<'a> Parser<'a> {
                 return self.close_node(import_path);
             }
 
+            if self.check(Token::LeftCurly) {
+                self.update_kind(import_path, NodeKind::ImportGroupDecl);
+                return self.parse_import_group(import_path);
+            }
+
             let ident = self.expect_ident();
             self.push_child(&mut import_path, ident);
         }
@@ -910,6 +915,59 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon);
 
         self.close_node(import)
+    }
+
+    fn parse_import_group(&mut self, mut group: UnfinishedNode) -> NodeIdx {
+        let mut item_count = 0u32;
+        let brace_start = self.skip_trivia_start();
+        self.parse_delimited(Token::LeftCurly, Token::RightCurly, Token::Comma, |parser| {
+            if parser.eat(Token::Star) {
+                parser.emit_glob_in_import_group();
+                item_count += 1;
+                return true;
+            }
+            if !parser.check(Token::Identifier) {
+                return false;
+            }
+            let item = parser.parse_import_group_item();
+            parser.push_child(&mut group, item);
+            item_count += 1;
+            true
+        });
+
+        if item_count == 0 {
+            self.emit_empty_import_group(brace_start);
+        } else if item_count == 1 {
+            self.emit_unnecessary_braces(brace_start);
+        }
+
+        self.expect(Token::Semicolon);
+        self.close_node(group)
+    }
+
+    fn parse_import_group_item(&mut self) -> NodeIdx {
+        let mut item = self.alloc_node(NodeKind::ImportGroupItem);
+        let name = self.expect_ident();
+        self.push_child(&mut item, name);
+
+        if self.check(Token::DoubleColon) {
+            let path_start = self.nodes[name].tokens.start;
+            while self.eat(Token::DoubleColon) {
+                if self.check(Token::Identifier) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.emit_path_in_import_group(path_start);
+        }
+
+        if self.eat(Token::As) {
+            let alias = self.expect_ident();
+            self.push_child(&mut item, alias);
+        }
+
+        self.close_node(item)
     }
 
     fn parse_const_decl(&mut self, start: TokenIdx) -> NodeIdx {

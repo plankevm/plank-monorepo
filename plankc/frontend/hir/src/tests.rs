@@ -5,10 +5,13 @@ use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::ValueInterner;
 
 fn try_lower(source: &str) -> (Hir, ValueInterner, Session, ParsedProject) {
-    try_lower_project(TestProject::root(source))
+    try_lower_project(source)
 }
 
-fn try_lower_project(project: TestProject) -> (Hir, ValueInterner, Session, ParsedProject) {
+fn try_lower_project(
+    project: impl Into<TestProject>,
+) -> (Hir, ValueInterner, Session, ParsedProject) {
+    let project = project.into();
     let mut session = Session::new();
     let project = project.build(&mut session);
 
@@ -45,7 +48,7 @@ fn format_session_diagnostics(session: &Session) -> String {
         .join("\n")
 }
 
-fn render_project_diagnostics(project: TestProject) -> String {
+fn render_project_diagnostics(project: impl Into<TestProject>) -> String {
     let (_hir, _big_nums, session, _project) = try_lower_project(project);
     format_session_diagnostics(&session)
 }
@@ -149,7 +152,11 @@ fn test_inline_closure_lowering() {
 
 #[test]
 fn test_set_undefined() {
-    let rendered = render_diagnostics("init { y = 4; }");
+    let rendered = render_diagnostics(
+        r#"
+        init { y = 4; }
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: unresolved identifier 'y'
@@ -263,7 +270,11 @@ fn test_assign_to_mutable_let() {
 
 #[test]
 fn test_unresolved_identifier_diagnostic() {
-    let rendered = render_diagnostics("init { x; }");
+    let rendered = render_diagnostics(
+        r#"
+        init { x; }
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: unresolved identifier 'x'
@@ -346,15 +357,20 @@ fn test_duplicate_const_def() {
 
 #[test]
 fn test_init_and_run_outside_entry() {
-    let project = TestProject::root("import m::other::*;\ninit {}")
-        .add_file(
-            "other",
-            "
-            init {}
-            run {}
-            ",
-        )
-        .add_module("m", "");
+    let project = TestProject::root(
+        r#"
+        import m::other::*;
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        init {}
+        run {}
+        "#,
+    )
+    .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -381,9 +397,20 @@ fn test_init_and_run_outside_entry() {
 
 #[test]
 fn test_import_name_collision() {
-    let project = TestProject::root("const x = 1;\nimport m::other::x;\ninit {}")
-        .add_file("other", "const x = 2;")
-        .add_module("m", "");
+    let project = TestProject::root(
+        r#"
+        const x = 1;
+        import m::other::x;
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const x = 2;
+        "#,
+    )
+    .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -408,7 +435,12 @@ fn test_glob_import_name_collision() {
         init {}
         "#,
     )
-    .add_file("other", "const x = 2;")
+    .add_file(
+        "other",
+        r#"
+        const x = 2;
+        "#,
+    )
     .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
@@ -432,9 +464,20 @@ fn test_glob_import_name_collision() {
 
 #[test]
 fn test_alias_import_collision() {
-    let project = TestProject::root("const x = 1;\nimport m::other::y as x;\ninit {}")
-        .add_file("other", "const y = 2;")
-        .add_module("m", "");
+    let project = TestProject::root(
+        r#"
+        const x = 1;
+        import m::other::y as x;
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const y = 2;
+        "#,
+    )
+    .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -452,10 +495,26 @@ fn test_alias_import_collision() {
 
 #[test]
 fn test_import_collision_with_previous_import() {
-    let project = TestProject::root("import m::a::x;\nimport m::b::x;\ninit {}")
-        .add_file("a", "const x = 1;")
-        .add_file("b", "const x = 2;")
-        .add_module("m", "");
+    let project = TestProject::root(
+        r#"
+        import m::a::x;
+        import m::b::x;
+        init {}
+        "#,
+    )
+    .add_file(
+        "a",
+        r#"
+        const x = 1;
+        "#,
+    )
+    .add_file(
+        "b",
+        r#"
+        const x = 2;
+        "#,
+    )
+    .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -473,9 +532,19 @@ fn test_import_collision_with_previous_import() {
 
 #[test]
 fn test_unresolved_import() {
-    let project = TestProject::root("import m::other::y;\ninit {}")
-        .add_file("other", "const x = 1;")
-        .add_module("m", "");
+    let project = TestProject::root(
+        r#"
+        import m::other::y;
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const x = 1;
+        "#,
+    )
+    .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -494,7 +563,11 @@ fn test_unresolved_import() {
 
 #[test]
 fn test_shadow_primitive_type() {
-    let rendered = render_diagnostics("init { let u256 = 1; }");
+    let rendered = render_diagnostics(
+        r#"
+        init { let u256 = 1; }
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: shadowing primitive type
@@ -509,7 +582,11 @@ fn test_shadow_primitive_type() {
 
 #[test]
 fn test_shadow_builtin() {
-    let rendered = render_diagnostics("init { let add = 1; }");
+    let rendered = render_diagnostics(
+        r#"
+        init { let add = 1; }
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: shadowing built-in function
@@ -524,7 +601,11 @@ fn test_shadow_builtin() {
 
 #[test]
 fn test_missing_init_block() {
-    let rendered = render_diagnostics("const x = 1;");
+    let rendered = render_diagnostics(
+        r#"
+        const x = 1;
+        "#,
+    );
     let expected = dedent_preserve_blank_lines(
         r#"
         error: missing init block
@@ -562,7 +643,9 @@ fn test_non_call_reference_to_builtin() {
 #[test]
 fn test_number_out_of_range() {
     let rendered = render_diagnostics(
-        "init { let x = 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF; }",
+        r#"
+        init { let x = 0x1FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF; }
+        "#,
     );
     let expected = dedent_preserve_blank_lines(
         r#"
@@ -938,4 +1021,136 @@ fn test_lone_slash_not_supported() {
         "#,
     );
     pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
+}
+
+#[test]
+fn test_import_group_unresolved_item() {
+    let project = TestProject::root(
+        r#"
+        import m::other::{a, b};
+        init { evm_stop(); }
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const a = 1;
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved import
+         --> main.plk:1:22
+          |
+        1 | import m::other::{a, b};
+          |                      ^ 'b' not found in target module
+          |
+        info: no definition of 'b' found in file
+         --> other.plk
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_import_group_collision_with_local() {
+    let project = TestProject::root(
+        r#"
+        const x = 1;
+        import m::other::{a, b as x};
+        init { evm_stop(); }
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const a = 1;
+        const b = 2;
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:2:22
+          |
+        1 | const x = 1;
+          | ------------ 'x' previously defined here
+        2 | import m::other::{a, b as x};
+          |                      ^^^^^^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_import_group_collision_with_other_import() {
+    let project = TestProject::root(
+        r#"
+        import m::a::x;
+        import m::b::{y, x};
+        init { evm_stop(); }
+        "#,
+    )
+    .add_file(
+        "a",
+        r#"
+        const x = 1;
+        "#,
+    )
+    .add_file(
+        "b",
+        r#"
+        const y = 2;
+        const x = 3;
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:2:18
+          |
+        1 | import m::a::x;
+          | --------------- 'x' previously imported here
+        2 | import m::b::{y, x};
+          |                  ^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_import_group_self_collision() {
+    let project = TestProject::root(
+        r#"
+        import m::other::{a as x, b as x};
+        init { evm_stop(); }
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const a = 1;
+        const b = 2;
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:1:27
+          |
+        1 | import m::other::{a as x, b as x};
+          |                   ------  ^^^^^^ conflicting import
+          |                   |
+          |                   'x' previously imported here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
