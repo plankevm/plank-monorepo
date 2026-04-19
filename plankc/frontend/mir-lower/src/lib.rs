@@ -5,7 +5,7 @@ mod tests;
 
 use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
-use plank_values::{Type, TypeId, Value, ValueId, ValueInterner};
+use plank_values::{PrimitiveType, Type, TypeId, Value, ValueId, ValueInterner};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},
@@ -67,12 +67,14 @@ struct LowerCtx<'a> {
 impl LowerCtx<'_> {
     fn size_in_locals(&self, ty: TypeId) -> u32 {
         match self.mir.types.lookup(ty) {
-            Type::Void | Type::Never => 0,
-            Type::Bool | Type::Int | Type::MemoryPointer => 1,
-            Type::Function => unreachable!("function unsizeable in SIR"),
-            Type::Type => unreachable!("type unsizeable in SIR"),
+            Type::Primitive(prim) => match prim {
+                PrimitiveType::Void | PrimitiveType::Never => 0,
+                PrimitiveType::Bool | PrimitiveType::U256 | PrimitiveType::MemoryPointer => 1,
+                PrimitiveType::Function => unreachable!("function unsizeable in SIR"),
+                PrimitiveType::Type => unreachable!("PrimitiveType unsizeable in SIR"),
+            },
             Type::Struct(r#struct) => {
-                r#struct.fields.iter().map(|&(_name, ty)| self.size_in_locals(ty)).sum()
+                r#struct.fields.iter().map(|&field| self.size_in_locals(field.ty)).sum()
             }
         }
     }
@@ -434,15 +436,15 @@ fn lower_field_access(
     let Type::Struct(r#struct) = ctx.mir.types.lookup(object_type) else {
         unreachable!("MIR invariant: field access on non-struct");
     };
-    let (_field_name, field_type) = r#struct.fields[field_index as usize];
-    let size = ctx.size_in_locals(field_type);
+    let target_field = r#struct.fields[field_index as usize];
+    let size = ctx.size_in_locals(target_field.ty);
     if size == 0 {
         return;
     }
 
     let flattened_fields_offset = r#struct.fields[..field_index as usize]
         .iter()
-        .map(|&(_name, field_type)| ctx.size_in_locals(field_type))
+        .map(|&field| ctx.size_in_locals(field.ty))
         .sum::<u32>() as usize;
 
     ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);

@@ -52,18 +52,11 @@ jobs:
         env:
           PLANK_VERSION: ${{ github.ref_name }}
 
-      - name: Package
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          ASSET_NAME="plank-${TAG}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz"
-          tar -czf "$ASSET_NAME" -C plankc/target/${{ matrix.target }}/release plank
-          echo "ASSET_NAME=$ASSET_NAME" >> "$GITHUB_ENV"
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: plank-${{ matrix.platform }}-${{ matrix.arch }}
-          path: ${{ env.ASSET_NAME }}
+          path: plankc/target/${{ matrix.target }}/release/plank
 
   vscode-extension:
     name: Build VS Code Extension
@@ -90,9 +83,32 @@ jobs:
           name: vscode-extension
           path: plank-vscode/plankevm-*.vsix
 
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mdBook
+        run: |
+          MDBOOK_VERSION="0.4.44"
+          curl -sSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
+          sudo mv mdbook /usr/local/bin/
+
+      - name: Build book
+        run: |
+          mdbook build plank-doc
+          cp -r plank-doc/src plank-doc/book/src
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: plank-doc/book/
+
   release:
     name: Create Release
-    needs: [build, vscode-extension]
+    needs: [build, vscode-extension, docs]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -102,11 +118,24 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
+
+      - name: Package tarballs
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          for dir in artifacts/plank-*/; do
+            name=$(basename "$dir")
+            asset_name="${name/plank/plank-${TAG}}.tar.gz"
+            mkdir -p staging
+            cp "$dir/plank" staging/
+            if [ -d "artifacts/docs" ]; then
+              cp -r artifacts/docs staging/book
+            fi
+            tar -czf "$asset_name" -C staging .
+            rm -rf staging
+          done
 
       - name: Generate checksums
         run: |
-          cd artifacts
           shasum -a 256 plank-*.tar.gz > checksums.txt
           cat checksums.txt
 
@@ -114,7 +143,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/plank-*.tar.gz
-            artifacts/plankevm-*.vsix
-            artifacts/checksums.txt
+            plank-*.tar.gz
+            artifacts/vscode-extension/plankevm-*.vsix
+            checksums.txt
           generate_release_notes: true

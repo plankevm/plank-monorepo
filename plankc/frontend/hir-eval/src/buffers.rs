@@ -14,6 +14,7 @@ macro_rules! with_buf_methods {
 impl crate::scope::Scope<'_, '_> {
     with_buf_methods! {
         with_values_buf => values_buf;
+        with_maybe_values_buf => maybe_values_buf;
         with_types_buf => types_buf;
         with_fields_buf => fields_buf;
         with_locals_buf => locals_buf;
