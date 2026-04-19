@@ -682,6 +682,27 @@ fn test_unknown_builtin_call() {
 }
 
 #[test]
+fn test_unknown_builtin_non_call() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let _ = @skibidi;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unknown builtin '@skibidi'
+         --> main.plk:2:13
+          |
+        2 |     let _ = @skibidi;
+          |             ^^^^^^^^ no built-in function with this name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_unknown_builtin_call_still_lowers_args() {
     let rendered = render_diagnostics(
         r#"
@@ -707,27 +728,6 @@ fn test_unknown_builtin_call_still_lowers_args() {
           |
         2 |     let _ = @nonexistent(@other_unknown(1), foo);
           |             ^^^^^^^^^^^^ no built-in function with this name
-        "#,
-    );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
-}
-
-#[test]
-fn test_unknown_builtin_non_call() {
-    let rendered = render_diagnostics(
-        r#"
-        init {
-            let _ = @skibidi;
-        }
-        "#,
-    );
-    let expected = dedent_preserve_blank_lines(
-        r#"
-        error: unknown builtin '@skibidi'
-         --> main.plk:2:13
-          |
-        2 |     let _ = @skibidi;
-          |             ^^^^^^^^ no built-in function with this name
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

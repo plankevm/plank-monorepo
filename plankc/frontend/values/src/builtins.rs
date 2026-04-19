@@ -231,8 +231,6 @@ mod tests {
 
     #[test]
     fn test_builtin_signatures_not_empty() {
-        use plank_session::builtins::BuiltinKind;
-        // Check all builtins that have fixed signatures
         for builtin in [
             Builtin::Add,
             Builtin::Mul,
@@ -244,9 +242,6 @@ mod tests {
             Builtin::IsStruct,
             Builtin::FieldCount,
         ] {
-            if let BuiltinKind::ComptimePolymorphic { .. } = builtin.kind() {
-                continue;
-            }
             let sigs = builtin_signatures(builtin);
             assert!(!sigs.is_empty(), "{builtin:?} has no signatures");
             let ac = sigs[0].inputs.len();
