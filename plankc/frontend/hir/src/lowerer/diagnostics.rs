@@ -1,7 +1,7 @@
 use plank_parser::lexer::{Token, TokenSpan};
 use plank_session::{
-    Annotations, Builtin, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId,
-    SourceSpan, StrId,
+    Annotations, Builtin, Claim, ClaimBuilder, DiagEmitter, Diagnostic, Element, Level, Session,
+    SourceId, SourceSpan, StrId,
 };
 
 use super::BlockLowerer;

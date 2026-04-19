@@ -82,72 +82,168 @@ impl<F: SourceFs> ProjectParser<'_, F> {
             source_id,
             self.file_imports.push_with(|mut imports| {
                 for def in file.iter_defs() {
-                    if let TopLevelDef::Import(_) = def {
-                        imports.push(None);
+                    match def {
+                        TopLevelDef::Import(_) => imports.push(None),
+                        TopLevelDef::ImportGroup(group) => {
+                            for _ in group.items() {
+                                imports.push(None);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             })
         );
 
-        let imports = file.iter_defs().filter_map(|def| match def {
-            TopLevelDef::Import(import) => Some(import),
-            _ => None,
-        });
-        for (i, import) in imports.enumerate() {
-            self.segment_buf.clear();
-            import.collect_path_segments(&mut self.segment_buf);
-            let import_kind = match self.module_resolver.resolve(
-                &self.segment_buf,
-                import,
-                self.session,
-                &mut self.import_resolved_path,
-            ) {
-                Ok(import_kind) => import_kind,
-                Err(err) => {
-                    let span = match &err {
-                        ModuleResolveError::UnknownModule(_) => import.first_path_segment_span(),
-                        ModuleResolveError::NotEnoughSegments => import.node().span(),
-                    };
-                    let source_span = self.source_span(source_id, span);
-                    error_failed_to_resolve_import(self.session, source_id, source_span, &err);
-                    continue;
-                }
-            };
-
-            let target_path = match self.fs.canonicalize(&self.import_resolved_path) {
-                Ok(path) => path,
-                Err(err) => {
-                    let source_span = self.source_span(source_id, import.file_path_span());
-                    error_failed_to_canonicalize_import(
+        let mut import_idx = 0usize;
+        for def in file.iter_defs() {
+            match def {
+                TopLevelDef::Import(import) => {
+                    self.segment_buf.clear();
+                    import.collect_path_segments(&mut self.segment_buf);
+                    let import_kind = match self.module_resolver.resolve_import(
+                        &self.segment_buf,
+                        import,
                         self.session,
-                        source_id,
-                        source_span,
-                        &self.import_resolved_path,
-                        &err,
-                    );
-                    continue;
+                        &mut self.import_resolved_path,
+                    ) {
+                        Ok(import_kind) => import_kind,
+                        Err(err) => {
+                            let span = match &err {
+                                ModuleResolveError::UnknownModule(_) => {
+                                    import.first_path_segment_span()
+                                }
+                                ModuleResolveError::NotEnoughSegments => import.node().span(),
+                            };
+                            let source_span = self.source_span(source_id, span);
+                            error_failed_to_resolve_import(
+                                self.session,
+                                source_id,
+                                source_span,
+                                &err,
+                            );
+                            import_idx += 1;
+                            continue;
+                        }
+                    };
+
+                    let target_path =
+                        match self.canonicalize_import(source_id, import.file_path_span()) {
+                            Some(path) => path,
+                            None => {
+                                import_idx += 1;
+                                continue;
+                            }
+                        };
+
+                    let target_source = match self.resolve_or_parse_source(target_path) {
+                        Some(id) => id,
+                        None => {
+                            import_idx += 1;
+                            continue;
+                        }
+                    };
+
+                    let prev = self.file_imports[source_id][import_idx].replace(FileImport {
+                        kind: import_kind,
+                        target_source,
+                        span: import.node().span(),
+                    });
+                    assert!(prev.is_none());
+                    import_idx += 1;
                 }
-            };
+                TopLevelDef::ImportGroup(group) => {
+                    self.segment_buf.clear();
+                    group.collect_path_segments(&mut self.segment_buf);
 
-            let target_source = match self.path_to_source.get(&target_path) {
-                Some(&id) => id,
-                None => match self.parse_source(target_path) {
-                    Some(id) => id,
-                    None => continue,
-                },
-            };
+                    let file_path_resolved = match self.module_resolver.resolve_group_import(
+                        &self.segment_buf,
+                        self.session,
+                        &mut self.import_resolved_path,
+                    ) {
+                        Ok(()) => true,
+                        Err(err) => {
+                            let span = match &err {
+                                ModuleResolveError::UnknownModule(_) => {
+                                    group.first_path_segment_span()
+                                }
+                                ModuleResolveError::NotEnoughSegments => group.node().span(),
+                            };
+                            let source_span = self.source_span(source_id, span);
+                            error_failed_to_resolve_import(
+                                self.session,
+                                source_id,
+                                source_span,
+                                &err,
+                            );
+                            false
+                        }
+                    };
 
-            let prev = self.file_imports[source_id][i].replace(FileImport {
-                kind: import_kind,
-                target_source,
-                span: import.node().span(),
-            });
-            assert!(prev.is_none());
+                    let target_source = if file_path_resolved {
+                        match self.canonicalize_import(source_id, group.file_path_span()) {
+                            Some(target_path) => self.resolve_or_parse_source(target_path),
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
+
+                    for item in group.items() {
+                        if let (Some(target_source), Some(name), Some(name_span)) =
+                            (target_source, item.name(), item.name_span())
+                        {
+                            let imported_as = item.alias().unwrap_or(name);
+                            let prev =
+                                self.file_imports[source_id][import_idx].replace(FileImport {
+                                    kind: ImportKind::Specific {
+                                        selected_name: name,
+                                        imported_as,
+                                        name_span,
+                                    },
+                                    target_source,
+                                    span: item.span(),
+                                });
+                            assert!(prev.is_none());
+                        }
+                        import_idx += 1;
+                    }
+                }
+                _ => {}
+            }
         }
 
         assert!(self.parsed_sources[source_id].1.replace(cst).is_none());
 
         Some(source_id)
+    }
+
+    fn canonicalize_import(
+        &mut self,
+        source_id: SourceId,
+        file_path_span: TokenSpan,
+    ) -> Option<PathBuf> {
+        match self.fs.canonicalize(&self.import_resolved_path) {
+            Ok(path) => Some(path),
+            Err(err) => {
+                let source_span = self.source_span(source_id, file_path_span);
+                error_failed_to_canonicalize_import(
+                    self.session,
+                    source_id,
+                    source_span,
+                    &self.import_resolved_path,
+                    &err,
+                );
+                None
+            }
+        }
+    }
+
+    fn resolve_or_parse_source(&mut self, target_path: PathBuf) -> Option<SourceId> {
+        match self.path_to_source.get(&target_path) {
+            Some(&id) => Some(id),
+            None => self.parse_source(target_path),
+        }
     }
 
     fn source_span(&self, source_id: SourceId, span: TokenSpan) -> SourceSpan {

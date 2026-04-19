@@ -17,8 +17,8 @@ impl<'a> DisplayMir<'a> {
         Self { mir, values, session }
     }
 
-    fn fmt_type(&self, f: &mut Formatter<'_>, type_id: TypeId) -> fmt::Result {
-        self.mir.types.fmt_type(f, type_id, self.session)
+    fn fmt_type(&self, f: &mut Formatter<'_>, ty: TypeId) -> fmt::Result {
+        write!(f, "{}", self.mir.types.format(self.session, ty))
     }
 
     fn fmt_args(&self, f: &mut Formatter<'_>, args_id: ArgsId) -> fmt::Result {
@@ -38,6 +38,7 @@ impl<'a> DisplayMir<'a> {
     }
 
     fn fmt_value(&self, f: &mut Formatter<'_>, vid: ValueId, indent: usize) -> fmt::Result {
+        let pad = PAD.repeat(indent);
         match self.values.lookup(vid) {
             Value::Bool(b) => write!(f, "{}", b),
             Value::BigNum(x) => {
@@ -53,7 +54,6 @@ impl<'a> DisplayMir<'a> {
                 if !fields.is_empty() {
                     writeln!(f)?;
                 }
-                let pad = PAD.repeat(indent);
                 for &field in fields {
                     write!(f, "{pad}{PAD}")?;
                     self.fmt_value(f, field, indent + 1)?;

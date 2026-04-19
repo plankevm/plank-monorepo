@@ -350,6 +350,24 @@ import very_nice::hey::haha::*;
     (suffix_import_all)))
 
 ================================================================================
+Import Group
+================================================================================
+import std::math::{add as a, sub,};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import
+    (identifier)
+    (identifier)
+    (suffix_import_group
+      (import_group_item
+        (identifier)
+        (identifier))
+      (import_group_item
+        (identifier)))))
+
+================================================================================
 Struct Definition (Without Type Index)
 ================================================================================
 const Values = struct {

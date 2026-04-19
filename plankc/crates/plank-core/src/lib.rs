@@ -1,4 +1,5 @@
 pub mod bigint;
+pub mod chunked_arena;
 pub mod const_print;
 pub mod dense_index_map;
 pub mod dense_index_set;

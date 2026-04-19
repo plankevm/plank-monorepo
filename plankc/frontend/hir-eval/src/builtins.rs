@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
-use plank_values::{Type, TypeId, Value, ValueId, ValueInterner};
+use plank_values::{Type, TypeId, Value, ValueId, ValueInterner, builtins as builtin_sigs};
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};
 use plank_session::Poisoned;
@@ -15,11 +15,11 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         match builtin.kind() {
-            BuiltinKind::RuntimeFoldable(_) => {
+            BuiltinKind::RuntimeFoldable => {
                 self.eval_runtime_foldable_builtin(builtin, args, expr_span)
             }
-            BuiltinKind::RuntimeOnly(_) => self.eval_runtime_only_builtin(builtin, args, expr_span),
-            BuiltinKind::Comptime(_) => self.eval_comptime_builtin(builtin, args, expr_span),
+            BuiltinKind::RuntimeOnly => self.eval_runtime_only_builtin(builtin, args, expr_span),
+            BuiltinKind::Comptime => self.eval_comptime_builtin(builtin, args, expr_span),
             BuiltinKind::ComptimePolymorphic { .. } => {
                 self.eval_comptime_polymorphic_builtin(builtin, args, expr_span)
             }
@@ -76,7 +76,7 @@ impl Scope<'_, '_> {
         if self.is_comptime() {
             self.diag_ctx.emit_unsupported_eval_of_runtime_builtin(builtin, self.loc(expr_span));
             if result_type == TypeId::NEVER {
-                return Ok(Err(Diverge::PoisonedControlFlow));
+                return Ok(Err(Diverge::ControlFlowPoisoned));
             } else {
                 return Err(Poisoned);
             }
@@ -100,9 +100,8 @@ impl Scope<'_, '_> {
             }
 
             let arg_types = &this.eval.types_buf[types_buf_offset..];
-            builtin.resolve_result_type(arg_types).ok_or_else(|| {
+            builtin_sigs::resolve_result_type(builtin, arg_types).ok_or_else(|| {
                 this.diag_ctx.emit_no_matching_builtin_signature(
-                    &this.eval.types,
                     builtin,
                     &this.eval.types_buf[types_buf_offset..],
                     expr_loc,
@@ -160,8 +159,8 @@ impl Scope<'_, '_> {
         let hir_args = &self.hir.call_args[args];
         let expr_loc = self.loc(expr_span);
 
-        if builtin.arg_count() != hir_args.len() {
-            self.diag_ctx.emit_wrong_arg_count(&self.eval.types, builtin, hir_args.len(), expr_loc);
+        if builtin_sigs::arg_count(builtin) != hir_args.len() {
+            self.diag_ctx.emit_wrong_arg_count(builtin, hir_args.len(), expr_loc);
             return Err(Poisoned);
         }
 
@@ -190,8 +189,8 @@ impl Scope<'_, '_> {
         let hir_args = &self.hir.call_args[args];
         let expr_loc = self.loc(expr_span);
 
-        if builtin.arg_count() != hir_args.len() {
-            self.diag_ctx.emit_wrong_arg_count(&self.eval.types, builtin, hir_args.len(), expr_loc);
+        if builtin_sigs::arg_count(builtin) != hir_args.len() {
+            self.diag_ctx.emit_wrong_arg_count(builtin, hir_args.len(), expr_loc);
             return Err(Poisoned);
         }
 
@@ -210,7 +209,7 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (ty, index) = self.resolve_struct_field_index(args, builtin, expr_span)?;
-        let (_, field_ty) = self.struct_info(ty).fields[index];
+        let field_ty = self.struct_info(ty).fields[index].ty;
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
 
@@ -221,7 +220,7 @@ impl Scope<'_, '_> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (ty, index) = self.resolve_struct_field_index(args, builtin, expr_span)?;
-        let (_, field_type) = self.struct_info(ty).fields[index];
+        let field_type = self.struct_info(ty).fields[index].ty;
         let field_index = u32::try_from(index).expect("field index fits in u32");
         let instance_state = self.bindings[args[2]].state?;
         let instance_type = self.state_type(instance_state);
@@ -252,7 +251,7 @@ impl Scope<'_, '_> {
         self.check_type_match(ty, self.state_type(instance_state), expr_span)?;
 
         let new_value_state = self.bindings[args[3]].state?;
-        let (_, expected_field_type) = self.struct_info(ty).fields[index];
+        let expected_field_type = self.struct_info(ty).fields[index].ty;
         self.check_type_match(expected_field_type, self.state_type(new_value_state), expr_span)?;
 
         // Both comptime: pure comptime fold.
@@ -275,10 +274,9 @@ impl Scope<'_, '_> {
         }
 
         // At least one side is runtime: emit MIR.
-        if self.eval.types.comptime_only(ty) {
+        if self.eval.types.is_comptime_only(ty) {
             let struct_def_loc = self.struct_info(ty).def_loc;
             self.diag_ctx.emit_set_field_on_comptime_only_struct(
-                &self.eval.types,
                 ty,
                 self.loc(expr_span),
                 struct_def_loc,
@@ -293,7 +291,7 @@ impl Scope<'_, '_> {
                 let local = if field_idx == index {
                     this.materialize_as_local(new_value_state, expected_field_type)
                 } else {
-                    let (_, ftype) = this.struct_info(ty).fields[field_idx];
+                    let ftype = this.struct_info(ty).fields[field_idx].ty;
                     let target = this.mir_types.push(ftype);
                     this.emit(mir::Instruction::Set {
                         target,
@@ -350,7 +348,7 @@ impl Scope<'_, '_> {
             return Ok(ty);
         }
         let actual_ty = self.state_type(state);
-        self.diag_ctx.emit_expected_type_arg(&self.eval.types, builtin, actual_ty, self.loc(span));
+        self.diag_ctx.emit_expected_type_arg(builtin, actual_ty, self.loc(span));
         Err(Poisoned)
     }
 
@@ -385,12 +383,7 @@ impl Scope<'_, '_> {
         if matches!(self.eval.types.lookup(ty), Type::Struct(_)) {
             Ok(())
         } else {
-            self.diag_ctx.emit_expected_struct_type_arg(
-                &self.eval.types,
-                builtin,
-                ty,
-                self.loc(span),
-            );
+            self.diag_ctx.emit_expected_struct_type_arg(builtin, ty, self.loc(span));
             Err(Poisoned)
         }
     }
@@ -402,12 +395,7 @@ impl Scope<'_, '_> {
         span: SourceSpan,
     ) -> MaybePoisoned<()> {
         if expected != actual {
-            self.diag_ctx.emit_type_mismatch_simple(
-                &self.eval.types,
-                expected,
-                actual,
-                self.loc(span),
-            );
+            self.diag_ctx.emit_type_mismatch_simple(expected, actual, self.loc(span));
             return Err(Poisoned);
         }
         Ok(())
@@ -424,11 +412,11 @@ impl Scope<'_, '_> {
         }
     }
 
-    fn struct_info(&self, ty: TypeId) -> plank_values::StructInfo<'_> {
-        let Type::Struct(info) = self.eval.types.lookup(ty) else {
+    fn struct_info(&self, ty: TypeId) -> plank_values::StructView<'_> {
+        let Type::Struct(view) = self.eval.types.lookup(ty) else {
             unreachable!("invariant: already validated as struct")
         };
-        info
+        view
     }
 }
 

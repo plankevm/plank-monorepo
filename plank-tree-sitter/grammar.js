@@ -45,11 +45,13 @@ module.exports = grammar({
       "import",
       field("root", $.identifier),
       field("path", repeat(seq("::", $.identifier))),
-      field("suffix", optional(choice($.suffix_import_all, $.suffix_import_as))),
+      field("suffix", optional(choice($.suffix_import_all, $.suffix_import_as, $.suffix_import_group))),
       ";"
     ),
     suffix_import_all: _ => seq("::", "*"),
     suffix_import_as: $ => seq("as", $.identifier),
+    suffix_import_group: $ => seq("::", "{", commaSeparated($.import_group_item), "}"),
+    import_group_item: $ => seq($.identifier, optional(seq("as", $.identifier))),
 
     // Expressions
     _expr: ($) => choice($.comptime_block, $.block, $.if_expr, $._expr_no_block),

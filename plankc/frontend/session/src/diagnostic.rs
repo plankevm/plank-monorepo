@@ -73,18 +73,6 @@ pub struct SrcLoc {
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct Tracked<T> {
-    pub inner: T,
-    pub loc: SrcLoc,
-}
-
-impl<T> Tracked<T> {
-    pub fn new(inner: T, loc: SrcLoc) -> Self {
-        Self { inner, loc }
-    }
-}
-
 impl SrcLoc {
     pub fn new(source: SourceId, span: SourceSpan) -> Self {
         Self { source, span }
@@ -208,6 +196,10 @@ impl ClaimBuilder for Claim {
     }
 }
 
+pub trait DiagEmitter {
+    fn emit_diagnostic(&mut self, diagnostic: Diagnostic);
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub level: Level,
@@ -259,8 +251,8 @@ impl Diagnostic {
         self.render_with(session, Renderer::styled())
     }
 
-    pub fn emit(self, session: &mut Session) {
-        session.emit_diagnostic(self);
+    pub fn emit(self, emitter: &mut impl DiagEmitter) {
+        emitter.emit_diagnostic(self);
     }
 
     fn render_with(&self, session: &Session, renderer: Renderer) -> String {
