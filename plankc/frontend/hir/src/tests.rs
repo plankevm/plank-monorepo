@@ -200,9 +200,9 @@ fn test_return_in_fn_param_type_expression() {
     let rendered = render_diagnostics(
         r#"
         const f = fn (x: { return 0; u256 }) void {
-            evm_stop();
+            @evm_stop();
         };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
     );
     let expected = dedent_preserve_blank_lines(
@@ -1318,9 +1318,9 @@ fn test_explicit_return_in_function() {
     assert_lowers_to(
         r#"
         const add_one = fn (x: u256) u256 {
-            return add(x, 1);
+            return @evm_add(x, 1);
         };
-        init { evm_stop(); }
+        init { @evm_stop(); }
         "#,
         r#"
         ==== Constants ====
@@ -1337,12 +1337,12 @@ fn test_explicit_return_in_function() {
             body:
                 %3 = %1
                 %4 = 1
-                ret add(%3, %4)
+                ret @evm_add(%3, %4)
                 ret void
         }
 
         ==== Init ====
-        eval evm_stop()
+        eval @evm_stop()
         "#,
     );
 }
@@ -1351,9 +1351,9 @@ fn test_explicit_return_in_function() {
 fn test_return_outside_function_body() {
     let source = r#"
         init {
-            let a = add(1, 2);
+            let a = @evm_add(1, 2);
             return a;
-            let b = add(3, 4);
+            let b = @evm_add(3, 4);
         }
     "#;
 
@@ -1379,11 +1379,11 @@ fn test_return_outside_function_body() {
         ==== Init ====
         %0 = 1
         %1 = 2
-        %2 = add(%0, %1)
+        %2 = @evm_add(%0, %1)
         eval %2
         %3 = 3
         %4 = 4
-        %5 = add(%3, %4)
+        %5 = @evm_add(%3, %4)
         "#,
     );
     pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
