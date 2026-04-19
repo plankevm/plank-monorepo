@@ -13,10 +13,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         self.with_fields_buf(|this, fields_buf_offset| {
             let struct_def = this.hir.struct_defs[struct_def_id];
             let type_index = this.bindings[struct_def.type_index].poisoned().and_then(
-                |(state, span)| match state {
+                |(state, use_span, _origin)| match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_struct_type_index_not_comptime(this.loc(span));
+                        this.diag_ctx.emit_struct_type_index_not_comptime(this.loc(use_span));
                         Err(Poisoned)
                     }
                 },
@@ -64,10 +64,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         member: StrId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
-        let (state, value_def_span) = self.bindings[object].poisoned()?;
+        let state = self.bindings[object].state?;
         let struct_ty = self.state_type(state);
         let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_member_on_non_struct(struct_ty, self.loc(value_def_span));
+            let binding = self.bindings[object];
+            self.diag_ctx.emit_member_on_non_struct(
+                struct_ty,
+                self.binding_loc(binding.use_span, binding.origin),
+            );
             return Err(Poisoned);
         };
 
@@ -157,7 +161,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 continue;
             };
             let LocalState::Comptime(value) = state else {
-                self.diag_ctx.emit_runtime_ref_in_comptime(self.source, lit_span, local.span);
+                self.diag_ctx.emit_runtime_ref_in_comptime(
+                    self.loc(lit_span),
+                    self.origin_loc(local.origin),
+                );
                 validity = Err(Poisoned);
                 continue;
             };
@@ -299,11 +306,13 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         let mut validity = self.struct_lit_diagnose_duplicate_fields(lit_loc, lit_fields);
 
-        // Retrieve struct type information.
-        let ty_loc = self.loc(self.bindings[struct_type_local].span);
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
-            self.diag_ctx.emit_not_a_struct_type(struct_ty, ty_loc);
+            let binding = self.bindings[struct_type_local];
+            self.diag_ctx.emit_not_a_struct_type(
+                struct_ty,
+                self.binding_loc(binding.use_span, binding.origin),
+            );
             return Err(Poisoned);
         };
 
@@ -315,7 +324,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 validity = Err(Poisoned);
                 continue;
             };
-            let Ok((field_value_state, field_value_span)) =
+            let Ok((field_value_state, field_value_use_span, _field_value_origin)) =
                 self.bindings[lit_field.value].poisoned()
             else {
                 validity = Err(Poisoned);
@@ -326,7 +335,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 self.diag_ctx.emit_struct_literal_field_type_mismatch(
                     def_field.ty,
                     field_value_ty,
-                    self.loc(field_value_span),
+                    self.loc(field_value_use_span),
                     lit_field.name,
                 );
                 validity = Err(Poisoned);

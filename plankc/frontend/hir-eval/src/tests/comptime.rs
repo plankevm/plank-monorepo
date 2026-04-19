@@ -415,6 +415,8 @@ fn test_comptime_param_type_not_type() {
         error: value used as type
          --> main.plk:2:17
           |
+        1 | const forty_two = 42;
+          | --------------------- defined here
         2 | const f = fn(x: forty_two) u256 { return x; };
           |                 ^^^^^^^^^ expected type, got value of type `u256`
           |
@@ -487,6 +489,25 @@ fn test_const_with_type_error_does_not_panic() {
           |            ----   ^ expected `bool`, got `u256`
           |            |
           |            `bool` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_const_with_poisoned_control_flow() {
+    assert_diagnostics(
+        r#"
+        const x = {
+            if 34 { 1 } else { 2 }
+        };
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:8
+          |
+        2 |     if 34 { 1 } else { 2 }
+          |        ^^ expected `bool`, got `u256`
         "#],
     );
 }

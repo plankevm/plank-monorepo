@@ -1,4 +1,5 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use owo_colors::OwoColorize;
 use plank_driver::Driver;
 use plank_hir::display::DisplayHir;
 use plank_mir::display::DisplayMir;
@@ -6,7 +7,15 @@ use plank_parser::cst::display::DisplayCST;
 use plank_session::SourceId;
 use plank_source::source_fs::RealFs;
 use sir_passes::{OPTIMIZE_HELP, parse_optimizations_string};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process,
+};
+
+pub fn cli_error_and_exit(message: impl Into<String>) -> ! {
+    anstream::eprintln!("{}: {}", "error".red(), message.into());
+    process::exit(1)
+}
 
 const VERSION: &str = match option_env!("PLANK_VERSION") {
     Some(v) => v,
@@ -15,7 +24,24 @@ const VERSION: &str = match option_env!("PLANK_VERSION") {
 
 #[derive(Parser)]
 #[command(name = "plank", about = "Plank compiler frontend", version = VERSION)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    action: Action,
+}
+
+#[derive(Subcommand)]
+enum Action {
+    /// Compile a Plank project
+    Build(BuildArgs),
+    /// Open Plank documentation in the browser
+    Doc {
+        /// Topic to open (e.g., 'comptime', 'getting-started')
+        topic: Option<String>,
+    },
+}
+
+#[derive(Parser)]
+struct BuildArgs {
     file_path: String,
 
     #[arg(short = 'c', long = "show-cst", help = "show CST")]
@@ -47,7 +73,51 @@ fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {
 }
 
 fn main() {
-    let args = Args::parse();
+    let cli = Cli::parse();
+
+    match cli.action {
+        Action::Build(args) => build(args),
+        Action::Doc { topic } => doc(topic),
+    }
+}
+
+fn doc(topic: Option<String>) {
+    let plank_dir = std::env::var("PLANK_DIR")
+        .or_else(|_| std::env::var("HOME").map(|home| format!("{}/.plank", home)))
+        .unwrap_or_else(|_| cli_error_and_exit("neither $PLANK_DIR or $HOME set"));
+    let doc_dir = PathBuf::from(plank_dir).join("share/doc");
+
+    let file = match &topic {
+        Some(t) => doc_dir.join(format!("{t}.html")),
+        None => doc_dir.join("index.html"),
+    };
+
+    if !file.exists() {
+        if let Some(t) = &topic {
+            cli_error_and_exit(format!(
+                "no docs found for '{t}'. Run 'plank doc' to browse all docs."
+            ));
+        } else {
+            anstream::eprintln!(
+                "{}: docs not found (searched for {file:?}), likely not installed.",
+                "error".red()
+            );
+            anstream::eprintln!(
+                "{}: Run 'plankup' to install the latest version with docs.",
+                "info".bright_blue()
+            );
+            std::process::exit(1);
+        }
+    }
+
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    process::Command::new(opener)
+        .arg(&file)
+        .status()
+        .unwrap_or_else(|_| cli_error_and_exit(format!("`{opener}` failed to open documentation")));
+}
+
+fn build(args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
 
     if let Some(name) = &args.module_name {
@@ -55,7 +125,12 @@ fn main() {
             Some(root) => PathBuf::from(root),
             None => Path::new(&args.file_path)
                 .parent()
-                .expect("file path has no parent directory")
+                .unwrap_or_else(|| {
+                    cli_error_and_exit(format!(
+                        "{:?} has no parent directory to use as module root{}",
+                        args.file_path, ", omit --module-name or specify --module-root",
+                    ))
+                })
                 .to_path_buf(),
         };
         driver.register_module(name, root);

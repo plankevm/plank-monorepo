@@ -16,3 +16,6 @@ plank-hir.workspace = true
 plank-mir.workspace = true
 sir-passes.workspace = true
 clap.workspace = true
+anstream.workspace = true
+owo-colors = "4.3.0"
+

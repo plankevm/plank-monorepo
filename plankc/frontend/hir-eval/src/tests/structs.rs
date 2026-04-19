@@ -292,6 +292,8 @@ fn test_comptime_struct_lit_type_not_type() {
         error: value used as type
          --> main.plk:2:11
           |
+        1 | const T = 42;
+          | ------------- defined here
         2 | const x = T { };
           |           ^ expected type, got value of type `u256`
         "#],
@@ -312,6 +314,9 @@ fn test_struct_lit_value_as_type_in_init() {
         error: value used as type
          --> main.plk:3:13
           |
+        1 | const T = 42;
+          | ------------- defined here
+        2 | init {
         3 |     let x = T { };
           |             ^ expected type, got value of type `u256`
         "#],
@@ -454,6 +459,64 @@ fn test_runtime_struct_lit_not_a_struct() {
 }
 
 #[test]
+fn test_cross_file_struct_lit_not_a_struct() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::T;
+            init {
+                let x = T { value: 1 };
+                @evm_stop();
+            }
+            ",
+        )
+        .add_file("other", "const T = bool;")
+        .add_module("m", ""),
+        &[r#"
+        error: expected struct type
+         --> main.plk:3:13
+          |
+        3 |     let x = T { value: 1 };
+          |             ^ `bool` is not a struct type
+          |
+         ::: other.plk:1:1
+          |
+        1 | const T = bool;
+          | --------------- defined here
+        "#],
+    );
+}
+
+#[test]
+fn test_cross_file_type_not_type() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::T;
+            init {
+                let x = T { };
+                @evm_stop();
+            }
+            ",
+        )
+        .add_file("other", "const T = 42;")
+        .add_module("m", ""),
+        &[r#"
+        error: value used as type
+         --> main.plk:3:13
+          |
+        3 |     let x = T { };
+          |             ^ expected type, got value of type `u256`
+          |
+         ::: other.plk:1:1
+          |
+        1 | const T = 42;
+          | ------------- defined here
+        "#],
+    );
+}
+
+#[test]
 fn test_runtime_struct_lit_unknown_field() {
     assert_diagnostics(
         r#"
@@ -527,6 +590,8 @@ fn test_comptime_member_on_non_struct() {
         error: no fields on type
          --> main.plk:2:11
           |
+        1 | const x: u256 = 5;
+          | ------------------ defined here
         2 | const y = x.foo;
           |           ^ value of type `u256` is not a struct type
         "#],
@@ -549,6 +614,33 @@ fn test_runtime_member_on_non_struct() {
           |
         3 |     let y = x.foo;
           |             ^ value of type `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_cross_file_member_on_non_struct() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::other::x;
+            const y = x.foo;
+            init { @evm_stop(); }
+            ",
+        )
+        .add_file("other", "const x: u256 = 5;")
+        .add_module("m", ""),
+        &[r#"
+        error: no fields on type
+         --> main.plk:2:11
+          |
+        2 | const y = x.foo;
+          |           ^ value of type `u256` is not a struct type
+          |
+         ::: other.plk:1:1
+          |
+        1 | const x: u256 = 5;
+          | ------------------ defined here
         "#],
     );
 }

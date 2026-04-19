@@ -3,6 +3,21 @@ use plank_hir as hir;
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{TypeId, TypeInterner, builtins as builtin_sigs};
 
+pub(crate) struct BindingLoc {
+    pub r#use: SrcLoc,
+    pub def: Option<SrcLoc>,
+}
+
+impl BindingLoc {
+    pub fn inline(r#use: SrcLoc) -> Self {
+        Self { r#use, def: None }
+    }
+
+    pub fn with_def(r#use: SrcLoc, def: SrcLoc) -> Self {
+        Self { r#use, def: Some(def) }
+    }
+}
+
 pub(crate) struct DiagCtx<'a> {
     pub session: &'a mut Session,
     pub types: &'a TypeInterner,
@@ -77,18 +92,20 @@ impl DiagCtx<'_> {
         }
     }
 
-    pub fn emit_type_not_type(&mut self, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("value used as type")
-            .primary(
-                loc.source,
-                loc.span,
-                format!(
-                    "expected {}, got value of type `{}`",
-                    builtin_names::TYPE,
-                    self.types.format(self.session, ty)
-                ),
-            )
-            .emit(self);
+    pub fn emit_type_not_type(&mut self, ty: TypeId, loc: BindingLoc) {
+        let primary_label = format!(
+            "expected {}, got value of type `{}`",
+            builtin_names::TYPE,
+            self.types.format(self.session, ty),
+        );
+        let diag = Diagnostic::error("value used as type");
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
+            }
+        };
+        diag.emit(self);
     }
 
     pub fn emit_struct_literal_field_type_mismatch(
@@ -131,37 +148,42 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, ty: TypeId, ty_loc: SrcLoc) {
-        Diagnostic::error("expected struct type")
-            .primary(
-                ty_loc.source,
-                ty_loc.span,
-                format!("`{}` is not a struct type", self.types.format(self.session, ty)),
-            )
-            .emit(self);
+    pub fn emit_not_a_struct_type(&mut self, ty: TypeId, loc: BindingLoc) {
+        let primary_label =
+            format!("`{}` is not a struct type", self.types.format(self.session, ty));
+        let diag = Diagnostic::error("expected struct type");
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
+            }
+        };
+        diag.emit(self);
     }
 
-    pub fn emit_member_on_non_struct(&mut self, ty: TypeId, value_loc: SrcLoc) {
-        Diagnostic::error("no fields on type")
-            .primary(
-                value_loc.source,
-                value_loc.span,
-                format!(
-                    "value of type `{}` is not a struct type",
-                    self.types.format(self.session, ty)
-                ),
-            )
-            .emit(self);
+    pub fn emit_member_on_non_struct(&mut self, ty: TypeId, loc: BindingLoc) {
+        let primary_label =
+            format!("value of type `{}` is not a struct type", self.types.format(self.session, ty));
+        let diag = Diagnostic::error("no fields on type");
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
+            }
+        };
+        diag.emit(self);
     }
 
-    pub fn emit_not_callable(&mut self, ty: TypeId, loc: SrcLoc) {
-        Diagnostic::error("expected function")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`{}` is not callable", self.types.format(self.session, ty)),
-            )
-            .emit(self);
+    pub fn emit_not_callable(&mut self, ty: TypeId, loc: BindingLoc) {
+        let primary_label = format!("`{}` is not callable", self.types.format(self.session, ty));
+        let diag = Diagnostic::error("expected function");
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
+            }
+        };
+        diag.emit(self);
     }
 
     pub fn emit_incompatible_branch_types(
@@ -223,20 +245,16 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_runtime_ref_in_comptime(
-        &mut self,
-        source: SourceId,
-        expr_span: SourceSpan,
-        runtime_def: SourceSpan,
-    ) {
+    pub fn emit_runtime_ref_in_comptime(&mut self, expr_loc: SrcLoc, runtime_def_loc: SrcLoc) {
         Diagnostic::error("runtime reference in comptime context")
-            .element(
-                Annotations::new(source)
-                    .primary(expr_span, "expression with runtime reference")
-                    .secondary(runtime_def, "runtime value defined here"),
+            .cross_source_annotations(
+                expr_loc,
+                "expression with runtime reference",
+                runtime_def_loc,
+                "runtime value defined here",
             )
             .note("comptime contexts can only reference values known at compile time")
-            .emit(self);
+            .emit(self.session);
     }
 
     pub fn emit_runtime_eval_in_comptime(&mut self, expr: SrcLoc) {

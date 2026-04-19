@@ -1,26 +1,31 @@
-use crate::{Evaluator, diagnostics::DiagCtx, evaluator::CallArgSpansIdx};
+use crate::{
+    Evaluator,
+    diagnostics::{BindingLoc, DiagCtx},
+    evaluator::CallArgSpansIdx,
+};
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind, operators as hir_ops};
 use plank_mir as mir;
 use plank_session::{
     MaybePoisoned, Poisoned, RuntimeBuiltin, SourceId, SourceSpan, SrcLoc, poison,
 };
-use plank_values::{TypeId, Value, ValueId};
+use plank_values::{DefOrigin, TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
-    pub span: SourceSpan,
+    pub use_span: SourceSpan,
+    pub origin: DefOrigin,
 }
 
 impl Local {
-    pub fn comptime(value: ValueId, span: SourceSpan) -> Self {
-        Self { state: Ok(LocalState::Comptime(value)), span }
+    pub fn comptime(value: ValueId, use_span: SourceSpan, origin: DefOrigin) -> Self {
+        Self { state: Ok(LocalState::Comptime(value)), use_span, origin }
     }
 
-    pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan)> {
+    pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
         let state = self.state?;
-        Ok((state, self.span))
+        Ok((state, self.use_span, self.origin))
     }
 }
 
@@ -47,8 +52,8 @@ impl Diverge {
 }
 
 pub(crate) enum EvalContext {
-    FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_span: SourceSpan },
-    FunctionPreamble { call_scope_source: SourceId, arg_spans: CallArgSpansIdx },
+    FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_loc: SrcLoc },
+    FunctionPreamble { arg_spans: CallArgSpansIdx, call_source: SourceId },
     Other,
 }
 
@@ -135,15 +140,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn expect_type(&mut self, type_local: hir::LocalId) -> MaybePoisoned<TypeId> {
-        let (state, span) = self.bindings[type_local].poisoned()?;
-        let type_loc = self.loc(span);
+        let (state, use_span, origin) = self.bindings[type_local].poisoned()?;
+        let type_loc = self.loc(use_span);
         let LocalState::Comptime(vid) = state else {
             self.diag_ctx.emit_type_not_comptime(type_loc);
             return Err(Poisoned);
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
-            self.diag_ctx.emit_type_not_type(actual_ty, type_loc);
+            self.diag_ctx.emit_type_not_type(actual_ty, self.binding_loc(use_span, origin));
             return Err(Poisoned);
         };
         Ok(ty)
@@ -185,7 +190,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         value: EvalValue,
         expected_ty: TypeId,
-        expected_span: SourceSpan,
+        expected_loc: SrcLoc,
         actual_span: SourceSpan,
     ) -> MaybePoisoned<()> {
         let actual_ty = self.value_type(value);
@@ -194,7 +199,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         } else {
             self.diag_ctx.emit_type_mismatch(
                 expected_ty,
-                self.loc(expected_span),
+                expected_loc,
                 actual_ty,
                 self.loc(actual_span),
                 true,
@@ -215,7 +220,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            self.type_check(value, expected_ty, self.bindings[type_local].span, expr.span)?;
+            let type_loc = self.loc(self.bindings[type_local].use_span);
+            self.type_check(value, expected_ty, type_loc, expr.span)?;
             Ok(value)
         });
         let state = value.and_then(|value| {
@@ -231,7 +237,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings.insert_no_prev(local, Local { state, span: expr.span });
+        self.bindings.insert_no_prev(
+            local,
+            Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+        );
         Ok(())
     }
 
@@ -247,7 +256,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            self.type_check(value, expected_ty, self.bindings[type_local].span, expr.span)?;
+            let type_loc = self.loc(self.bindings[type_local].use_span);
+            self.type_check(value, expected_ty, type_loc, expr.span)?;
             Ok(value)
         });
 
@@ -263,7 +273,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
 
-        self.bindings.insert_no_prev(local, Local { state: new_state, span: expr.span });
+        self.bindings.insert_no_prev(
+            local,
+            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
+        );
         Ok(())
     }
 
@@ -273,7 +286,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state = value
                 .and_then(|value| self.expect_comptime_value(value, expr.span))
                 .map(LocalState::Comptime);
-            let _ = self.bindings.insert(local, Local { state, span: expr.span });
+            let _ = self.bindings.insert(
+                local,
+                Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+            );
             return Ok(());
         }
 
@@ -285,7 +301,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 });
-                self.bindings.insert_no_prev(local, Local { state, span: expr.span });
+                self.bindings.insert_no_prev(
+                    local,
+                    Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                );
             }
             Some(binding) => {
                 let new_state = poison::zip(binding.state, mir_expr).and_then(
@@ -298,7 +317,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         if let Err(existing_ty) = self.mir_types[target].unify(ty) {
                             self.diag_ctx.emit_incompatible_branch_types(
                                 existing_ty,
-                                self.loc(binding.span),
+                                self.origin_loc(binding.origin),
                                 ty,
                                 self.loc(expr.span),
                             );
@@ -310,7 +329,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] = Local { state: new_state, span: expr.span };
+                self.bindings[local] =
+                    Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) };
             }
         }
 
@@ -336,15 +356,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let local = self.bindings[target];
         let new_state = poison::zip(local.state, value).and_then(|(state, value)| {
             let expected_ty = self.state_type(state);
-            let type_check = self.type_check(value, expected_ty, local.span, expr.span);
+            let type_check =
+                self.type_check(value, expected_ty, self.origin_loc(local.origin), expr.span);
             if self.is_comptime() {
                 let state = match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
                         self.diag_ctx.emit_runtime_ref_in_comptime(
-                            self.source,
-                            local.span,
-                            expr.span,
+                            self.origin_loc(local.origin),
+                            self.loc(expr.span),
                         );
                         Err(Poisoned)
                     }
@@ -417,7 +437,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 if self.mir_types[mir_local].is_assignable_to(TypeId::BOOL) =>
             {
                 if self.is_comptime() {
-                    self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.span));
+                    self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) = self.eval_block_to_mir(then);
@@ -447,7 +467,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.diag_ctx.emit_type_mismatch_simple(
                     TypeId::BOOL,
                     state_ty,
-                    self.loc(binding.span),
+                    self.loc(binding.use_span),
                 );
                 Err(Diverge::ControlFlowPoisoned)
             }
@@ -480,7 +500,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 this.diag_ctx.emit_type_mismatch_simple(
                     TypeId::BOOL,
                     state_ty,
-                    this.loc(binding.span),
+                    this.loc(binding.use_span),
                 );
                 return Err(Diverge::ControlFlowPoisoned);
             }
@@ -488,7 +508,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 LocalState::Runtime(local) => Ok(local),
                 LocalState::Comptime(value) => {
                     if this.is_comptime_only(value) {
-                        this.diag_ctx.emit_comptime_only_value_at_runtime(this.loc(binding.span));
+                        this.diag_ctx
+                            .emit_comptime_only_value_at_runtime(this.loc(binding.use_span));
                         return Err(Diverge::ControlFlowPoisoned);
                     }
                     let condition = this.mir_types.push(this.values.type_of_value(value));
@@ -517,11 +538,36 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         SrcLoc::new(self.source, span)
     }
 
+    pub fn expr_origin(&self, expr: hir::Expr) -> DefOrigin {
+        if let ExprKind::ConstRef(id) = expr.kind {
+            DefOrigin::Const(id)
+        } else {
+            DefOrigin::Local(expr.span)
+        }
+    }
+
+    pub fn origin_loc(&self, origin: DefOrigin) -> SrcLoc {
+        match origin {
+            DefOrigin::Local(span) => self.loc(span),
+            DefOrigin::Const(id) => self.hir.consts[id].loc(),
+        }
+    }
+
+    pub fn binding_loc(&self, use_span: SourceSpan, origin: DefOrigin) -> BindingLoc {
+        let r#use = self.loc(use_span);
+        match origin {
+            // Omit definition location for local defs (besides constants), to avoid having
+            // overlapping "cause" & "defined here" diagnostic notes.
+            DefOrigin::Local(_) => BindingLoc::inline(r#use),
+            DefOrigin::Const(id) => BindingLoc::with_def(r#use, self.hir.consts[id].loc()),
+        }
+    }
+
     pub fn eval_logical_not(&mut self, local: hir::LocalId) -> MaybePoisoned<EvalValue> {
-        let (state, span) = self.bindings[local].poisoned()?;
+        let (state, use_span, _origin) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(TypeId::BOOL, ty, self.loc(span));
+            self.diag_ctx.emit_type_mismatch_simple(TypeId::BOOL, ty, self.loc(use_span));
             return Err(Poisoned);
         }
         let value = match state {

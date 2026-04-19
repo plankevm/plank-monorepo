@@ -69,21 +69,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let caller_bindings = &mut self.bindings;
         let caller_mir_types = &mut self.mir_types;
 
-        let arg_spans =
-            self.eval.call_arg_spans.push_iter(args.iter().map(|&arg| caller_bindings[arg].span));
+        let arg_spans = self
+            .eval
+            .call_arg_spans
+            .push_iter(args.iter().map(|&arg| caller_bindings[arg].use_span));
+        let call_source = self.source;
 
         let mut fn_scope = Scope::new(
             self.eval,
             self.diag_ctx,
             fn_def.source,
             false,
-            EvalContext::FunctionPreamble { call_scope_source: self.source, arg_spans },
+            EvalContext::FunctionPreamble { arg_spans, call_source },
         );
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
         for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
-            fn_scope.bindings.insert_no_prev(def.inner_local, Local::comptime(value, def.use_span));
+            fn_scope.bindings.insert_no_prev(
+                def.inner_local,
+                Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span)),
+            );
         }
 
         for (&param, &arg) in params.iter().zip(args) {
@@ -93,7 +99,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Poisoned) => {
                     fn_scope.bindings.insert_no_prev(
                         param.value,
-                        Local { state: Err(Poisoned), span: param.span },
+                        Local {
+                            state: Err(Poisoned),
+                            use_span: param.span,
+                            origin: DefOrigin::Local(param.span),
+                        },
                     );
                     continue;
                 }
@@ -131,7 +141,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Ok(LocalState::Runtime(inner_mir))
                 }
             };
-            fn_scope.bindings.insert_no_prev(param.value, Local { state, span: param.span });
+            fn_scope.bindings.insert_no_prev(
+                param.value,
+                Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
+            );
         }
 
         (fn_scope, caller_bindings)
@@ -144,8 +157,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => return Err(Poisoned),
         }
         let return_type = self.expect_type(fn_def.return_type);
-        let ret_type_span = self.bindings[fn_def.return_type].span;
-        self.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_span };
+        let ret_type_loc = self.origin_loc(self.bindings[fn_def.return_type].origin);
+        self.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_loc };
         let is_comptime_only = return_type.is_ok_and(|ty| self.types.is_comptime_only(ty));
         Ok(PreambleResult { return_type, is_comptime_only })
     }
@@ -155,8 +168,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.with_captures_buf(|this, captures_buf_offset| {
             let mut poisoned = false;
             for &capture in def_captures {
-                let Local { state, span: def_span } = this.bindings[capture.outer_local];
-                let Ok(state) = state else {
+                let binding = this.bindings[capture.outer_local];
+                let Ok(state) = binding.state else {
                     poisoned = true;
                     continue;
                 };
@@ -165,13 +178,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     LocalState::Runtime(_) => {
                         this.diag_ctx.emit_closure_capture_not_comptime(
                             this.loc(capture.use_span),
-                            this.loc(def_span),
+                            this.origin_loc(binding.origin),
                         );
                         poisoned = true;
                         continue;
                     }
                 };
-                this.captures_buf.push((value, DefOrigin::Local(def_span)));
+                this.captures_buf.push((value, binding.origin));
             }
             if poisoned {
                 return Err(Poisoned);
@@ -192,11 +205,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
             this.with_maybe_values_buf(|this, values_buf_offset: usize| {
-                let (state, callee_def_span) = this.bindings[callee].poisoned()?;
+                let (state, callee_use_span, callee_origin) = this.bindings[callee].poisoned()?;
                 let closure_vid = match state {
                     LocalState::Comptime(value) => value,
                     LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_def_span));
+                        this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_use_span));
                         return Err(Poisoned);
                     }
                 };
@@ -204,7 +217,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     this.eval.values.lookup(closure_vid)
                 else {
                     let ty = this.values.type_of_value(closure_vid);
-                    this.diag_ctx.emit_not_callable(ty, this.loc(callee_def_span));
+                    this.diag_ctx
+                        .emit_not_callable(ty, this.binding_loc(callee_use_span, callee_origin));
                     return Err(Poisoned);
                 };
                 for &capture in captures {
@@ -246,7 +260,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let arg = self.bindings[arg];
             if let Ok(LocalState::Runtime(_)) = arg.state {
                 self.diag_ctx
-                    .emit_comptime_param_got_runtime(self.loc(arg.span), func.loc(param.span));
+                    .emit_comptime_param_got_runtime(self.loc(arg.use_span), func.loc(param.span));
                 comptime_args_poisoned = true;
                 continue;
             };
@@ -454,23 +468,29 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let ArgParamComptimenessMatch = call.validated;
                 continue;
             }
-            let Ok((state, arg_span)) = call.caller_bindings[arg].poisoned() else {
+            let Ok((state, _arg_use_span, arg_origin)) = call.caller_bindings[arg].poisoned()
+            else {
                 poisoned = true;
                 continue;
             };
             match state {
                 LocalState::Runtime(_) => {
                     if call.caller_comptime {
+                        let binding_loc = match arg_origin {
+                            DefOrigin::Local(span) => SrcLoc::new(call.source, span),
+                            DefOrigin::Const(id) => self.eval.hir.consts[id].loc(),
+                        };
                         self.diag_ctx.emit_runtime_ref_in_comptime(
-                            call.source,
-                            call.span,
-                            arg_span,
+                            SrcLoc::new(call.source, call.span),
+                            binding_loc,
                         );
                     } else {
-                        self.diag_ctx.emit_comptime_only_return_with_runtime_arg(
-                            SrcLoc::new(call.source, arg_span),
-                            call.loc(),
-                        );
+                        let arg_loc = match arg_origin {
+                            DefOrigin::Local(span) => SrcLoc::new(call.source, span),
+                            DefOrigin::Const(id) => self.eval.hir.consts[id].loc(),
+                        };
+                        self.diag_ctx
+                            .emit_comptime_only_return_with_runtime_arg(arg_loc, call.loc());
                     }
                     poisoned = true;
                 }
@@ -510,10 +530,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         r#type: hir::LocalId,
         idx: u32,
     ) {
-        let EvalContext::FunctionPreamble { call_scope_source, arg_spans } = self.ctx else {
+        let EvalContext::FunctionPreamble { arg_spans, call_source } = self.ctx else {
             unreachable!("invariant: param instr outside of fn preamable")
         };
 
+        let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
+        let arg_loc = SrcLoc::new(call_source, arg_span);
         let Ok(param_ty) = self.expect_type(r#type) else {
             self.bindings[arg].state = Err(Poisoned);
             return;
@@ -528,12 +550,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
         let arg_ty = self.state_type(state);
         if !arg_ty.is_assignable_to(param_ty) {
-            let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
             self.diag_ctx.emit_type_mismatch(
                 param_ty,
-                self.loc(self.bindings[r#type].span),
+                self.origin_loc(self.bindings[r#type].origin),
                 arg_ty,
-                SrcLoc::new(call_scope_source, arg_span),
+                arg_loc,
                 false,
             );
             self.bindings[arg].state = Err(Poisoned);
@@ -541,7 +562,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_return(&mut self, expr: hir::Expr) -> Result<(), Diverge> {
-        let EvalContext::FunctionBody { ret_type, ret_type_span } = self.ctx else {
+        let EvalContext::FunctionBody { ret_type, ret_type_loc } = self.ctx else {
             unreachable!("return outside of function body not filtered out by hir-lowerer")
         };
         let value = self.eval_expr(expr)?;
@@ -551,7 +572,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if !ty.is_assignable_to(return_type) {
                 self.diag_ctx.emit_type_mismatch(
                     return_type,
-                    self.loc(ret_type_span),
+                    ret_type_loc,
                     ty,
                     self.loc(expr.span),
                     true,
