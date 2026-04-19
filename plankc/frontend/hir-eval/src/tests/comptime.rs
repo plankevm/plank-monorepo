@@ -548,8 +548,8 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
             ret %2
         }
 
-        @fn1(%0: struct#40@main.plk:2:5) -> u256 {
-            %1 : struct#40@main.plk:2:5 = %0
+        @fn1(%0: struct#56@main.plk:2:5) -> u256 {
+            %1 : struct#56@main.plk:2:5 = %0
             %2 : u256 = %1.1
             ret %2
         }
@@ -561,7 +561,7 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
                 34,
             }
             %1 : u256 = call @fn0(%0)
-            %2 : struct#40@main.plk:2:5 = struct#40 {
+            %2 : struct#56@main.plk:2:5 = struct#56 {
                 false,
                 33,
             }
@@ -1105,10 +1105,13 @@ fn test_comptime_set_field_type_mismatch() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:3:12
+         --> main.plk:3:29
           |
+        1 | const Pair = struct { a: u256, b: bool };
+          |                                ------- `bool` expected because of this
+        2 | const p = Pair { a: 1, b: true };
         3 | const p2 = @set_field(p, 1, 42);
-          |            ^^^^^^^^^^^^^^^^^^^^ expected `bool`, got `u256`
+          |                             ^^ expected `bool`, got `u256`
         "#],
     );
 }
@@ -1151,13 +1154,13 @@ fn test_set_field_comptime_only_struct_runtime_value() {
         "#,
         &[r#"
         error: mixing comptime and runtime data in struct
-         --> main.plk:5:14
+         --> main.plk:5:31
           |
         1 | const Wrapper = struct { t: type, n: u256 };
           |                 --------------------------- `Wrapper` is comptime-only
         ...
         5 |     let w2 = @set_field(w, 1, v);
-          |              ^^^^^^^^^^^^^^^^^^^ `@set_field` would spill comptime-only struct `Wrapper` to runtime
+          |                               ^ this value is only known at runtime
         "#],
     );
 }

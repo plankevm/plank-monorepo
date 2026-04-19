@@ -42,7 +42,9 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     );
                     fields_poisoned = true;
                 }
-                this.fields_buf.push(Field { name: field.name, ty });
+                let def_span =
+                    SourceSpan::new(field.name_offset, this.bindings[field.value].use_span.end);
+                this.fields_buf.push(Field { name: field.name, ty, def_span });
             }
 
             if fields_poisoned {

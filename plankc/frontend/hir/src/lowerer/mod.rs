@@ -383,7 +383,7 @@ impl BlockLowerer<'_> {
                 for result in struct_lit.fields() {
                     let Ok(field) = result else { continue };
                     let value = self.lower_expr_to_local(field.value());
-                    let name_offset = self.lexed.tokens_src_span(field.name_span()).start;
+                    let name_offset = self.lexed.token_src_span(field.name_span().start).start;
                     self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
@@ -415,7 +415,7 @@ impl BlockLowerer<'_> {
                 for result in struct_def.fields() {
                     let Ok(field) = result else { continue };
                     let value = self.lower_expr_to_local(field.type_expr());
-                    let name_offset = self.lexed.tokens_src_span(field.name_span()).start;
+                    let name_offset = self.lexed.token_src_span(field.name_span().start).start;
                     self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));

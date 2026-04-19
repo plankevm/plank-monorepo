@@ -251,7 +251,18 @@ impl Scope<'_, '_> {
 
         let new_value_state = self.bindings[args[2]].state?;
         let expected_field_type = self.struct_info(ty).fields[index].ty;
-        self.check_type_match(expected_field_type, self.state_type(new_value_state), expr_span)?;
+        let actual_ty = self.state_type(new_value_state);
+        if actual_ty != expected_field_type {
+            let field_def_loc = self.loc(self.struct_info(ty).fields[index].def_span);
+            self.diag_ctx.emit_type_mismatch(
+                expected_field_type,
+                field_def_loc,
+                actual_ty,
+                self.loc(self.bindings[args[2]].use_span),
+                false,
+            );
+            return Err(Poisoned);
+        }
 
         // Both comptime: pure comptime fold.
         if let (LocalState::Comptime(instance_vid), LocalState::Comptime(new_value_vid)) =
@@ -277,7 +288,7 @@ impl Scope<'_, '_> {
             let struct_def_loc = self.struct_info(ty).def_loc;
             self.diag_ctx.emit_set_field_on_comptime_only_struct(
                 ty,
-                self.loc(expr_span),
+                self.loc(self.bindings[args[2]].use_span),
                 struct_def_loc,
             );
             return Err(Poisoned);
@@ -385,19 +396,6 @@ impl Scope<'_, '_> {
             self.diag_ctx.emit_expected_struct_type_arg(builtin, ty, self.loc(span));
             Err(Poisoned)
         }
-    }
-
-    fn check_type_match(
-        &mut self,
-        expected: TypeId,
-        actual: TypeId,
-        span: SourceSpan,
-    ) -> MaybePoisoned<()> {
-        if expected != actual {
-            self.diag_ctx.emit_type_mismatch_simple(expected, actual, self.loc(span));
-            return Err(Poisoned);
-        }
-        Ok(())
     }
 
     fn materialize_as_local(&mut self, state: LocalState, ty: TypeId) -> mir::LocalId {

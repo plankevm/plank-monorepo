@@ -326,14 +326,14 @@ impl DiagCtx<'_> {
     pub fn emit_set_field_on_comptime_only_struct(
         &mut self,
         struct_ty: TypeId,
-        call_loc: SrcLoc,
+        value_loc: SrcLoc,
         struct_def_loc: SrcLoc,
     ) {
         let struct_name = self.types.format(self.session, struct_ty);
         Diagnostic::error("mixing comptime and runtime data in struct")
             .cross_source_annotations(
-                call_loc,
-                format!("`@set_field` would spill comptime-only struct `{struct_name}` to runtime"),
+                value_loc,
+                "this value is only known at runtime",
                 struct_def_loc,
                 format!("`{struct_name}` is comptime-only"),
             )
