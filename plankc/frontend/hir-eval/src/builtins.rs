@@ -207,7 +207,8 @@ impl Scope<'_, '_> {
         builtin: Builtin,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let (ty, index) = self.resolve_struct_field_index(args, builtin, expr_span)?;
+        let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
+        let (ty, index) = self.resolve_struct_field_index(ty, args[1], builtin, expr_span)?;
         let field_ty = self.struct_info(ty).fields[index].ty;
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
@@ -218,12 +219,11 @@ impl Scope<'_, '_> {
         builtin: Builtin,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let (ty, index) = self.resolve_struct_field_index(args, builtin, expr_span)?;
+        let instance_state = self.bindings[args[0]].state?;
+        let ty = self.state_type(instance_state);
+        let (ty, index) = self.resolve_struct_field_index(ty, args[1], builtin, expr_span)?;
         let field_type = self.struct_info(ty).fields[index].ty;
         let field_index = u32::try_from(index).expect("field index fits in u32");
-        let instance_state = self.bindings[args[2]].state?;
-        let instance_type = self.state_type(instance_state);
-        self.check_type_match(ty, instance_type, expr_span)?;
 
         match instance_state {
             LocalState::Comptime(vid) => {
@@ -245,11 +245,11 @@ impl Scope<'_, '_> {
         builtin: Builtin,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let (ty, index) = self.resolve_struct_field_index(args, builtin, expr_span)?;
-        let instance_state = self.bindings[args[2]].state?;
-        self.check_type_match(ty, self.state_type(instance_state), expr_span)?;
+        let instance_state = self.bindings[args[0]].state?;
+        let ty = self.state_type(instance_state);
+        let (ty, index) = self.resolve_struct_field_index(ty, args[1], builtin, expr_span)?;
 
-        let new_value_state = self.bindings[args[3]].state?;
+        let new_value_state = self.bindings[args[2]].state?;
         let expected_field_type = self.struct_info(ty).fields[index].ty;
         self.check_type_match(expected_field_type, self.state_type(new_value_state), expr_span)?;
 
@@ -314,13 +314,13 @@ impl Scope<'_, '_> {
 
     fn resolve_struct_field_index(
         &mut self,
-        args: &[hir::LocalId],
+        ty: TypeId,
+        index_arg: hir::LocalId,
         builtin: Builtin,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<(TypeId, usize)> {
-        let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
-        let index = self.expect_comptime_field_index(args[1], builtin, expr_span)?;
         self.validate_struct_type(ty, builtin, expr_span)?;
+        let index = self.expect_comptime_field_index(index_arg, builtin, expr_span)?;
         let field_count = self.struct_info(ty).fields.len();
         if index >= field_count {
             self.diag_ctx.emit_field_index_out_of_bounds(

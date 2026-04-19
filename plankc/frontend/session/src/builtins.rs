@@ -325,8 +325,8 @@ define_builtins! {
     comptime_polymorphic_builtins {
         // Type Reflection
         FIELD_TYPE "@field_type" => FieldType(2);
-        GET_FIELD "@get_field" => GetField(3);
-        SET_FIELD "@set_field" => SetField(4);
+        GET_FIELD "@get_field" => GetField(2);
+        SET_FIELD "@set_field" => SetField(3);
     }
 }
 

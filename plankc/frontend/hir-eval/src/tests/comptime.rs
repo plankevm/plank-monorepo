@@ -877,7 +877,7 @@ fn test_comptime_get_field() {
         r#"
         const Pair = struct { a: u256, b: bool };
         const p = Pair { a: 42, b: true };
-        const val = @get_field(Pair, 0, p);
+        const val = @get_field(p, 0);
         init {
             let mut x = val;
             @evm_stop();
@@ -901,7 +901,7 @@ fn test_runtime_get_field() {
         const Pair = struct { a: u256, b: u256 };
         init {
             let s = Pair { a: @evm_calldataload(0), b: @evm_calldataload(0x20) };
-            let val = @get_field(Pair, 1, s);
+            let val = @get_field(s, 1);
             let mut x: u256 = val;
             @evm_stop();
         }
@@ -930,15 +930,15 @@ fn test_comptime_get_field_out_of_bounds() {
         r#"
         const S = struct { a: u256 };
         const s = S { a: 1 };
-        const val = @get_field(S, 3, s);
+        const val = @get_field(s, 3);
         init { @evm_stop(); }
         "#,
         &[r#"
         error: field index out of bounds
          --> main.plk:3:13
           |
-        3 | const val = @get_field(S, 3, s);
-          |             ^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 3 is out of bounds for struct with 1 field
+        3 | const val = @get_field(s, 3);
+          |             ^^^^^^^^^^^^^^^^ `@get_field`: field index 3 is out of bounds for struct with 1 field
         "#],
     );
 }
@@ -949,15 +949,15 @@ fn test_comptime_get_field_index_overflow() {
         r#"
         const S = struct { a: u256 };
         const s = S { a: 1 };
-        const val = @get_field(S, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, s);
+        const val = @get_field(s, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
         init { @evm_stop(); }
         "#,
         &[r#"
         error: field index out of bounds
          --> main.plk:3:13
           |
-        3 | const val = @get_field(S, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, s);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is too large
+        3 | const val = @get_field(s, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is too large
         "#],
     );
 }
@@ -969,7 +969,7 @@ fn test_comptime_get_field_runtime_index() {
         const S = struct { a: u256 };
         init {
             let s = S { a: 1 };
-            let val = @get_field(S, @evm_calldataload(0), s);
+            let val = @get_field(s, @evm_calldataload(0));
             @evm_stop();
         }
         "#,
@@ -977,29 +977,28 @@ fn test_comptime_get_field_runtime_index() {
         error: expected comptime argument
          --> main.plk:4:15
           |
-        4 |     let val = @get_field(S, @evm_calldataload(0), s);
-          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field index to be known at comptime
+        4 |     let val = @get_field(s, @evm_calldataload(0));
+          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field index to be known at comptime
         "#],
     );
 }
 
 #[test]
-fn test_get_field_instance_type_mismatch() {
+fn test_get_field_non_struct_instance() {
     assert_diagnostics(
         r#"
-        const Pair = struct { a: u256, b: u256 };
         init {
             let x: u256 = @evm_calldataload(0);
-            let val = @get_field(Pair, 0, x);
+            let val = @get_field(x, 0);
             @evm_stop();
         }
         "#,
         &[r#"
-        error: mismatched types
-         --> main.plk:4:15
+        error: expected struct type
+         --> main.plk:3:15
           |
-        4 |     let val = @get_field(Pair, 0, x);
-          |               ^^^^^^^^^^^^^^^^^^^^^^ expected `Pair`, got `u256`
+        3 |     let val = @get_field(x, 0);
+          |               ^^^^^^^^^^^^^^^^ `@get_field` expects a struct type, got `u256`
         "#],
     );
 }
@@ -1010,7 +1009,7 @@ fn test_comptime_set_field() {
         r#"
         const Pair = struct { a: u256, b: u256 };
         const p = Pair { a: 1, b: 2 };
-        const p2 = @set_field(Pair, 0, p, 99);
+        const p2 = @set_field(p, 0, 99);
         const val = p2.a;
         init {
             let mut x: u256 = val;
@@ -1035,7 +1034,7 @@ fn test_runtime_set_field() {
         const Pair = struct { a: u256, b: u256 };
         init {
             let s = Pair { a: @evm_calldataload(0), b: @evm_calldataload(0x20) };
-            let s2 = @set_field(Pair, 0, s, 99);
+            let s2 = @set_field(s, 0, 99);
             let mut x: u256 = s2.a;
             @evm_stop();
         }
@@ -1069,7 +1068,7 @@ fn test_set_field_comptime_struct_runtime_value() {
         const p = Pair { a: 1, b: 2 };
         init {
             let val: u256 = @evm_calldataload(0);
-            let p2 = @set_field(Pair, 0, p, val);
+            let p2 = @set_field(p, 0, val);
             let mut x: u256 = p2.a;
             @evm_stop();
         }
@@ -1101,15 +1100,15 @@ fn test_comptime_set_field_type_mismatch() {
         r#"
         const Pair = struct { a: u256, b: bool };
         const p = Pair { a: 1, b: true };
-        const p2 = @set_field(Pair, 1, p, 42);
+        const p2 = @set_field(p, 1, 42);
         init { @evm_stop(); }
         "#,
         &[r#"
         error: mismatched types
          --> main.plk:3:12
           |
-        3 | const p2 = @set_field(Pair, 1, p, 42);
-          |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `bool`, got `u256`
+        3 | const p2 = @set_field(p, 1, 42);
+          |            ^^^^^^^^^^^^^^^^^^^^ expected `bool`, got `u256`
         "#],
     );
 }
@@ -1121,7 +1120,7 @@ fn test_get_field_comptime_only_field_flows_to_comptime_use() {
         const Wrapper = struct { t: type, n: u256 };
         const w = Wrapper { t: u256, n: 7 };
         init {
-            let t = @get_field(Wrapper, 0, w);
+            let t = @get_field(w, 0);
             let s = @is_struct(t);
             let mut x: bool = s;
             @evm_stop();
@@ -1146,7 +1145,7 @@ fn test_set_field_comptime_only_struct_runtime_value() {
         const w = Wrapper { t: u256, n: 7 };
         init {
             let v: u256 = @evm_calldataload(0);
-            let w2 = @set_field(Wrapper, 1, w, v);
+            let w2 = @set_field(w, 1, v);
             @evm_stop();
         }
         "#,
@@ -1157,8 +1156,8 @@ fn test_set_field_comptime_only_struct_runtime_value() {
         1 | const Wrapper = struct { t: type, n: u256 };
           |                 --------------------------- `Wrapper` is comptime-only
         ...
-        5 |     let w2 = @set_field(Wrapper, 1, w, v);
-          |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@set_field` would spill comptime-only struct `Wrapper` to runtime
+        5 |     let w2 = @set_field(w, 1, v);
+          |              ^^^^^^^^^^^^^^^^^^^ `@set_field` would spill comptime-only struct `Wrapper` to runtime
         "#],
     );
 }
