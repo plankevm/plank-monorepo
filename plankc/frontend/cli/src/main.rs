@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use owo_colors::OwoColorize;
 use plank_driver::Driver;
 use plank_hir::display::DisplayHir;
 use plank_mir::display::DisplayMir;
@@ -10,6 +11,11 @@ use std::{
     path::{Path, PathBuf},
     process,
 };
+
+pub fn cli_error_and_exit(message: impl Into<String>) -> ! {
+    anstream::eprintln!("{}: {}", "error".red(), message.into());
+    process::exit(1)
+}
 
 const VERSION: &str = match option_env!("PLANK_VERSION") {
     Some(v) => v,
@@ -77,7 +83,8 @@ fn main() {
 
 fn doc(topic: Option<String>) {
     let plank_dir = std::env::var("PLANK_DIR")
-        .unwrap_or_else(|_| format!("{}/.plank", std::env::var("HOME").expect("HOME not set")));
+        .or_else(|_| std::env::var("HOME").map(|home| format!("{}/.plank", home)))
+        .unwrap_or_else(|_| cli_error_and_exit("neither $PLANK_DIR or $HOME set"));
     let doc_dir = PathBuf::from(plank_dir).join("share/doc");
 
     let file = match &topic {
@@ -87,15 +94,27 @@ fn doc(topic: Option<String>) {
 
     if !file.exists() {
         if let Some(t) = &topic {
-            eprintln!("no docs found for '{t}'. Run 'plank doc' to browse all docs.");
+            cli_error_and_exit(format!(
+                "no docs found for '{t}'. Run 'plank doc' to browse all docs."
+            ));
         } else {
-            eprintln!("docs not installed. Run 'plankup' to install the latest version with docs.");
+            anstream::eprintln!(
+                "{}: docs not found (searched for {file:?}), likely not installed.",
+                "error".red()
+            );
+            anstream::eprintln!(
+                "{}: Run 'plankup' to install the latest version with docs.",
+                "info".bright_blue()
+            );
+            std::process::exit(1);
         }
-        process::exit(1);
     }
 
     let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    process::Command::new(opener).arg(&file).status().expect("failed to open documentation");
+    process::Command::new(opener)
+        .arg(&file)
+        .status()
+        .unwrap_or_else(|_| cli_error_and_exit(format!("`{opener}` failed to open documentation")));
 }
 
 fn build(args: BuildArgs) {
@@ -106,7 +125,12 @@ fn build(args: BuildArgs) {
             Some(root) => PathBuf::from(root),
             None => Path::new(&args.file_path)
                 .parent()
-                .expect("file path has no parent directory")
+                .unwrap_or_else(|| {
+                    cli_error_and_exit(format!(
+                        "{:?} has no parent directory to use as module root{}",
+                        args.file_path, ", omit --module-name or specify --module-root",
+                    ))
+                })
                 .to_path_buf(),
         };
         driver.register_module(name, root);
