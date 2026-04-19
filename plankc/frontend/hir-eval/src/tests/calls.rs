@@ -18,6 +18,8 @@ fn test_preamble_error_per_call_site() {
         error: value used as type
          --> main.plk:2:16
           |
+        1 | const not_a_type = 42;
+          | ---------------------- defined here
         2 | const f = fn() not_a_type { return 0; };
           |                ^^^^^^^^^^ expected type, got value of type `u256`
           |
@@ -31,6 +33,8 @@ fn test_preamble_error_per_call_site() {
         error: value used as type
          --> main.plk:2:16
           |
+        1 | const not_a_type = 42;
+          | ---------------------- defined here
         2 | const f = fn() not_a_type { return 0; };
           |                ^^^^^^^^^^ expected type, got value of type `u256`
           |
@@ -44,6 +48,8 @@ fn test_preamble_error_per_call_site() {
         error: value used as type
          --> main.plk:2:16
           |
+        1 | const not_a_type = 42;
+          | ---------------------- defined here
         2 | const f = fn() not_a_type { return 0; };
           |                ^^^^^^^^^^ expected type, got value of type `u256`
           |
@@ -175,6 +181,8 @@ fn test_comptime_call_on_non_function() {
         error: expected function
          --> main.plk:2:11
           |
+        1 | const x = 5;
+          | ------------ defined here
         2 | const y = x();
           |           ^ `u256` is not callable
         "#],
@@ -217,6 +225,30 @@ fn test_runtime_call_on_non_function() {
         error: expected function
          --> main.plk:3:5
           |
+        3 |     x();
+          |     ^ `u256` is not callable
+        "#],
+    );
+}
+
+#[test]
+fn test_same_file_not_callable() {
+    assert_project_diagnostics(
+        r#"
+        const x = 5;
+
+        init {
+            x();
+            evm_stop();
+        }
+        "#,
+        &[r#"
+        error: expected function
+         --> main.plk:3:5
+          |
+        1 | const x = 5;
+          | ------------ defined here
+        2 | init {
         3 |     x();
           |     ^ `u256` is not callable
         "#],
@@ -541,6 +573,9 @@ fn test_nested_preamble_errors_point_at_correct_call_sites() {
         error: value used as type
          --> main.plk:3:20
           |
+        1 | const bad = 42;
+          | --------------- defined here
+        2 | const inner = fn() bad { return 0; };
         3 | const outer = fn() bad {
           |                    ^^^ expected type, got value of type `u256`
           |
@@ -554,6 +589,8 @@ fn test_nested_preamble_errors_point_at_correct_call_sites() {
         error: value used as type
          --> main.plk:2:20
           |
+        1 | const bad = 42;
+          | --------------- defined here
         2 | const inner = fn() bad { return 0; };
           |                    ^^^ expected type, got value of type `u256`
           |

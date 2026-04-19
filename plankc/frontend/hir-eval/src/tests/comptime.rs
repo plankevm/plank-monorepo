@@ -415,6 +415,8 @@ fn test_comptime_param_type_not_type() {
         error: value used as type
          --> main.plk:2:17
           |
+        1 | const forty_two = 42;
+          | --------------------- defined here
         2 | const f = fn(x: forty_two) u256 { return x; };
           |                 ^^^^^^^^^ expected type, got value of type `u256`
           |

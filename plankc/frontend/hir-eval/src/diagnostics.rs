@@ -6,9 +6,19 @@ use plank_values::{
     builtins::{arg_count, builtin_signatures},
 };
 
-pub(crate) enum BindingLoc {
-    Inline(SrcLoc),
-    WithDef { use_loc: SrcLoc, def_loc: SrcLoc },
+pub(crate) struct BindingLoc {
+    pub r#use: SrcLoc,
+    pub def: Option<SrcLoc>,
+}
+
+impl BindingLoc {
+    pub fn inline(r#use: SrcLoc) -> Self {
+        Self { r#use, def: None }
+    }
+
+    pub fn with_def(r#use: SrcLoc, def: SrcLoc) -> Self {
+        Self { r#use, def: Some(def) }
+    }
 }
 
 pub(crate) struct DiagCtx<'a> {
@@ -94,12 +104,10 @@ impl DiagCtx<'_> {
             self.types.format(self.session, ty),
         );
         let diag = Diagnostic::error("value used as type");
-        let diag = match loc {
-            BindingLoc::Inline(primary_loc) => {
-                diag.primary(primary_loc.source, primary_loc.span, primary_label)
-            }
-            BindingLoc::WithDef { use_loc, def_loc } => {
-                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
             }
         };
         diag.emit(self);
@@ -149,12 +157,10 @@ impl DiagCtx<'_> {
         let primary_label =
             format!("`{}` is not a struct type", self.types.format(self.session, ty));
         let diag = Diagnostic::error("expected struct type");
-        let diag = match loc {
-            BindingLoc::Inline(primary_loc) => {
-                diag.primary(primary_loc.source, primary_loc.span, primary_label)
-            }
-            BindingLoc::WithDef { use_loc, def_loc } => {
-                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
             }
         };
         diag.emit(self);
@@ -164,12 +170,10 @@ impl DiagCtx<'_> {
         let primary_label =
             format!("value of type `{}` is not a struct type", self.types.format(self.session, ty));
         let diag = Diagnostic::error("no fields on type");
-        let diag = match loc {
-            BindingLoc::Inline(primary_loc) => {
-                diag.primary(primary_loc.source, primary_loc.span, primary_label)
-            }
-            BindingLoc::WithDef { use_loc, def_loc } => {
-                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
             }
         };
         diag.emit(self);
@@ -178,12 +182,10 @@ impl DiagCtx<'_> {
     pub fn emit_not_callable(&mut self, ty: TypeId, loc: BindingLoc) {
         let primary_label = format!("`{}` is not callable", self.types.format(self.session, ty));
         let diag = Diagnostic::error("expected function");
-        let diag = match loc {
-            BindingLoc::Inline(primary_loc) => {
-                diag.primary(primary_loc.source, primary_loc.span, primary_label)
-            }
-            BindingLoc::WithDef { use_loc, def_loc } => {
-                diag.cross_source_annotations(use_loc, primary_label, def_loc, "defined here")
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
             }
         };
         diag.emit(self);

@@ -145,6 +145,9 @@ fn test_runtime_fn_return_type_not_type() {
         error: value used as type
          --> main.plk:3:18
           |
+        1 | const forty_two = 42;
+          | --------------------- defined here
+        2 | init {
         3 |     let f = fn() forty_two { return 1; };
           |                  ^^^^^^^^^ expected type, got value of type `u256`
           |

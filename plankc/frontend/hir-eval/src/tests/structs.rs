@@ -292,6 +292,8 @@ fn test_comptime_struct_lit_type_not_type() {
         error: value used as type
          --> main.plk:2:11
           |
+        1 | const T = 42;
+          | ------------- defined here
         2 | const x = T { };
           |           ^ expected type, got value of type `u256`
         "#],
@@ -312,6 +314,9 @@ fn test_struct_lit_value_as_type_in_init() {
         error: value used as type
          --> main.plk:3:13
           |
+        1 | const T = 42;
+          | ------------- defined here
+        2 | init {
         3 |     let x = T { };
           |             ^ expected type, got value of type `u256`
         "#],
@@ -585,6 +590,8 @@ fn test_comptime_member_on_non_struct() {
         error: no fields on type
          --> main.plk:2:11
           |
+        1 | const x: u256 = 5;
+          | ------------------ defined here
         2 | const y = x.foo;
           |           ^ value of type `u256` is not a struct type
         "#],

@@ -218,7 +218,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            let type_loc = self.origin_loc(self.bindings[type_local].origin);
+            let type_loc = self.loc(self.bindings[type_local].use_span);
             self.type_check(value, expected_ty, type_loc, expr.span)?;
             Ok(value)
         });
@@ -254,7 +254,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(value);
             };
             let expected_ty = self.expect_type(type_local)?;
-            let type_loc = self.origin_loc(self.bindings[type_local].origin);
+            let type_loc = self.loc(self.bindings[type_local].use_span);
             self.type_check(value, expected_ty, type_loc, expr.span)?;
             Ok(value)
         });
@@ -537,9 +537,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn expr_origin(&self, expr: hir::Expr) -> DefOrigin {
-        if let ExprKind::ConstRef(id) = expr.kind
-            && self.hir.consts[id].source_id != self.source
-        {
+        if let ExprKind::ConstRef(id) = expr.kind {
             DefOrigin::Const(id)
         } else {
             DefOrigin::Local(expr.span)
@@ -548,21 +546,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     pub fn origin_loc(&self, origin: DefOrigin) -> SrcLoc {
         match origin {
-            DefOrigin::Local(span) => SrcLoc::new(self.source, span),
+            DefOrigin::Local(span) => self.loc(span),
             DefOrigin::Const(id) => self.hir.consts[id].loc(),
         }
     }
 
     pub fn binding_loc(&self, use_span: SourceSpan, origin: DefOrigin) -> BindingLoc {
-        let use_loc = self.loc(use_span);
+        let r#use = self.loc(use_span);
         match origin {
-            DefOrigin::Local(_) => BindingLoc::Inline(use_loc),
-            DefOrigin::Const(id) if self.hir.consts[id].source_id == self.source => {
-                BindingLoc::Inline(use_loc)
-            }
-            DefOrigin::Const(id) => {
-                BindingLoc::WithDef { use_loc, def_loc: self.hir.consts[id].loc() }
-            }
+            // Omit definition location for local defs (besides constants), to avoid having
+            // overlapping "cause" & "defined here" diagnostic notes.
+            DefOrigin::Local(_) => BindingLoc::inline(r#use),
+            DefOrigin::Const(id) => BindingLoc::with_def(r#use, self.hir.consts[id].loc()),
         }
     }
 
