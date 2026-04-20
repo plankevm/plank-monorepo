@@ -24,7 +24,7 @@ impl Scope<'_, '_> {
             }
             builtin => match builtin.kind() {
                 BuiltinKind::Comptime => self.eval_comptime_builtin(builtin, args, expr_span),
-                BuiltinKind::ComptimePolymorphic { .. } => {
+                BuiltinKind::ComptimeDynamic { .. } => {
                     self.eval_comptime_polymorphic_builtin(builtin, args, expr_span)
                 }
                 BuiltinKind::RuntimeFoldable | BuiltinKind::RuntimeOnly => {

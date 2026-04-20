@@ -7,7 +7,7 @@ pub enum BuiltinKind {
     RuntimeFoldable,
     RuntimeOnly,
     Comptime,
-    ComptimePolymorphic { arg_count: usize },
+    ComptimeDynamic { arg_count: usize },
 }
 
 macro_rules! define_builtins {
@@ -132,7 +132,7 @@ macro_rules! define_builtins {
                     Self::Runtime(runtime) if runtime.foldable() => BuiltinKind::RuntimeFoldable,
                     Self::Runtime(_) => BuiltinKind::RuntimeOnly,
                     $(Self::$ct_variant => BuiltinKind::Comptime,)*
-                    $(Self::$cp_variant => BuiltinKind::ComptimePolymorphic { arg_count: $cp_arg_count },)*
+                    $(Self::$cp_variant => BuiltinKind::ComptimeDynamic { arg_count: $cp_arg_count },)*
                 }
             }
         }

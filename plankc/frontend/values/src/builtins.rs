@@ -10,7 +10,7 @@ pub struct BuiltinSignature {
 
 pub fn arg_count(builtin: Builtin) -> usize {
     match builtin.kind() {
-        BuiltinKind::ComptimePolymorphic { arg_count } => arg_count,
+        BuiltinKind::ComptimeDynamic { arg_count } => arg_count,
         _ => builtin_signatures(builtin)[0].inputs.len(),
     }
 }
@@ -239,7 +239,7 @@ mod tests {
     fn test_builtin_signatures_not_empty() {
         for &builtin in Builtin::ALL {
             let sigs = builtin_signatures(builtin);
-            if matches!(builtin.kind(), BuiltinKind::ComptimePolymorphic { .. }) {
+            if matches!(builtin.kind(), BuiltinKind::ComptimeDynamic { .. }) {
                 continue;
             }
             assert!(!sigs.is_empty(), "{builtin:?} has no signatures");
@@ -254,7 +254,7 @@ mod tests {
     fn test_comptime_polymorphic_has_no_signatures() {
         for &builtin in Builtin::ALL {
             let sigs = builtin_signatures(builtin);
-            if !matches!(builtin.kind(), BuiltinKind::ComptimePolymorphic { .. }) {
+            if !matches!(builtin.kind(), BuiltinKind::ComptimeDynamic { .. }) {
                 continue;
             }
             assert!(sigs.is_empty(), "polymorphic builtin {builtin:?} has signatures");
