@@ -154,7 +154,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     }
 
     if !args.deps.iter().any(|(name, _)| name == "std")
-        && let Some(std_path) = plank_dir.map(|dir| dir.join("lib/std")).filter(|p| p.is_dir())
+        && let Some(std_path) = plank_dir.map(|dir| dir.join("stdlib")).filter(|p| p.is_dir())
     {
         driver.register_module("std", std_path);
     }

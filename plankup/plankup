@@ -4,7 +4,6 @@ set -euo pipefail
 PLANK_DIR="${PLANK_DIR:-$HOME/.plank}"
 PLANK_BIN_DIR="$PLANK_DIR/bin"
 PLANK_DOC_DIR="$PLANK_DIR/share/doc"
-PLANK_LIB_DIR="$PLANK_DIR/lib"
 
 REPO="plankevm/plank-monorepo"
 GITHUB_API="https://api.github.com/repos/$REPO/releases"
@@ -196,10 +195,9 @@ main() {
 
     # Install standard library
     if [ -d "$tmpdir/std" ]; then
-        mkdir -p "$PLANK_LIB_DIR"
-        rm -rf "$PLANK_LIB_DIR/std"
-        mv "$tmpdir/std" "$PLANK_LIB_DIR/std"
-        say "standard library installed to $PLANK_LIB_DIR/std"
+        rm -rf "$PLANK_DIR/stdlib"
+        mv "$tmpdir/std" "$PLANK_DIR/stdlib"
+        say "standard library installed to $PLANK_DIR/stdlib"
     fi
 
     # VS Code extension install/update

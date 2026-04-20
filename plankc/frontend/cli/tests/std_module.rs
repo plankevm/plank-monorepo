@@ -9,7 +9,7 @@ fn plank_bin() -> std::path::PathBuf {
 }
 
 fn create_std_dir(dir: &TempDir) {
-    let std_path = dir.path().join("lib/std");
+    let std_path = dir.path().join("stdlib");
     fs::create_dir_all(&std_path).unwrap();
     fs::write(
         std_path.join("math.plk"),
