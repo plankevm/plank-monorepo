@@ -114,6 +114,8 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -129,6 +131,9 @@ jobs:
             cp "$dir/plank" staging/
             if [ -d "artifacts/docs" ]; then
               cp -r artifacts/docs staging/book
+            fi
+            if [ -d "std" ]; then
+              cp -r std staging/std
             fi
             tar -czf "$asset_name" -C staging .
             rm -rf staging
