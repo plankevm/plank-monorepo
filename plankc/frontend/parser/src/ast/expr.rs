@@ -72,7 +72,7 @@ impl<'cst> Expr<'cst> {
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral { value, span },
                 NodeKind::NumLiteral { id } => Expr::NumLiteral { id, span },
                 NodeKind::Identifier { ident } => Expr::Ident { name: ident, span },
-                NodeKind::AtIdentifier { ident } => Expr::AtIdent { name: ident, span },
+                NodeKind::BuiltinName { ident } => Expr::AtIdent { name: ident, span },
                 NodeKind::Error => Expr::Error { span },
                 _ => return None,
             };

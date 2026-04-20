@@ -607,11 +607,11 @@ fn test_shadow_builtin() {
     let rendered = render_diagnostics("init { let @evm_add = 1; }");
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: unexpected @identifier
+        error: unexpected builtin name
          --> main.plk:1:12
           |
         1 | init { let @evm_add = 1; }
-          |            ^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
+          |            ^^^^^^^^ unexpected builtin name, expected one of `mut`, identifier
           |
           = help: `@name` syntax is reserved for builtins and cannot be used as an identifier
         "#,
@@ -744,11 +744,11 @@ fn test_at_ident_not_allowed_as_binding() {
     );
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: unexpected @identifier
+        error: unexpected builtin name
          --> main.plk:2:9
           |
         2 |     let @skibidi = 1;
-          |         ^^^^^^^^ unexpected @identifier, expected one of `mut`, identifier
+          |         ^^^^^^^^ unexpected builtin name, expected one of `mut`, identifier
           |
           = help: `@name` syntax is reserved for builtins and cannot be used as an identifier
         "#,

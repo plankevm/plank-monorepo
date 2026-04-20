@@ -395,7 +395,7 @@ impl<'a> Parser<'a> {
     fn try_parse_at_ident(&mut self) -> Option<NodeIdx> {
         if self.eat(Token::BuiltinName) {
             let ident = self.intern(self.tokens.current() - 1);
-            return Some(self.alloc_last_token_as_node(NodeKind::AtIdentifier { ident }));
+            return Some(self.alloc_last_token_as_node(NodeKind::BuiltinName { ident }));
         }
         None
     }
