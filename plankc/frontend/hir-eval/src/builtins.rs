@@ -316,21 +316,35 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
-        let instance_local = self.materialize_as_local(instance_state, instance_ty);
         let mir_fields = self.with_locals_buf(|this, locals_buf_offset| {
             for (cur_field_idx, &field) in (0..).zip(r#struct.fields) {
                 let local = if cur_field_idx == field_index {
                     this.materialize_as_local(new_value_state, expected_field_type)
                 } else {
-                    let target = this.mir_types.push(field.ty);
-                    this.emit(mir::Instruction::Set {
-                        target,
-                        expr: mir::Expr::FieldAccess {
-                            object: instance_local,
-                            field_index: cur_field_idx,
+                    let field_state = match instance_state {
+                        LocalState::Comptime(vid) => match this.eval.values.lookup(vid) {
+                            Value::StructVal { fields, .. } => {
+                                LocalState::Comptime(fields[cur_field_idx as usize])
+                            }
+                            Value::Uninit(_) => {
+                                let uninit_vid = this.eval.values.intern(Value::Uninit(field.ty));
+                                LocalState::Comptime(uninit_vid)
+                            }
+                            _ => unreachable!("invariant: type checked as struct"),
                         },
-                    });
-                    target
+                        LocalState::Runtime(instance_local) => {
+                            let target = this.mir_types.push(field.ty);
+                            this.emit(mir::Instruction::Set {
+                                target,
+                                expr: mir::Expr::FieldAccess {
+                                    object: instance_local,
+                                    field_index: cur_field_idx,
+                                },
+                            });
+                            LocalState::Runtime(target)
+                        }
+                    };
+                    this.materialize_as_local(field_state, field.ty)
                 };
                 this.locals_buf.push(local);
             }

@@ -1103,15 +1103,11 @@ fn test_set_field_comptime_struct_runtime_value() {
             %0 : u256 = 0
             %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : Pair = struct#0 {
-                1,
-                2,
-            }
-            %4 : u256 = %3.1
-            %5 : Pair = Pair { %2, %4 }
-            %6 : Pair = %5
-            %7 : u256 = %6.0
-            %8 : never = @evm_stop()
+            %3 : u256 = 2
+            %4 : Pair = Pair { %2, %3 }
+            %5 : Pair = %4
+            %6 : u256 = %5.0
+            %7 : never = @evm_stop()
         }
         "#,
     );
@@ -1209,14 +1205,13 @@ fn test_uninit_struct_runtime_set_field() {
             %0 : u256 = 0
             %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : Pair = uninit(Pair)
-            %4 : u256 = %3.1
-            %5 : Pair = Pair { %2, %4 }
-            %6 : Pair = %5
-            %7 : u256 = %6.0
-            %8 : Pair = %5
-            %9 : u256 = %8.1
-            %10 : never = @evm_stop()
+            %3 : u256 = uninit(u256)
+            %4 : Pair = Pair { %2, %3 }
+            %5 : Pair = %4
+            %6 : u256 = %5.0
+            %7 : Pair = %4
+            %8 : u256 = %7.1
+            %9 : never = @evm_stop()
         }
         "#,
     );
