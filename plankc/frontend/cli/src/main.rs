@@ -1,3 +1,6 @@
+#[cfg(test)]
+use tempfile as _;
+
 use clap::{Parser, Subcommand};
 use owo_colors::OwoColorize;
 use plank_driver::Driver;

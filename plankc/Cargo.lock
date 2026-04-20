@@ -1876,6 +1876,7 @@ dependencies = [
  "plank-session",
  "plank-source",
  "sir-passes",
+ "tempfile",
 ]
 
 [[package]]
