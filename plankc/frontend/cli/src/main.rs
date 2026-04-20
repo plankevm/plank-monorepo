@@ -74,19 +74,27 @@ fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {
 
 fn main() {
     let cli = Cli::parse();
+    let plank_dir = resolve_plank_dir();
 
     match cli.action {
-        Action::Build(args) => build(args),
-        Action::Doc { topic } => doc(topic),
+        Action::Build(args) => build(plank_dir, args),
+        Action::Doc { topic } => {
+            let doc_dir = plank_dir
+                .unwrap_or_else(|| cli_error_and_exit("neither $PLANK_DIR or $HOME set"))
+                .join("share/doc");
+            doc(doc_dir, topic);
+        }
     }
 }
 
-fn doc(topic: Option<String>) {
-    let plank_dir = std::env::var("PLANK_DIR")
+fn resolve_plank_dir() -> Option<PathBuf> {
+    std::env::var("PLANK_DIR")
         .or_else(|_| std::env::var("HOME").map(|home| format!("{}/.plank", home)))
-        .unwrap_or_else(|_| cli_error_and_exit("neither $PLANK_DIR or $HOME set"));
-    let doc_dir = PathBuf::from(plank_dir).join("share/doc");
+        .ok()
+        .map(PathBuf::from)
+}
 
+fn doc(doc_dir: PathBuf, topic: Option<String>) {
     let file = match &topic {
         Some(t) => doc_dir.join(format!("{t}.html")),
         None => doc_dir.join("index.html"),
@@ -103,8 +111,12 @@ fn doc(topic: Option<String>) {
                 "error".red()
             );
             anstream::eprintln!(
-                "{}: Run 'plankup' to install the latest version with docs.",
-                "info".bright_blue()
+                "{}: Install docs with plankup, the Plank installer",
+                "help".bright_blue()
+            );
+            anstream::eprintln!(
+                "{}: See https://github.com/plankevm/plank-monorepo for installation instructions",
+                "note".bright_blue()
             );
             std::process::exit(1);
         }
@@ -117,7 +129,7 @@ fn doc(topic: Option<String>) {
         .unwrap_or_else(|_| cli_error_and_exit(format!("`{opener}` failed to open documentation")));
 }
 
-fn build(args: BuildArgs) {
+fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
 
     if let Some(name) = &args.module_name {
@@ -135,6 +147,13 @@ fn build(args: BuildArgs) {
         };
         driver.register_module(name, root);
     }
+
+    if !args.deps.iter().any(|(name, _)| name == "std")
+        && let Some(std_path) = plank_dir.map(|dir| dir.join("lib/std")).filter(|p| p.is_dir())
+    {
+        driver.register_module("std", std_path);
+    }
+
     for (name, path) in &args.deps {
         driver.register_module(name, path.clone());
     }

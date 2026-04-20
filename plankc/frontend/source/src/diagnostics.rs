@@ -28,9 +28,17 @@ pub fn error_failed_to_resolve_import(
     match error {
         ModuleResolveError::UnknownModule(name) => {
             let name = session.lookup_name(*name);
-            Diagnostic::error("unresolved import")
-                .primary(source_id, span, format!("unknown module '{name}'"))
-                .emit(session)
+            let mut diagnostic = Diagnostic::error("unresolved import").primary(
+                source_id,
+                span,
+                format!("unknown module '{name}'"),
+            );
+            if name == "std" {
+                diagnostic = diagnostic
+                    .help("the 'std' module is included with plankup, the Plank installer")
+                    .note("see https://github.com/plankevm/plank-monorepo for installation instructions");
+            }
+            diagnostic.emit(session)
         }
         ModuleResolveError::NotEnoughSegments => Diagnostic::error("unresolved import")
             .primary(source_id, span, "import path is too short")

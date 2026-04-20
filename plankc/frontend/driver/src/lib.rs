@@ -125,6 +125,35 @@ error: unresolved import
     }
 
     #[test]
+    fn unknown_std_module_import_emits_diagnostic_with_help() {
+        let mut fs = InMemoryFs::new();
+        fs.add_file(
+            "main.plk",
+            r#"import std::math::max;
+init {}
+"#
+            .to_string(),
+        );
+
+        let mut driver = Driver::new(&fs);
+        driver.load_project(Path::new("main.plk"));
+
+        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
+        pretty_assertions::assert_str_eq!(
+            rendered.trim(),
+            "\
+error: unresolved import
+ --> main.plk:1:8
+  |
+1 | import std::math::max;
+  |        ^^^ unknown module 'std'
+  |
+  = help: the 'std' module is included with plankup, the Plank installer
+  = note: see https://github.com/plankevm/plank-monorepo for installation instructions"
+        );
+    }
+
+    #[test]
     fn imported_file_not_found_emits_diagnostic() {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
