@@ -211,7 +211,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::FieldCount => &[sig!([TYPE => U256])],
 
         // Comptime dynamic — no fixed signatures
-        B::FieldType | B::GetField | B::SetField => &[],
+        B::FieldType | B::GetField | B::SetField | B::Uninit => &[],
     }
 }
 

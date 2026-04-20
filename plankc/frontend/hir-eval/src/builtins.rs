@@ -3,7 +3,8 @@ use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
 use plank_values::{
-    Field, StructView, Type, TypeId, Value, ValueId, ValueInterner, builtins as builtin_sigs,
+    Field, PrimitiveType, StructView, Type, TypeId, Value, ValueId, ValueInterner,
+    builtins as builtin_sigs,
 };
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};
@@ -205,6 +206,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::FieldType => self.eval_field_type(hir_args, builtin, expr_span),
             Builtin::GetField => self.eval_get_field(hir_args, builtin, expr_span),
             Builtin::SetField => self.eval_set_field(hir_args, builtin, expr_span),
+            Builtin::Uninit => self.eval_uninit(hir_args, builtin, expr_span),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -332,6 +334,25 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             expr: mir::Expr::StructLit { ty: instance_ty, fields: mir_fields },
             result_type: instance_ty,
         }))
+    }
+
+    fn eval_uninit(
+        &mut self,
+        args: &[hir::LocalId],
+        builtin: Builtin,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
+        match ty.as_primitive() {
+            Ok(PrimitiveType::U256)
+            | Ok(PrimitiveType::Bool)
+            | Ok(PrimitiveType::MemoryPointer)
+            | Err(_) => Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty))))),
+            Ok(primitive_ty) => {
+                self.diag_ctx.emit_invalid_uninit_type(primitive_ty, self.loc(expr_span));
+                Err(Poisoned)
+            }
+        }
     }
 
     fn resolve_struct_field_index(

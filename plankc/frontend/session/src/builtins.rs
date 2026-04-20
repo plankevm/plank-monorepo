@@ -346,10 +346,10 @@ define_builtins! {
     }
 
     comptime_dynamic_builtins {
-        // Type Reflection
         FIELD_TYPE "@field_type" => FieldType(2);
         GET_FIELD "@get_field" => GetField(2);
         SET_FIELD "@set_field" => SetField(3);
+        UNINIT "@uninit" => Uninit(1);
     }
 }
 
