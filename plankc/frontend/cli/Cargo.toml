@@ -21,4 +21,4 @@ owo-colors = "4.3.0"
 
 [dev-dependencies]
 tempfile.workspace = true
-
+plank-test-utils.workspace = true

@@ -1875,6 +1875,7 @@ dependencies = [
  "plank-parser",
  "plank-session",
  "plank-source",
+ "plank-test-utils",
  "sir-passes",
  "tempfile",
 ]

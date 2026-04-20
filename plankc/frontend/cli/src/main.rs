@@ -1,4 +1,6 @@
 #[cfg(test)]
+use plank_test_utils as _;
+#[cfg(test)]
 use tempfile as _;
 
 use clap::{Parser, Subcommand};

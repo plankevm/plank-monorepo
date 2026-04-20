@@ -1,5 +1,6 @@
 #![allow(unused_crate_dependencies)]
 
+use plank_test_utils::dedent_preserve_indent;
 use std::{fs, process::Command};
 use tempfile::TempDir;
 
@@ -12,16 +13,19 @@ fn create_std_dir(dir: &TempDir) {
     fs::create_dir_all(&std_path).unwrap();
     fs::write(
         std_path.join("math.plk"),
-        r#"const max = fn (a: u256, b: u256) u256 {
-    if gt(a, b) { a } else { b }
-};
-"#,
+        dedent_preserve_indent(
+            r#"
+            const max = fn (a: u256, b: u256) u256 {
+                if @evm_gt(a, b) { a } else { b }
+            };
+            "#,
+        ),
     )
     .unwrap();
 }
 
 #[test]
-fn auto_registers_std_from_plank_dir() {
+fn test_auto_registers_std_from_plank_dir() {
     let plank_dir = TempDir::new().unwrap();
     create_std_dir(&plank_dir);
 
@@ -29,13 +33,16 @@ fn auto_registers_std_from_plank_dir() {
     let source_file = source_dir.path().join("main.plk");
     fs::write(
         &source_file,
-        r#"import std::math::max;
+        dedent_preserve_indent(
+            r#"
+            import std::math::max;
 
-init {
-    let a = max(1, 2);
-    evm_stop();
-}
-"#,
+            init {
+                let a = max(1, 2);
+                @evm_stop();
+            }
+            "#,
+        ),
     )
     .unwrap();
 
@@ -50,17 +57,20 @@ init {
 }
 
 #[test]
-fn explicit_dep_overrides_plank_dir_std() {
+fn test_explicit_dep_overrides_plank_dir_std() {
     let plank_dir = TempDir::new().unwrap();
     create_std_dir(&plank_dir);
 
     let custom_std = TempDir::new().unwrap();
     fs::write(
         custom_std.path().join("math.plk"),
-        r#"const skibidi_max = fn (a: u256, b: u256) u256 {
-    if gt(a, b) { a } else { b }
-};
-"#,
+        dedent_preserve_indent(
+            r#"
+            const skibidi_max = fn (a: u256, b: u256) u256 {
+                if @evm_gt(a, b) { a } else { b }
+            };
+            "#,
+        ),
     )
     .unwrap();
 
@@ -68,13 +78,16 @@ fn explicit_dep_overrides_plank_dir_std() {
     let source_file = source_dir.path().join("main.plk");
     fs::write(
         &source_file,
-        r#"import std::math::skibidi_max;
+        dedent_preserve_indent(
+            r#"
+            import std::math::skibidi_max;
 
-init {
-    let a = skibidi_max(1, 2);
-    evm_stop();
-}
-"#,
+            init {
+                let a = skibidi_max(1, 2);
+                @evm_stop();
+            }
+            "#,
+        ),
     )
     .unwrap();
 
