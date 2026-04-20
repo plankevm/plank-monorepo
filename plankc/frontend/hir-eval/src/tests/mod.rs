@@ -22,11 +22,7 @@ fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
     (mir, big_nums, session)
 }
 
-fn assert_lowers_to(source: &str, expected: &str) {
-    assert_project_lowers_to(source, expected)
-}
-
-fn assert_project_lowers_to(project: impl Into<TestProject>, expected: &str) {
+fn assert_lowers_to(project: impl Into<TestProject>, expected: &str) {
     let (mir, big_nums, session) = try_lower(project);
 
     if session.has_errors() {

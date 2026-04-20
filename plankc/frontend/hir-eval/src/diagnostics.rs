@@ -644,11 +644,4 @@ impl DiagCtx<'_> {
             .primary(call.source, call.span, "call that recurses with identical arguments")
             .emit(self.session);
     }
-
-    pub fn emit_invalid_uninit_type(&mut self, ty: PrimitiveType, loc: SrcLoc) {
-        Diagnostic::error("cannot create uninitialized value")
-            .primary(loc.source, loc.span, format!("type '{}' cannot be uninitialized", ty.name()))
-            .help("@uninit only supports u256, bool, memptr, and struct types")
-            .emit(self);
-    }
 }

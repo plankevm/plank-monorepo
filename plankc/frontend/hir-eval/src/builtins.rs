@@ -363,17 +363,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         builtin: Builtin,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let ty = self.expect_type_arg(args[0], builtin, expr_span)?;
-        match ty.as_primitive() {
-            Ok(PrimitiveType::U256)
-            | Ok(PrimitiveType::Bool)
-            | Ok(PrimitiveType::MemoryPointer)
-            | Err(_) => Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty))))),
-            Ok(primitive_ty) => {
-                self.diag_ctx.emit_invalid_uninit_type(primitive_ty, self.loc(expr_span));
-                Err(Poisoned)
-            }
-        }
+        let &[ty_local] = args else { unreachable!("arg count checked") };
+        let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+        Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty)))))
     }
 
     fn resolve_struct_field_index(

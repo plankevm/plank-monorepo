@@ -461,7 +461,7 @@ fn test_cross_file_type_mismatch() {
 
 #[test]
 fn test_import_group_symbols_accessible() {
-    assert_project_lowers_to(
+    assert_lowers_to(
         TestProject::root(
             r#"
             import m::other::{f, g as my_g};

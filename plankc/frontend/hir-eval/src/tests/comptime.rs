@@ -1218,20 +1218,25 @@ fn test_uninit_struct_runtime_set_field() {
 }
 
 #[test]
-fn test_uninit_invalid_type() {
-    assert_diagnostics(
+fn test_uninit_nested_struct() {
+    assert_lowers_to(
         r#"
-        const x = @uninit(void);
-        init { @evm_stop(); }
+        const Inner = struct { a: u256, b: void };
+        const Outer = struct { x: Inner, y: memptr };
+
+        init {
+            let mut a = @uninit(Outer);
+            let mut b = a.x;
+            a = Outer {
+                x: Inner { a: 34, b: {}, },
+                y: @malloc_uninit(34)
+            };
+            @evm_stop();
+        }
         "#,
-        &[r#"
-        error: cannot create uninitialized value
-         --> main.plk:1:11
-          |
-        1 | const x = @uninit(void);
-          |           ^^^^^^^^^^^^^ type 'void' cannot be uninitialized
-          |
-          = help: @uninit only supports u256, bool, memptr, and struct types
-        "#],
+        r#"
+        ==== Functions ====
+        ; init
+        "#,
     );
 }
