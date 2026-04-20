@@ -61,20 +61,16 @@ macro_rules! define_builtins {
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub enum Builtin {
+        pub enum RuntimeBuiltin {
             $($rf_variant,)*
             $($ro_variant,)*
-            $($ct_variant,)*
-            $($cp_variant,)*
         }
 
-        impl Builtin {
+        impl RuntimeBuiltin {
             pub fn from_str_id(id: StrId) -> Option<Self> {
                 Some(match id {
-                    $($rf_const => Builtin::$rf_variant,)*
-                    $($ro_const => Builtin::$ro_variant,)*
-                    $($ct_const => Builtin::$ct_variant,)*
-                    $($cp_const => Builtin::$cp_variant,)*
+                    $($rf_const => RuntimeBuiltin::$rf_variant,)*
+                    $($ro_const => RuntimeBuiltin::$ro_variant,)*
                     _ => return None,
                 })
             }
@@ -83,6 +79,49 @@ macro_rules! define_builtins {
                 match self {
                     $(Self::$rf_variant => $rf_str,)*
                     $(Self::$ro_variant => $ro_str,)*
+                }
+            }
+
+            pub fn foldable(self) -> bool {
+                match self {
+                    $(Self::$rf_variant => true,)*
+                    $(Self::$ro_variant => false,)*
+                }
+            }
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Builtin {
+            Runtime(RuntimeBuiltin),
+            $($ct_variant,)*
+            $($cp_variant,)*
+        }
+
+        impl Builtin {
+            $(pub const $rf_const: Builtin = Builtin::Runtime(RuntimeBuiltin::$rf_variant);)*
+            $(pub const $ro_const: Builtin = Builtin::Runtime(RuntimeBuiltin::$ro_variant);)*
+
+            pub const ALL: &[Builtin] = &[
+                $(Builtin::Runtime(RuntimeBuiltin::$rf_variant),)*
+                $(Builtin::Runtime(RuntimeBuiltin::$ro_variant),)*
+                $(Builtin::$ct_variant,)*
+                $(Builtin::$cp_variant,)*
+            ];
+
+            pub fn from_str_id(id: StrId) -> Option<Self> {
+                if let Some(runtime) = RuntimeBuiltin::from_str_id(id) {
+                    return Some(Builtin::Runtime(runtime));
+                }
+                Some(match id {
+                    $($ct_const => Builtin::$ct_variant,)*
+                    $($cp_const => Builtin::$cp_variant,)*
+                    _ => return None,
+                })
+            }
+
+            pub fn name(self) -> &'static str {
+                match self {
+                    Self::Runtime(runtime) => runtime.name(),
                     $(Self::$ct_variant => $ct_str,)*
                     $(Self::$cp_variant => $cp_str,)*
                 }
@@ -90,49 +129,33 @@ macro_rules! define_builtins {
 
             pub fn kind(self) -> BuiltinKind {
                 match self {
-                    $(Self::$rf_variant => BuiltinKind::RuntimeFoldable,)*
-                    $(Self::$ro_variant => BuiltinKind::RuntimeOnly,)*
+                    Self::Runtime(runtime) if runtime.foldable() => BuiltinKind::RuntimeFoldable,
+                    Self::Runtime(_) => BuiltinKind::RuntimeOnly,
                     $(Self::$ct_variant => BuiltinKind::Comptime,)*
                     $(Self::$cp_variant => BuiltinKind::ComptimePolymorphic { arg_count: $cp_arg_count },)*
                 }
             }
         }
 
-        impl Display for Builtin {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(self.name())
-            }
-        }
-
-        /// A [`Builtin`] that is statically known to be runtime-only.
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub struct RuntimeBuiltin(Builtin);
-
-        #[allow(non_upper_case_globals)]
-        impl RuntimeBuiltin {
-            $(pub const $rf_variant: Self = Self(Builtin::$rf_variant);)*
-            $(pub const $ro_variant: Self = Self(Builtin::$ro_variant);)*
-
-            pub fn inner(self) -> Builtin { self.0 }
-        }
-
-        impl TryFrom<Builtin> for RuntimeBuiltin {
-            type Error = ();
-            fn try_from(b: Builtin) -> Result<Self, Self::Error> {
-                match b.kind() {
-                    BuiltinKind::RuntimeFoldable | BuiltinKind::RuntimeOnly => Ok(Self(b)),
-                    BuiltinKind::Comptime | BuiltinKind::ComptimePolymorphic { .. } => Err(()),
-                }
-            }
-        }
-
-        impl Display for RuntimeBuiltin {
-            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-
     };
+}
+
+impl Display for RuntimeBuiltin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl Display for Builtin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl From<RuntimeBuiltin> for Builtin {
+    fn from(value: RuntimeBuiltin) -> Self {
+        Self::Runtime(value)
+    }
 }
 
 define_builtins! {
@@ -342,8 +365,8 @@ mod tests {
 
     #[test]
     fn test_builtin_roundtrip() {
-        assert_eq!(Builtin::from_str_id(ADD), Some(Builtin::Add));
-        assert_eq!(Builtin::from_str_id(KECCAK256), Some(Builtin::Keccak256));
+        assert_eq!(Builtin::from_str_id(ADD), Some(Builtin::ADD));
+        assert_eq!(Builtin::from_str_id(KECCAK256), Some(Builtin::KECCAK256));
         assert_eq!(Builtin::from_str_id(VOID), None);
     }
 }

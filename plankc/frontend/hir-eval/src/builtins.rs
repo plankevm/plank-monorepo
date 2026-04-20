@@ -14,21 +14,29 @@ impl Scope<'_, '_> {
         args: hir::CallArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        match builtin.kind() {
-            BuiltinKind::RuntimeFoldable => {
-                self.eval_runtime_foldable_builtin(builtin, args, expr_span)
+        match builtin {
+            Builtin::Runtime(runtime) => {
+                if runtime.foldable() {
+                    self.eval_runtime_foldable_builtin(runtime, args, expr_span)
+                } else {
+                    self.eval_runtime_only_builtin(runtime, args, expr_span)
+                }
             }
-            BuiltinKind::RuntimeOnly => self.eval_runtime_only_builtin(builtin, args, expr_span),
-            BuiltinKind::Comptime => self.eval_comptime_builtin(builtin, args, expr_span),
-            BuiltinKind::ComptimePolymorphic { .. } => {
-                self.eval_comptime_polymorphic_builtin(builtin, args, expr_span)
-            }
+            builtin => match builtin.kind() {
+                BuiltinKind::Comptime => self.eval_comptime_builtin(builtin, args, expr_span),
+                BuiltinKind::ComptimePolymorphic { .. } => {
+                    self.eval_comptime_polymorphic_builtin(builtin, args, expr_span)
+                }
+                BuiltinKind::RuntimeFoldable | BuiltinKind::RuntimeOnly => {
+                    unreachable!("already matched")
+                }
+            },
         }
     }
 
     fn eval_runtime_foldable_builtin(
         &mut self,
-        builtin: Builtin,
+        builtin: RuntimeBuiltin,
         args: hir::CallArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
@@ -66,7 +74,7 @@ impl Scope<'_, '_> {
 
     fn eval_runtime_only_builtin(
         &mut self,
-        builtin: Builtin,
+        builtin: RuntimeBuiltin,
         args: hir::CallArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
@@ -86,7 +94,7 @@ impl Scope<'_, '_> {
 
     fn resolve_runtime_builtin_result_type(
         &mut self,
-        builtin: Builtin,
+        builtin: RuntimeBuiltin,
         args: hir::CallArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<TypeId> {
@@ -99,9 +107,9 @@ impl Scope<'_, '_> {
             }
 
             let arg_types = &this.eval.types_buf[types_buf_offset..];
-            builtin_sigs::resolve_result_type(builtin, arg_types).ok_or_else(|| {
+            builtin_sigs::resolve_result_type(builtin.into(), arg_types).ok_or_else(|| {
                 this.diag_ctx.emit_no_matching_builtin_signature(
-                    builtin,
+                    builtin.into(),
                     &this.eval.types_buf[types_buf_offset..],
                     expr_loc,
                 );
@@ -112,7 +120,7 @@ impl Scope<'_, '_> {
 
     fn emit_runtime_builtin_mir(
         &mut self,
-        builtin: Builtin,
+        builtin: RuntimeBuiltin,
         args: hir::CallArgsId,
         result_type: TypeId,
     ) -> Result<EvalValue, Diverge> {
@@ -134,11 +142,7 @@ impl Scope<'_, '_> {
             this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
         });
 
-        let expr = mir::Expr::RuntimeBuiltinCall {
-            builtin: RuntimeBuiltin::try_from(builtin)
-                .expect("dispatched via RuntimeFoldable/RuntimeOnly kind"),
-            args: mir_args,
-        };
+        let expr = mir::Expr::RuntimeBuiltinCall { builtin, args: mir_args };
         if result_type == TypeId::NEVER {
             // We diverge after this so we need to make sure the call is actually included.
             let target = self.mir_types.push(result_type);
@@ -417,15 +421,17 @@ impl Scope<'_, '_> {
     }
 }
 
-fn fold_runtime_builtin(builtin: Builtin, args: &[ValueId], values: &mut ValueInterner) -> ValueId {
-    use Builtin::*;
-
+fn fold_runtime_builtin(
+    builtin: RuntimeBuiltin,
+    args: &[ValueId],
+    values: &mut ValueInterner,
+) -> ValueId {
     match *args {
         [a] => {
             let a = as_u256(values, a);
             match builtin {
-                IsZero => plank_evm::iszero(a).into(),
-                Not => values.intern_num(plank_evm::not(a)),
+                RuntimeBuiltin::IsZero => plank_evm::iszero(a).into(),
+                RuntimeBuiltin::Not => values.intern_num(plank_evm::not(a)),
                 _ => unreachable!("not a unary foldable builtin: {builtin}"),
             }
         }
@@ -433,27 +439,27 @@ fn fold_runtime_builtin(builtin: Builtin, args: &[ValueId], values: &mut ValueIn
             let a = as_u256(values, a);
             let b = as_u256(values, b);
             match builtin {
-                Add => values.intern_num(plank_evm::add(a, b)),
-                Mul => values.intern_num(plank_evm::mul(a, b)),
-                Sub => values.intern_num(plank_evm::sub(a, b)),
-                Div => values.intern_num(plank_evm::div(a, b)),
-                SDiv => values.intern_num(plank_evm::sdiv(a, b)),
-                Mod => values.intern_num(plank_evm::r#mod(a, b)),
-                SMod => values.intern_num(plank_evm::smod(a, b)),
-                Exp => values.intern_num(plank_evm::exp(a, b)),
-                SignExtend => values.intern_num(plank_evm::signextend(a, b)),
-                Lt => plank_evm::lt(a, b).into(),
-                Gt => plank_evm::gt(a, b).into(),
-                SLt => plank_evm::slt(a, b).into(),
-                SGt => plank_evm::sgt(a, b).into(),
-                Eq => plank_evm::eq(a, b).into(),
-                And => values.intern_num(plank_evm::and(a, b)),
-                Or => values.intern_num(plank_evm::or(a, b)),
-                Xor => values.intern_num(plank_evm::xor(a, b)),
-                Byte => values.intern_num(plank_evm::byte(a, b)),
-                Shl => values.intern_num(plank_evm::shl(a, b)),
-                Shr => values.intern_num(plank_evm::shr(a, b)),
-                Sar => values.intern_num(plank_evm::sar(a, b)),
+                RuntimeBuiltin::Add => values.intern_num(plank_evm::add(a, b)),
+                RuntimeBuiltin::Mul => values.intern_num(plank_evm::mul(a, b)),
+                RuntimeBuiltin::Sub => values.intern_num(plank_evm::sub(a, b)),
+                RuntimeBuiltin::Div => values.intern_num(plank_evm::div(a, b)),
+                RuntimeBuiltin::SDiv => values.intern_num(plank_evm::sdiv(a, b)),
+                RuntimeBuiltin::Mod => values.intern_num(plank_evm::r#mod(a, b)),
+                RuntimeBuiltin::SMod => values.intern_num(plank_evm::smod(a, b)),
+                RuntimeBuiltin::Exp => values.intern_num(plank_evm::exp(a, b)),
+                RuntimeBuiltin::SignExtend => values.intern_num(plank_evm::signextend(a, b)),
+                RuntimeBuiltin::Lt => plank_evm::lt(a, b).into(),
+                RuntimeBuiltin::Gt => plank_evm::gt(a, b).into(),
+                RuntimeBuiltin::SLt => plank_evm::slt(a, b).into(),
+                RuntimeBuiltin::SGt => plank_evm::sgt(a, b).into(),
+                RuntimeBuiltin::Eq => plank_evm::eq(a, b).into(),
+                RuntimeBuiltin::And => values.intern_num(plank_evm::and(a, b)),
+                RuntimeBuiltin::Or => values.intern_num(plank_evm::or(a, b)),
+                RuntimeBuiltin::Xor => values.intern_num(plank_evm::xor(a, b)),
+                RuntimeBuiltin::Byte => values.intern_num(plank_evm::byte(a, b)),
+                RuntimeBuiltin::Shl => values.intern_num(plank_evm::shl(a, b)),
+                RuntimeBuiltin::Shr => values.intern_num(plank_evm::shr(a, b)),
+                RuntimeBuiltin::Sar => values.intern_num(plank_evm::sar(a, b)),
                 _ => unreachable!("not a binary foldable builtin: {builtin}"),
             }
         }
@@ -462,8 +468,8 @@ fn fold_runtime_builtin(builtin: Builtin, args: &[ValueId], values: &mut ValueIn
             let b = as_u256(values, b);
             let c = as_u256(values, c);
             match builtin {
-                AddMod => values.intern_num(plank_evm::addmod(a, b, c)),
-                MulMod => values.intern_num(plank_evm::mulmod(a, b, c)),
+                RuntimeBuiltin::AddMod => values.intern_num(plank_evm::addmod(a, b, c)),
+                RuntimeBuiltin::MulMod => values.intern_num(plank_evm::mulmod(a, b, c)),
                 _ => unreachable!("not a ternary foldable builtin: {builtin}"),
             }
         }

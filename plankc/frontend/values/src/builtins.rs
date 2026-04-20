@@ -1,4 +1,4 @@
-use plank_session::{Builtin, StrId, builtins::BuiltinKind};
+use plank_session::{Builtin, RuntimeBuiltin, StrId, builtins::BuiltinKind};
 
 use crate::TypeId;
 
@@ -43,7 +43,9 @@ macro_rules! sig {
 }
 
 pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
-    use Builtin::*;
+    use Builtin as B;
+    use RuntimeBuiltin as RB;
+
     const U256: TypeId = TypeId::U256;
     const BOOL: TypeId = TypeId::BOOL;
     const MP: TypeId = TypeId::MEMORY_POINTER;
@@ -53,159 +55,163 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
 
     match builtin {
         // Runtime foldable
-        Add => &[sig!([U256, U256 => U256]), sig!([MP, U256 => MP]), sig!([U256, MP => MP])],
-        Mul => &[sig!([U256, U256 => U256])],
-        Sub => &[sig!([U256, U256 => U256]), sig!([MP, U256 => MP]), sig!([MP, MP => U256])],
-        Div => &[sig!([U256, U256 => U256])],
-        SDiv => &[sig!([U256, U256 => U256])],
-        Mod => &[sig!([U256, U256 => U256])],
-        SMod => &[sig!([U256, U256 => U256])],
-        AddMod => &[sig!([U256, U256, U256 => U256])],
-        MulMod => &[sig!([U256, U256, U256 => U256])],
-        Exp => &[sig!([U256, U256 => U256])],
-        SignExtend => &[sig!([U256, U256 => U256])],
-        Lt => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
-        Gt => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
-        SLt => &[sig!([U256, U256 => BOOL])],
-        SGt => &[sig!([U256, U256 => BOOL])],
-        Eq => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
-        IsZero => &[sig!([U256 => BOOL])],
-        And => &[sig!([U256, U256 => U256])],
-        Or => &[sig!([U256, U256 => U256])],
-        Xor => &[sig!([U256, U256 => U256])],
-        Not => &[sig!([U256 => U256])],
-        Byte => &[sig!([U256, U256 => U256])],
-        Shl => &[sig!([U256, U256 => U256])],
-        Shr => &[sig!([U256, U256 => U256])],
-        Sar => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Add) => {
+            &[sig!([U256, U256 => U256]), sig!([MP, U256 => MP]), sig!([U256, MP => MP])]
+        }
+        B::Runtime(RB::Mul) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Sub) => {
+            &[sig!([U256, U256 => U256]), sig!([MP, U256 => MP]), sig!([MP, MP => U256])]
+        }
+        B::Runtime(RB::Div) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::SDiv) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Mod) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::SMod) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::AddMod) => &[sig!([U256, U256, U256 => U256])],
+        B::Runtime(RB::MulMod) => &[sig!([U256, U256, U256 => U256])],
+        B::Runtime(RB::Exp) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::SignExtend) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Lt) => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
+        B::Runtime(RB::Gt) => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
+        B::Runtime(RB::SLt) => &[sig!([U256, U256 => BOOL])],
+        B::Runtime(RB::SGt) => &[sig!([U256, U256 => BOOL])],
+        B::Runtime(RB::Eq) => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
+        B::Runtime(RB::IsZero) => &[sig!([U256 => BOOL])],
+        B::Runtime(RB::And) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Or) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Xor) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Not) => &[sig!([U256 => U256])],
+        B::Runtime(RB::Byte) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Shl) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Shr) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::Sar) => &[sig!([U256, U256 => U256])],
 
         // Runtime only
-        Keccak256 => &[sig!([MP, U256 => U256])],
-        Address => &[sig!([=> U256])],
-        Balance => &[sig!([U256 => U256])],
-        Origin => &[sig!([=> U256])],
-        Caller => &[sig!([=> U256])],
-        CallValue => &[sig!([=> U256])],
-        CallDataLoad => &[sig!([U256 => U256])],
-        CallDataSize => &[sig!([=> U256])],
-        CallDataCopy => &[sig!([MP, U256, U256 => VOID])],
-        CodeSize => &[sig!([=> U256])],
-        CodeCopy => &[sig!([MP, U256, U256 => VOID])],
-        GasPrice => &[sig!([=> U256])],
-        ExtCodeSize => &[sig!([U256 => U256])],
-        ExtCodeCopy => &[sig!([U256, MP, U256, U256 => VOID])],
-        ReturnDataSize => &[sig!([=> U256])],
-        ReturnDataCopy => &[sig!([MP, U256, U256 => VOID])],
-        ExtCodeHash => &[sig!([U256 => U256])],
-        Gas => &[sig!([=> U256])],
-        BlockHash => &[sig!([U256 => U256])],
-        Coinbase => &[sig!([=> U256])],
-        Timestamp => &[sig!([=> U256])],
-        Number => &[sig!([=> U256])],
-        Difficulty => &[sig!([=> U256])],
-        GasLimit => &[sig!([=> U256])],
-        ChainId => &[sig!([=> U256])],
-        SelfBalance => &[sig!([=> U256])],
-        BaseFee => &[sig!([=> U256])],
-        BlobHash => &[sig!([U256 => U256])],
-        BlobBaseFee => &[sig!([=> U256])],
-        SLoad => &[sig!([U256 => U256])],
-        SStore => &[sig!([U256, U256 => VOID])],
-        TLoad => &[sig!([U256 => U256])],
-        TStore => &[sig!([U256, U256 => VOID])],
-        Log0 => &[sig!([MP, U256 => VOID])],
-        Log1 => &[sig!([MP, U256, U256 => VOID])],
-        Log2 => &[sig!([MP, U256, U256, U256 => VOID])],
-        Log3 => &[sig!([MP, U256, U256, U256, U256 => VOID])],
-        Log4 => &[sig!([MP, U256, U256, U256, U256, U256 => VOID])],
-        Create => &[sig!([U256, MP, U256 => U256])],
-        Create2 => &[sig!([U256, MP, U256, U256 => U256])],
-        Call => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
-        CallCode => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
-        DelegateCall => &[sig!([U256, U256, MP, U256, MP, U256 => BOOL])],
-        StaticCall => &[sig!([U256, U256, MP, U256, MP, U256 => BOOL])],
-        Return => &[sig!([MP, U256 => NEVER])],
-        Stop => &[sig!([=> NEVER])],
-        Revert => &[sig!([MP, U256 => NEVER])],
-        Invalid => &[sig!([=> NEVER])],
-        SelfDestruct => &[sig!([U256 => NEVER])],
-        DynamicAllocZeroed => &[sig!([U256 => MP])],
-        DynamicAllocAnyBytes => &[sig!([U256 => MP])],
-        MemoryCopy => &[sig!([MP, MP, U256 => VOID])],
-        MLoad1 => &[sig!([MP => U256])],
-        MLoad2 => &[sig!([MP => U256])],
-        MLoad3 => &[sig!([MP => U256])],
-        MLoad4 => &[sig!([MP => U256])],
-        MLoad5 => &[sig!([MP => U256])],
-        MLoad6 => &[sig!([MP => U256])],
-        MLoad7 => &[sig!([MP => U256])],
-        MLoad8 => &[sig!([MP => U256])],
-        MLoad9 => &[sig!([MP => U256])],
-        MLoad10 => &[sig!([MP => U256])],
-        MLoad11 => &[sig!([MP => U256])],
-        MLoad12 => &[sig!([MP => U256])],
-        MLoad13 => &[sig!([MP => U256])],
-        MLoad14 => &[sig!([MP => U256])],
-        MLoad15 => &[sig!([MP => U256])],
-        MLoad16 => &[sig!([MP => U256])],
-        MLoad17 => &[sig!([MP => U256])],
-        MLoad18 => &[sig!([MP => U256])],
-        MLoad19 => &[sig!([MP => U256])],
-        MLoad20 => &[sig!([MP => U256])],
-        MLoad21 => &[sig!([MP => U256])],
-        MLoad22 => &[sig!([MP => U256])],
-        MLoad23 => &[sig!([MP => U256])],
-        MLoad24 => &[sig!([MP => U256])],
-        MLoad25 => &[sig!([MP => U256])],
-        MLoad26 => &[sig!([MP => U256])],
-        MLoad27 => &[sig!([MP => U256])],
-        MLoad28 => &[sig!([MP => U256])],
-        MLoad29 => &[sig!([MP => U256])],
-        MLoad30 => &[sig!([MP => U256])],
-        MLoad31 => &[sig!([MP => U256])],
-        MLoad32 => &[sig!([MP => U256])],
-        MStore1 => &[sig!([MP, U256 => VOID])],
-        MStore2 => &[sig!([MP, U256 => VOID])],
-        MStore3 => &[sig!([MP, U256 => VOID])],
-        MStore4 => &[sig!([MP, U256 => VOID])],
-        MStore5 => &[sig!([MP, U256 => VOID])],
-        MStore6 => &[sig!([MP, U256 => VOID])],
-        MStore7 => &[sig!([MP, U256 => VOID])],
-        MStore8 => &[sig!([MP, U256 => VOID])],
-        MStore9 => &[sig!([MP, U256 => VOID])],
-        MStore10 => &[sig!([MP, U256 => VOID])],
-        MStore11 => &[sig!([MP, U256 => VOID])],
-        MStore12 => &[sig!([MP, U256 => VOID])],
-        MStore13 => &[sig!([MP, U256 => VOID])],
-        MStore14 => &[sig!([MP, U256 => VOID])],
-        MStore15 => &[sig!([MP, U256 => VOID])],
-        MStore16 => &[sig!([MP, U256 => VOID])],
-        MStore17 => &[sig!([MP, U256 => VOID])],
-        MStore18 => &[sig!([MP, U256 => VOID])],
-        MStore19 => &[sig!([MP, U256 => VOID])],
-        MStore20 => &[sig!([MP, U256 => VOID])],
-        MStore21 => &[sig!([MP, U256 => VOID])],
-        MStore22 => &[sig!([MP, U256 => VOID])],
-        MStore23 => &[sig!([MP, U256 => VOID])],
-        MStore24 => &[sig!([MP, U256 => VOID])],
-        MStore25 => &[sig!([MP, U256 => VOID])],
-        MStore26 => &[sig!([MP, U256 => VOID])],
-        MStore27 => &[sig!([MP, U256 => VOID])],
-        MStore28 => &[sig!([MP, U256 => VOID])],
-        MStore29 => &[sig!([MP, U256 => VOID])],
-        MStore30 => &[sig!([MP, U256 => VOID])],
-        MStore31 => &[sig!([MP, U256 => VOID])],
-        MStore32 => &[sig!([MP, U256 => VOID])],
-        RuntimeStartOffset => &[sig!([=> U256])],
-        InitEndOffset => &[sig!([=> U256])],
-        RuntimeLength => &[sig!([=> U256])],
+        B::Runtime(RB::Keccak256) => &[sig!([MP, U256 => U256])],
+        B::Runtime(RB::Address) => &[sig!([=> U256])],
+        B::Runtime(RB::Balance) => &[sig!([U256 => U256])],
+        B::Runtime(RB::Origin) => &[sig!([=> U256])],
+        B::Runtime(RB::Caller) => &[sig!([=> U256])],
+        B::Runtime(RB::CallValue) => &[sig!([=> U256])],
+        B::Runtime(RB::CallDataLoad) => &[sig!([U256 => U256])],
+        B::Runtime(RB::CallDataSize) => &[sig!([=> U256])],
+        B::Runtime(RB::CallDataCopy) => &[sig!([MP, U256, U256 => VOID])],
+        B::Runtime(RB::CodeSize) => &[sig!([=> U256])],
+        B::Runtime(RB::CodeCopy) => &[sig!([MP, U256, U256 => VOID])],
+        B::Runtime(RB::GasPrice) => &[sig!([=> U256])],
+        B::Runtime(RB::ExtCodeSize) => &[sig!([U256 => U256])],
+        B::Runtime(RB::ExtCodeCopy) => &[sig!([U256, MP, U256, U256 => VOID])],
+        B::Runtime(RB::ReturnDataSize) => &[sig!([=> U256])],
+        B::Runtime(RB::ReturnDataCopy) => &[sig!([MP, U256, U256 => VOID])],
+        B::Runtime(RB::ExtCodeHash) => &[sig!([U256 => U256])],
+        B::Runtime(RB::Gas) => &[sig!([=> U256])],
+        B::Runtime(RB::BlockHash) => &[sig!([U256 => U256])],
+        B::Runtime(RB::Coinbase) => &[sig!([=> U256])],
+        B::Runtime(RB::Timestamp) => &[sig!([=> U256])],
+        B::Runtime(RB::Number) => &[sig!([=> U256])],
+        B::Runtime(RB::Difficulty) => &[sig!([=> U256])],
+        B::Runtime(RB::GasLimit) => &[sig!([=> U256])],
+        B::Runtime(RB::ChainId) => &[sig!([=> U256])],
+        B::Runtime(RB::SelfBalance) => &[sig!([=> U256])],
+        B::Runtime(RB::BaseFee) => &[sig!([=> U256])],
+        B::Runtime(RB::BlobHash) => &[sig!([U256 => U256])],
+        B::Runtime(RB::BlobBaseFee) => &[sig!([=> U256])],
+        B::Runtime(RB::SLoad) => &[sig!([U256 => U256])],
+        B::Runtime(RB::SStore) => &[sig!([U256, U256 => VOID])],
+        B::Runtime(RB::TLoad) => &[sig!([U256 => U256])],
+        B::Runtime(RB::TStore) => &[sig!([U256, U256 => VOID])],
+        B::Runtime(RB::Log0) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::Log1) => &[sig!([MP, U256, U256 => VOID])],
+        B::Runtime(RB::Log2) => &[sig!([MP, U256, U256, U256 => VOID])],
+        B::Runtime(RB::Log3) => &[sig!([MP, U256, U256, U256, U256 => VOID])],
+        B::Runtime(RB::Log4) => &[sig!([MP, U256, U256, U256, U256, U256 => VOID])],
+        B::Runtime(RB::Create) => &[sig!([U256, MP, U256 => U256])],
+        B::Runtime(RB::Create2) => &[sig!([U256, MP, U256, U256 => U256])],
+        B::Runtime(RB::Call) => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
+        B::Runtime(RB::CallCode) => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
+        B::Runtime(RB::DelegateCall) => &[sig!([U256, U256, MP, U256, MP, U256 => BOOL])],
+        B::Runtime(RB::StaticCall) => &[sig!([U256, U256, MP, U256, MP, U256 => BOOL])],
+        B::Runtime(RB::Return) => &[sig!([MP, U256 => NEVER])],
+        B::Runtime(RB::Stop) => &[sig!([=> NEVER])],
+        B::Runtime(RB::Revert) => &[sig!([MP, U256 => NEVER])],
+        B::Runtime(RB::Invalid) => &[sig!([=> NEVER])],
+        B::Runtime(RB::SelfDestruct) => &[sig!([U256 => NEVER])],
+        B::Runtime(RB::DynamicAllocZeroed) => &[sig!([U256 => MP])],
+        B::Runtime(RB::DynamicAllocAnyBytes) => &[sig!([U256 => MP])],
+        B::Runtime(RB::MemoryCopy) => &[sig!([MP, MP, U256 => VOID])],
+        B::Runtime(RB::MLoad1) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad2) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad3) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad4) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad5) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad6) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad7) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad8) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad9) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad10) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad11) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad12) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad13) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad14) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad15) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad16) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad17) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad18) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad19) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad20) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad21) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad22) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad23) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad24) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad25) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad26) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad27) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad28) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad29) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad30) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad31) => &[sig!([MP => U256])],
+        B::Runtime(RB::MLoad32) => &[sig!([MP => U256])],
+        B::Runtime(RB::MStore1) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore2) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore3) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore4) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore5) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore6) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore7) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore8) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore9) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore10) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore11) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore12) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore13) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore14) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore15) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore16) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore17) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore18) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore19) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore20) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore21) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore22) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore23) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore24) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore25) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore26) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore27) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore28) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore29) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore30) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore31) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::MStore32) => &[sig!([MP, U256 => VOID])],
+        B::Runtime(RB::RuntimeStartOffset) => &[sig!([=> U256])],
+        B::Runtime(RB::InitEndOffset) => &[sig!([=> U256])],
+        B::Runtime(RB::RuntimeLength) => &[sig!([=> U256])],
 
         // Comptime builtins
-        IsStruct => &[sig!([TYPE => BOOL])],
-        FieldCount => &[sig!([TYPE => U256])],
+        B::IsStruct => &[sig!([TYPE => BOOL])],
+        B::FieldCount => &[sig!([TYPE => U256])],
 
         // Comptime polymorphic — no fixed signatures
-        FieldType | GetField | SetField => &[],
+        B::FieldType | B::GetField | B::SetField => &[],
     }
 }
 
@@ -231,18 +237,11 @@ mod tests {
 
     #[test]
     fn test_builtin_signatures_not_empty() {
-        for builtin in [
-            Builtin::Add,
-            Builtin::Mul,
-            Builtin::Sub,
-            Builtin::Div,
-            Builtin::Stop,
-            Builtin::Return,
-            Builtin::Keccak256,
-            Builtin::IsStruct,
-            Builtin::FieldCount,
-        ] {
+        for &builtin in Builtin::ALL {
             let sigs = builtin_signatures(builtin);
+            if matches!(builtin.kind(), BuiltinKind::ComptimePolymorphic { .. }) {
+                continue;
+            }
             assert!(!sigs.is_empty(), "{builtin:?} has no signatures");
             let ac = sigs[0].inputs.len();
             for sig in sigs {
@@ -253,9 +252,13 @@ mod tests {
 
     #[test]
     fn test_comptime_polymorphic_has_no_signatures() {
-        assert!(builtin_signatures(Builtin::FieldType).is_empty());
-        assert!(builtin_signatures(Builtin::GetField).is_empty());
-        assert!(builtin_signatures(Builtin::SetField).is_empty());
+        for &builtin in Builtin::ALL {
+            let sigs = builtin_signatures(builtin);
+            if !matches!(builtin.kind(), BuiltinKind::ComptimePolymorphic { .. }) {
+                continue;
+            }
+            assert!(sigs.is_empty(), "polymorphic builtin {builtin:?} has signatures");
+        }
     }
 
     #[test]
@@ -269,9 +272,9 @@ mod tests {
     #[test]
     fn test_resolve_result_type() {
         assert_eq!(
-            resolve_result_type(Builtin::Add, &[TypeId::U256, TypeId::U256]),
+            resolve_result_type(Builtin::ADD, &[TypeId::U256, TypeId::U256]),
             Some(TypeId::U256)
         );
-        assert_eq!(resolve_result_type(Builtin::Add, &[TypeId::U256]), None);
+        assert_eq!(resolve_result_type(Builtin::ADD, &[TypeId::U256]), None);
     }
 }

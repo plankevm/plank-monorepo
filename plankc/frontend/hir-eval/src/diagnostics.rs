@@ -419,7 +419,11 @@ impl DiagCtx<'_> {
         diag.emit(self);
     }
 
-    pub fn emit_unsupported_eval_of_runtime_builtin(&mut self, builtin: Builtin, loc: SrcLoc) {
+    pub fn emit_unsupported_eval_of_runtime_builtin(
+        &mut self,
+        builtin: RuntimeBuiltin,
+        loc: SrcLoc,
+    ) {
         Diagnostic::error("builtin not supported at compile time")
             .primary(
                 loc.source,
