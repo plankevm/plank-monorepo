@@ -27,7 +27,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             builtin => match builtin.kind() {
                 BuiltinKind::Comptime => self.eval_comptime_builtin(builtin, args, expr_span),
                 BuiltinKind::ComptimeDynamic { .. } => {
-                    self.eval_comptime_polymorphic_builtin(builtin, args, expr_span)
+                    self.eval_comptime_dynamic_builtin(builtin, args, expr_span)
                 }
                 BuiltinKind::RuntimeFoldable | BuiltinKind::RuntimeOnly => {
                     unreachable!("already matched")
@@ -187,7 +187,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn eval_comptime_polymorphic_builtin(
+    fn eval_comptime_dynamic_builtin(
         &mut self,
         builtin: Builtin,
         args: hir::CallArgsId,
@@ -205,7 +205,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::FieldType => self.eval_field_type(hir_args, builtin, expr_span),
             Builtin::GetField => self.eval_get_field(hir_args, builtin, expr_span),
             Builtin::SetField => self.eval_set_field(hir_args, builtin, expr_span),
-            _ => unreachable!("not a comptime polymorphic builtin: {builtin}"),
+            _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
 

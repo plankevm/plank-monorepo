@@ -24,8 +24,8 @@ macro_rules! define_builtins {
         comptime_builtins {
             $($ct_const:ident $ct_str:literal => $ct_variant:ident;)*
         }
-        comptime_polymorphic_builtins {
-            $($cp_const:ident $cp_str:literal => $cp_variant:ident($cp_arg_count:literal);)*
+        comptime_dynamic_builtins {
+            $($cd_const:ident $cd_str:literal => $cd_variant:ident($cd_arg_count:literal);)*
         }
     ) => {
         pub mod builtin_names {
@@ -33,7 +33,7 @@ macro_rules! define_builtins {
             $(pub const $rf_const: &str = $rf_str;)*
             $(pub const $ro_const: &str = $ro_str;)*
             $(pub const $ct_const: &str = $ct_str;)*
-            $(pub const $cp_const: &str = $cp_str;)*
+            $(pub const $cd_const: &str = $cd_str;)*
         }
 
         #[doc(hidden)]
@@ -43,21 +43,21 @@ macro_rules! define_builtins {
             $($rf_variant,)*
             $($ro_variant,)*
             $($ct_variant,)*
-            $($cp_variant,)*
+            $($cd_variant,)*
         }
 
         $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
         $(pub const $rf_const: StrId = StrId::new(BuiltinStrIdx::$rf_variant as u32);)*
         $(pub const $ro_const: StrId = StrId::new(BuiltinStrIdx::$ro_variant as u32);)*
         $(pub const $ct_const: StrId = StrId::new(BuiltinStrIdx::$ct_variant as u32);)*
-        $(pub const $cp_const: StrId = StrId::new(BuiltinStrIdx::$cp_variant as u32);)*
+        $(pub const $cd_const: StrId = StrId::new(BuiltinStrIdx::$cd_variant as u32);)*
 
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
             $(assert_eq!(interner.intern(builtin_names::$rf_const), $rf_const);)*
             $(assert_eq!(interner.intern(builtin_names::$ro_const), $ro_const);)*
             $(assert_eq!(interner.intern(builtin_names::$ct_const), $ct_const);)*
-            $(assert_eq!(interner.intern(builtin_names::$cp_const), $cp_const);)*
+            $(assert_eq!(interner.intern(builtin_names::$cd_const), $cd_const);)*
         }
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ macro_rules! define_builtins {
         pub enum Builtin {
             Runtime(RuntimeBuiltin),
             $($ct_variant,)*
-            $($cp_variant,)*
+            $($cd_variant,)*
         }
 
         impl Builtin {
@@ -105,7 +105,7 @@ macro_rules! define_builtins {
                 $(Builtin::Runtime(RuntimeBuiltin::$rf_variant),)*
                 $(Builtin::Runtime(RuntimeBuiltin::$ro_variant),)*
                 $(Builtin::$ct_variant,)*
-                $(Builtin::$cp_variant,)*
+                $(Builtin::$cd_variant,)*
             ];
 
             pub fn from_str_id(id: StrId) -> Option<Self> {
@@ -114,7 +114,7 @@ macro_rules! define_builtins {
                 }
                 Some(match id {
                     $($ct_const => Builtin::$ct_variant,)*
-                    $($cp_const => Builtin::$cp_variant,)*
+                    $($cd_const => Builtin::$cd_variant,)*
                     _ => return None,
                 })
             }
@@ -123,7 +123,7 @@ macro_rules! define_builtins {
                 match self {
                     Self::Runtime(runtime) => runtime.name(),
                     $(Self::$ct_variant => $ct_str,)*
-                    $(Self::$cp_variant => $cp_str,)*
+                    $(Self::$cd_variant => $cd_str,)*
                 }
             }
 
@@ -132,7 +132,7 @@ macro_rules! define_builtins {
                     Self::Runtime(runtime) if runtime.foldable() => BuiltinKind::RuntimeFoldable,
                     Self::Runtime(_) => BuiltinKind::RuntimeOnly,
                     $(Self::$ct_variant => BuiltinKind::Comptime,)*
-                    $(Self::$cp_variant => BuiltinKind::ComptimeDynamic { arg_count: $cp_arg_count },)*
+                    $(Self::$cd_variant => BuiltinKind::ComptimeDynamic { arg_count: $cd_arg_count },)*
                 }
             }
         }
@@ -345,7 +345,7 @@ define_builtins! {
         FIELD_COUNT "@field_count" => FieldCount;
     }
 
-    comptime_polymorphic_builtins {
+    comptime_dynamic_builtins {
         // Type Reflection
         FIELD_TYPE "@field_type" => FieldType(2);
         GET_FIELD "@get_field" => GetField(2);

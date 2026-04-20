@@ -210,7 +210,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::IsStruct => &[sig!([TYPE => BOOL])],
         B::FieldCount => &[sig!([TYPE => U256])],
 
-        // Comptime polymorphic — no fixed signatures
+        // Comptime dynamic — no fixed signatures
         B::FieldType | B::GetField | B::SetField => &[],
     }
 }
@@ -251,13 +251,13 @@ mod tests {
     }
 
     #[test]
-    fn test_comptime_polymorphic_has_no_signatures() {
+    fn test_comptime_dynamic_builtin_has_no_signatures() {
         for &builtin in Builtin::ALL {
             let sigs = builtin_signatures(builtin);
             if !matches!(builtin.kind(), BuiltinKind::ComptimeDynamic { .. }) {
                 continue;
             }
-            assert!(sigs.is_empty(), "polymorphic builtin {builtin:?} has signatures");
+            assert!(sigs.is_empty(), "dynamic builtin {builtin:?} has signatures");
         }
     }
 
