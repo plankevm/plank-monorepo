@@ -935,10 +935,10 @@ fn test_comptime_get_field_out_of_bounds() {
         "#,
         &[r#"
         error: field index out of bounds
-         --> main.plk:3:13
+         --> main.plk:3:27
           |
         3 | const val = @get_field(s, 3);
-          |             ^^^^^^^^^^^^^^^^ `@get_field`: field index 3 is out of bounds for struct with 1 field
+          |                           ^ `@get_field`: field index 3 is out of bounds for struct with 1 field
         "#],
     );
 }
@@ -954,10 +954,10 @@ fn test_comptime_get_field_index_overflow() {
         "#,
         &[r#"
         error: field index out of bounds
-         --> main.plk:3:13
+         --> main.plk:3:27
           |
         3 | const val = @get_field(s, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is too large
+          |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is out of bounds for struct with 1 field
         "#],
     );
 }
@@ -999,6 +999,29 @@ fn test_get_field_non_struct_instance() {
           |
         3 |     let val = @get_field(x, 0);
           |               ^^^^^^^^^^^^^^^^ `@get_field` expects a struct type, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_set_field_non_num_index() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256, b: u256 };
+        const p = Pair { a: 1, b: 2 };
+        const p2 = @set_field(p, false, 99);
+        const val = p2.a;
+        init {
+            let mut x: u256 = val;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:26
+          |
+        3 | const p2 = @set_field(p, false, 99);
+          |                          ^^^^^ expected `u256`, got `bool`
         "#],
     );
 }

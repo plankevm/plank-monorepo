@@ -1,3 +1,4 @@
+use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir as hir;
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
@@ -559,7 +560,7 @@ impl DiagCtx<'_> {
     pub fn emit_field_index_out_of_bounds(
         &mut self,
         builtin: Builtin,
-        index: usize,
+        index: U256,
         field_count: usize,
         loc: SrcLoc,
     ) {
@@ -569,20 +570,9 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "`{builtin}`: field index {index} is out of bounds for struct with {}",
-                    diagnostic::fmt_count(field_count, "field"),
+                    fmt_count(field_count, "field"),
                 ),
             )
-            .emit(self);
-    }
-
-    pub fn emit_field_index_overflow(
-        &mut self,
-        builtin: Builtin,
-        index: alloy_primitives::U256,
-        loc: SrcLoc,
-    ) {
-        Diagnostic::error("field index out of bounds")
-            .primary(loc.source, loc.span, format!("`{builtin}`: field index {index} is too large"))
             .emit(self);
     }
 

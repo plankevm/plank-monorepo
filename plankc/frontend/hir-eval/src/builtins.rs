@@ -173,13 +173,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::IsStruct => {
                 let &[ty_local] = hir_args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_struct = matches!(self.eval.types.lookup(ty), Type::Struct(_));
+                let is_struct = !ty.is_primitive();
                 Ok(Ok(EvalValue::Comptime(is_struct.into())))
             }
             Builtin::FieldCount => {
                 let &[r#struct] = hir_args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
-                let r#struct = self.validate_struct_type(ty, builtin, expr_span)?;
+                let r#struct = self.expect_struct_type(ty, builtin, expr_span)?;
                 let count = U256::from(r#struct.fields.len());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
@@ -256,14 +256,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[instance, field_index, field_value] = args else { unreachable!("arg count checked") };
         let instance_state = self.bindings[instance].state?;
-        let ty = self.state_type(instance_state);
+        let instance_ty = self.state_type(instance_state);
         let (r#struct, field, field_index) =
-            self.resolve_struct_field_index(ty, field_index, builtin, expr_span)?;
+            self.resolve_struct_field_index(instance_ty, field_index, builtin, expr_span)?;
 
         let new_value_state = self.bindings[field_value].state?;
         let expected_field_type = field.ty;
         let actual_ty = self.state_type(new_value_state);
-        if actual_ty != expected_field_type {
+        if !actual_ty.is_assignable_to(expected_field_type) {
             let field_def_loc = self.loc(field.def_span);
             self.diag_ctx.emit_type_mismatch(
                 expected_field_type,
@@ -289,31 +289,31 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 this.eval.values_buf[values_buf_offset + field_index as usize] = new_value_vid;
                 let new_fields = &this.eval.values_buf[values_buf_offset..];
                 Ok(EvalValue::Comptime(
-                    this.eval.values.intern(Value::StructVal { ty, fields: new_fields }),
+                    this.eval
+                        .values
+                        .intern(Value::StructVal { ty: instance_ty, fields: new_fields }),
                 ))
             }));
         }
 
         // At least one side is runtime: emit MIR.
-        if self.eval.types.is_comptime_only(ty) {
-            let struct_def_loc = r#struct.def_loc;
+
+        if self.eval.types.is_comptime_only(instance_ty) {
             self.diag_ctx.emit_set_field_on_comptime_only_struct(
-                ty,
+                instance_ty,
                 self.loc(self.bindings[field_value].use_span),
-                struct_def_loc,
+                r#struct.def_loc,
             );
             return Err(Poisoned);
         }
 
-        let field_count = r#struct.fields.len() as u32;
-        let instance_local = self.materialize_as_local(instance_state, ty);
+        let instance_local = self.materialize_as_local(instance_state, instance_ty);
         let mir_fields = self.with_locals_buf(|this, locals_buf_offset| {
-            for cur_field_idx in 0..field_count {
+            for (cur_field_idx, &field) in (0..).zip(r#struct.fields) {
                 let local = if cur_field_idx == field_index {
                     this.materialize_as_local(new_value_state, expected_field_type)
                 } else {
-                    let ftype = r#struct.fields[cur_field_idx as usize].ty;
-                    let target = this.mir_types.push(ftype);
+                    let target = this.mir_types.push(field.ty);
                     this.emit(mir::Instruction::Set {
                         target,
                         expr: mir::Expr::FieldAccess {
@@ -329,8 +329,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         });
 
         Ok(Ok(EvalValue::Runtime {
-            expr: mir::Expr::StructLit { ty, fields: mir_fields },
-            result_type: ty,
+            expr: mir::Expr::StructLit { ty: instance_ty, fields: mir_fields },
+            result_type: instance_ty,
         }))
     }
 
@@ -341,20 +341,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         builtin: Builtin,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<(StructView<'a>, Field, u32)> {
-        let r#struct = self.validate_struct_type(ty, builtin, expr_span)?;
+        let r#struct = self.expect_struct_type(ty, builtin, expr_span)?;
         let index = self.expect_comptime_field_index(index_arg, builtin, expr_span)?;
-        let field_count = r#struct.fields.len();
-        let Some(&field) = r#struct.fields.get(index) else {
+        let field_and_index = u32::try_from(index).ok().and_then(|index| {
+            let &field = r#struct.fields.get(index as usize)?;
+            Some((field, index))
+        });
+        let Some((field, index)) = field_and_index else {
             self.diag_ctx.emit_field_index_out_of_bounds(
                 builtin,
                 index,
-                field_count,
-                self.loc(expr_span),
+                r#struct.fields.len(),
+                self.loc(self.bindings[index_arg].use_span),
             );
             return Err(Poisoned);
         };
-        // Fields limited to 2^32 by interner, successful lookup means index < 2^32.
-        Ok((r#struct, field, index as u32))
+        Ok((r#struct, field, index))
     }
 
     fn expect_type_arg(
@@ -379,24 +381,25 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arg_local: hir::LocalId,
         builtin: Builtin,
         span: SourceSpan,
-    ) -> MaybePoisoned<usize> {
-        let state = self.bindings[arg_local].state?;
-        if let LocalState::Comptime(vid) = state
-            && let Value::BigNum(n) = self.values.lookup(vid)
-        {
-            return match usize::try_from(n) {
-                Ok(index) => Ok(index),
-                Err(_) => {
-                    self.diag_ctx.emit_field_index_overflow(builtin, n, self.loc(span));
-                    Err(Poisoned)
-                }
-            };
-        }
-        self.diag_ctx.emit_expected_comptime_arg(builtin, "field index", self.loc(span));
-        Err(Poisoned)
+    ) -> MaybePoisoned<U256> {
+        let arg_binding = self.bindings[arg_local];
+        let state = arg_binding.state?;
+        let LocalState::Comptime(vid) = state else {
+            self.diag_ctx.emit_expected_comptime_arg(builtin, "field index", self.loc(span));
+            return Err(Poisoned);
+        };
+        let Value::BigNum(n) = self.values.lookup(vid) else {
+            self.diag_ctx.emit_type_mismatch_simple(
+                TypeId::U256,
+                self.eval.values.type_of_value(vid),
+                self.loc(arg_binding.use_span),
+            );
+            return Err(Poisoned);
+        };
+        Ok(n)
     }
 
-    fn validate_struct_type(
+    fn expect_struct_type(
         &mut self,
         ty: TypeId,
         builtin: Builtin,
