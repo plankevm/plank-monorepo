@@ -167,7 +167,7 @@ fn test_ident_builtin_at_prefix() {
                 " "
                 "="
                 " "
-                AtIdentifier
+                BuiltinName
                     "@foo"
                 ";"
         "#,

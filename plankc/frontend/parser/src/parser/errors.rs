@@ -72,7 +72,7 @@ impl<'a> Parser<'a> {
         self.session.emit_diagnostic(diagnostic);
     }
 
-    pub(crate) fn emit_unexpected_at_identifier(&mut self, span: SourceSpan) {
+    pub(crate) fn emit_builtin_name_used_as_ident(&mut self, span: SourceSpan) {
         let diagnostic = self
             .build_unexpected_diagnostic(Token::BuiltinName, span)
             .help("`@name` syntax is reserved for builtins and cannot be used as an identifier");

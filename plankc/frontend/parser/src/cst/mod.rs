@@ -154,7 +154,7 @@ impl std::fmt::Debug for NodeKind {
             Self::BoolLiteral(value) => write!(f, "BoolLiteral({value})"),
             Self::NumLiteral { .. } => write!(f, "NumLiteral"),
             Self::Identifier { .. } => write!(f, "Identifier"),
-            Self::BuiltinName { .. } => write!(f, "AtIdentifier"),
+            Self::BuiltinName { .. } => write!(f, "BuiltinName"),
             Self::FnDef => write!(f, "FnDef"),
             Self::ParamList => write!(f, "ParamList"),
             Self::Parameter => write!(f, "Parameter"),

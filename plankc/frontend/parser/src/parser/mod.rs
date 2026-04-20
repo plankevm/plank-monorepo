@@ -392,7 +392,7 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn try_parse_at_ident(&mut self) -> Option<NodeIdx> {
+    fn try_parse_builtin_name(&mut self) -> Option<NodeIdx> {
         if self.eat(Token::BuiltinName) {
             let ident = self.intern(self.tokens.current() - 1);
             return Some(self.alloc_last_token_as_node(NodeKind::BuiltinName { ident }));
@@ -409,7 +409,7 @@ impl<'a> Parser<'a> {
         if self.check(Token::BuiltinName) {
             if !self.at_last_unexpected() {
                 let (_, span) = self.tokens.peek();
-                self.emit_unexpected_at_identifier(span);
+                self.emit_builtin_name_used_as_ident(span);
                 self.last_unexpected = Some(self.tokens.current());
                 self.expected.clear();
             }
@@ -491,8 +491,8 @@ impl<'a> Parser<'a> {
             return Some(identifier);
         }
 
-        if let Some(at_identifier) = self.try_parse_at_ident() {
-            return Some(at_identifier);
+        if let Some(builtin_name) = self.try_parse_builtin_name() {
+            return Some(builtin_name);
         }
 
         if self.eat(Token::LeftRound) {
