@@ -1,4 +1,4 @@
-use plank_session::Session;
+use plank_session::{Diagnostic, Session};
 use plank_source::{
     FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project, source_fs::InMemoryFs,
 };
@@ -84,4 +84,21 @@ impl TestProject {
         parse_project(&self.entry_path, &module_resolver, session, &self.fs)
             .expect("project should be parsed")
     }
+}
+
+pub fn assert_diagnostics(diagnostics: &[Diagnostic], session: &Session, expected: &[&str]) {
+    let actual: Vec<_> = diagnostics.iter().map(|d| d.render_plain(session)).collect();
+    let expected: Vec<_> =
+        expected.iter().map(|s| dedent_preserve_blank_lines(s).trim().to_string()).collect();
+
+    let err_message = if actual.len() != expected.len() {
+        format!("length mismatch: {} != {}", actual.len(), expected.len())
+    } else {
+        "".to_string()
+    };
+
+    let actual_joined = actual.join("\n\n---\n\n");
+    let expected_joined = expected.join("\n\n---\n\n");
+    pretty_assertions::assert_str_eq!(actual_joined, expected_joined, "{err_message}");
+    assert_eq!(actual.len(), expected.len(), "length mismatch, actual != expected");
 }

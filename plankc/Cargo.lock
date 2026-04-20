@@ -1899,6 +1899,7 @@ dependencies = [
  "plank-mir-lower",
  "plank-session",
  "plank-source",
+ "plank-test-utils",
  "plank-values",
  "pretty_assertions",
  "sir-debug-backend",
@@ -2006,6 +2007,7 @@ version = "0.1.0"
 dependencies = [
  "plank-session",
  "plank-source",
+ "pretty_assertions",
 ]
 
 [[package]]

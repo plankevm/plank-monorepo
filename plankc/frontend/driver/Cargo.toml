@@ -21,3 +21,4 @@ anstream.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+plank-test-utils.workspace = true

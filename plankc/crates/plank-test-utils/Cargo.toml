@@ -10,3 +10,4 @@ workspace = true
 [dependencies]
 plank-session.workspace = true
 plank-source.workspace = true
+pretty_assertions.workspace = true
