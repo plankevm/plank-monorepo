@@ -66,11 +66,14 @@ impl<'a> DisplayHir<'a> {
                         write!(f, "0x{x:x}")
                     }
                 }
-                Value::Type(id) => write!(f, "type:{}", id.as_primitive().unwrap().name()),
-                Value::Uninit(ty) => {
-                    write!(f, "uninit({})", ty.as_primitive().unwrap().name())
-                }
-                other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
+                Value::Type(id) => write!(
+                    f,
+                    "type:{}",
+                    id.as_primitive()
+                        .expect("invariant: only primitive types are inlined as HIR values")
+                        .name()
+                ),
+                other @ (Value::Uninit(_) | Value::Closure { .. } | Value::StructVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")
                 }
             },
