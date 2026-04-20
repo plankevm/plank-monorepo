@@ -7,6 +7,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
+[profile.release-safe]
+inherits = "release"
+debug-assertions = true
+
 [workspace.dependencies]
 # Core
 plank-core = { path = "crates/plank-core" }
