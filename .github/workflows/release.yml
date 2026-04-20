@@ -48,7 +48,7 @@ jobs:
 
       - name: Build
         working-directory: plankc
-        run: cargo build --release --package plank --target ${{ matrix.target }}
+        run: cargo build --profile release-safe --package plank --target ${{ matrix.target }}
         env:
           PLANK_VERSION: ${{ github.ref_name }}
 
@@ -56,7 +56,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: plank-${{ matrix.platform }}-${{ matrix.arch }}
-          path: plankc/target/${{ matrix.target }}/release/plank
+          path: plankc/target/${{ matrix.target }}/release-safe/plank
 
   vscode-extension:
     name: Build VS Code Extension
