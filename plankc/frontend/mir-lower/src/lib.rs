@@ -5,7 +5,10 @@ mod tests;
 
 use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
-use plank_values::{PrimitiveType, Type, TypeId, Value, ValueId, ValueInterner};
+use plank_session::RuntimeBuiltin;
+use plank_values::{
+    PrimitiveType, Type, TypeId, TypeInterner, U256, Value, ValueId, ValueInterner,
+};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},
@@ -183,6 +186,7 @@ fn lower_basic_block(
                         let mut locals = ctx.locals_map.get(target).iter().copied();
                         materialize_constant_struct_literal(
                             values,
+                            &ctx.mir.types,
                             &mut current_bb,
                             &mut locals,
                             fields,
@@ -190,6 +194,16 @@ fn lower_basic_block(
                     }
                     Value::Type(_) | Value::Closure { .. } => {
                         unreachable!("comptime-only value in MIR")
+                    }
+                    Value::Uninit(ty) => {
+                        let size = ctx.size_in_locals(ty);
+                        ctx.locals_map.ensure_many(
+                            target,
+                            || current_bb.new_local(),
+                            size as usize,
+                        );
+                        let mut locals = ctx.locals_map.get(target).iter().copied();
+                        materialize_uninit(ty, &ctx.mir.types, &mut locals, &mut current_bb);
                     }
                 },
                 Expr::LocalRef(mir_src) => {
@@ -372,8 +386,48 @@ fn lower_basic_block(
     CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: true }
 }
 
+fn materialize_uninit(
+    ty: TypeId,
+    types: &TypeInterner,
+    targets: &mut impl Iterator<Item = sir::LocalId>,
+    bb: &mut BasicBlockBuilder<'_, '_>,
+) {
+    match ty.as_primitive() {
+        Ok(PrimitiveType::U256) => {
+            bb.add_set_const_op(targets.next().unwrap(), U256::ZERO);
+        }
+        Ok(PrimitiveType::Bool) => {
+            bb.add_operation(Operation::SetSmallConst(SetSmallConstData {
+                sets: targets.next().unwrap(),
+                value: 0,
+            }));
+        }
+        Ok(PrimitiveType::MemoryPointer) => {
+            let size_local = bb.new_local();
+            bb.add_set_const_op(size_local, U256::ZERO);
+            let sets = targets.next().unwrap();
+            builtins::add_as_op(
+                RuntimeBuiltin::DynamicAllocAnyBytes,
+                &[size_local],
+                Some(sets),
+                bb,
+            )
+            .expect("invariant: uninit memptr produces valid alloc op");
+        }
+        Ok(PrimitiveType::Void | PrimitiveType::Never) => {}
+        Ok(_) => unreachable!("unexpected type in uninit materialization"),
+        Err(struct_ref) => {
+            let view = types.lookup_struct(struct_ref);
+            for field in view.fields {
+                materialize_uninit(field.ty, types, targets, bb);
+            }
+        }
+    }
+}
+
 fn materialize_constant_struct_literal(
     values: &ValueInterner,
+    types: &TypeInterner,
     bb: &mut BasicBlockBuilder<'_, '_>,
     targets: &mut impl Iterator<Item = sir::LocalId>,
     fields: &[ValueId],
@@ -394,10 +448,13 @@ fn materialize_constant_struct_literal(
                 bb.add_set_const_op(sets, x);
             }
             Value::StructVal { ty: _, fields } => {
-                materialize_constant_struct_literal(values, bb, targets, fields);
+                materialize_constant_struct_literal(values, types, bb, targets, fields);
             }
             Value::Type(_) | Value::Closure { .. } => {
                 unreachable!("MIR: comptime-only value")
+            }
+            Value::Uninit(ty) => {
+                materialize_uninit(ty, types, targets, bb);
             }
         }
     }
