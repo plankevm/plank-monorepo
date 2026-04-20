@@ -378,7 +378,7 @@ impl<'a> Parser<'a> {
         let span = self.tokens.token_src_span(ti);
         debug_assert!(matches!(
             self.tokens.get_prev(),
-            Some((Token::Identifier | Token::AtIdentifier, p_span)) if p_span == span
+            Some((Token::Identifier | Token::BuiltinName, p_span)) if p_span == span
         ));
         let source = &self.source[span.usize_range()];
         self.session.intern(source)
@@ -393,7 +393,7 @@ impl<'a> Parser<'a> {
     }
 
     fn try_parse_at_ident(&mut self) -> Option<NodeIdx> {
-        if self.eat(Token::AtIdentifier) {
+        if self.eat(Token::BuiltinName) {
             let ident = self.intern(self.tokens.current() - 1);
             return Some(self.alloc_last_token_as_node(NodeKind::AtIdentifier { ident }));
         }
@@ -404,7 +404,7 @@ impl<'a> Parser<'a> {
         if let Some(ident) = self.try_parse_ident() {
             return ident;
         }
-        if self.check(Token::AtIdentifier) {
+        if self.check(Token::BuiltinName) {
             if !self.at_last_unexpected() {
                 let (_, span) = self.tokens.peek();
                 self.emit_unexpected_at_identifier(span);

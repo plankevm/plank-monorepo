@@ -131,7 +131,7 @@ fn test_missing_semicolon() {
              --> test.plk:2:1
               |
             2 | init {
-              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, @identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
         "#],
     );
 }
@@ -234,7 +234,7 @@ fn test_const_decl_missing_expr() {
              --> test.plk:2:1
               |
             2 | init { }
-              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, @identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
         "#],
     );
 }
@@ -302,7 +302,7 @@ fn test_arg_list_empty_after_comma() {
              --> test.plk:1:14
               |
             1 | run { foo(a, , b); }
-              |              ^ unexpected `,`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, @identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`, `)`
+              |              ^ unexpected `,`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`, `)`
         "#],
     );
 }
@@ -382,7 +382,7 @@ fn test_binary_expr_missing_rhs() {
              --> test.plk:1:15
               |
             1 | run { x = 1 + ; }
-              |               ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, @identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              |               ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
         "#],
     );
 }
@@ -398,7 +398,7 @@ fn test_unary_expr_missing_operand() {
              --> test.plk:1:12
               |
             1 | run { x = -; }
-              |            ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, @identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              |            ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
         "#],
     );
 }
@@ -414,7 +414,7 @@ fn test_paren_expr_empty() {
              --> test.plk:1:12
               |
             1 | run { x = (); }
-              |            ^ unexpected `)`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, @identifier, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              |            ^ unexpected `)`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
         "#],
     );
 }
@@ -463,11 +463,11 @@ fn test_at_identifier_no_double_emission_missing_as() {
             import foo @bar;
         "#,
         &[r#"
-            error: unexpected @identifier
+            error: unexpected builtin name
              --> test.plk:1:12
               |
             1 | import foo @bar;
-              |            ^^^^ unexpected @identifier, expected one of `::`, `;`, `as`
+              |            ^^^^ unexpected builtin name, expected one of `::`, `;`, `as`
         "#],
     );
 }
