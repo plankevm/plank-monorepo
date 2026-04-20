@@ -319,8 +319,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         target,
                         expr: mir::Expr::FieldAccess {
                             object: instance_local,
-                            field_index: u32::try_from(cur_field_idx)
-                                .expect("field index fits in u32"),
+                            field_index: cur_field_idx,
                         },
                     });
                     target
