@@ -85,12 +85,15 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         };
 
         match state {
-            LocalState::Comptime(vid) => {
-                let Value::StructVal { ty: _, fields } = self.values.lookup(vid) else {
-                    unreachable!("invariant: `state_type` != type of value")
-                };
-                Ok(EvalValue::Comptime(fields[field_index as usize]))
-            }
+            LocalState::Comptime(vid) => match self.values.lookup(vid) {
+                Value::StructVal { fields, .. } => {
+                    Ok(EvalValue::Comptime(fields[field_index as usize]))
+                }
+                Value::Uninit(_) => {
+                    Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(field.ty))))
+                }
+                _ => unreachable!("invariant: `state_type` != type of value"),
+            },
             LocalState::Runtime(local) => Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess { object: local, field_index },
                 result_type: field.ty,

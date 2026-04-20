@@ -513,6 +513,7 @@ fn fold_runtime_builtin(
 fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
     match values.lookup(vid) {
         Value::BigNum(n) => n,
-        other => unreachable!("expected U256 value, got {other:?}"),
+        Value::Uninit(_) => U256::ZERO,
+        other => unreachable!("invariant: type checked as u256, got {other:?}"),
     }
 }
