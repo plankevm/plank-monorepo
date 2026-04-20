@@ -237,12 +237,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.resolve_struct_field_index(ty, field_index, builtin, expr_span)?;
 
         match instance_state {
-            LocalState::Comptime(vid) => {
-                let Value::StructVal { ty: _, fields } = self.values.lookup(vid) else {
-                    unreachable!("invariant: type checked as struct")
-                };
-                Ok(Ok(EvalValue::Comptime(fields[field_index as usize])))
-            }
+            LocalState::Comptime(vid) => match self.values.lookup(vid) {
+                Value::StructVal { fields, .. } => {
+                    Ok(Ok(EvalValue::Comptime(fields[field_index as usize])))
+                }
+                Value::Uninit(_) => {
+                    Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(field.ty)))))
+                }
+                _ => unreachable!("invariant: type checked as struct"),
+            },
             LocalState::Runtime(local) => Ok(Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess { object: local, field_index },
                 result_type: field.ty,
@@ -282,12 +285,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             (instance_state, new_value_state)
         {
             return Ok(self.with_values_buf(|this, values_buf_offset| {
-                let Value::StructVal { ty: _, fields: old_fields } =
-                    this.eval.values.lookup(instance_vid)
-                else {
-                    unreachable!("invariant: type checked as struct")
-                };
-                this.eval.values_buf.extend_from_slice(old_fields);
+                match this.eval.values.lookup(instance_vid) {
+                    Value::StructVal { fields: old_fields, .. } => {
+                        this.eval.values_buf.extend_from_slice(old_fields);
+                    }
+                    Value::Uninit(_) => {
+                        for f in r#struct.fields {
+                            this.eval.values_buf.push(this.eval.values.intern(Value::Uninit(f.ty)));
+                        }
+                    }
+                    _ => unreachable!("invariant: type checked as struct"),
+                }
                 this.eval.values_buf[values_buf_offset + field_index as usize] = new_value_vid;
                 let new_fields = &this.eval.values_buf[values_buf_offset..];
                 Ok(EvalValue::Comptime(
@@ -299,7 +307,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         // At least one side is runtime: emit MIR.
-
         if self.eval.types.is_comptime_only(instance_ty) {
             self.diag_ctx.emit_set_field_on_comptime_only_struct(
                 instance_ty,
