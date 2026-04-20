@@ -404,6 +404,8 @@ impl<'a> Parser<'a> {
         if let Some(ident) = self.try_parse_ident() {
             return ident;
         }
+        // Specially handle builtin names so we can give a more specific error when a user tries to
+        // use an `@identifier` as a normal identifier
         if self.check(Token::BuiltinName) {
             if !self.at_last_unexpected() {
                 let (_, span) = self.tokens.peek();
