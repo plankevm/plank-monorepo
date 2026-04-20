@@ -1901,7 +1901,6 @@ dependencies = [
  "plank-source",
  "plank-test-utils",
  "plank-values",
- "pretty_assertions",
  "sir-debug-backend",
  "sir-passes",
 ]

@@ -78,13 +78,14 @@ mod tests {
         driver.register_module("m", PathBuf::from("/a"));
         driver.register_module("m", PathBuf::from("/b"));
 
-        let rendered = driver.session.diagnostics()[0].render_plain(&driver.session);
-        pretty_assertions::assert_str_eq!(
-            rendered.trim(),
-            "\
-error: duplicate module 'm'
-  |
-  = help: each module name can only be registered once"
+        assert_diagnostics(
+            driver.session.diagnostics(),
+            &driver.session,
+            &[r#"
+            error: duplicate module 'm'
+              |
+              = help: each module name can only be registered once
+            "#],
         );
     }
 
