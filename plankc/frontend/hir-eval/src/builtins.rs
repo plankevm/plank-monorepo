@@ -3,8 +3,7 @@ use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
 use plank_values::{
-    Field, StructRef, StructView, Type, TypeId, Value, ValueId, ValueInterner,
-    builtins as builtin_sigs,
+    Field, StructView, Type, TypeId, Value, ValueId, ValueInterner, builtins as builtin_sigs,
 };
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};
@@ -181,7 +180,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let &[r#struct] = hir_args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
                 let r#struct = self.validate_struct_type(ty, builtin, expr_span)?;
-                let count = U256::from(self.eval.types.lookup_struct(r#struct).fields.len());
+                let count = U256::from(r#struct.fields.len());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
             _ => unreachable!("not a comptime builtin: {builtin}"),
@@ -343,7 +342,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<(StructView<'a>, Field, u32)> {
         let r#struct = self.validate_struct_type(ty, builtin, expr_span)?;
-        let r#struct = self.types.lookup_struct(r#struct);
         let index = self.expect_comptime_field_index(index_arg, builtin, expr_span)?;
         let field_count = r#struct.fields.len();
         let Some(&field) = r#struct.fields.get(index) else {
@@ -403,13 +401,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         ty: TypeId,
         builtin: Builtin,
         span: SourceSpan,
-    ) -> MaybePoisoned<StructRef> {
-        match ty.as_primitive() {
-            Ok(_) => {
+    ) -> MaybePoisoned<StructView<'a>> {
+        match self.types.lookup(ty) {
+            Type::Struct(struct_info) => Ok(struct_info),
+            _ => {
                 self.diag_ctx.emit_expected_struct_type_arg(builtin, ty, self.loc(span));
                 Err(Poisoned)
             }
-            Err(r#struct) => Ok(r#struct),
         }
     }
 
