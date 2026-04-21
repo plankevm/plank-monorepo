@@ -389,6 +389,36 @@ const Values = struct {
         (identifier)))))
 
 ================================================================================
+Unary vs postfix precedence
+================================================================================
+const x = !wow();
+const y = !foo.bar(baz);
+const z = !a.b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (unary_expr
+      (fn_call
+        (identifier))))
+  (const_def
+    (identifier)
+    (unary_expr
+      (fn_call
+        (member
+          (identifier)
+          (identifier))
+        (identifier))))
+  (const_def
+    (identifier)
+    (unary_expr
+      (member
+        (identifier)
+        (identifier)))))
+
+================================================================================
 Comments
 ================================================================================
 // hello

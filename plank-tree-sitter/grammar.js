@@ -18,6 +18,7 @@ const PREC = {
   ADDITIVE: 8,
   MULTIPLICATIVE: 9,
   UNARY: 10,
+  POSTFIX: 11,
 }
 
 module.exports = grammar({
@@ -99,8 +100,8 @@ module.exports = grammar({
     )),
 
     paren_expr: ($) => seq("(", $._expr, ")"),
-    fn_call: ($) => seq(field("fn", $._expr), "(", commaSeparated($._expr, "args"), ")"),
-    member: ($) => seq($._expr, ".", $.identifier),
+    fn_call: ($) => prec(PREC.POSTFIX, seq(field("fn", $._expr), "(", commaSeparated($._expr, "args"), ")")),
+    member: ($) => prec(PREC.POSTFIX, seq($._expr, ".", $.identifier)),
 
     if_expr: ($) => seq(
       "if",
