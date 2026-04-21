@@ -370,6 +370,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
         if emit_invalid_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
             Err(Poisoned)
+        } else if ty == TypeId::VOID {
+            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Void))))
+        } else if ty == TypeId::TYPE {
+            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Type(TypeId::VOID)))))
         } else {
             Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty)))))
         }
@@ -531,8 +535,14 @@ fn emit_invalid_uninit_type(
     field_loc: Option<SrcLoc>,
 ) -> bool {
     match ty.as_primitive() {
-        Ok(PrimitiveType::U256 | PrimitiveType::Bool | PrimitiveType::MemoryPointer) => false,
-        Ok(invalid @ (PrimitiveType::Void | PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::Never)) => {
+        Ok(
+            PrimitiveType::U256
+            | PrimitiveType::Bool
+            | PrimitiveType::MemoryPointer
+            | PrimitiveType::Void
+            | PrimitiveType::Type,
+        ) => false,
+        Ok(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
             // `field_loc` is set when recursing into struct fields
             if let Some(field_loc) = field_loc {
                 diag_ctx.emit_invalid_uninit_struct_field(invalid, loc, field_loc);

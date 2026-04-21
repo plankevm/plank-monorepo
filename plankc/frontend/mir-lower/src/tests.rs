@@ -654,6 +654,61 @@ fn test_uninit_struct_with_memptr() {
 }
 
 #[test]
+fn test_uninit_struct_with_void_field() {
+    assert_lowers_to(
+        r#"
+        const Inner = struct { a: u256, b: void };
+        const x = @uninit(Inner);
+        init {
+            let mut a: u256 = x.a;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_uninit_type() {
+    assert_lowers_to(
+        r#"
+        const x = @uninit(@uninit(type));
+        const f = fn () @uninit(type) {};
+        init {
+            f();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @1
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+            fn @1 -> entry @1  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                iret
+            }
+
+            @1 {
+                icall @0
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_uninit_primitives() {
     assert_lowers_to(
         r#"

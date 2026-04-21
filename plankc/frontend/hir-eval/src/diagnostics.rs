@@ -645,7 +645,8 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    const UNINIT_HELP: &'static str = "@uninit only supports u256, bool, memptr, and struct types";
+    const UNINIT_HELP: &'static str =
+        "@uninit only supports u256, bool, void, type, memptr, and struct types";
 
     pub fn emit_invalid_uninit_type(&mut self, ty: PrimitiveType, loc: SrcLoc) {
         Diagnostic::error("cannot create uninitialized value")

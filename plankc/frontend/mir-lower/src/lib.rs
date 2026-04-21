@@ -414,6 +414,7 @@ fn materialize_uninit(
             )
             .expect("invariant: uninit memptr produces valid alloc op");
         }
+        Ok(PrimitiveType::Void) => {}
         Ok(_) => unreachable!("unexpected type in uninit materialization"),
         Err(struct_ref) => {
             let view = types.lookup_struct(struct_ref);

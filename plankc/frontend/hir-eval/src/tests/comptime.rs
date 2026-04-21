@@ -1221,42 +1221,37 @@ fn test_uninit_struct_runtime_set_field() {
 fn test_uninit_invalid_type() {
     assert_diagnostics(
         r#"
-        const x = @uninit(void);
+        const x = @uninit(never);
         init { @evm_stop(); }
         "#,
         &[r#"
         error: cannot create uninitialized value
          --> main.plk:1:11
           |
-        1 | const x = @uninit(void);
-          |           ^^^^^^^^^^^^^ type 'void' cannot be uninitialized
+        1 | const x = @uninit(never);
+          |           ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, memptr, and struct types
+          = help: @uninit only supports u256, bool, void, type, memptr, and struct types
         "#],
     );
 }
 
 #[test]
-fn test_uninit_struct_with_void_field() {
+fn test_uninit_type_spilled_to_runtime() {
     assert_diagnostics(
         r#"
-        const Inner = struct { a: u256, b: void };
-        const x = @uninit(Inner);
-        init { @evm_stop(); }
+        const t = @uninit(type);
+        init {
+            let mut x = t;
+            @evm_stop();
+        }
         "#,
         &[r#"
-        error: struct contains field that cannot be uninitialized
-         --> main.plk:2:11
+        error: use of comptime-only value at runtime
+         --> main.plk:3:17
           |
-        2 | const x = @uninit(Inner);
-          |           ^^^^^^^^^^^^^^ cannot use @uninit on this struct
-          |
-         ::: main.plk:1:33
-          |
-        1 | const Inner = struct { a: u256, b: void };
-          |                                 ------- type 'void' cannot be uninitialized
-          |
-          = help: @uninit only supports u256, bool, memptr, and struct types
+        3 |     let mut x = t;
+          |                 ^ reference to comptime-only value
         "#],
     );
 }
@@ -1282,7 +1277,7 @@ fn test_uninit_struct_with_never_and_function_fields() {
         1 | const Bad = struct { a: never, b: function };
           |                      -------- type 'never' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, memptr, and struct types
+          = help: @uninit only supports u256, bool, void, type, memptr, and struct types
         "#,
             r#"
         error: struct contains field that cannot be uninitialized
@@ -1296,7 +1291,7 @@ fn test_uninit_struct_with_never_and_function_fields() {
         1 | const Bad = struct { a: never, b: function };
           |                                ----------- type 'function' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, memptr, and struct types
+          = help: @uninit only supports u256, bool, void, type, memptr, and struct types
         "#,
         ],
     );
