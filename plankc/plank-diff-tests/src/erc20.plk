@@ -83,8 +83,8 @@ const total_supply = fn () never {
 const transfer = fn () never {
     let to = @evm_calldataload(4);
     let amount = @evm_calldataload(36);
-    transfer_balance(@evm_caller(), to, amount);
-    let buf = @malloc_uninit(32);
+    let buf = @malloc_uninit(64);
+    transfer_balance(@evm_caller(), to, amount, buf);
     @mstore32(buf, 1);
     @evm_return(buf, 32);
 };
@@ -125,8 +125,7 @@ const transfer_from = fn () never {
     }
     @evm_sstore(allowance_slot, @evm_sub(allowance_val, amount));
 
-    transfer_balance(from, to, amount);
-    let buf = @malloc_uninit(32);
+    transfer_balance(from, to, amount, buf);
     @mstore32(buf, 1);
     @evm_return(buf, 32);
 };
@@ -151,8 +150,7 @@ const symbol = fn () never {
     @evm_return(encoded.ptr, encoded.len);
 };
 
-const transfer_balance = fn (from: u256, to: u256, amount: u256) void {
-    let buf = @malloc_uninit(64);
+const transfer_balance = fn (from: u256, to: u256, amount: u256, buf: memptr) void {
     let slot = get_balance_slot(from, buf);
     let balance_from = @evm_sload(slot);
     if @evm_lt(balance_from, amount) {
