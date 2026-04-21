@@ -239,27 +239,34 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
     }
 
     fn visit_memory_load(&mut self, data: &'d MemoryLoadData) {
-        let load_size = data.size as u32;
         self.translator.emit_local_load(data.ptr);
-        self.translator.asm.push_op_byte(op::MLOAD);
-        self.translator.asm.push_minimal_u32(256 - load_size * 8);
-        self.translator.asm.push_op_byte(op::SHR);
+        self.translator.asm.push_op_byte(op::MLOAD); // [word]
+        if data.size != IRMemoryIOByteSize::B32 {
+            let lower_bits = 256 - data.size as u32 * 8;
+            self.translator.asm.push_minimal_u32(lower_bits);
+            self.translator.asm.push_op_byte(op::SHR);
+            self.translator.asm.push_minimal_u32(lower_bits);
+            self.translator.asm.push_op_byte(op::SHL);
+        }
         self.translator.emit_local_store(data.out);
     }
 
     fn visit_memory_store(&mut self, data: &'d MemoryStoreData) {
-        let load_size = data.size as u32;
-        let shift_to_clean_word = load_size * 8;
+        if data.size == IRMemoryIOByteSize::B32 {
+            self.translator.emit_local_load(data.value());
+            self.translator.emit_local_load(data.ptr());
+            self.translator.asm.push_op_byte(op::MSTORE);
+            return;
+        }
+        let shift_to_clean_word = data.size as u32 * 8;
         self.translator.emit_local_load(data.ptr()); // [ptr]
         self.translator.asm.push_op_byte(op::DUP1); // [ptr, ptr]
         self.translator.asm.push_op_byte(op::MLOAD); // [current_word, ptr]
         self.translator.asm.push_minimal_u32(shift_to_clean_word); // [shift, current_word, ptr]
         self.translator.asm.push_op_byte(op::SHL); // [current_word << shift, ptr]
-        self.translator.asm.push_minimal_u32(shift_to_clean_word); // [shift, current_word << shift, ptr]
+        self.translator.asm.push_minimal_u32(shift_to_clean_word); // [shift, shifted, ptr]
         self.translator.asm.push_op_byte(op::SHR); // [cleaned_word, ptr]
         self.translator.emit_local_load(data.value()); // [value, cleaned_word, ptr]
-        self.translator.asm.push_minimal_u32(256 - load_size * 8); // [value_shift, value, cleaned_word, ptr]
-        self.translator.asm.push_op_byte(op::SHL); // [shifted_value, cleaned_word, ptr]
         self.translator.asm.push_op_byte(op::OR); // [updated_word, ptr]
         self.translator.asm.push_op_byte(op::SWAP1); // [ptr, updated_word]
         self.translator.asm.push_op_byte(op::MSTORE); // []
