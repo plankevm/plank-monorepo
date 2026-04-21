@@ -629,10 +629,10 @@ fn test_uninit_struct_with_memptr() {
     assert_lowers_to(
         r#"
         const Buf = struct { ptr_a: memptr, ptr_b: memptr };
-        const b = @uninit(Buf);
         init {
+            let b = @uninit(Buf);
             let mut a: memptr = b.ptr_a;
-            let mut b: memptr = b.ptr_b;
+            let mut c: memptr = b.ptr_b;
             @evm_stop();
         }
         "#,
@@ -643,10 +643,20 @@ fn test_uninit_struct_with_memptr() {
 
         Basic Blocks:
             @0 {
-                $1 = const 0x0
-                $0 = mallocany $1
-                $3 = const 0x0
-                $2 = mallocany $3
+                $0 = const 0x0
+                $1 = mallocany $0
+                $2 = const 0x0
+                $3 = mallocany $2
+                $4 = copy $1
+                $5 = copy $3
+                $6 = copy $4
+                $7 = copy $5
+                $8 = copy $6
+                $9 = copy $7
+                $10 = copy $8
+                $11 = copy $6
+                $12 = copy $7
+                $13 = copy $12
                 stop
             }
         "#,
@@ -728,8 +738,9 @@ fn test_uninit_primitives() {
             @0 {
                 $0 = const 0x0
                 $1 = const 0x0
-                $3 = const 0x0
-                $2 = mallocany $3
+                $2 = const 0x0
+                $3 = mallocany $2
+                $4 = copy $3
                 stop
             }
         "#,

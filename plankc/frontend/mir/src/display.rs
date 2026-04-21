@@ -64,11 +64,6 @@ impl<'a> DisplayMir<'a> {
             Value::Type(_) | Value::Closure { .. } => {
                 unreachable!("comptime-only value in MIR")
             }
-            Value::Uninit(ty) => {
-                write!(f, "uninit(")?;
-                self.fmt_type(f, ty)?;
-                write!(f, ")")
-            }
         }
     }
 

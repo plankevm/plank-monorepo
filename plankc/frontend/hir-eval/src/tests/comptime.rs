@@ -1205,7 +1205,7 @@ fn test_uninit_struct_runtime_set_field() {
             %0 : u256 = 0
             %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : u256 = uninit(u256)
+            %3 : u256 = 0
             %4 : Pair = Pair { %2, %3 }
             %5 : Pair = %4
             %6 : u256 = %5.0
@@ -1294,5 +1294,22 @@ fn test_uninit_struct_with_never_and_function_fields() {
           = help: @uninit only supports u256, bool, void, type, memptr, and struct types
         "#,
         ],
+    );
+}
+
+#[test]
+fn test_uninit_memptr_in_comptime() {
+    assert_diagnostics(
+        r#"
+        const x = @uninit(memptr);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: cannot use @uninit on memptr type at comptime
+         --> main.plk:1:11
+          |
+        1 | const x = @uninit(memptr);
+          |           ^^^^^^^^^^^^^^^ memptr requires runtime allocation
+        "#],
     );
 }

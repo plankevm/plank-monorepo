@@ -73,7 +73,7 @@ impl<'a> DisplayHir<'a> {
                         .expect("invariant: only primitive types are inlined as HIR values")
                         .name()
                 ),
-                other @ (Value::Uninit(_) | Value::Closure { .. } | Value::StructVal { .. }) => {
+                other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")
                 }
             },

@@ -244,9 +244,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Value::StructVal { fields, .. } => {
                     Ok(Ok(EvalValue::Comptime(fields[field_index as usize])))
                 }
-                Value::Uninit(_) => {
-                    Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(field.ty)))))
-                }
                 _ => unreachable!("invariant: type checked as struct"),
             },
             LocalState::Runtime(local) => Ok(Ok(EvalValue::Runtime {
@@ -292,11 +289,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Value::StructVal { fields: old_fields, .. } => {
                         this.eval.values_buf.extend_from_slice(old_fields);
                     }
-                    Value::Uninit(_) => {
-                        for f in r#struct.fields {
-                            this.eval.values_buf.push(this.eval.values.intern(Value::Uninit(f.ty)));
-                        }
-                    }
                     _ => unreachable!("invariant: type checked as struct"),
                 }
                 this.eval.values_buf[values_buf_offset + field_index as usize] = new_value_vid;
@@ -328,10 +320,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         LocalState::Comptime(vid) => match this.eval.values.lookup(vid) {
                             Value::StructVal { fields, .. } => {
                                 LocalState::Comptime(fields[cur_field_idx as usize])
-                            }
-                            Value::Uninit(_) => {
-                                let uninit_vid = this.eval.values.intern(Value::Uninit(field.ty));
-                                LocalState::Comptime(uninit_vid)
                             }
                             _ => unreachable!("invariant: type checked as struct"),
                         },
@@ -368,21 +356,93 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty_local] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-        if emit_invalid_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
-            Err(Poisoned)
-        } else {
-            let value = match ty.as_primitive() {
-                Ok(PrimitiveType::Void) => Value::Void,
-                Ok(PrimitiveType::Bool) => Value::Bool(false),
-                Ok(PrimitiveType::U256) => Value::BigNum(U256::ZERO),
-                Ok(PrimitiveType::MemoryPointer) => Value::Uninit(ty),
-                Ok(PrimitiveType::Type) => Value::Type(TypeId::VOID),
-                Ok(PrimitiveType::Function | PrimitiveType::Never) => {
-                    unreachable!("rejected by emit_invalid_uninit_type")
-                }
-                Err(_) => Value::Uninit(ty),
-            };
-            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(value))))
+        if validate_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
+            return Err(Poisoned);
+        }
+
+        // Types that require runtime allocation (memptr, structs containing memptr)
+        // produce MIR directly.
+        if contains_memptr(ty, self.eval.types) {
+            if self.is_comptime() {
+                self.diag_ctx.emit_uninit_memptr_in_comptime(self.loc(expr_span));
+                return Err(Poisoned);
+            }
+            return Ok(Ok(self.emit_uninit_runtime(ty)));
+        }
+
+        Ok(Ok(EvalValue::Comptime(build_uninit_comptime(
+            ty,
+            self.eval.types,
+            self.eval.values,
+            &mut self.eval.values_buf,
+        ))))
+    }
+
+    /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).
+    fn emit_uninit_runtime(&mut self, ty: TypeId) -> EvalValue {
+        let local = self.emit_uninit_runtime_local(ty);
+        EvalValue::Runtime { expr: mir::Expr::LocalRef(local), result_type: ty }
+    }
+
+    fn emit_uninit_runtime_local(&mut self, ty: TypeId) -> mir::LocalId {
+        match ty.as_primitive() {
+            Ok(PrimitiveType::U256) => {
+                let vid = self.eval.values.intern(Value::BigNum(U256::ZERO));
+                let target = self.mir_types.push(TypeId::U256);
+                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
+                target
+            }
+            Ok(PrimitiveType::Bool) => {
+                let vid = self.eval.values.intern(Value::Bool(false));
+                let target = self.mir_types.push(TypeId::BOOL);
+                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
+                target
+            }
+            Ok(PrimitiveType::MemoryPointer) => {
+                let zero_vid = self.eval.values.intern(Value::BigNum(U256::ZERO));
+                let size_local = self.mir_types.push(TypeId::U256);
+                self.emit(mir::Instruction::Set {
+                    target: size_local,
+                    expr: mir::Expr::Const(zero_vid),
+                });
+                let args = self.eval.mir_args.push_copy_slice(&[size_local]);
+                let target = self.mir_types.push(TypeId::MEMORY_POINTER);
+                self.emit(mir::Instruction::Set {
+                    target,
+                    expr: mir::Expr::RuntimeBuiltinCall {
+                        builtin: RuntimeBuiltin::DynamicAllocAnyBytes,
+                        args,
+                    },
+                });
+                target
+            }
+            Ok(
+                PrimitiveType::Void
+                | PrimitiveType::Type
+                | PrimitiveType::Function
+                | PrimitiveType::Never,
+            ) => {
+                unreachable!("void/type/function/never do not produce runtime locals")
+            }
+            Err(struct_ref) => {
+                let fields = self.with_locals_buf(|this, offset| {
+                    let view = this.eval.types.lookup_struct(struct_ref);
+                    for field in view.fields {
+                        if field.ty != TypeId::VOID {
+                            let local = this.emit_uninit_runtime_local(field.ty);
+                            this.locals_buf.push(local);
+                        }
+                    }
+                    this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[offset..])
+                });
+                let struct_ty = TypeId::from_struct(struct_ref);
+                let target = self.mir_types.push(struct_ty);
+                self.emit(mir::Instruction::Set {
+                    target,
+                    expr: mir::Expr::StructLit { ty: struct_ty, fields },
+                });
+                target
+            }
         }
     }
 
@@ -534,7 +594,7 @@ fn fold_runtime_builtin(
     }
 }
 
-fn emit_invalid_uninit_type(
+fn validate_uninit_type(
     ty: TypeId,
     types: &TypeInterner,
     diag_ctx: &mut DiagCtx<'_>,
@@ -564,9 +624,48 @@ fn emit_invalid_uninit_type(
             for field in view.fields {
                 let field_loc = SrcLoc::new(view.def_loc.source, field.def_span);
                 has_invalid_uninit |=
-                    emit_invalid_uninit_type(field.ty, types, diag_ctx, loc, Some(field_loc));
+                    validate_uninit_type(field.ty, types, diag_ctx, loc, Some(field_loc));
             }
             has_invalid_uninit
+        }
+    }
+}
+
+fn contains_memptr(ty: TypeId, types: &TypeInterner) -> bool {
+    match ty.as_primitive() {
+        Ok(PrimitiveType::MemoryPointer) => true,
+        Ok(_) => false,
+        Err(struct_ref) => {
+            let view = types.lookup_struct(struct_ref);
+            view.fields.iter().any(|f| contains_memptr(f.ty, types))
+        }
+    }
+}
+
+fn build_uninit_comptime(
+    ty: TypeId,
+    types: &TypeInterner,
+    values: &mut ValueInterner,
+    buf: &mut Vec<ValueId>,
+) -> ValueId {
+    match ty.as_primitive() {
+        Ok(PrimitiveType::U256) => values.intern(Value::BigNum(U256::ZERO)),
+        Ok(PrimitiveType::Bool) => values.intern(Value::Bool(false)),
+        Ok(PrimitiveType::Void) => values.intern(Value::Void),
+        Ok(PrimitiveType::Type) => values.intern(Value::Type(TypeId::VOID)),
+        Ok(PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never) => {
+            unreachable!("memptr/function/never cannot appear in comptime uninit struct")
+        }
+        Err(struct_ref) => {
+            let buf_offset = buf.len();
+            let view = types.lookup_struct(struct_ref);
+            for field in view.fields {
+                let vid = build_uninit_comptime(field.ty, types, values, buf);
+                buf.push(vid);
+            }
+            let result = values.intern(Value::StructVal { ty, fields: &buf[buf_offset..] });
+            buf.truncate(buf_offset);
+            result
         }
     }
 }
@@ -574,7 +673,6 @@ fn emit_invalid_uninit_type(
 fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
     match values.lookup(vid) {
         Value::BigNum(n) => n,
-        Value::Uninit(_) => U256::ZERO,
         other => unreachable!("invariant: type checked as u256, got {other:?}"),
     }
 }

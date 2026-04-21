@@ -17,7 +17,6 @@ enum StoredValue {
     Type(TypeId),
     Closure { fn_def: FnDefId, captures: CaptureIdx },
     StructVal { ty: TypeId, children: CompoundIdx },
-    Uninit(TypeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,7 +27,6 @@ pub enum Value<'a> {
     Type(TypeId),
     Closure { fn_def: FnDefId, captures: &'a [(ValueId, DefOrigin)] },
     StructVal { ty: TypeId, fields: &'a [ValueId] },
-    Uninit(TypeId),
 }
 
 impl Value<'_> {
@@ -40,7 +38,6 @@ impl Value<'_> {
             Value::Type(_) => TypeId::TYPE,
             Value::Closure { .. } => TypeId::FUNCTION,
             Value::StructVal { ty, .. } => *ty,
-            Value::Uninit(ty) => *ty,
         }
     }
 }
@@ -77,7 +74,6 @@ fn stored_to_value<'a>(
         StoredValue::StructVal { ty, children: idx } => {
             Value::StructVal { ty, fields: &children[idx] }
         }
-        StoredValue::Uninit(ty) => Value::Uninit(ty),
     }
 }
 
@@ -146,7 +142,6 @@ impl ValueInterner {
                         ty,
                         children: self.children.push_copy_slice(fields),
                     },
-                    Value::Uninit(ty) => StoredValue::Uninit(ty),
                 };
                 let id = self.values.push(stored);
                 vacant.insert(id);

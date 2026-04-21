@@ -672,4 +672,10 @@ impl DiagCtx<'_> {
             .help(Self::UNINIT_HELP)
             .emit(self);
     }
+
+    pub fn emit_uninit_memptr_in_comptime(&mut self, loc: SrcLoc) {
+        Diagnostic::error("cannot use @uninit on memptr type at comptime")
+            .primary(loc.source, loc.span, "memptr requires runtime allocation")
+            .emit(self);
+    }
 }
