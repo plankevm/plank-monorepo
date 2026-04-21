@@ -1,5 +1,4 @@
-import std::abi::encode::abi_encode;
-import std::abi::decode::abi_decode;
+import std::abi::{unsafe_abi_encode, unsafe_abi_decode, abi_encoded_size};
 import std::membytes::{membytes, membytes_from_ptr};
 
 const WithBytes = struct { id: u256, data: membytes };
@@ -8,8 +7,9 @@ init {
     let size = @evm_calldatasize();
     let ptr = @malloc_zeroed(size);
     @evm_calldatacopy(ptr, 0, size);
-    let input = membytes_from_ptr(ptr, size);
-    let decoded = abi_decode(WithBytes, input);
-    let encoded = abi_encode(WithBytes, decoded);
-    @evm_return(encoded.ptr, encoded.len);
+    let decoded = unsafe_abi_decode(WithBytes, ptr, size);
+    let out_size = abi_encoded_size(WithBytes, decoded);
+    let out = @malloc_zeroed(out_size);
+    let written = unsafe_abi_encode(WithBytes, out, decoded);
+    @evm_return(out, written);
 }

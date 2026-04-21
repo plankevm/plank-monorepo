@@ -9,8 +9,6 @@ const Some = fn (comptime T: type, value: T) Option(T) {
     Option(T) { inner: value, is_some: true }
 };
 
-// Assumes `uninit` builtin: type -> T (not yet implemented in compiler)
-// TODO: remove this comment once `uninit` is implemented
 const None = fn (comptime T: type) Option(T) {
     Option(T) { inner: @uninit(T), is_some: false }
 };

@@ -1,0 +1,224 @@
+import std::membytes::{membytes, membytes_from_ptr, unsafe_membytes_write_u256, unsafe_membytes_read_u256};
+import std::math::ceil32;
+import std::utils::reduce;
+
+const EncodeState = fn (comptime T: type) type {
+    struct {
+        buf: membytes,
+        offset: u256,
+        value: T,
+        head_offset: u256,
+        tail_offset: u256
+    }
+};
+
+const DecodeState = fn (comptime T: type) type {
+    struct {
+        buf: membytes,
+        offset: u256,
+        head_offset: u256,
+        result: T
+    }
+};
+
+const ValidState = struct {
+    buf: membytes,
+    offset: u256,
+    head_offset: u256,
+    valid: bool
+};
+
+const is_abi_dynamic = fn (comptime T: type) bool {
+    if T == membytes {
+        return true;
+    }
+    if !@is_struct(T) {
+        return false;
+    }
+    reduce(
+        bool,
+        @field_count(T),
+        fn (comptime i: u256, found: bool) bool {
+            if found {
+                true
+            } else {
+                is_abi_dynamic(@field_type(T, i))
+            }
+        },
+        false
+    )
+};
+
+const abi_head_size = fn (comptime T: type) u256 {
+    if !@is_struct(T) {
+        return 32;
+    }
+    reduce(
+        u256,
+        @field_count(T),
+        fn (comptime i: u256, acc: u256) u256 {
+            if is_abi_dynamic(@field_type(T, i)) {
+                @evm_add(acc, 32)
+            } else {
+                @evm_add(acc, abi_head_size(@field_type(T, i)))
+            }
+        },
+        0
+    )
+};
+
+const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
+    if T == membytes {
+        unsafe_membytes_write_u256(buf, offset, value.len);
+        @mcopy(@evm_add(buf.ptr, @evm_add(offset, 32)), value.ptr, value.len);
+        return @evm_add(32, ceil32(value.len));
+    }
+
+    if !@is_struct(T) {
+        if T == bool {
+            unsafe_membytes_write_u256(buf, offset, if value { 1 } else { 0 });
+        } else {
+            unsafe_membytes_write_u256(buf, offset, value);
+        }
+        return 32;
+    }
+
+    let initial = EncodeState(T) {
+        buf: buf,
+        offset: offset,
+        value: value,
+        head_offset: offset,
+        tail_offset: @evm_add(offset, abi_head_size(T))
+    };
+    let result = reduce(
+        EncodeState(T),
+        @field_count(T),
+        fn (comptime i: u256, state: EncodeState(T)) EncodeState(T) {
+            let is_dynamic = is_abi_dynamic(@field_type(T, i));
+            let write_at = if is_dynamic {
+                // write offset pointer relative to start of this struct's encoding
+                unsafe_membytes_write_u256(
+                    state.buf,
+                    state.head_offset,
+                    @evm_sub(state.tail_offset, state.offset)
+                );
+                state.tail_offset
+            } else {
+                state.head_offset
+            };
+            let written = unsafe_abi_encode_to(
+                @field_type(T, i),
+                state.buf,
+                write_at,
+                @get_field(state.value, i)
+            );
+            let mut s = state;
+            if is_dynamic {
+                s = @set_field(s, 3, @evm_add(state.head_offset, 32));
+                s = @set_field(s, 4, @evm_add(state.tail_offset, written));
+            } else {
+                s = @set_field(s, 3, @evm_add(state.head_offset, written));
+            }
+            s
+        },
+        initial
+    );
+    @evm_sub(result.tail_offset, offset)
+};
+
+const unsafe_abi_decode_from = fn (comptime T: type, buf: membytes, offset: u256) T {
+    // membytes: read length, then reference the data directly without copying
+    if T == membytes {
+        let len = unsafe_membytes_read_u256(buf, offset);
+        return membytes_from_ptr(@evm_add(buf.ptr, @evm_add(offset, 32)), len);
+    }
+
+    if !@is_struct(T) {
+        if T == bool {
+            return !@evm_iszero(unsafe_membytes_read_u256(buf, offset));
+        } else {
+            return unsafe_membytes_read_u256(buf, offset);
+        }
+    }
+    
+    let initial = DecodeState(T) {
+        buf: buf,
+        offset: offset,
+        head_offset: offset,
+        result: @uninit(T)
+    };
+    let result = reduce(
+        DecodeState(T),
+        @field_count(T),
+        fn (comptime i: u256, state: DecodeState(T)) DecodeState(T) {
+            let read_at = if is_abi_dynamic(@field_type(T, i)) {
+                @evm_add(
+                    state.offset,
+                    unsafe_membytes_read_u256(state.buf, state.head_offset)
+                )
+            } else {
+                state.head_offset
+            };
+            let decoded = unsafe_abi_decode_from(
+                @field_type(T, i),
+                state.buf,
+                read_at
+            );
+            let mut s = state;
+            s = @set_field(s, 2, @evm_add(state.head_offset, abi_head_size(@field_type(T, i))));
+            s = @set_field(s, 3, @set_field(state.result, i, decoded));
+            s
+        },
+        initial
+    );
+    result.result
+};
+
+const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
+    if T == membytes {
+        if @evm_gt(@evm_add(offset, 32), buf.len) {
+            return false;
+        }
+        let len = unsafe_membytes_read_u256(buf, offset);
+        return !@evm_gt(@evm_add(@evm_add(offset, 32), len), buf.len);
+    }
+
+    if !@is_struct(T) {
+        return !@evm_gt(@evm_add(offset, 32), buf.len);
+    }
+
+    if @evm_gt(@evm_add(offset, abi_head_size(T)), buf.len) {
+        return false;
+    }
+    
+    let initial = ValidState {
+        buf: buf,
+        offset: offset,
+        head_offset: offset,
+        valid: true
+    };
+    let result = reduce(
+        ValidState,
+        @field_count(T),
+        fn (comptime i: u256, state: ValidState) ValidState {
+            if !state.valid {
+                return state;
+            }
+            let validate_at = if is_abi_dynamic(@field_type(T, i)) {
+                @evm_add(
+                    state.offset,
+                    unsafe_membytes_read_u256(state.buf, state.head_offset)
+                )
+            } else {
+                state.head_offset
+            };
+            let valid = abi_buf_fits(@field_type(T, i), state.buf, validate_at);
+            let mut s = state;
+            s = @set_field(s, 2, @evm_add(state.head_offset, abi_head_size(@field_type(T, i))));
+            s = @set_field(s, 3, valid);
+            s
+        },
+        initial
+    );
+    result.valid
+};

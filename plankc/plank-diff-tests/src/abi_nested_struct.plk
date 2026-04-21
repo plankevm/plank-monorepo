@@ -1,5 +1,4 @@
-import std::abi::encode::abi_encode_try;
-import std::abi::decode::abi_decode_try;
+import std::abi::{abi_encode_try, abi_decode_try};
 import std::membytes::{membytes_new, membytes_from_ptr};
 
 const Inner = struct { x: u256, flag: bool };

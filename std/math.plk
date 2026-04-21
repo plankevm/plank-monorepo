@@ -1,12 +1,24 @@
 const max = fn (a: u256, b: u256) u256 {
-    if @evm_gt(a, b) { a } else { b }
+    if @evm_gt(a, b) {
+        a
+    } else {
+        b
+    }
 };
 
 const min = fn (a: u256, b: u256) u256 {
-    if @evm_lt(a, b) { a } else { b }
+    if @evm_lt(a, b) {
+        a
+    } else {
+        b
+    }
 };
 
 const ceil32 = fn (x: u256) u256 {
     let remainder = @evm_mod(x, 32);
-    if @evm_eq(remainder, 0) { x } else { @evm_add(x, @evm_sub(32, remainder)) }
+    if @evm_eq(remainder, 0) {
+        x
+    } else {
+        @evm_add(x, @evm_sub(32, remainder))
+    }
 };

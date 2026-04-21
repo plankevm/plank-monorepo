@@ -1,10 +1,15 @@
 import std::utils::reduce;
 
-const type_size = fn (comptime T: type) u256 {
+const sizeof = fn (comptime T: type) u256 {
     if !@is_struct(T) {
         return 32;
     }
-    reduce(u256, @field_count(T), fn (comptime i: u256, acc: u256) u256 {
-        @evm_add(acc, type_size(@field_type(T, i)))
-    }, 0)
+    reduce(
+        u256,
+        @field_count(T),
+        fn (comptime i: u256, acc: u256) u256 {
+            @evm_add(acc, sizeof(@field_type(T, i)))
+        },
+        0
+    )
 };

@@ -1,0 +1,89 @@
+import std::option::{Option, Some, None, unwrap};
+import std::membytes::{membytes, membytes_new, membytes_from_ptr};
+import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
+import std::math::ceil32;
+import std::utils::reduce;
+
+const SizeState = fn (comptime T: type) type {
+    struct {
+        value: T,
+        acc: u256
+    }
+};
+
+// Returns the total byte size of the ABI encoding for a given value.
+// For dynamic types (e.g. membytes), the size depends on the runtime value.
+const abi_encoded_size = fn (comptime T: type, value: T) u256 {
+    if T == membytes {
+        return @evm_add(32, ceil32(value.len));
+    }
+    if !@is_struct(T) {
+        return 32;
+    }
+    let initial = SizeState(T) { value: value, acc: abi_head_size(T) };
+    let result = reduce(
+        SizeState(T),
+        @field_count(T),
+        fn (comptime i: u256, state: SizeState(T)) SizeState(T) {
+            if is_abi_dynamic(@field_type(T, i)) {
+                let field_size = abi_encoded_size(
+                    @field_type(T, i),
+                    @get_field(state.value, i)
+                );
+                @set_field(state, 1, @evm_add(state.acc, field_size))
+            } else {
+                state
+            }
+        },
+        initial
+    );
+    result.acc
+};
+
+// Encodes `value` into pre-allocated memory at `ptr`. Caller must ensure
+// the region is large enough (use `abi_encoded_size` to determine).
+// Returns the number of bytes written.
+const unsafe_abi_encode = fn (comptime T: type, ptr: memptr, value: T) u256 {
+    let size = abi_encoded_size(T, value);
+    let buf = membytes_from_ptr(ptr, size);
+    unsafe_abi_encode_to(T, buf, 0, value)
+};
+
+// Encodes `value` into `buf`. Returns None if the buffer is too small.
+const abi_encode_try = fn (comptime T: type, buf: membytes, value: T) Option(u256) {
+    let size = abi_encoded_size(T, value);
+    if @evm_gt(size, buf.len) {
+        return None(u256);
+    }
+    Some(u256, unsafe_abi_encode_to(T, buf, 0, value))
+};
+
+// Encodes `value`, allocating a new buffer of the exact size needed.
+const abi_encode = fn (comptime T: type, value: T) membytes {
+    let size = abi_encoded_size(T, value);
+    let buf = membytes_new(size);
+    unsafe_abi_encode_to(T, buf, 0, value);
+    buf
+};
+
+// Decodes a value of type T from raw memory. Caller must ensure
+// the region contains valid ABI-encoded data.
+const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, len: u256) T {
+    let buf = membytes_from_ptr(ptr, len);
+    unsafe_abi_decode_from(T, buf, 0)
+};
+
+// Decodes a value of type T from `buf`. Returns None if the buffer
+// is too small to hold the encoding.
+const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
+    if !abi_buf_fits(T, buf, 0) {
+        return None(T);
+    }
+    Some(T, unsafe_abi_decode_from(T, buf, 0))
+};
+
+// Decodes a value of type T from `buf`. Reverts if the buffer
+// is too small to hold the encoding.
+const abi_decode = fn (comptime T: type, buf: membytes) T {
+    unwrap(T, abi_decode_try(T, buf))
+};
