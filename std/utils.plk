@@ -1,7 +1,17 @@
-const reduce = fn (comptime n: u256, comptime i: u256, comptime f: function, acc: u256) u256 {
+// Iterates from 0 to n, calling f at each step to produce a new state.
+// - State: the type of the accumulator (e.g. u256, bool, or a struct for complex state)
+// - n: number of iterations
+// - f: step function with signature fn (comptime i: u256, state: State) State
+// - state: initial accumulator value
+// Returns the final state after n iterations.
+const reduce = fn (comptime State: type, comptime n: u256, comptime f: function, state: State) State {
+    reduce_from(State, n, 0, f, state)
+};
+
+const reduce_from = fn (comptime State: type, comptime n: u256, comptime i: u256, comptime f: function, state: State) State {
     if @evm_eq(i, n) {
-        acc
+        state
     } else {
-        reduce(n, @evm_add(i, 1), f, f(i, acc))
+        reduce_from(State, n, @evm_add(i, 1), f, f(i, state))
     }
 };

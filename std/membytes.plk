@@ -39,20 +39,26 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
     Some(u256, unsafe_membytes_read_u256(buf, offset))
 };
 
+const WriteState = fn (comptime T: type) type {
+    struct { buf: membytes, offset: u256, value: T, bytes_written: u256 }
+};
+
 const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
     if !@is_struct(T) {
-        if @evm_eq(T, bool) {
+        if T == bool {
             @mstore32(@evm_add(buf.ptr, offset), if value { 1 } else { 0 });
-        } else if @evm_eq(T, u256) {
+        } else if T == u256 {
             @mstore32(@evm_add(buf.ptr, offset), value);
         }
         return 32;
     }
-    reduce(@field_count(T), 0, fn (comptime i: u256, bytes_written: u256) u256 {
-        @evm_add(bytes_written, unsafe_membytes_write(
-            @field_type(T, i), buf, @evm_add(offset, bytes_written), @get_field(value, i)
-        ))
-    }, 0)
+    let result = reduce(WriteState(T), @field_count(T), fn (comptime i: u256, state: WriteState(T)) WriteState(T) {
+        let written = unsafe_membytes_write(
+            @field_type(T, i), state.buf, @evm_add(state.offset, state.bytes_written), @get_field(state.value, i)
+        );
+        @set_field(state, 3, @evm_add(state.bytes_written, written))
+    }, WriteState(T) { buf: buf, offset: offset, value: value, bytes_written: 0 });
+    result.bytes_written
 };
 
 const membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) Option(u256) {

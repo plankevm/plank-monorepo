@@ -1,63 +1,52 @@
 import std::option::{Option, Some, None, unwrap};
 import std::membytes::{membytes, membytes_from_ptr, unsafe_membytes_read_u256};
 import std::abi::helpers::{is_abi_dynamic, abi_head_size};
+import std::utils::reduce;
 
-// Decodes struct fields recursively, building the result with @set_field.
-const decode_fields = fn (comptime T: type, comptime i: u256, buf: membytes, offset: u256, head_offset: u256, result: T) T {
-    if @evm_eq(i, @field_count(T)) {
-        result
-    } else if is_abi_dynamic(@field_type(T, i)) {
-        let data_offset = @evm_add(offset, unsafe_membytes_read_u256(buf, head_offset));
-        decode_fields(
-            T, @evm_add(i, 1), buf, offset, @evm_add(head_offset, 32),
-            @set_field(result, i, unsafe_abi_decode_from(@field_type(T, i), buf, data_offset))
-        )
-    } else {
-        decode_fields(
-            T, @evm_add(i, 1), buf, offset, @evm_add(head_offset, abi_head_size(@field_type(T, i))),
-            @set_field(result, i, unsafe_abi_decode_from(@field_type(T, i), buf, head_offset))
-        )
-    }
+const DecodeState = fn (comptime T: type) type {
+    struct { buf: membytes, offset: u256, head_offset: u256, result: T }
 };
 
 // Core decoding function. Reads the ABI encoding of type T from `buf` at `offset`.
 // Returns the decoded value.
 const unsafe_abi_decode_from = fn (comptime T: type, buf: membytes, offset: u256) T {
     // membytes: read length from tail, then reference the data
-    if @evm_eq(T, membytes) {
+    if T == membytes {
         let len = unsafe_membytes_read_u256(buf, offset);
         return membytes_from_ptr(@evm_add(buf.ptr, @evm_add(offset, 32)), len);
     }
     // primitive
     if !@is_struct(T) {
-        if @evm_eq(T, bool) {
+        if T == bool {
             return !@evm_iszero(unsafe_membytes_read_u256(buf, offset));
-        } else if @evm_eq(T, u256) {
+        } else if T == u256 {
             return unsafe_membytes_read_u256(buf, offset);
         }
     }
     // struct: read head, follow offsets for dynamic fields
-    decode_fields(T, 0, buf, offset, offset, @uninit(T))
+    let result = reduce(DecodeState(T), @field_count(T), fn (comptime i: u256, state: DecodeState(T)) DecodeState(T) {
+        if is_abi_dynamic(@field_type(T, i)) {
+            let data_offset = @evm_add(state.offset, unsafe_membytes_read_u256(state.buf, state.head_offset));
+            @set_field(
+                @set_field(state, 2, @evm_add(state.head_offset, 32)),
+                3, @set_field(state.result, i, unsafe_abi_decode_from(@field_type(T, i), state.buf, data_offset))
+            )
+        } else {
+            @set_field(
+                @set_field(state, 2, @evm_add(state.head_offset, abi_head_size(@field_type(T, i)))),
+                3, @set_field(state.result, i, unsafe_abi_decode_from(@field_type(T, i), state.buf, state.head_offset))
+            )
+        }
+    }, DecodeState(T) { buf: buf, offset: offset, head_offset: offset, result: @uninit(T) });
+    result.result
 };
 
-// Validates struct fields recursively.
-const validate_fields = fn (comptime T: type, comptime i: u256, buf: membytes, offset: u256, head_offset: u256) bool {
-    if @evm_eq(i, @field_count(T)) {
-        true
-    } else if is_abi_dynamic(@field_type(T, i)) {
-        let data_offset = @evm_add(offset, unsafe_membytes_read_u256(buf, head_offset));
-        if !is_abi_valid(@field_type(T, i), buf, data_offset) { return false; }
-        validate_fields(T, @evm_add(i, 1), buf, offset, @evm_add(head_offset, 32))
-    } else {
-        if !is_abi_valid(@field_type(T, i), buf, head_offset) { return false; }
-        validate_fields(T, @evm_add(i, 1), buf, offset, @evm_add(head_offset, abi_head_size(@field_type(T, i))))
-    }
-};
+const ValidState = struct { buf: membytes, offset: u256, head_offset: u256, valid: bool };
 
 // Validates that `buf` contains valid ABI-encoded data of type T starting at `offset`.
 const is_abi_valid = fn (comptime T: type, buf: membytes, offset: u256) bool {
     // membytes: need 32 bytes for length, then length bytes for data
-    if @evm_eq(T, membytes) {
+    if T == membytes {
         if @evm_gt(@evm_add(offset, 32), buf.len) { return false; }
         let len = unsafe_membytes_read_u256(buf, offset);
         return !@evm_gt(@evm_add(@evm_add(offset, 32), len), buf.len);
@@ -68,7 +57,22 @@ const is_abi_valid = fn (comptime T: type, buf: membytes, offset: u256) bool {
     }
     // struct: validate head fits, then validate each field
     if @evm_gt(@evm_add(offset, abi_head_size(T)), buf.len) { return false; }
-    validate_fields(T, 0, buf, offset, offset)
+    let result = reduce(ValidState, @field_count(T), fn (comptime i: u256, state: ValidState) ValidState {
+        if !state.valid { return state; }
+        if is_abi_dynamic(@field_type(T, i)) {
+            let data_offset = @evm_add(state.offset, unsafe_membytes_read_u256(state.buf, state.head_offset));
+            @set_field(
+                @set_field(state, 2, @evm_add(state.head_offset, 32)),
+                3, is_abi_valid(@field_type(T, i), state.buf, data_offset)
+            )
+        } else {
+            @set_field(
+                @set_field(state, 2, @evm_add(state.head_offset, abi_head_size(@field_type(T, i)))),
+                3, is_abi_valid(@field_type(T, i), state.buf, state.head_offset)
+            )
+        }
+    }, ValidState { buf: buf, offset: offset, head_offset: offset, valid: true });
+    result.valid
 };
 
 const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, len: u256) T {

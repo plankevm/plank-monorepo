@@ -4,7 +4,7 @@ const type_size = fn (comptime T: type) u256 {
     if !@is_struct(T) {
         return 32;
     }
-    reduce(@field_count(T), 0, fn (comptime i: u256, acc: u256) u256 {
+    reduce(u256, @field_count(T), fn (comptime i: u256, acc: u256) u256 {
         @evm_add(acc, type_size(@field_type(T, i)))
     }, 0)
 };
