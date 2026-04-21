@@ -1,0 +1,15 @@
+import std::abi::encode::abi_encode;
+import std::abi::decode::abi_decode;
+import std::membytes::{membytes, membytes_from_ptr};
+
+const WithBytes = struct { id: u256, data: membytes };
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let input = membytes_from_ptr(ptr, size);
+    let decoded = abi_decode(WithBytes, input);
+    let encoded = abi_encode(WithBytes, decoded);
+    @evm_return(encoded.ptr, encoded.len);
+}

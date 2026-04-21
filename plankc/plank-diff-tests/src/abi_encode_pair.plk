@@ -1,0 +1,14 @@
+import std::abi::encode::unsafe_abi_encode;
+import std::abi::decode::unsafe_abi_decode;
+
+const Pair = struct { a: u256, b: u256 };
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let decoded = unsafe_abi_decode(Pair, ptr, size);
+    let out = @malloc_zeroed(size);
+    let written = unsafe_abi_encode(Pair, out, decoded);
+    @evm_return(out, written);
+}

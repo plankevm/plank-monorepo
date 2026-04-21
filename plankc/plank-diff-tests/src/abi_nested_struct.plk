@@ -1,0 +1,23 @@
+import std::abi::encode::abi_encode_try;
+import std::abi::decode::abi_decode_try;
+import std::membytes::{membytes_new, membytes_from_ptr};
+
+const Inner = struct { x: u256, flag: bool };
+const Outer = struct { a: Inner, b: u256, c: bool };
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let input = membytes_from_ptr(ptr, size);
+    let maybe_decoded = abi_decode_try(Outer, input);
+    if !maybe_decoded.is_some {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+    let out_buf = membytes_new(size);
+    let maybe_written = abi_encode_try(Outer, out_buf, maybe_decoded.inner);
+    if !maybe_written.is_some {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+    @evm_return(out_buf.ptr, maybe_written.inner);
+}
