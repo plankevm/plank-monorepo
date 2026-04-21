@@ -370,12 +370,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
         if emit_invalid_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
             Err(Poisoned)
-        } else if ty == TypeId::VOID {
-            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Void))))
-        } else if ty == TypeId::TYPE {
-            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Type(TypeId::VOID)))))
         } else {
-            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty)))))
+            let value = match ty.as_primitive() {
+                Ok(PrimitiveType::Void) => Value::Void,
+                Ok(PrimitiveType::Bool) => Value::Bool(false),
+                Ok(PrimitiveType::U256) => Value::BigNum(U256::ZERO),
+                Ok(PrimitiveType::MemoryPointer) => Value::Uninit(ty),
+                Ok(PrimitiveType::Type) => Value::Type(TypeId::VOID),
+                Ok(PrimitiveType::Function | PrimitiveType::Never) => {
+                    unreachable!("rejected by emit_invalid_uninit_type")
+                }
+                Err(_) => Value::Uninit(ty),
+            };
+            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(value))))
         }
     }
 
