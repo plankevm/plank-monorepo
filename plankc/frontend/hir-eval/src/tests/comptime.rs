@@ -1237,6 +1237,19 @@ fn test_uninit_nested_struct() {
         r#"
         ==== Functions ====
         ; init
+        @fn0() -> never {
+            %0 : Outer = uninit(Outer)
+            %1 : Outer = %0
+            %2 : Inner = %1.0
+            %3 : u256 = 34
+            %4 : memptr = @malloc_uninit(%3)
+            %5 : Inner = struct#0 {
+                34,
+                void_unit,
+            }
+            %0 : Outer = Outer { %5, %4 }
+            %6 : never = @evm_stop()
+        }
         "#,
     );
 }

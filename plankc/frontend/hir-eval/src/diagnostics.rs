@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir as hir;
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
-use plank_values::{PrimitiveType, TypeId, TypeInterner, builtins as builtin_sigs};
+use plank_values::{TypeId, TypeInterner, builtins as builtin_sigs};
 
 pub(crate) struct BindingLoc {
     pub r#use: SrcLoc,

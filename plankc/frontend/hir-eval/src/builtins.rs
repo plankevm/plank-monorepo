@@ -3,8 +3,7 @@ use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
 use plank_values::{
-    Field, PrimitiveType, StructView, Type, TypeId, Value, ValueId, ValueInterner,
-    builtins as builtin_sigs,
+    Field, StructView, Type, TypeId, Value, ValueId, ValueInterner, builtins as builtin_sigs,
 };
 
 use crate::scope::{Diverge, EvalValue, LocalState, Scope};

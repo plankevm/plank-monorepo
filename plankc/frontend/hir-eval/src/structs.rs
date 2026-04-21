@@ -244,6 +244,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                                 target: tmp_local,
                                 expr: mir::Expr::Const(value),
                             });
+                            self.eval.locals_buf.push(tmp_local);
                         }
 
                         first_runtime_field = Some(lit_field);
@@ -272,6 +273,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                         target: tmp_local,
                         expr: mir::Expr::Const(value),
                     });
+                    self.eval.locals_buf.push(tmp_local);
                 }
             }
         }
