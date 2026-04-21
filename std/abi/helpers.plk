@@ -1,32 +1,31 @@
 import std::membytes::membytes;
+import std::utils::reduce;
+
+const is_abi_dynamic_field = fn (comptime T: type, comptime i: u256) bool {
+    if @evm_eq(i, @field_count(T)) {
+        false
+    } else if is_abi_dynamic(@field_type(T, i)) {
+        true
+    } else {
+        is_abi_dynamic_field(T, @evm_add(i, 1))
+    }
+};
 
 const is_abi_dynamic = fn (comptime T: type) bool {
-    if eq(T, membytes) { return true; }
-    if !is_struct(T) { return false; }
-    comptime let mut field_index = 0;
-    inline while lt(field_index, field_count(T)) {
-        if is_abi_dynamic(get_field_type(T, field_index)) {
-            return true;
-        }
-        comptime field_index = add(field_index, 1);
-    }
-    false
+    if @evm_eq(T, membytes) { return true; }
+    if !@is_struct(T) { return false; }
+    is_abi_dynamic_field(T, 0)
 };
 
 const abi_head_size = fn (comptime T: type) u256 {
-    if !is_struct(T) {
+    if !@is_struct(T) {
         return 32;
     }
-    comptime let mut field_index = 0;
-    comptime let mut size = 0;
-    inline while lt(field_index, field_count(T)) {
-        let field_type = get_field_type(T, field_index);
-        if is_abi_dynamic(field_type) {
-            size = add(size, 32);
+    reduce(@field_count(T), 0, fn (comptime i: u256, acc: u256) u256 {
+        if is_abi_dynamic(@field_type(T, i)) {
+            @evm_add(acc, 32)
         } else {
-            size = add(size, abi_head_size(field_type));
+            @evm_add(acc, abi_head_size(@field_type(T, i)))
         }
-        comptime field_index = add(field_index, 1);
-    }
-    size
+    }, 0)
 };

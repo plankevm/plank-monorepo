@@ -1,79 +1,64 @@
-import std::option::Option;
-import std::option::Some;
-import std::option::None;
-import std::membytes::membytes;
-import std::membytes::membytes_new;
-import std::membytes::membytes_from_ptr;
-import std::membytes::unsafe_membytes_write_u256;
-import std::abi::helpers::is_abi_dynamic;
-import std::abi::helpers::abi_head_size;
+import std::option::{Option, Some, None};
+import std::membytes::{membytes, membytes_new, membytes_from_ptr, unsafe_membytes_write_u256};
+import std::abi::helpers::{is_abi_dynamic, abi_head_size};
 import std::math::ceil32;
+import std::utils::reduce;
+
+// Encodes struct fields recursively, tracking head and tail offsets.
+// Returns tail_offset (head_offset is implicit from field index).
+const encode_fields = fn (comptime T: type, comptime i: u256, buf: membytes, offset: u256, value: T, head_offset: u256, tail_offset: u256) u256 {
+    if @evm_eq(i, @field_count(T)) {
+        tail_offset
+    } else if is_abi_dynamic(@field_type(T, i)) {
+        // write offset relative to start of this struct's encoding
+        unsafe_membytes_write_u256(buf, head_offset, @evm_sub(tail_offset, offset));
+        let written = unsafe_abi_encode_to(@field_type(T, i), buf, tail_offset, @get_field(value, i));
+        encode_fields(T, @evm_add(i, 1), buf, offset, value, @evm_add(head_offset, 32), @evm_add(tail_offset, written))
+    } else {
+        let written = unsafe_abi_encode_to(@field_type(T, i), buf, head_offset, @get_field(value, i));
+        encode_fields(T, @evm_add(i, 1), buf, offset, value, @evm_add(head_offset, written), tail_offset)
+    }
+};
 
 // Core encoding function. Writes the ABI encoding of `value` into `buf` at `offset`.
 // Returns the total number of bytes written.
 const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
     // membytes: length-prefixed padded data
-    if eq(T, membytes) {
+    if @evm_eq(T, membytes) {
         unsafe_membytes_write_u256(buf, offset, value.len);
-        mcopy(add(buf.ptr, add(offset, 32)), value.ptr, value.len);
-        return add(32, ceil32(value.len));
+        @mcopy(@evm_add(buf.ptr, @evm_add(offset, 32)), value.ptr, value.len);
+        return @evm_add(32, ceil32(value.len));
     }
     // primitive
-    if !is_struct(T) {
-        if eq(T, bool) {
+    if !@is_struct(T) {
+        if @evm_eq(T, bool) {
             unsafe_membytes_write_u256(buf, offset, if value { 1 } else { 0 });
-        } else if eq(T, u256) {
+        } else if @evm_eq(T, u256) {
             unsafe_membytes_write_u256(buf, offset, value);
-        } else {
-            comptimeError("unsupported primitive type");
         }
         return 32;
     }
     // struct: head/tail encoding
-    let head_size = abi_head_size(T);
-    let mut head_offset = offset;
-    let mut tail_offset = add(offset, head_size);
-    comptime let mut field_index = 0;
-    inline while lt(field_index, field_count(T)) {
-        let field_type = get_field_type(T, field_index);
-        let getter = create_field_getter(T, field_index);
-        let field_value = getter(value);
-        if is_abi_dynamic(field_type) {
-            // write offset relative to start of this struct's encoding
-            unsafe_membytes_write_u256(buf, head_offset, sub(tail_offset, offset));
-            head_offset = add(head_offset, 32);
-            // write data in tail
-            let written = unsafe_abi_encode_to(field_type, buf, tail_offset, field_value);
-            tail_offset = add(tail_offset, written);
-        } else {
-            let written = unsafe_abi_encode_to(field_type, buf, head_offset, field_value);
-            head_offset = add(head_offset, written);
-        }
-        comptime field_index = add(field_index, 1);
-    }
-    sub(tail_offset, offset)
+    let tail_offset = encode_fields(T, 0, buf, offset, value, offset, @evm_add(offset, abi_head_size(T)));
+    @evm_sub(tail_offset, offset)
 };
 
 // Computes the total ABI-encoded size of a value at runtime.
 // For static types this is comptime-known. For dynamic types it depends on runtime lengths.
 const abi_encoded_size = fn (comptime T: type, value: T) u256 {
-    if eq(T, membytes) {
-        return add(32, ceil32(value.len));
+    if @evm_eq(T, membytes) {
+        return @evm_add(32, ceil32(value.len));
     }
-    if !is_struct(T) {
+    if !@is_struct(T) {
         return 32;
     }
-    let mut size = abi_head_size(T);
-    comptime let mut field_index = 0;
-    inline while lt(field_index, field_count(T)) {
-        let field_type = get_field_type(T, field_index);
-        if is_abi_dynamic(field_type) {
-            let getter = create_field_getter(T, field_index);
-            size = add(size, abi_encoded_size(field_type, getter(value)));
+    reduce(@field_count(T), 0, fn (comptime i: u256, acc: u256) u256 {
+        if is_abi_dynamic(@field_type(T, i)) {
+            @evm_add(acc, abi_encoded_size(@field_type(T, i), @get_field(value, i)))
+        } else {
+            acc
         }
-        comptime field_index = add(field_index, 1);
-    }
-    size
+    }, abi_head_size(T))
 };
 
 const unsafe_abi_encode = fn (comptime T: type, ptr: memptr, value: T) u256 {
@@ -84,7 +69,7 @@ const unsafe_abi_encode = fn (comptime T: type, ptr: memptr, value: T) u256 {
 
 const abi_encode_try = fn (comptime T: type, buf: membytes, value: T) Option(u256) {
     let size = abi_encoded_size(T, value);
-    if gt(size, buf.len) {
+    if @evm_gt(size, buf.len) {
         return None(u256);
     }
     Some(u256, unsafe_abi_encode_to(T, buf, 0, value))

@@ -12,7 +12,7 @@ const Some = fn (comptime T: type, value: T) Option(T) {
 // Assumes `uninit` builtin: type -> T (not yet implemented in compiler)
 // TODO: remove this comment once `uninit` is implemented
 const None = fn (comptime T: type) Option(T) {
-    Option(T) { inner: uninit(T), is_some: false }
+    Option(T) { inner: @uninit(T), is_some: false }
 };
 
 const is_some = fn (comptime T: type, opt: Option(T)) bool {
@@ -25,7 +25,7 @@ const is_none = fn (comptime T: type, opt: Option(T)) bool {
 
 const unwrap = fn (comptime T: type, opt: Option(T)) T {
     if !opt.is_some {
-        revert(malloc_uninit(0), 0);
+        @evm_revert(@malloc_uninit(0), 0);
     }
     opt.inner
 };

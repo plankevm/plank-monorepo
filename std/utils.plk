@@ -1,0 +1,7 @@
+const reduce = fn (comptime n: u256, comptime i: u256, comptime f: function, acc: u256) u256 {
+    if @evm_eq(i, n) {
+        acc
+    } else {
+        reduce(n, @evm_add(i, 1), f, f(i, acc))
+    }
+};

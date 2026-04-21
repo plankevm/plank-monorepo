@@ -1,7 +1,6 @@
-import std::option::Option;
-import std::option::Some;
-import std::option::None;
+import std::option::{Option, Some, None};
 import std::type::type_size;
+import std::utils::reduce;
 
 // Invariant: the region [ptr, ptr + len) is allocated and exclusively owned.
 const membytes = struct {
@@ -10,7 +9,7 @@ const membytes = struct {
 };
 
 const membytes_new = fn (len: u256) membytes {
-    membytes { ptr: malloc_zeroed(len), len: len }
+    membytes { ptr: @malloc_zeroed(len), len: len }
 };
 
 const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
@@ -18,57 +17,46 @@ const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
 };
 
 const unsafe_membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) u256 {
-    mstore32(add(buf.ptr, offset), value);
+    @mstore32(@evm_add(buf.ptr, offset), value);
     32
 };
 
 const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
-    if gt(add(offset, 32), buf.len) {
+    if @evm_gt(@evm_add(offset, 32), buf.len) {
         return None(u256);
     }
     Some(u256, unsafe_membytes_write_u256(buf, offset, value))
 };
 
 const unsafe_membytes_read_u256 = fn (buf: membytes, offset: u256) u256 {
-    mload32(add(buf.ptr, offset))
+    @mload32(@evm_add(buf.ptr, offset))
 };
 
 const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
-    if gt(add(offset, 32), buf.len) {
+    if @evm_gt(@evm_add(offset, 32), buf.len) {
         return None(u256);
     }
     Some(u256, unsafe_membytes_read_u256(buf, offset))
 };
 
-// Assumes comptime builtins: is_struct, field_count, get_field_type, create_field_getter, eq on type
-// Assumes comptime features: inline while, comptime let mut
-// TODO: remove this comment once the above are implemented
 const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
-    if !is_struct(T) {
-        if eq(T, bool) {
-            mstore32(add(buf.ptr, offset), if value { 1 } else { 0 });
-        } else if eq(T, u256) {
-            mstore32(add(buf.ptr, offset), value);
-        } else {
-            comptimeError("unsupported primitive type");
+    if !@is_struct(T) {
+        if @evm_eq(T, bool) {
+            @mstore32(@evm_add(buf.ptr, offset), if value { 1 } else { 0 });
+        } else if @evm_eq(T, u256) {
+            @mstore32(@evm_add(buf.ptr, offset), value);
         }
         return 32;
     }
-    comptime let mut field_index = 0;
-    let mut bytes_written = 0;
-    inline while lt(field_index, field_count(T)) {
-        let getter = create_field_getter(T, field_index);
-        let written = unsafe_membytes_write(
-            get_field_type(T, field_index), buf, add(offset, bytes_written), getter(value)
-        );
-        bytes_written = add(bytes_written, written);
-        comptime field_index = add(field_index, 1);
-    }
-    bytes_written
+    reduce(@field_count(T), 0, fn (comptime i: u256, bytes_written: u256) u256 {
+        @evm_add(bytes_written, unsafe_membytes_write(
+            @field_type(T, i), buf, @evm_add(offset, bytes_written), @get_field(value, i)
+        ))
+    }, 0)
 };
 
 const membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) Option(u256) {
-    if gt(add(offset, type_size(T)), buf.len) {
+    if @evm_gt(@evm_add(offset, type_size(T)), buf.len) {
         return None(u256);
     }
     Some(u256, unsafe_membytes_write(T, buf, offset, value))
