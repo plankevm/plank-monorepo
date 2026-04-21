@@ -343,6 +343,7 @@ define_builtins! {
         // Type Reflection
         IS_STRUCT "@is_struct" => IsStruct;
         FIELD_COUNT "@field_count" => FieldCount;
+        IN_COMPTIME "@in_comptime" => InComptime;
     }
 
     comptime_dynamic_builtins {

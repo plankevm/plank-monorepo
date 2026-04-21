@@ -187,6 +187,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let count = U256::from(r#struct.fields.len());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
+            Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
             _ => unreachable!("not a comptime builtin: {builtin}"),
         }
     }

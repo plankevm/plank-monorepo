@@ -1226,6 +1226,42 @@ fn test_uninit_struct_runtime_set_field() {
 }
 
 #[test]
+fn test_in_comptime_builtin() {
+    assert_lowers_to(
+        r#"
+        const const_comptime = @in_comptime();
+
+        const simple_func = fn () bool { @in_comptime() };
+
+        init {
+            let mut a = @in_comptime();
+            let mut b = comptime { @in_comptime() };
+            let mut c = comptime { simple_func() };
+            let mut d = { simple_func() };
+
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> bool {
+            %0 : bool = false
+            ret %0
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : bool = false
+            %1 : bool = true
+            %2 : bool = true
+            %3 : bool = call @fn0()
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_uninit_invalid_type() {
     assert_diagnostics(
         r#"
