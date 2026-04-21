@@ -1,0 +1,48 @@
+const CLONE_SELECTOR = 0x8124b78e;
+const CLONE_DETERMINISTIC_SELECTOR = 0xb86b2ceb;
+
+const CLONE_CREATED_TOPIC = 0xbe2f3d28fdeb5839123d65fd47ec2f5915c715d2b527b9e229123706fdecfc85;
+
+init {
+    let length = @runtime_length();
+    let dest = @malloc_uninit(length);
+    @evm_codecopy(dest, @runtime_start_offset(), length);
+    @evm_return(dest, length);
+}
+
+run {
+    let selector = @evm_shr(224, @evm_calldataload(0));
+    if @evm_eq(selector, CLONE_SELECTOR) {
+        clone();
+    } else if @evm_eq(selector, CLONE_DETERMINISTIC_SELECTOR) {
+        clone_deterministic();
+    } else {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+}
+
+const clone = fn () never {
+    let buf = @malloc_uninit(55);
+    build_clone(buf);
+    let address = @evm_create(0, buf, 55);
+    @mstore32(buf, address);
+    @evm_log1(buf, 32, CLONE_CREATED_TOPIC);
+    @evm_return(buf, 32);
+};
+
+const clone_deterministic = fn () never {
+    let buf = @malloc_uninit(55);
+    build_clone(buf);
+    let salt = @evm_calldataload(36);
+    let address = @evm_create2(0, buf, 55, salt);
+    @mstore32(buf, address);
+    @evm_log1(buf, 32, CLONE_CREATED_TOPIC);
+    @evm_return(buf, 32);
+};
+
+const build_clone = fn (buf: memptr) void {
+    let address = @evm_calldataload(4);
+    @mstore20(buf, @evm_shl(96, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73));
+    @mstore20(@evm_add(buf, 20), @evm_shl(96, address));
+    @mstore15(@evm_add(buf, 40), @evm_shl(136, 0x5af43d82803e903d91602b57fd5bf3));
+};
