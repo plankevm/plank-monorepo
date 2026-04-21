@@ -1218,38 +1218,86 @@ fn test_uninit_struct_runtime_set_field() {
 }
 
 #[test]
-fn test_uninit_nested_struct() {
-    assert_lowers_to(
+fn test_uninit_invalid_type() {
+    assert_diagnostics(
+        r#"
+        const x = @uninit(void);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: cannot create uninitialized value
+         --> main.plk:1:11
+          |
+        1 | const x = @uninit(void);
+          |           ^^^^^^^^^^^^^ type 'void' cannot be uninitialized
+          |
+          = help: @uninit only supports u256, bool, memptr, and struct types
+        "#],
+    );
+}
+
+#[test]
+fn test_uninit_struct_with_void_field() {
+    assert_diagnostics(
         r#"
         const Inner = struct { a: u256, b: void };
-        const Outer = struct { x: Inner, y: memptr };
+        const x = @uninit(Inner);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: struct contains field that cannot be uninitialized
+         --> main.plk:2:11
+          |
+        2 | const x = @uninit(Inner);
+          |           ^^^^^^^^^^^^^^ cannot use @uninit on this struct
+          |
+         ::: main.plk:1:33
+          |
+        1 | const Inner = struct { a: u256, b: void };
+          |                                 ------- type 'void' cannot be uninitialized
+          |
+          = help: @uninit only supports u256, bool, memptr, and struct types
+        "#],
+    );
+}
 
-        init {
-            let mut a = @uninit(Outer);
-            let mut b = a.x;
-            a = Outer {
-                x: Inner { a: 34, b: {}, },
-                y: @malloc_uninit(34)
-            };
-            @evm_stop();
-        }
-        "#,
+#[test]
+fn test_uninit_struct_with_never_and_function_fields() {
+    assert_diagnostics(
         r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {
-            %0 : Outer = uninit(Outer)
-            %1 : Outer = %0
-            %2 : Inner = %1.0
-            %3 : u256 = 34
-            %4 : memptr = @malloc_uninit(%3)
-            %5 : Inner = struct#0 {
-                34,
-                void_unit,
-            }
-            %0 : Outer = Outer { %5, %4 }
-            %6 : never = @evm_stop()
-        }
+        const Bad = struct { a: never, b: function };
+        const x = @uninit(Bad);
+        init { @evm_stop(); }
         "#,
+        &[
+            r#"
+        error: struct contains field that cannot be uninitialized
+         --> main.plk:2:11
+          |
+        2 | const x = @uninit(Bad);
+          |           ^^^^^^^^^^^^ cannot use @uninit on this struct
+          |
+         ::: main.plk:1:22
+          |
+        1 | const Bad = struct { a: never, b: function };
+          |                      -------- type 'never' cannot be uninitialized
+          |
+          = help: @uninit only supports u256, bool, memptr, and struct types
+        "#,
+            r#"
+        error: struct contains field that cannot be uninitialized
+         --> main.plk:2:11
+          |
+        2 | const x = @uninit(Bad);
+          |           ^^^^^^^^^^^^ cannot use @uninit on this struct
+          |
+         ::: main.plk:1:32
+          |
+        1 | const Bad = struct { a: never, b: function };
+          |                                ----------- type 'function' cannot be uninitialized
+          |
+          = help: @uninit only supports u256, bool, memptr, and struct types
+        "#,
+        ],
     );
 }

@@ -3,11 +3,15 @@ use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
 use plank_values::{
-    Field, StructView, Type, TypeId, Value, ValueId, ValueInterner, builtins as builtin_sigs,
+    Field, PrimitiveType, StructView, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner,
+    builtins as builtin_sigs,
 };
 
-use crate::scope::{Diverge, EvalValue, LocalState, Scope};
-use plank_session::Poisoned;
+use crate::{
+    diagnostics::DiagCtx,
+    scope::{Diverge, EvalValue, LocalState, Scope},
+};
+use plank_session::{Poisoned, SrcLoc};
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -364,7 +368,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty_local] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-        Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty)))))
+        if emit_invalid_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
+            Err(Poisoned)
+        } else {
+            Ok(Ok(EvalValue::Comptime(self.eval.values.intern(Value::Uninit(ty)))))
+        }
     }
 
     fn resolve_struct_field_index(
@@ -512,6 +520,37 @@ fn fold_runtime_builtin(
             }
         }
         _ => unreachable!("non-foldable builtin cannot be evaluated: {builtin}"),
+    }
+}
+
+fn emit_invalid_uninit_type(
+    ty: TypeId,
+    types: &TypeInterner,
+    diag_ctx: &mut DiagCtx<'_>,
+    loc: SrcLoc,
+    field_loc: Option<SrcLoc>,
+) -> bool {
+    match ty.as_primitive() {
+        Ok(PrimitiveType::U256 | PrimitiveType::Bool | PrimitiveType::MemoryPointer) => false,
+        Ok(invalid @ (PrimitiveType::Void | PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::Never)) => {
+            // `field_loc` is set when recursing into struct fields
+            if let Some(field_loc) = field_loc {
+                diag_ctx.emit_invalid_uninit_struct_field(invalid, loc, field_loc);
+            } else {
+                diag_ctx.emit_invalid_uninit_type(invalid, loc);
+            }
+            true
+        }
+        Err(struct_ref) => {
+            let view = types.lookup_struct(struct_ref);
+            let mut has_invalid_uninit = false;
+            for field in view.fields {
+                let field_loc = SrcLoc::new(view.def_loc.source, field.def_span);
+                has_invalid_uninit |=
+                    emit_invalid_uninit_type(field.ty, types, diag_ctx, loc, Some(field_loc));
+            }
+            has_invalid_uninit
+        }
     }
 }
 
