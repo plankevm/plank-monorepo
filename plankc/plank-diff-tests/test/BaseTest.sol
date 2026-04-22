@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 
 abstract contract BaseTest is Test {
     function deployCodeTo(address addr, bytes memory initcode) internal returns (bool success, bytes memory errdata) {
@@ -22,28 +22,50 @@ abstract contract BaseTest is Test {
         }
     }
 
+    function assertCallEq(address ref, address impl, bytes memory data) internal {
+        assertCallEqFrom(ref, impl, data, address(this));
+    }
+
+    function assertCallEqFrom(address ref, address impl, bytes memory data, address sender) internal {
+        vm.startPrank(sender);
+
+        vm.recordLogs();
+        (bool refSucc, bytes memory refOut) = ref.call(data);
+        Vm.Log[] memory refLogs = vm.getRecordedLogs();
+
+        vm.recordLogs();
+        (bool plankSucc, bytes memory plankOut) = impl.call(data);
+        Vm.Log[] memory plankLogs = vm.getRecordedLogs();
+
+        vm.stopPrank();
+
+        assertEq(refSucc, plankSucc, "success mismatch");
+        assertEq(refOut, plankOut, "output mismatch");
+        assertEq(refLogs.length, plankLogs.length, "log count mismatch");
+        for (uint256 i = 0; i < refLogs.length; i++) {
+            assertEq(refLogs[i].data, plankLogs[i].data, "log data mismatch");
+            assertEq(
+                refLogs[i].topics.length,
+                plankLogs[i].topics.length,
+                "topic count mismatch"
+            );
+            for (uint256 j = 0; j < refLogs[i].topics.length; j++) {
+                assertEq(refLogs[i].topics[j], plankLogs[i].topics[j], "topic mismatch");
+            }
+        }
+    }
+
     function plank(string memory sourcePath) internal returns (bytes memory) {
-        string[] memory args = new string[](5);
+        string[] memory args = new string[](9);
         args[0] = "cargo";
         args[1] = "run";
         args[2] = "-p";
         args[3] = "plank";
         args[4] = "--";
-        string[] memory fullArgs = new string[](8);
-        fullArgs[0] = args[0];
-        fullArgs[1] = args[1];
-        fullArgs[2] = args[2];
-        fullArgs[3] = args[3];
-        fullArgs[4] = args[4];
-        fullArgs[5] = "build";
-        fullArgs[6] = sourcePath;
-        fullArgs[7] = "--dep";
-        // Grow by one more for the dep value
-        string[] memory finalArgs = new string[](9);
-        for (uint256 i = 0; i < 8; i++) {
-            finalArgs[i] = fullArgs[i];
-        }
-        finalArgs[8] = string.concat("std=", vm.projectRoot(), "/../../std");
-        return vm.ffi(finalArgs);
+        args[5] = "build";
+        args[6] = sourcePath;
+        args[7] = "--dep";
+        args[8] = string.concat("std=", vm.projectRoot(), "/../../std");
+        return vm.ffi(args);
     }
 }

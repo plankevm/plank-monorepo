@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {Test, Vm} from "forge-std/Test.sol";
 import {BaseTest} from "./BaseTest.sol";
 import {ERC20} from "src/ERC20.sol";
 
@@ -20,36 +19,11 @@ contract ERC20Test is BaseTest {
     // --- helpers ---
 
     function assertCallEq(bytes memory data) internal {
-        assertCallEqFrom(data, address(this));
+        assertCallEq(address(solRef), plankImpl, data);
     }
 
     function assertCallEqFrom(bytes memory data, address sender) internal {
-        vm.startPrank(sender);
-
-        vm.recordLogs();
-        (bool refSucc, bytes memory refOut) = address(solRef).call(data);
-        Vm.Log[] memory refLogs = vm.getRecordedLogs();
-
-        vm.recordLogs();
-        (bool plankSucc, bytes memory plankOut) = plankImpl.call(data);
-        Vm.Log[] memory plankLogs = vm.getRecordedLogs();
-
-        vm.stopPrank();
-
-        assertEq(refSucc, plankSucc, "success mismatch");
-        assertEq(refOut, plankOut, "output mismatch");
-        assertEq(refLogs.length, plankLogs.length, "log count mismatch");
-        for (uint256 i = 0; i < refLogs.length; i++) {
-            assertEq(refLogs[i].data, plankLogs[i].data, "log data mismatch");
-            assertEq(
-                refLogs[i].topics.length,
-                plankLogs[i].topics.length,
-                "topic count mismatch"
-            );
-            for (uint256 j = 0; j < refLogs[i].topics.length; j++) {
-                assertEq(refLogs[i].topics[j], plankLogs[i].topics[j], "topic mismatch");
-            }
-        }
+        assertCallEqFrom(address(solRef), plankImpl, data, sender);
     }
 
     // --- view functions ---

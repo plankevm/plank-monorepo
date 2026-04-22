@@ -1,4 +1,4 @@
-import std::abi::{abi_encode, abi_decode};
+import std::abi::{abi_encode};
 import std::membytes::{membytes, membytes_from_ptr};
 
 const TOTAL_SUPPLY = 1000000;
@@ -19,10 +19,6 @@ const SYMBOL_SELECTOR = 0x95d89b41;
 
 const TRANSFER_TOPIC = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
 const APPROVAL_TOPIC = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
-
-const TransferArgs = struct { to: u256, amount: u256 };
-const ApproveArgs = struct { spender: u256, amount: u256 };
-const TransferFromArgs = struct { from: u256, to: u256, amount: u256 };
 
 init {
     @evm_sstore(TOTAL_SUPPLY_SLOT, TOTAL_SUPPLY);
@@ -55,7 +51,7 @@ run {
     } else if @evm_eq(selector, TRANSFER_FROM_SELECTOR) {
         transfer_from();
     } else if @evm_eq(selector, DECIMALS_SELECTOR) {
-        decimal();
+        decimals();
     } else if @evm_eq(selector, NAME_SELECTOR) {
         name();
     } else if @evm_eq(selector, SYMBOL_SELECTOR) {
@@ -130,7 +126,7 @@ const transfer_from = fn () never {
     @evm_return(buf, 32);
 };
 
-const decimal = fn () never {
+const decimals = fn () never {
     let buf = @malloc_uninit(32);
     @mstore32(buf, 18);
     @evm_return(buf, 32);
