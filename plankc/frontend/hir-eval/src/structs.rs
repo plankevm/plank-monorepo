@@ -27,10 +27,18 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let mut fields_poisoned = false;
             let fields = &this.hir.fields[struct_def.fields];
             for (i, &field) in fields.iter().enumerate() {
+                let field_value_binding = this.bindings[field.value];
+                let field_def_span =
+                    SourceSpan::new(field.name_offset, field_value_binding.use_span.end);
                 let Ok(ty) = this.expect_type(field.value) else {
                     fields_poisoned = true;
                     continue;
                 };
+                if ty == TypeId::NEVER {
+                    this.diag_ctx.emit_never_as_struct_field(this.loc(field_def_span), field.name);
+                    fields_poisoned = true;
+                    continue;
+                }
                 if let Some(first_offset) = fields[..i].iter().find_map(|prev_field| {
                     (prev_field.name == field.name).then_some(prev_field.name_offset)
                 }) {
@@ -42,9 +50,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     );
                     fields_poisoned = true;
                 }
-                let def_span =
-                    SourceSpan::new(field.name_offset, this.bindings[field.value].use_span.end);
-                this.fields_buf.push(Field { name: field.name, ty, def_span });
+                this.fields_buf.push(Field { name: field.name, ty, def_span: field_def_span });
             }
 
             if fields_poisoned {

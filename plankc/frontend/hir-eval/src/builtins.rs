@@ -291,12 +291,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     _ => unreachable!("invariant: type checked as struct"),
                 }
-                this.eval.values_buf[values_buf_offset + field_index as usize] = new_value_vid;
-                let new_fields = &this.eval.values_buf[values_buf_offset..];
+                let fields = &mut this.eval.values_buf[values_buf_offset..];
+                fields[field_index as usize] = new_value_vid;
                 Ok(EvalValue::Comptime(
-                    this.eval
-                        .values
-                        .intern(Value::StructVal { ty: instance_ty, fields: new_fields }),
+                    this.eval.values.intern(Value::StructVal { ty: instance_ty, fields }),
                 ))
             }));
         }
@@ -311,33 +309,23 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
+        let instance_local = self.materialize_as_local(instance_state, instance_ty);
         let mir_fields = self.with_locals_buf(|this, locals_buf_offset| {
             for (cur_field_idx, &field) in (0..).zip(r#struct.fields) {
-                let local = if cur_field_idx == field_index {
-                    this.materialize_as_local(new_value_state, expected_field_type)
-                } else {
-                    let field_state = match instance_state {
-                        LocalState::Comptime(vid) => match this.eval.values.lookup(vid) {
-                            Value::StructVal { fields, .. } => {
-                                LocalState::Comptime(fields[cur_field_idx as usize])
-                            }
-                            _ => unreachable!("invariant: type checked as struct"),
-                        },
-                        LocalState::Runtime(instance_local) => {
-                            let target = this.mir_types.push(field.ty);
-                            this.emit(mir::Instruction::Set {
-                                target,
-                                expr: mir::Expr::FieldAccess {
-                                    object: instance_local,
-                                    field_index: cur_field_idx,
-                                },
-                            });
-                            LocalState::Runtime(target)
-                        }
-                    };
-                    this.materialize_as_local(field_state, field.ty)
-                };
-                this.locals_buf.push(local);
+                if cur_field_idx == field_index {
+                    let local = this.materialize_as_local(new_value_state, expected_field_type);
+                    this.locals_buf.push(local);
+                    continue;
+                }
+                let target = this.mir_types.push(field.ty);
+                this.emit(mir::Instruction::Set {
+                    target,
+                    expr: mir::Expr::FieldAccess {
+                        object: instance_local,
+                        field_index: cur_field_idx,
+                    },
+                });
+                this.locals_buf.push(target);
             }
             this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[locals_buf_offset..])
         });
@@ -387,23 +375,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn emit_uninit_runtime_local(&mut self, ty: TypeId) -> mir::LocalId {
         match ty.as_primitive() {
             Ok(PrimitiveType::U256) => {
-                let vid = self.eval.values.intern(Value::BigNum(U256::ZERO));
                 let target = self.mir_types.push(TypeId::U256);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
+                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::ZERO) });
                 target
             }
             Ok(PrimitiveType::Bool) => {
-                let vid = self.eval.values.intern(Value::Bool(false));
                 let target = self.mir_types.push(TypeId::BOOL);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(vid) });
+                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::FALSE) });
                 target
             }
             Ok(PrimitiveType::MemoryPointer) => {
-                let zero_vid = self.eval.values.intern(Value::BigNum(U256::ZERO));
                 let size_local = self.mir_types.push(TypeId::U256);
                 self.emit(mir::Instruction::Set {
                     target: size_local,
-                    expr: mir::Expr::Const(zero_vid),
+                    expr: mir::Expr::Const(ValueId::ZERO),
                 });
                 let args = self.eval.mir_args.push_copy_slice(&[size_local]);
                 let target = self.mir_types.push(TypeId::MEMORY_POINTER);
@@ -416,22 +401,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 target
             }
-            Ok(
-                PrimitiveType::Void
-                | PrimitiveType::Type
-                | PrimitiveType::Function
-                | PrimitiveType::Never,
-            ) => {
+            Ok(PrimitiveType::Void) => {
+                let target = self.mir_types.push(TypeId::VOID);
+                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::VOID) });
+                target
+            }
+            Ok(PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::Never) => {
                 unreachable!("void/type/function/never do not produce runtime locals")
             }
             Err(struct_ref) => {
                 let fields = self.with_locals_buf(|this, offset| {
                     let view = this.eval.types.lookup_struct(struct_ref);
                     for field in view.fields {
-                        if field.ty != TypeId::VOID {
-                            let local = this.emit_uninit_runtime_local(field.ty);
-                            this.locals_buf.push(local);
-                        }
+                        let local = this.emit_uninit_runtime_local(field.ty);
+                        this.locals_buf.push(local);
                     }
                     this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[offset..])
                 });

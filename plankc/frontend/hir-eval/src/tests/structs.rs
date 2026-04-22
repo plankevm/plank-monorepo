@@ -692,3 +692,22 @@ fn test_type_index_expr_eagerly_evaluates() {
         "#,
     );
 }
+
+#[test]
+fn test_struct_with_never_field() {
+    assert_diagnostics(
+        r#"
+        const S = struct { x: u256, y: never };
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: `never` not valid struct field type
+         --> main.plk:1:29
+          |
+        1 | const S = struct { x: u256, y: never };
+          |                             ^^^^^^^^ type of `y` evaluated to `never`
+        "#],
+    );
+}

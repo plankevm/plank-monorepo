@@ -645,13 +645,17 @@ impl DiagCtx<'_> {
             .emit(self.session);
     }
 
-    const UNINIT_HELP: &'static str =
-        "@uninit only supports u256, bool, void, type, memptr, and struct types";
+    fn uninit_help() -> String {
+        use builtin_names::*;
+        format!(
+            "{UNINIT} only supports {U256}, {BOOL}, {VOID}, {TYPE}, {MEMORY_POINTER} and struct types",
+        )
+    }
 
     pub fn emit_invalid_uninit_type(&mut self, ty: PrimitiveType, loc: SrcLoc) {
         Diagnostic::error("cannot create uninitialized value")
             .primary(loc.source, loc.span, format!("type '{}' cannot be uninitialized", ty.name()))
-            .help(Self::UNINIT_HELP)
+            .help(Self::uninit_help())
             .emit(self);
     }
 
@@ -662,20 +666,38 @@ impl DiagCtx<'_> {
         field_loc: SrcLoc,
     ) {
         Diagnostic::error("struct contains field that cannot be uninitialized")
-            .primary(loc.source, loc.span, "cannot use @uninit on this struct")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("cannot use {} on this struct", builtin_names::UNINIT),
+            )
             .element(
                 Annotations::new(field_loc.source).secondary(
                     field_loc.span,
                     format!("type '{}' cannot be uninitialized", ty.name()),
                 ),
             )
-            .help(Self::UNINIT_HELP)
+            .help(Self::uninit_help())
             .emit(self);
     }
 
     pub fn emit_uninit_memptr_in_comptime(&mut self, loc: SrcLoc) {
-        Diagnostic::error("cannot use @uninit on memptr type at comptime")
-            .primary(loc.source, loc.span, "memptr requires runtime allocation")
+        Diagnostic::error(format!(
+            "cannot use {} on memptr type at comptime",
+            builtin_names::UNINIT
+        ))
+        .primary(loc.source, loc.span, "memptr requires runtime allocation")
+        .emit(self);
+    }
+
+    pub fn emit_never_as_struct_field(&mut self, field_def: SrcLoc, name: StrId) {
+        let name = self.session.lookup_name(name);
+        Diagnostic::error(format!("`{}` not valid struct field type", builtin_names::NEVER))
+            .primary(
+                field_def.source,
+                field_def.span,
+                format!("type of `{name}` evaluated to `{}`", builtin_names::NEVER),
+            )
             .emit(self);
     }
 }

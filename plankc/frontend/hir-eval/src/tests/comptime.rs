@@ -1103,11 +1103,15 @@ fn test_set_field_comptime_struct_runtime_value() {
             %0 : u256 = 0
             %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : u256 = 2
-            %4 : Pair = Pair { %2, %3 }
-            %5 : Pair = %4
-            %6 : u256 = %5.0
-            %7 : never = @evm_stop()
+            %3 : Pair = struct#0 {
+                1,
+                2,
+            }
+            %4 : u256 = %3.1
+            %5 : Pair = Pair { %2, %4 }
+            %6 : Pair = %5
+            %7 : u256 = %6.0
+            %8 : never = @evm_stop()
         }
         "#,
     );
@@ -1205,13 +1209,17 @@ fn test_uninit_struct_runtime_set_field() {
             %0 : u256 = 0
             %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
-            %3 : u256 = 0
-            %4 : Pair = Pair { %2, %3 }
-            %5 : Pair = %4
-            %6 : u256 = %5.0
-            %7 : Pair = %4
-            %8 : u256 = %7.1
-            %9 : never = @evm_stop()
+            %3 : Pair = struct#0 {
+                0,
+                0,
+            }
+            %4 : u256 = %3.1
+            %5 : Pair = Pair { %2, %4 }
+            %6 : Pair = %5
+            %7 : u256 = %6.0
+            %8 : Pair = %5
+            %9 : u256 = %8.1
+            %10 : never = @evm_stop()
         }
         "#,
     );
@@ -1231,7 +1239,7 @@ fn test_uninit_invalid_type() {
         1 | const x = @uninit(never);
           |           ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, memptr, and struct types
+          = help: @uninit only supports u256, bool, void, type, memptr and struct types
         "#],
     );
 }
@@ -1257,43 +1265,27 @@ fn test_uninit_type_spilled_to_runtime() {
 }
 
 #[test]
-fn test_uninit_struct_with_never_and_function_fields() {
+fn test_uninit_struct_with_function_field() {
     assert_diagnostics(
         r#"
-        const Bad = struct { a: never, b: function };
+        const Bad = struct { a: u256, b: function };
         const x = @uninit(Bad);
         init { @evm_stop(); }
         "#,
-        &[
-            r#"
+        &[r#"
         error: struct contains field that cannot be uninitialized
          --> main.plk:2:11
           |
         2 | const x = @uninit(Bad);
           |           ^^^^^^^^^^^^ cannot use @uninit on this struct
           |
-         ::: main.plk:1:22
+         ::: main.plk:1:31
           |
-        1 | const Bad = struct { a: never, b: function };
-          |                      -------- type 'never' cannot be uninitialized
+        1 | const Bad = struct { a: u256, b: function };
+          |                               ----------- type 'function' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, memptr, and struct types
-        "#,
-            r#"
-        error: struct contains field that cannot be uninitialized
-         --> main.plk:2:11
-          |
-        2 | const x = @uninit(Bad);
-          |           ^^^^^^^^^^^^ cannot use @uninit on this struct
-          |
-         ::: main.plk:1:32
-          |
-        1 | const Bad = struct { a: never, b: function };
-          |                                ----------- type 'function' cannot be uninitialized
-          |
-          = help: @uninit only supports u256, bool, void, type, memptr, and struct types
-        "#,
-        ],
+          = help: @uninit only supports u256, bool, void, type, memptr and struct types
+        "#],
     );
 }
 

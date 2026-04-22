@@ -90,6 +90,7 @@ impl ValueInterner {
         assert_eq!(new_interner.intern(Value::Void), ValueId::VOID);
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
         assert_eq!(new_interner.intern(Value::Bool(true)), ValueId::TRUE);
+        assert_eq!(new_interner.intern_num(U256::ZERO), ValueId::ZERO);
         new_interner
     }
 
