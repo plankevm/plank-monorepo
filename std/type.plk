@@ -1,15 +1,25 @@
 import std::utils::reduce;
 
 const sizeof = fn (comptime T: type) u256 {
-    if !@is_struct(T) {
-        return 32;
-    }
-    reduce(
-        u256,
-        @field_count(T),
-        fn (comptime i: u256, acc: u256) u256 {
-            @evm_add(acc, sizeof(@field_type(T, i)))
-        },
+    if T == void {
         0
-    )
+    } else if T == u256 {
+        32
+    } else if T == bool {
+        32
+    } else if T == memptr {
+        32
+    } else if @is_struct(T) {
+        reduce(
+            u256,
+            @field_count(T),
+            fn (comptime i: u256, acc: u256) u256 {
+                @evm_add(acc, sizeof(@field_type(T, i)))
+            },
+            0
+        )
+    } else {
+        let _sizeof_unsupported_type: u256 = true;
+        0
+    }
 };

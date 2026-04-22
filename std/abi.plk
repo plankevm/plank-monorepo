@@ -14,30 +14,37 @@ const SizeState = fn (comptime T: type) type {
 // Returns the total byte size of the ABI encoding for a given value.
 // For dynamic types (e.g. membytes), the size depends on the runtime value.
 const abi_encoded_size = fn (comptime T: type, value: T) u256 {
-    if T == membytes {
-        return @evm_add(32, ceil32(value.len));
+    if T == void {
+        0
+    } else if T == u256 {
+        32
+    } else if T == bool {
+        32
+    } else if T == membytes {
+        @evm_add(32, ceil32(value.len))
+    } else if @is_struct(T) {
+        let initial = SizeState(T) { value: value, acc: abi_head_size(T) };
+        let result = reduce(
+            SizeState(T),
+            @field_count(T),
+            fn (comptime i: u256, state: SizeState(T)) SizeState(T) {
+                if is_abi_dynamic(@field_type(T, i)) {
+                    let field_size = abi_encoded_size(
+                        @field_type(T, i),
+                        @get_field(state.value, i)
+                    );
+                    @set_field(state, 1, @evm_add(state.acc, field_size))
+                } else {
+                    state
+                }
+            },
+            initial
+        );
+        result.acc
+    } else {
+        let _sizeof_unsupported_type: u256 = true;
+        0
     }
-    if !@is_struct(T) {
-        return 32;
-    }
-    let initial = SizeState(T) { value: value, acc: abi_head_size(T) };
-    let result = reduce(
-        SizeState(T),
-        @field_count(T),
-        fn (comptime i: u256, state: SizeState(T)) SizeState(T) {
-            if is_abi_dynamic(@field_type(T, i)) {
-                let field_size = abi_encoded_size(
-                    @field_type(T, i),
-                    @get_field(state.value, i)
-                );
-                @set_field(state, 1, @evm_add(state.acc, field_size))
-            } else {
-                state
-            }
-        },
-        initial
-    );
-    result.acc
 };
 
 // Encodes `value` into pre-allocated memory at `ptr`. Caller must ensure

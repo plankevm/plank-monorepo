@@ -1,0 +1,13 @@
+import std::abi::{abi_decode_try};
+import std::membytes::{membytes, membytes_from_ptr};
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let buf = membytes_from_ptr(ptr, size);
+    let result = abi_decode_try(membytes, buf);
+    let out_ptr = @malloc_zeroed(32);
+    @mstore32(out_ptr, if result.is_some { 1 } else { 0 });
+    @evm_return(out_ptr, 32);
+}
