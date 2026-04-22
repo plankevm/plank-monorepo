@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {BaseTest} from "./BaseTest.sol";
-import {ERC20} from "src/ERC20.sol";
+import {BaseTest} from "../BaseTest.sol";
+import {ERC20} from "src/examples/ERC20.sol";
 
 contract ERC20Test is BaseTest {
     ERC20 solRef;
@@ -11,7 +11,7 @@ contract ERC20Test is BaseTest {
     function setUp() public {
         solRef = new ERC20();
 
-        bytes memory plankCode = plank("src/erc20.plk");
+        bytes memory plankCode = plank("src/examples/erc20.plk");
         (bool success,) = deployCodeTo(plankImpl, plankCode);
         require(success, "plank deploy failed");
     }

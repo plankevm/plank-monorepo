@@ -1,0 +1,45 @@
+import std::storage::{sstore_bytes, sload_bytes};
+import std::membytes::{membytes, membytes_from_ptr};
+import std::abi::{abi_encode};
+
+const STORE_SELECTOR = 0xb374012b;
+const LOAD_SELECTOR = 0x86d5c4be;
+
+const DATA_SLOT = 0;
+
+const BytesResult = struct { data: membytes };
+
+init {
+    let length = @runtime_length();
+    let dest = @malloc_uninit(length);
+    @evm_codecopy(dest, @runtime_start_offset(), length);
+    @evm_return(dest, length);
+}
+
+run {
+    let selector = @evm_shr(224, @evm_calldataload(0));
+    if @evm_eq(selector, STORE_SELECTOR) {
+        store();
+    } else if @evm_eq(selector, LOAD_SELECTOR) {
+        load();
+    } else {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+}
+
+// store(bytes)
+const store = fn () never {
+    let offset = @evm_add(4, @evm_calldataload(4));
+    let length = @evm_calldataload(offset);
+    let ptr = @malloc_uninit(length);
+    @evm_calldatacopy(ptr, @evm_add(offset, 32), length);
+    sstore_bytes(DATA_SLOT, membytes_from_ptr(ptr, length));
+    @evm_return(@malloc_uninit(0), 0);
+};
+
+// load() returns (bytes)
+const load = fn () never {
+    let data = sload_bytes(DATA_SLOT);
+    let encoded = abi_encode(BytesResult, BytesResult { data: data });
+    @evm_return(encoded.ptr, encoded.len);
+};

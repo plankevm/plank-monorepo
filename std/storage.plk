@@ -1,0 +1,47 @@
+import std::membytes::{membytes, membytes_new};
+
+// Hashes a storage slot to derive a base slot for dynamic data.
+const slot_hash = fn (slot: u256) u256 {
+    let buf = @malloc_uninit(32);
+    @mstore32(buf, slot);
+    @evm_keccak256(buf, 32)
+};
+
+// Hashes a key against a base slot to derive a mapping storage slot.
+// Equivalent to Solidity's mapping slot: keccak256(key, base_slot).
+const map_slot_hash = fn (key: u256, base_slot: u256) u256 {
+    let buf = @malloc_uninit(64);
+    @mstore32(buf, key);
+    @mstore32(@evm_add(buf, 32), base_slot);
+    @evm_keccak256(buf, 64)
+};
+
+// Stores a membytes value into storage at `slot`.
+// Length is stored at `slot`, data chunks at keccak256(slot), keccak256(slot)+1, ...
+const sstore_bytes = fn (slot: u256, data: membytes) void {
+    @evm_sstore(slot, data.len);
+    let base_slot = slot_hash(slot);
+    let mut i = 0;
+    while @evm_lt(@evm_mul(i, 32), data.len) {
+        let chunk_slot = @evm_add(base_slot, i);
+        let chunk = @mload32(@evm_add(data.ptr, @evm_mul(32, i)));
+        @evm_sstore(chunk_slot, chunk);
+        i = @evm_add(i, 1);
+    }
+};
+
+// Loads a membytes value from storage at `slot`.
+// Allocates a new buffer and copies the data from storage into it.
+const sload_bytes = fn (slot: u256) membytes {
+    let length = @evm_sload(slot);
+    let data = membytes_new(length);
+    let base_slot = slot_hash(slot);
+    let mut i = 0;
+    while @evm_lt(@evm_mul(i, 32), length) {
+        let chunk_slot = @evm_add(base_slot, i);
+        let chunk = @evm_sload(chunk_slot);
+        @mstore32(@evm_add(data.ptr, @evm_mul(32, i)), chunk);
+        i = @evm_add(i, 1);
+    }
+    data
+};

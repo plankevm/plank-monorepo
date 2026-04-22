@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {BaseTest} from "./BaseTest.sol";
-import {AbiNestedStruct} from "src/AbiNestedStruct.sol";
+import {BaseTest} from "../BaseTest.sol";
+import {AbiNestedStruct} from "src/std/AbiNestedStruct.sol";
 
 contract AbiNestedStructTest is BaseTest {
     AbiNestedStruct solRef = new AbiNestedStruct();
     address plankImpl = makeAddr("plank-implementation");
 
     function setUp() public {
-        bytes memory plankCode = plank("src/abi_nested_struct.plk");
+        bytes memory plankCode = plank("src/std/abi_nested_struct.plk");
         vm.etch(plankImpl, plankCode);
     }
 

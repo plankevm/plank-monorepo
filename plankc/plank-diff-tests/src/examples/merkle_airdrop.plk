@@ -1,3 +1,5 @@
+import std::storage::map_slot_hash;
+
 const CLAIM_SELECTOR = 0x3d13f874;
 const MERKLE_ROOT_SELECTOR = 0x2eb4a7ab;
 const HAS_CLAIMED_SELECTOR = 0x73b2e80e;
@@ -32,7 +34,7 @@ run {
 
 const claim = fn () never {
     let buf = @malloc_uninit(64);
-    let slot = get_merkle_slot(buf);
+    let slot = get_merkle_slot();
     let claimed = @evm_sload(slot);
     if !@evm_iszero(claimed) {
         @evm_revert(@malloc_uninit(0), 0);
@@ -80,15 +82,13 @@ const merkle_root = fn () never {
 
 const has_claimed = fn () never {
     let buf = @malloc_uninit(64);
-    let slot = get_merkle_slot(buf);
+    let slot = get_merkle_slot();
     let claimed = @evm_sload(slot);
     @mstore32(buf, claimed);
     @evm_return(buf, 32);
 };
 
-const get_merkle_slot = fn (buf: memptr) u256 {
+const get_merkle_slot = fn () u256 {
     let address = @evm_calldataload(4);
-    @mstore32(buf, address);
-    @mstore32(@evm_add(buf, 32), HAS_CLAIMED_SLOT_BASE);
-    @evm_keccak256(buf, 64) 
+    map_slot_hash(address, HAS_CLAIMED_SLOT_BASE)
 };

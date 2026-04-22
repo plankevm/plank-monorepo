@@ -1,5 +1,6 @@
 import std::abi::{abi_encode};
 import std::membytes::{membytes, membytes_from_ptr};
+import std::storage::map_slot_hash;
 
 const TOTAL_SUPPLY = 1000000;
 
@@ -23,8 +24,8 @@ const APPROVAL_TOPIC = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac
 init {
     @evm_sstore(TOTAL_SUPPLY_SLOT, TOTAL_SUPPLY);
     let caller = @evm_caller();
-    let buf = @malloc_uninit(64);
-    let slot = get_balance_slot(caller, buf);
+    let slot = map_slot_hash(caller, BALANCE_SLOT_BASE);
+    let buf = @malloc_uninit(32);
     @evm_sstore(slot, TOTAL_SUPPLY);
 
     @mstore32(buf, TOTAL_SUPPLY);
@@ -62,8 +63,8 @@ run {
 }
 
 const balance_of = fn (address: u256) never {
-    let buf = @malloc_uninit(64);
-    let slot = get_balance_slot(address, buf);
+    let slot = map_slot_hash(address, BALANCE_SLOT_BASE);
+    let buf = @malloc_uninit(32);
     let balance = @evm_sload(slot);
     @mstore32(buf, balance);
     @evm_return(buf, 32);
@@ -79,8 +80,8 @@ const total_supply = fn () never {
 const transfer = fn () never {
     let to = @evm_calldataload(4);
     let amount = @evm_calldataload(36);
-    let buf = @malloc_uninit(64);
-    transfer_balance(@evm_caller(), to, amount, buf);
+    transfer_balance(@evm_caller(), to, amount);
+    let buf = @malloc_uninit(32);
     @mstore32(buf, 1);
     @evm_return(buf, 32);
 };
@@ -88,9 +89,9 @@ const transfer = fn () never {
 const allowance = fn () never {
     let owner = @evm_calldataload(4);
     let spender = @evm_calldataload(36);
-    let buf = @malloc_uninit(64);
-    let slot = get_allowance_slot(owner, spender, buf);
+    let slot = map_slot_hash(spender, map_slot_hash(owner, ALLOWANCE_SLOT_BASE));
     let allowance = @evm_sload(slot);
+    let buf = @malloc_uninit(32);
     @mstore32(buf, allowance);
     @evm_return(buf, 32);
 };
@@ -99,9 +100,9 @@ const approve = fn () never {
     let spender = @evm_calldataload(4);
     let amount = @evm_calldataload(36);
     let caller = @evm_caller();
-    let buf = @malloc_uninit(64);
-    let slot = get_allowance_slot(caller, spender, buf);
+    let slot = map_slot_hash(spender, map_slot_hash(caller, ALLOWANCE_SLOT_BASE));
     @evm_sstore(slot, amount);
+    let buf = @malloc_uninit(32);
     @mstore32(buf, amount);
     @evm_log3(buf, 32, APPROVAL_TOPIC, caller, spender);
     @mstore32(buf, 1);
@@ -113,15 +114,15 @@ const transfer_from = fn () never {
     let to = @evm_calldataload(36);
     let amount = @evm_calldataload(68);
 
-    let buf = @malloc_uninit(64);
-    let allowance_slot = get_allowance_slot(from, @evm_caller(), buf);
+    let allowance_slot = map_slot_hash(@evm_caller(), map_slot_hash(from, ALLOWANCE_SLOT_BASE));
     let allowance_val = @evm_sload(allowance_slot);
     if @evm_lt(allowance_val, amount) {
         @evm_revert(@malloc_uninit(0), 0);
     }
     @evm_sstore(allowance_slot, @evm_sub(allowance_val, amount));
 
-    transfer_balance(from, to, amount, buf);
+    transfer_balance(from, to, amount);
+    let buf = @malloc_uninit(32);
     @mstore32(buf, 1);
     @evm_return(buf, 32);
 };
@@ -146,33 +147,20 @@ const symbol = fn () never {
     @evm_return(encoded.ptr, encoded.len);
 };
 
-const transfer_balance = fn (from: u256, to: u256, amount: u256, buf: memptr) void {
-    let slot = get_balance_slot(from, buf);
+const transfer_balance = fn (from: u256, to: u256, amount: u256) void {
+    let slot = map_slot_hash(from, BALANCE_SLOT_BASE);
     let balance_from = @evm_sload(slot);
     if @evm_lt(balance_from, amount) {
         @evm_revert(@malloc_uninit(0), 0);
     }
     @evm_sstore(slot, @evm_sub(balance_from, amount));
 
-    let slot = get_balance_slot(to, buf);
+    let slot = map_slot_hash(to, BALANCE_SLOT_BASE);
     let balance_to = @evm_sload(slot);
     @evm_sstore(slot, @evm_add(balance_to, amount));
 
+    let buf = @malloc_uninit(32);
     @mstore32(buf, amount);
     @evm_log3(buf, 32, TRANSFER_TOPIC, from, to);
 };
 
-const get_balance_slot = fn (address: u256, buf: memptr) u256 {
-    @mstore32(buf, address);
-    @mstore32(@evm_add(buf, 32), BALANCE_SLOT_BASE);
-    @evm_keccak256(buf, 64)
-};
-
-const get_allowance_slot = fn (owner: u256, spender: u256, buf: memptr) u256 {
-    @mstore32(buf, owner);
-    @mstore32(@evm_add(buf, 32), ALLOWANCE_SLOT_BASE);
-    let inner = @evm_keccak256(buf, 64);
-    @mstore32(buf, spender);
-    @mstore32(@evm_add(buf, 32), inner);
-    @evm_keccak256(buf, 64)
-};

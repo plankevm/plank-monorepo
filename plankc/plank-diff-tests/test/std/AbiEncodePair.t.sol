@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {BaseTest} from "./BaseTest.sol";
-import {AbiEncodePair} from "src/AbiEncodePair.sol";
+import {BaseTest} from "../BaseTest.sol";
+import {AbiEncodePair} from "src/std/AbiEncodePair.sol";
 
 contract AbiEncodePairTest is BaseTest {
     AbiEncodePair solRef = new AbiEncodePair();
     address plankImpl = makeAddr("plank-implementation");
 
     function setUp() public {
-        bytes memory plankCode = plank("src/abi_encode_pair.plk");
+        bytes memory plankCode = plank("src/std/abi_encode_pair.plk");
         vm.etch(plankImpl, plankCode);
     }
 

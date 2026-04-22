@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {BaseTest} from "./BaseTest.sol";
-import {MerkleAirdrop} from "src/MerkleAirdrop.sol";
+import {BaseTest} from "../BaseTest.sol";
+import {MerkleAirdrop} from "src/examples/MerkleAirdrop.sol";
 
 contract MerkleAirdropTest is BaseTest {
     MerkleAirdrop solRef;
@@ -43,7 +43,7 @@ contract MerkleAirdropTest is BaseTest {
         solRef = new MerkleAirdrop(root);
 
         // Deploy plank implementation — pass root as constructor calldata
-        bytes memory plankCode = plank("src/merkle_airdrop.plk");
+        bytes memory plankCode = plank("src/examples/merkle_airdrop.plk");
         (bool success,) = deployCodeTo(plankImpl, plankCode, abi.encode(root));
         require(success, "plank deploy failed");
     }

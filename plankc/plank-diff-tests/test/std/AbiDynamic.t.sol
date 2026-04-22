@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {BaseTest} from "./BaseTest.sol";
-import {AbiDynamic} from "src/AbiDynamic.sol";
+import {BaseTest} from "../BaseTest.sol";
+import {AbiDynamic} from "src/std/AbiDynamic.sol";
 
 contract AbiDynamicTest is BaseTest {
     AbiDynamic solRef = new AbiDynamic();
     address plankImpl = makeAddr("plank-implementation");
 
     function setUp() public {
-        bytes memory plankCode = plank("src/abi_dynamic.plk");
+        bytes memory plankCode = plank("src/std/abi_dynamic.plk");
         vm.etch(plankImpl, plankCode);
     }
 

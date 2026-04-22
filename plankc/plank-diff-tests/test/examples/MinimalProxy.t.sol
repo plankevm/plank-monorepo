@@ -2,8 +2,8 @@
 pragma solidity ^0.8.0;
 
 import {Test, Vm} from "forge-std/Test.sol";
-import {BaseTest} from "./BaseTest.sol";
-import {MinimalProxyFactory} from "src/MinimalProxy.sol";
+import {BaseTest} from "../BaseTest.sol";
+import {MinimalProxyFactory} from "src/examples/MinimalProxy.sol";
 
 /// Simple implementation contract for testing clones
 contract Counter {
@@ -27,7 +27,7 @@ contract MinimalProxyTest is BaseTest {
         solRef = new MinimalProxyFactory();
         impl = new Counter();
 
-        bytes memory plankCode = plank("src/minimal_proxy.plk");
+        bytes memory plankCode = plank("src/examples/minimal_proxy.plk");
         (bool success,) = deployCodeTo(plankImpl, plankCode);
         require(success, "plank deploy failed");
     }
