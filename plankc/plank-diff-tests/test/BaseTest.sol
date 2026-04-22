@@ -13,6 +13,15 @@ abstract contract BaseTest is Test {
         }
     }
 
+    function deployCodeTo(address addr, bytes memory initcode, bytes memory constructorArgs) internal returns (bool success, bytes memory errdata) {
+        vm.etch(addr, initcode);
+        (success, errdata) = addr.call(constructorArgs);
+        if (success) {
+            vm.etch(addr, errdata);
+            errdata = "";
+        }
+    }
+
     function plank(string memory sourcePath) internal returns (bytes memory) {
         string[] memory args = new string[](5);
         args[0] = "cargo";
