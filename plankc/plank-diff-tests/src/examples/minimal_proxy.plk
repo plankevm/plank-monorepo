@@ -1,13 +1,12 @@
+import std::constructor::return_runtime;
+
 const CLONE_SELECTOR = 0x8124b78e;
 const CLONE_DETERMINISTIC_SELECTOR = 0xb86b2ceb;
 
 const CLONE_CREATED_TOPIC = 0xbe2f3d28fdeb5839123d65fd47ec2f5915c715d2b527b9e229123706fdecfc85;
 
 init {
-    let length = @runtime_length();
-    let dest = @malloc_uninit(length);
-    @evm_codecopy(dest, @runtime_start_offset(), length);
-    @evm_return(dest, length);
+    return_runtime();
 }
 
 run {

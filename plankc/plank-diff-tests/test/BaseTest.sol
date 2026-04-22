@@ -4,22 +4,16 @@ pragma solidity ^0.8.0;
 import {Test, Vm} from "forge-std/Test.sol";
 
 abstract contract BaseTest is Test {
-    function deployCodeTo(address addr, bytes memory initcode) internal returns (bool success, bytes memory errdata) {
-        vm.etch(addr, initcode);
-        (success, errdata) = addr.call("");
-        if (success) {
-            vm.etch(addr, errdata);
-            errdata = "";
-        }
+    function deployCode(bytes memory initcode) internal returns (address addr) {
+        addr = deployCode(initcode, "");
     }
 
-    function deployCodeTo(address addr, bytes memory initcode, bytes memory constructorArgs) internal returns (bool success, bytes memory errdata) {
-        vm.etch(addr, initcode);
-        (success, errdata) = addr.call(constructorArgs);
-        if (success) {
-            vm.etch(addr, errdata);
-            errdata = "";
+    function deployCode(bytes memory initcode, bytes memory args) internal returns (address addr) {
+        initcode = bytes.concat(initcode, args);
+        assembly ("memory-safe") {
+            addr := create(0, add(initcode, 0x20), mload(initcode))
         }
+        require(addr != address(0), "deploy failed");
     }
 
     function assertCallEq(address ref, address impl, bytes memory data) internal {
@@ -44,11 +38,7 @@ abstract contract BaseTest is Test {
         assertEq(refLogs.length, plankLogs.length, "log count mismatch");
         for (uint256 i = 0; i < refLogs.length; i++) {
             assertEq(refLogs[i].data, plankLogs[i].data, "log data mismatch");
-            assertEq(
-                refLogs[i].topics.length,
-                plankLogs[i].topics.length,
-                "topic count mismatch"
-            );
+            assertEq(refLogs[i].topics.length, plankLogs[i].topics.length, "topic count mismatch");
             for (uint256 j = 0; j < refLogs[i].topics.length; j++) {
                 assertEq(refLogs[i].topics[j], plankLogs[i].topics[j], "topic mismatch");
             }

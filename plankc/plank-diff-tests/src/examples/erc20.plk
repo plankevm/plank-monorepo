@@ -1,6 +1,7 @@
 import std::abi::{abi_encode};
 import std::membytes::{membytes, membytes_from_ptr};
 import std::storage::map_slot_hash;
+import std::constructor::return_runtime;
 
 const TOTAL_SUPPLY = 1000000;
 
@@ -31,10 +32,7 @@ init {
     @mstore32(buf, TOTAL_SUPPLY);
     @evm_log3(buf, 32, TRANSFER_TOPIC, 0, caller);
 
-    let length = @runtime_length();
-    let dest = @malloc_uninit(length);
-    @evm_codecopy(dest, @runtime_start_offset(), length);
-    @evm_return(dest, length);
+    return_runtime();
 }
 
 run {

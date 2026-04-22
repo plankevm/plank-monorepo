@@ -12,8 +12,7 @@ contract StorageBytesTestTest is BaseTest {
         solRef = new StorageBytesTest();
 
         bytes memory plankCode = plank("src/std/storage_bytes_test.plk");
-        (bool success,) = deployCodeTo(plankImpl, plankCode);
-        require(success, "plank deploy failed");
+        plankImpl = deployCode(plankCode);
     }
 
     function assertCallEq(bytes memory data) internal {
@@ -31,10 +30,11 @@ contract StorageBytesTestTest is BaseTest {
     }
 
     function test_store_and_load_exactly_32() public {
-        assertCallEq(abi.encodeWithSignature(
-            "store(bytes)",
-            hex"0102030405060708091011121314151617181920212223242526272829303132"
-        ));
+        assertCallEq(
+            abi.encodeWithSignature(
+                "store(bytes)", hex"0102030405060708091011121314151617181920212223242526272829303132"
+            )
+        );
         assertCallEq(abi.encodeWithSignature("load()"));
     }
 

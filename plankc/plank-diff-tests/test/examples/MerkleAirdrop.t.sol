@@ -44,8 +44,7 @@ contract MerkleAirdropTest is BaseTest {
 
         // Deploy plank implementation — pass root as constructor calldata
         bytes memory plankCode = plank("src/examples/merkle_airdrop.plk");
-        (bool success,) = deployCodeTo(plankImpl, plankCode, abi.encode(root));
-        require(success, "plank deploy failed");
+        plankImpl = deployCode(plankCode, abi.encode(root));
     }
 
     function _hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
@@ -82,12 +81,7 @@ contract MerkleAirdropTest is BaseTest {
         proof[0] = leafBob;
         proof[1] = nodeCD;
 
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                alice, aliceAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", alice, aliceAmt, proof));
     }
 
     function test_claim_bob() public {
@@ -95,12 +89,7 @@ contract MerkleAirdropTest is BaseTest {
         proof[0] = leafAlice;
         proof[1] = nodeCD;
 
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                bob, bobAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", bob, bobAmt, proof));
     }
 
     function test_claim_charlie() public {
@@ -108,12 +97,7 @@ contract MerkleAirdropTest is BaseTest {
         proof[0] = leafEve;
         proof[1] = nodeAB;
 
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                charlie, charlieAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", charlie, charlieAmt, proof));
     }
 
     // --- double claim reverts ---
@@ -124,20 +108,10 @@ contract MerkleAirdropTest is BaseTest {
         proof[1] = nodeCD;
 
         // First claim succeeds
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                alice, aliceAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", alice, aliceAmt, proof));
 
         // Second claim reverts
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                alice, aliceAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", alice, aliceAmt, proof));
     }
 
     // --- hasClaimed after claim ---
@@ -147,12 +121,7 @@ contract MerkleAirdropTest is BaseTest {
         proof[0] = leafBob;
         proof[1] = nodeCD;
 
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                alice, aliceAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", alice, aliceAmt, proof));
 
         assertCallEq(abi.encodeWithSignature("hasClaimed(address)", alice));
     }
@@ -164,12 +133,7 @@ contract MerkleAirdropTest is BaseTest {
         proof[0] = leafCharlie; // wrong sibling
         proof[1] = nodeCD;
 
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                alice, aliceAmt, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", alice, aliceAmt, proof));
     }
 
     // --- wrong amount reverts ---
@@ -179,11 +143,6 @@ contract MerkleAirdropTest is BaseTest {
         proof[0] = leafBob;
         proof[1] = nodeCD;
 
-        assertCallEq(
-            abi.encodeWithSignature(
-                "claim(address,uint256,bytes32[])",
-                alice, 999, proof
-            )
-        );
+        assertCallEq(abi.encodeWithSignature("claim(address,uint256,bytes32[])", alice, 999, proof));
     }
 }

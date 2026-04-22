@@ -12,8 +12,7 @@ contract ERC20Test is BaseTest {
         solRef = new ERC20();
 
         bytes memory plankCode = plank("src/examples/erc20.plk");
-        (bool success,) = deployCodeTo(plankImpl, plankCode);
-        require(success, "plank deploy failed");
+        plankImpl = deployCode(plankCode);
     }
 
     // --- helpers ---
@@ -58,12 +57,7 @@ contract ERC20Test is BaseTest {
 
     // --- transferFrom (multi-step) ---
 
-    function test_fuzzing_transferFrom(
-        address from,
-        address to,
-        uint256 approveAmt,
-        uint256 transferAmt
-    ) public {
+    function test_fuzzing_transferFrom(address from, address to, uint256 approveAmt, uint256 transferAmt) public {
         vm.assume(from != address(this));
         approveAmt = bound(approveAmt, 0, 1000000);
         transferAmt = bound(transferAmt, 0, approveAmt);
@@ -72,14 +66,9 @@ contract ERC20Test is BaseTest {
         assertCallEq(abi.encodeWithSignature("transfer(address,uint256)", from, approveAmt));
 
         // `from` approves this contract
-        assertCallEqFrom(
-            abi.encodeWithSignature("approve(address,uint256)", address(this), approveAmt),
-            from
-        );
+        assertCallEqFrom(abi.encodeWithSignature("approve(address,uint256)", address(this), approveAmt), from);
 
         // this contract calls transferFrom
-        assertCallEq(
-            abi.encodeWithSignature("transferFrom(address,address,uint256)", from, to, transferAmt)
-        );
+        assertCallEq(abi.encodeWithSignature("transferFrom(address,address,uint256)", from, to, transferAmt));
     }
 }

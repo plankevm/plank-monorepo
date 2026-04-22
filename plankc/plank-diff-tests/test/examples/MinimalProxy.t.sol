@@ -20,7 +20,7 @@ contract Counter {
 
 contract MinimalProxyTest is BaseTest {
     MinimalProxyFactory solRef;
-    address plankImpl = makeAddr("plank-implementation");
+    address plankImpl;
     Counter impl;
 
     function setUp() public {
@@ -28,16 +28,13 @@ contract MinimalProxyTest is BaseTest {
         impl = new Counter();
 
         bytes memory plankCode = plank("src/examples/minimal_proxy.plk");
-        (bool success,) = deployCodeTo(plankImpl, plankCode);
-        require(success, "plank deploy failed");
+        plankImpl = deployCode(plankCode);
     }
 
     // --- clone ---
 
     function test_clone() public {
-        (bool succ, bytes memory out) = plankImpl.call(
-            abi.encodeWithSignature("clone(address)", address(impl))
-        );
+        (bool succ, bytes memory out) = plankImpl.call(abi.encodeWithSignature("clone(address)", address(impl)));
         require(succ, "plank clone failed");
         address cloneAddr = abi.decode(out, (address));
 
@@ -48,31 +45,20 @@ contract MinimalProxyTest is BaseTest {
 
     function test_clone_emits_event() public {
         vm.recordLogs();
-        (bool succ,) = plankImpl.call(
-            abi.encodeWithSignature("clone(address)", address(impl))
-        );
+        (bool succ,) = plankImpl.call(abi.encodeWithSignature("clone(address)", address(impl)));
         require(succ, "plank clone failed");
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 1, "should emit one event");
-        assertEq(
-            logs[0].topics[0],
-            keccak256("CloneCreated(address)"),
-            "wrong event topic"
-        );
+        assertEq(logs[0].topics[0], keccak256("CloneCreated(address)"), "wrong event topic");
     }
 
     // --- cloneDeterministic ---
 
     function test_cloneDeterministic() public {
         bytes32 salt = bytes32(uint256(42));
-        (bool succ, bytes memory out) = plankImpl.call(
-            abi.encodeWithSignature(
-                "cloneDeterministic(address,bytes32)",
-                address(impl),
-                salt
-            )
-        );
+        (bool succ, bytes memory out) =
+            plankImpl.call(abi.encodeWithSignature("cloneDeterministic(address,bytes32)", address(impl), salt));
         require(succ, "plank deterministic clone failed");
         address cloneAddr = abi.decode(out, (address));
 
@@ -86,9 +72,7 @@ contract MinimalProxyTest is BaseTest {
     function test_clone_bytecode_matches() public {
         address solClone = solRef.clone(address(impl));
 
-        (bool succ, bytes memory out) = plankImpl.call(
-            abi.encodeWithSignature("clone(address)", address(impl))
-        );
+        (bool succ, bytes memory out) = plankImpl.call(abi.encodeWithSignature("clone(address)", address(impl)));
         require(succ, "plank clone failed");
         address plankClone = abi.decode(out, (address));
 
@@ -100,13 +84,8 @@ contract MinimalProxyTest is BaseTest {
         bytes32 salt = bytes32(uint256(123));
         address solClone = solRef.cloneDeterministic(address(impl), salt);
 
-        (bool succ, bytes memory out) = plankImpl.call(
-            abi.encodeWithSignature(
-                "cloneDeterministic(address,bytes32)",
-                address(impl),
-                salt
-            )
-        );
+        (bool succ, bytes memory out) =
+            plankImpl.call(abi.encodeWithSignature("cloneDeterministic(address,bytes32)", address(impl), salt));
         require(succ, "plank deterministic clone failed");
         address plankClone = abi.decode(out, (address));
 

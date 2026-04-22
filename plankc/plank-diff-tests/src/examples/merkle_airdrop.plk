@@ -1,4 +1,5 @@
 import std::storage::map_slot_hash;
+import std::constructor::return_runtime;
 
 const CLAIM_SELECTOR = 0x3d13f874;
 const MERKLE_ROOT_SELECTOR = 0x2eb4a7ab;
@@ -10,13 +11,12 @@ const MERKLE_ROOT_SLOT = 0;
 const HAS_CLAIMED_SLOT_BASE = 1;
 
 init {
-    let merkle_root = @evm_calldataload(0);
+    let args_buf = @malloc_zeroed(32);
+    @evm_codecopy(args_buf, @init_end_offset(), 32);
+    let merkle_root = @mload32(args_buf);
     @evm_sstore(MERKLE_ROOT_SLOT, merkle_root);
 
-    let length = @runtime_length();
-    let dest = @malloc_uninit(length);
-    @evm_codecopy(dest, @runtime_start_offset(), length);
-    @evm_return(dest, length);
+    return_runtime();
 }
 
 run {
