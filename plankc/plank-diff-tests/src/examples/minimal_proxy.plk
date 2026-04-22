@@ -42,7 +42,7 @@ const clone_deterministic = fn () never {
 
 const build_clone = fn (buf: memptr) void {
     let address = @evm_calldataload(4);
-    @mstore20(buf, @evm_shl(96, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73));
-    @mstore20(@evm_add(buf, 20), @evm_shl(96, address));
-    @mstore15(@evm_add(buf, 40), @evm_shl(136, 0x5af43d82803e903d91602b57fd5bf3));
+    @mstore20(buf, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
+    @mstore20(@evm_add(buf, 20), address);
+    @mstore15(@evm_add(buf, 40), 0x5af43d82803e903d91602b57fd5bf3);
 };
