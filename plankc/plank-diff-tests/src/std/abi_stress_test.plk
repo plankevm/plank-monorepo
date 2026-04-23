@@ -1,0 +1,19 @@
+import std::abi::{abi_encode, abi_decode, abi_encoded_size};
+import std::membytes::{membytes, membytes_from_ptr};
+
+const Inner = struct { x: u256, data: membytes };
+const Outer = struct { a: u256, b: bool, inner: Inner, c: membytes };
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let buf = membytes_from_ptr(ptr, size);
+    let decoded = abi_decode(Outer, buf);
+    let esize = abi_encoded_size(Outer, decoded);
+    let encoded = abi_encode(Outer, decoded);
+    let out_ptr = @malloc_zeroed(@evm_add(32, encoded.len));
+    @mstore32(out_ptr, esize);
+    @mcopy(@evm_add(out_ptr, 32), encoded.ptr, encoded.len);
+    @evm_return(out_ptr, @evm_add(32, encoded.len));
+}
