@@ -4,8 +4,13 @@ import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_
 import std::math::ceil32;
 import std::utils::fold;
 
-// Needed because encoded_value is a runtime value and cannot be captured in a closure,
-// so it must be threaded through fold as part of the accumulator.
+// Accumulator for computing ABI encoded size of a struct via fold.
+// Runtime value (encoded_value) cannot be captured in closures,
+// so it must be threaded through fold. total_size changes each iteration.
+//
+// Fields:
+//   encoded_value - the value being sized (runtime, read-only in fold)
+//   total_size    - accumulated size; starts from abi_head_size(T), dynamic field sizes are added
 const AbiSizeAccumulator = fn (comptime T: type) type {
     struct {
         encoded_value: T,
