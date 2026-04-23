@@ -319,7 +319,6 @@ impl Assembler {
         self.sections.push(section);
     }
 
-    // Helpful for debugging but not always used.
     #[allow(unused)]
     fn eprint_mark_map(mark_to_offset: &IndexVec<MarkId, u32>) {
         eprint!("{{");
