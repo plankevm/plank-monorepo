@@ -441,3 +441,35 @@ Comments
   (block_comment)
   (block_comment)
   (block_comment))
+
+================================================================================
+Group Imports
+================================================================================
+
+import std::membytes::{membytes, membytes_from_ptr, unsafe_membytes_write_u256, unsafe_membytes_read_u256};
+import std::math::ceil32;
+import std::utils::reduce;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (import
+    (identifier)
+    (identifier)
+    (suffix_import_group
+      (import_group_item
+        (identifier))
+      (import_group_item
+        (identifier))
+      (import_group_item
+        (identifier))
+      (import_group_item
+        (identifier))))
+  (import
+    (identifier)
+    (identifier)
+    (identifier))
+  (import
+    (identifier)
+    (identifier)
+    (identifier)))
