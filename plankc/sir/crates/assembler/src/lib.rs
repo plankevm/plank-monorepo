@@ -138,6 +138,8 @@ impl AsmSection {
                 let value = match mark_ref.mark_ref {
                     MarkReference::Direct(id) => mark_map[id],
                     MarkReference::Delta(span) => {
+                        // The end mark may temporarily have an offset smaller than the start's if
+                        // the start is updated *first* to a large value past end.
                         mark_map[span.end].saturating_sub(mark_map[span.start])
                     }
                 };
