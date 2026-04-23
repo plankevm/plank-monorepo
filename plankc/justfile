@@ -14,8 +14,8 @@ test-sir-diff:
      forge test --ffi
 
 [working-directory: 'plank-diff-tests/']
-test-plank-diff:
-     forge test --ffi
+test-plank-diff *args:
+     forge test --ffi {{args}}
 
 test-all: test test-sir-diff test-plank-diff
 
