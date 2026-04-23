@@ -29,9 +29,13 @@ jobs:
         working-directory: plank-tree-sitter
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        id: cache-tree-sitter
         with:
-          tool: tree-sitter-cli
-      - run: tree-sitter --version
+          path: ~/.cargo/bin/tree-sitter
+          key: tree-sitter-cli-0.26.8
+      - if: steps.cache-tree-sitter.outputs.cache-hit != 'true'
+        run: cargo install tree-sitter-cli --version 0.26.8
       - run: tree-sitter generate
       - run: tree-sitter test
