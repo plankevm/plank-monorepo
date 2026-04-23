@@ -45,7 +45,7 @@ impl<'a> DisplayMir<'a> {
                 if x < uint!(100_000_U256) {
                     write!(f, "{x}")
                 } else {
-                    write!(f, "{x:x}")
+                    write!(f, "0x{x:x}")
                 }
             }
             Value::Void => write!(f, "void_unit"),
