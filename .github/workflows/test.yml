@@ -29,7 +29,9 @@ jobs:
         working-directory: plank-tree-sitter
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install tree-sitter-cli
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tree-sitter-cli
+      - run: tree-sitter --version
       - run: tree-sitter generate
       - run: tree-sitter test
