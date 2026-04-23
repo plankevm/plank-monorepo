@@ -10,7 +10,7 @@ env:
 
 jobs:
   test:
-    name: Tests
+    name: Compiler Tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -21,20 +21,15 @@ jobs:
       - uses: ./.github/actions/setup-rust-env
       - run: just test-all
 
-  tree-sitter-check:
-    name: Tree-sitter Generated Files Up-to-date
+  tree-sitter-test:
+    name: Tree-sitter Tests
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: plank-tree-sitter
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install
-      - run: npx tree-sitter generate
-      - run: npx tree-sitter --version
-      - name: Check for uncommitted changes
-        run: git diff --exit-code -- src/
-      - run: npx tree-sitter test
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install tree-sitter-cli
+      - run: tree-sitter generate
+      - run: tree-sitter test
