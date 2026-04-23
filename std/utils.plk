@@ -1,17 +1,17 @@
-// Iterates from 0 to n, calling f at each step to produce a new state.
-// - State: the type of the accumulator (e.g. u256, bool, or a struct for complex state)
+// Iterates from 0 to n, calling f at each step to produce a new accumulator value.
+// - Accumulator: the type of the accumulator (e.g. u256, bool, or a struct for complex state)
 // - n: number of iterations
-// - f: step function with signature fn (comptime i: u256, state: State) State
-// - state: initial accumulator value
-// Returns the final state after n iterations.
-const reduce = fn (comptime State: type, comptime n: u256, comptime f: function, state: State) State {
-    reduce_from(State, n, 0, f, state)
+// - f: step function with signature fn (comptime i: u256, acc: Accumulator) Accumulator
+// - initial: initial accumulator value
+// Returns the final accumulator after n iterations.
+const fold = fn (comptime Accumulator: type, comptime n: u256, comptime f: function, initial: Accumulator) Accumulator {
+    fold_from(Accumulator, n, 0, f, initial)
 };
 
-const reduce_from = fn (comptime State: type, comptime n: u256, comptime i: u256, comptime f: function, state: State) State {
+const fold_from = fn (comptime Accumulator: type, comptime n: u256, comptime i: u256, comptime f: function, acc: Accumulator) Accumulator {
     if @evm_eq(i, n) {
-        state
+        acc
     } else {
-        reduce_from(State, n, @evm_add(i, 1), f, f(i, state))
+        fold_from(Accumulator, n, @evm_add(i, 1), f, f(i, acc))
     }
 };

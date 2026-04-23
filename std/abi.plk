@@ -2,17 +2,18 @@ import std::option::{Option, Some, None, unwrap};
 import std::membytes::{membytes, membytes_new, membytes_from_ptr};
 import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
 import std::math::ceil32;
-import std::utils::reduce;
+import std::utils::fold;
 
-const SizeState = fn (comptime T: type) type {
+// Needed because encoded_value is a runtime value and cannot be captured in a closure,
+// so it must be threaded through fold as part of the accumulator.
+const AbiSizeAccumulator = fn (comptime T: type) type {
     struct {
-        value: T,
-        acc: u256
+        encoded_value: T,
+        total_size: u256
     }
 };
 
 // Returns the total byte size of the ABI encoding for a given value.
-// For dynamic types (e.g. membytes), the size depends on the runtime value.
 const abi_encoded_size = fn (comptime T: type, value: T) u256 {
     if T == void {
         0
@@ -23,24 +24,28 @@ const abi_encoded_size = fn (comptime T: type, value: T) u256 {
     } else if T == membytes {
         @evm_add(32, ceil32(value.len))
     } else if @is_struct(T) {
-        let initial = SizeState(T) { value: value, acc: abi_head_size(T) };
-        let result = reduce(
-            SizeState(T),
+        // Start from the head size; non-dynamic fields are already accounted for.
+        let initial = AbiSizeAccumulator(T) {
+            encoded_value: value,
+            total_size: abi_head_size(T)
+        };
+        let result = fold(
+            AbiSizeAccumulator(T),
             @field_count(T),
-            fn (comptime i: u256, state: SizeState(T)) SizeState(T) {
+            fn (comptime i: u256, acc: AbiSizeAccumulator(T)) AbiSizeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
                     let field_size = abi_encoded_size(
                         @field_type(T, i),
-                        @get_field(state.value, i)
+                        @get_field(acc.encoded_value, i)
                     );
-                    @set_field(state, 1, @evm_add(state.acc, field_size))
+                    @set_field(acc, 1, @evm_add(acc.total_size, field_size))
                 } else {
-                    state
+                    acc
                 }
             },
             initial
         );
-        result.acc
+        result.total_size
     } else {
         let _sizeof_unsupported_type: u256 = true;
         0

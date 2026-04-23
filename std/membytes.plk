@@ -1,6 +1,6 @@
 import std::option::{Option, Some, None};
 import std::type::sizeof;
-import std::utils::reduce;
+import std::utils::fold;
 
 // A owned region of memory: [ptr, ptr + len).
 const membytes = struct {
@@ -8,14 +8,6 @@ const membytes = struct {
     len: u256
 };
 
-const WriteState = fn (comptime T: type) type {
-    struct {
-        buf: membytes,
-        offset: u256,
-        value: T,
-        bytes_written: u256
-    }
-};
 
 // Allocates a new zero-initialized buffer of `len` bytes.
 const membytes_new = fn (len: u256) membytes {
@@ -55,8 +47,8 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
     Some(u256, unsafe_membytes_read_u256(buf, offset))
 };
 
-// Writes a value of any type T at `offset`, serializing struct fields
-// contiguously. No bounds check. Returns bytes written.
+// Writes a value of type T at `offset`. For structs, fields are serialized contiguously.
+// No bounds check. Returns bytes written.
 const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
     if T == void {
         0
@@ -67,27 +59,20 @@ const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256,
         @mstore32(@evm_add(buf.ptr, offset), if value { 1 } else { 0 });
         32
     } else if @is_struct(T) {
-        let initial = WriteState(T) {
-            buf: buf,
-            offset: offset,
-            value: value,
-            bytes_written: 0
-        };
-        let result = reduce(
-            WriteState(T),
+        fold(
+            u256,
             @field_count(T),
-            fn (comptime i: u256, state: WriteState(T)) WriteState(T) {
+            fn (comptime i: u256, bytes_written: u256) u256 {
                 let written = unsafe_membytes_write(
                     @field_type(T, i),
-                    state.buf,
-                    @evm_add(state.offset, state.bytes_written),
-                    @get_field(state.value, i)
+                    buf,
+                    @evm_add(offset, bytes_written),
+                    @get_field(value, i)
                 );
-                @set_field(state, 3, @evm_add(state.bytes_written, written))
+                @evm_add(bytes_written, written)
             },
-            initial
-        );
-        result.bytes_written
+            0
+        )
     } else {
         let _sizeof_unsupported_type: u256 = true;
         0

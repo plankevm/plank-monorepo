@@ -1,4 +1,4 @@
-import std::utils::reduce;
+import std::utils::fold;
 
 const sizeof = fn (comptime T: type) u256 {
     if T == void {
@@ -10,7 +10,7 @@ const sizeof = fn (comptime T: type) u256 {
     } else if T == memptr {
         32
     } else if @is_struct(T) {
-        reduce(
+        fold(
             u256,
             @field_count(T),
             fn (comptime i: u256, acc: u256) u256 {
