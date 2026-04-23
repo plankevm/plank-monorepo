@@ -76,10 +76,10 @@ impl SCCP {
             let op = &program.operations[op_idx];
             let mut outs = op.outputs(program).iter();
             let out = outs.next().copied();
-            debug_assert!(
-                outs.next().is_none(),
-                "no operation with several outputs should be rewritable"
-            );
+            if outs.next().is_some() {
+                // skip multi-output ops because they would require splicing the operation list
+                continue;
+            }
 
             let Some(out) = out else { continue };
             let LatticeValue::Const(cv) = self.lattice[out] else { continue };
@@ -537,6 +537,63 @@ mod tests {
         let mut sccp = SCCP::default();
         run_pass(&mut sccp, &mut ir, &store);
         (sir_data::display_program(&ir), sccp)
+    }
+
+    #[test]
+    fn test_icall_multiple_constant_outputs() {
+        let input = r#"
+            fn init:
+                entry {
+                    stop
+                }
+
+            fn pair:
+                entry -> a b {
+                    a = const 1
+                    b = const 2
+                    iret
+                }
+
+            fn caller:
+                entry {
+                    x y = icall @pair
+                    stop
+                }
+        "#;
+
+        let expected = r#"
+Init: @0
+Functions:
+    fn @0 -> entry @0  (outputs: 0)
+    fn @1 -> entry @1  (outputs: 2)
+    fn @2 -> entry @2  (outputs: 0)
+
+Basic Blocks:
+    @0 {
+        stop
+    }
+
+    @1 -> $0 $1 {
+        $0 = const 0x1
+        $1 = const 0x2
+        iret
+    }
+
+    @2 {
+        $2 $3 = icall @1
+        stop
+    }
+        "#;
+
+        let (actual, sccp) = run_const_prop(input);
+        assert_trim_strings_eq_with_diff(
+            &actual,
+            expected,
+            "icall with multiple constant outputs should be skipped",
+        );
+
+        assert_eq!(sccp.lattice[LocalId::new(2)], LatticeValue::Overdefined);
+        assert_eq!(sccp.lattice[LocalId::new(3)], LatticeValue::Overdefined);
     }
 
     #[test]
