@@ -597,27 +597,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
-            ExprKind::BinaryOpCall { op: hir_ops::BinaryOp::Equals, lhs, rhs } => {
-                let lhs_type = self.bindings[lhs].state.and_then(|lhs| {
-                    let LocalState::Comptime(value) = lhs else { return Err(Poisoned) };
-                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
-                    Ok(ty)
-                });
-                let rhs_type = self.bindings[rhs].state.and_then(|rhs| {
-                    let LocalState::Comptime(value) = rhs else { return Err(Poisoned) };
-                    let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
-                    Ok(ty)
-                });
-                match poison::zip(lhs_type, rhs_type) {
-                    Ok((lhs, rhs)) => Ok(EvalValue::Comptime((lhs == rhs).into())),
-                    Err(Poisoned) => poison::transpose(self.eval_binary_op(
-                        hir_ops::BinaryOp::Equals,
-                        lhs,
-                        rhs,
-                        expr.span,
-                    ))?,
-                }
-            }
             ExprKind::BinaryOpCall { op, lhs, rhs } => {
                 poison::transpose(self.eval_binary_op(op, lhs, rhs, expr.span))?
             }
