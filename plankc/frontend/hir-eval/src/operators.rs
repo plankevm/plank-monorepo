@@ -70,10 +70,13 @@ fn resolve_std_fn<'a>(
     diag_ctx: &mut DiagCtx<'a>,
 ) -> Option<ValueId> {
     let name_id = diag_ctx.session.intern(name);
-    let const_id = hir.consts.iter_idx().find(|id| {
+    let Some(const_id) = hir.consts.iter_idx().find(|id| {
         let def = hir.consts[*id];
         def.name == name_id && def.source_id == core_ops_source
-    })?;
+    }) else {
+        diag_ctx.emit_failed_to_resolve_std_fn(core_ops_source, name);
+        return None;
+    };
 
     let value_id = evaluator.evaluate_const(const_id, diag_ctx).ok()?;
     if !matches!(evaluator.values.lookup(value_id), Value::Closure { .. }) {
@@ -241,10 +244,7 @@ impl crate::scope::Scope<'_, '_> {
                 let result = if op_equals { lhs == rhs } else { lhs != rhs };
                 Ok(Ok(EvalValue::Comptime(result.into())))
             }
-            (
-                true,
-                Ok(PrimitiveType::U256 | PrimitiveType::Bool | PrimitiveType::MemoryPointer),
-            ) => {
+            (true, Ok(PrimitiveType::U256 | PrimitiveType::MemoryPointer)) => {
                 let args = [lhs, rhs];
                 self.eval_runtime_foldable_builtin(RuntimeBuiltin::Eq, &args, expr)
             }
@@ -275,19 +275,22 @@ impl crate::scope::Scope<'_, '_> {
                     result_type: TypeId::BOOL,
                 }))
             }
-            (false, Ok(PrimitiveType::Bool)) => {
+            (op_equals, Ok(PrimitiveType::Bool)) => {
                 let lhs_value = self.try_comptime(lhs_binding, expr)?;
                 let rhs_value = self.try_comptime(rhs_binding, expr)?;
                 if let Some((lhs, rhs)) = lhs_value.zip(rhs_value) {
-                    return Ok(Ok(EvalValue::Comptime((lhs != rhs).into())));
+                    return Ok(Ok(EvalValue::Comptime(if op_equals {
+                        (lhs == rhs).into()
+                    } else {
+                        (lhs != rhs).into()
+                    })));
                 }
-                // Lower `a != b` as `xor(a, b)`. Sound because `bool` values translate to `0` or
-                // `1`.
                 let lhs = self.materialize_as_local(lhs_state, ty);
                 let rhs = self.materialize_as_local(rhs_state, ty);
                 let args = self.eval.mir_args.push_copy_slice(&[lhs, rhs]);
+                let builtin = if op_equals { RuntimeBuiltin::Eq } else { RuntimeBuiltin::Xor };
                 Ok(Ok(EvalValue::Runtime {
-                    expr: mir::Expr::RuntimeBuiltinCall { builtin: RuntimeBuiltin::Xor, args },
+                    expr: mir::Expr::RuntimeBuiltinCall { builtin, args },
                     result_type: TypeId::BOOL,
                 }))
             }

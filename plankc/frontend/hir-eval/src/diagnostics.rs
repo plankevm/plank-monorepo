@@ -767,4 +767,10 @@ impl DiagCtx<'_> {
             .primary(loc.source, loc.span, format!("`{name}` is not a function"))
             .emit(self);
     }
+
+    pub fn emit_failed_to_resolve_std_fn(&mut self, source: SourceId, op_name: &str) {
+        Diagnostic::error(format!("failed to resolve core operation handler `{op_name}`"))
+            .element(Element::Origin { path: source })
+            .emit(self);
+    }
 }

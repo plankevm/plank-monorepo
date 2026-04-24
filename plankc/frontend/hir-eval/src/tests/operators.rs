@@ -264,6 +264,39 @@ fn test_runtime_shift_left_with_std() {
 }
 
 #[test]
+fn test_runtime_negate() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let a = @evm_calldataload(0);
+            let b = -a;
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            %2 : u256 = 0
+            %3 : u256 = @evm_sub(%2, %1)
+            ret %3
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = %1
+            %3 : u256 = call @fn0(%2)
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_runtime_not_eq_with_std() {
     assert_lowers_to(
         std_project(
@@ -657,6 +690,73 @@ fn test_type_inequality() {
 }
 
 #[test]
+fn test_std_operator_not_a_function() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+        init {
+            @evm_stop();
+        }
+        "#,
+        )
+        .with_core_ops(
+            r#"
+const checked_sub = fn (x: u256, y: u256) u256 { x };
+const checked_mul = fn (x: u256, y: u256) u256 { x };
+const checked_mod = fn (x: u256, y: u256) u256 { x };
+const checked_div_up = fn (x: u256, y: u256) u256 { x };
+const checked_div_down = fn (x: u256, y: u256) u256 { x };
+const greater_equals = fn (x: u256, y: u256) bool { true };
+const less_equals = fn (x: u256, y: u256) bool { true };
+const neg_u256 = fn (x: u256) u256 { x };
+const checked_add = 42;
+        "#,
+        ),
+        &[r#"
+        error: invalid standard library operator
+         --> __core_ops.plk:9:1
+          |
+        9 | const checked_add = 42;
+          | ^^^^^^^^^^^^^^^^^^^^^^^ `checked_add` is not a function
+        "#],
+    );
+}
+
+#[test]
+fn test_std_operator_missing() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+        init {
+            @evm_stop();
+        }
+        "#,
+        )
+        .with_core_ops(
+            r#"
+const checked_sub = fn (x: u256, y: u256) u256 { x };
+const checked_mul = fn (x: u256, y: u256) u256 { x };
+const checked_mod = fn (x: u256, y: u256) u256 { x };
+const checked_div_up = fn (x: u256, y: u256) u256 { x };
+const checked_div_down = fn (x: u256, y: u256) u256 { x };
+const less_equals = fn (x: u256, y: u256) bool { true };
+const neg_u256 = fn (x: u256) u256 { x };
+        "#,
+        ),
+        &[
+            r#"
+        error: failed to resolve core operation handler `checked_add`
+         --> __core_ops.plk
+        "#,
+            r#"
+        error: failed to resolve core operation handler `greater_equals`
+         --> __core_ops.plk
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_bool_runtime_inequality() {
     assert_lowers_to(
         std_project(
@@ -679,6 +779,100 @@ fn test_bool_runtime_inequality() {
             %3 : bool = %1
             %4 : bool = @evm_xor(%2, %3)
             %5 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_bool_runtime_equality() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let mut x = false;
+            let mut y = true;
+            if x == y {
+                @evm_stop();
+            } else {
+                @evm_invalid();
+            }
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = true
+            %2 : bool = %0
+            %3 : bool = %1
+            %4 : bool = @evm_eq(%2, %3)
+            if %4 {
+                %5 : never = @evm_stop()
+            } else {
+                %6 : never = @evm_invalid()
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_bool_comptime_equality() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let mut x = true == true;
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_memptr_equality() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let p1 = @malloc_uninit(0);
+            let p2 = p1;
+            if p1 == p2 {
+                @evm_invalid();
+            }
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : memptr = @malloc_uninit(%0)
+            %2 : memptr = %1
+            %3 : memptr = %1
+            %4 : memptr = %2
+            %5 : bool = @evm_eq(%3, %4)
+            if %5 {
+                %6 : never = @evm_invalid()
+            } else {
+                %7 : void = void_unit
+            }
+            %8 : void = %7
+            %9 : never = @evm_stop()
         }
         "#,
     );
