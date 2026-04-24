@@ -5,7 +5,7 @@ use plank_hir::{
 };
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, RuntimeBuiltin, SourceId, SourceSpan, SrcLoc};
-use plank_values::{PrimitiveType, TypeId, Value, ValueId, builtins::resolve_result_type};
+use plank_values::{PrimitiveType, TypeId, Value, ValueId};
 
 use crate::{diagnostics::DiagCtx, evaluator::Evaluator, scope::*};
 
@@ -294,7 +294,7 @@ impl crate::scope::Scope<'_, '_> {
             (op_equals, Err(_) | Ok(PrimitiveType::Function | PrimitiveType::Never)) => {
                 let op = if op_equals { BinaryOp::Equals } else { BinaryOp::NotEquals };
                 self.diag_ctx.emit_operator_not_supported(op, ty, self.loc(expr));
-                return Err(Poisoned);
+                Err(Poisoned)
             }
         }
     }

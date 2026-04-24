@@ -6,9 +6,7 @@ use crate::{
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind, operators as hir_ops};
 use plank_mir as mir;
-use plank_session::{
-    MaybePoisoned, Poisoned, RuntimeBuiltin, SourceId, SourceSpan, SrcLoc, poison,
-};
+use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +124,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Runtime(_) => {
                 self.diag_ctx
                     .emit_runtime_ref_in_comptime(self.loc(expr), self.origin_loc(binding.origin));
-                return Err(Poisoned);
+                Err(Poisoned)
             }
         }
     }
