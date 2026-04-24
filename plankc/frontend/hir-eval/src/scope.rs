@@ -4,7 +4,7 @@ use crate::{
     evaluator::CallArgSpansIdx,
 };
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, InstructionKind, operators as hir_ops};
+use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};

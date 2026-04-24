@@ -7,10 +7,6 @@ fn std_project(source: &str) -> TestProject {
     TestProject::root(source).with_stdlib_dir(STD_DIR)
 }
 
-// ─────────────────────────────────────────────────────────────
-// Without std: operator table is empty
-// ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_binary_op_not_supported_without_std() {
     assert_diagnostics(
@@ -79,10 +75,6 @@ fn test_unary_negate_not_supported_without_std() {
         "#],
     );
 }
-
-// ─────────────────────────────────────────────────────────────
-// With std: runtime operators (verify no errors)
-// ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_runtime_checked_add_with_std() {
@@ -408,10 +400,6 @@ fn test_runtime_bitwise_not_with_std() {
     );
 }
 
-// ─────────────────────────────────────────────────────────────
-// With std: comptime folding
-// ─────────────────────────────────────────────────────────────
-
 #[test]
 fn test_comptime_checked_add_fold_with_std() {
     assert_lowers_to(
@@ -461,10 +449,6 @@ fn test_comptime_wrapping_add_fold_with_std() {
         "#,
     );
 }
-
-// ─────────────────────────────────────────────────────────────
-// With std: comptime overflow / div-by-zero diagnostics
-// ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_comptime_add_overflow_with_std() {
@@ -597,10 +581,6 @@ fn test_comptime_div_down_by_zero_with_std() {
         "#],
     );
 }
-
-// ─────────────────────────────────────────────────────────────
-// Equals type-equality special case (no std needed)
-// ─────────────────────────────────────────────────────────────
 
 #[test]
 fn test_equals_type_equality() {
