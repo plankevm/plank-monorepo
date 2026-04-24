@@ -1,3 +1,4 @@
+// Reproduces an old codegen bug in the assembler that arises from overly strict arithmetic.
 fn init:
     b0 {
         => @b1
