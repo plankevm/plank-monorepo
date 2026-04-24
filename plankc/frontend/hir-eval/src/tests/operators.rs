@@ -877,3 +877,53 @@ fn test_memptr_equality() {
         "#,
     );
 }
+
+#[test]
+fn test_memptr_add_not_supported() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+        init {
+            let a = @malloc_uninit(32);
+            let b = @malloc_uninit(32);
+            let c = a + b;
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
+        error: operator not supported
+         --> main.plk:4:13
+          |
+        4 |     let c = a + b;
+          |             ^^^^^ operator '+' is not supported for type `memptr`
+          |
+          = help: only wrapping operators `+%` and `-%` are supported for `memptr`
+        "#],
+    );
+}
+
+#[test]
+fn test_memptr_sub_not_supported() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+        init {
+            let a = @malloc_uninit(32);
+            let b = @malloc_uninit(32);
+            let c = a - b;
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
+        error: operator not supported
+         --> main.plk:4:13
+          |
+        4 |     let c = a - b;
+          |             ^^^^^ operator '-' is not supported for type `memptr`
+          |
+          = help: only wrapping operators `+%` and `-%` are supported for `memptr`
+        "#],
+    );
+}

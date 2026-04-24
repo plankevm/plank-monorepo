@@ -121,7 +121,12 @@ impl crate::scope::Scope<'_, '_> {
         }
 
         let Some(closure_vid) = self.eval.operator_table.lookup_binary(op, lhs_ty) else {
-            self.diag_ctx.emit_operator_not_supported(op, lhs_ty, self.loc(expr));
+            if lhs_ty == TypeId::MEMORY_POINTER && matches!(op, BinaryOp::Add | BinaryOp::Subtract)
+            {
+                self.diag_ctx.emit_operator_not_supported_for_memptr(op, self.loc(expr));
+            } else {
+                self.diag_ctx.emit_operator_not_supported(op, lhs_ty, self.loc(expr));
+            }
             return Err(Poisoned);
         };
 

@@ -719,6 +719,21 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_operator_not_supported_for_memptr(
+        &mut self,
+        op: impl std::fmt::Display,
+        expr: SrcLoc,
+    ) {
+        Diagnostic::error("operator not supported")
+            .primary(
+                expr.source,
+                expr.span,
+                format!("operator '{op}' is not supported for type `memptr`"),
+            )
+            .help("only wrapping operators `+%` and `-%` are supported for `memptr`")
+            .emit(self);
+    }
+
     pub fn emit_operator_type_mismatch(&mut self, lhs_ty: TypeId, rhs_ty: TypeId, loc: SrcLoc) {
         Diagnostic::error("mismatched types")
             .primary(
