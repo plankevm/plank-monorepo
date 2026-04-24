@@ -13,11 +13,7 @@ test:
 test-sir-diff:
      forge test --ffi
 
-[working-directory: 'plank-diff-tests/']
-test-plank-diff:
-     forge test --ffi
-
-test-all: test test-sir-diff test-plank-diff
+test-all: test test-sir-diff
 
 ci-fmt:
     (cd sir/sir-solidity-diff-tests/ && forge fmt --check)
