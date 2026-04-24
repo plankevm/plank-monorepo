@@ -10,7 +10,7 @@ use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
-    evaluator::State,
+    evaluator::{CallArgSpansIdx, State},
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -58,21 +58,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn create_fn_scope<'s>(
         &'s mut self,
         fn_def_id: hir::FnDefId,
-        args_id: hir::CallArgsId,
+        args: &[hir::LocalId],
+        arg_spans: CallArgSpansIdx,
         capture_buf_offset: usize,
         validated: ArgParamComptimenessMatch,
     ) -> (Scope<'s, 'ctx>, &'s DenseIndexMap<hir::LocalId, Local>) {
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
-        let args = &self.eval.hir.call_args[args_id];
         let is_comptime = self.is_comptime();
         let caller_bindings = &mut self.bindings;
         let caller_mir_types = &mut self.mir_types;
 
-        let arg_spans = self
-            .eval
-            .call_arg_spans
-            .push_iter(args.iter().map(|&arg| caller_bindings[arg].use_span));
         let call_source = self.source;
 
         let mut fn_scope = Scope::new(
@@ -225,24 +221,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     this.eval.captures_buf.push(capture);
                 }
 
-                let arg_span_groups_before = this.eval.call_arg_spans.len();
+                let args = &this.hir.call_args[args_id];
+                let arg_spans = this
+                    .eval
+                    .call_arg_spans
+                    .push_iter(args.iter().map(|&arg| this.bindings[arg].use_span));
                 let eval_res = this.eval_call_inner(
                     closure_vid,
                     fn_def_id,
-                    args_id,
+                    args,
+                    arg_spans,
                     call_span,
                     capture_buf_offset,
                     values_buf_offset,
                 );
-                let arg_span_groups_after = this.eval.call_arg_spans.len();
-
-                let diff = arg_span_groups_after
-                    .checked_sub(arg_span_groups_before)
-                    .expect("inconsistent arg spans cleanup");
-                assert!(diff <= 1);
-                if diff == 1 {
-                    this.eval.call_arg_spans.pop();
-                }
+                this.eval.call_arg_spans.pop();
 
                 eval_res
             })
@@ -268,18 +261,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if comptime_args_poisoned { Err(Poisoned) } else { Ok(ArgParamComptimenessMatch) }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn eval_call_inner(
         &mut self,
         closure: ValueId,
         fn_def_id: hir::FnDefId,
-        args_id: hir::CallArgsId,
+        args: &[hir::LocalId],
+        arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         capture_buf_offset: usize,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let func = self.hir.fns[fn_def_id];
         let params = &self.hir.fn_params[fn_def_id];
-        let args = &self.hir.call_args[args_id];
         let call_loc = self.loc(call_span);
 
         if params.len() != args.len() {
@@ -298,7 +292,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let caller_comptime = self.is_comptime();
             let call_source = self.source;
             let (fn_scope, caller_bindings) =
-                self.create_fn_scope(fn_def_id, args_id, capture_buf_offset, validated);
+                self.create_fn_scope(fn_def_id, args, arg_spans, capture_buf_offset, validated);
             let call = Call {
                 source: call_source,
                 caller_comptime,

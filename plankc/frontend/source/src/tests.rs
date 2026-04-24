@@ -49,7 +49,7 @@ fn source_content_matches_source_manager_path() {
         .expect("module registration succeeds");
 
     let project =
-        parse_project(&dir.path().join(source_file("main")), &modules, &mut session, &RealFs)
+        parse_project(&dir.path().join(source_file("main")), None, &modules, &mut session, &RealFs)
             .expect("project should be parsed");
     assert!(!session.has_errors(), "parse errors: {:?}", session.diagnostics());
 

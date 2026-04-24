@@ -1,5 +1,5 @@
 use plank_hir::lower;
-use plank_session::Session;
+use plank_session::{Session, SourceId};
 use plank_source::{
     ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
@@ -12,6 +12,7 @@ pub struct Driver<'a, F: SourceFs> {
     pub values: ValueInterner,
     module_resolver: ModuleResolver,
     fs: &'a F,
+    std_root: Option<PathBuf>,
 }
 
 impl<'a, F: SourceFs> Driver<'a, F> {
@@ -21,7 +22,16 @@ impl<'a, F: SourceFs> Driver<'a, F> {
             values: ValueInterner::new(),
             module_resolver: ModuleResolver::default(),
             fs,
+            std_root: None,
         }
+    }
+
+    pub fn register_std(&mut self, root: PathBuf) {
+        let name_id = self.session.intern("std");
+        if self.module_resolver.register(name_id, root.clone()).is_err() {
+            diagnostics::error_duplicate_module(&mut self.session, name_id);
+        }
+        self.std_root = Some(root);
     }
 
     pub fn register_module(&mut self, name: &str, root: PathBuf) {
@@ -39,15 +49,26 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     }
 
     pub fn load_project(&mut self, entry_path: &Path) -> Option<ParsedProject> {
-        parse_project(entry_path, &self.module_resolver, &mut self.session, self.fs)
+        let core_ops_path = self.std_root.as_ref().map(|root| root.join("core_ops.plk"));
+        parse_project(
+            entry_path,
+            core_ops_path.as_deref(),
+            &self.module_resolver,
+            &mut self.session,
+            self.fs,
+        )
     }
 
     pub fn lower_hir(&mut self, project: &ParsedProject) -> plank_hir::Hir {
         lower(project, &mut self.values, &mut self.session)
     }
 
-    pub fn evaluate_hir(&mut self, hir: &plank_hir::Hir) -> plank_mir::Mir {
-        plank_hir_eval::evaluate(hir, &mut self.values, &mut self.session)
+    pub fn evaluate_hir(
+        &mut self,
+        hir: &plank_hir::Hir,
+        core_ops_source: Option<SourceId>,
+    ) -> plank_mir::Mir {
+        plank_hir_eval::evaluate(hir, core_ops_source, &mut self.values, &mut self.session)
     }
 
     pub fn emit_bytecode(&self, mir: &plank_mir::Mir, optimizations: Option<&str>) -> Vec<u8> {

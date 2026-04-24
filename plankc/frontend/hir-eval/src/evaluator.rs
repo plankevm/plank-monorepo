@@ -7,6 +7,7 @@ use plank_values::{DefOrigin, Field, Type, TypeId, TypeInterner, Value, ValueId,
 use crate::{
     diagnostics::DiagCtx,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
+    operators::OperatorTable,
     scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
@@ -35,6 +36,8 @@ pub(crate) struct Evaluator<'a> {
     pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
+
+    pub operator_table: OperatorTable,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -67,6 +70,8 @@ impl<'a> Evaluator<'a> {
             lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
+
+            operator_table: OperatorTable::new(),
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),

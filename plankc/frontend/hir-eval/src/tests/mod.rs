@@ -2,6 +2,7 @@ mod basic;
 mod calls;
 mod comptime;
 mod logical_ops;
+mod operators;
 mod structs;
 mod types;
 
@@ -17,7 +18,7 @@ fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
 
     let mut big_nums = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir = crate::evaluate(&hir, &mut big_nums, &mut session);
+    let mir = crate::evaluate(&hir, project.core_ops_source, &mut big_nums, &mut session);
 
     (mir, big_nums, session)
 }

@@ -153,13 +153,20 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         driver.register_module(name, root);
     }
 
-    if !args.deps.iter().any(|(name, _)| name == "std")
-        && let Some(std_path) = plank_dir.map(|dir| dir.join("stdlib")).filter(|p| p.is_dir())
-    {
-        driver.register_module("std", std_path);
+    let std_path = args
+        .deps
+        .iter()
+        .find_map(|(name, path)| (name == "std").then_some(path.clone()))
+        .or_else(|| plank_dir.map(|dir| dir.join("stdlib")).filter(|p| p.is_dir()));
+
+    if let Some(std_path) = std_path {
+        driver.register_std(std_path);
     }
 
     for (name, path) in &args.deps {
+        if name == "std" {
+            continue;
+        }
         driver.register_module(name, path.clone());
     }
 
@@ -194,7 +201,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         }
     }
 
-    let mir = driver.evaluate_hir(&hir);
+    let mir = driver.evaluate_hir(&hir, project.core_ops_source);
 
     if args.show_mir {
         print!("{}", DisplayMir::new(&mir, &driver.values, &driver.session));

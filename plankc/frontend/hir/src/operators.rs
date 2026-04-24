@@ -2,6 +2,8 @@
 //! [`plank_parser::cst::UnaryOp`] as these contain `and`, `or` and `!` which are bool specific and
 //! should not be overridable.
 
+use plank_session::RuntimeBuiltin;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
     // Comparison
@@ -33,6 +35,35 @@ pub enum BinaryOp {
 }
 
 impl BinaryOp {
+    pub const fn runtime_equivalent(self) -> Option<RuntimeBuiltin> {
+        let builtin = match self {
+            Self::LessThan => RuntimeBuiltin::Lt,
+            Self::GreaterThan => RuntimeBuiltin::Gt,
+            Self::AddWrap => RuntimeBuiltin::Add,
+            Self::SubtractWrap => RuntimeBuiltin::Sub,
+            Self::MulWrap => RuntimeBuiltin::Mul,
+            Self::BitwiseOr => RuntimeBuiltin::Or,
+            Self::BitwiseXor => RuntimeBuiltin::Xor,
+            Self::BitwiseAnd => RuntimeBuiltin::And,
+            Self::ShiftLeft => RuntimeBuiltin::Shl,
+            Self::ShiftRight => RuntimeBuiltin::Shr,
+
+            Self::LessEquals
+            | Self::GreaterEquals
+            | Self::Add
+            | Self::Subtract
+            | Self::Mul
+            | Self::Mod
+            | Self::NotEquals
+            | Self::Equals
+            | Self::DivRoundPos
+            | Self::DivRoundNeg
+            | Self::DivRoundToZero
+            | Self::DivRoundAwayFromZero => return None,
+        };
+        Some(builtin)
+    }
+
     pub const fn symbol(self) -> &'static str {
         match self {
             Self::NotEquals => "!=",
@@ -61,6 +92,12 @@ impl BinaryOp {
     }
 }
 
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.symbol())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnaryOp {
     Negate,
@@ -73,5 +110,11 @@ impl UnaryOp {
             Self::Negate => "-",
             Self::BitwiseNot => "~",
         }
+    }
+}
+
+impl std::fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.symbol())
     }
 }

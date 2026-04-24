@@ -1,6 +1,6 @@
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
-use plank_hir as hir;
+use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{PrimitiveType, TypeId, TypeInterner, builtins as builtin_sigs};
 
@@ -698,6 +698,73 @@ impl DiagCtx<'_> {
                 field_def.span,
                 format!("type of `{name}` evaluated to `{}`", builtin_names::NEVER),
             )
+            .emit(self);
+    }
+
+    pub fn emit_operator_not_supported(
+        &mut self,
+        op: impl std::fmt::Display,
+        ty: TypeId,
+        expr: SrcLoc,
+    ) {
+        Diagnostic::error("operator not supported")
+            .primary(
+                expr.source,
+                expr.span,
+                format!(
+                    "operator '{op}' is not supported for type `{}`",
+                    self.types.format(self.session, ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_operator_type_mismatch(&mut self, lhs_ty: TypeId, rhs_ty: TypeId, loc: SrcLoc) {
+        Diagnostic::error("mismatched types")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "expected `{}`, got `{}`",
+                    self.types.format(self.session, lhs_ty),
+                    self.types.format(self.session, rhs_ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_comptime_arithmetic_overflow(&mut self, op: impl std::fmt::Display, loc: SrcLoc) {
+        Diagnostic::error("arithmetic overflow")
+            .primary(loc.source, loc.span, format!("'{op}' overflow at compile time"))
+            .emit(self);
+    }
+
+    pub fn emit_comptime_arithmetic_underflow(&mut self, op: impl std::fmt::Display, loc: SrcLoc) {
+        Diagnostic::error("arithmetic underflow")
+            .primary(loc.source, loc.span, format!("'{op}' underflow at compile time"))
+            .emit(self);
+    }
+
+    pub fn emit_comptime_division_by_zero(&mut self, op: BinaryOp, expr: SrcLoc) {
+        Diagnostic::error("division by zero")
+            .primary(expr.source, expr.span, format!("'{op}' division by zero at compile time"))
+            .info(concat!(
+                "for EVM behavior where division by zero returns 0, use `@evm_div` or `@evm_sdiv`,",
+                " note that the rounding direction may differ"
+            ))
+            .emit(self);
+    }
+
+    pub fn emit_comptime_modulo_by_zero(&mut self, op: BinaryOp, expr: SrcLoc) {
+        Diagnostic::error("modulo by zero")
+            .primary(expr.source, expr.span, format!("'{op}' modulo by zero at compile time"))
+            .info("for EVM behavior where modulo by zero returns 0, use `@evm_mod`")
+            .emit(self);
+    }
+
+    pub fn emit_std_operator_not_a_function(&mut self, name: &str, loc: SrcLoc) {
+        Diagnostic::error("invalid standard library operator")
+            .primary(loc.source, loc.span, format!("`{name}` is not a function"))
             .emit(self);
     }
 }

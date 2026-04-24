@@ -1,0 +1,63 @@
+import std::sol::{SolPanicCode, PANIC_SELECTOR, ARITH_OVERFLOW_UNDERFLOW, DIV_BY_ZERO};
+
+/// Comptime compatible error
+const arith_error = fn (comptime code: SolPanicCode) never {
+    let error_buf = @malloc_uninit(0x40);
+    @mstore32(error_buf +% 0x00, PANIC_SELECTOR);
+    @mstore32(error_buf +% 0x20, code.code);
+    @evm_revert(error_buf +% 0x1c, 0x24);
+};
+
+/// TODO: Ensure this is a no-op (https://github.com/plankevm/plank-monorepo/issues/160)
+const bool_to_u256 = fn (b: bool) u256 {
+    if b { 1 } else { 0 }
+};
+
+const checked_sub = fn (x: u256, y: u256) u256 {
+    let z = x -% y;
+    if z > x {
+        arith_error(ARITH_OVERFLOW_UNDERFLOW);
+    }
+    z
+};
+
+const checked_add = fn (x: u256, y: u256) u256 {
+    let z = x +% y;
+    if z < x {
+        arith_error(ARITH_OVERFLOW_UNDERFLOW);
+    }
+    z
+};
+
+const checked_mul = fn (x: u256, y: u256) u256 {
+    let z = x *% y;
+    if (@evm_div(z, x) != y) & (x > 0)  {
+        arith_error(ARITH_OVERFLOW_UNDERFLOW);
+    }
+    z
+};
+
+const checked_mod = fn (x: u256, y: u256) u256 {
+    if y == 0 {
+        arith_error(DIV_BY_ZERO);
+    }
+    @evm_mod(x, y)
+};
+
+const checked_div_down = fn (x: u256, y: u256) u256 {
+    if y == 0 {
+        arith_error(DIV_BY_ZERO);
+    }
+    @evm_div(x, y)
+};
+
+const checked_div_up = fn (x: u256, y: u256) u256 {
+    if y == 0 {
+        arith_error(DIV_BY_ZERO);
+    }
+    @evm_div(x, y) +% bool_to_u256(@evm_mod(x, y) > 0)
+};
+
+const greater_equals = fn (x: u256, y: u256) bool { !(x < y) };
+const less_equals = fn (x: u256, y: u256) bool { !(x > y) };
+const neg_u256 = fn (x: u256) u256 { 0 -% x };

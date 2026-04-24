@@ -1,0 +1,15 @@
+// Based on https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require
+
+const SolPanicCode = struct { code: u256 };
+
+const PANIC_SELECTOR = 0x4e487b71;
+
+const ASSERT_FALSE = SolPanicCode { code: 0x01 };
+const ARITH_OVERFLOW_UNDERFLOW = SolPanicCode { code: 0x11 };
+const DIV_BY_ZERO = SolPanicCode { code: 0x12 };
+const ENUM_CONVERT_FAIL = SolPanicCode { code: 0x21 };
+const INVALID_BYTE_ARRAY_ACCESS = SolPanicCode { code: 0x22 };
+const POP_EMPTY = SolPanicCode { code: 0x31 };
+const OUT_OF_BOUNDS_ACCESS = SolPanicCode { code: 0x32 };
+const OVER_ALLOC = SolPanicCode { code: 0x41 };
+

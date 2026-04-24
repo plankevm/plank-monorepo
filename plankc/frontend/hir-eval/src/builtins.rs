@@ -20,6 +20,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: hir::CallArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let args = &self.eval.hir.call_args[args];
         match builtin {
             Builtin::Runtime(runtime) => {
                 if runtime.foldable() {
@@ -40,17 +41,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn eval_runtime_foldable_builtin(
+    pub fn eval_runtime_foldable_builtin(
         &mut self,
         builtin: RuntimeBuiltin,
-        args: hir::CallArgsId,
+        args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span)?;
 
-        let hir_args = &self.hir.call_args[args];
         let folded = self.with_values_buf(|this, values_buf_offset| {
-            for &arg in hir_args {
+            for &arg in args {
                 let (state, _arg_use_span, arg_origin) =
                     this.bindings[arg].poisoned().expect("invariant: arg type check checks poison");
                 match state {
@@ -81,7 +81,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn eval_runtime_only_builtin(
         &mut self,
         builtin: RuntimeBuiltin,
-        args: hir::CallArgsId,
+        args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span)?;
@@ -101,13 +101,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn resolve_runtime_builtin_result_type(
         &mut self,
         builtin: RuntimeBuiltin,
-        args: hir::CallArgsId,
+        args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<TypeId> {
-        let hir_args = &self.hir.call_args[args];
         let expr_loc = self.loc(expr_span);
         self.with_types_buf(|this, types_buf_offset| {
-            for &arg in hir_args {
+            for &arg in args {
                 let ty = this.state_type(this.bindings[arg].state?);
                 this.eval.types_buf.push(ty);
             }
@@ -127,12 +126,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn emit_runtime_builtin_mir(
         &mut self,
         builtin: RuntimeBuiltin,
-        args: hir::CallArgsId,
+        args: &[hir::LocalId],
         result_type: TypeId,
     ) -> Result<EvalValue, Diverge> {
-        let hir_args = &self.hir.call_args[args];
         let mir_args = self.with_locals_buf(|this, locals_buf_offset| {
-            for &arg in hir_args {
+            for &arg in args {
                 let state =
                     this.bindings[arg].state.expect("invariant: arg type check checks poison");
                 if let LocalState::Comptime(vid) = state {
@@ -162,26 +160,25 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn eval_comptime_builtin(
         &mut self,
         builtin: Builtin,
-        args: hir::CallArgsId,
+        args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let hir_args = &self.hir.call_args[args];
         let expr_loc = self.loc(expr_span);
 
-        if builtin_sigs::arg_count(builtin) != hir_args.len() {
-            self.diag_ctx.emit_wrong_arg_count(builtin, hir_args.len(), expr_loc);
+        if builtin_sigs::arg_count(builtin) != args.len() {
+            self.diag_ctx.emit_wrong_arg_count(builtin, args.len(), expr_loc);
             return Err(Poisoned);
         }
 
         match builtin {
             Builtin::IsStruct => {
-                let &[ty_local] = hir_args else { unreachable!("arg count checked") };
+                let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let is_struct = !ty.is_primitive();
                 Ok(Ok(EvalValue::Comptime(is_struct.into())))
             }
             Builtin::FieldCount => {
-                let &[r#struct] = hir_args else { unreachable!("arg count checked") };
+                let &[r#struct] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
                 let r#struct = self.expect_struct_type(ty, builtin, expr_span)?;
                 let count = U256::from(r#struct.fields.len());
@@ -195,22 +192,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn eval_comptime_dynamic_builtin(
         &mut self,
         builtin: Builtin,
-        args: hir::CallArgsId,
-        expr_span: SourceSpan,
+        args: &[hir::LocalId],
+        expr: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let hir_args = &self.hir.call_args[args];
-        let expr_loc = self.loc(expr_span);
-
-        if builtin_sigs::arg_count(builtin) != hir_args.len() {
-            self.diag_ctx.emit_wrong_arg_count(builtin, hir_args.len(), expr_loc);
+        if builtin_sigs::arg_count(builtin) != args.len() {
+            self.diag_ctx.emit_wrong_arg_count(builtin, args.len(), self.loc(expr));
             return Err(Poisoned);
         }
 
         match builtin {
-            Builtin::FieldType => self.eval_field_type(hir_args, builtin, expr_span),
-            Builtin::GetField => self.eval_get_field(hir_args, builtin, expr_span),
-            Builtin::SetField => self.eval_set_field(hir_args, builtin, expr_span),
-            Builtin::Uninit => self.eval_uninit(hir_args, builtin, expr_span),
+            Builtin::FieldType => self.eval_field_type(args, builtin, expr),
+            Builtin::GetField => self.eval_get_field(args, builtin, expr),
+            Builtin::SetField => self.eval_set_field(args, builtin, expr),
+            Builtin::Uninit => self.eval_uninit(args, builtin, expr),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -510,7 +504,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn materialize_as_local(&mut self, state: LocalState, ty: TypeId) -> mir::LocalId {
+    pub(crate) fn materialize_as_local(&mut self, state: LocalState, ty: TypeId) -> mir::LocalId {
         match state {
             LocalState::Runtime(local) => local,
             LocalState::Comptime(vid) => {
@@ -522,7 +516,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 }
 
-fn fold_runtime_builtin(
+pub(crate) fn fold_runtime_builtin(
     builtin: RuntimeBuiltin,
     args: &[ValueId],
     values: &mut ValueInterner,
@@ -654,7 +648,7 @@ fn build_uninit_comptime(
     }
 }
 
-fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
+pub(crate) fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
     match values.lookup(vid) {
         Value::BigNum(n) => n,
         other => unreachable!("invariant: type checked as u256, got {other:?}"),

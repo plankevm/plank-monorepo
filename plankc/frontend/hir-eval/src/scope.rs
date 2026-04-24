@@ -115,6 +115,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.eval.instr_stack_buf.push(instr);
     }
 
+    pub fn try_comptime(
+        &mut self,
+        binding: Local,
+        expr: SourceSpan,
+    ) -> MaybePoisoned<Option<ValueId>> {
+        match binding.state? {
+            LocalState::Comptime(value) => Ok(Some(value)),
+            LocalState::Runtime(_) if !self.is_comptime() => Ok(None),
+            LocalState::Runtime(_) => {
+                self.diag_ctx
+                    .emit_runtime_ref_in_comptime(self.loc(expr), self.origin_loc(binding.origin));
+                return Err(Poisoned);
+            }
+        }
+    }
+
     pub fn state_type(&self, state: LocalState) -> TypeId {
         match state {
             LocalState::Runtime(mir) => self.mir_types[mir],
@@ -563,28 +579,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    pub fn eval_logical_not(&mut self, local: hir::LocalId) -> MaybePoisoned<EvalValue> {
-        let (state, use_span, _origin) = self.bindings[local].poisoned()?;
-        let ty = self.state_type(state);
-        if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(TypeId::BOOL, ty, self.loc(use_span));
-            return Err(Poisoned);
-        }
-        let value = match state {
-            LocalState::Runtime(mir) => {
-                let args = self.mir_args.push_copy_slice(&[mir]);
-                EvalValue::Runtime {
-                    expr: mir::Expr::RuntimeBuiltinCall { builtin: RuntimeBuiltin::IsZero, args },
-                    result_type: TypeId::BOOL,
-                }
-            }
-            LocalState::Comptime(ValueId::FALSE) => EvalValue::Comptime(ValueId::TRUE),
-            LocalState::Comptime(ValueId::TRUE) => EvalValue::Comptime(ValueId::FALSE),
-            LocalState::Comptime(_) => unreachable!("already type checked"),
-        };
-        Ok(value)
-    }
-
     pub fn eval_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, Diverge> {
         let value = match expr.kind {
             ExprKind::Value(maybe_vid) => maybe_vid.map(EvalValue::Comptime),
@@ -606,30 +600,31 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
             ExprKind::BinaryOpCall { op: hir_ops::BinaryOp::Equals, lhs, rhs } => {
-                let lhs = self.bindings[lhs].state.and_then(|lhs| {
+                let lhs_type = self.bindings[lhs].state.and_then(|lhs| {
                     let LocalState::Comptime(value) = lhs else { return Err(Poisoned) };
                     let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
                     Ok(ty)
                 });
-                let rhs = self.bindings[rhs].state.and_then(|rhs| {
+                let rhs_type = self.bindings[rhs].state.and_then(|rhs| {
                     let LocalState::Comptime(value) = rhs else { return Err(Poisoned) };
                     let Value::Type(ty) = self.values.lookup(value) else { return Err(Poisoned) };
                     Ok(ty)
                 });
-                let result = poison::zip(lhs, rhs)
-                    .map(|(lhs, rhs)| EvalValue::Comptime((lhs == rhs).into()));
-                if result.is_err() {
-                    self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
+                match poison::zip(lhs_type, rhs_type) {
+                    Ok((lhs, rhs)) => Ok(EvalValue::Comptime((lhs == rhs).into())),
+                    Err(Poisoned) => poison::transpose(self.eval_binary_op(
+                        hir_ops::BinaryOp::Equals,
+                        lhs,
+                        rhs,
+                        expr.span,
+                    ))?,
                 }
-                result
             }
-            ExprKind::BinaryOpCall { .. } => {
-                self.diag_ctx.emit_not_yet_implemented("binary operators", self.loc(expr.span));
-                Err(Poisoned)
+            ExprKind::BinaryOpCall { op, lhs, rhs } => {
+                poison::transpose(self.eval_binary_op(op, lhs, rhs, expr.span))?
             }
-            ExprKind::UnaryOpCall { .. } => {
-                self.diag_ctx.emit_not_yet_implemented("unary operators", self.loc(expr.span));
-                Err(Poisoned)
+            ExprKind::UnaryOpCall { op, input } => {
+                poison::transpose(self.eval_unary_op(op, input, expr.span))?
             }
             ExprKind::StructLit { ty, fields } => self.eval_struct_lit(ty, fields, expr.span),
             ExprKind::Member { object, member } => {
