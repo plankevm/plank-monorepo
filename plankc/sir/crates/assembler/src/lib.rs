@@ -143,7 +143,7 @@ impl AsmSection {
                         // `end_offset` can be less than `start_offset` if while converging we
                         // update the start offset *before* end, potentially bumping it to a higher
                         // value.
-                        if end_offset < start_offset { 0 } else { end_offset - start_offset }
+                        end_offset.saturating_sub(start_offset)
                     }
                 };
                 let ref_size = bytes_to_hold(value);
@@ -322,6 +322,7 @@ impl Assembler {
         self.sections.push(section);
     }
 
+    #[allow(unused)]
     fn eprint_mark_map(mark_to_offset: &IndexVec<MarkId, u32>) {
         eprint!("{{");
         for (id, offset) in mark_to_offset.enumerate_idx() {
@@ -340,10 +341,6 @@ impl Assembler {
         let mut min_size = 0;
         for section in self.iter_sections() {
             if let AsmSection::Mark(id) = section {
-                if [56, 74].contains(&id.get()) {
-                    eprintln!("id: {id}");
-                    eprintln!("  min_size: {min_size}");
-                }
                 let size_for_id = id.get() as usize + 1;
                 // Maintain `length == capacity`.
                 let additional_to_reserve = size_for_id.saturating_sub(mark_to_offset.len());
@@ -355,20 +352,11 @@ impl Assembler {
             min_size += section.min_compiled_size();
         }
 
-        for iter in 0..MAX_ASSEMBLER_CONVERGENCE_ITERS {
-            eprintln!("iter: {iter}");
-            eprint!("mark_map: ");
-            Self::eprint_mark_map(&mark_to_offset);
-            eprintln!();
-
+        for _ in 0..MAX_ASSEMBLER_CONVERGENCE_ITERS {
             let mut converged = true;
             let mut current_code_offset = 0;
             for (i, section) in self.iter_sections().enumerate() {
                 if let AsmSection::Mark(id) = section {
-                    if [56, 74].contains(&id.get()) {
-                        eprintln!("id: {id}");
-                        eprintln!("  min_size: {current_code_offset}");
-                    }
                     let prev_offset = mark_to_offset[id];
                     if prev_offset != current_code_offset {
                         converged = false;
