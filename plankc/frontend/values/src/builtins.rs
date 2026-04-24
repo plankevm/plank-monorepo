@@ -74,11 +74,13 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::Runtime(RB::Gt) => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
         B::Runtime(RB::SLt) => &[sig!([U256, U256 => BOOL])],
         B::Runtime(RB::SGt) => &[sig!([U256, U256 => BOOL])],
-        B::Runtime(RB::Eq) => &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL])],
+        B::Runtime(RB::Eq) => {
+            &[sig!([U256, U256 => BOOL]), sig!([MP, MP => BOOL]), sig!([BOOL, BOOL => BOOL])]
+        }
         B::Runtime(RB::IsZero) => &[sig!([U256 => BOOL])],
-        B::Runtime(RB::And) => &[sig!([U256, U256 => U256])],
-        B::Runtime(RB::Or) => &[sig!([U256, U256 => U256])],
-        B::Runtime(RB::Xor) => &[sig!([U256, U256 => U256])],
+        B::Runtime(RB::And) => &[sig!([U256, U256 => U256]), sig!([BOOL, BOOL => BOOL])],
+        B::Runtime(RB::Or) => &[sig!([U256, U256 => U256]), sig!([BOOL, BOOL => BOOL])],
+        B::Runtime(RB::Xor) => &[sig!([U256, U256 => U256]), sig!([BOOL, BOOL => BOOL])],
         B::Runtime(RB::Not) => &[sig!([U256 => U256])],
         B::Runtime(RB::Byte) => &[sig!([U256, U256 => U256])],
         B::Runtime(RB::Shl) => &[sig!([U256, U256 => U256])],

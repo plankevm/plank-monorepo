@@ -65,11 +65,23 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     LocalState::Runtime(_) => return Ok(None),
                 }
             }
-            Ok(Some(fold_runtime_builtin(
+            let result = fold_runtime_builtin(
                 builtin,
                 &this.eval.values_buf[values_buf_offset..],
                 this.eval.values,
-            )))
+            );
+            Ok(Some(match result_type {
+                TypeId::U256 => this.eval.values.intern_num(result),
+                TypeId::BOOL => match result {
+                    U256::ZERO => ValueId::FALSE,
+                    U256::ONE => ValueId::TRUE,
+                    x => unreachable!("{x} can't be turned into `bool`"),
+                },
+                ty => unreachable!(
+                    "unsupported result type `{}`",
+                    this.eval.types.format(this.diag_ctx.session, ty)
+                ),
+            }))
         })?;
         if let Some(value) = folded {
             return Ok(Ok(EvalValue::Comptime(value)));
@@ -520,13 +532,14 @@ pub(crate) fn fold_runtime_builtin(
     builtin: RuntimeBuiltin,
     args: &[ValueId],
     values: &mut ValueInterner,
-) -> ValueId {
+) -> U256 {
+    use plank_evm as evm;
     match *args {
         [a] => {
             let a = as_u256(values, a);
             match builtin {
-                RuntimeBuiltin::IsZero => plank_evm::iszero(a).into(),
-                RuntimeBuiltin::Not => values.intern_num(plank_evm::not(a)),
+                RuntimeBuiltin::IsZero => U256::from(plank_evm::iszero(a)),
+                RuntimeBuiltin::Not => plank_evm::not(a),
                 _ => unreachable!("not a unary foldable builtin: {builtin}"),
             }
         }
@@ -534,27 +547,27 @@ pub(crate) fn fold_runtime_builtin(
             let a = as_u256(values, a);
             let b = as_u256(values, b);
             match builtin {
-                RuntimeBuiltin::Add => values.intern_num(plank_evm::add(a, b)),
-                RuntimeBuiltin::Mul => values.intern_num(plank_evm::mul(a, b)),
-                RuntimeBuiltin::Sub => values.intern_num(plank_evm::sub(a, b)),
-                RuntimeBuiltin::Div => values.intern_num(plank_evm::div(a, b)),
-                RuntimeBuiltin::SDiv => values.intern_num(plank_evm::sdiv(a, b)),
-                RuntimeBuiltin::Mod => values.intern_num(plank_evm::r#mod(a, b)),
-                RuntimeBuiltin::SMod => values.intern_num(plank_evm::smod(a, b)),
-                RuntimeBuiltin::Exp => values.intern_num(plank_evm::exp(a, b)),
-                RuntimeBuiltin::SignExtend => values.intern_num(plank_evm::signextend(a, b)),
-                RuntimeBuiltin::Lt => plank_evm::lt(a, b).into(),
-                RuntimeBuiltin::Gt => plank_evm::gt(a, b).into(),
-                RuntimeBuiltin::SLt => plank_evm::slt(a, b).into(),
-                RuntimeBuiltin::SGt => plank_evm::sgt(a, b).into(),
-                RuntimeBuiltin::Eq => plank_evm::eq(a, b).into(),
-                RuntimeBuiltin::And => values.intern_num(plank_evm::and(a, b)),
-                RuntimeBuiltin::Or => values.intern_num(plank_evm::or(a, b)),
-                RuntimeBuiltin::Xor => values.intern_num(plank_evm::xor(a, b)),
-                RuntimeBuiltin::Byte => values.intern_num(plank_evm::byte(a, b)),
-                RuntimeBuiltin::Shl => values.intern_num(plank_evm::shl(a, b)),
-                RuntimeBuiltin::Shr => values.intern_num(plank_evm::shr(a, b)),
-                RuntimeBuiltin::Sar => values.intern_num(plank_evm::sar(a, b)),
+                RuntimeBuiltin::Add => evm::add(a, b),
+                RuntimeBuiltin::Mul => evm::mul(a, b),
+                RuntimeBuiltin::Sub => evm::sub(a, b),
+                RuntimeBuiltin::Div => evm::div(a, b),
+                RuntimeBuiltin::SDiv => evm::sdiv(a, b),
+                RuntimeBuiltin::Mod => evm::r#mod(a, b),
+                RuntimeBuiltin::SMod => evm::smod(a, b),
+                RuntimeBuiltin::Exp => evm::exp(a, b),
+                RuntimeBuiltin::SignExtend => evm::signextend(a, b),
+                RuntimeBuiltin::Lt => U256::from(evm::lt(a, b)),
+                RuntimeBuiltin::Gt => U256::from(evm::gt(a, b)),
+                RuntimeBuiltin::SLt => U256::from(evm::slt(a, b)),
+                RuntimeBuiltin::SGt => U256::from(evm::sgt(a, b)),
+                RuntimeBuiltin::Eq => U256::from(evm::eq(a, b)),
+                RuntimeBuiltin::And => evm::and(a, b),
+                RuntimeBuiltin::Or => evm::or(a, b),
+                RuntimeBuiltin::Xor => evm::xor(a, b),
+                RuntimeBuiltin::Byte => evm::byte(a, b),
+                RuntimeBuiltin::Shl => evm::shl(a, b),
+                RuntimeBuiltin::Shr => evm::shr(a, b),
+                RuntimeBuiltin::Sar => evm::sar(a, b),
                 _ => unreachable!("not a binary foldable builtin: {builtin}"),
             }
         }
@@ -563,8 +576,8 @@ pub(crate) fn fold_runtime_builtin(
             let b = as_u256(values, b);
             let c = as_u256(values, c);
             match builtin {
-                RuntimeBuiltin::AddMod => values.intern_num(plank_evm::addmod(a, b, c)),
-                RuntimeBuiltin::MulMod => values.intern_num(plank_evm::mulmod(a, b, c)),
+                RuntimeBuiltin::AddMod => plank_evm::addmod(a, b, c),
+                RuntimeBuiltin::MulMod => plank_evm::mulmod(a, b, c),
                 _ => unreachable!("not a ternary foldable builtin: {builtin}"),
             }
         }
@@ -651,6 +664,13 @@ fn build_uninit_comptime(
 pub(crate) fn as_u256(values: &ValueInterner, vid: ValueId) -> U256 {
     match values.lookup(vid) {
         Value::BigNum(n) => n,
+        Value::Bool(b) => {
+            if b {
+                U256::ONE
+            } else {
+                U256::ZERO
+            }
+        }
         other => unreachable!("invariant: type checked as u256, got {other:?}"),
     }
 }

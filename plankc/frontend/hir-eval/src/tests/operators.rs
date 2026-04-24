@@ -927,3 +927,194 @@ fn test_memptr_sub_not_supported() {
         "#],
     );
 }
+
+#[test]
+fn test_operator_precedence() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        const a = fn () u256 { @evm_sload(0) };
+        const b = fn () u256 { @evm_sload(1) };
+        const c = fn () u256 { @evm_sload(2) };
+        const d = fn () u256 { @evm_sload(3) };
+
+        init {
+            let x = a() * b() + (c() +% c()) -/ d();
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        @fn0() -> u256 {
+            %0 : u256 = 0
+            %1 : u256 = @evm_sload(%0)
+            ret %1
+        }
+
+        @fn1() -> u256 {
+            %0 : u256 = 1
+            %1 : u256 = @evm_sload(%0)
+            ret %1
+        }
+
+        @fn2() -> never {
+            %0 : u256 = 64
+            %1 : memptr = @malloc_uninit(%0)
+            %2 : memptr = %1
+            %3 : u256 = 0
+            %4 : memptr = @evm_add(%2, %3)
+            %5 : u256 = 0x4e487b71
+            %6 : void = @mstore32(%4, %5)
+            %7 : memptr = %1
+            %8 : u256 = 32
+            %9 : memptr = @evm_add(%7, %8)
+            %10 : u256 = 17
+            %11 : void = @mstore32(%9, %10)
+            %12 : memptr = %1
+            %13 : u256 = 28
+            %14 : memptr = @evm_add(%12, %13)
+            %15 : u256 = 36
+            %16 : never = @evm_revert(%14, %15)
+        }
+
+        @fn3(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            %3 : u256 = %1
+            %4 : u256 = @evm_mul(%2, %3)
+            %5 : u256 = %4
+            %6 : u256 = %0
+            %7 : u256 = @evm_div(%5, %6)
+            %8 : u256 = %1
+            %9 : bool = @evm_eq(%7, %8)
+            %10 : bool = @evm_iszero(%9)
+            %11 : u256 = %0
+            %12 : u256 = 0
+            %13 : bool = @evm_gt(%11, %12)
+            %14 : bool = @evm_and(%10, %13)
+            if %14 {
+                %15 : never = call @fn2()
+            } else {
+                %16 : void = void_unit
+            }
+            %17 : void = %16
+            %18 : u256 = %4
+            ret %18
+        }
+
+        @fn4() -> u256 {
+            %0 : u256 = 2
+            %1 : u256 = @evm_sload(%0)
+            ret %1
+        }
+
+        @fn5() -> u256 {
+            %0 : u256 = 3
+            %1 : u256 = @evm_sload(%0)
+            ret %1
+        }
+
+        @fn6() -> never {
+            %0 : u256 = 64
+            %1 : memptr = @malloc_uninit(%0)
+            %2 : memptr = %1
+            %3 : u256 = 0
+            %4 : memptr = @evm_add(%2, %3)
+            %5 : u256 = 0x4e487b71
+            %6 : void = @mstore32(%4, %5)
+            %7 : memptr = %1
+            %8 : u256 = 32
+            %9 : memptr = @evm_add(%7, %8)
+            %10 : u256 = 18
+            %11 : void = @mstore32(%9, %10)
+            %12 : memptr = %1
+            %13 : u256 = 28
+            %14 : memptr = @evm_add(%12, %13)
+            %15 : u256 = 36
+            %16 : never = @evm_revert(%14, %15)
+        }
+
+        @fn7(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %1
+            %3 : u256 = 0
+            %4 : bool = @evm_eq(%2, %3)
+            if %4 {
+                %5 : never = call @fn6()
+            } else {
+                %6 : void = void_unit
+            }
+            %7 : void = %6
+            %8 : u256 = %0
+            %9 : u256 = %1
+            %10 : u256 = @evm_div(%8, %9)
+            ret %10
+        }
+
+        @fn8(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            %3 : u256 = %1
+            %4 : u256 = @evm_add(%2, %3)
+            %5 : u256 = %4
+            %6 : u256 = %0
+            %7 : bool = @evm_lt(%5, %6)
+            if %7 {
+                %8 : never = call @fn2()
+            } else {
+                %9 : void = void_unit
+            }
+            %10 : void = %9
+            %11 : u256 = %4
+            ret %11
+        }
+
+        ; init
+        @fn9() -> never {
+            %0 : u256 = call @fn0()
+            %1 : u256 = call @fn1()
+            %2 : u256 = call @fn3(%0, %1)
+            %3 : u256 = call @fn4()
+            %4 : u256 = call @fn4()
+            %5 : u256 = @evm_add(%3, %4)
+            %6 : u256 = call @fn5()
+            %7 : u256 = call @fn7(%5, %6)
+            %8 : u256 = call @fn8(%2, %7)
+            %9 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_bitwise_bool() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let mut x = false ^ false;
+            let mut x = true ^ false;
+            let mut x = true | false;
+            let mut x = false | false;
+            let mut x = false & false;
+            let mut x = true & false;
+            let mut x = true & true;
+            @evm_stop();
+        }
+
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = true
+            %2 : bool = true
+            %3 : bool = false
+            %4 : bool = false
+            %5 : bool = false
+            %6 : bool = true
+            %7 : never = @evm_stop()
+        }
+        "#,
+    );
+}

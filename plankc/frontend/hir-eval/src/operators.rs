@@ -249,7 +249,10 @@ impl crate::scope::Scope<'_, '_> {
                 let result = if op_equals { lhs == rhs } else { lhs != rhs };
                 Ok(Ok(EvalValue::Comptime(result.into())))
             }
-            (true, Ok(PrimitiveType::U256 | PrimitiveType::MemoryPointer)) => {
+            (
+                true,
+                Ok(PrimitiveType::U256 | PrimitiveType::MemoryPointer | PrimitiveType::Bool),
+            ) => {
                 let args = [lhs, rhs];
                 self.eval_runtime_foldable_builtin(RuntimeBuiltin::Eq, &args, expr)
             }
@@ -280,22 +283,17 @@ impl crate::scope::Scope<'_, '_> {
                     result_type: TypeId::BOOL,
                 }))
             }
-            (op_equals, Ok(PrimitiveType::Bool)) => {
+            (false, Ok(PrimitiveType::Bool)) => {
                 let lhs_value = self.try_comptime(lhs_binding, expr)?;
                 let rhs_value = self.try_comptime(rhs_binding, expr)?;
                 if let Some((lhs, rhs)) = lhs_value.zip(rhs_value) {
-                    return Ok(Ok(EvalValue::Comptime(if op_equals {
-                        (lhs == rhs).into()
-                    } else {
-                        (lhs != rhs).into()
-                    })));
+                    return Ok(Ok(EvalValue::Comptime((lhs != rhs).into())));
                 }
                 let lhs = self.materialize_as_local(lhs_state, ty);
                 let rhs = self.materialize_as_local(rhs_state, ty);
                 let args = self.eval.mir_args.push_copy_slice(&[lhs, rhs]);
-                let builtin = if op_equals { RuntimeBuiltin::Eq } else { RuntimeBuiltin::Xor };
                 Ok(Ok(EvalValue::Runtime {
-                    expr: mir::Expr::RuntimeBuiltinCall { builtin, args },
+                    expr: mir::Expr::RuntimeBuiltinCall { builtin: RuntimeBuiltin::Xor, args },
                     result_type: TypeId::BOOL,
                 }))
             }
