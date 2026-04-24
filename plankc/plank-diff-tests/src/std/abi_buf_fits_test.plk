@@ -1,13 +1,49 @@
-import std::abi::{abi_decode_try};
-import std::membytes::{membytes, membytes_from_ptr};
+import std::abi_helpers::abi_buf_fits;
+import std::membytes::{membytes, membytes_new, unsafe_membytes_write_u256};
+import std::math::ceil32;
+
+const assert_fits = fn (comptime T: type, buf: membytes, offset: u256, expected: bool) void {
+    if abi_buf_fits(T, buf, offset) != expected {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+};
 
 init {
-    let size = @evm_calldatasize();
-    let ptr = @malloc_zeroed(size);
-    @evm_calldatacopy(ptr, 0, size);
-    let buf = membytes_from_ptr(ptr, size);
-    let result = abi_decode_try(membytes, buf);
+    let buf0 = membytes_new(0);
+    assert_fits(void, buf0, 0, true);
+    assert_fits(u256, buf0, 0, false);
+    assert_fits(bool, buf0, 0, false);
+
+    let buf31 = membytes_new(31);
+    assert_fits(u256, buf31, 0, false);
+    assert_fits(bool, buf31, 0, false);
+
+    let buf32 = membytes_new(32);
+    assert_fits(u256, buf32, 0, true);
+    assert_fits(bool, buf32, 0, true);
+    assert_fits(u256, buf32, 1, false);
+    assert_fits(bool, buf32, 1, false);
+
+    let buf33 = membytes_new(33);
+    assert_fits(u256, buf33, 1, true);
+    assert_fits(bool, buf33, 1, true);
+
+    let buf64 = membytes_new(64);
+    unsafe_membytes_write_u256(buf64, 0, 32);
+    assert_fits(membytes, buf64, 0, true);
+
+    unsafe_membytes_write_u256(buf64, 1, 32);
+    assert_fits(membytes, buf64, 1, false);
+
+    let buf65 = membytes_new(65);
+    unsafe_membytes_write_u256(buf65, 0, 33);
+    assert_fits(membytes, buf65, 0, false);
+
+    let buf96 = membytes_new(96);
+    unsafe_membytes_write_u256(buf96, 0, 33);
+    assert_fits(membytes, buf96, 0, true);
+
     let out_ptr = @malloc_zeroed(32);
-    @mstore32(out_ptr, if result.is_some { 1 } else { 0 });
+    @mstore32(out_ptr, 1);
     @evm_return(out_ptr, 32);
 }

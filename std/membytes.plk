@@ -26,9 +26,15 @@ const unsafe_membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256)
     32
 };
 
+// Writes `data` into `buf` at `offset`. No bounds check. Returns bytes written.
+const unsafe_membytes_write_bytes = fn (buf: membytes, offset: u256, data: membytes) u256 {
+    @mcopy(@evm_add(buf.ptr, offset), data.ptr, data.len);
+    data.len
+};
+
 // Writes a u256 at `offset`. Returns None if out of bounds.
 const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
-    if @evm_gt(@evm_add(offset, 32), buf.len) {
+    if offset + 32 > buf.len {
         return None(u256);
     }
     Some(u256, unsafe_membytes_write_u256(buf, offset, value))
@@ -39,9 +45,14 @@ const unsafe_membytes_read_u256 = fn (buf: membytes, offset: u256) u256 {
     @mload32(@evm_add(buf.ptr, offset))
 };
 
+// Creates a `membytes` pointing into `buf` at `offset` with the given `len`. No bounds check.
+const unsafe_membytes_slice = fn (buf: membytes, offset: u256, len: u256) membytes {
+    membytes_from_ptr(@evm_add(buf.ptr, offset), len)
+};
+
 // Reads a u256 from `offset`. Returns None if out of bounds.
 const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
-    if @evm_gt(@evm_add(offset, 32), buf.len) {
+    if offset + 32 > buf.len {
         return None(u256);
     }
     Some(u256, unsafe_membytes_read_u256(buf, offset))
@@ -66,10 +77,10 @@ const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256,
                 let written = unsafe_membytes_write(
                     @field_type(T, i),
                     buf,
-                    @evm_add(offset, bytes_written),
+                    offset + bytes_written,
                     @get_field(value, i)
                 );
-                @evm_add(bytes_written, written)
+                bytes_written + written
             },
             0
         )
@@ -81,7 +92,7 @@ const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256,
 
 // Writes a value of any type T at `offset`. Returns None if out of bounds.
 const membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) Option(u256) {
-    if @evm_gt(@evm_add(offset, sizeof(T)), buf.len) {
+    if offset + sizeof(T) > buf.len {
         return None(u256);
     }
     Some(u256, unsafe_membytes_write(T, buf, offset, value))

@@ -27,7 +27,7 @@ const abi_encoded_size = fn (comptime T: type, value: T) u256 {
     } else if T == bool {
         32
     } else if T == membytes {
-        @evm_add(32, ceil32(value.len))
+        32 + ceil32(value.len)
     } else if @is_struct(T) {
         // Start from the head size; non-dynamic fields are already accounted for.
         let initial = AbiSizeAccumulator(T) {
@@ -43,7 +43,7 @@ const abi_encoded_size = fn (comptime T: type, value: T) u256 {
                         @field_type(T, i),
                         @get_field(acc.encoded_value, i)
                     );
-                    @set_field(acc, 1, @evm_add(acc.total_size, field_size))
+                    @set_field(acc, 1, acc.total_size + field_size)
                 } else {
                     acc
                 }

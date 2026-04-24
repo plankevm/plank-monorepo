@@ -4,6 +4,10 @@ pragma solidity ^0.8.0;
 import {BaseTest} from "../BaseTest.sol";
 import {AbiNestedStruct} from "src/std/AbiNestedStruct.sol";
 
+struct Level0 { uint256 x; bytes data; }
+struct Level1 { Level0 inner; bool flag; }
+struct Level2 { Level1 inner; uint256 y; bytes suffix; }
+
 contract AbiNestedStructTest is BaseTest {
     AbiNestedStruct solRef = new AbiNestedStruct();
     address plankImpl = makeAddr("plank-implementation");
@@ -13,12 +17,25 @@ contract AbiNestedStructTest is BaseTest {
         vm.etch(plankImpl, plankCode);
     }
 
-    function test_fuzzing_abiNestedStruct(uint256 x, bool flag, uint256 b, bool c) public {
-        bytes memory dataIn = abi.encode(x, flag, b, c);
-        (bool refSucc, bytes memory refOut) = address(solRef).call(dataIn);
-        (bool plankSucc, bytes memory plankOut) = plankImpl.call(dataIn);
+    function _encode(Level2 memory val) internal pure returns (bytes memory) {
+        return abi.encode(val.inner, val.y, val.suffix);
+    }
 
-        assertEq(refSucc, plankSucc, "different success");
-        assertEq(refOut, plankOut, "different output data");
+    function test_fuzzing_abiNestedStruct(
+        uint256 x,
+        bytes calldata data,
+        bool flag,
+        uint256 y,
+        bytes calldata suffix
+    ) public {
+        Level2 memory val = Level2({
+            inner: Level1({
+                inner: Level0({ x: x, data: data }),
+                flag: flag
+            }),
+            y: y,
+            suffix: suffix
+        });
+        assertCallEq(address(solRef), plankImpl, _encode(val));
     }
 }

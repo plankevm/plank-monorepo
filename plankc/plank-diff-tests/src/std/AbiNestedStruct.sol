@@ -2,20 +2,15 @@
 pragma solidity =0.8.30;
 
 contract AbiNestedStruct {
-    // Mirrors: struct Inner { x: u256, flag: bool }; struct Outer { a: Inner, b: u256, c: bool };
-    // ABI layout (static): (uint256, bool, uint256, bool) = 4 × 32 bytes
     fallback() external payable {
+        uint256 len = msg.data.length;
+        bytes memory result = new bytes(32 + len);
         assembly ("memory-safe") {
-            let ax := calldataload(0x00)
-            let aflag := calldataload(0x20)
-            let b := calldataload(0x40)
-            let c := calldataload(0x60)
-            let out := mload(0x40)
-            mstore(out, ax)
-            mstore(add(out, 0x20), aflag)
-            mstore(add(out, 0x40), b)
-            mstore(add(out, 0x60), c)
-            return(out, 0x80)
+            mstore(add(result, 0x20), len)
+            calldatacopy(add(add(result, 0x20), 32), 0, len)
+        }
+        assembly ("memory-safe") {
+            return(add(result, 0x20), mload(result))
         }
     }
 }

@@ -14,7 +14,7 @@ const sizeof = fn (comptime T: type) u256 {
             u256,
             @field_count(T),
             fn (comptime i: u256, acc: u256) u256 {
-                @evm_add(acc, sizeof(@field_type(T, i)))
+                acc + sizeof(@field_type(T, i))
             },
             0
         )

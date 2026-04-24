@@ -19,6 +19,6 @@ const ceil32 = fn (x: u256) u256 {
     if @evm_eq(remainder, 0) {
         x
     } else {
-        @evm_add(x, @evm_sub(32, remainder))
+        x +% 32 -% remainder
     }
 };

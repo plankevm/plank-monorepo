@@ -3,14 +3,12 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../BaseTest.sol";
 import {AbiStressTest} from "src/std/AbiStressTest.sol";
-import {AbiBufFitsTest} from "src/std/AbiBufFitsTest.sol";
 
 struct Inner { uint256 x; bytes data; }
 struct Outer { uint256 a; bool b; Inner inner; bytes c; }
 
 contract AbiStressTestTest is BaseTest {
     AbiStressTest roundTripRef = new AbiStressTest();
-    AbiBufFitsTest bufFitsRef = new AbiBufFitsTest();
 
     address plankRoundTrip = makeAddr("plank-round-trip");
     address plankBufFits = makeAddr("plank-buf-fits");
@@ -27,23 +25,13 @@ contract AbiStressTestTest is BaseTest {
         return abi.encode(val.a, val.b, val.inner, val.c);
     }
 
-    // --- Buf fits tests ---
+    // --- Buf fits tests (all assertions are in the plank code) ---
 
-    function test_ceil32Bug_length33_buffer65() public {
-        bytes memory data = new bytes(65);
-        assembly ("memory-safe") {
-            mstore(add(data, 0x20), 33)
-        }
-        assertCallEq(address(bufFitsRef), plankBufFits, data);
-    }
-
-    function test_fuzzing_bufFits(uint256 len) public {
-        uint256 size = 32 + (len % 128) + 1;
-        bytes memory data = new bytes(size);
-        assembly ("memory-safe") {
-            mstore(add(data, 0x20), len)
-        }
-        assertCallEq(address(bufFitsRef), plankBufFits, data);
+    function test_bufFits_allTypes() public {
+        (bool succ, bytes memory ret) = plankBufFits.call("");
+        assertTrue(succ, "buf fits assertions failed");
+        assertEq(ret.length, 32);
+        assertEq(abi.decode(ret, (uint256)), 1);
     }
 
     // --- Round-trip encode/decode tests ---

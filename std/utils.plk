@@ -12,6 +12,6 @@ const fold_from = fn (comptime Accumulator: type, comptime n: u256, comptime i: 
     if @evm_eq(i, n) {
         acc
     } else {
-        fold_from(Accumulator, n, @evm_add(i, 1), f, f(i, acc))
+        fold_from(Accumulator, n, i + 1, f, f(i, acc))
     }
 };

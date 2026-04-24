@@ -1,4 +1,4 @@
-import std::membytes::{membytes, membytes_from_ptr, unsafe_membytes_write_u256, unsafe_membytes_read_u256};
+import std::membytes::{membytes, membytes_from_ptr, unsafe_membytes_write_u256, unsafe_membytes_write_bytes, unsafe_membytes_read_u256, unsafe_membytes_slice};
 import std::math::ceil32;
 import std::utils::fold;
 
@@ -45,9 +45,9 @@ const abi_head_size = fn (comptime T: type) u256 {
             @field_count(T),
             fn (comptime i: u256, total_head_size: u256) u256 {
                 if is_abi_dynamic(@field_type(T, i)) {
-                    @evm_add(total_head_size, 32)
+                    total_head_size + 32
                 } else {
-                    @evm_add(total_head_size, abi_head_size(@field_type(T, i)))
+                    total_head_size + abi_head_size(@field_type(T, i))
                 }
             },
             0
@@ -78,6 +78,9 @@ const AbiEncodeAccumulator = fn (comptime T: type) type {
     }
 };
 
+// ABI-encodes `value` of type `T` into `buf` starting at `offset`.
+// Returns the number of bytes written.
+// Caller must ensure `buf` is large enough for the full encoding (use `abi_encoded_size`).
 const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
     if T == void {
         0
@@ -89,16 +92,16 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, 
         32
     } else if T == membytes {
         unsafe_membytes_write_u256(buf, offset, value.len);
-        @mcopy(@evm_add(buf.ptr, @evm_add(offset, 32)), value.ptr, value.len);
+        unsafe_membytes_write_bytes(buf, offset + 32, value);
         // padding after value.len is left uninitialized; consumers only read len bytes
-        @evm_add(32, ceil32(value.len))
+        32 + ceil32(value.len)
     } else if @is_struct(T) {
         let initial = AbiEncodeAccumulator(T) {
             buf: buf,
             base_offset: offset,
             encoded_value: value,
             head_offset: offset,
-            tail_offset: @evm_add(offset, abi_head_size(T))
+            tail_offset: offset + abi_head_size(T)
         };
         let result = fold(
             AbiEncodeAccumulator(T),
@@ -108,7 +111,7 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, 
                     unsafe_membytes_write_u256(
                         acc.buf,
                         acc.head_offset,
-                        @evm_sub(acc.tail_offset, acc.base_offset)
+                        acc.tail_offset - acc.base_offset
                     );
                     let written = unsafe_abi_encode_to(
                         @field_type(T, i),
@@ -117,8 +120,8 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, 
                         @get_field(acc.encoded_value, i)
                     );
                     let mut next = acc;
-                    next = @set_field(next, 3, @evm_add(acc.head_offset, 32));
-                    next = @set_field(next, 4, @evm_add(acc.tail_offset, written));
+                    next = @set_field(next, 3, acc.head_offset + 32);
+                    next = @set_field(next, 4, acc.tail_offset + written);
                     next
                 } else {
                     let written = unsafe_abi_encode_to(
@@ -128,13 +131,13 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: membytes, offset: u256, 
                         @get_field(acc.encoded_value, i)
                     );
                     let mut next = acc;
-                    next = @set_field(next, 3, @evm_add(acc.head_offset, written));
+                    next = @set_field(next, 3, acc.head_offset + written);
                     next
                 }
             },
             initial
         );
-        @evm_sub(result.tail_offset, offset)
+        result.tail_offset - offset
     } else {
         let _sizeof_unsupported_type: u256 = true;
         0
@@ -159,16 +162,18 @@ const AbiDecodeAccumulator = fn (comptime T: type) type {
     }
 };
 
+// ABI-decodes a value of type `T` from `buf` starting at `offset`.
+// Caller must ensure `buf` contains valid ABI-encoded data for type `T`.
 const unsafe_abi_decode_from = fn (comptime T: type, buf: membytes, offset: u256) T {
     if T == void {
         {}
     } else if T == u256 {
         unsafe_membytes_read_u256(buf, offset)
     } else if T == bool {
-        !@evm_iszero(unsafe_membytes_read_u256(buf, offset))
+        unsafe_membytes_read_u256(buf, offset) != 0
     } else if T == membytes {
         let len = unsafe_membytes_read_u256(buf, offset);
-        membytes_from_ptr(@evm_add(buf.ptr, @evm_add(offset, 32)), len)
+        unsafe_membytes_slice(buf, offset + 32, len)
     } else if @is_struct(T) {
         let initial = AbiDecodeAccumulator(T) {
             buf: buf,
@@ -181,17 +186,14 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: membytes, offset: u256
             @field_count(T),
             fn (comptime i: u256, acc: AbiDecodeAccumulator(T)) AbiDecodeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
-                    let read_at = @evm_add(
-                        acc.base_offset,
-                        unsafe_membytes_read_u256(acc.buf, acc.head_offset)
-                    );
+                    let tail_offset = acc.base_offset + unsafe_membytes_read_u256(acc.buf, acc.head_offset);
                     let decoded = unsafe_abi_decode_from(
                         @field_type(T, i),
                         acc.buf,
-                        read_at
+                        tail_offset
                     );
                     let mut next = acc;
-                    next = @set_field(next, 2, @evm_add(acc.head_offset, 32));
+                    next = @set_field(next, 2, acc.head_offset + 32);
                     next = @set_field(next, 3, @set_field(acc.decoded_value, i, decoded));
                     next
                 } else {
@@ -201,7 +203,7 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: membytes, offset: u256
                         acc.head_offset
                     );
                     let mut next = acc;
-                    next = @set_field(next, 2, @evm_add(acc.head_offset, abi_head_size(@field_type(T, i))));
+                    next = @set_field(next, 2, acc.head_offset + abi_head_size(@field_type(T, i)));
                     next = @set_field(next, 3, @set_field(acc.decoded_value, i, decoded));
                     next
                 }
@@ -231,21 +233,22 @@ const AbiBufFitsAccumulator = struct {
     fits: bool
 };
 
+// Checks whether `buf` starting at `offset` is large enough to hold a valid ABI encoding of type `T`.
 const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
     if T == void {
         true
     } else if T == u256 {
-        !@evm_gt(@evm_add(offset, 32), buf.len)
+        buf.len >= offset + 32
     } else if T == bool {
-        !@evm_gt(@evm_add(offset, 32), buf.len)
+        buf.len >= offset + 32
     } else if T == membytes {
-        if @evm_gt(@evm_add(offset, 32), buf.len) {
+        if offset + 32 > buf.len {
             return false;
         }
         let len = unsafe_membytes_read_u256(buf, offset);
-        !@evm_gt(@evm_add(@evm_add(offset, 32), ceil32(len)), buf.len)
+        buf.len >= offset + 32 + ceil32(len)
     } else if @is_struct(T) {
-        if @evm_gt(@evm_add(offset, abi_head_size(T)), buf.len) {
+        if offset + abi_head_size(T) > buf.len {
             return false;
         } 
         let initial = AbiBufFitsAccumulator {
@@ -262,18 +265,15 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
                     return acc;
                 }
                 if is_abi_dynamic(@field_type(T, i)) {
-                    let dynamic_data_offset = @evm_add(
-                        acc.base_offset,
-                        unsafe_membytes_read_u256(acc.buf, acc.head_offset)
-                    );
-                    let fits = abi_buf_fits(@field_type(T, i), acc.buf, dynamic_data_offset);
+                    let tail_offset = acc.base_offset + unsafe_membytes_read_u256(acc.buf, acc.head_offset);
+                    let fits = abi_buf_fits(@field_type(T, i), acc.buf, tail_offset);
                     let mut next = acc;
-                    next = @set_field(next, 2, @evm_add(acc.head_offset, 32));
+                    next = @set_field(next, 2, acc.head_offset + 32);
                     next = @set_field(next, 3, fits);
                     next
                 } else {
                     let mut next = acc;
-                    next = @set_field(next, 2, @evm_add(acc.head_offset, abi_head_size(@field_type(T, i))));
+                    next = @set_field(next, 2, acc.head_offset + abi_head_size(@field_type(T, i)));
                     next
                 }
             },

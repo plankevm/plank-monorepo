@@ -22,11 +22,11 @@ const sstore_bytes = fn (slot: u256, data: membytes) void {
     @evm_sstore(slot, data.len);
     let base_slot = slot_hash(slot);
     let mut i = 0;
-    while @evm_lt(@evm_mul(i, 32), data.len) {
-        let chunk_slot = @evm_add(base_slot, i);
-        let chunk = @mload32(@evm_add(data.ptr, @evm_mul(32, i)));
+    while i * 32 < data.len {
+        let chunk_slot = base_slot + i;
+        let chunk = @mload32(@evm_add(data.ptr, 32 * i));
         @evm_sstore(chunk_slot, chunk);
-        i = @evm_add(i, 1);
+        i = i + 1;
     }
 };
 
@@ -37,11 +37,11 @@ const sload_bytes = fn (slot: u256) membytes {
     let data = membytes_new(length);
     let base_slot = slot_hash(slot);
     let mut i = 0;
-    while @evm_lt(@evm_mul(i, 32), length) {
-        let chunk_slot = @evm_add(base_slot, i);
+    while i * 32 < length {
+        let chunk_slot = base_slot + i;
         let chunk = @evm_sload(chunk_slot);
-        @mstore32(@evm_add(data.ptr, @evm_mul(32, i)), chunk);
-        i = @evm_add(i, 1);
+        @mstore32(@evm_add(data.ptr, 32 * i), chunk);
+        i = i + 1;
     }
     data
 };
