@@ -1,0 +1,32 @@
+fn init:
+    init_entry {
+        c0 = const 0
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = malloc runtime_len
+        codecopy buf runtime_off runtime_len
+        return buf runtime_len
+    }
+
+fn main:
+    entry {
+        c0 = const 0
+        c32 = const 32
+        c64 = const 64
+
+        value1 = calldataload c0
+        value2 = calldataload c32
+
+        ptr1 = malloc c64
+        ptr1_plus_32 = add ptr1 c32
+        mstore256 ptr1 value1
+        mstore256 ptr1_plus_32 c0
+
+        ptr2 = malloc c32
+        mstore256 ptr2 value2
+
+        result = mload256 ptr1
+        buf = sallocany 32
+        mstore256 buf result
+        return buf c32
+    }

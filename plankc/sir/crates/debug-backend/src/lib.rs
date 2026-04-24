@@ -209,6 +209,7 @@ pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) {
     translator.translated_bbs.clear();
     translator.translating_init_code = false;
     translator.asm.push_mark(translator.mark_map.runtime_start);
+    translator.memory_layout.emit_init_free_pointer(&mut translator.asm);
     if let Some(main_entry) = ir.main_entry {
         translator.translate_basic_blocks_from_entry_point(main_entry);
     }

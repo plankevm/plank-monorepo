@@ -2,37 +2,41 @@ use crate::{AsmReference, AsmSection, Assembler, MarkReference, op};
 use std::fmt::Write;
 
 impl Assembler {
-    pub fn display_asm(&self) -> String {
-        let mut output = String::new();
-
+    pub fn write_asm(&self, f: &mut impl Write) -> std::fmt::Result {
         for section in self.iter_sections() {
             match section {
                 AsmSection::Mark(id) => {
-                    writeln!(&mut output, ".mark{id}:").unwrap();
+                    writeln!(f, ".mark{id}:")?;
                 }
                 AsmSection::Data(span) => {
                     let data = &self.bytes[span.start..span.end];
-                    write!(&mut output, "  data 0x").unwrap();
+                    write!(f, "  data 0x").unwrap();
                     for &byte in data {
-                        write!(&mut output, "{byte:02x}").unwrap();
+                        write!(f, "{byte:02x}").unwrap();
                     }
-                    writeln!(&mut output, " ({} bytes)", data.len()).unwrap();
+                    writeln!(f, " ({} bytes)", data.len()).unwrap();
                 }
                 AsmSection::Ops(span) => {
                     let ops = &self.bytes[span.start..span.end];
-                    fmt_ops(&mut output, ops);
+                    fmt_ops(f, ops);
                 }
                 AsmSection::MarkRef(asm_ref) => {
-                    fmt_mark_ref(&mut output, asm_ref);
+                    fmt_mark_ref(f, asm_ref);
                 }
             }
         }
 
-        output
+        Ok(())
     }
 }
 
-fn fmt_mark_ref(output: &mut String, asm_ref: AsmReference) {
+impl std::fmt::Display for Assembler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.write_asm(f)
+    }
+}
+
+fn fmt_mark_ref(f: &mut impl Write, asm_ref: AsmReference) {
     let ref_str = match asm_ref.mark_ref {
         MarkReference::Direct(id) => format!(".mark{id}"),
         MarkReference::Delta(span) => {
@@ -41,13 +45,13 @@ fn fmt_mark_ref(output: &mut String, asm_ref: AsmReference) {
     };
     let size_str = asm_ref.set_size.map(|s| format!(":{}", s as u8)).unwrap_or_default();
     if asm_ref.pushed {
-        writeln!(output, "  PUSH {ref_str}{size_str}").unwrap();
+        writeln!(f, "  PUSH {ref_str}{size_str}").unwrap();
     } else {
-        writeln!(output, "  RAW {ref_str}{size_str}").unwrap();
+        writeln!(f, "  RAW {ref_str}{size_str}").unwrap();
     }
 }
 
-fn fmt_ops(output: &mut String, ops: &[u8]) {
+fn fmt_ops(output: &mut impl Write, ops: &[u8]) {
     let mut i = 0;
     while i < ops.len() {
         let opcode = ops[i];
