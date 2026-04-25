@@ -1,332 +1,349 @@
-use crate::{
-    AnalysesStore, Pass, analyses::DominanceFrontiers, run_pass, transforms::CriticalEdgeSplitting,
+use crate::{AnalysesStore, Predecessors, run_pass, transforms::CriticalEdgeSplitting};
+use hashbrown::{HashMap, HashSet};
+use plank_core::{Idx, IncIterable};
+use sir_data::{
+    BasicBlock, BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Span, index_vec,
 };
-use hashbrown::HashSet;
-use plank_core::IncIterable;
-use sir_data::{BasicBlockId, Control, EthIRProgram, Idx, IndexVec, LocalId, Span, index_vec};
+use smallvec::SmallVec;
 
-#[derive(Default)]
-pub struct SsaTransform {
-    def_sites: IndexVec<LocalId, HashSet<BasicBlockId>>,
-    dominators: IndexVec<BasicBlockId, Vec<BasicBlockId>>,
-    phi_locations: IndexVec<BasicBlockId, Vec<LocalId>>,
-    worklist: Vec<BasicBlockId>,
-}
+type Defs = IndexVec<BasicBlockId, HashMap<LocalId, LocalId>>;
 
-impl Pass for SsaTransform {
-    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
-        // CriticalEdgeSplitting is stateless, no benefit from reuse
-        run_pass(&mut CriticalEdgeSplitting, program, store);
+pub fn run(program: &mut EthIRProgram, store: &AnalysesStore) {
+    // CriticalEdgeSplitting is stateless, no benefit from reuse
+    run_pass(&mut CriticalEdgeSplitting, program, store);
 
-        debug_assert!(self.worklist.is_empty());
-        for parent in self.dominators.iter_mut() {
-            parent.clear();
-        }
-        self.dominators.resize(program.basic_blocks.len(), Vec::new());
+    println!("{program}");
 
-        let dominators_child_to_parent = store.dominators(program);
-        for bb in program.basic_blocks.iter_idx() {
-            if let Some(parent) = dominators_child_to_parent.of(bb)
-                && parent != bb
-            {
-                self.dominators[parent].push(bb);
-            }
-        }
+    let predecessors = store.predecessors(program);
+    let reachability = store.reachability(program);
 
-        self.collect_definition_sites(program);
-
-        self.phi_locations.clear();
-        self.phi_locations.resize(program.basic_blocks.len(), Vec::new());
-        self.compute_phi_locations(&store.dominance_frontiers(program));
-
-        self.rename(program);
+    let mut unfilled_until_sealed = HashMap::new();
+    for bb in program.basic_blocks.iter_idx() {
+        let pred_count = predecessors.of(bb).len() as u32;
+        unsafe { unfilled_until_sealed.insert_unique_unchecked(bb, pred_count) };
     }
-}
 
-impl SsaTransform {
-    fn collect_definition_sites(&mut self, program: &EthIRProgram) {
-        self.def_sites.clear();
-        self.def_sites.resize(program.next_free_local_id.idx(), HashSet::new());
-        for block in program.blocks() {
-            for &local in block.inputs() {
-                self.def_sites[local].insert(block.id());
+    let mut t = SSATransformer {
+        outputs: index_vec![Vec::new(); program.basic_blocks.len()],
+        inputs: index_vec![Vec::new(); program.basic_blocks.len()],
+        defs: index_vec![HashMap::new(); program.basic_blocks.len()],
+        predecessors: &predecessors,
+        program,
+        filled: HashSet::new(),
+        unfilled_until_sealed,
+    };
+
+    let mut tmp_locals = SmallVec::<[LocalId; 32]>::new();
+
+    // Use RPO so that only loop back edges require incomplete phis.
+    for &bb in store.reverse_post_order(t.program).order() {
+        println!("filling @{}", bb.get());
+
+        for block_input in &mut t.program.locals[t.program.basic_blocks[bb].inputs] {
+            let new_out = t.program.next_free_local_id.get_and_inc();
+            let original = std::mem::replace(block_input, new_out);
+            t.defs[bb].insert(original, new_out);
+        }
+
+        for op_idx in t.program.basic_blocks[bb].operations.iter() {
+            let mut op = t.program.operations[op_idx];
+
+            // Use temporary buffer to circumvent borrow checker.
+            tmp_locals.clear();
+            tmp_locals.extend_from_slice(op.inputs(t.program));
+            for input in &mut tmp_locals {
+                *input = t.read_variable(bb, *input);
             }
-            for op in block.operations() {
-                for &local in op.outputs() {
-                    self.def_sites[local].insert(block.id());
+            op.inputs_mut(&mut t.program.locals).copy_from_slice(&tmp_locals);
+
+            for output in op.outputs_mut(&mut t.program.locals, &t.program.functions) {
+                let new_out = t.program.next_free_local_id.get_and_inc();
+                let original = std::mem::replace(output, new_out);
+                t.defs[bb].insert(original, new_out);
+            }
+
+            t.program.operations[op_idx] = op;
+        }
+
+        tmp_locals.clear();
+        tmp_locals.extend_from_slice(&t.program.locals[t.program.basic_blocks[bb].outputs]);
+        for block_output in &mut tmp_locals {
+            *block_output = t.read_variable(bb, *block_output);
+        }
+        t.program.locals[t.program.basic_blocks[bb].outputs].copy_from_slice(&tmp_locals);
+
+        match &mut t.program.basic_blocks[bb].control {
+            Control::LastOpTerminates | Control::InternalReturn | Control::ContinuesTo(_) => {}
+            Control::Branches(branches) => branches.condition = t.defs[bb][&branches.condition],
+            Control::Switch(switch) => switch.condition = t.defs[bb][&switch.condition],
+        }
+
+        t.filled.insert(bb);
+        for succ in t.program.block(bb).successors() {
+            let unfilled = t.unfilled_until_sealed.get_mut(&succ).unwrap();
+            *unfilled -= 1;
+        }
+        for oi in 0..t.outputs[bb].len() {
+            match t.outputs[bb][oi] {
+                PhiParam::Output(_) => {}
+                PhiParam::Missing(missing) => {
+                    t.outputs[bb][oi] = PhiParam::Output(t.read_variable(bb, missing));
                 }
             }
         }
     }
 
-    fn compute_phi_locations(&mut self, dominance_frontiers: &DominanceFrontiers) {
-        for (local, def_blocks) in self.def_sites.enumerate_idx() {
-            if def_blocks.len() <= 1 {
-                continue;
-            }
-            for bb in def_blocks {
-                self.worklist.push(*bb);
-            }
-            while let Some(bb) = self.worklist.pop() {
-                for &frontier_block in dominance_frontiers.of(bb) {
-                    if !self.phi_locations[frontier_block].contains(&local) {
-                        self.phi_locations[frontier_block].push(local);
-                        self.worklist.push(frontier_block);
-                    }
-                }
-            }
+    for bb in t.program.basic_blocks.iter_idx() {
+        if !reachability.contains(bb) {
+            continue;
         }
-    }
+        let BasicBlock { inputs, outputs, .. } = t.program.basic_blocks[bb];
+        let inputs_start = t.program.locals.len_idx();
+        t.program.locals.extend_from_within(inputs.usize_range());
+        t.program.locals.extend_from_slice(&t.inputs[bb]);
+        t.program.basic_blocks[bb].inputs = Span::new(inputs_start, t.program.locals.len_idx());
 
-    fn rename(&self, program: &mut EthIRProgram) {
-        let num_locals = program.next_free_local_id.idx();
-        let mut local_versions = index_vec![Vec::new(); num_locals];
-        let mut rename_trail = Vec::new();
-        for func_id in program.functions.iter_idx() {
-            self.rename_block(
-                program,
-                program.functions[func_id].entry(),
-                &mut local_versions,
-                &mut rename_trail,
-            );
-        }
-    }
-
-    fn rename_block(
-        &self,
-        program: &mut EthIRProgram,
-        bb: BasicBlockId,
-        local_versions: &mut IndexVec<LocalId, Vec<LocalId>>,
-        rename_trail: &mut Vec<LocalId>,
-    ) {
-        let checkpoint = rename_trail.len();
-
-        self.rename_block_inputs(program, bb, local_versions, rename_trail);
-
-        rename_operations(program, bb, local_versions, rename_trail);
-
-        match &mut program.basic_blocks[bb].control {
-            Control::Branches(branch) => {
-                branch.condition = rename_use(local_versions, branch.condition);
-            }
-            Control::Switch(switch) => {
-                switch.condition = rename_use(local_versions, switch.condition);
-            }
-            _ => {}
-        }
-
-        self.rename_block_outputs(program, bb, local_versions);
-
-        for child in &self.dominators[bb] {
-            self.rename_block(program, *child, local_versions, rename_trail);
-        }
-
-        for local in &rename_trail[checkpoint..] {
-            local_versions[*local].pop();
-        }
-        rename_trail.truncate(checkpoint);
-    }
-
-    fn rename_block_inputs(
-        &self,
-        program: &mut EthIRProgram,
-        bb: BasicBlockId,
-        local_versions: &mut IndexVec<LocalId, Vec<LocalId>>,
-        rename_trail: &mut Vec<LocalId>,
-    ) {
-        let old_inputs_span = program.basic_blocks[bb].inputs;
-        let new_inputs_start = program.locals.next_idx();
-        for idx in old_inputs_span.iter() {
-            let local = program.locals[idx];
-            let renamed =
-                rename_def(local_versions, rename_trail, &mut program.next_free_local_id, local);
-            program.locals.push(renamed);
-        }
-        for local in &self.phi_locations[bb] {
-            let renamed =
-                rename_def(local_versions, rename_trail, &mut program.next_free_local_id, *local);
-            program.locals.push(renamed);
-        }
-        program.basic_blocks[bb].inputs = Span::new(new_inputs_start, program.locals.next_idx());
-    }
-
-    fn rename_block_outputs(
-        &self,
-        program: &mut EthIRProgram,
-        bb: BasicBlockId,
-        local_versions: &IndexVec<LocalId, Vec<LocalId>>,
-    ) {
-        let old_outputs_span = program.basic_blocks[bb].outputs;
-        let new_outputs_start = program.locals.next_idx();
-        for idx in old_outputs_span.iter() {
-            program.locals.push(rename_use(local_versions, program.locals[idx]));
-        }
-        // After critical edge splitting, only single-successor blocks (ContinuesTo) can
-        // target a join block with phis. This lets us avoid collecting successors into a Vec.
-        if let Control::ContinuesTo(succ) = program.basic_blocks[bb].control {
-            for local in &self.phi_locations[succ] {
-                program.locals.push(rename_use(local_versions, *local));
-            }
-        }
-        program.basic_blocks[bb].outputs = Span::new(new_outputs_start, program.locals.next_idx());
+        let outputs_start = t.program.locals.len_idx();
+        t.program.locals.extend_from_within(outputs.usize_range());
+        t.program.locals.extend(t.outputs[bb].iter().map(|out| match out {
+            PhiParam::Output(out) => out,
+            PhiParam::Missing(_) => unreachable!("unresolved missing param (@{})", bb.get()),
+        }));
+        t.program.basic_blocks[bb].outputs = Span::new(outputs_start, t.program.locals.len_idx());
     }
 }
 
-fn rename_operations(
-    program: &mut EthIRProgram,
-    bb: BasicBlockId,
-    local_versions: &mut IndexVec<LocalId, Vec<LocalId>>,
-    rename_trail: &mut Vec<LocalId>,
-) {
-    for op_idx in program.basic_blocks[bb].operations.iter() {
-        let mut op = program.operations[op_idx];
+#[derive(Debug, Clone, Copy)]
+enum PhiParam {
+    Missing(LocalId),
+    Output(LocalId),
+}
 
-        for input in op.inputs_mut(&mut program.locals) {
-            *input = rename_use(local_versions, *input);
+struct SSATransformer<'a> {
+    predecessors: &'a Predecessors,
+    program: &'a mut EthIRProgram,
+    unfilled_until_sealed: HashMap<BasicBlockId, u32>,
+    filled: HashSet<BasicBlockId>,
+    outputs: IndexVec<BasicBlockId, Vec<PhiParam>>,
+    inputs: IndexVec<BasicBlockId, Vec<LocalId>>,
+    defs: Defs,
+}
+
+impl SSATransformer<'_> {
+    fn sealed(&self, bb: BasicBlockId) -> bool {
+        match self.unfilled_until_sealed.get(&bb) {
+            Some(&count) => count == 0,
+            None => false,
         }
-
-        for output in op.outputs_mut(&mut program.locals, &program.functions) {
-            *output =
-                rename_def(local_versions, rename_trail, &mut program.next_free_local_id, *output);
-        }
-
-        program.operations[op_idx] = op;
     }
-}
 
-#[track_caller]
-fn rename_use(local_versions: &IndexVec<LocalId, Vec<LocalId>>, local: LocalId) -> LocalId {
-    *local_versions[local].last().expect("local not in scope")
-}
+    fn filled(&self, bb: BasicBlockId) -> bool {
+        self.filled.contains(&bb)
+    }
 
-fn rename_def(
-    local_versions: &mut IndexVec<LocalId, Vec<LocalId>>,
-    rename_trail: &mut Vec<LocalId>,
-    next_local: &mut LocalId,
-    local: LocalId,
-) -> LocalId {
-    let new_version = next_local.get_and_inc();
-    local_versions[local].push(new_version);
-    rename_trail.push(local);
-    new_version
+    fn read_variable(&mut self, bb: BasicBlockId, local: LocalId) -> LocalId {
+        if let Some(&local) = self.defs[bb].get(&local) {
+            return local;
+        }
+
+        if !self.sealed(bb) {
+            let new_out = self.program.next_free_local_id.get_and_inc();
+            self.defs[bb].insert(local, new_out);
+
+            self.inputs[bb].push(new_out);
+            for &pred in self.predecessors.of(bb) {
+                let phi_param = if self.filled(pred) {
+                    PhiParam::Output(self.read_variable(pred, local))
+                } else {
+                    PhiParam::Missing(local)
+                };
+                self.outputs[pred].push(phi_param);
+            }
+            return new_out;
+        }
+
+        if let &[single_pred] = self.predecessors.of(bb) {
+            return self.read_variable(single_pred, local);
+        }
+
+        let new_out = self.program.next_free_local_id.get_and_inc();
+        self.defs[bb].insert(local, new_out);
+
+        self.inputs[bb].push(new_out);
+        for &pred in self.predecessors.of(bb) {
+            let path_input = self.read_variable(pred, local);
+            self.outputs[pred].push(PhiParam::Output(path_input));
+        }
+
+        new_out
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{run as ssa_transform, *};
     use crate::Legalizer;
     use plank_test_utils::dedent_preserve_indent;
-    use sir_data::display_program;
     use sir_parser::EmitConfig;
 
-    fn parse_without_ssa(source: &str) -> EthIRProgram {
+    fn assert_transforms_to(input: &str, expected_out: &str) {
         let mut config = EmitConfig::init_only();
         config.allow_duplicate_locals = true;
-        sir_parser::parse_without_legalization(source, config)
-    }
+        let mut program = sir_parser::parse_without_legalization(input, config);
+        let store = AnalysesStore::default();
+        ssa_transform(&mut program, &store);
+        Legalizer::default()
+            .run(&mut program, &store)
+            .unwrap_or_else(|e| panic!("Legalize failed:\n{e}\n{program}"));
 
-    fn transform_and_legalize(program: &mut EthIRProgram, store: &AnalysesStore) {
-        run_pass(&mut SsaTransform::default(), program, store);
-        let ir = display_program(program);
-        Legalizer::default().run(program, store).unwrap_or_else(|e| panic!("{e}\n{ir}"));
-    }
-
-    #[test]
-    fn test_diamond_phi_placement() {
-        //       A
-        //      / \
-        //     B   C
-        //      \ /
-        //       D
-        //
-        // v defined in B and C.
-        let mut program = parse_without_ssa(
-            r#"
-            fn init:
-                a {
-                    cond = const 1
-                    => cond ? @b : @c
-                }
-                b -> v {
-                    v = const 2
-                    => @d
-                }
-                c -> v {
-                    v = const 3
-                    => @d
-                }
-                d v {
-                    stop
-                }
-            "#,
+        pretty_assertions::assert_str_eq!(
+            dedent_preserve_indent(&format!("{program}")),
+            dedent_preserve_indent(expected_out)
         );
-
-        let d = BasicBlockId::new(3);
-        let original_v = program.block(d).inputs()[0];
-
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-        let post_ir = display_program(&program);
-
-        let d_inputs = program.block(d).inputs();
-        assert_eq!(d_inputs.len(), 2, "D should have original input + phi\n{post_ir}");
-        for &input in d_inputs {
-            assert_ne!(input, original_v, "phi input should be renamed\n{post_ir}");
-        }
-        assert_ne!(d_inputs[0], d_inputs[1], "phi inputs should be distinct\n{post_ir}");
     }
 
     #[test]
-    fn test_partial_redef_phi() {
-        //     A
-        //    / \
-        //   B   C
-        //    \ /
-        //     D
-        //
-        // v defined in A and B, but not C.
-        let mut program = parse_without_ssa(
-            r#"
-            fn init:
-                a -> v {
-                    v = const 1
-                    cond = const 0
-                    => cond ? @b : @c
-                }
-                b v -> v {
-                    v = const 2
-                    => @d
-                }
-                c v -> v {
-                    => @d
-                }
-                d v {
-                    stop
-                }
-            "#,
-        );
-
-        let d = BasicBlockId::new(3);
-        let original_v = program.block(d).inputs()[0];
-
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-        let post_ir = display_program(&program);
-
-        let d_inputs = program.block(d).inputs();
-        assert_eq!(d_inputs.len(), 2, "D should have original input + phi\n{post_ir}");
-        for &input in d_inputs {
-            assert_ne!(input, original_v, "phi input should be renamed\n{post_ir}");
-        }
-        assert_ne!(d_inputs[0], d_inputs[1], "phi inputs should be distinct\n{post_ir}");
-    }
-
-    #[test]
-    fn test_simple_merge() {
-        let mut program = parse_without_ssa(
+    fn test_unreachable() {
+        assert_transforms_to(
             r#"
             fn init:
                 @0 {
                     $0 = const 0x0
                     => $0 ? @1 : @4
+                }
+
+                @1 {
+                    $0 = const 0x1
+                    => @3
+                }
+
+                @2 {
+                    $0 = const 0x2
+                    => @3
+                }
+
+                @3 {
+                    $2 = copy $0
+                    => @4
+                }
+
+                @4 {
+                    $1 = copy $0
+                    stop
+                }
+            "#,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $3 = const 0x0
+                    => $3 ? @1 : @5
+                }
+                @1 -> $4 {
+                    $4 = const 0x1
+                    => @3
+                }
+                @2 {
+                    $0 = const 0x2
+                    => @3
+                }
+                @3 $5 -> $5 {
+                    $6 = copy $5
+                    => @4
+                }
+                @4 $7 {
+                    $8 = copy $7
+                    stop
+                }
+                @5 -> $3 {
+                    => @4
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_branched_set() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                @0 {
+                    $0 = const 0x0
+                    => $0 ? @1 : @5
+                }
+
+                @1 {
+                    $21 = const 0x0
+                    => $21 ? @2 : @3
+                }
+
+                @2 {
+                    $0 = const 0x1
+                    => @4
+                }
+
+                @3 {
+                    $0 = const 0x2
+                    => @4
+                }
+
+                @4 {
+                    $2 = copy $0
+                    => @5
+                }
+
+                @5 {
+                    $1 = copy $0
+                    stop
+                }
+
+            "#,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $4 = const 0x0
+                    => $4 ? @1 : @6
+                }
+                @1 {
+                    $5 = const 0x0
+                    => $5 ? @2 : @3
+                }
+                @2 -> $6 {
+                    $6 = const 0x1
+                    => @4
+                }
+                @3 -> $7 {
+                    $7 = const 0x2
+                    => @4
+                }
+                @4 $8 -> $8 {
+                    $9 = copy $8
+                    => @5
+                }
+                @5 $10 {
+                    $11 = copy $10
+                    stop
+                }
+                @6 -> $4 {
+                    => @5
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_simple_merge() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                @0 {
+                    $0 = const 0x0
+                    => $0 ? @1 : @5
                 }
 
                 @1 {
@@ -345,173 +362,264 @@ mod tests {
                 }
 
                 @4 {
+                    $3 = copy $2
+                    => @5
+                }
+
+                @5 {
                     stop
                 }
             "#,
-        );
-
-        println!("{program}");
-
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-
-        pretty_assertions::assert_str_eq!(
-            dedent_preserve_indent(&format!("{program}")),
-            dedent_preserve_indent(
-                r#"
-
-            "#
-            )
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $4 = const 0x0
+                    => $4 ? @1 : @6
+                }
+                @1 {
+                    $5 = const 0x0
+                    => $5 ? @2 : @3
+                }
+                @2 -> $6 {
+                    $6 = const 0x1
+                    => @4
+                }
+                @3 -> $7 {
+                    $7 = const 0x2
+                    => @4
+                }
+                @4 $8 {
+                    $9 = copy $8
+                    => @5
+                }
+                @5 {
+                    stop
+                }
+                @6 {
+                    => @5
+                }
+            "#,
         );
     }
 
     #[test]
     fn test_loop_phi() {
-        //   A
-        //   |
-        //   B <--+
-        //  / \   |
-        // D   C--+
-        //
-        // v defined in A and C.
-        let mut program = parse_without_ssa(
+        assert_transforms_to(
             r#"
             fn init:
-                a -> v {
-                    v = const 0
-                    => @b
+                @0 {
+                    $0 = const 0x0
+                    => @1
                 }
-                b v -> v {
-                    cond = const 1
-                    => cond ? @c : @d
+
+                @1 {
+                    $1 = const 0x1
+                    => $1 ? @2 : @3
                 }
-                c v -> v {
-                    one = const 1
-                    v = add v one
-                    => @b
+
+                @2 {
+                    $2 = const 0x1
+                    $0 = add $0 $2
+                    => @1
                 }
-                d v {
+
+                @3 {
+                    stop
+                }
+            "#,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 -> $3 {
+                    $3 = const 0x0
+                    => @1
+                }
+                @1 $6 {
+                    $4 = const 0x1
+                    => $4 ? @2 : @3
+                }
+                @2 -> $7 {
+                    $5 = const 0x1
+                    $7 = add $6 $5
+                    => @1
+                }
+                @3 {
                     stop
                 }
             "#,
         );
-
-        let b = BasicBlockId::new(1);
-        let original_v = program.block(b).inputs()[0];
-
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-        let post_ir = display_program(&program);
-
-        let b_inputs = program.block(b).inputs();
-        assert_eq!(b_inputs.len(), 2, "B should have original input + phi\n{post_ir}");
-        for &input in b_inputs {
-            assert_ne!(input, original_v, "phi input should be renamed\n{post_ir}");
-        }
-        assert_ne!(b_inputs[0], b_inputs[1], "phi inputs should be distinct\n{post_ir}");
     }
 
     #[test]
     fn test_multiple_phis_at_join() {
-        //     A
-        //    / \
-        //   B   C
-        //    \ /
-        //     D
-        //
-        // x defined in A and B, y defined in A and C.
-        let mut program = parse_without_ssa(
+        assert_transforms_to(
             r#"
             fn init:
-                a -> x y {
-                    x = const 1
-                    y = const 2
-                    cond = const 0
-                    => cond ? @b : @c
+                @0 {
+                    $0 = const 0x0
+                    $1 = const 0x0
+                    => $1 ? @1 : @2
                 }
-                b x y -> x y {
-                    x = const 3
-                    => @d
+
+                @1 {
+                    $0 = const 0x1
+                    => @3
                 }
-                c x y -> x y {
-                    y = const 4
-                    => @d
+
+                @2 {
+                    $1 = const 0x4
+                    => @3
                 }
-                d x y {
+
+                @3 {
+                    $3 = add $0 $1
+                    stop
+                }
+            "#,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $3 = const 0x0
+                    $4 = const 0x0
+                    => $4 ? @1 : @2
+                }
+                @1 -> $5 $4 {
+                    $5 = const 0x1
+                    => @3
+                }
+                @2 -> $3 $6 {
+                    $6 = const 0x4
+                    => @3
+                }
+                @3 $7 $8 {
+                    $9 = add $7 $8
                     stop
                 }
             "#,
         );
-
-        let d = BasicBlockId::new(3);
-        let original_x = program.block(d).inputs()[0];
-        let original_y = program.block(d).inputs()[1];
-
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-        let post_ir = display_program(&program);
-
-        let d_inputs = program.block(d).inputs();
-        assert_eq!(d_inputs.len(), 4, "D should have 2 original inputs + 2 phis\n{post_ir}");
-        for &input in d_inputs {
-            assert_ne!(input, original_x, "x should be renamed\n{post_ir}");
-            assert_ne!(input, original_y, "y should be renamed\n{post_ir}");
-        }
     }
 
     #[test]
-    fn test_icall_and_multi_function() {
-        //  init:        helper:
-        //     A           E
-        //    / \          |
-        //   B   C         F
-        //    \ /
-        //     D (calls helper with v)
-        //
-        // v defined in A and B. D calls helper passing v.
-        let mut program = parse_without_ssa(
+    fn test_icall_without_args() {
+        assert_transforms_to(
             r#"
             fn init:
-                a -> v {
-                    v = const 1
-                    cond = const 0
-                    => cond ? @b : @c
-                }
-                b v -> v {
-                    v = const 2
-                    => @d
-                }
-                c v -> v {
-                    => @d
-                }
-                d v {
-                    result = icall @helper v
+                @0 {
+                    icall @other
                     stop
                 }
-            fn helper:
-                e x -> x {
-                    => @f
+
+            fn other:
+                @0 {
+                    cond = const 0
+                    => cond ? @1 : @2
                 }
-                f x -> x {
+                @1 {
+                    a = const 1
+                    => @3
+                }
+                @2 {
+                    a = const 2
+                    => @3
+                }
+                @3 {
+                    sstore a a
                     iret
                 }
             "#,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @4  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $2 = const 0x0
+                    => $2 ? @1 : @2
+                }
+                @1 -> $3 {
+                    $3 = const 0x1
+                    => @3
+                }
+                @2 -> $4 {
+                    $4 = const 0x2
+                    => @3
+                }
+                @3 $5 {
+                    sstore $5 $5
+                    iret
+                }
+                @4 {
+                    icall @0
+                    stop
+                }
+            "#,
         );
+    }
 
-        let init_entry = program.functions[program.init_entry].entry();
-        let helper_id = program.functions.iter_idx().find(|&id| id != program.init_entry).unwrap();
-        let helper_entry = program.functions[helper_id].entry();
+    #[test]
+    fn test_icall_no_mut_args() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                @0 {
+                    in = const 0
+                    out = icall @other in
+                    stop
+                }
 
-        transform_and_legalize(&mut program, &AnalysesStore::default());
-        let post_ir = display_program(&program);
-
-        let init_inputs = program.block(init_entry).inputs();
-        let helper_inputs = program.block(helper_entry).inputs();
-        assert_eq!(helper_inputs.len(), 1, "helper entry should still have 1 input\n{post_ir}");
-        for &init_local in init_inputs {
-            for &helper_local in helper_inputs {
-                assert_ne!(
-                    init_local, helper_local,
-                    "locals across functions should be renamed independently\n{post_ir}"
-                );
-            }
-        }
+            fn other:
+                @0 in {
+                    cond = const 0
+                    => cond ? @1 : @2
+                }
+                @1 {
+                    a = const 1
+                    => @3
+                }
+                @2 {
+                    a = const 2
+                    => @3
+                }
+                @3 -> a {
+                    iret
+                }
+            "#,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @4  (outputs: 0)
+            Basic Blocks:
+                @0 $7 {
+                    $8 = const 0x0
+                    => $8 ? @1 : @2
+                }
+                @1 -> $9 {
+                    $9 = const 0x1
+                    => @3
+                }
+                @2 -> $10 {
+                    $10 = const 0x2
+                    => @3
+                }
+                @3 $11 -> $11 {
+                    iret
+                }
+                @4 {
+                    $5 = const 0x0
+                    $6 = icall @0 $5
+                    stop
+                }
+            "#,
+        );
     }
 }

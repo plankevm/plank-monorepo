@@ -7,7 +7,6 @@ use optimizations::{
     unused_operation_elimination::UnusedOperationElimination,
 };
 use sir_data::EthIRProgram;
-use transforms::ssa_transform::SsaTransform;
 
 pub use analyses::{
     AnalysesMask, AnalysesStore, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling,
@@ -15,6 +14,8 @@ pub use analyses::{
     UseLocation,
 };
 pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
+
+use crate::transforms::ssa_transform;
 
 pub trait Pass {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);
@@ -34,7 +35,6 @@ pub struct PassManager<'a> {
     store: AnalysesStore,
 
     legalizer: Option<Legalizer>,
-    ssa_transform: Option<SsaTransform>,
     sccp: Option<SCCP>,
     copy_prop: Option<CopyPropagation>,
     unused_elim: Option<UnusedOperationElimination>,
@@ -47,7 +47,6 @@ impl<'a> PassManager<'a> {
             program,
             store: AnalysesStore::default(),
             legalizer: None,
-            ssa_transform: None,
             sccp: None,
             copy_prop: None,
             unused_elim: None,
@@ -60,8 +59,7 @@ impl<'a> PassManager<'a> {
     }
 
     pub fn run_ssa_transform(&mut self) {
-        let pass = self.ssa_transform.get_or_insert_default();
-        run_pass(pass, self.program, &self.store);
+        ssa_transform(self.program, &self.store);
         self.run_legalize().expect("IR is illegal after SSA transform");
     }
 

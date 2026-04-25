@@ -7,10 +7,10 @@ pub fn dfs_postorder(
     visited: &mut DenseIndexSet<BasicBlockId>,
     postorder: &mut Vec<BasicBlockId>,
 ) {
-    if visited.contains(entry) {
+    if !visited.add(entry) {
         return;
     }
-    visited.add(entry);
+
     for succ in program.block(entry).successors() {
         dfs_postorder(program, succ, visited, postorder);
     }

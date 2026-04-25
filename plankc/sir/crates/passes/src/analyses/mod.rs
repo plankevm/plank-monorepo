@@ -8,6 +8,7 @@ mod legalizer;
 mod local_liveness;
 mod predecessors;
 mod reachability;
+mod reverse_post_order;
 mod traversal;
 
 pub use allocation_liveness::{AllocData, AllocId, AllocKind, AllocationLiveness};
@@ -20,4 +21,5 @@ pub use legalizer::{Legalizer, LegalizerError};
 pub use local_liveness::{Interval, IntervalEnd, IntervalStart, LocalIntervals, LocalLiveness};
 pub use predecessors::Predecessors;
 pub use reachability::Reachability;
+pub use reverse_post_order::ReversePostOrder;
 pub use traversal::dfs_postorder;

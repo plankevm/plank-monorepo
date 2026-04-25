@@ -1,7 +1,4 @@
-use crate::analyses::{
-    AllocationLiveness, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling, DefUse,
-    DominanceFrontiers, Dominators, LocalLiveness, Predecessors, Reachability,
-};
+use crate::analyses::*;
 use sir_data::EthIRProgram;
 use std::cell::{Ref, RefCell, RefMut};
 
@@ -98,6 +95,7 @@ define_analyses! {
     AllocationLiveness => allocation_liveness: AllocationLiveness,
     LocalLiveness => local_liveness: LocalLiveness,
     Reachability => reachability: Reachability,
+    ReversePostOrder => reverse_post_order: ReversePostOrder,
 }
 
 impl AnalysesStore {
@@ -107,6 +105,10 @@ impl AnalysesStore {
 
     pub fn def_use_mut(&self, program: &EthIRProgram) -> RefMut<'_, DefUse> {
         self.def_use.get_mut(program, self, true)
+    }
+
+    pub fn reverse_post_order(&self, program: &EthIRProgram) -> Ref<'_, ReversePostOrder> {
+        self.reverse_post_order.get(program, self)
     }
 
     pub fn predecessors(&self, program: &EthIRProgram) -> Ref<'_, Predecessors> {
