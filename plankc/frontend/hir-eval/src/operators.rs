@@ -95,7 +95,12 @@ impl crate::scope::Scope<'_, '_> {
         expr: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         if let Some(builtin) = op.runtime_equivalent() {
-            let args = [lhs, rhs];
+            let args = if builtin == RuntimeBuiltin::Shl || builtin == RuntimeBuiltin::Shr {
+                // operator uses (value, shift) but EVM builtins expect (shift, value)
+                [rhs, lhs]
+            } else {
+                [lhs, rhs]
+            };
             return self.eval_runtime_foldable_builtin(builtin, &args, expr);
         }
 

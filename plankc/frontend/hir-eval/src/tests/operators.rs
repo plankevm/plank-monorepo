@@ -256,8 +256,63 @@ fn test_runtime_shift_left_with_std() {
             %3 : u256 = @evm_calldataload(%2)
             %4 : u256 = %1
             %5 : u256 = %3
-            %6 : u256 = @evm_shl(%4, %5)
+            %6 : u256 = @evm_shl(%5, %4)
             %7 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_shift_operators() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let value = @evm_calldataload(0);
+            let shr_builtin = @evm_shr(224, value);
+            let shr_operator = value >> 224;
+            let shl_builtin = @evm_shl(4, value);
+            let shl_operator = value << 4;
+            @evm_sstore(0, shr_builtin);
+            @evm_sstore(1, shr_operator);
+            @evm_sstore(2, shl_builtin);
+            @evm_sstore(3, shl_operator);
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = %1
+            %3 : u256 = 224
+            %4 : u256 = @evm_shr(%3, %2)
+            %5 : u256 = %1
+            %6 : u256 = 224
+            %7 : u256 = @evm_shr(%6, %5)
+            %8 : u256 = %1
+            %9 : u256 = 4
+            %10 : u256 = @evm_shl(%9, %8)
+            %11 : u256 = %1
+            %12 : u256 = 4
+            %13 : u256 = @evm_shl(%12, %11)
+            %14 : u256 = %4
+            %15 : u256 = 0
+            %16 : void = @evm_sstore(%15, %14)
+            %17 : u256 = %7
+            %18 : u256 = 1
+            %19 : void = @evm_sstore(%18, %17)
+            %20 : u256 = %10
+            %21 : u256 = 2
+            %22 : void = @evm_sstore(%21, %20)
+            %23 : u256 = %13
+            %24 : u256 = 3
+            %25 : void = @evm_sstore(%24, %23)
+            %26 : never = @evm_stop()
         }
         "#,
     );
