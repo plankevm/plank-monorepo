@@ -10,10 +10,10 @@ init {
 }
 
 run {
-    let selector = @evm_shr(224, @evm_calldataload(0));
-    if @evm_eq(selector, CLONE_SELECTOR) {
+    let selector = @evm_calldataload(0) >> 224;
+    if selector == CLONE_SELECTOR {
         clone();
-    } else if @evm_eq(selector, CLONE_DETERMINISTIC_SELECTOR) {
+    } else if selector == CLONE_DETERMINISTIC_SELECTOR {
         clone_deterministic();
     } else {
         @evm_revert(@malloc_uninit(0), 0);

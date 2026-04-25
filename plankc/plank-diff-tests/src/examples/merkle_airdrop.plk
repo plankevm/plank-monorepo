@@ -20,12 +20,12 @@ init {
 }
 
 run {
-    let selector = @evm_shr(224, @evm_calldataload(0));
-    if @evm_eq(selector, CLAIM_SELECTOR) {
+    let selector = @evm_calldataload(0) >> 224;
+    if selector == CLAIM_SELECTOR {
         claim();
-    } else if @evm_eq(selector, MERKLE_ROOT_SELECTOR) {
+    } else if selector == MERKLE_ROOT_SELECTOR {
         merkle_root();
-    } else if @evm_eq(selector, HAS_CLAIMED_SELECTOR) {
+    } else if selector == HAS_CLAIMED_SELECTOR {
         has_claimed();
     } else {
         @evm_revert(@malloc_uninit(0), 0);
@@ -36,13 +36,13 @@ const claim = fn () never {
     let buf = @malloc_uninit(64);
     let slot = get_merkle_slot();
     let claimed = @evm_sload(slot);
-    if !@evm_iszero(claimed) {
+    if claimed != 0 {
         @evm_revert(@malloc_uninit(0), 0);
     }
 
     let address = @evm_calldataload(4);
     let amount = @evm_calldataload(36);
-    let offset = @evm_add(4, @evm_calldataload(68));
+    let offset = 4 + @evm_calldataload(68);
     let proof_length = @evm_calldataload(offset);
 
     @mstore20(buf, address);
@@ -50,9 +50,9 @@ const claim = fn () never {
     let mut node = @evm_keccak256(buf, 52);
 
     let mut i = 0;
-    while @evm_lt(i, proof_length) {
-        let proof_element = @evm_calldataload(@evm_add(@evm_add(offset, 32), @evm_mul(i, 32)));
-        if !@evm_gt(node, proof_element) {
+    while i < proof_length {
+        let proof_element = @evm_calldataload(offset + 32 + i * 32);
+        if node <= proof_element {
             @mstore32(buf, node);
             @mstore32(@evm_add(buf, 32), proof_element);
         } else {
@@ -60,11 +60,11 @@ const claim = fn () never {
             @mstore32(@evm_add(buf, 32), node);
         }
         node = @evm_keccak256(buf, 64);
-        i = @evm_add(i, 1);
+        i = i + 1;
     }
 
     let root = @evm_sload(MERKLE_ROOT_SLOT);
-    if !@evm_eq(node, root) {
+    if node != root {
         @evm_revert(@malloc_uninit(0), 0);
     }
 

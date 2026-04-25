@@ -36,24 +36,24 @@ init {
 }
 
 run {
-    let selector = @evm_shr(224, @evm_calldataload(0));
-    if @evm_eq(selector, BALANCE_OF_SELECTOR) {
+    let selector = @evm_calldataload(0) >> 224;
+    if selector == BALANCE_OF_SELECTOR {
         balance_of(@evm_calldataload(4));
-    } else if @evm_eq(selector, TOTAL_SUPPLY_SELECTOR) {
+    } else if selector == TOTAL_SUPPLY_SELECTOR {
         total_supply();
-    } else if @evm_eq(selector, TRANSFER_SELECTOR) {
+    } else if selector == TRANSFER_SELECTOR {
         transfer();
-    } else if @evm_eq(selector, ALLOWANCE_SELECTOR) {
+    } else if selector == ALLOWANCE_SELECTOR {
         allowance();
-    } else if @evm_eq(selector, APPROVE_SELECTOR) {
+    } else if selector == APPROVE_SELECTOR {
         approve();
-    } else if @evm_eq(selector, TRANSFER_FROM_SELECTOR) {
+    } else if selector == TRANSFER_FROM_SELECTOR {
         transfer_from();
-    } else if @evm_eq(selector, DECIMALS_SELECTOR) {
+    } else if selector == DECIMALS_SELECTOR {
         decimals();
-    } else if @evm_eq(selector, NAME_SELECTOR) {
+    } else if selector == NAME_SELECTOR {
         name();
-    } else if @evm_eq(selector, SYMBOL_SELECTOR) {
+    } else if selector == SYMBOL_SELECTOR {
         symbol();
     } else {
         @evm_revert(@malloc_uninit(0), 0);
@@ -114,10 +114,10 @@ const transfer_from = fn () never {
 
     let allowance_slot = map_slot_hash(@evm_caller(), map_slot_hash(from, ALLOWANCE_SLOT_BASE));
     let allowance_val = @evm_sload(allowance_slot);
-    if @evm_lt(allowance_val, amount) {
+    if allowance_val < amount {
         @evm_revert(@malloc_uninit(0), 0);
     }
-    @evm_sstore(allowance_slot, @evm_sub(allowance_val, amount));
+    @evm_sstore(allowance_slot, allowance_val - amount);
 
     transfer_balance(from, to, amount);
     let buf = @malloc_uninit(32);
@@ -148,14 +148,14 @@ const symbol = fn () never {
 const transfer_balance = fn (from: u256, to: u256, amount: u256) void {
     let slot = map_slot_hash(from, BALANCE_SLOT_BASE);
     let balance_from = @evm_sload(slot);
-    if @evm_lt(balance_from, amount) {
+    if balance_from < amount {
         @evm_revert(@malloc_uninit(0), 0);
     }
-    @evm_sstore(slot, @evm_sub(balance_from, amount));
+    @evm_sstore(slot, balance_from - amount);
 
     let slot = map_slot_hash(to, BALANCE_SLOT_BASE);
     let balance_to = @evm_sload(slot);
-    @evm_sstore(slot, @evm_add(balance_to, amount));
+    @evm_sstore(slot, balance_to + amount);
 
     let buf = @malloc_uninit(32);
     @mstore32(buf, amount);

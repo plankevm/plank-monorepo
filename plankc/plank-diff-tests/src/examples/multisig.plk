@@ -54,18 +54,18 @@ init {
 }
 
 run {
-    let selector = @evm_shr(224, @evm_calldataload(0));
-    if @evm_eq(selector, SUBMIT_SELECTOR) {
+    let selector = @evm_calldataload(0) >> 224;
+    if selector == SUBMIT_SELECTOR {
         submit();
-    } else if @evm_eq(selector, CONFIRM_SELECTOR) {
+    } else if selector == CONFIRM_SELECTOR {
         confirm();
-    } else if @evm_eq(selector, EXECUTE_SELECTOR) {
+    } else if selector == EXECUTE_SELECTOR {
         execute();
-    } else if @evm_eq(selector, REVOKE_SELECTOR) {
+    } else if selector == REVOKE_SELECTOR {
         revoke();
-    } else if @evm_eq(selector, GET_CONF_COUNT_SELECTOR) {
+    } else if selector == GET_CONF_COUNT_SELECTOR {
         get_conf_count();
-    } else if @evm_eq(selector, GET_TX_SELECTOR) {
+    } else if selector == GET_TX_SELECTOR {
         get_tx();
     } else {
         @evm_revert(@malloc_uninit(0), 0);
@@ -78,19 +78,19 @@ const submit = fn () never {
         @evm_revert(@malloc_uninit(0), 0);
     }
     let tx_id = @evm_sload(TX_COUNT_SLOT);
-    let tx_base_slot = @evm_add(slot_hash(TX_COUNT_SLOT), @evm_mul(tx_id, 4));
+    let tx_base_slot = slot_hash(TX_COUNT_SLOT) +% tx_id * 4;
 
-    let cd_size = @evm_sub(@evm_calldatasize(), 4);
+    let cd_size = @evm_calldatasize() - 4;
     let buf = @malloc_uninit(cd_size);
     @evm_calldatacopy(buf, 4, cd_size);
     let args = abi_decode(SubmitArgs, membytes_from_ptr(buf, cd_size));
 
     @evm_sstore(tx_base_slot, args.to);
-    @evm_sstore(@evm_add(tx_base_slot, 1), args.value);
-    sstore_bytes(@evm_add(tx_base_slot, 2), args.data);
-    @evm_sstore(@evm_add(tx_base_slot, 3), 0);
+    @evm_sstore(tx_base_slot +% 1, args.value);
+    sstore_bytes(tx_base_slot +% 2, args.data);
+    @evm_sstore(tx_base_slot +% 3, 0);
 
-    @evm_sstore(TX_COUNT_SLOT, @evm_add(tx_id, 1));
+    @evm_sstore(TX_COUNT_SLOT, tx_id + 1);
     @evm_log2(@malloc_uninit(0), 0, SUBMIT_TOPIC, tx_id);
     let ret = @malloc_uninit(32);
     @mstore32(ret, tx_id);
@@ -109,21 +109,21 @@ const execute = fn () never {
 
     let tx_id = @evm_calldataload(4);
     let confs = count_confirmations(tx_id);
-    if @evm_lt(confs, THRESHOLD) {
+    if confs < THRESHOLD {
         @evm_revert(@malloc_uninit(0), 0);
     }
 
-    let tx_base_slot = @evm_add(slot_hash(TX_COUNT_SLOT), @evm_mul(tx_id, 4));
-    let executed = @evm_sload(@evm_add(tx_base_slot, 3));
-    if @evm_gt(executed, 0) {
+    let tx_base_slot = slot_hash(TX_COUNT_SLOT) +% tx_id * 4;
+    let executed = @evm_sload(tx_base_slot +% 3);
+    if executed != 0 {
         @evm_revert(@malloc_uninit(0), 0);
     }
 
-    @evm_sstore(@evm_add(tx_base_slot, 3), 1);
+    @evm_sstore(tx_base_slot +% 3, 1);
 
     let to = @evm_sload(tx_base_slot);
-    let value = @evm_sload(@evm_add(tx_base_slot, 1));
-    let data = sload_bytes(@evm_add(tx_base_slot, 2));
+    let value = @evm_sload(tx_base_slot +% 1);
+    let data = sload_bytes(tx_base_slot +% 2);
     let success = @evm_call(@evm_gas(), to, value, data.ptr, data.len, @malloc_uninit(0), 0);
     if !success {
         @evm_revert(@malloc_uninit(0), 0);
@@ -147,13 +147,13 @@ const get_conf_count = fn () never {
 
 const get_tx = fn () never {
     let tx_id = @evm_calldataload(4);
-    let tx_base_slot = @evm_add(slot_hash(TX_COUNT_SLOT), @evm_mul(tx_id, 4));
+    let tx_base_slot = slot_hash(TX_COUNT_SLOT) +% tx_id * 4;
 
     let tx_result = GetTxResult {
         to: @evm_sload(tx_base_slot),
-        value: @evm_sload(@evm_add(tx_base_slot, 1)),
-        data: sload_bytes(@evm_add(tx_base_slot, 2)),
-        executed: @evm_sload(@evm_add(tx_base_slot, 3))
+        value: @evm_sload(tx_base_slot +% 1),
+        data: sload_bytes(tx_base_slot +% 2),
+        executed: @evm_sload(tx_base_slot +% 3)
     };
 
     let encoded = abi_encode(GetTxResult, tx_result);
@@ -161,11 +161,11 @@ const get_tx = fn () never {
 };
 
 const is_owner = fn (caller: u256) bool {
-    if @evm_eq(caller, @evm_sload(OWNER0_SLOT)) {
+    if caller == @evm_sload(OWNER0_SLOT) {
         true
-    } else if @evm_eq(caller, @evm_sload(OWNER1_SLOT)) {
+    } else if caller == @evm_sload(OWNER1_SLOT) {
         true
-    } else if @evm_eq(caller, @evm_sload(OWNER2_SLOT)) {
+    } else if caller == @evm_sload(OWNER2_SLOT) {
         true
     } else {
         false
@@ -180,7 +180,7 @@ const conf_of = fn (owner: u256, tx_id: u256) u256 {
 const set_confirmation = fn (comptime value: u256, comptime topic: u256) never {
     let tx_id = @evm_calldataload(4);
     let tx_count = @evm_sload(TX_COUNT_SLOT);
-    if !@evm_lt(tx_id, tx_count) {
+    if tx_id >= tx_count {
         @evm_revert(@malloc_uninit(0), 0);
     }
 
@@ -191,7 +191,7 @@ const set_confirmation = fn (comptime value: u256, comptime topic: u256) never {
 
     let conf_slot = map_slot_hash(caller, map_slot_hash(tx_id, CONFIRMATIONS_BASE_SLOT));
     let conf = @evm_sload(conf_slot);
-    if !@evm_eq(conf, @evm_sub(1, value)) {
+    if conf != 1 - value {
         @evm_revert(@malloc_uninit(0), 0);
     }
 
@@ -202,8 +202,8 @@ const set_confirmation = fn (comptime value: u256, comptime topic: u256) never {
 
 const count_confirmations = fn (tx_id: u256) u256 {
     let mut confs = 0;
-    confs = @evm_add(confs, conf_of(@evm_sload(OWNER0_SLOT), tx_id));
-    confs = @evm_add(confs, conf_of(@evm_sload(OWNER1_SLOT), tx_id));
-    confs = @evm_add(confs, conf_of(@evm_sload(OWNER2_SLOT), tx_id));
+    confs = confs + conf_of(@evm_sload(OWNER0_SLOT), tx_id);
+    confs = confs + conf_of(@evm_sload(OWNER1_SLOT), tx_id);
+    confs = confs + conf_of(@evm_sload(OWNER2_SLOT), tx_id);
     confs
 };
