@@ -219,7 +219,9 @@ impl SSATransformer<'_> {
         }
 
         if let &[single_pred] = self.predecessors.of(bb) {
-            return self.read_variable(single_pred, local);
+            let new_out = self.read_variable(single_pred, local);
+            self.defs[bb].insert(local, new_out);
+            return new_out;
         }
 
         let new_out = self.program.next_free_local_id.get_and_inc();
