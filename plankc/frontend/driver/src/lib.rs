@@ -75,16 +75,33 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         &self,
         mir: &plank_mir::Mir,
         optimizations: Option<&str>,
-        show_sir: bool,
+        disp_needs_separators: bool,
+        show_sir_in: bool,
+        show_sir_last: bool,
     ) -> Vec<u8> {
         let mut program = plank_mir_lower::lower(mir, &self.values);
-        if show_sir {
+        if show_sir_in {
+            if disp_needs_separators {
+                eprintln!("\n");
+                eprintln!("////////////////////////////////////////////////////////////////");
+                eprintln!("//                           SIR IN                           //");
+                eprintln!("////////////////////////////////////////////////////////////////");
+            }
             eprintln!("{}", program);
         }
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
         if let Some(passes) = optimizations {
             pass_manager.run_optimizations(passes);
+        }
+        if show_sir_last {
+            if disp_needs_separators {
+                eprintln!("\n");
+                eprintln!("////////////////////////////////////////////////////////////////");
+                eprintln!("//                          SIR LAST                          //");
+                eprintln!("////////////////////////////////////////////////////////////////");
+            }
+            eprintln!("{}", program);
         }
         let mut bytecode = Vec::with_capacity(0x6000);
         sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
