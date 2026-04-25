@@ -58,6 +58,9 @@ struct BuildArgs {
     #[arg(short = 'm', long = "show-mir", help = "show MIR")]
     show_mir: bool,
 
+    #[arg(long = "show-sir", help = "show SIR post `mir-lower`")]
+    show_sir: bool,
+
     #[arg(short = 'O', long = "optimize", help = OPTIMIZE_HELP, value_parser = parse_optimizations_string)]
     optimize: Option<String>,
 
@@ -186,32 +189,41 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
 
     let hir = driver.lower_hir(&project);
 
+    let total_shows = (args.show_hir as u32) + (args.show_mir as u32) + (args.show_sir as u32);
+
     if args.show_hir {
-        if args.show_mir {
-            println!("////////////////////////////////////////////////////////////////");
-            println!("//                            HIR                             //");
-            println!("////////////////////////////////////////////////////////////////");
+        if total_shows >= 2 {
+            eprintln!("////////////////////////////////////////////////////////////////");
+            eprintln!("//                            HIR                             //");
+            eprintln!("////////////////////////////////////////////////////////////////");
         }
-        print!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
-        if args.show_mir {
-            println!("\n");
-            println!("////////////////////////////////////////////////////////////////");
-            println!("//                            MIR                             //");
-            println!("////////////////////////////////////////////////////////////////");
-        }
+        eprintln!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
     }
 
     let mir = driver.evaluate_hir(&hir, project.core_ops_source);
 
     if args.show_mir {
-        print!("{}", DisplayMir::new(&mir, &driver.values, &driver.session));
+        if total_shows >= 2 {
+            eprintln!("\n");
+            eprintln!("////////////////////////////////////////////////////////////////");
+            eprintln!("//                            MIR                             //");
+            eprintln!("////////////////////////////////////////////////////////////////");
+        }
+        eprintln!("{}", DisplayMir::new(&mir, &driver.values, &driver.session));
     }
 
     if driver.session.has_errors() {
         driver.render_diagnostics_and_exit();
     }
 
-    let bytecode = driver.emit_bytecode(&mir, args.optimize.as_deref());
+    if total_shows >= 2 && args.show_sir {
+        eprintln!("\n");
+        eprintln!("////////////////////////////////////////////////////////////////");
+        eprintln!("//                            SIR                             //");
+        eprintln!("////////////////////////////////////////////////////////////////");
+    }
+
+    let bytecode = driver.emit_bytecode(&mir, args.optimize.as_deref(), args.show_sir);
 
     print!("0x");
     for byte in bytecode {

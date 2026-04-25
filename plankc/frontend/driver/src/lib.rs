@@ -71,8 +71,16 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         plank_hir_eval::evaluate(hir, core_ops_source, &mut self.values, &mut self.session)
     }
 
-    pub fn emit_bytecode(&self, mir: &plank_mir::Mir, optimizations: Option<&str>) -> Vec<u8> {
+    pub fn emit_bytecode(
+        &self,
+        mir: &plank_mir::Mir,
+        optimizations: Option<&str>,
+        show_sir: bool,
+    ) -> Vec<u8> {
         let mut program = plank_mir_lower::lower(mir, &self.values);
+        if show_sir {
+            eprintln!("{}", program);
+        }
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
         if let Some(passes) = optimizations {
