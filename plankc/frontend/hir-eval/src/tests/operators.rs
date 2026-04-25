@@ -539,6 +539,36 @@ fn test_comptime_wrapping_add_fold_with_std() {
 }
 
 #[test]
+fn test_comptime_shift_fold_with_std() {
+    assert_lowers_to(
+        std_project(
+            r#"
+        const shr_result = 256 >> 4;
+        const shl_result = 1 << 8;
+        init {
+            @evm_sstore(0, shr_result);
+            @evm_sstore(1, shl_result);
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = 16
+            %2 : void = @evm_sstore(%0, %1)
+            %3 : u256 = 1
+            %4 : u256 = 256
+            %5 : void = @evm_sstore(%3, %4)
+            %6 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_add_overflow_with_std() {
     assert_project_diagnostics(
         std_project(
