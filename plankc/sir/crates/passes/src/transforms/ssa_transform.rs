@@ -194,6 +194,7 @@ fn rename_operations(
     }
 }
 
+#[track_caller]
 fn rename_use(local_versions: &IndexVec<LocalId, Vec<LocalId>>, local: LocalId) -> LocalId {
     *local_versions[local].last().expect("local not in scope")
 }
@@ -214,6 +215,7 @@ fn rename_def(
 mod tests {
     use super::*;
     use crate::Legalizer;
+    use plank_test_utils::dedent_preserve_indent;
     use sir_data::display_program;
     use sir_parser::EmitConfig;
 
@@ -315,6 +317,51 @@ mod tests {
             assert_ne!(input, original_v, "phi input should be renamed\n{post_ir}");
         }
         assert_ne!(d_inputs[0], d_inputs[1], "phi inputs should be distinct\n{post_ir}");
+    }
+
+    #[test]
+    fn test_simple_merge() {
+        let mut program = parse_without_ssa(
+            r#"
+            fn init:
+                @0 {
+                    $0 = const 0x0
+                    => $0 ? @1 : @4
+                }
+
+                @1 {
+                    $1 = const 0x0
+                    => $1 ? @2 : @3
+                }
+
+                @2 {
+                    $2 = const 0x1
+                    => @4
+                }
+
+                @3 {
+                    $2 = const 0x2
+                    => @4
+                }
+
+                @4 {
+                    stop
+                }
+            "#,
+        );
+
+        println!("{program}");
+
+        transform_and_legalize(&mut program, &AnalysesStore::default());
+
+        pretty_assertions::assert_str_eq!(
+            dedent_preserve_indent(&format!("{program}")),
+            dedent_preserve_indent(
+                r#"
+
+            "#
+            )
+        );
     }
 
     #[test]

@@ -19,3 +19,5 @@ bitflags.workspace = true
 [dev-dependencies]
 sir-parser.workspace = true
 sir-test-utils = { path = "../../test-utils" }
+pretty_assertions.workspace = true
+plank-test-utils.workspace = true

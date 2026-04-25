@@ -2874,6 +2874,8 @@ dependencies = [
  "hashbrown 0.16.1",
  "plank-core",
  "plank-evm",
+ "plank-test-utils",
+ "pretty_assertions",
  "sir-data",
  "sir-parser",
  "sir-test-utils",
