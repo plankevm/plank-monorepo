@@ -41,6 +41,8 @@ impl<T: Eq> Span<T> {
 }
 
 impl<I: Idx> Span<I> {
+    pub const EMPTY: Self = Span::new(I::ZERO, I::ZERO);
+
     pub const fn dummy() -> Self {
         Self { start: I::MAX, end: I::ZERO }
     }

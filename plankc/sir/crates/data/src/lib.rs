@@ -257,8 +257,8 @@ impl fmt::Display for EthIRProgram {
 
 #[derive(Debug, Clone, Copy)]
 pub struct Function {
-    entry_bb_id: BasicBlockId,
-    outputs: u32,
+    pub entry_bb_id: BasicBlockId,
+    pub outputs: u32,
 }
 
 impl Function {

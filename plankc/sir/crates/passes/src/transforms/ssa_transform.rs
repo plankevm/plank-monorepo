@@ -1,18 +1,14 @@
-use crate::{AnalysesStore, Predecessors, run_pass, transforms::CriticalEdgeSplitting};
+use crate::{AnalysesStore, Pass, Predecessors, run_pass, transforms::CriticalEdgeSplitting};
 use hashbrown::{HashMap, HashSet};
-use plank_core::{Idx, IncIterable};
-use sir_data::{
-    BasicBlock, BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Span, index_vec,
-};
+use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span};
+use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, LocalId, index_vec};
 use smallvec::SmallVec;
 
 type Defs = IndexVec<BasicBlockId, HashMap<LocalId, LocalId>>;
 
 pub fn run(program: &mut EthIRProgram, store: &AnalysesStore) {
-    // CriticalEdgeSplitting is stateless, no benefit from reuse
     run_pass(&mut CriticalEdgeSplitting, program, store);
-
-    println!("{program}");
+    run_pass(&mut PreSSAFunctionEntryRegularizer, program, store);
 
     let predecessors = store.predecessors(program);
     let reachability = store.reachability(program);
@@ -37,8 +33,6 @@ pub fn run(program: &mut EthIRProgram, store: &AnalysesStore) {
 
     // Use RPO so that only loop back edges require incomplete phis.
     for &bb in store.reverse_post_order(t.program).order() {
-        println!("filling @{}", bb.get());
-
         for block_input in &mut t.program.locals[t.program.basic_blocks[bb].inputs] {
             let new_out = t.program.next_free_local_id.get_and_inc();
             let original = std::mem::replace(block_input, new_out);
@@ -72,10 +66,22 @@ pub fn run(program: &mut EthIRProgram, store: &AnalysesStore) {
         }
         t.program.locals[t.program.basic_blocks[bb].outputs].copy_from_slice(&tmp_locals);
 
-        match &mut t.program.basic_blocks[bb].control {
+        match t.program.basic_blocks[bb].control {
             Control::LastOpTerminates | Control::InternalReturn | Control::ContinuesTo(_) => {}
-            Control::Branches(branches) => branches.condition = t.defs[bb][&branches.condition],
-            Control::Switch(switch) => switch.condition = t.defs[bb][&switch.condition],
+            Control::Branches(branches) => {
+                let new_cond = t.read_variable(bb, branches.condition);
+                match &mut t.program.basic_blocks[bb].control {
+                    Control::Branches(branches) => branches.condition = new_cond,
+                    _ => unreachable!("`t.read_variable` mutated control kind?"),
+                }
+            }
+            Control::Switch(switch) => {
+                let new_cond = t.read_variable(bb, switch.condition);
+                match &mut t.program.basic_blocks[bb].control {
+                    Control::Switch(switch) => switch.condition = new_cond,
+                    _ => unreachable!("`t.read_variable` mutated control kind?"),
+                }
+            }
         }
 
         t.filled.insert(bb);
@@ -110,6 +116,56 @@ pub fn run(program: &mut EthIRProgram, store: &AnalysesStore) {
             PhiParam::Missing(_) => unreachable!("unresolved missing param (@{})", bb.get()),
         }));
         t.program.basic_blocks[bb].outputs = Span::new(outputs_start, t.program.locals.len_idx());
+    }
+}
+
+/// Checks that only function entry points have inputs and `iret` blocks have outputs in pre-SSA
+/// IR. Ensures the entry point has no predecessors that can cause the input parameter count to get
+/// messed up via phi-node insertion.
+struct PreSSAFunctionEntryRegularizer;
+
+impl Pass for PreSSAFunctionEntryRegularizer {
+    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
+        let mut worklist = SmallVec::<[BasicBlockId; 64]>::new();
+        let mut enqueued = DenseIndexSet::new();
+
+        for func_id in program.functions.iter_idx() {
+            let mut entry_has_pred = false;
+
+            let entry = program.functions[func_id].entry();
+            worklist.push(entry);
+            enqueued.add(entry);
+            while let Some(bb) = worklist.pop() {
+                assert!(
+                    bb == entry || program.basic_blocks[bb].inputs.is_empty(),
+                    "pre-SSA block @{} has inputs despite not being function entry",
+                    bb.get()
+                );
+                assert!(
+                    matches!(program.block(bb).control(), ControlView::InternalReturn)
+                        || program.basic_blocks[bb].outputs.is_empty(),
+                    "pre-SSA block @{} has outputs despite not ending in `iret`",
+                    bb.get()
+                );
+                for succ in program.block(bb).successors() {
+                    entry_has_pred |= succ == entry;
+                    if enqueued.add(succ) {
+                        worklist.push(succ);
+                    }
+                }
+            }
+
+            if entry_has_pred {
+                let new_entry = program.basic_blocks.push(BasicBlock {
+                    inputs: program.basic_blocks[entry].inputs,
+                    outputs: Span::EMPTY,
+                    operations: Span::EMPTY,
+                    control: Control::ContinuesTo(entry),
+                });
+                program.basic_blocks[entry].inputs = Span::EMPTY;
+                program.functions[func_id].entry_bb_id = new_entry;
+            }
+        }
     }
 }
 
@@ -193,7 +249,7 @@ mod tests {
         let store = AnalysesStore::default();
         ssa_transform(&mut program, &store);
         Legalizer::default()
-            .run(&mut program, &store)
+            .run(&program, &store)
             .unwrap_or_else(|e| panic!("Legalize failed:\n{e}\n{program}"));
 
         pretty_assertions::assert_str_eq!(
@@ -566,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn test_icall_no_mut_args() {
+    fn test_icall_no_mut_params() {
         assert_transforms_to(
             r#"
             fn init:
@@ -618,6 +674,207 @@ mod tests {
                     $5 = const 0x0
                     $6 = icall @0 $5
                     stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_icall_mut_params() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                @0 {
+                    in = const 0
+                    out = icall @other in
+                    stop
+                }
+
+            fn other:
+                @0 in {
+                    cond = const 0
+                    => cond ? @1 : @2
+                }
+                @1 {
+                    in = const 1
+                    => @3
+                }
+                @2 {
+                    a = const 2
+                    in = add in a
+                    => @3
+                }
+                @3 -> in {
+                    iret
+                }
+            "#,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @4  (outputs: 0)
+            Basic Blocks:
+                @0 $7 {
+                    $8 = const 0x0
+                    => $8 ? @1 : @2
+                }
+                @1 -> $9 {
+                    $9 = const 0x1
+                    => @3
+                }
+                @2 -> $11 {
+                    $10 = const 0x2
+                    $11 = add $7 $10
+                    => @3
+                }
+                @3 $12 -> $12 {
+                    iret
+                }
+                @4 {
+                    $5 = const 0x0
+                    $6 = icall @0 $5
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_icall_tail_call_no_block_out() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                @0 {
+                    a = const 0
+                    b = const 1
+                    n = const 10
+                    out = icall @fib a b n
+                    stop
+                }
+
+            fn fib:
+                @0 a b n {
+                    => n ? @1 : @2
+                }
+                @1 {
+                    c1 = const 1
+                    tmp = add a b
+                    a = copy b
+                    b = copy tmp
+                    n = sub n c1
+                    => @0
+                }
+                @2 -> n {
+                    iret
+                }
+            "#,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @4  (outputs: 1)
+                fn @1 -> entry @3  (outputs: 0)
+            Basic Blocks:
+                @0 $16 $18 $19 {
+                    => $16 ? @1 : @2
+                }
+                @1 -> $23 $21 $22 {
+                    $17 = const 0x1
+                    $20 = add $18 $19
+                    $21 = copy $19
+                    $22 = copy $20
+                    $23 = sub $16 $17
+                    => @0
+                }
+                @2 -> $16 {
+                    iret
+                }
+                @3 {
+                    $9 = const 0x0
+                    $10 = const 0x1
+                    $11 = const 0xa
+                    $12 = icall @0 $9 $10 $11
+                    stop
+                }
+                @4 $13 $14 $15 -> $15 $13 $14 {
+                    => @0
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_versions_control_flow_conditions() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                @0 {
+                    c = const 0
+                    => c ? @1 : @2
+                }
+                @1 {
+                    c = const 1
+                    => @3
+                }
+                @2 {
+                    => @3
+                }
+                @3 {
+                    => c ? @4 : @5
+                }
+                @4 {
+                    switch c {
+                        0x34 => @5
+                        0x35 => @6
+                        default => @5
+                    }
+                }
+                @5 {
+                    stop
+                }
+                @6 {
+                    invalid
+                }
+            "#,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $1 = const 0x0
+                    => $1 ? @1 : @2
+                }
+                @1 -> $2 {
+                    $2 = const 0x1
+                    => @3
+                }
+                @2 -> $1 {
+                    => @3
+                }
+                @3 $3 {
+                    => $3 ? @4 : @7
+                }
+                @4 {
+                    switch $3 {
+                        0x34 => @8,
+                        0x35 => @6,
+                        else => @9
+                    }
+                }
+                @5 {
+                    stop
+                }
+                @6 {
+                    invalid
+                }
+                @7 {
+                    => @5
+                }
+                @8 {
+                    => @5
+                }
+                @9 {
+                    => @5
                 }
             "#,
         );

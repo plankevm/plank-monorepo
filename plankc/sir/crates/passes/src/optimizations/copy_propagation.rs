@@ -245,7 +245,7 @@ Basic Blocks:
     @1 $0 {
         $1 = copy $0
         switch $0 {
-            0 => @2,
+            0x0 => @2,
             else => @3
         }
 

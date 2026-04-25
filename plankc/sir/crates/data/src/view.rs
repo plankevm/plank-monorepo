@@ -125,7 +125,7 @@ impl fmt::Display for ControlView<'_> {
             Self::Switch(switch) => {
                 writeln!(f, "switch ${} {{", switch.condition())?;
                 for (value, target) in switch.cases() {
-                    writeln!(f, "            {value:x} => @{target},")?;
+                    writeln!(f, "            0x{value:x} => @{target},")?;
                 }
                 if let Some(fallback) = switch.fallback() {
                     writeln!(f, "            else => @{fallback}\n        }}")

@@ -155,7 +155,7 @@ Basic Blocks:
         $0 = const 0x1
         $1 = copy $0
         switch $0 {
-            1 => @1,
+            0x1 => @1,
             else => @2
         }
 

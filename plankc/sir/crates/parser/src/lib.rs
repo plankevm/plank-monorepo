@@ -88,9 +88,7 @@ mod tests {
             let err = e.remove(0);
             format!("parse error at {:?}", err.span())
         })?;
-        emit::emit_ir(&arena, &ast, config).map_err(|e| {
-            e.reason.to_string()
-        })
+        emit::emit_ir(&arena, &ast, config).map_err(|e| e.reason.to_string())
     }
 
     #[test]
@@ -170,7 +168,10 @@ mod tests {
         "#;
         let mut config = EmitConfig::init_only();
         config.allow_duplicate_locals = true;
-        assert!(parse_to_result(source, config).is_ok(), "expected success when duplicates are allowed");
+        assert!(
+            parse_to_result(source, config).is_ok(),
+            "expected success when duplicates are allowed"
+        );
     }
 
     #[test]
@@ -669,8 +670,8 @@ Basic Blocks:
     @3 {
         $2 = calldatasize
         switch $2 {
-            0 => @4,
-            1 => @5,
+            0x0 => @4,
+            0x1 => @5,
             else => @6
         }
 

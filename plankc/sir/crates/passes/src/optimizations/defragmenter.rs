@@ -557,8 +557,8 @@ Basic Blocks:
         sstore $2 $0
         $3 = const 0x0
         switch $3 {
-            1 => @1,
-            2 => @2,
+            0x1 => @1,
+            0x2 => @2,
             else => @3
         }
 
@@ -582,8 +582,8 @@ Basic Blocks:
         $6 = salloc 128 #1
         $7 = const 0x0
         switch $7 {
-            64 => @5,
-            c8 => @6,
+            0x64 => @5,
+            0xc8 => @6,
             else => @7
         }
 
@@ -624,8 +624,8 @@ Basic Blocks:
         sstore $2 $0
         $3 = const 0x0
         switch $3 {
-            1 => @2,
-            2 => @1,
+            0x1 => @2,
+            0x2 => @1,
             else => @3
         }
 
