@@ -1,13 +1,13 @@
+import std::mem::{unsafe_mem_write_u256, unsafe_mem_read_u256, unsafe_mem_write_bytes, unsafe_mem_write};
 import std::option::{Option, Some, None};
 import std::type::sizeof;
 import std::utils::fold;
 
-// A owned region of memory: [ptr, ptr + len).
+// Invariant: membytes owns the memory region: [ptr, ptr + len).
 const membytes = struct {
     ptr: memptr,
     len: u256
 };
-
 
 // Allocates a new zero-initialized buffer of `len` bytes.
 const membytes_new = fn (len: u256) membytes {
@@ -20,34 +20,12 @@ const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
     membytes { ptr: ptr, len: len }
 };
 
-// Writes a u256 at `offset`. No bounds check.
-const unsafe_membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) u256 {
-    @mstore32(@evm_add(buf.ptr, offset), value);
-    32
-};
-
-// Writes `data` into `buf` at `offset`. No bounds check. Returns bytes written.
-const unsafe_membytes_write_bytes = fn (buf: membytes, offset: u256, data: membytes) u256 {
-    @mcopy(@evm_add(buf.ptr, offset), data.ptr, data.len);
-    data.len
-};
-
 // Writes a u256 at `offset`. Returns None if out of bounds.
 const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
     if offset + 32 > buf.len {
         return None(u256);
     }
-    Some(u256, unsafe_membytes_write_u256(buf, offset, value))
-};
-
-// Reads a u256 from `offset`. No bounds check.
-const unsafe_membytes_read_u256 = fn (buf: membytes, offset: u256) u256 {
-    @mload32(@evm_add(buf.ptr, offset))
-};
-
-// Creates a `membytes` pointing into `buf` at `offset` with the given `len`. No bounds check.
-const unsafe_membytes_slice = fn (buf: membytes, offset: u256, len: u256) membytes {
-    membytes_from_ptr(@evm_add(buf.ptr, offset), len)
+    Some(u256, unsafe_mem_write_u256(buf.ptr, offset, value))
 };
 
 // Reads a u256 from `offset`. Returns None if out of bounds.
@@ -55,39 +33,7 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
     if offset + 32 > buf.len {
         return None(u256);
     }
-    Some(u256, unsafe_membytes_read_u256(buf, offset))
-};
-
-// Writes a value of type T at `offset`. For structs, fields are serialized contiguously.
-// No bounds check. Returns bytes written.
-const unsafe_membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value: T) u256 {
-    if T == void {
-        0
-    } else if T == u256 {
-        @mstore32(@evm_add(buf.ptr, offset), value);
-        32
-    } else if T == bool {
-        @mstore32(@evm_add(buf.ptr, offset), if value { 1 } else { 0 });
-        32
-    } else if @is_struct(T) {
-        fold(
-            u256,
-            @field_count(T),
-            fn (comptime i: u256, bytes_written: u256) u256 {
-                let written = unsafe_membytes_write(
-                    @field_type(T, i),
-                    buf,
-                    offset + bytes_written,
-                    @get_field(value, i)
-                );
-                bytes_written + written
-            },
-            0
-        )
-    } else {
-        let _sizeof_unsupported_type: u256 = true;
-        0
-    }
+    Some(u256, unsafe_mem_read_u256(buf.ptr, offset))
 };
 
 // Writes a value of any type T at `offset`. Returns None if out of bounds.
@@ -95,5 +41,5 @@ const membytes_write = fn (comptime T: type, buf: membytes, offset: u256, value:
     if offset + sizeof(T) > buf.len {
         return None(u256);
     }
-    Some(u256, unsafe_membytes_write(T, buf, offset, value))
+    Some(u256, unsafe_mem_write(T, buf.ptr, offset, value))
 };

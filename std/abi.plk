@@ -58,36 +58,33 @@ const abi_encoded_size = fn (comptime T: type, value: T) u256 {
 };
 
 // Encodes `value` into pre-allocated memory at `ptr`. Caller must ensure
-// the region is large enough (use `abi_encoded_size` to determine).
-// Returns the number of bytes written.
+// the region is large enough. Returns the number of bytes written.
 const unsafe_abi_encode = fn (comptime T: type, ptr: memptr, value: T) u256 {
-    let size = abi_encoded_size(T, value);
-    let buf = membytes_from_ptr(ptr, size);
-    unsafe_abi_encode_to(T, buf, 0, value)
+    unsafe_abi_encode_to(T, ptr, 0, value)
 };
 
-// Encodes `value` into `buf`. Returns None if the buffer is too small.
+// Encodes `value` into `buf`. Returns the number of bytes written,
+// or None if the buffer is too small to hold the encoding.
 const abi_encode_try = fn (comptime T: type, buf: membytes, value: T) Option(u256) {
     let size = abi_encoded_size(T, value);
-    if @evm_gt(size, buf.len) {
+    if size > buf.len {
         return None(u256);
     }
-    Some(u256, unsafe_abi_encode_to(T, buf, 0, value))
+    Some(u256, unsafe_abi_encode_to(T, buf.ptr, 0, value))
 };
 
 // Encodes `value`, allocating a new buffer of the exact size needed.
 const abi_encode = fn (comptime T: type, value: T) membytes {
     let size = abi_encoded_size(T, value);
     let buf = membytes_new(size);
-    unsafe_abi_encode_to(T, buf, 0, value);
+    unsafe_abi_encode_to(T, buf.ptr, 0, value);
     buf
 };
 
 // Decodes a value of type T from raw memory. Caller must ensure
 // the region contains valid ABI-encoded data.
 const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, len: u256) T {
-    let buf = membytes_from_ptr(ptr, len);
-    unsafe_abi_decode_from(T, buf, 0)
+    unsafe_abi_decode_from(T, ptr, 0)
 };
 
 // Decodes a value of type T from `buf`. Returns None if the buffer
@@ -96,7 +93,7 @@ const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
     if !abi_buf_fits(T, buf, 0) {
         return None(T);
     }
-    Some(T, unsafe_abi_decode_from(T, buf, 0))
+    Some(T, unsafe_abi_decode_from(T, buf.ptr, 0))
 };
 
 // Decodes a value of type T from `buf`. Reverts if the buffer

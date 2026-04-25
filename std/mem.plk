@@ -1,0 +1,45 @@
+import std::utils::fold;
+
+const unsafe_mem_write_u256 = fn (ptr: memptr, offset: u256, value: u256) u256 {
+    @mstore32(@evm_add(ptr, offset), value);
+    32
+};
+
+const unsafe_mem_read_u256 = fn (ptr: memptr, offset: u256) u256 {
+    @mload32(@evm_add(ptr, offset))
+};
+
+const unsafe_mem_write_bytes = fn (dst: memptr, dst_offset: u256, src: memptr, len: u256) u256 {
+    @mcopy(@evm_add(dst, dst_offset), src, len);
+    len
+};
+
+// Writes a value of type T at `offset`. For structs, fields are serialized contiguously.
+// No bounds check. Returns bytes written.
+const unsafe_mem_write = fn (comptime T: type, ptr: memptr, offset: u256, value: T) u256 {
+    if T == void {
+        0
+    } else if T == u256 {
+        unsafe_mem_write_u256(ptr, offset, value)
+    } else if T == bool {
+        unsafe_mem_write_u256(ptr, offset, if value { 1 } else { 0 })
+    } else if @is_struct(T) {
+        fold(
+            u256,
+            @field_count(T),
+            fn (comptime i: u256, bytes_written: u256) u256 {
+                let written = unsafe_mem_write(
+                    @field_type(T, i),
+                    ptr,
+                    offset + bytes_written,
+                    @get_field(value, i)
+                );
+                bytes_written + written
+            },
+            0
+        )
+    } else {
+        let _sizeof_unsupported_type: u256 = true;
+        0
+    }
+};

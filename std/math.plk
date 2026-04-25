@@ -1,5 +1,5 @@
 const max = fn (a: u256, b: u256) u256 {
-    if @evm_gt(a, b) {
+    if a > b {
         a
     } else {
         b
@@ -7,7 +7,7 @@ const max = fn (a: u256, b: u256) u256 {
 };
 
 const min = fn (a: u256, b: u256) u256 {
-    if @evm_lt(a, b) {
+    if a < b {
         a
     } else {
         b
@@ -15,8 +15,8 @@ const min = fn (a: u256, b: u256) u256 {
 };
 
 const ceil32 = fn (x: u256) u256 {
-    let remainder = @evm_mod(x, 32);
-    if @evm_eq(remainder, 0) {
+    let remainder = x % 32;
+    if remainder == 0 {
         x
     } else {
         x +% 32 -% remainder
