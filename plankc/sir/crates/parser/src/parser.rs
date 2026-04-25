@@ -270,6 +270,7 @@ fn parser<'arena, 'src: 'arena>(
 
     // Basic block parser
     let basic_block = ident
+        .or(label)
         .then(empty().map(|_| BVec::with_capacity_in(DEFAULT_BB_INPUTS_CAPACITY, arena)).foldl(
             ident.repeated(),
             |mut inputs, input| {

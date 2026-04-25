@@ -53,9 +53,9 @@ pub enum Token {
     #[token("iret")]
     InternalReturn,
 
-    #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex("([a-zA-Z_][a-zA-Z0-9_]*|\\$[a-zA-Z0-9_]+)")]
     Identifier,
-    #[regex("@[a-zA-Z_][a-zA-Z0-9_]*")]
+    #[regex("@[a-zA-Z0-9_]+")]
     Label,
     #[regex(r"\.[a-zA-Z_][a-zA-Z0-9_]*")]
     DataRef,

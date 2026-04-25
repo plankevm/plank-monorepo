@@ -347,6 +347,10 @@ impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
         id
     }
 
+    pub fn abandon(self) {
+        self._must_use.unchecked_destroy();
+    }
+
     pub fn alloc_u256(&mut self, value: U256) -> LargeConstId {
         self.fn_builder.ir_builder.alloc_u256(value)
     }

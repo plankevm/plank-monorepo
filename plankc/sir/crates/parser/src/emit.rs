@@ -212,193 +212,213 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
         for (bb_index, bb) in func.basic_blocks.iter().enumerate() {
             let mut bb_builder = func_builder.begin_basic_block();
 
-            locals_buffer.clear();
-            for input in bb.inputs.iter() {
-                let input = local_name_to_id.get(input.inner).ok_or_else(|| SirAstSemaError {
-                    spans: arena.alloc([input.span()]),
-                    reason: format_in!(
-                        arena,
-                        "Undefined input local {:?} in basic block {:?}",
-                        input.inner,
-                        bb.name.inner
-                    ),
-                })?;
-                locals_buffer.push(input.inner);
-            }
-            bb_builder.set_inputs(&locals_buffer);
-
-            locals_buffer.clear();
-            for output in bb.outputs.iter() {
-                let output = local_name_to_id.get(output.inner).ok_or_else(|| SirAstSemaError {
-                    spans: arena.alloc([output.span()]),
-                    reason: format_in!(
-                        arena,
-                        "Undefined output local {:?} in basic block {:?}",
-                        output.inner,
-                        bb.name.inner
-                    ),
-                })?;
-                locals_buffer.push(output.inner);
-            }
-            bb_builder.set_outputs(&locals_buffer);
-
-            // Operations
-            for stmt in bb.stmts.iter() {
-                let name = stmt.op.inner;
-
-                let (maybe_mem_size, op_name) =
-                    if let Some(mstore_suffix) = name.strip_prefix("mstore") {
-                        (Some(mstore_suffix), "mstore")
-                    } else if let Some(mload_suffix) = name.strip_prefix("mload") {
-                        (Some(mload_suffix), "mload")
-                    } else {
-                        (None, name)
-                    };
-                let memory_size_extra = maybe_mem_size
-                    .map(|unparsed_mem_size| match unparsed_mem_size.parse::<u32>() {
-                        Ok(size_as_bits) if (1..=32).any(|size| size * 8 == size_as_bits) => {
-                            Ok(Spanned::new(
-                                OpExtraData::Num(U256::from(size_as_bits / 8)),
-                                stmt.op.span(),
-                            ))
-                        }
-                        _ => Err(SirAstSemaError {
-                            spans: arena.alloc([stmt.op.span()]),
+            let block_result: Result<(), SirAstSemaError<'arena>> = (|| {
+                locals_buffer.clear();
+                for input in bb.inputs.iter() {
+                    let input =
+                        local_name_to_id.get(input.inner).ok_or_else(|| SirAstSemaError {
+                            spans: arena.alloc([input.span()]),
                             reason: format_in!(
                                 arena,
-                                "Unsuported memory op ({:?}), expected mstore8-256/mload8-256 (multiple of 8)",
-                                name
+                                "Undefined input local {:?} in basic block {:?}",
+                                input.inner,
+                                bb.name.inner
                             ),
-                        }),
-                    })
-                    .transpose()?;
-
-                let kind = op_name.parse().map_err(|_| SirAstSemaError {
-                    spans: arena.alloc([stmt.op.span()]),
-                    reason: format_in!(arena, "Unknown operation {:?}", stmt.op.inner),
-                })?;
+                        })?;
+                    locals_buffer.push(input.inner);
+                }
+                bb_builder.set_inputs(&locals_buffer);
 
                 locals_buffer.clear();
-                for param in stmt.params.iter() {
-                    let ParamExpr::NameRef(name) = param else { continue };
-                    let id = local_name_to_id.get(name.inner).ok_or_else(|| SirAstSemaError {
-                        spans: arena.alloc([name.span()]),
-                        reason: format_in!(arena, "Local {:?} not defined in function", name.inner),
+                for output in bb.outputs.iter() {
+                    let output =
+                        local_name_to_id.get(output.inner).ok_or_else(|| SirAstSemaError {
+                            spans: arena.alloc([output.span()]),
+                            reason: format_in!(
+                                arena,
+                                "Undefined output local {:?} in basic block {:?}",
+                                output.inner,
+                                bb.name.inner
+                            ),
+                        })?;
+                    locals_buffer.push(output.inner);
+                }
+                bb_builder.set_outputs(&locals_buffer);
+
+                // Operations
+                for stmt in bb.stmts.iter() {
+                    let name = stmt.op.inner;
+
+                    let (maybe_mem_size, op_name) =
+                        if let Some(mstore_suffix) = name.strip_prefix("mstore") {
+                            (Some(mstore_suffix), "mstore")
+                        } else if let Some(mload_suffix) = name.strip_prefix("mload") {
+                            (Some(mload_suffix), "mload")
+                        } else {
+                            (None, name)
+                        };
+                    let memory_size_extra = maybe_mem_size
+                        .map(|unparsed_mem_size| match unparsed_mem_size.parse::<u32>() {
+                            Ok(size_as_bits) if (1..=32).any(|size| size * 8 == size_as_bits) => {
+                                Ok(Spanned::new(
+                                    OpExtraData::Num(U256::from(size_as_bits / 8)),
+                                    stmt.op.span(),
+                                ))
+                            }
+                            _ => Err(SirAstSemaError {
+                                spans: arena.alloc([stmt.op.span()]),
+                                reason: format_in!(
+                                    arena,
+                                    "Unsuported memory op ({:?}), expected mstore8-256/mload8-256 (multiple of 8)",
+                                    name
+                                ),
+                            }),
+                        })
+                        .transpose()?;
+
+                    let kind = op_name.parse().map_err(|_| SirAstSemaError {
+                        spans: arena.alloc([stmt.op.span()]),
+                        reason: format_in!(arena, "Unknown operation {:?}", stmt.op.inner),
                     })?;
-                    locals_buffer.push(id.inner);
-                }
-                let ins_end_outs_start = locals_buffer.len();
-                for output in stmt.assigns.iter() {
-                    let id = local_name_to_id.get(output.inner).expect("BB stmt assign unchecked");
-                    locals_buffer.push(id.inner);
-                }
 
-                let mut extras = memory_size_extra.map(Ok).into_iter().chain(
-                    stmt.params.iter().filter_map(|param| match param {
-                        ParamExpr::FuncRef(func_ref) => Some(
-                            func_ids
-                                .get(func_ref.inner)
-                                .map(|func_id| {
-                                    Spanned::new(OpExtraData::FuncId(*func_id), func_ref.span())
-                                })
-                                .ok_or_else(|| SirAstSemaError {
-                                    spans: arena.alloc([func_ref.span()]),
-                                    reason: format_in!(
-                                        arena,
-                                        "Undefined function {:?}",
-                                        func_ref.inner
-                                    ),
-                                }),
-                        ),
-                        ParamExpr::DataRef(data_ref) => Some(
-                            data_names
-                                .get(data_ref.inner)
-                                .map(|data_id| {
-                                    Spanned::new(
-                                        OpExtraData::DataId(data_id.inner),
-                                        data_ref.span(),
-                                    )
-                                })
-                                .ok_or_else(|| SirAstSemaError {
-                                    spans: arena.alloc([data_ref.span()]),
-                                    reason: format_in!(
-                                        arena,
-                                        "Undefined data {:?}",
-                                        data_ref.inner
-                                    ),
-                                }),
-                        ),
-                        ParamExpr::Num(num) => {
-                            Some(Ok(Spanned::new(OpExtraData::Num(num.inner), num.span())))
+                    locals_buffer.clear();
+                    for param in stmt.params.iter() {
+                        let ParamExpr::NameRef(name) = param else { continue };
+                        let id =
+                            local_name_to_id.get(name.inner).ok_or_else(|| SirAstSemaError {
+                                spans: arena.alloc([name.span()]),
+                                reason: format_in!(
+                                    arena,
+                                    "Local {:?} not defined in function",
+                                    name.inner
+                                ),
+                            })?;
+                        locals_buffer.push(id.inner);
+                    }
+                    let ins_end_outs_start = locals_buffer.len();
+                    for output in stmt.assigns.iter() {
+                        let id =
+                            local_name_to_id.get(output.inner).expect("BB stmt assign unchecked");
+                        locals_buffer.push(id.inner);
+                    }
+
+                    let mut extras = memory_size_extra.map(Ok).into_iter().chain(
+                        stmt.params.iter().filter_map(|param| match param {
+                            ParamExpr::FuncRef(func_ref) => Some(
+                                func_ids
+                                    .get(func_ref.inner)
+                                    .map(|func_id| {
+                                        Spanned::new(OpExtraData::FuncId(*func_id), func_ref.span())
+                                    })
+                                    .ok_or_else(|| SirAstSemaError {
+                                        spans: arena.alloc([func_ref.span()]),
+                                        reason: format_in!(
+                                            arena,
+                                            "Undefined function {:?}",
+                                            func_ref.inner
+                                        ),
+                                    }),
+                            ),
+                            ParamExpr::DataRef(data_ref) => Some(
+                                data_names
+                                    .get(data_ref.inner)
+                                    .map(|data_id| {
+                                        Spanned::new(
+                                            OpExtraData::DataId(data_id.inner),
+                                            data_ref.span(),
+                                        )
+                                    })
+                                    .ok_or_else(|| SirAstSemaError {
+                                        spans: arena.alloc([data_ref.span()]),
+                                        reason: format_in!(
+                                            arena,
+                                            "Undefined data {:?}",
+                                            data_ref.inner
+                                        ),
+                                    }),
+                            ),
+                            ParamExpr::Num(num) => {
+                                Some(Ok(Spanned::new(OpExtraData::Num(num.inner), num.span())))
+                            }
+                            ParamExpr::NameRef(_) => None,
+                        }),
+                    );
+                    let extra = extras.next().transpose()?.map_or(OpExtraData::Empty, |e| e.inner);
+                    if let Some(another_extra) = extras.next().transpose()? {
+                        return Err(SirAstSemaError {
+                            spans: arena.alloc([another_extra.span()]),
+                            reason: format_in!(arena, "Max one @func/.data/<num> per op accepted"),
+                        });
+                    }
+
+                    let operation = Operation::try_build(
+                        kind,
+                        &locals_buffer[..ins_end_outs_start],
+                        &locals_buffer[ins_end_outs_start..],
+                        extra,
+                        bb_builder.as_mut(),
+                    )
+                    .map_err(|err| match err {
+                        OpBuildError::NumTooLarge { too_large, valid_lower, valid_upper } => {
+                            SirAstSemaError {
+                                spans: arena.alloc([stmt.op.span()]),
+                                reason: format_in!(
+                                    arena,
+                                    "Number {} for op {:?} not in valid range [{}; {}]",
+                                    too_large,
+                                    stmt.op.inner,
+                                    valid_lower,
+                                    valid_upper
+                                ),
+                            }
                         }
-                        ParamExpr::NameRef(_) => None,
-                    }),
-                );
-                let extra = extras.next().transpose()?.map_or(OpExtraData::Empty, |e| e.inner);
-                if let Some(another_extra) = extras.next().transpose()? {
-                    return Err(SirAstSemaError {
-                        spans: arena.alloc([another_extra.span()]),
-                        reason: format_in!(arena, "Max one @func/.data/<num> per op accepted"),
-                    });
-                }
-
-                let operation = Operation::try_build(
-                    kind,
-                    &locals_buffer[..ins_end_outs_start],
-                    &locals_buffer[ins_end_outs_start..],
-                    extra,
-                    bb_builder.as_mut(),
-                )
-                .map_err(|err| match err {
-                    OpBuildError::NumTooLarge { too_large, valid_lower, valid_upper } => {
-                        SirAstSemaError {
+                        OpBuildError::UnexpectedExtraData { received, expected } => {
+                            SirAstSemaError {
+                                spans: arena.alloc([stmt.op.span()]),
+                                reason: format_in!(
+                                    arena,
+                                    "Operation {:?} expects extra ={}, got: {:?}",
+                                    stmt.op.inner,
+                                    expected,
+                                    received
+                                ),
+                            }
+                        }
+                        OpBuildError::WrongInputCount { expected, received } => SirAstSemaError {
                             spans: arena.alloc([stmt.op.span()]),
                             reason: format_in!(
                                 arena,
-                                "Number {} for op {:?} not in valid range [{}; {}]",
-                                too_large,
+                                "Operation {:?} expects {} inputs, got: {}",
                                 stmt.op.inner,
-                                valid_lower,
-                                valid_upper
+                                expected,
+                                received
                             ),
-                        }
-                    }
-                    OpBuildError::UnexpectedExtraData { received, expected } => SirAstSemaError {
-                        spans: arena.alloc([stmt.op.span()]),
-                        reason: format_in!(
-                            arena,
-                            "Operation {:?} expects extra ={}, got: {:?}",
-                            stmt.op.inner,
-                            expected,
-                            received
-                        ),
-                    },
-                    OpBuildError::WrongInputCount { expected, received } => SirAstSemaError {
-                        spans: arena.alloc([stmt.op.span()]),
-                        reason: format_in!(
-                            arena,
-                            "Operation {:?} expects {} inputs, got: {}",
-                            stmt.op.inner,
-                            expected,
-                            received
-                        ),
-                    },
-                    OpBuildError::WrongOutputCount { expected, received } => SirAstSemaError {
-                        spans: arena.alloc([stmt.op.span()]),
-                        reason: format_in!(
-                            arena,
-                            "Operation {:?} assigns {} outputs, assigning {}",
-                            stmt.op.inner,
-                            expected,
-                            received
-                        ),
-                    },
-                    OpBuildError::UndefinedFunction(_) => unreachable!("checked further up?"),
-                })?;
-                bb_builder.add_operation(operation);
-            }
+                        },
+                        OpBuildError::WrongOutputCount { expected, received } => SirAstSemaError {
+                            spans: arena.alloc([stmt.op.span()]),
+                            reason: format_in!(
+                                arena,
+                                "Operation {:?} assigns {} outputs, assigning {}",
+                                stmt.op.inner,
+                                expected,
+                                received
+                            ),
+                        },
+                        OpBuildError::UndefinedFunction(_) => unreachable!("checked further up?"),
+                    })?;
+                    bb_builder.add_operation(operation);
+                }
 
-            let bb_id = bb_builder.finish_with_placeholder_control();
+                Ok(())
+            })();
+
+            let bb_id = match block_result {
+                Ok(()) => bb_builder.finish_with_placeholder_control(),
+                Err(e) => {
+                    bb_builder.abandon();
+                    return Err(e);
+                }
+            };
             if bb_index == 0 {
                 entry_bb_id = Some(bb_id);
             }

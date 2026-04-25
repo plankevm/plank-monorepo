@@ -8,6 +8,7 @@ impl MustUseStrict {
 }
 
 impl Drop for MustUseStrict {
+    #[track_caller]
     fn drop(&mut self) {
         if !std::thread::panicking() {
             panic!("dropped must use type")

@@ -81,6 +81,120 @@ mod tests {
         assert_trim_strings_eq_with_diff(&actual, expected, "IR snapshot");
     }
 
+    fn parse_to_result(source: &str, config: EmitConfig) -> Result<EthIRProgram, String> {
+        use bumpalo::Bump;
+        let arena = Bump::with_capacity(8_192);
+        let ast = parser::parse(source, &arena).map_err(|mut e| {
+            let err = e.remove(0);
+            format!("parse error at {:?}", err.span())
+        })?;
+        emit::emit_ir(&arena, &ast, config).map_err(|e| {
+            e.reason.to_string()
+        })
+    }
+
+    #[test]
+    fn test_error_undefined_local_in_param() {
+        let source = r#"
+            fn init:
+                entry {
+                    result = add missing_local 1
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Local "missing_local" not defined in function"#);
+    }
+
+    #[test]
+    fn test_error_undefined_local_in_block_output() {
+        let source = r#"
+            fn init:
+                entry -> missing {
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Undefined output local "missing" in basic block "entry""#);
+    }
+
+    #[test]
+    fn test_error_undefined_function() {
+        let source = r#"
+            fn init:
+                entry {
+                    result = icall @missing_fn
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Function "missing_fn" not found"#);
+    }
+
+    #[test]
+    fn test_error_undefined_block_in_control_flow() {
+        let source = r#"
+            fn init:
+                entry {
+                    cond = const 1
+                    => cond ? @missing_block : @missing_block2
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Undefined !=0 dest. basic block "missing_block""#);
+    }
+
+    #[test]
+    fn test_error_duplicate_local() {
+        let source = r#"
+            fn init:
+                entry {
+                    x = const 1
+                    x = const 2
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Locals are required to be unique within a function, "x" not unique"#);
+    }
+
+    #[test]
+    fn test_allow_duplicate_locals() {
+        let source = r#"
+            fn init:
+                entry {
+                    x = const 1
+                    x = const 2
+                    stop
+                }
+        "#;
+        let mut config = EmitConfig::init_only();
+        config.allow_duplicate_locals = true;
+        assert!(parse_to_result(source, config).is_ok(), "expected success when duplicates are allowed");
+    }
+
+    #[test]
+    fn test_error_abandon_does_not_panic_on_undefined_local() {
+        // Regression test: before the abandon() fix, this would panic with
+        // "dropped must use type" instead of returning a proper error.
+        let source = r#"
+            fn init:
+                @0 {
+                    $0 = const 0x0
+                    => $0 ? @1 : @2
+                }
+                @1 {
+                    $5 = copy $4
+                    => @2
+                }
+                @2 {
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Local "$4" not defined in function"#);
+    }
+
     #[test]
     fn test_simple_function1() {
         let input = r#"
