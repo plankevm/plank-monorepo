@@ -59,12 +59,12 @@ struct BuildArgs {
     show_mir: bool,
 
     #[arg(
-        long = "show-sir-post-mir",
+        long = "show-sir-first",
         help = "show the SIR going into the middle end (directly after lowering from MIR)"
     )]
     show_sir_in: bool,
 
-    #[arg(long = "show-sir-last", help = "show the final SIR pre lowering to EVM assembly")]
+    #[arg(long = "show-sir-final", help = "show the final SIR pre lowering to EVM assembly")]
     show_sir_last: bool,
 
     #[arg(short = 'O', long = "optimize", help = OPTIMIZE_HELP, value_parser = parse_optimizations_string)]
