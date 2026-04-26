@@ -8,14 +8,13 @@ use optimizations::{
 };
 use sir_data::EthIRProgram;
 
+use crate::transforms::SSATransform;
 pub use analyses::{
     AnalysesMask, AnalysesStore, BasicBlockOwnershipAndReachability, ControlFlowGraphInOutBundling,
     DefUse, DominanceFrontiers, Dominators, InOutGroupId, Legalizer, Predecessors, UseKind,
     UseLocation,
 };
 pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
-
-use crate::transforms::ssa_transform;
 
 pub trait Pass {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);
@@ -59,7 +58,7 @@ impl<'a> PassManager<'a> {
     }
 
     pub fn run_ssa_transform(&mut self) {
-        ssa_transform(self.program, &self.store);
+        run_pass(&mut SSATransform, self.program, &self.store);
         self.run_legalize().expect("IR is illegal after SSA transform");
     }
 

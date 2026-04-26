@@ -6,116 +6,124 @@ use smallvec::SmallVec;
 
 type Defs = IndexVec<BasicBlockId, HashMap<LocalId, LocalId>>;
 
-pub fn run(program: &mut EthIRProgram, store: &AnalysesStore) {
-    run_pass(&mut CriticalEdgeSplitting, program, store);
-    run_pass(&mut PreSSAFunctionEntryRegularizer, program, store);
+// to-SSA is usually a one-off operation so need to try and cache state.
+pub struct SSATransform;
 
-    let predecessors = store.predecessors(program);
-    let reachability = store.reachability(program);
+impl Pass for SSATransform {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        run_pass(&mut CriticalEdgeSplitting, program, store);
+        run_pass(&mut PreSSAFunctionEntryRegularizer, program, store);
 
-    let mut unfilled_until_sealed = HashMap::new();
-    for bb in program.basic_blocks.iter_idx() {
-        let pred_count = predecessors.of(bb).len() as u32;
-        unsafe { unfilled_until_sealed.insert_unique_unchecked(bb, pred_count) };
-    }
+        let predecessors = store.predecessors(program);
+        let reachability = store.reachability(program);
 
-    let mut t = SSATransformer {
-        outputs: index_vec![Vec::new(); program.basic_blocks.len()],
-        inputs: index_vec![Vec::new(); program.basic_blocks.len()],
-        defs: index_vec![HashMap::new(); program.basic_blocks.len()],
-        predecessors: &predecessors,
-        program,
-        filled: HashSet::new(),
-        unfilled_until_sealed,
-    };
-
-    let mut tmp_locals = SmallVec::<[LocalId; 32]>::new();
-
-    // Use RPO so that only loop back edges require incomplete phis.
-    for &bb in store.reverse_post_order(t.program).order() {
-        for block_input in &mut t.program.locals[t.program.basic_blocks[bb].inputs] {
-            let new_out = t.program.next_free_local_id.get_and_inc();
-            let original = std::mem::replace(block_input, new_out);
-            t.defs[bb].insert(original, new_out);
+        let mut unfilled_until_sealed = HashMap::new();
+        for bb in program.basic_blocks.iter_idx() {
+            let pred_count = predecessors.of(bb).len() as u32;
+            unsafe { unfilled_until_sealed.insert_unique_unchecked(bb, pred_count) };
         }
 
-        for op_idx in t.program.basic_blocks[bb].operations.iter() {
-            let mut op = t.program.operations[op_idx];
+        let mut t = SSATransformer {
+            outputs: index_vec![Vec::new(); program.basic_blocks.len()],
+            inputs: index_vec![Vec::new(); program.basic_blocks.len()],
+            defs: index_vec![HashMap::new(); program.basic_blocks.len()],
+            predecessors: &predecessors,
+            program,
+            filled: HashSet::new(),
+            unfilled_until_sealed,
+        };
 
-            // Use temporary buffer to circumvent borrow checker.
-            tmp_locals.clear();
-            tmp_locals.extend_from_slice(op.inputs(t.program));
-            for input in &mut tmp_locals {
-                *input = t.read_variable(bb, *input);
-            }
-            op.inputs_mut(&mut t.program.locals).copy_from_slice(&tmp_locals);
+        // Temporary buffer to circumvent borrow checker.
+        let mut tmp_locals = SmallVec::<[LocalId; 32]>::new();
 
-            for output in op.outputs_mut(&mut t.program.locals, &t.program.functions) {
+        // Use RPO so that only loop back edges require incomplete phis.
+        for &bb in store.reverse_post_order(t.program).order() {
+            for block_input in &mut t.program.locals[t.program.basic_blocks[bb].inputs] {
                 let new_out = t.program.next_free_local_id.get_and_inc();
-                let original = std::mem::replace(output, new_out);
+                let original = std::mem::replace(block_input, new_out);
                 t.defs[bb].insert(original, new_out);
             }
 
-            t.program.operations[op_idx] = op;
-        }
+            for op_idx in t.program.basic_blocks[bb].operations.iter() {
+                let mut op = t.program.operations[op_idx];
 
-        tmp_locals.clear();
-        tmp_locals.extend_from_slice(&t.program.locals[t.program.basic_blocks[bb].outputs]);
-        for block_output in &mut tmp_locals {
-            *block_output = t.read_variable(bb, *block_output);
-        }
-        t.program.locals[t.program.basic_blocks[bb].outputs].copy_from_slice(&tmp_locals);
+                tmp_locals.clear();
+                tmp_locals.extend_from_slice(op.inputs(t.program));
+                for input in &mut tmp_locals {
+                    *input = t.read_variable(bb, *input);
+                }
+                op.inputs_mut(&mut t.program.locals).copy_from_slice(&tmp_locals);
 
-        match t.program.basic_blocks[bb].control {
-            Control::LastOpTerminates | Control::InternalReturn | Control::ContinuesTo(_) => {}
-            Control::Branches(branches) => {
-                let new_cond = t.read_variable(bb, branches.condition);
-                match &mut t.program.basic_blocks[bb].control {
-                    Control::Branches(branches) => branches.condition = new_cond,
-                    _ => unreachable!("`t.read_variable` mutated control kind?"),
+                for output in op.outputs_mut(&mut t.program.locals, &t.program.functions) {
+                    let new_out = t.program.next_free_local_id.get_and_inc();
+                    let original = std::mem::replace(output, new_out);
+                    t.defs[bb].insert(original, new_out);
+                }
+
+                t.program.operations[op_idx] = op;
+            }
+
+            tmp_locals.clear();
+            tmp_locals.extend_from_slice(&t.program.locals[t.program.basic_blocks[bb].outputs]);
+            for block_output in &mut tmp_locals {
+                *block_output = t.read_variable(bb, *block_output);
+            }
+            t.program.locals[t.program.basic_blocks[bb].outputs].copy_from_slice(&tmp_locals);
+
+            match t.program.basic_blocks[bb].control {
+                Control::LastOpTerminates | Control::InternalReturn | Control::ContinuesTo(_) => {}
+                Control::Branches(branches) => {
+                    let new_cond = t.read_variable(bb, branches.condition);
+                    match &mut t.program.basic_blocks[bb].control {
+                        Control::Branches(branches) => branches.condition = new_cond,
+                        _ => unreachable!("`t.read_variable` mutated control kind?"),
+                    }
+                }
+                Control::Switch(switch) => {
+                    let new_cond = t.read_variable(bb, switch.condition);
+                    match &mut t.program.basic_blocks[bb].control {
+                        Control::Switch(switch) => switch.condition = new_cond,
+                        _ => unreachable!("`t.read_variable` mutated control kind?"),
+                    }
                 }
             }
-            Control::Switch(switch) => {
-                let new_cond = t.read_variable(bb, switch.condition);
-                match &mut t.program.basic_blocks[bb].control {
-                    Control::Switch(switch) => switch.condition = new_cond,
-                    _ => unreachable!("`t.read_variable` mutated control kind?"),
+
+            t.filled.insert(bb);
+            for succ in t.program.block(bb).successors() {
+                let unfilled = t.unfilled_until_sealed.get_mut(&succ).unwrap();
+                *unfilled -= 1;
+            }
+            for oi in 0..t.outputs[bb].len() {
+                match t.outputs[bb][oi] {
+                    PhiParam::Output(_) => {}
+                    PhiParam::Missing(missing) => {
+                        t.outputs[bb][oi] = PhiParam::Output(t.read_variable(bb, missing));
+                    }
                 }
             }
         }
 
-        t.filled.insert(bb);
-        for succ in t.program.block(bb).successors() {
-            let unfilled = t.unfilled_until_sealed.get_mut(&succ).unwrap();
-            *unfilled -= 1;
-        }
-        for oi in 0..t.outputs[bb].len() {
-            match t.outputs[bb][oi] {
-                PhiParam::Output(_) => {}
-                PhiParam::Missing(missing) => {
-                    t.outputs[bb][oi] = PhiParam::Output(t.read_variable(bb, missing));
-                }
+        for bb in t.program.basic_blocks.iter_idx() {
+            if !reachability.contains(bb) {
+                continue;
             }
-        }
-    }
+            let BasicBlock { inputs, outputs, .. } = t.program.basic_blocks[bb];
+            let inputs_start = t.program.locals.len_idx();
+            t.program.locals.extend_from_within(inputs.usize_range());
+            t.program.locals.extend_from_slice(&t.inputs[bb]);
+            t.program.basic_blocks[bb].inputs = Span::new(inputs_start, t.program.locals.len_idx());
 
-    for bb in t.program.basic_blocks.iter_idx() {
-        if !reachability.contains(bb) {
-            continue;
+            let outputs_start = t.program.locals.len_idx();
+            t.program.locals.extend_from_within(outputs.usize_range());
+            t.program.locals.extend(t.outputs[bb].iter().map(|out| match out {
+                PhiParam::Output(out) => out,
+                PhiParam::Missing(_) => {
+                    unreachable!("unresolved missing param (@{})", bb.get())
+                }
+            }));
+            t.program.basic_blocks[bb].outputs =
+                Span::new(outputs_start, t.program.locals.len_idx());
         }
-        let BasicBlock { inputs, outputs, .. } = t.program.basic_blocks[bb];
-        let inputs_start = t.program.locals.len_idx();
-        t.program.locals.extend_from_within(inputs.usize_range());
-        t.program.locals.extend_from_slice(&t.inputs[bb]);
-        t.program.basic_blocks[bb].inputs = Span::new(inputs_start, t.program.locals.len_idx());
-
-        let outputs_start = t.program.locals.len_idx();
-        t.program.locals.extend_from_within(outputs.usize_range());
-        t.program.locals.extend(t.outputs[bb].iter().map(|out| match out {
-            PhiParam::Output(out) => out,
-            PhiParam::Missing(_) => unreachable!("unresolved missing param (@{})", bb.get()),
-        }));
-        t.program.basic_blocks[bb].outputs = Span::new(outputs_start, t.program.locals.len_idx());
     }
 }
 
@@ -239,7 +247,7 @@ impl SSATransformer<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{run as ssa_transform, *};
+    use super::*;
     use crate::Legalizer;
     use plank_test_utils::dedent_preserve_indent;
     use sir_parser::EmitConfig;
@@ -249,7 +257,7 @@ mod tests {
         config.allow_duplicate_locals = true;
         let mut program = sir_parser::parse_without_legalization(input, config);
         let store = AnalysesStore::default();
-        ssa_transform(&mut program, &store);
+        run_pass(&mut SSATransform, &mut program, &store);
         Legalizer::default()
             .run(&program, &store)
             .unwrap_or_else(|e| panic!("Legalize failed:\n{e}\n{program}"));
