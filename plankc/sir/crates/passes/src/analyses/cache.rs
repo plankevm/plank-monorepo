@@ -81,6 +81,13 @@ macro_rules! define_analyses {
                     self.$field.invalidate();
                 })*
             }
+
+            $(
+                pub fn $field(&self, program: &EthIRProgram) -> Ref<'_, $ty> {
+                    self.$field.get(program, self)
+
+                }
+            )*
         }
     };
 }
@@ -99,54 +106,8 @@ define_analyses! {
 }
 
 impl AnalysesStore {
-    pub fn def_use(&self, program: &EthIRProgram) -> Ref<'_, DefUse> {
-        self.def_use.get(program, self)
-    }
-
     pub fn def_use_mut(&self, program: &EthIRProgram) -> RefMut<'_, DefUse> {
         self.def_use.get_mut(program, self, true)
-    }
-
-    pub fn reverse_post_order(&self, program: &EthIRProgram) -> Ref<'_, ReversePostOrder> {
-        self.reverse_post_order.get(program, self)
-    }
-
-    pub fn predecessors(&self, program: &EthIRProgram) -> Ref<'_, Predecessors> {
-        self.predecessors.get(program, self)
-    }
-
-    pub fn dominators(&self, program: &EthIRProgram) -> Ref<'_, Dominators> {
-        self.dominators.get(program, self)
-    }
-
-    pub fn dominance_frontiers(&self, program: &EthIRProgram) -> Ref<'_, DominanceFrontiers> {
-        self.dominance_frontiers.get(program, self)
-    }
-
-    pub fn basic_block_ownership(
-        &self,
-        program: &EthIRProgram,
-    ) -> Ref<'_, BasicBlockOwnershipAndReachability> {
-        self.basic_block_ownership.get(program, self)
-    }
-
-    pub fn cfg_in_out_bundling(
-        &self,
-        program: &EthIRProgram,
-    ) -> Ref<'_, ControlFlowGraphInOutBundling> {
-        self.cfg_in_out_bundling.get(program, self)
-    }
-
-    pub fn allocation_liveness(&self, program: &EthIRProgram) -> Ref<'_, AllocationLiveness> {
-        self.allocation_liveness.get(program, self)
-    }
-
-    pub fn local_liveness(&self, program: &EthIRProgram) -> Ref<'_, LocalLiveness> {
-        self.local_liveness.get(program, self)
-    }
-
-    pub fn reachability(&self, program: &EthIRProgram) -> Ref<'_, Reachability> {
-        self.reachability.get(program, self)
     }
 
     pub fn reachability_mut(
