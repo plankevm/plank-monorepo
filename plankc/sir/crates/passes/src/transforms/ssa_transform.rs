@@ -4,8 +4,6 @@ use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span};
 use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, LocalId, index_vec};
 use smallvec::SmallVec;
 
-type Defs = IndexVec<BasicBlockId, HashMap<LocalId, LocalId>>;
-
 // to-SSA is usually a one-off operation so need to try and cache state.
 pub struct SSATransform;
 
@@ -193,7 +191,7 @@ struct SSATransformer<'a> {
     filled: HashSet<BasicBlockId>,
     outputs: IndexVec<BasicBlockId, Vec<PhiParam>>,
     inputs: IndexVec<BasicBlockId, Vec<LocalId>>,
-    defs: Defs,
+    defs: IndexVec<BasicBlockId, HashMap<LocalId, LocalId>>,
 }
 
 impl SSATransformer<'_> {
