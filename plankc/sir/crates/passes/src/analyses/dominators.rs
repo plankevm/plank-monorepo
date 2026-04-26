@@ -1,6 +1,6 @@
 use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, LoopLimit};
-use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram, IndexVec, index_vec};
+use sir_data::{BasicBlockId, EthIRProgram, FunctionView, IndexVec, index_vec};
 
 use crate::analyses::{AnalysesStore, Predecessors, cache::Analysis};
 
@@ -12,10 +12,19 @@ pub struct Dominators {
 impl Analysis for Dominators {
     // iterative dominator algorithm using RPO
     fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
+        eprintln!("{program}");
         let predecessors = store.predecessors(program);
+        let rpo = store.reverse_post_order(program);
+        eprintln!("{rpo:?}");
         self.inner.clear();
         for func in program.functions_iter() {
-            compute_function_dominators(program, func.entry().id(), &predecessors, &mut self.inner);
+            compute_function_dominators(
+                program,
+                func,
+                &predecessors,
+                rpo.function_rpo(func.id()),
+                &mut self.inner,
+            );
         }
     }
 }
@@ -71,18 +80,18 @@ impl DominanceFrontiers {
 
 fn compute_function_dominators(
     program: &EthIRProgram,
-    entry: BasicBlockId,
+    function: FunctionView<'_>,
     predecessors: &Predecessors,
+    rpo: &[BasicBlockId],
     dominators: &mut DenseIndexMap<BasicBlockId, BasicBlockId>,
 ) {
+    let entry = function.entry().id();
     assert!(dominators.insert(entry, entry).is_none());
+    eprintln!("compute dom func @{}", function.id().const_get());
+    eprintln!("  rpo: {rpo:?}",);
 
-    let mut visited = DenseIndexSet::new();
-    let mut reverse_post_order = Vec::new();
-    dfs_postorder(program, entry, &mut visited, &mut reverse_post_order);
-    reverse_post_order.reverse();
     let mut bb_to_rpo_pos = index_vec![0; program.basic_blocks.len()];
-    for (pos, &basic_block) in reverse_post_order.iter().enumerate() {
+    for (pos, &basic_block) in rpo.iter().enumerate() {
         bb_to_rpo_pos[basic_block] = pos as u32;
     }
 
@@ -91,7 +100,7 @@ fn compute_function_dominators(
     while changed {
         limit.tick();
         changed = false;
-        for &bb in reverse_post_order[1..].iter() {
+        for &bb in rpo[1..].iter() {
             let mut preds =
                 predecessors.of(bb).iter().copied().filter(|&pred| dominators.contains(pred));
             let mut new_idom = preds.next().expect("non-entry block in RPO has no predecessors");
@@ -128,22 +137,6 @@ fn intersect(
     }
 
     finger1
-}
-
-fn dfs_postorder(
-    program: &EthIRProgram,
-    bb: BasicBlockId,
-    visited: &mut DenseIndexSet<BasicBlockId>,
-    postorder: &mut Vec<BasicBlockId>,
-) {
-    if visited.contains(bb) {
-        return;
-    }
-    visited.add(bb);
-    for succ in program.block(bb).successors() {
-        dfs_postorder(program, succ, visited, postorder);
-    }
-    postorder.push(bb);
 }
 
 #[cfg(test)]

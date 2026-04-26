@@ -35,7 +35,7 @@ impl Pass for SSATransform {
         let mut tmp_locals = SmallVec::<[LocalId; 32]>::new();
 
         // Use RPO so that only loop back edges require incomplete phis.
-        for &bb in store.reverse_post_order(t.program).order() {
+        for &bb in store.reverse_post_order(t.program).global_rpo() {
             for block_input in &mut t.program.locals[t.program.basic_blocks[bb].inputs] {
                 let new_out = t.program.next_free_local_id.get_and_inc();
                 let original = std::mem::replace(block_input, new_out);
@@ -91,11 +91,11 @@ impl Pass for SSATransform {
                 let unfilled = t.unfilled_until_sealed.get_mut(&succ).unwrap();
                 *unfilled -= 1;
             }
-            for oi in 0..t.outputs[bb].len() {
-                match t.outputs[bb][oi] {
+            for output_idx in 0..t.outputs[bb].len() {
+                match t.outputs[bb][output_idx] {
                     PhiParam::Output(_) => {}
                     PhiParam::Missing(missing) => {
-                        t.outputs[bb][oi] = PhiParam::Output(t.read_variable(bb, missing));
+                        t.outputs[bb][output_idx] = PhiParam::Output(t.read_variable(bb, missing));
                     }
                 }
             }

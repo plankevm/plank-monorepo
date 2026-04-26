@@ -1,7 +1,7 @@
 use hashbrown::{HashMap, HashSet};
 
-use crate::analyses::{AnalysesStore, Predecessors, cache::Analysis, dfs_postorder};
-use plank_core::{DenseIndexSet, Idx};
+use crate::analyses::{AnalysesStore, Predecessors, ReversePostOrder, cache::Analysis};
+use plank_core::Idx;
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, IndexVec, LocalId, OperationIdx};
 use std::cmp::{Ord, Ordering};
 
@@ -88,14 +88,9 @@ impl Analysis for LocalLiveness {
         self.locals_live_at_exit.resize(program.basic_blocks.len(), HashSet::new());
 
         let predecessors = store.predecessors(program);
+        let rpo = store.reverse_post_order(program);
 
-        let mut blocks_postorder = Vec::new();
-        let mut visited = DenseIndexSet::new();
-        for func in program.functions_iter() {
-            dfs_postorder(program, func.entry().id(), &mut visited, &mut blocks_postorder);
-        }
-
-        self.compute_liveness(program, &predecessors, &blocks_postorder);
+        self.compute_liveness(program, &predecessors, &rpo);
         self.compute_intervals(program);
     }
 }
@@ -109,12 +104,12 @@ impl LocalLiveness {
         &mut self,
         program: &EthIRProgram,
         predecessors: &Predecessors,
-        blocks_postorder: &[BasicBlockId],
+        rpo: &ReversePostOrder,
     ) {
         let mut changed = true;
         while changed {
             changed = false;
-            for &bb_id in blocks_postorder {
+            for bb_id in rpo.global_post_order() {
                 Self::compute_liveness_at_block_entry(
                     program,
                     bb_id,
