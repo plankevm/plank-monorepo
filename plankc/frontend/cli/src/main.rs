@@ -58,7 +58,10 @@ struct BuildArgs {
     #[arg(short = 'm', long = "show-mir", help = "show MIR")]
     show_mir: bool,
 
-    #[arg(long = "show-sir-in", help = "show SIR post `mir-lower`")]
+    #[arg(
+        long = "show-sir-post-mir",
+        help = "show the SIR going into the middle end (directly after lowering from MIR)"
+    )]
     show_sir_in: bool,
 
     #[arg(long = "show-sir-last", help = "show the final SIR pre lowering to EVM assembly")]
