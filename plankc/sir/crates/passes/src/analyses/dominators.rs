@@ -12,10 +12,8 @@ pub struct Dominators {
 impl Analysis for Dominators {
     // iterative dominator algorithm using RPO
     fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
-        eprintln!("{program}");
         let predecessors = store.predecessors(program);
         let rpo = store.reverse_post_order(program);
-        eprintln!("{rpo:?}");
         self.inner.clear();
         for func in program.functions_iter() {
             compute_function_dominators(
@@ -87,8 +85,6 @@ fn compute_function_dominators(
 ) {
     let entry = function.entry().id();
     assert!(dominators.insert(entry, entry).is_none());
-    eprintln!("compute dom func @{}", function.id().const_get());
-    eprintln!("  rpo: {rpo:?}",);
 
     let mut bb_to_rpo_pos = index_vec![0; program.basic_blocks.len()];
     for (pos, &basic_block) in rpo.iter().enumerate() {
