@@ -125,6 +125,9 @@ impl Pass for SSATransform {
                 Span::new(outputs_start, t.program.locals.len_idx());
         }
     }
+
+    // TODO: Implement `preserves`. to-SSA only affects locals & block inputs so CFG remains
+    // unchanged, we have perf to spare so conservatively omitting for now.
 }
 
 /// Checks that only function entry points have inputs and `iret` blocks have outputs in pre-SSA
