@@ -26,13 +26,19 @@ Both read the implementation address from calldata and delegate to `deploy_clone
 The ERC1167 minimal proxy is a fixed 55-byte contract assembled directly in memory:
 
 ```plank
-let buf = @malloc_uninit(55);
-@mstore20(buf, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
-@mstore20(buf +% 20, address);
-@mstore15(buf +% 40, 0x5af43d82803e903d91602b57fd5bf3);
+let len = 32 + 20 + 15;
+let buf = @malloc_uninit(len);
+@mstore32(buf +% (len - 32), 0x5af43d82803e903d91602b57fd5bf3);
+@mstore32(buf +% (len - 32 - 15), address);
+@mstore32(buf +% (len - 32 - 15 - 20), 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
 ```
 
 The bytecode consists of three parts: a fixed prefix (20 bytes), the implementation address (20 bytes), and a fixed suffix (15 bytes).
+We write the components in backwards order as this allows us to use more
+efficient `@mstore32` calls instead of `@mstore20` / `@mstore15` that aren't native in the EVM and therefore cost more.
+
+Such optimizations will be handled automatically by the standard library in the
+future.
 
 ## Comptime Generic Dispatch
 

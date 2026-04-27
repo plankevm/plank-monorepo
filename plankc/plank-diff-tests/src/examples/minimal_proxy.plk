@@ -31,14 +31,15 @@ const clone_deterministic = fn () never {
 
 const deploy_clone = fn (comptime SaltT: type, salt: SaltT) never {
     let address = @evm_calldataload(4);
-    let buf = @malloc_uninit(55);
-    @mstore20(buf, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
-    @mstore20(buf +% 20, address);
-    @mstore15(buf +% 40, 0x5af43d82803e903d91602b57fd5bf3);
+    let len = 32 + 20 + 15;
+    let buf = @malloc_uninit(len);
+    @mstore32(buf +% (len - 32), 0x5af43d82803e903d91602b57fd5bf3);
+    @mstore32(buf +% (len - 32 - 15), address);
+    @mstore32(buf +% (len - 32 - 15 - 20), 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
     let address = if SaltT == void {
-        @evm_create(0, buf, 55)
+        @evm_create(0, buf +% (32 - 20), 55)
     } else if SaltT == u256 {
-        @evm_create2(0, buf, 55, salt)
+        @evm_create2(0, buf +% (32 - 20), 55, salt)
     } else {
         // Jank compile-time error.
         let _unsupported_clone_type_error: u256 = true;

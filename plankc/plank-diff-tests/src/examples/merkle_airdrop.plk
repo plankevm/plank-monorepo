@@ -45,9 +45,9 @@ const claim = fn () never {
     let offset = 4 + @evm_calldataload(68);
     let proof_length = @evm_calldataload(offset);
 
-    @mstore20(buf, address);
-    @mstore32(buf +% 20, amount);
-    let mut node = @evm_keccak256(buf, 52);
+    @mstore32(buf, address);
+    @mstore32(buf +% 32, amount);
+    let mut node = @evm_keccak256(buf +% 12, 52);
 
     let mut i = 0;
     while i < proof_length {

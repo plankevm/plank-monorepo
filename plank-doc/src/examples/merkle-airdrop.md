@@ -34,11 +34,11 @@ while i < proof_length {
 
 ## Leaf Computation
 
-The leaf is computed by packing the address (20 bytes) and amount (32 bytes) into a 52-byte buffer:
+The leaf is computed by packing the address (20 bytes) and amount (32 bytes) into a manually allocated buffer:
 
 ```plank
 let buf = @malloc_uninit(64);
-@mstore20(buf, address);
-@mstore32(buf +% 20, amount);
-let mut node = @evm_keccak256(buf, 52);
+@mstore32(buf, address);
+@mstore32(buf +% 32, amount);
+let mut node = @evm_keccak256(buf +% 12, 52);
 ```
