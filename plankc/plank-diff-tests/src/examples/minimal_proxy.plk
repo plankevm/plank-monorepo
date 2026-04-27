@@ -33,8 +33,8 @@ const deploy_clone = fn (comptime SaltT: type, salt: SaltT) never {
     let address = @evm_calldataload(4);
     let buf = @malloc_uninit(55);
     @mstore20(buf, 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
-    @mstore20(@evm_add(buf, 20), address);
-    @mstore15(@evm_add(buf, 40), 0x5af43d82803e903d91602b57fd5bf3);
+    @mstore20(buf +% 20, address);
+    @mstore15(buf +% 40, 0x5af43d82803e903d91602b57fd5bf3);
     let address = if SaltT == void {
         @evm_create(0, buf, 55)
     } else if SaltT == u256 {

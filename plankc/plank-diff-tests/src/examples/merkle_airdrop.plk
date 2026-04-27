@@ -46,7 +46,7 @@ const claim = fn () never {
     let proof_length = @evm_calldataload(offset);
 
     @mstore20(buf, address);
-    @mstore32(@evm_add(buf, 20), amount);
+    @mstore32(buf +% 20, amount);
     let mut node = @evm_keccak256(buf, 52);
 
     let mut i = 0;
@@ -54,10 +54,10 @@ const claim = fn () never {
         let proof_element = @evm_calldataload(offset + 32 + i * 32);
         if node <= proof_element {
             @mstore32(buf, node);
-            @mstore32(@evm_add(buf, 32), proof_element);
+            @mstore32(buf +% 32, proof_element);
         } else {
             @mstore32(buf, proof_element);
-            @mstore32(@evm_add(buf, 32), node);
+            @mstore32(buf +% 32, node);
         }
         node = @evm_keccak256(buf, 64);
         i = i + 1;

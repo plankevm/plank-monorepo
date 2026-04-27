@@ -1,0 +1,89 @@
+<style>
+.hljs-type { color: #b21e00; }
+.hljs-literal { color: #b21e00; }
+.hljs-symbol { color: #008200; }
+.hljs-variable { color: #d70025; }
+.hljs-function { color: #6f42c1; }
+html.dark .hljs-type { color: #ffee99; }
+html.dark .hljs-literal { color: #ffee99; }
+html.dark .hljs-symbol { color: #b8cc52; }
+html.dark .hljs-variable { color: #ff7733; }
+html.dark .hljs-function { color: #ffb454; }
+</style>
+<script>
+(function() {
+  var plankLang = function(hljs) {
+    return {
+      name: 'plank',
+      case_insensitive: false,
+      keywords: {
+        keyword: 'as comptime const else fn if import init inline let mut return run struct while',
+        type: 'void u256 bool memptr type function never',
+        literal: 'true false'
+      },
+      contains: [
+        hljs.C_LINE_COMMENT_MODE,
+        hljs.C_BLOCK_COMMENT_MODE,
+        {
+          className: 'number',
+          begin: /-?0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
+          relevance: 10
+        },
+        {
+          className: 'number',
+          begin: /-?0b[01][01_]*/
+        },
+        {
+          className: 'number',
+          begin: /-?[0-9][0-9_]*/
+        },
+        {
+          className: 'title',
+          begin: /@evm_[a-z0-9_]+/,
+          relevance: 10
+        },
+        {
+          className: 'title',
+          begin: /@malloc_[a-z0-9_]+/,
+          relevance: 10
+        },
+        {
+          className: 'title',
+          begin: /@[a-z_][a-z0-9_]*/,
+          relevance: 5
+        },
+        {
+          className: 'string',
+          begin: /"[^"]*"/,
+          relevance: 0
+        },
+        {
+          className: 'function',
+          begin: /[a-zA-Z_]\w*(?=\s*\()/,
+          relevance: 0
+        },
+        {
+          className: 'symbol',
+          begin: /\b[A-Z][A-Z0-9_]{2,}\b/
+        },
+        {
+          className: 'variable',
+          begin: /\b[a-z_][a-z0-9_]*\s*(?==)/,
+          relevance: 0
+        },
+        {
+          className: 'type',
+          begin: /\b[A-Z][a-zA-Z0-9]*\b/
+        }
+      ]
+    };
+  };
+
+  window.addEventListener('load', function() {
+    hljs.registerLanguage('plank', plankLang);
+    document.querySelectorAll('pre code.language-plank').forEach(function(block) {
+      hljs.highlightBlock(block);
+    });
+  });
+})();
+</script>

@@ -31,14 +31,25 @@
     "imports": {
       "patterns": [
         {
-          "match": "\\b(import)\\s+([a-zA-Z_][a-zA-Z0-9_]*(?:::[a-zA-Z_][a-zA-Z0-9_]*)*)(?:::(\\*))?\\s*(?:(as)\\s+([a-zA-Z_][a-zA-Z0-9_]*))?",
-          "captures": {
-            "1": { "name": "keyword.other.import.plank" },
-            "2": { "name": "entity.name.namespace.plank" },
-            "3": { "name": "keyword.operator.glob.plank" },
-            "4": { "name": "keyword.other.as.plank" },
-            "5": { "name": "entity.name.type.plank" }
-          }
+          "begin": "\\b(import)\\b",
+          "beginCaptures": {
+            "1": { "name": "keyword.other.import.plank" }
+          },
+          "end": "(?=;|$)",
+          "patterns": [
+            {
+              "match": "\\b(as)\\b",
+              "name": "keyword.other.as.plank"
+            },
+            {
+              "match": "\\*",
+              "name": "keyword.operator.glob.plank"
+            },
+            {
+              "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b",
+              "name": "entity.name.namespace.plank"
+            }
+          ]
         }
       ]
     },

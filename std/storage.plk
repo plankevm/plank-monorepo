@@ -12,7 +12,7 @@ const slot_hash = fn (slot: u256) u256 {
 const map_slot_hash = fn (key: u256, base_slot: u256) u256 {
     let buf = @malloc_uninit(64);
     @mstore32(buf, key);
-    @mstore32(@evm_add(buf, 32), base_slot);
+    @mstore32(buf +% 32, base_slot);
     @evm_keccak256(buf, 64)
 };
 
@@ -24,7 +24,7 @@ const sstore_bytes = fn (slot: u256, data: membytes) void {
     let mut i = 0;
     while i * 32 < data.len {
         let chunk_slot = base_slot + i;
-        let chunk = @mload32(@evm_add(data.ptr, 32 * i));
+        let chunk = @mload32(data.ptr +% 32 * i);
         @evm_sstore(chunk_slot, chunk);
         i = i + 1;
     }
@@ -40,7 +40,7 @@ const sload_bytes = fn (slot: u256) membytes {
     while i * 32 < length {
         let chunk_slot = base_slot + i;
         let chunk = @evm_sload(chunk_slot);
-        @mstore32(@evm_add(data.ptr, 32 * i), chunk);
+        @mstore32(data.ptr +% 32 * i, chunk);
         i = i + 1;
     }
     data

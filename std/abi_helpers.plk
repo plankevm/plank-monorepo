@@ -175,7 +175,7 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: memptr, offset: u256) 
         unsafe_mem_read_u256(buf, offset) != 0
     } else if T == membytes {
         let len = unsafe_mem_read_u256(buf, offset);
-        membytes_from_ptr(@evm_add(buf, offset + 32), len)
+        membytes_from_ptr(buf +% offset +% 32, len)
     } else if @is_struct(T) {
         let initial = AbiDecodeAccumulator(T) {
             buf: buf,
