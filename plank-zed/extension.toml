@@ -1,0 +1,12 @@
+id = "plank"
+name = "Plank"
+description = "Plank language support for Zed"
+version = "0.1.0"
+schema_version = 1
+authors = ["philogy", "DaniPopes"]
+repository = "https://github.com/plankevm/plank-monorepo"
+
+[grammars.plank]
+repository = "https://github.com/plankevm/plank-monorepo"
+commit = "HEAD"
+path = "plank-tree-sitter"

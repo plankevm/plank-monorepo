@@ -1,0 +1,1 @@
+../../../plank-tree-sitter/queries/brackets.scm
