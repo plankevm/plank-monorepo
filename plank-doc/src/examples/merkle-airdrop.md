@@ -42,3 +42,4 @@ let buf = @malloc_uninit(64);
 @mstore32(buf +% 32, amount);
 let mut node = @evm_keccak256(buf +% 12, 52);
 ```
+
