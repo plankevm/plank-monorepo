@@ -8,4 +8,3 @@
   - [ERC20 Token](./examples/erc20.md)
   - [Minimal Proxy (ERC1167)](./examples/minimal-proxy.md)
   - [Merkle Airdrop](./examples/merkle-airdrop.md)
-  - [Multisig Wallet](./examples/multisig-wallet.md)
