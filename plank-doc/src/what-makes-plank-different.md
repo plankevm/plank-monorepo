@@ -101,7 +101,7 @@ Functions in Plank are values at `comptime` - you can store them in variables, p
 Patterns that require special syntax in Solidity, like access control modifiers, can be expressed as `comptime` functions in Plank:
 
 ```plank
-const require_owner = fn(action: fn() void) void {
+const require_owner = fn(comptime action: function) void {
     if @evm_caller() != OWNER { revert_empty(); }
     action();
 };
