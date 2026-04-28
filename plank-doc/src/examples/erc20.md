@@ -21,7 +21,7 @@ The contract uses a few standard library utilities:
 
 ## Constants
 
-Storage slots and function selectors are defined as constants at the top of the file. There is no compiler-managed storage layout: storage slots are defined explicitly and mapping slots are derived using `map_slot_hash`.
+Storage slots and function selectors are defined as constants at the top of the file. There is no compiler-managed storage layout yet, so storage slots are defined explicitly and mapping slots are derived using `map_slot_hash`.
 
 Function selectors and event topics follow standard EVM conventions.
 

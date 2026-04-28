@@ -1,6 +1,6 @@
 # Introduction
 
-Plank is a low-level programming language for writing EVM smart contracts, giving you direct access to every opcode as a builtin function, without inline assembly blocks, or separate syntax. At the same time, it provides modern language features like compile-time evaluation (comptime), generics, structs, modules, and first-class functions. By combining low-level control with high-level ergonomics, Plank lets you write expressive code that still compiles to efficient bytecode.
+Plank is an EVM-native programming language for writing smart contracts, giving you direct access to every opcode as a builtin function, without inline assembly blocks, or separate syntax. At the same time, it provides modern language features like compile-time evaluation (comptime), generics, structs, modules, and first-class functions. By combining low-level control with high-level ergonomics, Plank lets you write expressive code that still compiles to efficient bytecode.
 
 Under the hood, Plank compiles to EVM bytecode via Sensei IR (SIR), a language-agnostic intermediate representation designed for fast compilation and EVM-specific optimizations.
 

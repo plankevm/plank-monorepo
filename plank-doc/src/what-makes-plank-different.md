@@ -20,7 +20,7 @@ See [Comptime](./comptime.md) for details.
 
 ## Direct EVM Access
 
-Every EVM opcode is exposed as a builtin function. There's no separate assembly or inline assembly: opcodes are called directly in your code via builtins such as `@evm_sload`, `@evm_sstore`, `@evm_caller`, and `@evm_keccak256`.
+Every EVM opcode is exposed as a builtin function. There's no separate assembly or inline assembly: opcodes are called directly in your code via builtins such as `@evm_sload`, `@evm_sstore`, `@evm_caller`, and `@evm_keccak256`. Low-level operations become composable building blocks, reusable and abstractable with the same flexibility as high-level code.
 
 ```plank
 let caller = @evm_caller();
@@ -29,11 +29,9 @@ let slot = map_slot_hash(caller, BALANCE_SLOT);
 @evm_sstore(slot, amount);
 ```
 
-Low-level patterns that require assembly in Solidity become regular code in Plank.
-
 ## Operator Semantics
 
-Arithmetic operators in Plank are checked by default: `+`, `-`, and `*` revert on overflow and underflow. When wrapping behavior is required, for example for modular arithmetic on storage slots, use the `%`-suffixed variants:
+Arithmetic operators in Plank are checked by default: `+`, `-`, and `*` revert on overflow and underflow. When wrapping behavior is required, for example for modular arithmetic on storage slots, use the `%`-suffixed variants (`+%`, `-%`, `*%`):
 
 ```plank
 let sum = a + b;            // reverts on overflow
@@ -47,13 +45,19 @@ Division has two rounding modes, since division can be floored or ceiled:
 7 +/ 2 == 4;   // ceiling division
 ```
 
-By requiring an explicit choice, Plank avoids the ambiguity present in other languages, where the rounding direction of `/` may depend on context or convention.
+By requiring an explicit choice, Plank makes the rounding direction immediately visible in the code, rather than relying on a single `/` operator whose rounding behavior is easy to forget or overlook.
+
+Bitwise operators (`|`, `^`, `&`, `<<`, `>>`, `~`) and comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) follow standard conventions.
+
+Logical operators are `and` and `or`, instead of `&&` and `||`.
 
 ## Memory Management
 
-Plank simplifies low-level memory management via `@malloc_uninit` and `@malloc_zeroed` builtins. The compiler controls the final memory layout, tracking allocation lifetimes and optimizing them by removing redundant allocations, merging overlapping ones, reordering them, and promoting dynamic allocations to static slots where possible.
+Plank simplifies low-level memory management via the `@malloc_uninit` and `@malloc_zeroed` builtins, with the compiler controlling the final memory layout and allocation lifetimes. 
 
-With full visibility into memory usage, the compiler can produce memory layouts that minimize memory footprint, avoid unnecessary reads and writes, and safely spill variables from the EVM stack to memory when needed, eliminating the possibility of ["stack too deep"](https://github.com/argotorg/solidity/issues/14358) errors.
+This design enables optimizations such as redundant allocation removal, allocation merging and reordering, and promotion of dynamic allocations to static slots. With full visibility into memory usage, the compiler can produce memory layouts that minimize memory footprint, avoid unnecessary reads and writes, and safely spill variables from the EVM stack to memory when needed, thus eliminating the possibility of ["stack too deep"](https://github.com/argotorg/solidity/issues/14358) errors.
+
+While some of these optimizations are still a work in progress, the model is designed to support them.
 
 ```plank
 const map_slot_hash = fn (key: u256, base_slot: u256) u256 {
@@ -92,9 +96,9 @@ No manual calldata slicing, no hardcoded offsets - just define your struct, and 
 
 ## First-Class Functions
 
-Functions in Plank are values. You can store them in variables, pass them as arguments, and return them from other functions.
+Functions in Plank are values at `comptime` - you can store them in variables, pass them as arguments, and return them from other functions.
 
-Patterns that require special syntax in Solidity, like access control modifiers, are just regular functions in Plank:
+Patterns that require special syntax in Solidity, like access control modifiers, can be expressed as `comptime` functions in Plank:
 
 ```plank
 const require_owner = fn(action: fn() void) void {
