@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "plank-monorepo",
+  "compatibility_date": "2026-04-29",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "book"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}
