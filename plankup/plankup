@@ -245,7 +245,7 @@ resolve_editor_cmd() {
 
 is_extension_installed() {
     local editor="$1"
-    "$editor" --list-extensions 2>/dev/null | grep -qi "^plankevm$"
+    "$editor" --list-extensions 2>/dev/null | grep -qi "^undefined_publisher\.plankevm$"
 }
 
 should_install_extension() {
