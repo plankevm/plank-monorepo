@@ -12,17 +12,9 @@ GITHUB_DOWNLOAD="https://github.com/$REPO/releases/download"
 TMPDIR_CLEANUP=""
 
 PLANKUP_SELF_URL="https://raw.githubusercontent.com/$REPO/main/plankup/plankup"
+PLANKUP_VERSION="0.1.1"
 
 skip_self_update=false
-args=()
-for arg in "$@"; do
-    if [ "$arg" = "--skip-self" ]; then
-        skip_self_update=true
-    else
-        args+=("$arg")
-    fi
-done
-set -- "${args[@]}"
 
 say() { printf "plankup: %s\n" "$1"; }
 warn() { say "warning: $1" >&2; }
@@ -132,10 +124,12 @@ plankup — the Plank compiler installer and updater
 USAGE:
     plankup
     plankup -h | --help
+    plankup -v | --version
     plankup --skip-self
 
 OPTIONS:
     -h, --help       Show this help message and exit
+    -v, --version    Show version information and exit
     --skip-self      Skip the remote self-update check (internal use)
 
 Running plankup without arguments installs the latest version of plank.
@@ -149,12 +143,21 @@ main() {
                 usage
                 return
                 ;;
+            -v|--version)
+                printf "plankup %s\n" "$PLANKUP_VERSION"
+                return
+                ;;
+            --skip-self)
+                skip_self_update=true
+                shift
+                ;;
             *)
                 err "unknown argument: $1"
                 ;;
         esac
-        shift
     done
+
+    self_update_plankup "$@"
 
     need_cmd curl
     need_cmd tar
@@ -345,7 +348,5 @@ self_update_plankup() {
 
    rm -f "$tmp"
 }
-
-self_update_plankup "$@"
 
 main "$@"
