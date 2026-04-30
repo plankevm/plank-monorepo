@@ -11,6 +11,19 @@ GITHUB_DOWNLOAD="https://github.com/$REPO/releases/download"
 
 TMPDIR_CLEANUP=""
 
+PLANKUP_SELF_URL="https://raw.githubusercontent.com/$REPO/main/plankup/plankup"
+
+skip_self_update=false
+args=()
+for arg in "$@"; do
+    if [ "$arg" = "--skip-self" ]; then
+        skip_self_update=true
+    else
+        args+=("$arg")
+    fi
+done
+set -- "${args[@]}"
+
 say() { printf "plankup: %s\n" "$1"; }
 warn() { say "warning: $1" >&2; }
 err() { say "error: $1" >&2; exit 1; }
@@ -119,6 +132,11 @@ plankup — the Plank compiler installer and updater
 USAGE:
     plankup
     plankup -h | --help
+    plankup --skip-self
+
+OPTIONS:
+    -h, --help       Show this help message and exit
+    --skip-self      Skip the remote self-update check (internal use)
 
 Running plankup without arguments installs the latest version of plank.
 EOF
@@ -294,5 +312,40 @@ install_vscode_extension() {
             || warn "failed to install extension for $editor_name"
     done
 }
+
+self_update_plankup() {
+   [ "$skip_self_update" = true ] && return
+
+   need_cmd curl
+
+   local self_path="${BASH_SOURCE[0]}"
+   local self_dir
+
+   # Can't self-update if path is unknown, not a regular file, or dir isn't writable
+   if [ -z "$self_path" ] || [ ! -f "$self_path" ]; then
+       return
+   fi
+   self_dir=$(dirname "$self_path")
+   if [ ! -w "$self_dir" ]; then
+       return
+   fi
+
+   local tmp
+   tmp=$(mktemp)
+
+   if curl -sSfL "$PLANKUP_SELF_URL" -o "$tmp" 2>/dev/null; then
+       if ! cmp -s "$self_path" "$tmp"; then
+           say "newer plankup found on main, restarting..."
+           mv "$tmp" "$self_path"
+           chmod +x "$self_path"
+           # Re-run the latest version. --skip-self breaks the recursion.
+           exec bash "$self_path" --skip-self "$@"
+       fi
+   fi
+
+   rm -f "$tmp"
+}
+
+self_update_plankup "$@"
 
 main "$@"
