@@ -1,4 +1,5 @@
 name = "plank-monorepo"
 compatibility_date = "2026-04-30"
 
-pages_build_output_dir = "book"
+[assets]
+directory = "./book"
