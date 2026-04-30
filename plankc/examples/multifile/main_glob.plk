@@ -4,4 +4,5 @@ const local_val = MAGIC;
 
 init {
     let x = double(MAGIC);
+    @evm_stop();
 }
