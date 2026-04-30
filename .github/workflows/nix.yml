@@ -1,0 +1,25 @@
+name: Nix
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  flake:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Check flake outputs and run checks
+        run: nix flake check --print-build-logs
+
+      - name: Build package outputs
+        run: |
+          nix build .#plank --no-link --print-build-logs
+          nix build .#tree-sitter-plank --no-link --print-build-logs

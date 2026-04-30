@@ -3,3 +3,4 @@ target/
 plank-tree-sitter/Cargo.lock
 *.vsix
 plank-doc/book/
+result

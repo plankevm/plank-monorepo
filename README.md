@@ -8,6 +8,14 @@ To install the compiler run:
 curl -L install.plankevm.org | bash && plankup
 ```
 
+Or, with Nix flakes enabled, run Plank directly from the flake:
+
+```bash
+nix run github:plankevm/plank-monorepo#plank -- --help
+```
+
+The Nix package includes the compiler, standard library, and local docs. The wrapped `plank` binary sets `PLANK_DIR` to the package output so `plank build` can find `stdlib/` and `plank doc` can find `share/doc/`.
+
 If you'd like to contribute please read the [Contributor Guidelines](./CONTRIBUTING.md).
 
 ## Contents

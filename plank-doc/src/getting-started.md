@@ -16,6 +16,16 @@ To update Plank to the latest version, run:
 plankup
 ```
 
+### Nix
+
+If you use Nix with flakes enabled, you can run Plank directly from the flake:
+
+```bash
+nix run github:plankevm/plank-monorepo#plank -- --help
+```
+
+The Nix package includes the compiler, standard library, and local documentation. The `plank` binary is wrapped with `PLANK_DIR` pointing at the package output, so `plank build` automatically discovers `stdlib/` and `plank doc` opens the docs from `share/doc/`.
+
 ### Other Editors
 
 **Neovim**
