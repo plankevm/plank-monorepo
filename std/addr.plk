@@ -57,7 +57,6 @@ const raw_call = fn (
 
 const raw_staticcall = fn (
     target: addr,
-    value: u256,
     gas: u256,
     calldata: membytes,
     return_buf: Option(membytes)
@@ -66,20 +65,18 @@ const raw_staticcall = fn (
         @evm_staticcall(
             gas,
             target.raw,
-            value,
             calldata.ptr,
             calldata.len,
             return_buf.inner.ptr,
             return_buf.inner.len
         )
     } else {
-        @evm_staticcall(gas, target.raw, value, calldata.ptr, calldata.len, 0, 0)
+        @evm_staticcall(gas, target.raw, calldata.ptr, calldata.len, 0, 0)
     }
 };
 
 const raw_delegatecall = fn (
     delegate: addr,
-    value: u256,
     gas: u256,
     calldata: membytes,
     return_buf: Option(membytes)
@@ -88,13 +85,12 @@ const raw_delegatecall = fn (
         @evm_delegatecall(
             gas,
             delegate.raw,
-            value,
             calldata.ptr,
             calldata.len,
             return_buf.inner.ptr,
             return_buf.inner.len
         )
     } else {
-        @evm_delegatecall(gas, delegate.raw, value, calldata.ptr, calldata.len, 0, 0)
+        @evm_delegatecall(gas, delegate.raw, calldata.ptr, calldata.len, 0, 0)
     }
 };
