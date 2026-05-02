@@ -15,7 +15,8 @@ const try_into_bytes32 = fn (comptime T: type, value: T) Option(bytes32) {
         if value.len != 32 {
             return None(bytes32);
         }
-        Some(bytes32, unsafe_mem_read_u256(value.ptr, 0))
+        let raw = unsafe_mem_read_u256(value.ptr, 0);
+        Some(bytes32, bytes32_from_u256(raw))
     } else {
         None(bytes32)
     }
