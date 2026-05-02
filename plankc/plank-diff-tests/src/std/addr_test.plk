@@ -1,0 +1,10 @@
+import std::addr::addr_from_u256;
+
+init {
+    // not convertible to address, should revert
+    let address = addr_from_u256(1 << 160);
+
+    let out_ptr = @malloc_zeroed(32);
+    @mstore32(out_ptr, address.raw);
+    @evm_return(out_ptr, 32);
+}
