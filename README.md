@@ -11,13 +11,15 @@ curl -L install.plankevm.org | bash && plankup
 If you'd like to contribute please read the [Contributor Guidelines](./CONTRIBUTING.md).
 
 ## Contents
-- `std/`: Plank Standard Library
-- `plankc/`: Plank Compiler
+- [`plank-doc/`](./plank-doc/): Plank Docs
+- [`plank-tree-sitter/`](./plank-tree-sitter/): Tree sitter grammar & parser for the plank language
+- [`plank-vscode`](./plank-vscode/): VS Code extension for Planke
+- [`plank-zed`](./plank-zed/): Zed extension for Plank
+- [`plankc/`](./plankc/): Plank Compiler
     - [`frontend/`](./plankc/frontend/): Plank Frontend
     - [`sir/`](./plankc/sir/): Sensei IR (Plank's Low-Level IR & Backend)
-    - [Plank Examples](`./plankc/plank-diff-tests/src/examples/`)
-- `plank-doc/`: Plank Docs
-- `plank-tree-sitter/`: Tree sitter grammar & parser for the plank language
+- [`plankup`](./plankup/): Installer for Plank 
+- [`std/`](./std/): Plank Standard Library
 
 ## Donating
 
