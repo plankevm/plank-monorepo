@@ -43,11 +43,12 @@ impl Pass for SwitchPeephole {
 mod tests {
     use super::*;
     use crate::run_pass_and_display;
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
+    use sir_data::assert_ir_display;
 
     #[test]
     fn lowers_zero_case_with_default_to_branch() {
-        let input = r#"
+        let actual = run_pass_and_display::<SwitchPeephole>(
+            r#"
             fn init:
                 a {
                     sel = const 0
@@ -62,30 +63,30 @@ mod tests {
                 c {
                     stop
                 }
-        "#;
+            "#,
+        );
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x0
+                    => $0 ? @2 : @1
+                }
 
-Basic Blocks:
-    @0 {
-        $0 = const 0x0
-        => $0 ? @2 : @1
-    }
+                @1 {
+                    => @2
+                }
 
-    @1 {
-        => @2
-    }
-
-    @2 {
-        stop
-    }
-        "#;
-
-        let actual = run_pass_and_display::<SwitchPeephole>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "switch peephole zero case");
+                @2 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -110,36 +111,37 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x0
-        switch $0 {
-            0x1 => @2,
-            else => @3
-        }
-
-    }
-
-    @1 {
-        => @2
-    }
-
-    @2 {
-        stop
-    }
-
-    @3 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<SwitchPeephole>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "switch peephole non-zero case");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x0
+                    switch $0 {
+                        0x1 => @2,
+                        else => @3
+                    }
+
+                }
+
+                @1 {
+                    => @2
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -165,36 +167,37 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x0
-        switch $0 {
-            0x0 => @1,
-            0x1 => @2,
-            else => @3
-        }
-
-    }
-
-    @1 {
-        => @2
-    }
-
-    @2 {
-        stop
-    }
-
-    @3 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<SwitchPeephole>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "switch peephole multi-case switch");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x0
+                    switch $0 {
+                        0x0 => @1,
+                        0x1 => @2,
+                        else => @3
+                    }
+
+                }
+
+                @1 {
+                    => @2
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
     }
 }
