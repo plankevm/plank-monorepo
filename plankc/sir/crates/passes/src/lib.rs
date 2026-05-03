@@ -92,9 +92,9 @@ impl<'a> PassManager<'a> {
 }
 
 #[cfg(test)]
-pub(crate) fn run_pass_and_display<T: Pass + Default>(source: &str) -> String {
+pub(crate) fn run_pass_and_display<T: Pass + Default>(source: &str) -> EthIRProgram {
     let mut ir = sir_parser::parse_or_panic(source, sir_parser::EmitConfig::init_only());
     let store = AnalysesStore::default();
     run_pass(&mut T::default(), &mut ir, &store);
-    sir_data::display_program(&ir)
+    ir
 }

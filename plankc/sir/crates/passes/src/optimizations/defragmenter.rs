@@ -370,8 +370,8 @@ mod tests {
         },
         run_pass,
     };
+    use sir_data::assert_ir_display;
     use sir_parser::{EmitConfig, parse_or_panic};
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     #[test]
     fn test_sccp_unused_elim_and_defragment() {
@@ -420,83 +420,84 @@ mod tests {
         run_pass(&mut SCCP::default(), &mut ir, &store);
         run_pass(&mut UnusedOperationElimination::default(), &mut ir, &store);
 
-        let src_str = sir_data::display_program(&ir);
-        let expected_src = r#"
-Init: @2
-Functions:
-    fn @0 -> entry @0  (outputs: 1)
-    fn @1 -> entry @1  (outputs: 2)
-    fn @2 -> entry @2  (outputs: 0)
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @2
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 2)
+                fn @2 -> entry @2  (outputs: 0)
 
-Basic Blocks:
-    @0 $0 $1 -> $2 {
-        $2 = add $0 $1
-        iret
-    }
+            Basic Blocks:
+                @0 $0 $1 -> $2 {
+                    $2 = add $0 $1
+                    iret
+                }
 
-    @1 $3 $4 -> $5 $6 {
-        $5 = mul $3 $4
-        $6 = div $3 $4
-        iret
-    }
+                @1 $3 $4 -> $5 $6 {
+                    $5 = mul $3 $4
+                    $6 = div $3 $4
+                    iret
+                }
 
-    @2 {
-        noop
-        => @3
-    }
+                @2 {
+                    noop
+                    => @3
+                }
 
-    @3 {
-        $8 = const 0x1
-        $9 = const 0x2
-        $10 = icall @0 $8 $9
-        noop
-        $12 = const 0x0
-        sstore $12 $10
-        stop
-    }
+                @3 {
+                    $8 = const 0x1
+                    $9 = const 0x2
+                    $10 = icall @0 $8 $9
+                    noop
+                    $12 = const 0x0
+                    sstore $12 $10
+                    stop
+                }
 
-    @4 {
-        noop
-        $14 = const 0x63
-        $15 = const 0x64
-        $16 $17 = icall @1 $14 $15
-        stop
-    }
+                @4 {
+                    noop
+                    $14 = const 0x63
+                    $15 = const 0x64
+                    $16 $17 = icall @1 $14 $15
+                    stop
+                }
 
-
-data .0 0xcafebabe
-        "#;
-        assert_trim_strings_eq_with_diff(&src_str, expected_src, "src after sccp + unused elim");
+            data .0 0xcafebabe
+            "#,
+        );
 
         run_pass(&mut Defragmenter::default(), &mut ir, &store);
 
-        let dst_str = sir_data::display_program(&ir);
-        let expected_dst = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @2  (outputs: 1)
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @2  (outputs: 1)
 
-Basic Blocks:
-    @0 {
-        => @1
-    }
+            Basic Blocks:
+                @0 {
+                    => @1
+                }
 
-    @1 {
-        $0 = const 0x1
-        $1 = const 0x2
-        $2 = icall @1 $0 $1
-        $3 = const 0x0
-        sstore $3 $2
-        stop
-    }
+                @1 {
+                    $0 = const 0x1
+                    $1 = const 0x2
+                    $2 = icall @1 $0 $1
+                    $3 = const 0x0
+                    sstore $3 $2
+                    stop
+                }
 
-    @2 $4 $5 -> $6 {
-        $6 = add $4 $5
-        iret
-    }
-        "#;
-        assert_trim_strings_eq_with_diff(&dst_str, expected_dst, "dst after defragment");
+                @2 $4 $5 -> $6 {
+                    $6 = add $4 $5
+                    iret
+                }
+            "#,
+        );
         assert_eq!(Legalizer::default().run(&ir, &store), Ok(()));
     }
 
@@ -542,111 +543,113 @@ Basic Blocks:
 
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
 
-        let src_str = sir_data::display_program(&ir);
-        let expected_src = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @4  (outputs: 0)
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @4  (outputs: 0)
 
-Basic Blocks:
-    @0 {
-        $0 = large_const 0xaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd
-        $1 = data_offset .0
-        $2 = salloc 64 #0
-        sstore $2 $0
-        $3 = const 0x0
-        switch $3 {
-            0x1 => @1,
-            0x2 => @2,
-            else => @3
-        }
+            Basic Blocks:
+                @0 {
+                    $0 = large_const 0xaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd
+                    $1 = data_offset .0
+                    $2 = salloc 64 #0
+                    sstore $2 $0
+                    $3 = const 0x0
+                    switch $3 {
+                        0x1 => @1,
+                        0x2 => @2,
+                        else => @3
+                    }
 
-    }
+                }
 
-    @1 {
-        stop
-    }
+                @1 {
+                    stop
+                }
 
-    @2 {
-        stop
-    }
+                @2 {
+                    stop
+                }
 
-    @3 {
-        stop
-    }
+                @3 {
+                    stop
+                }
 
-    @4 {
-        $4 = large_const 0x1122334411223344112233441122334411223344112233441122334411223344
-        $5 = data_offset .1
-        $6 = salloc 128 #1
-        $7 = const 0x0
-        switch $7 {
-            0x64 => @5,
-            0xc8 => @6,
-            else => @7
-        }
+                @4 {
+                    $4 = large_const 0x1122334411223344112233441122334411223344112233441122334411223344
+                    $5 = data_offset .1
+                    $6 = salloc 128 #1
+                    $7 = const 0x0
+                    switch $7 {
+                        0x64 => @5,
+                        0xc8 => @6,
+                        else => @7
+                    }
 
-    }
+                }
 
-    @5 {
-        stop
-    }
+                @5 {
+                    stop
+                }
 
-    @6 {
-        stop
-    }
+                @6 {
+                    stop
+                }
 
-    @7 {
-        stop
-    }
+                @7 {
+                    stop
+                }
 
 
-data .0 0x1234
-data .1 0x5678
-        "#;
-        assert_trim_strings_eq_with_diff(&src_str, expected_src, "src before defragment");
+            data .0 0x1234
+            data .1 0x5678
+            "#,
+        );
 
         let store = AnalysesStore::default();
         run_pass(&mut Defragmenter::default(), &mut ir, &store);
 
-        let actual = sir_data::display_program(&ir);
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
 
-Basic Blocks:
-    @0 {
-        $0 = large_const 0xaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd
-        $1 = data_offset .0
-        $2 = salloc 64 #0
-        sstore $2 $0
-        $3 = const 0x0
-        switch $3 {
-            0x1 => @2,
-            0x2 => @1,
-            else => @3
-        }
+            Basic Blocks:
+                @0 {
+                    $0 = large_const 0xaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccddaabbccdd
+                    $1 = data_offset .0
+                    $2 = salloc 64 #0
+                    sstore $2 $0
+                    $3 = const 0x0
+                    switch $3 {
+                        0x1 => @2,
+                        0x2 => @1,
+                        else => @3
+                    }
 
-    }
+                }
 
-    @1 {
-        stop
-    }
+                @1 {
+                    stop
+                }
 
-    @2 {
-        stop
-    }
+                @2 {
+                    stop
+                }
 
-    @3 {
-        stop
-    }
+                @3 {
+                    stop
+                }
 
 
-data .0 0x1234
-        "#;
-        assert_trim_strings_eq_with_diff(&actual, expected, "defragment dead function data");
+            data .0 0x1234
+            "#,
+        );
     }
 
     #[test]
@@ -667,30 +670,27 @@ data .0 0x1234
         let store = AnalysesStore::default();
         run_pass(&mut Defragmenter::default(), &mut ir_structural, &store);
 
-        let structural_result = sir_data::display_program(&ir_structural);
-        let expected_structural = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
+        assert_ir_display(
+            &ir_structural,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
 
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        => $0 ? @2 : @1
-    }
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    => $0 ? @2 : @1
+                }
 
-    @1 {
-        stop
-    }
+                @1 {
+                    stop
+                }
 
-    @2 {
-        stop
-    }
-        "#;
-        assert_trim_strings_eq_with_diff(
-            &structural_result,
-            expected_structural,
-            "structural reachability removes orphan but keeps both branches",
+                @2 {
+                    stop
+                }
+            "#,
         );
 
         // SCCP-refined reachability additionally eliminates the dead branch
@@ -699,26 +699,23 @@ Basic Blocks:
         run_pass(&mut SCCP::default(), &mut ir_sccp, &store);
         run_pass(&mut Defragmenter::default(), &mut ir_sccp, &store);
 
-        let sccp_result = sir_data::display_program(&ir_sccp);
-        let expected_sccp = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
+        assert_ir_display(
+            &ir_sccp,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
 
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        => @1
-    }
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    => @1
+                }
 
-    @1 {
-        stop
-    }
-        "#;
-        assert_trim_strings_eq_with_diff(
-            &sccp_result,
-            expected_sccp,
-            "sccp reachability also eliminates dead branch",
+                @1 {
+                    stop
+                }
+            "#,
         );
     }
 }

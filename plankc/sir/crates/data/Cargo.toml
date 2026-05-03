@@ -11,6 +11,5 @@ workspace = true
 alloy-primitives.workspace = true
 plank-core.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-sir-test-utils = { path = "../../test-utils" }
+plank-test-utils.workspace = true
+pretty_assertions.workspace = true

@@ -1,4 +1,7 @@
 {
+  "../../plank-diff-tests/lib/forge-std": {
+    "rev": "8987040ede9553cea20c95ad40d0455930f9c8e0"
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.15.0",

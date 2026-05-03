@@ -51,13 +51,13 @@ pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use crate::PassManager;
+    use sir_data::assert_ir_display;
     use sir_parser::{EmitConfig, parse_or_panic};
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
 
-    fn optimize(source: &str, passes: &str) -> String {
+    fn optimize(source: &str, passes: &str) -> sir_data::EthIRProgram {
         let mut program = parse_or_panic(source, EmitConfig::init_only());
         PassManager::new(&mut program).run_optimizations(passes);
-        sir_data::display_program(&program)
+        program
     }
 
     const SWITCH_ON_COPY_WITH_DEAD_CODE: &str = r#"
@@ -83,120 +83,125 @@ mod tests {
 
     #[test]
     fn test_csud() {
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        => @1
-    }
-
-    @1 {
-        stop
-    }
-        "#;
-
         let actual = optimize(SWITCH_ON_COPY_WITH_DEAD_CODE, "csud");
-        assert_trim_strings_eq_with_diff(&actual, expected, "csud");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
     fn test_cusd() {
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        => @1
-    }
-
-    @1 {
-        stop
-    }
-        "#;
-
         let actual = optimize(SWITCH_ON_COPY_WITH_DEAD_CODE, "cusd");
-        assert_trim_strings_eq_with_diff(&actual, expected, "cusd");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
     fn test_ucsd() {
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        $1 = copy $0
-        => @1
-    }
-
-    @1 {
-        stop
-    }
-        "#;
-
         let actual = optimize(SWITCH_ON_COPY_WITH_DEAD_CODE, "ucsd");
-        assert_trim_strings_eq_with_diff(&actual, expected, "ucsd");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
     fn test_uscd() {
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        $1 = copy $0
-        switch $0 {
-            0x1 => @1,
-            else => @2
-        }
-
-    }
-
-    @1 {
-        stop
-    }
-
-    @2 {
-        $2 = const 0x0
-        => @1
-    }
-        "#;
-
         let actual = optimize(SWITCH_ON_COPY_WITH_DEAD_CODE, "uscd");
-        assert_trim_strings_eq_with_diff(&actual, expected, "uscd");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    switch $0 {
+                        0x1 => @1,
+                        else => @2
+                    }
+
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    $2 = const 0x0
+                    => @1
+                }
+            "#,
+        );
     }
 
     #[test]
     fn test_scsud() {
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        => @1
-    }
-
-    @1 {
-        stop
-    }
-        "#;
-
         let actual = optimize(SWITCH_ON_COPY_WITH_DEAD_CODE, "scsud");
-        assert_trim_strings_eq_with_diff(&actual, expected, "scsud");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+            "#,
+        );
     }
 }

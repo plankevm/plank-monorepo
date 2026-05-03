@@ -427,14 +427,19 @@ impl<'ir> Iterator for OutgoingConnectionsIter<'ir> {
     }
 }
 
+pub fn assert_ir_display(program: &EthIRProgram, expected: &str) {
+    use plank_test_utils::dedent_preserve_indent;
+    let actual = display_program(program);
+    pretty_assertions::assert_str_eq!(
+        dedent_preserve_indent(&actual),
+        dedent_preserve_indent(expected),
+        "IR display"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn assert_ir_display(program: &EthIRProgram, expected: &str) {
-        let actual = display_program(program);
-        sir_test_utils::assert_trim_strings_eq_with_diff(&actual, expected, "IR display");
-    }
 
     #[test]
     fn control_memory_layout() {
@@ -464,21 +469,21 @@ mod tests {
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 1)
+        assert_ir_display(
+            &program,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
 
-Basic Blocks:
-    @0 $0 $1 -> $2 {
-        $2 = add $0 $1
-        stop
-        iret
-    }
-
-"#;
-
-        assert_ir_display(&program, expected);
+            Basic Blocks:
+                @0 $0 $1 -> $2 {
+                    $2 = add $0 $1
+                    stop
+                    iret
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -520,33 +525,33 @@ Basic Blocks:
 
         let program = builder.build(func0_id, None);
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @2  (outputs: 1)
+        assert_ir_display(
+            &program,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @2  (outputs: 1)
 
-Basic Blocks:
-    @0 {
-        stop
-    }
+            Basic Blocks:
+                @0 {
+                    stop
+                }
 
-    @1 {
-        invalid
-    }
+                @1 {
+                    invalid
+                }
 
-    @2 $0 -> $1 {
-        $1 = copy $0
-        iret
-    }
+                @2 $0 -> $1 {
+                    $1 = copy $0
+                    iret
+                }
 
-    @3 {
-        stop
-    }
-
-"#;
-
-        assert_ir_display(&program, expected);
+                @3 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -583,24 +588,25 @@ Basic Blocks:
         let func_id = func.finish(bb_id);
         let program = builder.build(func_id, None);
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
+        assert_ir_display(
+            &program,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
 
-Basic Blocks:
-    @0 {
-        $0 = large_const 0xdeadbeef
-        $1 = data_offset .1
-        stop
-    }
+            Basic Blocks:
+                @0 {
+                    $0 = large_const 0xdeadbeef
+                    $1 = data_offset .1
+                    stop
+                }
 
 
-data .0 0x1234
-data .1 0x56789abc
-data .2 0xdef0
-"#;
-
-        assert_ir_display(&program, expected);
+            data .0 0x1234
+            data .1 0x56789abc
+            data .2 0xdef0
+            "#,
+        );
     }
 }

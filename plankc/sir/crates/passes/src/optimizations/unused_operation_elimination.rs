@@ -72,7 +72,7 @@ fn is_removable(op: &Operation, program: &EthIRProgram, defuse: &DefUse) -> bool
 mod tests {
     use super::UnusedOperationElimination;
     use crate::run_pass_and_display;
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
+    use sir_data::assert_ir_display;
 
     // Note: block outputs count as uses, even if the successor never uses the input.
     #[test]
@@ -97,35 +97,36 @@ mod tests {
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        => $0 ? @1 : @2
-    }
-
-    @1 -> $1 {
-        $1 = const 0xa
-        => @3
-    }
-
-    @2 -> $3 {
-        noop
-        $3 = const 0x14
-        => @3
-    }
-
-    @3 $4 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<UnusedOperationElimination>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "block outputs count as uses");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    => $0 ? @1 : @2
+                }
+
+                @1 -> $1 {
+                    $1 = const 0xa
+                    => @3
+                }
+
+                @2 -> $3 {
+                    noop
+                    $3 = const 0x14
+                    => @3
+                }
+
+                @3 $4 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -143,26 +144,27 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        noop
-        => @1
-    }
-
-    @1 {
-        noop
-        noop
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<UnusedOperationElimination>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "cross block chain eliminated");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    noop
+                    => @1
+                }
+
+                @1 {
+                    noop
+                    noop
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -185,31 +187,32 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @1
-Functions:
-    fn @0 -> entry @0  (outputs: 2)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 $0 $1 -> $2 $3 {
-        $2 = add $0 $1
-        $3 = sub $0 $1
-        iret
-    }
-
-    @1 {
-        $4 = const 0x1
-        $5 = const 0x2
-        $6 $7 = icall @0 $4 $5
-        $8 = const 0x0
-        sstore $8 $6
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<UnusedOperationElimination>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "side effecting ops preserved");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 2)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 $1 -> $2 $3 {
+                    $2 = add $0 $1
+                    $3 = sub $0 $1
+                    iret
+                }
+
+                @1 {
+                    $4 = const 0x1
+                    $5 = const 0x2
+                    $6 $7 = icall @0 $4 $5
+                    $8 = const 0x0
+                    sstore $8 $6
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -228,28 +231,29 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        => $0 ? @1 : @2
-    }
-
-    @1 {
-        stop
-    }
-
-    @2 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<UnusedOperationElimination>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "control flow vars preserved");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    => $0 ? @1 : @2
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -266,23 +270,24 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x1
-        $1 = add $0 $0
-        $2 = const 0x0
-        sstore $2 $1
-        noop
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<UnusedOperationElimination>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "mixed live dead chains");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = add $0 $0
+                    $2 = const 0x0
+                    sstore $2 $1
+                    noop
+                    stop
+                }
+            "#,
+        );
     }
 }

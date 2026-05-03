@@ -68,17 +68,11 @@ pub fn parse_without_legalization<'a>(source: &str, config: EmitConfig<'a>) -> E
 mod tests {
     use super::*;
     use crate::emit::EmitConfig;
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
-
-    fn parse_and_display<'a>(source: &str, config: EmitConfig<'a>) -> String {
-        let ir = parse_or_panic(source, config);
-
-        sir_data::display_program(&ir)
-    }
+    use sir_data::assert_ir_display;
 
     fn assert_parse_format<'a>(input: &str, expected: &str, config: EmitConfig<'a>) {
-        let actual = parse_and_display(input, config);
-        assert_trim_strings_eq_with_diff(&actual, expected, "IR snapshot");
+        let ir = parse_or_panic(input, config);
+        assert_ir_display(&ir, expected);
     }
 
     fn parse_to_result(source: &str, config: EmitConfig) -> Result<EthIRProgram, String> {

@@ -2838,7 +2838,8 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "plank-core",
- "sir-test-utils",
+ "plank-test-utils",
+ "pretty_assertions",
  "thiserror",
 ]
 
@@ -2861,7 +2862,6 @@ dependencies = [
  "logos",
  "sir-data",
  "sir-passes",
- "sir-test-utils",
  "smallvec",
 ]
 
@@ -2878,16 +2878,8 @@ dependencies = [
  "pretty_assertions",
  "sir-data",
  "sir-parser",
- "sir-test-utils",
  "smallvec",
  "thiserror",
-]
-
-[[package]]
-name = "sir-test-utils"
-version = "0.1.0"
-dependencies = [
- "pretty_assertions",
 ]
 
 [[package]]

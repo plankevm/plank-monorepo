@@ -17,4 +17,3 @@ alloy-primitives.workspace = true
 smallvec.workspace = true
 
 [dev-dependencies]
-sir-test-utils = { path = "../../test-utils" }

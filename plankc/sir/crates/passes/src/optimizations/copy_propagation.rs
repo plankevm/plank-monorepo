@@ -68,7 +68,7 @@ fn replace_if_copied(input: &mut LocalId, copy_map: &HashMap<LocalId, LocalId>) 
 mod tests {
     use super::CopyPropagation;
     use crate::run_pass_and_display;
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
+    use sir_data::assert_ir_display;
 
     #[test]
     fn test_copy_chains_and_inline_operands() {
@@ -88,29 +88,30 @@ mod tests {
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 {
-        $1 = copy $0
-        $2 = copy $0
-        $3 = copy $0
-        $4 = copy $0
-        $5 = add $0 $0
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<CopyPropagation>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "copy chains and inline operands");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    $1 = copy $0
+                    $2 = copy $0
+                    $3 = copy $0
+                    $4 = copy $0
+                    $5 = add $0 $0
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -132,31 +133,32 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 -> $0 {
-        $1 = copy $0
-        $2 = copy $0
-        => @2
-    }
-
-    @2 $3 {
-        $4 = add $3 $3
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<CopyPropagation>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "phi nodes block propagation");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 -> $0 {
+                    $1 = copy $0
+                    $2 = copy $0
+                    => @2
+                }
+
+                @2 $3 {
+                    $4 = add $3 $3
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -179,33 +181,34 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 {
-        $1 = copy $0
-        => $0 ? @2 : @3
-    }
-
-    @2 {
-        stop
-    }
-
-    @3 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<CopyPropagation>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "branch condition propagation");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    $1 = copy $0
+                    => $0 ? @2 : @3
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -231,37 +234,38 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 {
-        $1 = copy $0
-        switch $0 {
-            0x0 => @2,
-            else => @3
-        }
-
-    }
-
-    @2 {
-        stop
-    }
-
-    @3 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<CopyPropagation>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "switch condition propagation");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    $1 = copy $0
+                    switch $0 {
+                        0x0 => @2,
+                        else => @3
+                    }
+
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -284,32 +288,33 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 1)
-    fn @2 -> entry @2  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 -> $1 {
-        $1 = add $0 $0
-        iret
-    }
-
-    @2 $2 {
-        $3 = copy $2
-        $4 = icall @1 $2
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<CopyPropagation>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "icall argument propagation");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 1)
+                fn @2 -> entry @2  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 -> $1 {
+                    $1 = add $0 $0
+                    iret
+                }
+
+                @2 $2 {
+                    $3 = copy $2
+                    $4 = icall @1 $2
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -330,33 +335,30 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 -> $0 $0 {
-        $1 = copy $0
-        => @2
-    }
-
-    @2 $2 $3 {
-        $4 = add $2 $3
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<CopyPropagation>(input);
-        assert_trim_strings_eq_with_diff(
+        assert_ir_display(
             &actual,
-            expected,
-            "copy map does not leak between blocks",
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 -> $0 $0 {
+                    $1 = copy $0
+                    => @2
+                }
+
+                @2 $2 $3 {
+                    $4 = add $2 $3
+                    stop
+                }
+            "#,
         );
     }
 }

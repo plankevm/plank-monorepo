@@ -518,8 +518,8 @@ define_consts!(
 mod tests {
     use super::*;
     use crate::{AnalysesStore, run_pass, run_pass_and_display};
+    use sir_data::assert_ir_display;
     use sir_parser::{EmitConfig, parse_or_panic};
-    use sir_test_utils::assert_trim_strings_eq_with_diff;
 
     fn run_analysis(source: &str) -> (SCCP, DenseIndexSet<BasicBlockId>) {
         let ir = parse_or_panic(source, EmitConfig::init_only());
@@ -531,12 +531,12 @@ mod tests {
         (sccp, reachable)
     }
 
-    fn run_const_prop(source: &str) -> (String, SCCP) {
+    fn run_const_prop(source: &str) -> (EthIRProgram, SCCP) {
         let mut ir = parse_or_panic(source, EmitConfig::init_only());
         let store = AnalysesStore::default();
         let mut sccp = SCCP::default();
         run_pass(&mut sccp, &mut ir, &store);
-        (sir_data::display_program(&ir), sccp)
+        (ir, sccp)
     }
 
     #[test]
@@ -561,35 +561,32 @@ mod tests {
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 2)
-    fn @2 -> entry @2  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 -> $0 $1 {
-        $0 = const 0x1
-        $1 = const 0x2
-        iret
-    }
-
-    @2 {
-        $2 $3 = icall @1
-        stop
-    }
-        "#;
-
         let (actual, sccp) = run_const_prop(input);
-        assert_trim_strings_eq_with_diff(
+        assert_ir_display(
             &actual,
-            expected,
-            "icall with multiple constant outputs should be skipped",
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 2)
+                fn @2 -> entry @2  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 -> $0 $1 {
+                    $0 = const 0x1
+                    $1 = const 0x2
+                    iret
+                }
+
+                @2 {
+                    $2 $3 = icall @1
+                    stop
+                }
+            "#,
         );
 
         assert_eq!(sccp.lattice[LocalId::new(2)], LatticeValue::Overdefined);
@@ -624,45 +621,42 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 {
-        => $0 ? @2 : @3
-    }
-
-    @2 -> $1 $2 {
-        $1 = const 0x2a
-        $2 = const 0xa
-        => @4
-    }
-
-    @3 -> $3 $4 {
-        $3 = const 0x2a
-        $4 = const 0x14
-        => @4
-    }
-
-    @4 $5 $6 {
-        $7 = const 0x54
-        $8 = add $5 $6
-        stop
-    }
-        "#;
-
         let (actual, sccp) = run_const_prop(input);
-        assert_trim_strings_eq_with_diff(
+        assert_ir_display(
             &actual,
-            expected,
-            "block inputs propagate only when predecessors agree",
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    => $0 ? @2 : @3
+                }
+
+                @2 -> $1 $2 {
+                    $1 = const 0x2a
+                    $2 = const 0xa
+                    => @4
+                }
+
+                @3 -> $3 $4 {
+                    $3 = const 0x2a
+                    $4 = const 0x14
+                    => @4
+                }
+
+                @4 $5 $6 {
+                    $7 = const 0x54
+                    $8 = add $5 $6
+                    stop
+                }
+            "#,
         );
 
         assert_eq!(sccp.lattice[LocalId::new(6)], LatticeValue::Overdefined);
@@ -681,28 +675,29 @@ Basic Blocks:
                 if_false { stop }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x0
-        => @2
-    }
-
-    @1 {
-        stop
-    }
-
-    @2 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<SCCP>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "branch zero takes false");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x0
+                    => @2
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -717,28 +712,29 @@ Basic Blocks:
                 if_false { stop }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = large_const 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6
-        => @1
-    }
-
-    @1 {
-        stop
-    }
-
-    @2 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<SCCP>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "branch nonzero takes true");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = large_const 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff6
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -758,30 +754,31 @@ Basic Blocks:
                 fallback { stop }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x7
-        $1 = const 0x5
-        $2 = const 0x1
-        => @1
-    }
-
-    @1 {
-        stop
-    }
-
-    @2 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<SCCP>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "switch with folded condition");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x7
+                    $1 = const 0x5
+                    $2 = const 0x1
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -801,30 +798,31 @@ Basic Blocks:
                 fallback { stop }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x11
-        $1 = const 0x5
-        $2 = const 0x2
-        => @2
-    }
-
-    @1 {
-        stop
-    }
-
-    @2 {
-        stop
-    }
-        "#;
-
         let actual = run_pass_and_display::<SCCP>(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "switch no match takes default");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x11
+                    $1 = const 0x5
+                    $2 = const 0x2
+                    => @2
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -848,36 +846,33 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 -> $0 {
-        => @2
-    }
-
-    @2 $1 -> $2 {
-        $2 = const 0x0
-        => $1 ? @3 : @2
-    }
-
-    @3 $3 {
-        stop
-    }
-        "#;
-
         let (actual, sccp) = run_const_prop(input);
-        assert_trim_strings_eq_with_diff(
+        assert_ir_display(
             &actual,
-            expected,
-            "internal function inputs remain overdefined and don't propagate constants incorrectly",
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 -> $0 {
+                    => @2
+                }
+
+                @2 $1 -> $2 {
+                    $2 = const 0x0
+                    => $1 ? @3 : @2
+                }
+
+                @3 $3 {
+                    stop
+                }
+            "#,
         );
 
         assert_eq!(sccp.lattice[LocalId::new(0)], LatticeValue::Overdefined);
@@ -966,78 +961,79 @@ Basic Blocks:
                 }
         "#;
 
-        let expected = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        $0 = const 0x0
-        $1 = const 0x1
-        $2 = const 0x3
-        $3 = const 0x7
-        $4 = const 0x80
-        $5 = const 0xff
-        $6 = const 0x20
-        $7 = const 0x100
-        $8 = large_const 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        $9 = large_const 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9
-        $10 = large_const 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-        $11 = large_const 0x8000000000000000000000000000000000000000000000000000000000000000
-        $12 = add $10 $1
-        $13 = sub $11 $1
-        $14 = const 0x1
-        $15 = const 0x1
-        $16 = const 0x1
-        $17 = sdiv $9 $2
-        $18 = smod $9 $2
-        $19 = const 0x1
-        $20 = const 0x0
-        $21 = const 0x0
-        $22 = const 0x0
-        $23 = const 0x0
-        $24 = const 0x0
-        $25 = const 0x2
-        $26 = const 0x0
-        $27 = const 0x0
-        $28 = const 0x0
-        $29 = const 0x1
-        $30 = const 0x1
-        $31 = sdiv $11 $10
-        $32 = sdiv $11 $8
-        $33 = const 0x1
-        $34 = const 0x0
-        $35 = const 0x0
-        $36 = const 0x1
-        $37 = const 0x0
-        $38 = const 0x0
-        $39 = const 0x1
-        $40 = const 0x0
-        $41 = const 0x1
-        $42 = const 0x1
-        $43 = or $11 $8
-        $44 = not $0
-        $45 = const 0x0
-        $46 = const 0x1
-        $47 = const 0x0
-        $48 = const 0x0
-        $49 = sar $5 $8
-        $50 = sar $7 $8
-        $51 = const 0x0
-        $52 = const 0x0
-        $53 = const 0xff
-        $54 = signextend $0 $4
-        $55 = const 0xff
-        $56 = const 0x80
-        $57 = const 0x2
-        $58 = const 0xff
-        stop
-    }
-        "#;
-
         let (actual, sccp) = run_const_prop(input);
-        assert_trim_strings_eq_with_diff(&actual, expected, "constant evaluation");
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x0
+                    $1 = const 0x1
+                    $2 = const 0x3
+                    $3 = const 0x7
+                    $4 = const 0x80
+                    $5 = const 0xff
+                    $6 = const 0x20
+                    $7 = const 0x100
+                    $8 = large_const 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+                    $9 = large_const 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9
+                    $10 = large_const 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+                    $11 = large_const 0x8000000000000000000000000000000000000000000000000000000000000000
+                    $12 = add $10 $1
+                    $13 = sub $11 $1
+                    $14 = const 0x1
+                    $15 = const 0x1
+                    $16 = const 0x1
+                    $17 = sdiv $9 $2
+                    $18 = smod $9 $2
+                    $19 = const 0x1
+                    $20 = const 0x0
+                    $21 = const 0x0
+                    $22 = const 0x0
+                    $23 = const 0x0
+                    $24 = const 0x0
+                    $25 = const 0x2
+                    $26 = const 0x0
+                    $27 = const 0x0
+                    $28 = const 0x0
+                    $29 = const 0x1
+                    $30 = const 0x1
+                    $31 = sdiv $11 $10
+                    $32 = sdiv $11 $8
+                    $33 = const 0x1
+                    $34 = const 0x0
+                    $35 = const 0x0
+                    $36 = const 0x1
+                    $37 = const 0x0
+                    $38 = const 0x0
+                    $39 = const 0x1
+                    $40 = const 0x0
+                    $41 = const 0x1
+                    $42 = const 0x1
+                    $43 = or $11 $8
+                    $44 = not $0
+                    $45 = const 0x0
+                    $46 = const 0x1
+                    $47 = const 0x0
+                    $48 = const 0x0
+                    $49 = sar $5 $8
+                    $50 = sar $7 $8
+                    $51 = const 0x0
+                    $52 = const 0x0
+                    $53 = const 0xff
+                    $54 = signextend $0 $4
+                    $55 = const 0xff
+                    $56 = const 0x80
+                    $57 = const 0x2
+                    $58 = const 0xff
+                    stop
+                }
+            "#,
+        );
 
         let neg1 = U256::from_str_radix(
             "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -1320,49 +1316,46 @@ Basic Blocks:
                 false_target { stop }
         "#;
 
-        let expected_ir = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 {
-        => $0 ? @2 : @3
-    }
-
-    @2 -> $1 {
-        $1 = const 0x1
-        => @4
-    }
-
-    @3 -> $2 {
-        $2 = const 0x0
-        => @4
-    }
-
-    @4 $3 {
-        => $3 ? @5 : @6
-    }
-
-    @5 {
-        stop
-    }
-
-    @6 {
-        stop
-    }
-        "#;
-
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        assert_trim_strings_eq_with_diff(
-            &sir_data::display_program(&ir),
-            expected_ir,
-            "overdefined input makes both branch targets reachable",
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    => $0 ? @2 : @3
+                }
+
+                @2 -> $1 {
+                    $1 = const 0x1
+                    => @4
+                }
+
+                @3 -> $2 {
+                    $2 = const 0x0
+                    => @4
+                }
+
+                @4 $3 {
+                    => $3 ? @5 : @6
+                }
+
+                @5 {
+                    stop
+                }
+
+                @6 {
+                    stop
+                }
+            "#,
         );
 
         let store = AnalysesStore::default();
@@ -1406,45 +1399,42 @@ Basic Blocks:
                 }
         "#;
 
-        let expected_ir = r#"
-Init: @0
-Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-
-Basic Blocks:
-    @0 {
-        stop
-    }
-
-    @1 $0 {
-        => $0 ? @2 : @3
-    }
-
-    @2 -> $1 {
-        $1 = const 0x5
-        => @4
-    }
-
-    @3 -> $2 {
-        $2 = const 0xa
-        => @4
-    }
-
-    @4 $3 -> $3 {
-        => @5
-    }
-
-    @5 $4 {
-        stop
-    }
-        "#;
-
         let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        assert_trim_strings_eq_with_diff(
-            &sir_data::display_program(&ir),
-            expected_ir,
-            "block output use propagates overdefined to successor",
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    => $0 ? @2 : @3
+                }
+
+                @2 -> $1 {
+                    $1 = const 0x5
+                    => @4
+                }
+
+                @3 -> $2 {
+                    $2 = const 0xa
+                    => @4
+                }
+
+                @4 $3 -> $3 {
+                    => @5
+                }
+
+                @5 $4 {
+                    stop
+                }
+            "#,
         );
 
         let store = AnalysesStore::default();
