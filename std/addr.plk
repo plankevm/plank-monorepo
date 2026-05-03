@@ -29,68 +29,6 @@ const raw_create = fn (value: u256, code: membytes) addr {
 };
 
 const raw_create2 = fn (value: u256, code: membytes, salt: bytes32) addr {
-    let account = @evm_create(value, code.ptr, code.len, salt.raw);
+    let account = @evm_create2(value, code.ptr, code.len, salt.raw);
     addr { raw: account }
-};
-
-const raw_call = fn (
-    target: addr,
-    value: u256,
-    gas: u256,
-    calldata: membytes,
-    return_buf: Option(membytes)
-) bool {
-    if return_buf.is_some {
-        @evm_call(
-            gas,
-            target.raw,
-            value,
-            calldata.ptr,
-            calldata.len,
-            return_buf.inner.ptr,
-            return_buf.inner.len
-        )
-    } else {
-        @evm_call(gas, target.raw, value, calldata.ptr, calldata.len, 0, 0)
-    }
-};
-
-const raw_staticcall = fn (
-    target: addr,
-    gas: u256,
-    calldata: membytes,
-    return_buf: Option(membytes)
-) bool {
-    if return_buf.is_some {
-        @evm_staticcall(
-            gas,
-            target.raw,
-            calldata.ptr,
-            calldata.len,
-            return_buf.inner.ptr,
-            return_buf.inner.len
-        )
-    } else {
-        @evm_staticcall(gas, target.raw, calldata.ptr, calldata.len, 0, 0)
-    }
-};
-
-const raw_delegatecall = fn (
-    delegate: addr,
-    gas: u256,
-    calldata: membytes,
-    return_buf: Option(membytes)
-) bool {
-    if return_buf.is_some {
-        @evm_delegatecall(
-            gas,
-            delegate.raw,
-            calldata.ptr,
-            calldata.len,
-            return_buf.inner.ptr,
-            return_buf.inner.len
-        )
-    } else {
-        @evm_delegatecall(gas, delegate.raw, calldata.ptr, calldata.len, 0, 0)
-    }
 };
