@@ -1,0 +1,98 @@
+import std::membytes::{membytes, membytes_new};
+import std::option::{Option, Some, None};
+
+const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+
+const ECRECOVER_ADDR = 0x01;
+const SHA2_256_ADDR = 0x02;
+const RIPEMD_160_ADDR = 0x03;
+const IDENTITY_ADDR = 0x04;
+const MODEXP_ADDR = 0x05;
+
+const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(u256) {
+    let len = 128;
+    let calldata = membytes_new(len);
+
+    @mstore32(calldata.ptr +% 0, hash);
+    @mstore32(calldata.ptr +% 32, v);
+    @mstore32(calldata.ptr +% 64, r);
+    @mstore32(calldata.ptr +% 96, s);
+
+    let returndata = membytes_new(32);
+    let success = @evm_staticcall(@evm_gas(), ECRECOVER_ADDR, calldata.ptr, calldata.len, returndata.ptr, returndata.len);
+
+    let returndata_size = @evm_returndatasize();
+    if returndata_size != 32 {
+        return None(u256);
+    }
+    
+    if success {
+        let inner = @mload32(returndata.ptr);
+        Some(u256, inner)
+    } else {
+        None(u256)
+    }
+
+};
+
+const sha2_256 = fn (data: membytes) u256 {
+    let returndata = membytes_new(32);
+    let success = @evm_staticcall(@evm_gas(), SHA2_256_ADDR, data.ptr, data.len, returndata.ptr, returndata.len);
+    revert_on_fail(success);
+
+    @mload32(returndata.ptr)
+};
+
+const ripemd_160 = fn (data: membytes) u256 {
+    let returndata = membytes_new(32);
+    let success = @evm_staticcall(@evm_gas(), RIPEMD_160_ADDR, data.ptr, data.len, returndata.ptr, returndata.len);
+    revert_on_fail(success);
+
+    @mload32(returndata.ptr)
+};
+
+const set_returndata = fn (data: membytes) membytes {
+    let returndata = membytes_new(data.len);
+    @evm_staticcall(@evm_gas(), IDENTITY_ADDR, data.ptr, data.len, returndata.ptr, returndata.len);
+
+    returndata
+};
+
+const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
+    let len = 96 + base.len + exp.len + mod.len;
+    let calldata = membytes_new(len);
+
+    @mstore32(calldata.ptr +% 0, base.len);
+    @mstore32(calldata.ptr +% 32, exp.len);
+    @mstore32(calldata.ptr +% 64, mod.len);
+
+    @mcopy(calldata.ptr +% 96, base.ptr, base.len);
+    @mcopy(calldata.ptr +% 96 +% base.len, exp.ptr, exp.len);
+    @mcopy(calldata.ptr +% 96 +% base.len +% exp.len, mod.ptr, mod.len);
+
+    let returndata = membytes_new(mod.len);
+    let success = @evm_staticcall(@evm_gas(), MODEXP_ADDR, calldata.ptr, calldata.len, returndata.ptr, returndata.len);
+    revert_on_fail(success);
+
+    returndata
+};
+
+const modexp_256 = fn (base: u256, exp: u256) u256 {
+    let base_bytes = membytes_new(32);
+    let exp_bytes = membytes_new(32);
+    let mod_bytes = membytes_new(32);
+
+    @mstore32(base_bytes.ptr, base);
+    @mstore32(exp_bytes.ptr, exp);
+    @mstore32(mod_bytes.ptr, U256_MAX);
+
+    let returndata = modexp(base_bytes, exp_bytes, mod_bytes);
+
+    @mload32(returndata.ptr)
+};
+
+const revert_on_fail = fn (success: bool) void {
+    if !success {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+};
