@@ -1,6 +1,6 @@
 import std::fixedbytes::bytes32;
 import std::membytes::{membytes, membytes_new};
-import std::option::Option;
+import std::option::{Option, Some, None};
 
 const addr = struct { raw: u256 };
 
@@ -23,12 +23,18 @@ const tx_origin = fn () addr {
     addr { raw: @evm_origin() }
 };
 
-const raw_create = fn (value: u256, code: membytes) addr {
+const raw_create = fn (value: u256, code: membytes) Option(addr) {
     let account = @evm_create(value, code.ptr, code.len);
-    addr { raw: account }
+    if account == 0 {
+        return None(addr);
+    }
+    Some(addr, addr { raw: account })
 };
 
-const raw_create2 = fn (value: u256, code: membytes, salt: bytes32) addr {
+const raw_create2 = fn (value: u256, code: membytes, salt: bytes32) Option(addr) {
     let account = @evm_create2(value, code.ptr, code.len, salt.raw);
-    addr { raw: account }
+    if account == 0 {
+        return None(addr);
+    }
+    Some(addr, addr { raw: account })
 };
