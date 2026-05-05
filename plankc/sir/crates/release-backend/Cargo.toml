@@ -1,0 +1,15 @@
+[package]
+name = "sir-release-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sir-data.workspace = true
+sir-assembler.workspace = true
+sir-passes.workspace = true
+plank-core.workspace = true
+hashbrown.workspace = true
+
+[lints]
+workspace = true

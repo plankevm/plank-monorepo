@@ -2883,6 +2883,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sir-release-backend"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "plank-core",
+ "sir-assembler",
+ "sir-data",
+ "sir-passes",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
