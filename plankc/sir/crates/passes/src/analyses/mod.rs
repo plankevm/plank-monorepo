@@ -11,7 +11,7 @@ mod reachability;
 mod reverse_post_order;
 
 pub use allocation_liveness::{AllocData, AllocId, AllocKind, AllocationLiveness};
-pub use basic_block_ownership::BasicBlockOwnershipAndReachability;
+pub use basic_block_ownership::*;
 pub use cache::{AnalysesMask, AnalysesStore};
 pub use cfg_in_out_bundling::{ControlFlowGraphInOutBundling, InOutGroupId};
 pub use def_use::{DefUse, UseKind, UseLocation};

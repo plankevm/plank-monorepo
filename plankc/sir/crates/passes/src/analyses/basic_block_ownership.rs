@@ -17,6 +17,9 @@ impl Analysis for BasicBlockOwnershipAndReachability {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub struct Unreachable;
+
 impl BasicBlockOwnershipAndReachability {
     fn mark_reachable_blocks(
         ownership: &mut IndexVec<BasicBlockId, Option<FunctionId>>,
@@ -35,8 +38,8 @@ impl BasicBlockOwnershipAndReachability {
         }
     }
 
-    pub fn get_owner(&self, block: BasicBlockId) -> Option<FunctionId> {
-        self.ownership[block]
+    pub fn get_owner(&self, block: BasicBlockId) -> Result<FunctionId, Unreachable> {
+        self.ownership[block].ok_or(Unreachable)
     }
 
     pub fn is_reachable(&self, block: BasicBlockId) -> bool {
@@ -121,8 +124,8 @@ mod tests {
         let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
-        assert_eq!(analysis.get_owner(bb0_id), Some(func_id));
-        assert_eq!(analysis.get_owner(bb1_id), Some(func_id));
+        assert_eq!(analysis.get_owner(bb0_id), Ok(func_id));
+        assert_eq!(analysis.get_owner(bb1_id), Ok(func_id));
 
         assert!(analysis.is_reachable(bb0_id));
         assert!(analysis.is_reachable(bb1_id));
@@ -185,9 +188,9 @@ mod tests {
         let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
-        assert_eq!(analysis.get_owner(bb0_id), Some(func0_id));
-        assert_eq!(analysis.get_owner(bb1_id), Some(func0_id));
-        assert_eq!(analysis.get_owner(bb2_id), Some(func1_id));
+        assert_eq!(analysis.get_owner(bb0_id), Ok(func0_id));
+        assert_eq!(analysis.get_owner(bb1_id), Ok(func0_id));
+        assert_eq!(analysis.get_owner(bb2_id), Ok(func1_id));
 
         assert_eq!(analysis.blocks_owned_by(func0_id).collect::<Vec<_>>(), vec![bb0_id, bb1_id]);
         assert_eq!(analysis.blocks_owned_by(func1_id).collect::<Vec<_>>(), vec![bb2_id]);
@@ -224,9 +227,9 @@ mod tests {
         let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);
 
-        assert_eq!(analysis.get_owner(bb0_id), Some(func_id));
-        assert_eq!(analysis.get_owner(bb1_id), Some(func_id));
-        assert_eq!(analysis.get_owner(bb2_id), Some(func_id));
+        assert_eq!(analysis.get_owner(bb0_id), Ok(func_id));
+        assert_eq!(analysis.get_owner(bb1_id), Ok(func_id));
+        assert_eq!(analysis.get_owner(bb2_id), Ok(func_id));
 
         assert!(analysis.is_reachable(bb0_id));
         assert!(analysis.is_reachable(bb1_id));

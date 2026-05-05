@@ -96,6 +96,14 @@ impl Analysis for LocalLiveness {
 }
 
 impl LocalLiveness {
+    pub fn get_live_at_entry(&self, bb: BasicBlockId) -> &HashSet<LocalId> {
+        &self.locals_live_at_entry[bb]
+    }
+
+    pub fn get_live_at_exit(&self, bb: BasicBlockId) -> &HashSet<LocalId> {
+        &self.locals_live_at_exit[bb]
+    }
+
     pub fn intervals_of(&self, local: LocalId) -> &[(BasicBlockId, Interval)] {
         &self.local_intervals[local]
     }

@@ -98,7 +98,6 @@ define_analyses! {
     Dominators => dominators: Dominators,
     DominanceFrontiers => dominance_frontiers: DominanceFrontiers,
     BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability,
-    CfgInOutBundling => cfg_in_out_bundling: ControlFlowGraphInOutBundling,
     AllocationLiveness => allocation_liveness: AllocationLiveness,
     LocalLiveness => local_liveness: LocalLiveness,
     Reachability => reachability: Reachability,
@@ -171,7 +170,6 @@ mod tests {
         assert!(!store.dominators.is_valid());
         assert!(!store.dominance_frontiers.is_valid());
         assert!(!store.basic_block_ownership.is_valid());
-        assert!(!store.cfg_in_out_bundling.is_valid());
         assert!(store.reachability.is_valid());
 
         // Defragmenter consumes reachability and invalidates it
