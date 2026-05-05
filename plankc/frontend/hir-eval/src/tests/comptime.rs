@@ -614,16 +614,14 @@ fn test_basic_polymorphic_function() {
         }
 
         @fn1(%0: bool, %1: bool) -> bool {
-            %2 : void = void_unit
-            %3 : void = %2
-            %4 : bool = %0
-            if %4 {
-                %5 : bool = true
+            %2 : bool = %0
+            if %2 {
+                %3 : bool = true
             } else {
-                %5 : bool = %1
+                %3 : bool = %1
             }
-            %6 : bool = %5
-            ret %6
+            %4 : bool = %3
+            ret %4
         }
 
         ; init

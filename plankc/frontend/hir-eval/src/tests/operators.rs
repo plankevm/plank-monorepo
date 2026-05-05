@@ -721,9 +721,7 @@ fn test_equals_type_equality() {
             %0 : u256 = 0
             %1 : u256 = 1
             %2 : void = @evm_sstore(%0, %1)
-            %3 : void = void_unit
-            %4 : void = %3
-            %5 : never = @evm_stop()
+            %3 : never = @evm_stop()
         }
         "#,
     );

@@ -107,6 +107,28 @@ fn test_logical_not_in_if_condition() {
 }
 
 #[test]
+fn test_logical_not_or_eager() {
+    assert_lowers_to(
+        r#"
+        init {
+            let T = struct {};
+            if !@is_struct(T) or false {
+                @evm_invalid();
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_logical_not_type_mismatch_runtime() {
     assert_diagnostics(
         r#"
