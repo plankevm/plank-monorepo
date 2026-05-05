@@ -1,5 +1,7 @@
 use alloy_primitives::U256;
-use plank_core::{Idx, IndexVec, Span, index_vec, newtype_index};
+use plank_core::{
+    Idx, IndexVec, Span, const_print::const_assert_mem_size, index_vec, newtype_index,
+};
 
 mod display;
 pub mod op;
@@ -45,6 +47,11 @@ enum StoredAsmSection {
     Size3RawDeltaRef(Span<MarkId>),
     Size4RawDeltaRef(Span<MarkId>),
 }
+
+const _ASSERT_STORED_ASM_SECTION_MEM_SIZE: () = const {
+    const_assert_mem_size::<StoredAsmSection>(12);
+    assert!(std::mem::align_of::<StoredAsmSection>() == 4);
+};
 
 fn bytes_to_hold(offset: u32) -> RefSize {
     match offset {
@@ -180,11 +187,6 @@ impl AsmReference {
     }
 }
 
-const _ASSERT_STORED_ASM_SECTION_MEM_SIZE: () = const {
-    assert!(std::mem::size_of::<StoredAsmSection>() == 12);
-    assert!(std::mem::align_of::<StoredAsmSection>() == 4);
-};
-
 #[derive(Debug, Clone)]
 pub struct Assembler {
     bytes: IndexVec<AsmBytesIdx, u8>,
@@ -202,6 +204,11 @@ impl Assembler {
             bytes: IndexVec::with_capacity(bytes_capacity),
             sections: Vec::with_capacity(sections_capacity),
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.bytes.clear();
+        self.sections.clear();
     }
 
     fn iter_sections(&self) -> impl Iterator<Item = AsmSection> {

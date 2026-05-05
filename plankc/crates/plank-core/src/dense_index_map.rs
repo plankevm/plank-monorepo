@@ -82,6 +82,13 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         assert!(prev.is_none(), "inserting but not first");
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (I, &mut V)> {
+        self.inner
+            .iter_mut()
+            .zip(0u32..)
+            .filter_map(|(slot, i)| slot.as_mut().map(|v| (I::ZERO + i, v)))
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (I, &V)> {
         self.inner
             .iter()

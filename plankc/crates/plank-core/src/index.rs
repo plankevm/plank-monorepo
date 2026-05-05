@@ -1,4 +1,4 @@
-use crate::span::IncIterable;
+use crate::{Span, span::IncIterable};
 use std::{
     convert::TryFrom,
     fmt::Debug,
@@ -185,6 +185,10 @@ impl<I: Idx> IncIterable for I {
         *self += 1;
         current
     }
+}
+
+pub fn iter_until<I: Idx>(i: I) -> impl Iterator<Item = I> {
+    Span::new(I::ZERO, i).iter()
 }
 
 #[cfg(test)]
