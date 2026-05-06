@@ -3,17 +3,17 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "../BaseTest.sol";
 
-contract AddrTest is BaseTest {
+contract FixedBytesTest is BaseTest {
 
     address plankImpl = makeAddr("plank-impl");
 
     function setUp() public {
-        bytes memory addrTestCode = plank("src/std/addr_test.plk");
-        vm.etch(plankImpl, addrTestCode);
+        bytes memory fixedBytesTestCode = plank("src/std/fixedbytes_test.plk");
+        vm.etch(plankImpl, fixedBytesTestCode);
     }
 
-    function test_addr_conversion_fails() public {
+    function test_fixedbytes() public {
         (bool success, bytes memory out) = plankImpl.call("");
-        assertEq(success, false);
+        assertEq(success, true);
     }
 }

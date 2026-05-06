@@ -1,0 +1,16 @@
+import std::fixedbytes::membytes_read_bytes32;
+import std::membytes::membytes_new;
+
+init {
+    let buf = membytes_new(32);
+
+    // test out of bounds condition
+    let maybe_bytes = membytes_read_bytes32(buf, 32);
+    if maybe_bytes.is_some {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+
+    let out_ptr = @malloc_zeroed(32);
+    @mstore32(out_ptr, 0);
+    @evm_return(out_ptr, 32);
+}
