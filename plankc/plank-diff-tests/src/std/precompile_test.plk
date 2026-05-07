@@ -1,0 +1,108 @@
+import std::storage::{sstore_bytes, sload_bytes};
+import std::membytes::{membytes, membytes_from_ptr};
+import std::constructor::return_runtime;
+import std::abi::abi_encode;
+import std::precompile::{ecrecover, sha2_256, ripemd_160, set_returndata, modexp};
+
+const ECRECOVER_SELECTOR = 0xa489405c;
+const RIPEMD160_SELECTOR = 0x31699b64;
+const SHA256_SELECTOR = 0xb32a323d;
+const SET_RETURNDATA_SELECTOR = 0x51a31a9d;
+const MODEXP_SELECTOR = 0x725782ca;
+
+const BytesResult = struct { data: membytes };
+
+init {
+    return_runtime();
+}
+
+run {
+    let selector = @evm_shr(224, @evm_calldataload(0));
+    if @evm_eq(selector, ECRECOVER_SELECTOR) {
+        call_ecrecover();
+    } else if @evm_eq(selector, SHA256_SELECTOR) {
+        call_sha2_256();
+    } else if @evm_eq(selector, RIPEMD160_SELECTOR) {
+        call_ripemd_160();
+    } else if @evm_eq(selector, SET_RETURNDATA_SELECTOR ) {
+        call_set_returndata();
+    } else if @evm_eq(selector, MODEXP_SELECTOR) {
+        call_modexp();
+    } else {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+}
+
+const call_ecrecover = fn () never {
+    let hash = @evm_calldataload(4);
+    let v = @evm_calldataload(36);
+    let r = @evm_calldataload(68);
+    let s = @evm_calldataload(100);
+    
+    let addr = ecrecover(hash, v, r, s);
+    let out = @malloc_uninit(32);
+    @mstore32(out, addr.inner);
+    @evm_return(out, 32);
+};
+
+const call_sha2_256 = fn () never {
+    let offset = @evm_add(4, @evm_calldataload(4));
+    let length = @evm_calldataload(offset);
+    let ptr = @malloc_uninit(length);
+    @evm_calldatacopy(ptr, @evm_add(offset, 32), length);
+
+    let data = membytes_from_ptr(ptr, length);
+    let hash = sha2_256(data);
+
+    let out = @malloc_uninit(32);
+    @mstore32(out, hash);
+    @evm_return(out, 32);
+};
+
+const call_ripemd_160 = fn () never {
+    let offset = @evm_add(4, @evm_calldataload(4));
+    let length = @evm_calldataload(offset);
+    let ptr = @malloc_uninit(length);
+    @evm_calldatacopy(ptr, @evm_add(offset, 32), length);
+
+    let data = membytes_from_ptr(ptr, length);
+    let hash = ripemd_160(data);
+
+    let out = @malloc_uninit(32);
+    @mstore32(out, hash);
+    @evm_return(out, 32);
+};
+
+const call_set_returndata = fn () never {
+    let offset = @evm_add(4, @evm_calldataload(4));
+    let length = @evm_calldataload(offset);
+    let ptr = @malloc_uninit(length);
+    @evm_calldatacopy(ptr, @evm_add(offset, 32), length);
+
+    let data = membytes_from_ptr(ptr, length);
+    let copy = set_returndata(data);
+    let out = abi_encode(BytesResult, BytesResult { data: data });
+    @evm_return(out.ptr, out.len);
+};
+
+const call_modexp = fn () never {
+    let base_offset = @evm_add(4, @evm_calldataload(4));
+    let exp_offset = @evm_add(4, @evm_calldataload(36));
+    let mod_offset = @evm_add(4, @evm_calldataload(68));
+
+    let base = bytes_from_offset(base_offset);
+    let exp = bytes_from_offset(exp_offset);
+    let mod = bytes_from_offset(mod_offset);
+
+    let result = modexp(base, exp, mod);
+    let out = abi_encode(BytesResult, BytesResult { data: result });
+    @evm_return(out.ptr, out.len);
+};
+
+const bytes_from_offset = fn (off: u256) membytes {
+    let len = @evm_calldataload(off);
+    let ptr = @malloc_uninit(len);
+    @evm_calldatacopy(ptr, @evm_add(off, 32), len);
+
+    membytes_from_ptr(ptr, len)
+};
