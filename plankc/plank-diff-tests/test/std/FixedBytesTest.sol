@@ -13,7 +13,12 @@ contract FixedBytesTest is BaseTest {
     }
 
     function test_fixedbytes() public {
-        (bool success, bytes memory out) = plankImpl.call("");
-        assertEq(success, true);
+        (bool success, bytes memory out) = plankImpl.call(abi.encode(0));
+        assertTrue(success);
+    }
+
+    function test_fixedbytes_revert_on_overflow() public {
+        (bool success, bytes memory out) = plankImpl.call(abi.encode(1));
+        assertFalse(success);
     }
 }

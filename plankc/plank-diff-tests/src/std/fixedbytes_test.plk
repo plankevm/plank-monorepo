@@ -1,17 +1,43 @@
+import std::abi::abi_decode;
+import std::core_ops::checked_add;
 import std::fixedbytes::membytes_read_bytes32;
-import std::membytes::membytes_new;
+import std::membytes::{membytes_new, membytes_read_u256, membytes_from_ptr, membytes_write_u256};
+
+const ITEM = 0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c;
+const UINT_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+
+const SELECTOR_MEMBYTES_READ_BYTES32 = 0;
+const SELECTOR_MEMBYTES_READ_BYTES32_OVERFLOW = 1;
 
 init {
+    // read simple u256 selector
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let input = membytes_from_ptr(ptr, size);
+    let selector = abi_decode(u256, input);
+
     let buf = membytes_new(32);
+    membytes_write_u256(buf, 0, ITEM);
 
-    let maybe_bytes = membytes_read_bytes32(buf, 0);
-    if !maybe_bytes.is_some {
-        @evm_revert(@malloc_uninit(0), 0);
-    }
+    if (selector == SELECTOR_MEMBYTES_READ_BYTES32) {
+        // should read Some(bytes32) from membuf
+        let maybe_bytes1 = membytes_read_bytes32(buf, 0);
+        if !maybe_bytes1.is_some {
+            @evm_revert(@malloc_uninit(0), 0);
+        }
+        if maybe_bytes1.inner.raw != ITEM {
+            @evm_revert(@malloc_uninit(0), 0);
+        }
 
-    // test out of bounds condition
-    let maybe_bytes = membytes_read_bytes32(buf, 32);
-    if maybe_bytes.is_some {
+        // OOB: Should read None from membuf
+        let maybe_bytes2 = membytes_read_bytes32(buf, 1);
+        if maybe_bytes2.is_some {
+            @evm_revert(@malloc_uninit(0), 0);
+        }
+    } else if (selector == SELECTOR_MEMBYTES_READ_BYTES32_OVERFLOW) {
+        membytes_read_bytes32(buf, UINT_MAX);
+    } else {
         @evm_revert(@malloc_uninit(0), 0);
     }
 
