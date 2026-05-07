@@ -1,3 +1,4 @@
+import std::error::require;
 import std::membytes::{membytes, membytes_from_ptr};
 import std::option::{Option, Some, None};
 
@@ -8,7 +9,7 @@ const IDENTITY_ADDR = 0x04;
 const MODEXP_ADDR = 0x05;
 
 const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(u256) {
-    let calldata = membytes_new_uninit(128);
+    let calldata = membytes{ ptr: @malloc_uninit(128), len: 128 };
     @mstore32(calldata.ptr +% 0, hash);
     @mstore32(calldata.ptr +% 32, v);
     @mstore32(calldata.ptr +% 64, r);
@@ -34,7 +35,7 @@ const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(u256) {
 };
 
 const sha256 = fn (data: membytes) u256 {
-    let returndata = membytes_new_uninit(32);
+    let returndata = membytes{ ptr: @malloc_uninit(32), len: 32 };
     let success = @evm_staticcall(
         @evm_gas(), 
         SHA256_ADDR, 
@@ -49,7 +50,7 @@ const sha256 = fn (data: membytes) u256 {
 };
 
 const ripemd160 = fn (data: membytes) u256 {
-    let returndata = membytes_new_uninit(32);
+    let returndata = membytes{ ptr: @malloc_uninit(32), len: 32 };
     let success = @evm_staticcall(
         @evm_gas(), 
         RIPEMD160_ADDR, 
@@ -64,7 +65,7 @@ const ripemd160 = fn (data: membytes) u256 {
 };
 
 const set_returndata = fn (data: membytes) membytes {
-    let returndata = membytes_new_uninit(data.len);
+    let returndata = membytes{ ptr: @malloc_uninit(data.len), len: data.len };
     let success = @evm_staticcall(
         @evm_gas(), 
         IDENTITY_ADDR, 
@@ -80,7 +81,7 @@ const set_returndata = fn (data: membytes) membytes {
 
 const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
     let len = 96 + base.len + exp.len + mod.len;
-    let calldata = membytes_new_uninit(len);
+    let calldata = membytes{ ptr: @malloc_uninit(len), len: len };
 
     @mstore32(calldata.ptr +% 0, base.len);
     @mstore32(calldata.ptr +% 32, exp.len);
@@ -101,15 +102,4 @@ const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
     require(success);
 
     membytes_from_ptr(calldata.ptr, mod.len) 
-};
-
-const membytes_new_uninit = fn (len: u256) membytes {
-    let ptr = @malloc_uninit(len);
-    membytes_from_ptr(ptr, len)
-};
-
-const require = fn (success: bool) void {
-    if !success {
-        @evm_revert(@malloc_uninit(0), 0);
-    }
 };
