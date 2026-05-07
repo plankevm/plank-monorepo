@@ -1,10 +1,47 @@
-import std::addr::addr_from_u256;
+import std::abi::abi_decode;
+import std::addr::{addr, addr_from_u256, raw_create, raw_create2};
+import std::fixedbytes::bytes32_from_u256;
+import std::membytes::{membytes_new, membytes_from_ptr};
+import std::option::Option;
+
+const assert_some = fn (comptime T: type, option: Option(T)) void {
+    if !option.is_some {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+};
+
+const assert_nonzero = fn (value: u256) void {
+    if value == 0 {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+};
+
+const SELECTOR_CONVERT = 0;
+const SELECTOR_CREATE = 1;
 
 init {
-    // not convertible to address, should revert
-    let address = addr_from_u256(1 << 160);
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let input = membytes_from_ptr(ptr, size);
+    let selector = abi_decode(u256, input);
+
+    if selector == SELECTOR_CONVERT {
+        // not convertible to address, should revert
+        addr_from_u256(1 << 160);
+    } else if selector == SELECTOR_CREATE {
+        let code = membytes_new(32);
+        let maybe_account1 = raw_create(0, code);
+        assert_some(addr, maybe_account1);
+        assert_nonzero(maybe_account1.inner.raw);
+
+        let salt = bytes32_from_u256(0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c);
+        let maybe_account2 = raw_create2(0, code, salt);
+        assert_some(addr, maybe_account2);
+        assert_nonzero(maybe_account2.inner.raw);
+    }
 
     let out_ptr = @malloc_zeroed(32);
-    @mstore32(out_ptr, address.raw);
+    @mstore32(out_ptr, 0);
     @evm_return(out_ptr, 32);
 }

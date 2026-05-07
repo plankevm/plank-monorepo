@@ -13,7 +13,12 @@ contract AddrTest is BaseTest {
     }
 
     function test_addr_conversion_fails() public {
-        (bool success, bytes memory out) = plankImpl.call("");
-        assertEq(success, false);
+        (bool success, bytes memory out) = plankImpl.call(abi.encode(0));
+        assertFalse(success);
+    }
+
+    function test_raw_create() public {
+        (bool success, bytes memory out) = plankImpl.call(abi.encode(1));
+        assertTrue(success);
     }
 }
