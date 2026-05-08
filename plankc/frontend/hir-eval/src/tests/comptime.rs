@@ -216,6 +216,25 @@ fn test_compile_error_accepts_cbytes_const() {
 }
 
 #[test]
+fn test_compile_error_accepts_cbytes_let() {
+    assert_diagnostics(
+        r#"
+        init {
+            let msg = "from let";
+            @compile_error(msg);
+        }
+        "#,
+        &[r#"
+        error: from let
+         --> main.plk:3:5
+          |
+        3 |     @compile_error(msg);
+          |     ^^^^^^^^^^^^^^^^^^^ compile error triggered here
+        "#],
+    );
+}
+
+#[test]
 fn test_compile_error_requires_string_literal() {
     assert_diagnostics(
         r#"
