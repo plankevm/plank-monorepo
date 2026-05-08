@@ -154,11 +154,12 @@ module.exports = grammar({
     field_init: ($) => seq(field("name", $.identifier), ":", field("value", $._expr)),
 
     // Literals
-    _literal: ($) => choice($.bool_literal, $.hex_literal, $.bin_literal, $.dec_literal),
+    _literal: ($) => choice($.bool_literal, $.hex_literal, $.bin_literal, $.dec_literal, $.string_literal),
     bool_literal: (_) => choice("true", "false"),
     hex_literal: (_) => /-?0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
     bin_literal: (_) => /-?0b[01][01_]*/,
     dec_literal: (_) => /-?[0-9][0-9_]*/,
+    string_literal: (_) => /"([^"\\\r\n]|\\.)*"/,
 
     // Helpers
     block_comment: ($) => seq('/*', $._block_comment_content, '*/'),
