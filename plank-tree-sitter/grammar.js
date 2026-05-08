@@ -24,7 +24,11 @@ const PREC = {
 module.exports = grammar({
   name: "plank",
 
-  externals: $ => [$._block_comment_content, $.error_sentinel],
+  externals: $ => [
+    $._block_comment_content,
+    $.string_literal,
+    $.error_sentinel,
+  ],
   extras: ($) => [/\s/, $.line_comment, $.block_comment],
   conflicts: ($) => [
     [$._expr, $._stmt],
@@ -167,7 +171,6 @@ module.exports = grammar({
     hex_literal: (_) => /-?0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
     bin_literal: (_) => /-?0b[01][01_]*/,
     dec_literal: (_) => /-?[0-9][0-9_]*/,
-    string_literal: (_) => /"([^"\\\r\n]|\\.)*"/,
     hex_string_literal: (_) => token(prec(1, /hex"[0-9A-Fa-f]*"/)),
 
     // Helpers

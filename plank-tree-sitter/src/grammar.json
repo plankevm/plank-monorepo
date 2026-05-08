@@ -1625,10 +1625,6 @@
       "type": "PATTERN",
       "value": "-?[0-9][0-9_]*"
     },
-    "string_literal": {
-      "type": "PATTERN",
-      "value": "\"([^\"\\\\\\r\\n]|\\\\.)*\""
-    },
     "hex_string_literal": {
       "type": "TOKEN",
       "content": {
@@ -1707,6 +1703,10 @@
     {
       "type": "SYMBOL",
       "name": "_block_comment_content"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "string_literal"
     },
     {
       "type": "SYMBOL",

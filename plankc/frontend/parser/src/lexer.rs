@@ -1,6 +1,7 @@
 use logos::{Lexer as LogosLexer, Logos};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
 use plank_session::{SourceByteOffset, SourceSpan};
+use std::borrow::Cow;
 
 type CharsPeekable<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
 
@@ -60,13 +61,16 @@ fn lex_number_literal<const RADIX: u32>(lexer: &mut LogosLexer<Token>) -> Result
 
 fn lex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     fn inner<'a>(chars: &mut CharsPeekable<'a>) -> Result<(), Token> {
+        let mut malformed = false;
         while let Some((_, c)) = chars.next() {
             match c {
-                '"' => return Ok(()),
+                '"' => {
+                    return if malformed { Err(Token::UnclosedStringError) } else { Ok(()) };
+                }
                 '\\' => {
                     chars.next();
                 }
-                '\n' | '\r' => return Err(Token::UnclosedStringError),
+                '\n' | '\r' => malformed = true,
                 _ => {}
             }
         }
@@ -89,7 +93,7 @@ fn lex_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
                     return Err(Token::MalformedHexStringError);
                 }
                 '0'..='9' | 'A'..='F' | 'a'..='f' => digits += 1,
-                '\n' | '\r' => return Err(Token::UnclosedStringError),
+                '\n' | '\r' => malformed = true,
                 _ => malformed = true,
             }
         }
@@ -99,55 +103,78 @@ fn lex_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     inner_do_lex(lexer, inner)
 }
 
-fn decode_string_literal(src: &str) -> Vec<u8> {
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn decode_string_literal(src: &str) -> Option<Vec<u8>> {
     let inner = &src[1..src.len() - 1];
     if !inner.contains('\\') {
-        return inner.as_bytes().to_vec();
+        return None;
     }
 
     let mut decoded = Vec::with_capacity(inner.len());
-    let mut chars = inner.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            let mut buf = [0; 4];
-            decoded.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-            continue;
+    let mut pos = 0;
+    while pos < inner.len() {
+        let rest = &inner[pos..];
+        let Some(escape) = rest.find('\\') else {
+            decoded.extend_from_slice(rest.as_bytes());
+            break;
+        };
+        decoded.extend_from_slice(&rest.as_bytes()[..escape]);
+        pos += escape + 1;
+
+        let Some(escaped) = inner[pos..].chars().next() else {
+            decoded.push(b'\\');
+            break;
+        };
+        if escaped == 'x' {
+            let bytes = inner.as_bytes();
+            if let Some((&hi, rest)) = bytes.get(pos + 1).zip(bytes.get(pos + 2..))
+                && let Some(&lo) = rest.first()
+                && let Some(hi) = hex_value(hi)
+                && let Some(lo) = hex_value(lo)
+            {
+                decoded.push(hi << 4 | lo);
+                pos += 3;
+                continue;
+            }
         }
-        match chars.next() {
-            Some('n') => decoded.push(b'\n'),
-            Some('r') => decoded.push(b'\r'),
-            Some('t') => decoded.push(b'\t'),
-            Some('\\') => decoded.push(b'\\'),
-            Some('"') => decoded.push(b'"'),
-            Some(other) => {
+
+        match escaped {
+            'n' => decoded.push(b'\n'),
+            'r' => decoded.push(b'\r'),
+            't' => decoded.push(b'\t'),
+            '\\' => decoded.push(b'\\'),
+            '"' => decoded.push(b'"'),
+            other => {
                 decoded.push(b'\\');
                 let mut buf = [0; 4];
                 decoded.extend_from_slice(other.encode_utf8(&mut buf).as_bytes());
             }
-            None => decoded.push(b'\\'),
         }
+        pos += escaped.len_utf8();
     }
-    decoded
+    Some(decoded)
 }
 
 fn decode_hex_string_literal(src: &str) -> Vec<u8> {
-    fn hex_value(byte: u8) -> u8 {
-        match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'A'..=b'F' => byte - b'A' + 10,
-            b'a'..=b'f' => byte - b'a' + 10,
-            _ => unreachable!("hex string literal validated by lexer"),
-        }
-    }
-
     let inner = &src[4..src.len() - 1];
     inner
         .as_bytes()
         .chunks_exact(2)
-        .map(|chunk| hex_value(chunk[0]) << 4 | hex_value(chunk[1]))
+        .map(|chunk| {
+            let hi = hex_value(chunk[0]).expect("hex string literal validated by lexer");
+            let lo = hex_value(chunk[1]).expect("hex string literal validated by lexer");
+            hi << 4 | lo
+        })
         .collect()
 }
-
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Copy, Default)]
 #[cfg_attr(test, derive(enum_iterator::Sequence))]
 #[logos(error(Token))]
@@ -548,7 +575,7 @@ impl Lexed {
             let (tok, span) = lexer.next_with_eof();
             let token_source = &source[span.usize_range()];
             let bytes_literal = match tok {
-                Token::StringLiteral => Some(decode_string_literal(token_source)),
+                Token::StringLiteral => decode_string_literal(token_source),
                 Token::HexStringLiteral => Some(decode_hex_string_literal(token_source)),
                 _ => None,
             };
@@ -585,8 +612,15 @@ impl Lexed {
         (self.tokens[index], self.token_src_span(index))
     }
 
-    pub fn bytes_literal_value(&self, index: TokenIdx) -> Option<&[u8]> {
-        self.bytes_literals[index].as_deref()
+    pub fn bytes_literal_value<'a>(&'a self, index: TokenIdx, source: &'a str) -> Cow<'a, [u8]> {
+        if let Some(value) = &self.bytes_literals[index] {
+            return Cow::Borrowed(value);
+        }
+
+        assert_eq!(self.tokens[index], Token::StringLiteral);
+        let span = self.token_src_span(index);
+        let src = &source[span.usize_range()];
+        Cow::Borrowed(&src.as_bytes()[1..src.len() - 1])
     }
 
     pub fn len(&self) -> TokenIdx {
@@ -769,16 +803,18 @@ mod tests {
 
     #[test]
     fn test_string_literal_values() {
-        let lexed =
-            Lexed::lex("\"hello\" \"\" \"quote: \\\" slash: \\\\\" \"line\\n\" hex\"00ff\"");
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(0)), Some("hello".as_bytes()));
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(2)), Some("".as_bytes()));
+        let source =
+            "\"hello\" \"\" \"quote: \\\" slash: \\\\\" \"line\\n\" \"nul\\x00\" hex\"00ff\"";
+        let lexed = Lexed::lex(source);
+        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(0), source), "hello".as_bytes());
+        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(2), source), "".as_bytes());
         assert_eq!(
-            lexed.bytes_literal_value(TokenIdx::new(4)),
-            Some("quote: \" slash: \\".as_bytes())
+            lexed.bytes_literal_value(TokenIdx::new(4), source),
+            "quote: \" slash: \\".as_bytes()
         );
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(6)), Some("line\n".as_bytes()));
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(8)), Some([0x00, 0xff].as_slice()));
+        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(6), source), "line\n".as_bytes());
+        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(8), source), b"nul\0".as_slice());
+        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(10), source), [0x00, 0xff].as_slice());
     }
 
     #[test]
@@ -796,8 +832,10 @@ mod tests {
         assert_eq!(results, vec![(Token::UnclosedStringError, 0..13, "\"unterminated")]);
 
         let results = lex_all("\"unterminated\nnext");
-        assert_eq!(results[0], (Token::UnclosedStringError, 0..14, "\"unterminated\n"));
-        assert_eq!(results[1], (Token::Identifier, 14..18, "next"));
+        assert_eq!(results, vec![(Token::UnclosedStringError, 0..18, "\"unterminated\nnext")]);
+
+        let results = lex_all("\"line\ncontinued\"");
+        assert_eq!(results, vec![(Token::UnclosedStringError, 0..16, "\"line\ncontinued\"")]);
     }
 
     #[test]

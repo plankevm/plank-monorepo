@@ -322,11 +322,8 @@ impl<'a> Parser<'a> {
         }
         self.advance();
 
-        let value = self
-            .tokens
-            .bytes_literal_value(token_idx)
-            .expect("string literal token has decoded bytes");
-        let value = self.session.intern_bytes(value);
+        let value = self.tokens.bytes_literal_value(token_idx, self.source);
+        let value = self.session.intern_bytes(&value);
         Some(NodeKind::StringLiteral { value })
     }
 

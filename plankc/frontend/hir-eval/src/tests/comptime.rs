@@ -252,6 +252,23 @@ fn test_compile_error_accepts_hex_cbytes() {
 }
 
 #[test]
+fn test_compile_error_accepts_non_utf8_cbytes() {
+    assert_diagnostics(
+        r#"
+        const x = @compile_error(hex"ff");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: �
+         --> main.plk:1:11
+          |
+        1 | const x = @compile_error(hex"ff");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+        "#],
+    );
+}
+
+#[test]
 fn test_compile_error_requires_string_literal() {
     assert_diagnostics(
         r#"
