@@ -172,6 +172,29 @@ fn test_literal_string_escapes() {
     );
 }
 
+#[test]
+fn test_literal_hex_string() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const x = hex"01af";
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                StringLiteral
+                    "hex\"01af\""
+                ";"
+        "#,
+    );
+}
+
 // =============================================================================
 // Identifiers & Paths
 // =============================================================================

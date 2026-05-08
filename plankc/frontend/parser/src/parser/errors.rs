@@ -67,6 +67,9 @@ impl<'a> Parser<'a> {
                 span,
                 "missing closing `\"`",
             ),
+            ErrorToken::MalformedHexString => Diagnostic::error("malformed hex string literal")
+                .primary(self.source_id, span, "not a valid hex string literal")
+                .help("hex string literals must contain an even number of hex digits"),
         };
 
         diag.emit(self.session);

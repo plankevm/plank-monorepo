@@ -234,6 +234,23 @@ fn test_compile_error_accepts_cbytes_let() {
 }
 
 #[test]
+fn test_compile_error_accepts_hex_cbytes() {
+    assert_diagnostics(
+        r#"
+        const x = @compile_error(hex"686578206661696c757265");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: hex failure
+         --> main.plk:1:11
+          |
+        1 | const x = @compile_error(hex"686578206661696c757265");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+        "#],
+    );
+}
+
+#[test]
 fn test_compile_error_requires_string_literal() {
     assert_diagnostics(
         r#"
@@ -261,12 +278,18 @@ fn test_comptime_cbytes_literals() {
         const empty = "" == "";
         const empty_different = "" != "x";
         const escaped = "\q" == "\\q";
+        const hex_equal = "abc" == hex"616263";
+        const hex_different = "abc" != hex"616264";
+        const arbitrary_bytes = hex"00ff" == hex"00ff";
         init {
             let mut a: bool = same;
             let mut b: bool = different;
             let mut c: bool = empty;
             let mut d: bool = empty_different;
             let mut e: bool = escaped;
+            let mut f: bool = hex_equal;
+            let mut g: bool = hex_different;
+            let mut h: bool = arbitrary_bytes;
             @evm_stop();
         }
         "#,
@@ -279,7 +302,10 @@ fn test_comptime_cbytes_literals() {
             %2 : bool = true
             %3 : bool = true
             %4 : bool = true
-            %5 : never = @evm_stop()
+            %5 : bool = true
+            %6 : bool = true
+            %7 : bool = true
+            %8 : never = @evm_stop()
         }
         "#,
     );

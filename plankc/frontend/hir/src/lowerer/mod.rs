@@ -360,7 +360,7 @@ impl BlockLowerer<'_> {
                 }
             }
             ast::Expr::StringLiteral { value, .. } => {
-                let len = self.session.borrow().lookup_name(value).len();
+                let len = self.session.borrow().lookup_bytes(value).len();
                 let len = u32::try_from(len).expect("source len checked to fit in u32");
                 ExprKind::Value(Ok(self.values.intern_bytes(value, 0, len)))
             }

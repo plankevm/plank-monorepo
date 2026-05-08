@@ -101,6 +101,33 @@ fn test_lexer_error_unclosed_string() {
 }
 
 #[test]
+fn test_lexer_error_malformed_hex_string() {
+    assert_parser_errors(
+        r#"
+            const x = hex"0fg";
+        "#,
+        &[
+            r#"
+            error: malformed hex string literal
+             --> test.plk:1:11
+              |
+            1 | const x = hex"0fg";
+              |           ^^^^^^^^ not a valid hex string literal
+              |
+              = help: hex string literals must contain an even number of hex digits
+            "#,
+            r#"
+            error: unexpected `;`
+             --> test.plk:1:19
+              |
+            1 | const x = hex"0fg";
+              |                   ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+            "#,
+        ],
+    );
+}
+
+#[test]
 fn test_lexer_error_unclosed_block_comment() {
     assert_parser_errors(
         r#"

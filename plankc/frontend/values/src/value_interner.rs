@@ -2,7 +2,7 @@ use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::StrId;
+use plank_session::BytesId;
 use std::hash::BuildHasher;
 
 newtype_index! {
@@ -12,7 +12,7 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CBytes {
-    pub contents: StrId,
+    pub contents: BytesId,
     pub start: u32,
     pub end: u32,
 }
@@ -123,7 +123,7 @@ impl ValueInterner {
         self.intern(Value::Type(ty))
     }
 
-    pub fn intern_bytes(&mut self, contents: StrId, start: u32, end: u32) -> ValueId {
+    pub fn intern_bytes(&mut self, contents: BytesId, start: u32, end: u32) -> ValueId {
         self.intern(Value::Bytes(CBytes { contents, start, end }))
     }
 

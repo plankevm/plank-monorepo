@@ -85,7 +85,7 @@
       "patterns": [
         {
           "name": "string.quoted.double.plank",
-          "begin": "\"",
+          "begin": "\\bhex\"|\"",
           "end": "\"",
           "patterns": [
             {

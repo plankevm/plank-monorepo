@@ -2,7 +2,7 @@ use crate::{
     cst::{BinaryOp, NodeKind, NodeView, NumLitId, UnaryOp},
     lexer::TokenSpan,
 };
-use plank_session::StrId;
+use plank_session::{BytesId, StrId};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Expr<'cst> {
@@ -18,7 +18,7 @@ pub enum Expr<'cst> {
     ComptimeBlock(BlockExpr<'cst>),
     BoolLiteral { value: bool, span: TokenSpan },
     NumLiteral { id: NumLitId, span: TokenSpan },
-    StringLiteral { value: StrId, span: TokenSpan },
+    StringLiteral { value: BytesId, span: TokenSpan },
     Ident { name: StrId, span: TokenSpan },
     BuiltinName { name: StrId, span: TokenSpan },
     Error { span: TokenSpan },
