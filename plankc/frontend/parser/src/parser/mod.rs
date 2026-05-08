@@ -322,34 +322,11 @@ impl<'a> Parser<'a> {
         }
         self.advance();
 
-        let span = self.tokens.token_src_span(token_idx);
-        let src = &self.source[span.usize_range()];
-        let inner = &src[1..src.len() - 1];
-        let value = if inner.contains('\\') {
-            let mut decoded = String::with_capacity(inner.len());
-            let mut chars = inner.chars();
-            while let Some(c) = chars.next() {
-                if c != '\\' {
-                    decoded.push(c);
-                    continue;
-                }
-                match chars.next() {
-                    Some('n') => decoded.push('\n'),
-                    Some('r') => decoded.push('\r'),
-                    Some('t') => decoded.push('\t'),
-                    Some('\\') => decoded.push('\\'),
-                    Some('"') => decoded.push('"'),
-                    Some(other) => {
-                        decoded.push('\\');
-                        decoded.push(other);
-                    }
-                    None => decoded.push('\\'),
-                }
-            }
-            self.session.intern(&decoded)
-        } else {
-            self.session.intern(inner)
-        };
+        let value = self
+            .tokens
+            .string_literal_value(token_idx)
+            .expect("string literal token has decoded value");
+        let value = self.session.intern(value);
         Some(NodeKind::StringLiteral { value })
     }
 

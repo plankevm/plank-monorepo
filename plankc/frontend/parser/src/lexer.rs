@@ -76,6 +76,35 @@ fn lex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     inner_do_lex(lexer, inner)
 }
 
+fn decode_string_literal(src: &str) -> String {
+    let inner = &src[1..src.len() - 1];
+    if !inner.contains('\\') {
+        return inner.to_string();
+    }
+
+    let mut decoded = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            decoded.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => decoded.push('\n'),
+            Some('r') => decoded.push('\r'),
+            Some('t') => decoded.push('\t'),
+            Some('\\') => decoded.push('\\'),
+            Some('"') => decoded.push('"'),
+            Some(other) => {
+                decoded.push('\\');
+                decoded.push(other);
+            }
+            None => decoded.push('\\'),
+        }
+    }
+    decoded
+}
+
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Copy, Default)]
 #[cfg_attr(test, derive(enum_iterator::Sequence))]
 #[logos(error(Token))]
@@ -449,6 +478,7 @@ pub type TokenSpan = Span<TokenIdx>;
 pub struct Lexed {
     tokens: IndexVec<TokenIdx, Token>,
     source_ends: IndexVec<TokenIdx, SourceByteOffset>,
+    string_literals: IndexVec<TokenIdx, Option<String>>,
 }
 
 const LEN_TO_TOKEN_CAPACITY: usize = 4;
@@ -457,13 +487,18 @@ impl Lexed {
     pub fn lex(source: &str) -> Self {
         let mut tokens = IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
         let mut source_ends = IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
+        let mut string_literals =
+            IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
         let mut last_end = SourceByteOffset::ZERO;
 
         let mut lexer = Lexer::new(source);
         loop {
             let (tok, span) = lexer.next_with_eof();
+            let string_literal = (tok == Token::StringLiteral)
+                .then(|| decode_string_literal(&source[span.usize_range()]));
             tokens.push(tok);
             source_ends.push(span.end);
+            string_literals.push(string_literal);
             debug_assert!(last_end == span.start);
             last_end = span.end;
             if tok == Token::Eof {
@@ -471,7 +506,7 @@ impl Lexed {
             }
         }
 
-        Self { tokens, source_ends }
+        Self { tokens, source_ends, string_literals }
     }
 
     fn token_src_start(&self, token: TokenIdx) -> SourceByteOffset {
@@ -492,6 +527,10 @@ impl Lexed {
 
     pub fn get(&self, index: TokenIdx) -> (Token, Span<SourceByteOffset>) {
         (self.tokens[index], self.token_src_span(index))
+    }
+
+    pub fn string_literal_value(&self, index: TokenIdx) -> Option<&str> {
+        self.string_literals[index].as_deref()
     }
 
     pub fn len(&self) -> TokenIdx {
@@ -667,6 +706,15 @@ mod tests {
         assert_eq!(results[4], (Token::StringLiteral, 11..29, r#""escaped \" quote""#));
         assert_eq!(results[5], (Token::Whitespace, 29..30, " "));
         assert_eq!(results[6], (Token::StringLiteral, 30..43, r#""path \\ tmp""#));
+    }
+
+    #[test]
+    fn test_string_literal_values() {
+        let lexed = Lexed::lex("\"hello\" \"\" \"quote: \\\" slash: \\\\\" \"line\\n\"");
+        assert_eq!(lexed.string_literal_value(TokenIdx::new(0)), Some("hello"));
+        assert_eq!(lexed.string_literal_value(TokenIdx::new(2)), Some(""));
+        assert_eq!(lexed.string_literal_value(TokenIdx::new(4)), Some("quote: \" slash: \\"));
+        assert_eq!(lexed.string_literal_value(TokenIdx::new(6)), Some("line\n"));
     }
 
     #[test]

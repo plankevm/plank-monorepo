@@ -89,7 +89,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.plank",
-          "match": "\\b(u256|bool|void|memptr|type|function|never)\\b"
+          "match": "\\b(u256|bool|void|memptr|type|function|never|cbytes)\\b"
         }
       ]
     },
@@ -189,6 +189,11 @@
           "comment": "Comptime Type Reflection",
           "name": "support.function.builtin.plank",
           "match": "@(?:is_struct|field_count|field_type|get_field|set_field)\\b"
+        },
+        {
+          "comment": "Comptime Diagnostics",
+          "name": "support.function.builtin.plank",
+          "match": "@compile_error\\b"
         }
       ]
     },

@@ -24,6 +24,10 @@ impl<'a> TokenItems<'a> {
         self.lexed.token_src_span(ti)
     }
 
+    pub(crate) fn string_literal_value(&self, ti: TokenIdx) -> Option<&str> {
+        self.lexed.string_literal_value(ti)
+    }
+
     pub(crate) fn get_prev(&self) -> Option<(Token, SourceSpan)> {
         (self.current > TokenIdx::ZERO).then(|| self.lexed.get(self.current - 1))
     }

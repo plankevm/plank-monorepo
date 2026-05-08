@@ -1589,6 +1589,10 @@
         {
           "type": "SYMBOL",
           "name": "dec_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "string_literal"
         }
       ]
     },
@@ -1616,6 +1620,10 @@
     "dec_literal": {
       "type": "PATTERN",
       "value": "-?[0-9][0-9_]*"
+    },
+    "string_literal": {
+      "type": "PATTERN",
+      "value": "\"([^\"\\\\\\r\\n]|\\\\.)*\""
     },
     "block_comment": {
       "type": "SEQ",

@@ -12,7 +12,7 @@
 ; Builtin types
 
 ((identifier) @type.builtin
- (#any-of? @type.builtin "void" "u256" "bool" "memptr" "type" "function" "never"))
+ (#any-of? @type.builtin "void" "u256" "bool" "memptr" "type" "function" "never" "cbytes"))
 
 ; Builtin functions
 
@@ -59,7 +59,9 @@
   ; Bytecode Introspection
   "@runtime_start_offset" "@init_end_offset" "@runtime_length"
   ; Comptime Type Reflection
-  "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field"))
+  "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field"
+  ; Comptime Diagnostics
+  "@compile_error"))
 
 ; Function calls
 
@@ -132,6 +134,7 @@
 (hex_literal) @number
 (bin_literal) @number
 (dec_literal) @number
+(string_literal) @string
 
 ; Operators
 
