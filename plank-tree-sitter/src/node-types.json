@@ -1739,6 +1739,11 @@
     }
   },
   {
+    "type": "string_literal",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "struct_def",
     "named": true,
     "fields": {
@@ -2166,6 +2171,10 @@
     "named": false
   },
   {
+    "type": "\"",
+    "named": false
+  },
+  {
     "type": "%",
     "named": false
   },
@@ -2377,10 +2386,6 @@
   {
     "type": "run",
     "named": false
-  },
-  {
-    "type": "string_literal",
-    "named": true
   },
   {
     "type": "struct",

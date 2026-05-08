@@ -4,7 +4,7 @@
 
 enum TokenType {
     BLOCK_COMMENT_CONTENT,
-    STRING_LITERAL,
+    STRING_LITERAL_END,
     ERROR_SENTINEL
 };
 
@@ -36,22 +36,14 @@ void tree_sitter_plank_external_scanner_deserialize(
   unsigned length
 ) { }
 
-static bool scan_string_literal(TSLexer *lexer) {
-    while (lexer->lookahead == ' ' || lexer->lookahead == '\t' || lexer->lookahead == '\n' || lexer->lookahead == '\r') {
-        lexer->advance(lexer, true);
-    }
+static bool scan_string_literal_end(TSLexer *lexer) {
+    lexer->result_symbol = STRING_LITERAL_END;
 
-    if (lexer->lookahead != '"') {
-        return false;
-    }
-
-    lexer->advance(lexer, false);
     while (!lexer->eof(lexer)) {
         switch (lexer->lookahead) {
             case '"':
                 lexer->advance(lexer, false);
                 lexer->mark_end(lexer);
-                lexer->result_symbol = STRING_LITERAL;
                 return true;
             case '\\':
                 lexer->advance(lexer, false);
@@ -65,28 +57,10 @@ static bool scan_string_literal(TSLexer *lexer) {
         }
     }
 
-    return false;
+    return true;
 }
 
-bool tree_sitter_plank_external_scanner_scan(
-  void *payload,
-  TSLexer *lexer,
-  const bool *valid_symbols
-) {
-    if (valid_symbols[STRING_LITERAL] && scan_string_literal(lexer)) {
-        return true;
-    }
-
-    // Recommended way of handling error state: https://tree-sitter.github.io/tree-sitter/creating-parsers/4-external-scanners.html#other-external-scanner-details
-    if (valid_symbols[ERROR_SENTINEL]) {
-        return false;
-    }
-
-    if (!valid_symbols[BLOCK_COMMENT_CONTENT]) {
-        return false;
-    }
-
-
+static void scan_block_comment_content(TSLexer *lexer) {
     // We are only parsing content (`$._block_comment_content`):
     // `const BIG_NUMBER = 3749; /* commented stuff /* nested */ ok */`
     // Lexer gets started at  -----^
@@ -125,5 +99,29 @@ bool tree_sitter_plank_external_scanner_scan(
     // Still accept result even if we ended via EOF as it's useful while typing.
 
     lexer->result_symbol = BLOCK_COMMENT_CONTENT;
-    return true;
+    return;
+
+}
+
+bool tree_sitter_plank_external_scanner_scan(
+  void *payload,
+  TSLexer *lexer,
+  const bool *valid_symbols
+) {
+    // Recommended way of handling error state: https://tree-sitter.github.io/tree-sitter/creating-parsers/4-external-scanners.html#other-external-scanner-details
+    if (valid_symbols[ERROR_SENTINEL]) {
+        return false;
+    }
+
+    if (valid_symbols[STRING_LITERAL_END] && scan_string_literal_end(lexer)) {
+        return true;
+    }
+
+    // `$._block_comment_content` only valid when expected
+    if (valid_symbols[BLOCK_COMMENT_CONTENT]) {
+        scan_block_comment_content(lexer);
+        return true;
+    }
+
+    return false;
 }
