@@ -36,7 +36,7 @@ void tree_sitter_plank_external_scanner_deserialize(
   unsigned length
 ) { }
 
-static bool scan_string_literal_end(TSLexer *lexer) {
+static void scan_string_literal_end(TSLexer *lexer) {
     lexer->result_symbol = STRING_LITERAL_END;
 
     while (!lexer->eof(lexer)) {
@@ -44,7 +44,7 @@ static bool scan_string_literal_end(TSLexer *lexer) {
             case '"':
                 lexer->advance(lexer, false);
                 lexer->mark_end(lexer);
-                return true;
+                return;
             case '\\':
                 lexer->advance(lexer, false);
                 if (!lexer->eof(lexer)) {
@@ -56,8 +56,6 @@ static bool scan_string_literal_end(TSLexer *lexer) {
                 break;
         }
     }
-
-    return true;
 }
 
 static void scan_block_comment_content(TSLexer *lexer) {
@@ -113,7 +111,9 @@ bool tree_sitter_plank_external_scanner_scan(
         return false;
     }
 
-    if (valid_symbols[STRING_LITERAL_END] && scan_string_literal_end(lexer)) {
+    // `$._string_literal_end` only valid when expected
+    if (valid_symbols[STRING_LITERAL_END]) {
+        scan_string_literal_end(lexer);
         return true;
     }
 
