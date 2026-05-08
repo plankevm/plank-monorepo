@@ -24,8 +24,6 @@ check: fmt
 test:
     cargo nextest run --workspace
 
-
-
 [working-directory: 'sir/sir-solidity-diff-tests']
 test-sir-diff: build-debug-sir
     SIR_RELEASE_BACKEND=0 forge test
