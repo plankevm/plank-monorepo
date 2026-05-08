@@ -1,12 +1,11 @@
 import std::abi::abi_encode;
 import std::constructor::return_runtime;
 import std::membytes::{membytes, membytes_new, membytes_from_ptr};
-import std::precompile::{ecrecover, sha256, ripemd160, set_returndata, modexp};
+import std::precompile::{ecrecover, sha256, ripemd160, modexp};
 
 const ECRECOVER_SELECTOR = 0xa489405c;
 const RIPEMD160_SELECTOR = 0x31699b64;
 const SHA256_SELECTOR = 0xb32a323d;
-const SET_RETURNDATA_SELECTOR = 0x51a31a9d;
 const MODEXP_SELECTOR = 0x725782ca;
 
 const BytesResult = struct { data: membytes };
@@ -23,8 +22,6 @@ run {
         call_sha256();
     } else if @evm_eq(selector, RIPEMD160_SELECTOR) {
         call_ripemd160();
-    } else if @evm_eq(selector, SET_RETURNDATA_SELECTOR ) {
-        call_set_returndata();
     } else if @evm_eq(selector, MODEXP_SELECTOR) {
         call_modexp();
     } else {
@@ -62,17 +59,6 @@ const call_ripemd160 = fn () never {
     let out = @malloc_uninit(32);
     @mstore32(out, hash);
     @evm_return(out, 32);
-};
-
-const call_set_returndata = fn () never {
-    let offset = @evm_add(4, @evm_calldataload(4));
-    let data = bytes_from_offset(offset);
-    let ptr = @malloc_uninit(data.len);
-    set_returndata(data, ptr);
-   
-    let copy = membytes_from_ptr(ptr, data.len);
-    let out = abi_encode(BytesResult, BytesResult { data: copy });
-    @evm_return(out.ptr, out.len);
 };
 
 const call_modexp = fn () never {

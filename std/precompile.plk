@@ -67,18 +67,6 @@ const ripemd160 = fn (data: membytes) u256 {
     @mload32(buf)
 };
 
-const set_returndata = fn (data: membytes, out: memptr) void {
-    let success = @evm_staticcall(
-        @evm_gas(),
-        IDENTITY_ADDR,
-        data.ptr,
-        data.len,
-        out,
-        data.len
-    );
-    require(success);
-};
-
 const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
     let len = 96 + base.len + exp.len + mod.len;
     let buf = @malloc_uninit(len);

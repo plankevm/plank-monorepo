@@ -22,12 +22,6 @@ contract PrecompileTest {
         return bytes32(uint256(uint160(digest)));
     }
 
-    function setReturnDataExt(
-        bytes memory data
-    ) external pure returns (bytes memory) {
-        return data;
-    }
-
     function modexpExt(
         bytes memory base,
         bytes memory exp,

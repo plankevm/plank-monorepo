@@ -104,19 +104,6 @@ contract PrecompileTestTest is BaseTest {
         assertCallEq(abi.encodeWithSignature("ripemd160Ext(bytes)", data));
     }
 
-    function test_set_returndata() public {
-        assertCallEq(
-            abi.encodeWithSignature(
-                "setReturnDataExt(bytes)",
-                abi.encode(0xdeadbeef)
-            )
-        );
-    }
-
-    function test_fuzz_set_returndata(bytes memory data) public {
-        assertCallEq(abi.encodeWithSignature("setReturnDataExt(bytes)", data));
-    }
-
     function test_modexp() public {
         assertCallEq(
             abi.encodeWithSignature(
