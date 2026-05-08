@@ -135,6 +135,7 @@
 (bin_literal) @number
 (dec_literal) @number
 (string_literal) @string
+(hex_string_literal) @string
 
 ; Operators
 

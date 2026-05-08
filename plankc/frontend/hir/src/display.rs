@@ -6,6 +6,22 @@ use std::fmt::{self, Display, Formatter};
 
 const DISPLAY_AS_HEX_THRESHOLD: U256 = uint!(100_000_U256);
 
+fn write_bytes_literal(f: &mut Formatter<'_>, bytes: &[u8]) -> fmt::Result {
+    write!(f, "\"")?;
+    for &byte in bytes {
+        match byte {
+            b'\n' => write!(f, "\\n")?,
+            b'\r' => write!(f, "\\r")?,
+            b'\t' => write!(f, "\\t")?,
+            b'\\' => write!(f, "\\\\")?,
+            b'"' => write!(f, "\\\"")?,
+            0x20..=0x7e => write!(f, "{}", byte as char)?,
+            _ => write!(f, "\\x{byte:02x}")?,
+        }
+    }
+    write!(f, "\"")
+}
+
 pub struct DisplayHir<'a> {
     hir: &'a Hir,
     values: &'a ValueInterner,
@@ -74,9 +90,9 @@ impl<'a> DisplayHir<'a> {
                         .name()
                 ),
                 Value::Bytes(bytes) => {
-                    let contents = self.session.lookup_name(bytes.contents);
-                    let string = &contents[bytes.start as usize..bytes.end as usize];
-                    write!(f, "\"{string}\"")
+                    let contents = self.session.lookup_bytes(bytes.contents);
+                    let bytes = &contents[bytes.start as usize..bytes.end as usize];
+                    write_bytes_literal(f, bytes)
                 }
                 other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")

@@ -521,6 +521,7 @@ String Literals
 
 const msg = "custom failure";
 const escaped = "quote: \" slash: \\";
+const bytes = hex"00ff";
 init {
   @compile_error(msg);
 }
@@ -534,6 +535,9 @@ init {
   (const_def
     (identifier)
     (string_literal))
+  (const_def
+    (identifier)
+    (hex_string_literal))
   (init
     (block
       (fn_call

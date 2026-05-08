@@ -2,7 +2,7 @@ use crate::{ast::File, lexer::TokenSpan};
 use plank_core::{
     Idx, IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
 };
-use plank_session::StrId;
+use plank_session::{BytesId, StrId};
 
 pub mod display;
 
@@ -101,7 +101,7 @@ pub enum NodeKind {
     // Atoms
     BoolLiteral(bool),
     NumLiteral { id: NumLitId },
-    StringLiteral { value: StrId },
+    StringLiteral { value: BytesId },
     Identifier { ident: StrId },
     BuiltinName { ident: StrId },
 

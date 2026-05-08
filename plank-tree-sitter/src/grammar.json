@@ -1593,6 +1593,10 @@
         {
           "type": "SYMBOL",
           "name": "string_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "hex_string_literal"
         }
       ]
     },
@@ -1624,6 +1628,17 @@
     "string_literal": {
       "type": "PATTERN",
       "value": "\"([^\"\\\\\\r\\n]|\\\\.)*\""
+    },
+    "hex_string_literal": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "PATTERN",
+          "value": "hex\"[0-9A-Fa-f]*\""
+        }
+      }
     },
     "block_comment": {
       "type": "SEQ",

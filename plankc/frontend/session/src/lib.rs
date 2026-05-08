@@ -6,11 +6,16 @@ pub use builtins::{Builtin, RuntimeBuiltin};
 pub use diagnostic::*;
 pub use poison::{MaybePoisoned, Poisoned};
 
-use plank_core::{Idx, IndexVec, Span, intern::StringInterner, newtype_index};
+use plank_core::{
+    Idx, IndexVec, Span,
+    intern::{BytesInterner, StringInterner},
+    newtype_index,
+};
 use std::path::PathBuf;
 
 newtype_index! {
     pub struct StrId;
+    pub struct BytesId;
     pub struct SourceId;
     pub struct SourceByteOffset;
 }
@@ -30,6 +35,7 @@ pub struct Source {
 
 pub struct Session {
     name_interner: StringInterner<StrId>,
+    bytes_interner: BytesInterner<BytesId>,
     source_map: IndexVec<SourceId, Source>,
     total_errors: u32,
     diagnostics: Vec<Diagnostic>,
@@ -39,6 +45,7 @@ impl Session {
     pub fn new() -> Self {
         let mut this = Self {
             name_interner: StringInterner::new(),
+            bytes_interner: BytesInterner::new(),
             source_map: IndexVec::new(),
             total_errors: 0,
             diagnostics: Vec::new(),
@@ -62,6 +69,14 @@ impl Session {
     pub fn lookup_name_spanned(&self, name: StrId, start: SourceByteOffset) -> (&str, SourceSpan) {
         let name = &self.name_interner[name];
         (name, Span::new(start, start + name.len() as u32))
+    }
+
+    pub fn intern_bytes(&mut self, bytes: &[u8]) -> BytesId {
+        self.bytes_interner.intern(bytes)
+    }
+
+    pub fn lookup_bytes(&self, bytes: BytesId) -> &[u8] {
+        &self.bytes_interner[bytes]
     }
 
     pub fn next_source(&self) -> SourceId {

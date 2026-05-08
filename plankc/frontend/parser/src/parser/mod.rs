@@ -317,16 +317,16 @@ impl<'a> Parser<'a> {
     fn try_parse_string_literal(&mut self) -> Option<NodeKind> {
         self.skip_trivia();
         let token_idx = self.tokens.current();
-        if !self.at(Token::StringLiteral) {
+        if !matches!(self.current_token(), Token::StringLiteral | Token::HexStringLiteral) {
             return None;
         }
         self.advance();
 
         let value = self
             .tokens
-            .string_literal_value(token_idx)
-            .expect("string literal token has decoded value");
-        let value = self.session.intern(value);
+            .bytes_literal_value(token_idx)
+            .expect("string literal token has decoded bytes");
+        let value = self.session.intern_bytes(value);
         Some(NodeKind::StringLiteral { value })
     }
 
