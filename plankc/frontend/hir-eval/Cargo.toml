@@ -21,4 +21,3 @@ hashbrown.workspace = true
 [dev-dependencies]
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
-snapbox = "1.2.1"

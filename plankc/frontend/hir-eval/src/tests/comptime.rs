@@ -252,20 +252,19 @@ fn test_compile_error_accepts_hex_cbytes() {
 
 #[test]
 fn test_compile_error_accepts_non_utf8_cbytes() {
-    let (_, _, session) = try_lower(
+    assert_diagnostics(
         r#"
         const x = @compile_error(hex"ff");
         init { @evm_stop(); }
         "#,
+        &[r#"
+        error: �
+         --> main.plk:1:11
+          |
+        1 | const x = @compile_error(hex"ff");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
     );
-    let actual = session.diagnostics()[0].render_plain(&session);
-    snapbox::assert_data_eq!(actual, snapbox::Data::from(snapbox::str![[r#"
-error: �
- --> main.plk:1:11
-  |
-1 | const x = @compile_error(hex"ff");
-  |           ^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
-"#]]).raw());
 }
 
 #[test]
