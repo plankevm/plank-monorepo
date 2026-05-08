@@ -1,0 +1,32 @@
+name: Check Tree-sitter parser.c is synced
+
+on:
+  push:
+    paths:
+      - "plank-tree-sitter/grammar.js"
+      - "plank-tree-sitter/src/scanner.c"
+      - ".github/workflows/ts-check-parser.yml"
+  pull_request:
+    paths:
+      - "plank-tree-sitter/grammar.js"
+      - "plank-tree-sitter/src/scanner.c"
+      - ".github/workflows/ts-check-parser.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plank-tree-sitter
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tree-sitter CLI
+        run: npm install -g tree-sitter-cli
+      - name: Check Version
+        run: tree-sitter --version
+      - name: Regenerate parser
+        run: tree-sitter generate
+      - name: Ensure parser.c is up to date
+        run: |
+          git diff --exit-code src/parser.c

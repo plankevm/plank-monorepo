@@ -62,6 +62,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub source: SourceId,
     pub ctx: EvalContext,
     pub comptime: bool,
+    pub conditional: bool,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
     pub mir_types: IndexVec<mir::LocalId, TypeId>,
@@ -82,6 +83,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
+            conditional: false,
 
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
@@ -295,6 +297,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
+        if !self.conditional {
+            return self.eval_set(local, None, expr);
+        }
         let value = self.eval_expr(expr)?;
         if self.is_comptime() {
             let state = value
@@ -439,6 +444,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
+    fn with_conditional<R>(&mut self, conditional: bool, inner: impl FnOnce(&mut Self) -> R) -> R {
+        let prev_conditional = std::mem::replace(&mut self.conditional, conditional);
+        let result = inner(self);
+        self.conditional = prev_conditional;
+        result
+    }
+
     fn eval_if(
         &mut self,
         condition: hir::LocalId,
@@ -454,8 +466,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
                     return Err(Diverge::ControlFlowPoisoned);
                 }
-                let (then, then_res) = self.eval_block_to_mir(then);
-                let (r#else, else_res) = self.eval_block_to_mir(r#else);
+                let (then, then_res) =
+                    self.with_conditional(true, |this| this.eval_block_to_mir(then));
+                let (r#else, else_res) =
+                    self.with_conditional(true, |this| this.eval_block_to_mir(r#else));
                 self.emit(mir::Instruction::If {
                     condition: mir_local,
                     then_block: then,
@@ -474,8 +488,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
                 }
             }
-            Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
-            Ok(LocalState::Comptime(ValueId::FALSE)) => self.eval_block_inline(r#else),
+            Ok(LocalState::Comptime(ValueId::TRUE)) => {
+                self.with_conditional(false, |this| this.eval_block_inline(then))
+            }
+            Ok(LocalState::Comptime(ValueId::FALSE)) => {
+                self.with_conditional(false, |this| this.eval_block_inline(r#else))
+            }
             Ok(state) => {
                 let state_ty = self.state_type(state);
                 self.diag_ctx.emit_type_mismatch_simple(

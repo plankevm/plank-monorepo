@@ -15,7 +15,7 @@ If you'd like to contribute please read the [Contributor Guidelines](./CONTRIBUT
 - `plankc/`: Plank Compiler
     - [`frontend/`](./plankc/frontend/): Plank Frontend
     - [`sir/`](./plankc/sir/): Sensei IR (Plank's Low-Level IR & Backend)
-    - [Plank Examples](`./plankc/plank-diff-tests/src/examples/`)
+    - [Plank Examples](./plankc/plank-diff-tests/src/examples/)
 - `plank-doc/`: Plank Docs
 - `plank-tree-sitter/`: Tree sitter grammar & parser for the plank language
 

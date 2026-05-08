@@ -95,9 +95,7 @@ fn test_comptime_if_condition_folds_in_runtime() {
             %0 : u256 = 3
             %1 : u256 = 4
             %2 : void = @evm_sstore(%0, %1)
-            %3 : void = void_unit
-            %4 : void = %3
-            %5 : never = @evm_stop()
+            %3 : never = @evm_stop()
         }
         "#,
     );

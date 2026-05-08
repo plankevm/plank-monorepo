@@ -1,0 +1,28 @@
+import std::abi::abi_decode;
+import std::fixedbytes::{bytes32, membytes_read_bytes32};
+import std::membytes::{membytes_new, membytes_read_u256, membytes_from_ptr, membytes_write_u256};
+import std::option::Option;
+import std::error::require;
+
+const ITEM = 0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c;
+const UINT_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+
+init {
+    let buf = membytes_new(32);
+    membytes_write_u256(buf, 0, ITEM);
+
+    // should read Some(bytes32) from membuf
+    let maybe_bytes1 = membytes_read_bytes32(buf, 0);
+    require(maybe_bytes1.is_some);
+    require(maybe_bytes1.inner.raw == ITEM);
+
+    // OOB: Should read None from membuf
+    let maybe_bytes2 = membytes_read_bytes32(buf, 1);
+    require(!maybe_bytes2.is_some);
+
+    // overflow: Should read None from membuf
+    let maybe_bytes3 = membytes_read_bytes32(buf, UINT_MAX);
+    require(!maybe_bytes3.is_some);
+
+    @evm_stop();
+}

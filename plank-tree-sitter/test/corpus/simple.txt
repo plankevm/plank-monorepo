@@ -474,3 +474,19 @@ import std::utils::reduce;
     (identifier)
     (identifier)))
 
+================================================================================
+Call vs. Binary Op Precedence
+================================================================================
+
+const x = y() + b();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (binary_expr
+      (fn_call
+        (identifier))
+      (fn_call
+        (identifier)))))
