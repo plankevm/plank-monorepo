@@ -15,7 +15,16 @@ test-sir-diff:
 
 [working-directory: 'plank-diff-tests/']
 test-plank-diff *args:
-     forge test --ffi {{args}}
+     PLANK_OPTIMIZE= forge test --ffi {{args}}
+     PLANK_OPTIMIZE=csud forge test --ffi {{args}}
+
+[working-directory: 'plank-diff-tests/']
+test-plank-diff-unoptimized *args:
+     PLANK_OPTIMIZE= forge test --ffi {{args}}
+
+[working-directory: 'plank-diff-tests/']
+test-plank-diff-optimized *args:
+     PLANK_OPTIMIZE=csud forge test --ffi {{args}}
 
 test-all: test test-sir-diff test-plank-diff
 
@@ -33,4 +42,3 @@ docs-build:
 
 docs-serve:
     mdbook serve ../plank-doc
-

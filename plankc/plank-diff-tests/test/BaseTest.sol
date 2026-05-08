@@ -46,7 +46,10 @@ abstract contract BaseTest is Test {
     }
 
     function plank(string memory sourcePath) internal returns (bytes memory) {
-        string[] memory args = new string[](9);
+        string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
+        bool hasOptimize = bytes(optimize).length != 0;
+
+        string[] memory args = new string[](hasOptimize ? 11 : 9);
         args[0] = "cargo";
         args[1] = "run";
         args[2] = "-p";
@@ -56,6 +59,10 @@ abstract contract BaseTest is Test {
         args[6] = sourcePath;
         args[7] = "--dep";
         args[8] = string.concat("std=", vm.projectRoot(), "/../../std");
+        if (hasOptimize) {
+            args[9] = "-O";
+            args[10] = optimize;
+        }
         return vm.ffi(args);
     }
 }
