@@ -90,8 +90,8 @@ impl<'a> DisplayHir<'a> {
                         .name()
                 ),
                 Value::Bytes(bytes) => {
-                    let contents = self.session.lookup_bytes(bytes.contents);
-                    let bytes = &contents[bytes.start as usize..bytes.end as usize];
+                    let bytes =
+                        self.session.lookup_bytes_slice(bytes.contents, bytes.start, bytes.end);
                     write_bytes_literal(f, bytes)
                 }
                 other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
