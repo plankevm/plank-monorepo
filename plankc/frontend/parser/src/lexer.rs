@@ -58,6 +58,24 @@ fn lex_number_literal<const RADIX: u32>(lexer: &mut LogosLexer<Token>) -> Result
     inner_do_lex(lexer, inner::<RADIX>)
 }
 
+fn lex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
+    fn inner<'a>(chars: &mut CharsPeekable<'a>) -> Result<(), Token> {
+        while let Some((_, c)) = chars.next() {
+            match c {
+                '"' => return Ok(()),
+                '\\' => {
+                    chars.next();
+                }
+                '\n' | '\r' => return Err(Token::UnclosedStringError),
+                _ => {}
+            }
+        }
+        Err(Token::UnclosedStringError)
+    }
+
+    inner_do_lex(lexer, inner)
+}
+
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Copy, Default)]
 #[cfg_attr(test, derive(enum_iterator::Sequence))]
 #[logos(error(Token))]
@@ -203,6 +221,9 @@ pub enum Token {
     #[regex("0b[01]", lex_number_literal::<2>)]
     BinLiteral,
 
+    #[token("\"", lex_string_literal)]
+    StringLiteral,
+
     // Trivia
     #[regex("[ \t\n\r]+")]
     Whitespace,
@@ -218,6 +239,7 @@ pub enum Token {
     InvalidCharError,
     MalformedIdentError,
     UnclosedBlockCommentError,
+    UnclosedStringError,
 
     Eof,
 }
@@ -227,6 +249,7 @@ pub enum ErrorToken {
     InvalidChar,
     MalformedIdent,
     UnclosedBlockComment,
+    UnclosedString,
     AtWithoutIdent,
 }
 
@@ -247,6 +270,7 @@ impl Token {
             Token::InvalidCharError => Some(ErrorToken::InvalidChar),
             Token::MalformedIdentError => Some(ErrorToken::MalformedIdent),
             Token::UnclosedBlockCommentError => Some(ErrorToken::UnclosedBlockComment),
+            Token::UnclosedStringError => Some(ErrorToken::UnclosedString),
             Token::AtWithoutIdentError => Some(ErrorToken::AtWithoutIdent),
             _ => None,
         }
@@ -318,12 +342,14 @@ impl Token {
             | Token::DecimalLiteral
             | Token::HexLiteral
             | Token::BinLiteral
+            | Token::StringLiteral
             | Token::Whitespace
             | Token::LineComment
             | Token::BlockComment
             | Token::InvalidCharError
             | Token::MalformedIdentError
             | Token::UnclosedBlockCommentError
+            | Token::UnclosedStringError
             | Token::AtWithoutIdentError
             | Token::Eof => return None,
         };
@@ -395,12 +421,14 @@ impl Token {
             Token::DecimalLiteral => "decimal literal",
             Token::HexLiteral => "hex literal",
             Token::BinLiteral => "binary literal",
+            Token::StringLiteral => "string literal",
             Token::Whitespace => "whitespace",
             Token::LineComment => "line comment",
             Token::BlockComment => "block comment",
             Token::InvalidCharError => "invalid character",
             Token::MalformedIdentError => "malformed literal",
             Token::UnclosedBlockCommentError => "unclosed block comment",
+            Token::UnclosedStringError => "unclosed string literal",
             Token::AtWithoutIdentError => "invalid builtin name",
             Token::Eof => "EOF",
         }
@@ -622,6 +650,15 @@ mod tests {
         assert_eq!(results[4], (Token::DecimalLiteral, 10..11, "0"));
         assert_eq!(results[5], (Token::Whitespace, 11..12, " "));
         assert_eq!(results[6], (Token::DecimalLiteral, 12..14, "42"));
+    }
+
+    #[test]
+    fn test_string_literals() {
+        let results = lex_all(r#""hello" "escaped \" quote""#);
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0], (Token::StringLiteral, 0..7, r#""hello""#));
+        assert_eq!(results[1], (Token::Whitespace, 7..8, " "));
+        assert_eq!(results[2], (Token::StringLiteral, 8..26, r#""escaped \" quote""#));
     }
 
     #[test]

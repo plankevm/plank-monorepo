@@ -434,6 +434,13 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_compile_error(&mut self, message: StrId, loc: SrcLoc) {
+        let message = self.session.lookup_name(message);
+        Diagnostic::error(message)
+            .primary(loc.source, loc.span, "compile error triggered here")
+            .emit(self);
+    }
+
     pub fn emit_struct_lit_unexpected_field(
         &mut self,
         struct_ty: TypeId,

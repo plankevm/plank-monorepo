@@ -166,6 +166,7 @@ define_builtins! {
         MEMORY_POINTER = "memptr" => MemoryPointer;
         TYPE = "type" => Type;
         FUNCTION = "function" => Function;
+        COMPTIME_STRING = "comptime_string" => ComptimeString;
         NEVER = "never" => Never;
     }
 
@@ -344,6 +345,7 @@ define_builtins! {
         IS_STRUCT "@is_struct" => IsStruct;
         FIELD_COUNT "@field_count" => FieldCount;
         IN_COMPTIME "@in_comptime" => InComptime;
+        COMPILE_ERROR "@compile_error" => CompileError;
     }
 
     comptime_dynamic_builtins {

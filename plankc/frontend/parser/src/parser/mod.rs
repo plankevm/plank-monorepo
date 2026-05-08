@@ -317,6 +317,45 @@ impl<'a> Parser<'a> {
         Some(NodeKind::NumLiteral { id })
     }
 
+    fn try_parse_string_literal(&mut self) -> Option<NodeKind> {
+        self.skip_trivia();
+        let token_idx = self.tokens.current();
+        if !self.at(Token::StringLiteral) {
+            return None;
+        }
+        self.advance();
+
+        let span = self.tokens.token_src_span(token_idx);
+        let src = &self.source[span.usize_range()];
+        let inner = &src[1..src.len() - 1];
+        let value = if inner.contains('\\') {
+            let mut decoded = String::with_capacity(inner.len());
+            let mut chars = inner.chars();
+            while let Some(c) = chars.next() {
+                if c != '\\' {
+                    decoded.push(c);
+                    continue;
+                }
+                match chars.next() {
+                    Some('n') => decoded.push('\n'),
+                    Some('r') => decoded.push('\r'),
+                    Some('t') => decoded.push('\t'),
+                    Some('\\') => decoded.push('\\'),
+                    Some('"') => decoded.push('"'),
+                    Some(other) => {
+                        decoded.push('\\');
+                        decoded.push(other);
+                    }
+                    None => decoded.push('\\'),
+                }
+            }
+            self.session.intern(&decoded)
+        } else {
+            self.session.intern(inner)
+        };
+        Some(NodeKind::StringLiteral { value })
+    }
+
     // ======================== EXPRESSION PARSING (PRATT) ========================
 
     fn check_binary_op(&mut self) -> Option<(OpPriority, OpPriority, BinaryOp)> {
@@ -484,6 +523,10 @@ impl<'a> Parser<'a> {
         }
 
         if let Some(kind) = self.try_parse_num_literal() {
+            return Some(self.alloc_last_token_as_node(kind));
+        }
+
+        if let Some(kind) = self.try_parse_string_literal() {
             return Some(self.alloc_last_token_as_node(kind));
         }
 
