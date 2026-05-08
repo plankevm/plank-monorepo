@@ -1,0 +1,25 @@
+[package]
+name = "plank-mir-lower-sona"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+plank-core.workspace = true
+plank-mir.workspace = true
+plank-session.workspace = true
+plank-values.workspace = true
+smallvec.workspace = true
+sonatina-codegen = { git = "https://github.com/fe-lang/sonatina", rev = "5987a72" }
+sonatina-ir = { git = "https://github.com/fe-lang/sonatina", rev = "5987a72" }
+sonatina-triple = { git = "https://github.com/fe-lang/sonatina", rev = "5987a72" }
+thiserror.workspace = true
+
+[dev-dependencies]
+plank-hir.workspace = true
+plank-hir-eval.workspace = true
+plank-test-utils.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

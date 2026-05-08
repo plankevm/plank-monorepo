@@ -25,6 +25,7 @@ plank-values = { path = "frontend/values" }
 plank-hir = { path = "frontend/hir" }
 plank-mir = { path = "frontend/mir" }
 plank-mir-lower = { path = "frontend/mir-lower" }
+plank-mir-lower-sona = { path = "frontend/mir-lower-sona" }
 plank-hir-eval = { path = "frontend/hir-eval" }
 plank-driver = { path = "frontend/driver" }
 

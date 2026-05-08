@@ -14,15 +14,17 @@ test-sir-diff:
      forge test --ffi
 
 [working-directory: 'plank-diff-tests/']
-test-plank-diff: test-plank-diff-unoptimized test-plank-diff-optimized
+test-plank-diff: test-plank-diff-sir test-plank-diff-sona
 
 [working-directory: 'plank-diff-tests/']
-test-plank-diff-unoptimized:
-     PLANK_OPTIMIZE= forge test --ffi
+test-plank-diff-sir:
+     PLANK_BACKEND=sir PLANK_OPTIMIZE= forge test --ffi
+     PLANK_BACKEND=sir PLANK_OPTIMIZE=csud forge test --ffi
 
 [working-directory: 'plank-diff-tests/']
-test-plank-diff-optimized:
-     PLANK_OPTIMIZE=csud forge test --ffi
+test-plank-diff-sona:
+     PLANK_BACKEND=sona PLANK_OPTIMIZE= forge test --ffi
+     PLANK_BACKEND=sona PLANK_OPTIMIZE=O1 forge test --ffi
 
 test-all: test test-sir-diff test-plank-diff
 

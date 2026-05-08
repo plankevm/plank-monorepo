@@ -4,8 +4,18 @@ use plank_source::{
     ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
 use plank_values::ValueInterner;
-use sir_passes::PassManager;
-use std::path::{Path, PathBuf};
+use sir_passes::{PassManager, parse_optimizations_string};
+use std::{
+    fmt::Display,
+    path::{Path, PathBuf},
+};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BackendKind {
+    #[default]
+    Sir,
+    Sona,
+}
 
 pub struct Driver<'a, F: SourceFs> {
     pub session: Session,
@@ -79,34 +89,130 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         show_sir_in: bool,
         show_sir_last: bool,
     ) -> Vec<u8> {
+        self.emit_bytecode_with_backend(
+            mir,
+            optimizations,
+            disp_needs_separators,
+            show_sir_in,
+            show_sir_last,
+            BackendKind::Sir,
+        )
+        .expect("SIR bytecode emission should not fail")
+    }
+
+    pub fn emit_bytecode_with_backend(
+        &self,
+        mir: &plank_mir::Mir,
+        optimizations: Option<&str>,
+        disp_needs_separators: bool,
+        show_sir_in: bool,
+        show_sir_last: bool,
+        backend: BackendKind,
+    ) -> Result<Vec<u8>, String> {
+        match backend {
+            BackendKind::Sir => self.emit_sir_bytecode(
+                mir,
+                optimizations,
+                disp_needs_separators,
+                show_sir_in,
+                show_sir_last,
+            ),
+            BackendKind::Sona => self.emit_sona_bytecode(
+                mir,
+                optimizations,
+                disp_needs_separators,
+                show_sir_in,
+                show_sir_last,
+            ),
+        }
+    }
+
+    fn emit_sir_bytecode(
+        &self,
+        mir: &plank_mir::Mir,
+        optimizations: Option<&str>,
+        disp_needs_separators: bool,
+        show_sir_in: bool,
+        show_sir_last: bool,
+    ) -> Result<Vec<u8>, String> {
         let mut program = plank_mir_lower::lower(mir, &self.values);
         if show_sir_in {
-            if disp_needs_separators {
-                eprintln!("\n");
-                eprintln!("////////////////////////////////////////////////////////////////");
-                eprintln!("//                           SIR IN                           //");
-                eprintln!("////////////////////////////////////////////////////////////////");
-            }
-            eprintln!("{}", program);
+            print_backend_ir("SIR IN", disp_needs_separators, &program);
         }
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
         if let Some(passes) = optimizations {
+            parse_optimizations_string(passes)?;
             pass_manager.run_optimizations(passes);
         }
         if show_sir_last {
-            if disp_needs_separators {
-                eprintln!("\n");
-                eprintln!("////////////////////////////////////////////////////////////////");
-                eprintln!("//                          SIR LAST                          //");
-                eprintln!("////////////////////////////////////////////////////////////////");
-            }
-            eprintln!("{}", program);
+            print_backend_ir("SIR LAST", disp_needs_separators, &program);
         }
         let mut bytecode = Vec::with_capacity(0x6000);
         sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
-        bytecode
+        Ok(bytecode)
     }
+
+    fn emit_sona_bytecode(
+        &self,
+        mir: &plank_mir::Mir,
+        optimizations: Option<&str>,
+        disp_needs_separators: bool,
+        show_sir_in: bool,
+        show_sir_last: bool,
+    ) -> Result<Vec<u8>, String> {
+        let opt_level = parse_sona_opt_level(optimizations)?;
+        if show_sir_in {
+            print_backend_ir(
+                "SONA IR",
+                disp_needs_separators,
+                plank_mir_lower_sona::emit_ir(
+                    mir,
+                    &self.values,
+                    plank_mir_lower_sona::OptLevel::O0,
+                )
+                .map_err(|err| err.to_string())?,
+            );
+        }
+        if show_sir_last {
+            print_backend_ir(
+                "SONA IR OPT",
+                disp_needs_separators,
+                plank_mir_lower_sona::emit_ir(mir, &self.values, opt_level)
+                    .map_err(|err| err.to_string())?,
+            );
+        }
+        plank_mir_lower_sona::emit_bytecode(mir, &self.values, opt_level)
+            .map_err(|err| err.to_string())
+    }
+}
+
+fn parse_sona_opt_level(
+    optimizations: Option<&str>,
+) -> Result<plank_mir_lower_sona::OptLevel, String> {
+    let Some(optimizations) = optimizations else {
+        return Ok(plank_mir_lower_sona::OptLevel::O0);
+    };
+
+    match optimizations.to_ascii_lowercase().as_str() {
+        "0" | "o0" => Ok(plank_mir_lower_sona::OptLevel::O0),
+        "1" | "o1" => Ok(plank_mir_lower_sona::OptLevel::O1),
+        "s" | "os" => Ok(plank_mir_lower_sona::OptLevel::Os),
+        "2" | "o2" => Ok(plank_mir_lower_sona::OptLevel::O2),
+        _ => Err(format!(
+            "invalid Sona optimization level '{optimizations}', valid levels: O0, O1, Os, O2"
+        )),
+    }
+}
+
+fn print_backend_ir(title: &str, disp_needs_separators: bool, ir: impl Display) {
+    if disp_needs_separators {
+        eprintln!("\n");
+        eprintln!("////////////////////////////////////////////////////////////////");
+        eprintln!("//{title:^60}//");
+        eprintln!("////////////////////////////////////////////////////////////////");
+    }
+    eprintln!("{ir}");
 }
 
 #[cfg(test)]
@@ -114,6 +220,24 @@ mod tests {
     use super::*;
     use plank_source::source_fs::InMemoryFs;
     use plank_test_utils::{assert_diagnostics, dedent_preserve_indent};
+
+    #[test]
+    fn parse_sona_opt_level_accepts_explicit_levels() {
+        assert_eq!(parse_sona_opt_level(None).unwrap(), plank_mir_lower_sona::OptLevel::O0);
+        assert_eq!(parse_sona_opt_level(Some("0")).unwrap(), plank_mir_lower_sona::OptLevel::O0);
+        assert_eq!(parse_sona_opt_level(Some("O0")).unwrap(), plank_mir_lower_sona::OptLevel::O0);
+        assert_eq!(parse_sona_opt_level(Some("O1")).unwrap(), plank_mir_lower_sona::OptLevel::O1);
+        assert_eq!(parse_sona_opt_level(Some("Os")).unwrap(), plank_mir_lower_sona::OptLevel::Os);
+        assert_eq!(parse_sona_opt_level(Some("O2")).unwrap(), plank_mir_lower_sona::OptLevel::O2);
+    }
+
+    #[test]
+    fn parse_sona_opt_level_rejects_sir_passes() {
+        assert_eq!(
+            parse_sona_opt_level(Some("csud")).unwrap_err(),
+            "invalid Sona optimization level 'csud', valid levels: O0, O1, Os, O2"
+        );
+    }
 
     #[test]
     fn duplicate_dep_emits_diagnostic() {
