@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install tree-sitter CLI
-        run: npm install -g tree-sitter-cli
+        run: npm install -g tree-sitter-cli@0.26.8
       - name: Check Version
         run: tree-sitter --version
       - name: Regenerate parser
