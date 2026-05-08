@@ -76,6 +76,31 @@ fn test_lexer_error_malformed_ident() {
 }
 
 #[test]
+fn test_lexer_error_unclosed_string() {
+    assert_parser_errors(
+        r#"
+            const x = "unterminated
+        "#,
+        &[
+            r#"
+            error: unclosed string literal
+             --> test.plk:1:11
+              |
+            1 | const x = "unterminated
+              |           ^^^^^^^^^^^^^ missing closing `"`
+            "#,
+            r#"
+            error: unexpected EOF
+             --> test.plk:1:24
+              |
+            1 | const x = "unterminated
+              |                        ^ unexpected EOF, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+            "#,
+        ],
+    );
+}
+
+#[test]
 fn test_lexer_error_unclosed_block_comment() {
     assert_parser_errors(
         r#"

@@ -658,11 +658,25 @@ mod tests {
 
     #[test]
     fn test_string_literals() {
-        let results = lex_all(r#""hello" "escaped \" quote""#);
-        assert_eq!(results.len(), 3);
+        let results = lex_all("\"hello\" \"\" \"escaped \\\" quote\" \"path \\\\ tmp\"");
+        assert_eq!(results.len(), 7);
         assert_eq!(results[0], (Token::StringLiteral, 0..7, r#""hello""#));
         assert_eq!(results[1], (Token::Whitespace, 7..8, " "));
-        assert_eq!(results[2], (Token::StringLiteral, 8..26, r#""escaped \" quote""#));
+        assert_eq!(results[2], (Token::StringLiteral, 8..10, r#""""#));
+        assert_eq!(results[3], (Token::Whitespace, 10..11, " "));
+        assert_eq!(results[4], (Token::StringLiteral, 11..29, r#""escaped \" quote""#));
+        assert_eq!(results[5], (Token::Whitespace, 29..30, " "));
+        assert_eq!(results[6], (Token::StringLiteral, 30..43, r#""path \\ tmp""#));
+    }
+
+    #[test]
+    fn test_unclosed_string_literal() {
+        let results = lex_all("\"unterminated");
+        assert_eq!(results, vec![(Token::UnclosedStringError, 0..13, "\"unterminated")]);
+
+        let results = lex_all("\"unterminated\nnext");
+        assert_eq!(results[0], (Token::UnclosedStringError, 0..14, "\"unterminated\n"));
+        assert_eq!(results[1], (Token::Identifier, 14..18, "next"));
     }
 
     #[test]

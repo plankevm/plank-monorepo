@@ -181,6 +181,41 @@ fn test_compile_error_builtin() {
 }
 
 #[test]
+fn test_compile_error_escaped_message() {
+    assert_diagnostics(
+        r#"
+        const x = @compile_error("quote: \" slash: \\");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: quote: " slash: \
+         --> main.plk:1:11
+          |
+        1 | const x = @compile_error("quote: \" slash: \\");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_compile_error_accepts_cbytes_const() {
+    assert_diagnostics(
+        r#"
+        const msg = "from const";
+        const x = @compile_error(msg);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: from const
+         --> main.plk:2:11
+          |
+        2 | const x = @compile_error(msg);
+          |           ^^^^^^^^^^^^^^^^^^^ compile error triggered here
+        "#],
+    );
+}
+
+#[test]
 fn test_compile_error_requires_string_literal() {
     assert_diagnostics(
         r#"
@@ -205,9 +240,15 @@ fn test_comptime_cbytes_literals() {
         r#"
         const same = "hello" == "hello";
         const different = "hello" != "world";
+        const empty = "" == "";
+        const empty_different = "" != "x";
+        const escaped = "\q" == "\\q";
         init {
             let mut a: bool = same;
             let mut b: bool = different;
+            let mut c: bool = empty;
+            let mut d: bool = empty_different;
+            let mut e: bool = escaped;
             @evm_stop();
         }
         "#,
@@ -217,7 +258,10 @@ fn test_comptime_cbytes_literals() {
         @fn0() -> never {
             %0 : bool = true
             %1 : bool = true
-            %2 : never = @evm_stop()
+            %2 : bool = true
+            %3 : bool = true
+            %4 : bool = true
+            %5 : never = @evm_stop()
         }
         "#,
     );

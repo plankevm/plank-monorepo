@@ -126,6 +126,52 @@ fn test_literal_decimal() {
     );
 }
 
+#[test]
+fn test_literal_string() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const x = "hello";
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                StringLiteral
+                    "\"hello\""
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_literal_string_escapes() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const x = "escaped \" quote";
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                StringLiteral
+                    "\"escaped \\\" quote\""
+                ";"
+        "#,
+    );
+}
+
 // =============================================================================
 // Identifiers & Paths
 // =============================================================================
