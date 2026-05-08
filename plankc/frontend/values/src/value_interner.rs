@@ -2,7 +2,7 @@ use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::BytesId;
+use plank_session::{BytesId, Session};
 use std::hash::BuildHasher;
 
 newtype_index! {
@@ -102,8 +102,12 @@ impl ValueInterner {
         assert_eq!(new_interner.intern(Value::Void), ValueId::VOID);
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
         assert_eq!(new_interner.intern(Value::Bool(true)), ValueId::TRUE);
-        assert_eq!(new_interner.intern_num(U256::ZERO), ValueId::ZERO);
-        assert_eq!(new_interner.intern_num(U256::ONE), ValueId::ONE);
+        assert_eq!(new_interner.intern_num(U256::ZERO), ValueId::ZERO_NUM);
+        assert_eq!(new_interner.intern_num(U256::ONE), ValueId::ONE_NUM);
+        assert_eq!(
+            new_interner.intern_bytes(Session::EMPTY_STRING.into(), 0, 0),
+            ValueId::BYTES_EMPTY
+        );
         new_interner
     }
 

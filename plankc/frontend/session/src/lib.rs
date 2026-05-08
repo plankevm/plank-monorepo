@@ -6,11 +6,7 @@ pub use builtins::{Builtin, RuntimeBuiltin};
 pub use diagnostic::*;
 pub use poison::{MaybePoisoned, Poisoned};
 
-use plank_core::{
-    Idx, IndexVec, Span,
-    intern::{BytesInterner, StringInterner},
-    newtype_index,
-};
+use plank_core::{Idx, IndexVec, Span, intern::BytesInterner, newtype_index};
 use std::path::PathBuf;
 
 newtype_index! {
@@ -34,20 +30,26 @@ pub struct Source {
 }
 
 pub struct Session {
-    name_interner: StringInterner<StrId>,
-    // Kept separate from names so arbitrary non-UTF-8 cbytes can never be read through
-    // the UTF-8-only `lookup_name` path.
     bytes_interner: BytesInterner<BytesId>,
     source_map: IndexVec<SourceId, Source>,
     total_errors: u32,
     diagnostics: Vec<Diagnostic>,
 }
 
+impl From<StrId> for BytesId {
+    fn from(value: StrId) -> Self {
+        BytesId::from_raw(value.to_raw())
+    }
+}
+
 impl Session {
+    pub const EMPTY_STRING: StrId = StrId::new(0);
+
     pub fn new() -> Self {
+        let mut bytes_interner = BytesInterner::new();
+        assert_eq!(bytes_interner.intern(b""), BytesId::from(Self::EMPTY_STRING));
         let mut this = Self {
-            name_interner: StringInterner::new(),
-            bytes_interner: BytesInterner::new(),
+            bytes_interner,
             source_map: IndexVec::new(),
             total_errors: 0,
             diagnostics: Vec::new(),
@@ -61,15 +63,17 @@ impl Session {
     }
 
     pub fn intern(&mut self, name: &str) -> StrId {
-        self.name_interner.intern(name)
+        let bytes_id = self.bytes_interner.intern(name.as_bytes());
+        StrId::from_raw(bytes_id.to_raw())
     }
 
     pub fn lookup_name(&self, name: StrId) -> &str {
-        &self.name_interner[name]
+        let as_bytes_id = BytesId::from_raw(name.to_raw());
+        unsafe { core::str::from_utf8_unchecked(&self.bytes_interner[as_bytes_id]) }
     }
 
     pub fn lookup_name_spanned(&self, name: StrId, start: SourceByteOffset) -> (&str, SourceSpan) {
-        let name = &self.name_interner[name];
+        let name = self.lookup_name(name);
         (name, Span::new(start, start + name.len() as u32))
     }
 
@@ -107,10 +111,6 @@ impl Session {
 
     pub fn has_errors(&self) -> bool {
         self.total_errors() > 0
-    }
-
-    pub fn interner(&self) -> &plank_core::intern::StringInterner<StrId> {
-        &self.name_interner
     }
 
     /// Both line and col are 1-indexed. O(n) linear scan.

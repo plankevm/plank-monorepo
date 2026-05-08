@@ -205,7 +205,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     message.start,
                     message.end,
                 );
-                self.diag_ctx.emit_compile_error(message, self.loc(expr_span));
+                self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
             _ => unreachable!("not a comptime builtin: {builtin}"),
@@ -362,17 +362,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty_local] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-        if validate_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
-            return Err(Poisoned);
-        }
+        let requires_runtime = validate_uninit_type(
+            self.eval.types,
+            self.diag_ctx,
+            self.is_comptime(),
+            ty,
+            self.loc(expr_span),
+            None,
+        )?;
 
         // Types that require runtime allocation (memptr, structs containing memptr)
         // produce MIR directly.
-        if contains_memptr(ty, self.eval.types) {
-            if self.is_comptime() {
-                self.diag_ctx.emit_uninit_memptr_in_comptime(self.loc(expr_span));
-                return Err(Poisoned);
-            }
+        if requires_runtime || !self.is_comptime() {
             return Ok(Ok(self.emit_uninit_runtime(ty)));
         }
 
@@ -394,7 +395,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         match ty.as_primitive() {
             Ok(PrimitiveType::U256) => {
                 let target = self.mir_types.push(TypeId::U256);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::ZERO) });
+                self.emit(mir::Instruction::Set {
+                    target,
+                    expr: mir::Expr::Const(ValueId::ZERO_NUM),
+                });
                 target
             }
             Ok(PrimitiveType::Bool) => {
@@ -406,7 +410,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let size_local = self.mir_types.push(TypeId::U256);
                 self.emit(mir::Instruction::Set {
                     target: size_local,
-                    expr: mir::Expr::Const(ValueId::ZERO),
+                    expr: mir::Expr::Const(ValueId::ZERO_NUM),
                 });
                 let args = self.eval.mir_args.push_copy_slice(&[size_local]);
                 let target = self.mir_types.push(TypeId::MEMORY_POINTER);
@@ -619,49 +623,52 @@ pub(crate) fn fold_runtime_builtin(
 }
 
 fn validate_uninit_type(
-    ty: TypeId,
     types: &TypeInterner,
     diag_ctx: &mut DiagCtx<'_>,
-    loc: SrcLoc,
+    is_comptime: bool,
+    ty: TypeId,
+    expr: SrcLoc,
     field_loc: Option<SrcLoc>,
-) -> bool {
+) -> MaybePoisoned<bool> {
     match ty.as_primitive() {
+        Ok(PrimitiveType::MemoryPointer) => {
+            if is_comptime {
+                diag_ctx.emit_uninit_memptr_in_comptime(expr);
+                return Err(Poisoned);
+            }
+            Ok(true)
+        }
         Ok(
             PrimitiveType::U256
             | PrimitiveType::Bool
-            | PrimitiveType::MemoryPointer
             | PrimitiveType::Void
-            | PrimitiveType::Type,
-        ) => false,
-        Ok(invalid @ (PrimitiveType::Function | PrimitiveType::CBytes | PrimitiveType::Never)) => {
+            | PrimitiveType::Type
+            | PrimitiveType::CBytes,
+        ) => Ok(false),
+        Ok(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
             // `field_loc` is set when recursing into struct fields
             if let Some(field_loc) = field_loc {
-                diag_ctx.emit_invalid_uninit_struct_field(invalid, loc, field_loc);
+                diag_ctx.emit_invalid_uninit_struct_field(invalid, expr, field_loc);
             } else {
-                diag_ctx.emit_invalid_uninit_type(invalid, loc);
+                diag_ctx.emit_invalid_uninit_type(invalid, expr);
             }
-            true
+            Err(Poisoned)
         }
         Err(struct_ref) => {
             let view = types.lookup_struct(struct_ref);
-            let mut has_invalid_uninit = false;
+            let mut requires_runtime = false;
             for field in view.fields {
                 let field_loc = SrcLoc::new(view.def_loc.source, field.def_span);
-                has_invalid_uninit |=
-                    validate_uninit_type(field.ty, types, diag_ctx, loc, Some(field_loc));
+                requires_runtime |= validate_uninit_type(
+                    types,
+                    diag_ctx,
+                    is_comptime,
+                    field.ty,
+                    expr,
+                    Some(field_loc),
+                )?;
             }
-            has_invalid_uninit
-        }
-    }
-}
-
-fn contains_memptr(ty: TypeId, types: &TypeInterner) -> bool {
-    match ty.as_primitive() {
-        Ok(PrimitiveType::MemoryPointer) => true,
-        Ok(_) => false,
-        Err(struct_ref) => {
-            let view = types.lookup_struct(struct_ref);
-            view.fields.iter().any(|f| contains_memptr(f.ty, types))
+            Ok(requires_runtime)
         }
     }
 }
@@ -673,17 +680,13 @@ fn build_uninit_comptime(
     buf: &mut Vec<ValueId>,
 ) -> ValueId {
     match ty.as_primitive() {
-        Ok(PrimitiveType::U256) => values.intern(Value::BigNum(U256::ZERO)),
-        Ok(PrimitiveType::Bool) => values.intern(Value::Bool(false)),
-        Ok(PrimitiveType::Void) => values.intern(Value::Void),
-        Ok(PrimitiveType::Type) => values.intern(Value::Type(TypeId::VOID)),
-        Ok(
-            PrimitiveType::MemoryPointer
-            | PrimitiveType::Function
-            | PrimitiveType::CBytes
-            | PrimitiveType::Never,
-        ) => {
-            unreachable!("memptr/function/cbytes/never cannot appear in comptime uninit struct")
+        Ok(PrimitiveType::U256) => ValueId::ZERO_NUM,
+        Ok(PrimitiveType::Bool) => ValueId::FALSE,
+        Ok(PrimitiveType::Void) => ValueId::VOID,
+        Ok(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
+        Ok(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
+        Ok(PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never) => {
+            unreachable!("memptr/function/never cannot appear in comptime uninit struct")
         }
         Err(struct_ref) => {
             let buf_offset = buf.len();
