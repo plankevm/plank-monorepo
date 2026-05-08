@@ -71,7 +71,7 @@ impl LowerCtx<'_> {
                 PrimitiveType::Void | PrimitiveType::Never => 0,
                 PrimitiveType::Bool | PrimitiveType::U256 | PrimitiveType::MemoryPointer => 1,
                 PrimitiveType::Function => unreachable!("function unsizeable in SIR"),
-                PrimitiveType::Type | PrimitiveType::ComptimeString => {
+                PrimitiveType::Type | PrimitiveType::CBytes => {
                     unreachable!("comptime-only primitive unsizeable in SIR")
                 }
             },
@@ -190,7 +190,7 @@ fn lower_basic_block(
                             fields,
                         )
                     }
-                    Value::Type(_) | Value::String(_) | Value::Closure { .. } => {
+                    Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                         unreachable!("comptime-only value in MIR")
                     }
                 },
@@ -398,7 +398,7 @@ fn materialize_constant_struct_literal(
             Value::StructVal { ty: _, fields } => {
                 materialize_constant_struct_literal(values, bb, targets, fields);
             }
-            Value::Type(_) | Value::String(_) | Value::Closure { .. } => {
+            Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 unreachable!("MIR: comptime-only value")
             }
         }

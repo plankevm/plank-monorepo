@@ -73,8 +73,9 @@ impl<'a> DisplayHir<'a> {
                         .expect("invariant: only primitive types are inlined as HIR values")
                         .name()
                 ),
-                Value::String(s) => {
-                    let string = self.session.lookup_name(s);
+                Value::Bytes(bytes) => {
+                    let contents = self.session.lookup_name(bytes.contents);
+                    let string = &contents[bytes.start as usize..bytes.end as usize];
                     write!(f, "\"{string}\"")
                 }
                 other @ (Value::Closure { .. } | Value::StructVal { .. }) => {

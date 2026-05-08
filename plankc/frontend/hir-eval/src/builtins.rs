@@ -1,12 +1,10 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{
-    Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, StrId, builtins::BuiltinKind,
-};
+use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
 use plank_values::{
-    Field, PrimitiveType, StructView, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner,
-    builtins as builtin_sigs,
+    CBytes, Field, PrimitiveType, StructView, Type, TypeId, TypeInterner, Value, ValueId,
+    ValueInterner, builtins as builtin_sigs,
 };
 
 use crate::{
@@ -201,7 +199,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
             Builtin::CompileError => {
                 let &[message] = args else { unreachable!("arg count checked") };
-                let message = self.expect_string_arg(message, builtin, expr_span)?;
+                let message = self.expect_bytes_arg(message, builtin, expr_span)?;
+                let contents = self.diag_ctx.session.lookup_name(message.contents);
+                let message = contents[message.start as usize..message.end as usize].to_string();
                 self.diag_ctx.emit_compile_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
@@ -424,7 +424,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(
                 PrimitiveType::Type
                 | PrimitiveType::Function
-                | PrimitiveType::ComptimeString
+                | PrimitiveType::CBytes
                 | PrimitiveType::Never,
             ) => {
                 unreachable!("comptime-only/never types do not produce runtime locals")
@@ -491,17 +491,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Err(Poisoned)
     }
 
-    fn expect_string_arg(
+    fn expect_bytes_arg(
         &mut self,
         arg_local: hir::LocalId,
         builtin: Builtin,
         span: SourceSpan,
-    ) -> MaybePoisoned<StrId> {
+    ) -> MaybePoisoned<CBytes> {
         let state = self.bindings[arg_local].state?;
         if let LocalState::Comptime(vid) = state
-            && let Value::String(message) = self.values.lookup(vid)
+            && let Value::Bytes(bytes) = self.values.lookup(vid)
         {
-            return Ok(message);
+            return Ok(bytes);
         }
         let actual_ty = self.state_type(state);
         self.diag_ctx.emit_no_matching_builtin_signature(builtin, &[actual_ty], self.loc(span));
@@ -630,11 +630,7 @@ fn validate_uninit_type(
             | PrimitiveType::Void
             | PrimitiveType::Type,
         ) => false,
-        Ok(
-            invalid @ (PrimitiveType::Function
-            | PrimitiveType::ComptimeString
-            | PrimitiveType::Never),
-        ) => {
+        Ok(invalid @ (PrimitiveType::Function | PrimitiveType::CBytes | PrimitiveType::Never)) => {
             // `field_loc` is set when recursing into struct fields
             if let Some(field_loc) = field_loc {
                 diag_ctx.emit_invalid_uninit_struct_field(invalid, loc, field_loc);
@@ -681,12 +677,10 @@ fn build_uninit_comptime(
         Ok(
             PrimitiveType::MemoryPointer
             | PrimitiveType::Function
-            | PrimitiveType::ComptimeString
+            | PrimitiveType::CBytes
             | PrimitiveType::Never,
         ) => {
-            unreachable!(
-                "memptr/function/comptime_string/never cannot appear in comptime uninit struct"
-            )
+            unreachable!("memptr/function/cbytes/never cannot appear in comptime uninit struct")
         }
         Err(struct_ref) => {
             let buf_offset = buf.len();
