@@ -39,6 +39,7 @@ macro_rules! define_builtins {
         #[doc(hidden)]
         #[repr(u32)]
         enum BuiltinStrIdx {
+            _EmptyString,
             $($pt_type,)*
             $($rf_variant,)*
             $($ro_variant,)*

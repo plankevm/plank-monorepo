@@ -175,7 +175,7 @@ fn test_compile_error_builtin() {
          --> main.plk:1:11
           |
         1 | const x = @compile_error("custom failure");
-          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -192,7 +192,7 @@ fn test_compile_error_escaped_message() {
          --> main.plk:1:11
           |
         1 | const x = @compile_error("quote: \" slash: \\");
-          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -210,7 +210,7 @@ fn test_compile_error_accepts_cbytes_const() {
          --> main.plk:2:11
           |
         2 | const x = @compile_error(msg);
-          |           ^^^^^^^^^^^^^^^^^^^ compile error triggered here
+          |           ^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -229,7 +229,7 @@ fn test_compile_error_accepts_cbytes_let() {
          --> main.plk:3:5
           |
         3 |     @compile_error(msg);
-          |     ^^^^^^^^^^^^^^^^^^^ compile error triggered here
+          |     ^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -246,26 +246,27 @@ fn test_compile_error_accepts_hex_cbytes() {
          --> main.plk:1:11
           |
         1 | const x = @compile_error(hex"686578206661696c757265");
-          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
 
 #[test]
 fn test_compile_error_accepts_non_utf8_cbytes() {
-    assert_diagnostics(
+    let (_, _, session) = try_lower(
         r#"
         const x = @compile_error(hex"ff");
         init { @evm_stop(); }
         "#,
-        &[r#"
-        error: �
-         --> main.plk:1:11
-          |
-        1 | const x = @compile_error(hex"ff");
-          |           ^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
-        "#],
     );
+    let actual = session.diagnostics()[0].render_plain(&session);
+    snapbox::assert_data_eq!(actual, snapbox::Data::from(snapbox::str![[r#"
+error: �
+ --> main.plk:1:11
+  |
+1 | const x = @compile_error(hex"ff");
+  |           ^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+"#]]).raw());
 }
 
 #[test]

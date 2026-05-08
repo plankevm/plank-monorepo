@@ -737,10 +737,12 @@ fn test_uninit_primitives() {
         Basic Blocks:
             @0 {
                 $0 = const 0x0
-                $1 = const 0x0
+                $1 = copy $0
                 $2 = const 0x0
-                $3 = mallocany $2
-                $4 = copy $3
+                $3 = copy $2
+                $4 = const 0x0
+                $5 = mallocany $4
+                $6 = copy $5
                 stop
             }
         "#,

@@ -27,8 +27,9 @@ impl ValueId {
     pub const VOID: Self = ValueId::new(0);
     pub const FALSE: Self = ValueId::new(1);
     pub const TRUE: Self = ValueId::new(2);
-    pub const ZERO: Self = ValueId::new(3);
-    pub const ONE: Self = ValueId::new(4);
+    pub const ZERO_NUM: Self = ValueId::new(3);
+    pub const ONE_NUM: Self = ValueId::new(4);
+    pub const BYTES_EMPTY: Self = ValueId::new(5);
 }
 
 impl From<bool> for ValueId {

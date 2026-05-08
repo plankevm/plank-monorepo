@@ -476,9 +476,9 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_compile_error(&mut self, message: impl Into<String>, loc: SrcLoc) {
+    pub fn emit_custom_comptime_error(&mut self, message: impl Into<String>, loc: SrcLoc) {
         Diagnostic::error(message)
-            .primary(loc.source, loc.span, "compile error triggered here")
+            .primary(loc.source, loc.span, "custom compile error triggered here")
             .emit(self);
     }
 
