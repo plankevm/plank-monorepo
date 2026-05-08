@@ -269,6 +269,25 @@ fn test_compile_error_accepts_non_utf8_cbytes() {
 }
 
 #[test]
+fn test_runtime_cbytes() {
+    assert_diagnostics(
+        r#"
+        init {
+            let mut x = "";
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: use of comptime-only value at runtime
+         --> main.plk:2:17
+          |
+        2 |     let mut x = "";
+          |                 ^^ reference to comptime-only value
+        "#],
+    );
+}
+
+#[test]
 fn test_compile_error_requires_string_literal() {
     assert_diagnostics(
         r#"
