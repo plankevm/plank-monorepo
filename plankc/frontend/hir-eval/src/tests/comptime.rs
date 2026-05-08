@@ -194,13 +194,13 @@ fn test_compile_error_requires_string_literal() {
         1 | const x = @compile_error(1);
           |           ^^^^^^^^^^^^^^^^^ `@compile_error` cannot be called with (u256)
           |
-          = note: `@compile_error` accepts (comptime_string)
+          = note: `@compile_error` accepts (cbytes)
         "#],
     );
 }
 
 #[test]
-fn test_comptime_string_literals() {
+fn test_comptime_cbytes_literals() {
     assert_lowers_to(
         r#"
         const same = "hello" == "hello";

@@ -246,11 +246,29 @@ impl crate::scope::Scope<'_, '_> {
         let (rhs_state, _, _) = rhs_binding.poisoned()?;
 
         match (op_equals, ty.as_primitive()) {
-            (op_equals, Ok(PrimitiveType::Type | PrimitiveType::ComptimeString)) => {
+            (op_equals, Ok(PrimitiveType::Type)) => {
                 let (LocalState::Comptime(lhs), LocalState::Comptime(rhs)) = (lhs_state, rhs_state)
                 else {
                     unreachable!("invariant: type is comptime-only")
                 };
+                let result = if op_equals { lhs == rhs } else { lhs != rhs };
+                Ok(Ok(EvalValue::Comptime(result.into())))
+            }
+            (op_equals, Ok(PrimitiveType::CBytes)) => {
+                let (LocalState::Comptime(lhs), LocalState::Comptime(rhs)) = (lhs_state, rhs_state)
+                else {
+                    unreachable!("invariant: cbytes is comptime-only")
+                };
+                let Value::Bytes(lhs) = self.values.lookup(lhs) else {
+                    unreachable!("invariant: type checked as cbytes")
+                };
+                let Value::Bytes(rhs) = self.values.lookup(rhs) else {
+                    unreachable!("invariant: type checked as cbytes")
+                };
+                let lhs_contents = self.diag_ctx.session.lookup_name(lhs.contents);
+                let rhs_contents = self.diag_ctx.session.lookup_name(rhs.contents);
+                let lhs = &lhs_contents[lhs.start as usize..lhs.end as usize];
+                let rhs = &rhs_contents[rhs.start as usize..rhs.end as usize];
                 let result = if op_equals { lhs == rhs } else { lhs != rhs };
                 Ok(Ok(EvalValue::Comptime(result.into())))
             }

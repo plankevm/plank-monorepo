@@ -61,7 +61,7 @@ impl<'a> DisplayMir<'a> {
                 }
                 write!(f, "{pad}}}")
             }
-            Value::Type(_) | Value::String(_) | Value::Closure { .. } => {
+            Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 unreachable!("comptime-only value in MIR")
             }
         }

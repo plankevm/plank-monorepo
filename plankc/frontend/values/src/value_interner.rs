@@ -10,13 +10,20 @@ newtype_index! {
     struct CaptureIdx;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CBytes {
+    pub contents: StrId,
+    pub start: u32,
+    pub end: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StoredValue {
     Void,
     Bool(bool),
     BigNum(BigNumId),
     Type(TypeId),
-    String(StrId),
+    Bytes(CBytes),
     Closure { fn_def: FnDefId, captures: CaptureIdx },
     StructVal { ty: TypeId, children: CompoundIdx },
 }
@@ -27,7 +34,7 @@ pub enum Value<'a> {
     Bool(bool),
     BigNum(U256),
     Type(TypeId),
-    String(StrId),
+    Bytes(CBytes),
     Closure { fn_def: FnDefId, captures: &'a [(ValueId, DefOrigin)] },
     StructVal { ty: TypeId, fields: &'a [ValueId] },
 }
@@ -39,7 +46,7 @@ impl Value<'_> {
             Value::Bool(_) => TypeId::BOOL,
             Value::BigNum(_) => TypeId::U256,
             Value::Type(_) => TypeId::TYPE,
-            Value::String(_) => TypeId::COMPTIME_STRING,
+            Value::Bytes(_) => TypeId::CBYTES,
             Value::Closure { .. } => TypeId::FUNCTION,
             Value::StructVal { ty, .. } => *ty,
         }
@@ -72,7 +79,7 @@ fn stored_to_value<'a>(
         StoredValue::Bool(b) => Value::Bool(b),
         StoredValue::BigNum(bid) => Value::BigNum(big_nums.lookup(bid)),
         StoredValue::Type(t) => Value::Type(t),
-        StoredValue::String(s) => Value::String(s),
+        StoredValue::Bytes(bytes) => Value::Bytes(bytes),
         StoredValue::Closure { fn_def, captures: idx } => {
             Value::Closure { fn_def, captures: &captures[idx] }
         }
@@ -116,8 +123,8 @@ impl ValueInterner {
         self.intern(Value::Type(ty))
     }
 
-    pub fn intern_string(&mut self, string: StrId) -> ValueId {
-        self.intern(Value::String(string))
+    pub fn intern_bytes(&mut self, contents: StrId, start: u32, end: u32) -> ValueId {
+        self.intern(Value::Bytes(CBytes { contents, start, end }))
     }
 
     pub fn intern(&mut self, value: Value<'_>) -> ValueId {
@@ -145,7 +152,7 @@ impl ValueInterner {
                     Value::Bool(b) => StoredValue::Bool(b),
                     Value::BigNum(n) => StoredValue::BigNum(self.big_nums.intern(n)),
                     Value::Type(t) => StoredValue::Type(t),
-                    Value::String(s) => StoredValue::String(s),
+                    Value::Bytes(bytes) => StoredValue::Bytes(bytes),
                     Value::Closure { fn_def, captures } => StoredValue::Closure {
                         fn_def,
                         captures: self.captures.push_copy_slice(captures),

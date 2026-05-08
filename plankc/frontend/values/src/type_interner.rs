@@ -63,7 +63,7 @@ pub enum PrimitiveType {
     MemoryPointer,
     Type,
     Function,
-    ComptimeString,
+    CBytes,
     Never,
 }
 
@@ -77,7 +77,7 @@ impl PrimitiveType {
             PrimitiveType::MemoryPointer => builtin_names::MEMORY_POINTER,
             PrimitiveType::Type => builtin_names::TYPE,
             PrimitiveType::Function => builtin_names::FUNCTION,
-            PrimitiveType::ComptimeString => builtin_names::COMPTIME_STRING,
+            PrimitiveType::CBytes => builtin_names::CBYTES,
             PrimitiveType::Never => builtin_names::NEVER,
         }
     }
@@ -89,7 +89,7 @@ impl PrimitiveType {
             | PrimitiveType::Bool
             | PrimitiveType::MemoryPointer
             | PrimitiveType::Never => false,
-            PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::ComptimeString => true,
+            PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::CBytes => true,
         }
     }
 }
@@ -134,7 +134,7 @@ impl std::fmt::Debug for TypeId {
             TypeId::MEMORY_POINTER => write!(f, "TypeId::MEMORY_POINTER"),
             TypeId::TYPE => write!(f, "TypeId::TYPE"),
             TypeId::FUNCTION => write!(f, "TypeId::FUNCTION"),
-            TypeId::COMPTIME_STRING => write!(f, "TypeId::COMPTIME_STRING"),
+            TypeId::CBYTES => write!(f, "TypeId::CBYTES"),
             TypeId::NEVER => write!(f, "TypeId::NEVER"),
             other => write!(f, "TypeId({})", other.get()),
         }
@@ -151,7 +151,7 @@ impl TypeId {
     pub const MEMORY_POINTER: TypeId = TypeId::from_primitive(PrimitiveType::MemoryPointer);
     pub const TYPE: TypeId = TypeId::from_primitive(PrimitiveType::Type);
     pub const FUNCTION: TypeId = TypeId::from_primitive(PrimitiveType::Function);
-    pub const COMPTIME_STRING: TypeId = TypeId::from_primitive(PrimitiveType::ComptimeString);
+    pub const CBYTES: TypeId = TypeId::from_primitive(PrimitiveType::CBytes);
     pub const NEVER: TypeId = TypeId::from_primitive(PrimitiveType::Never);
 
     const IS_PRIMITIVE_FLAG: u32 = 1;
@@ -189,7 +189,7 @@ impl TypeId {
             TypeId::MEMORY_POINTER => Ok(PrimitiveType::MemoryPointer),
             TypeId::TYPE => Ok(PrimitiveType::Type),
             TypeId::FUNCTION => Ok(PrimitiveType::Function),
-            TypeId::COMPTIME_STRING => Ok(PrimitiveType::ComptimeString),
+            TypeId::CBYTES => Ok(PrimitiveType::CBytes),
             TypeId::NEVER => Ok(PrimitiveType::Never),
             ty => Err(StructRef(ty.get())),
         }

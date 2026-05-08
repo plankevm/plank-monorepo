@@ -166,7 +166,7 @@ define_builtins! {
         MEMORY_POINTER = "memptr" => MemoryPointer;
         TYPE = "type" => Type;
         FUNCTION = "function" => Function;
-        COMPTIME_STRING = "comptime_string" => ComptimeString;
+        CBYTES = "cbytes" => CBytes;
         NEVER = "never" => Never;
     }
 
