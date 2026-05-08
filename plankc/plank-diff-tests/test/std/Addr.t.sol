@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 import {BaseTest} from "../BaseTest.sol";
 
 contract AddrTest is BaseTest {
-
     address plankImpl = makeAddr("plank-impl");
 
     function setUp() public {
@@ -13,12 +12,12 @@ contract AddrTest is BaseTest {
     }
 
     function test_addr_conversion_fails() public {
-        (bool success, bytes memory out) = plankImpl.call(abi.encode(0));
+        (bool success,) = plankImpl.call(abi.encode(0));
         assertFalse(success);
     }
 
     function test_raw_create() public {
-        (bool success, bytes memory out) = plankImpl.call(abi.encode(1));
+        (bool success,) = plankImpl.call(abi.encode(1));
         assertTrue(success);
     }
 }

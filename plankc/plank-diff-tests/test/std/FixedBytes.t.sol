@@ -4,7 +4,6 @@ pragma solidity ^0.8.0;
 import {BaseTest} from "../BaseTest.sol";
 
 contract FixedBytesTest is BaseTest {
-
     address plankImpl = makeAddr("plank-impl");
 
     function setUp() public {
@@ -13,7 +12,7 @@ contract FixedBytesTest is BaseTest {
     }
 
     function test_fixedbytes() public {
-        (bool success, bytes memory out) = plankImpl.call("");
+        (bool success,) = plankImpl.call("");
         assertTrue(success);
     }
 }

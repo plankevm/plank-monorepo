@@ -3,18 +3,7 @@ import std::addr::{addr, addr_from_u256, raw_create, raw_create2};
 import std::fixedbytes::bytes32_from_u256;
 import std::membytes::{membytes_new, membytes_from_ptr};
 import std::option::Option;
-
-const assert_some = fn (comptime T: type, option: Option(T)) void {
-    if !option.is_some {
-        @evm_revert(@malloc_uninit(0), 0);
-    }
-};
-
-const assert_nonzero = fn (value: u256) void {
-    if value == 0 {
-        @evm_revert(@malloc_uninit(0), 0);
-    }
-};
+import std::error::require;
 
 const SELECTOR_CONVERT = 0;
 const SELECTOR_CREATE = 1;
@@ -32,16 +21,14 @@ init {
     } else if selector == SELECTOR_CREATE {
         let code = membytes_new(32);
         let maybe_account1 = raw_create(0, code);
-        assert_some(addr, maybe_account1);
-        assert_nonzero(maybe_account1.inner.raw);
+        require(maybe_account1.is_some);
+        require(maybe_account1.inner.raw != 0);
 
         let salt = bytes32_from_u256(0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c);
         let maybe_account2 = raw_create2(0, code, salt);
-        assert_some(addr, maybe_account2);
-        assert_nonzero(maybe_account2.inner.raw);
+        require(maybe_account2.is_some);
+        require(maybe_account2.inner.raw != 0);
     }
 
-    let out_ptr = @malloc_zeroed(32);
-    @mstore32(out_ptr, 0);
-    @evm_return(out_ptr, 32);
+    @evm_stop();
 }
