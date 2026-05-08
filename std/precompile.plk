@@ -9,25 +9,24 @@ const IDENTITY_ADDR = 0x04;
 const MODEXP_ADDR = 0x05;
 
 const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(u256) {
-    let calldata = membytes{ ptr: @malloc_uninit(128), len: 128 };
-    @mstore32(calldata.ptr +% 0, hash);
-    @mstore32(calldata.ptr +% 32, v);
-    @mstore32(calldata.ptr +% 64, r);
-    @mstore32(calldata.ptr +% 96, s);
+    let len = 128;
+    let buf = @malloc_uninit(len);
+    @mstore32(buf +% 0, hash);
+    @mstore32(buf +% 32, v);
+    @mstore32(buf +% 64, r);
+    @mstore32(buf +% 96, s);
 
     let success = @evm_staticcall(
         @evm_gas(), 
         ECRECOVER_ADDR, 
-        calldata.ptr, 
-        calldata.len, 
-        calldata.ptr, 
+        buf, 
+        len, 
+        buf,
         32
     );
-    require(success);
     
-    let inner = @mload32(calldata.ptr);
-    if inner != 0 {
-        Some(u256, inner)
+    if success {
+        Some(u256, @mload32(buf))
     } else {
         None(u256)
     }
@@ -35,71 +34,72 @@ const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(u256) {
 };
 
 const sha256 = fn (data: membytes) u256 {
-    let returndata = membytes{ ptr: @malloc_uninit(32), len: 32 };
+    let len = 32;
+    let buf = @malloc_uninit(len);
+
     let success = @evm_staticcall(
         @evm_gas(), 
         SHA256_ADDR, 
         data.ptr, 
         data.len, 
-        returndata.ptr, 
-        returndata.len
+        buf, 
+        len 
     );
     require(success);
 
-    @mload32(returndata.ptr)
+    @mload32(buf)
 };
 
 const ripemd160 = fn (data: membytes) u256 {
-    let returndata = membytes{ ptr: @malloc_uninit(32), len: 32 };
+    let len = 32;
+    let buf = @malloc_uninit(len);
+
     let success = @evm_staticcall(
         @evm_gas(), 
         RIPEMD160_ADDR, 
         data.ptr, 
         data.len, 
-        returndata.ptr, 
-        returndata.len
+        buf,
+        len,
     );
     require(success);
 
-    @mload32(returndata.ptr)
+    @mload32(buf)
 };
 
-const set_returndata = fn (data: membytes) membytes {
-    let returndata = membytes{ ptr: @malloc_uninit(data.len), len: data.len };
+const set_returndata = fn (data: membytes, out: memptr) void {
     let success = @evm_staticcall(
-        @evm_gas(), 
-        IDENTITY_ADDR, 
-        data.ptr, 
-        data.len, 
-        returndata.ptr, 
-        returndata.len
+        @evm_gas(),
+        IDENTITY_ADDR,
+        data.ptr,
+        data.len,
+        out,
+        data.len
     );
     require(success);
-
-    returndata
 };
 
 const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
     let len = 96 + base.len + exp.len + mod.len;
-    let calldata = membytes{ ptr: @malloc_uninit(len), len: len };
+    let buf = @malloc_uninit(len);
 
-    @mstore32(calldata.ptr +% 0, base.len);
-    @mstore32(calldata.ptr +% 32, exp.len);
-    @mstore32(calldata.ptr +% 64, mod.len);
+    @mstore32(buf +% 0, base.len);
+    @mstore32(buf +% 32, exp.len);
+    @mstore32(buf +% 64, mod.len);
 
-    @mcopy(calldata.ptr +% 96, base.ptr, base.len);
-    @mcopy(calldata.ptr +% 96 +% base.len, exp.ptr, exp.len);
-    @mcopy(calldata.ptr +% 96 +% base.len +% exp.len, mod.ptr, mod.len);
+    @mcopy(buf +% 96, base.ptr, base.len);
+    @mcopy(buf +% 96 +% base.len, exp.ptr, exp.len);
+    @mcopy(buf +% 96 +% base.len +% exp.len, mod.ptr, mod.len);
 
     let success = @evm_staticcall(
         @evm_gas(), 
         MODEXP_ADDR, 
-        calldata.ptr, 
-        calldata.len, 
-        calldata.ptr, 
+        buf, 
+        len, 
+        buf, 
         mod.len 
     );
     require(success);
 
-    membytes_from_ptr(calldata.ptr, mod.len) 
+    membytes_from_ptr(buf, mod.len) 
 };

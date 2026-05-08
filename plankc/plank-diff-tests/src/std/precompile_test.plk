@@ -1,6 +1,6 @@
 import std::abi::abi_encode;
 import std::constructor::return_runtime;
-import std::membytes::{membytes, membytes_new};
+import std::membytes::{membytes, membytes_new, membytes_from_ptr};
 import std::precompile::{ecrecover, sha256, ripemd160, set_returndata, modexp};
 
 const ECRECOVER_SELECTOR = 0xa489405c;
@@ -67,8 +67,10 @@ const call_ripemd160 = fn () never {
 const call_set_returndata = fn () never {
     let offset = @evm_add(4, @evm_calldataload(4));
     let data = bytes_from_offset(offset);
-    let copy = set_returndata(data);
-
+    let ptr = @malloc_uninit(data.len);
+    set_returndata(data, ptr);
+   
+    let copy = membytes_from_ptr(ptr, data.len);
     let out = abi_encode(BytesResult, BytesResult { data: copy });
     @evm_return(out.ptr, out.len);
 };
