@@ -166,6 +166,7 @@ define_builtins! {
         MEMORY_POINTER = "memptr" => MemoryPointer;
         TYPE = "type" => Type;
         FUNCTION = "function" => Function;
+        COMPTIME_STRING = "comptime_string" => ComptimeString;
         NEVER = "never" => Never;
     }
 
@@ -345,6 +346,7 @@ define_builtins! {
         FIELD_COUNT "@field_count" => FieldCount;
         IN_COMPTIME "@in_comptime" => InComptime;
         SET_EVAL_BRANCH_QUOTA "@set_eval_branch_quota" => SetEvalBranchQuota;
+        COMPILE_ERROR "@compile_error" => CompileError;
     }
 
     comptime_dynamic_builtins {

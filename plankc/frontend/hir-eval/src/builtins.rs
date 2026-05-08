@@ -1,7 +1,9 @@
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
+use plank_session::{
+    Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, StrId, builtins::BuiltinKind,
+};
 use plank_values::{
     Field, PrimitiveType, StructView, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner,
     builtins as builtin_sigs,
@@ -228,6 +230,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.max_eval_branch_quota_seen.max(requested_quota);
                 Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
             }
+            Builtin::CompileError => {
+                let &[message] = args else { unreachable!("arg count checked") };
+                let message = self.expect_string_arg(message, builtin, expr_span)?;
+                self.diag_ctx.emit_compile_error(message, self.loc(expr_span));
+                Ok(Err(Diverge::ControlFlowPoisoned))
+            }
             _ => unreachable!("not a comptime builtin: {builtin}"),
         }
     }
@@ -444,8 +452,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::VOID) });
                 target
             }
-            Ok(PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::Never) => {
-                unreachable!("void/type/function/never do not produce runtime locals")
+            Ok(
+                PrimitiveType::Type
+                | PrimitiveType::Function
+                | PrimitiveType::ComptimeString
+                | PrimitiveType::Never,
+            ) => {
+                unreachable!("comptime-only/never types do not produce runtime locals")
             }
             Err(struct_ref) => {
                 let fields = self.with_locals_buf(|this, offset| {
@@ -506,6 +519,23 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
         let actual_ty = self.state_type(state);
         self.diag_ctx.emit_expected_type_arg(builtin, actual_ty, self.loc(span));
+        Err(Poisoned)
+    }
+
+    fn expect_string_arg(
+        &mut self,
+        arg_local: hir::LocalId,
+        builtin: Builtin,
+        span: SourceSpan,
+    ) -> MaybePoisoned<StrId> {
+        let state = self.bindings[arg_local].state?;
+        if let LocalState::Comptime(vid) = state
+            && let Value::String(message) = self.values.lookup(vid)
+        {
+            return Ok(message);
+        }
+        let actual_ty = self.state_type(state);
+        self.diag_ctx.emit_no_matching_builtin_signature(builtin, &[actual_ty], self.loc(span));
         Err(Poisoned)
     }
 
@@ -631,7 +661,11 @@ fn validate_uninit_type(
             | PrimitiveType::Void
             | PrimitiveType::Type,
         ) => false,
-        Ok(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
+        Ok(
+            invalid @ (PrimitiveType::Function
+            | PrimitiveType::ComptimeString
+            | PrimitiveType::Never),
+        ) => {
             // `field_loc` is set when recursing into struct fields
             if let Some(field_loc) = field_loc {
                 diag_ctx.emit_invalid_uninit_struct_field(invalid, loc, field_loc);
@@ -675,8 +709,15 @@ fn build_uninit_comptime(
         Ok(PrimitiveType::Bool) => values.intern(Value::Bool(false)),
         Ok(PrimitiveType::Void) => values.intern(Value::Void),
         Ok(PrimitiveType::Type) => values.intern(Value::Type(TypeId::VOID)),
-        Ok(PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never) => {
-            unreachable!("memptr/function/never cannot appear in comptime uninit struct")
+        Ok(
+            PrimitiveType::MemoryPointer
+            | PrimitiveType::Function
+            | PrimitiveType::ComptimeString
+            | PrimitiveType::Never,
+        ) => {
+            unreachable!(
+                "memptr/function/comptime_string/never cannot appear in comptime uninit struct"
+            )
         }
         Err(struct_ref) => {
             let buf_offset = buf.len();

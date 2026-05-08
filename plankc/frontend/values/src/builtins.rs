@@ -52,6 +52,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
     const VOID: TypeId = TypeId::VOID;
     const NEVER: TypeId = TypeId::NEVER;
     const TYPE: TypeId = TypeId::TYPE;
+    const STRING: TypeId = TypeId::COMPTIME_STRING;
 
     match builtin {
         // Runtime foldable
@@ -213,6 +214,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::FieldCount => &[sig!([TYPE => U256])],
         B::InComptime => &[sig!([=> BOOL])],
         B::SetEvalBranchQuota => &[sig!([U256 => VOID])],
+        B::CompileError => &[sig!([STRING => NEVER])],
 
         // Comptime dynamic — no fixed signatures
         B::FieldType | B::GetField | B::SetField | B::Uninit => &[],
@@ -229,6 +231,7 @@ impl TypeId {
             MEMORY_POINTER => TypeId::MEMORY_POINTER,
             TYPE => TypeId::TYPE,
             FUNCTION => TypeId::FUNCTION,
+            COMPTIME_STRING => TypeId::COMPTIME_STRING,
             NEVER => TypeId::NEVER,
             _ => return None,
         })

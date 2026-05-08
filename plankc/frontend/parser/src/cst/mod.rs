@@ -101,6 +101,7 @@ pub enum NodeKind {
     // Atoms
     BoolLiteral(bool),
     NumLiteral { id: NumLitId },
+    StringLiteral { value: StrId },
     Identifier { ident: StrId },
     BuiltinName { ident: StrId },
 
@@ -154,6 +155,7 @@ impl std::fmt::Debug for NodeKind {
             Self::ElseIfBranch => write!(f, "ElseIfBranch"),
             Self::BoolLiteral(value) => write!(f, "BoolLiteral({value})"),
             Self::NumLiteral { .. } => write!(f, "NumLiteral"),
+            Self::StringLiteral { .. } => write!(f, "StringLiteral"),
             Self::Identifier { .. } => write!(f, "Identifier"),
             Self::BuiltinName { .. } => write!(f, "BuiltinName"),
             Self::FnDef => write!(f, "FnDef"),
@@ -185,6 +187,7 @@ impl NodeKind {
             | Self::StructLit
             | Self::BoolLiteral(_)
             | Self::NumLiteral { .. }
+            | Self::StringLiteral { .. }
             | Self::Identifier { .. }
             | Self::BuiltinName { .. } => Some(true),
             _ => None,

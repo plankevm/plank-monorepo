@@ -361,6 +361,9 @@ impl BlockLowerer<'_> {
                     }
                 }
             }
+            ast::Expr::StringLiteral { value, .. } => {
+                ExprKind::Value(Ok(self.values.intern_string(value)))
+            }
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
                 ExprKind::Member { object, member: member_expr.member }

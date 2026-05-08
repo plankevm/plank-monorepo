@@ -2,6 +2,7 @@ use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_session::StrId;
 use std::hash::BuildHasher;
 
 newtype_index! {
@@ -15,6 +16,7 @@ enum StoredValue {
     Bool(bool),
     BigNum(BigNumId),
     Type(TypeId),
+    String(StrId),
     Closure { fn_def: FnDefId, captures: CaptureIdx },
     StructVal { ty: TypeId, children: CompoundIdx },
 }
@@ -25,6 +27,7 @@ pub enum Value<'a> {
     Bool(bool),
     BigNum(U256),
     Type(TypeId),
+    String(StrId),
     Closure { fn_def: FnDefId, captures: &'a [(ValueId, DefOrigin)] },
     StructVal { ty: TypeId, fields: &'a [ValueId] },
 }
@@ -36,6 +39,7 @@ impl Value<'_> {
             Value::Bool(_) => TypeId::BOOL,
             Value::BigNum(_) => TypeId::U256,
             Value::Type(_) => TypeId::TYPE,
+            Value::String(_) => TypeId::COMPTIME_STRING,
             Value::Closure { .. } => TypeId::FUNCTION,
             Value::StructVal { ty, .. } => *ty,
         }
@@ -68,6 +72,7 @@ fn stored_to_value<'a>(
         StoredValue::Bool(b) => Value::Bool(b),
         StoredValue::BigNum(bid) => Value::BigNum(big_nums.lookup(bid)),
         StoredValue::Type(t) => Value::Type(t),
+        StoredValue::String(s) => Value::String(s),
         StoredValue::Closure { fn_def, captures: idx } => {
             Value::Closure { fn_def, captures: &captures[idx] }
         }
@@ -111,6 +116,10 @@ impl ValueInterner {
         self.intern(Value::Type(ty))
     }
 
+    pub fn intern_string(&mut self, string: StrId) -> ValueId {
+        self.intern(Value::String(string))
+    }
+
     pub fn intern(&mut self, value: Value<'_>) -> ValueId {
         let hash = self.hash_value(value);
         let entry = self.dedup.entry(
@@ -136,6 +145,7 @@ impl ValueInterner {
                     Value::Bool(b) => StoredValue::Bool(b),
                     Value::BigNum(n) => StoredValue::BigNum(self.big_nums.intern(n)),
                     Value::Type(t) => StoredValue::Type(t),
+                    Value::String(s) => StoredValue::String(s),
                     Value::Closure { fn_def, captures } => StoredValue::Closure {
                         fn_def,
                         captures: self.captures.push_copy_slice(captures),

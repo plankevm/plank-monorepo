@@ -246,7 +246,7 @@ impl crate::scope::Scope<'_, '_> {
         let (rhs_state, _, _) = rhs_binding.poisoned()?;
 
         match (op_equals, ty.as_primitive()) {
-            (op_equals, Ok(PrimitiveType::Type)) => {
+            (op_equals, Ok(PrimitiveType::Type | PrimitiveType::ComptimeString)) => {
                 let (LocalState::Comptime(lhs), LocalState::Comptime(rhs)) = (lhs_state, rhs_state)
                 else {
                     unreachable!("invariant: type is comptime-only")

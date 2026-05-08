@@ -164,6 +164,66 @@ fn test_comptime_unsupported_evm_builtin() {
 }
 
 #[test]
+fn test_compile_error_builtin() {
+    assert_diagnostics(
+        r#"
+        const x = @compile_error("custom failure");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: custom failure
+         --> main.plk:1:11
+          |
+        1 | const x = @compile_error("custom failure");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_compile_error_requires_string_literal() {
+    assert_diagnostics(
+        r#"
+        const x = @compile_error(1);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: no valid match for builtin signature
+         --> main.plk:1:11
+          |
+        1 | const x = @compile_error(1);
+          |           ^^^^^^^^^^^^^^^^^ `@compile_error` cannot be called with (u256)
+          |
+          = note: `@compile_error` accepts (comptime_string)
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_string_literals() {
+    assert_lowers_to(
+        r#"
+        const same = "hello" == "hello";
+        const different = "hello" != "world";
+        init {
+            let mut a: bool = same;
+            let mut b: bool = different;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_evm_wrong_arg_type_in_const() {
     assert_diagnostics(
         r#"

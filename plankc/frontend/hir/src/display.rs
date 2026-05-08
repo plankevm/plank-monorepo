@@ -73,6 +73,10 @@ impl<'a> DisplayHir<'a> {
                         .expect("invariant: only primitive types are inlined as HIR values")
                         .name()
                 ),
+                Value::String(s) => {
+                    let string = self.session.lookup_name(s);
+                    write!(f, "\"{string}\"")
+                }
                 other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")
                 }

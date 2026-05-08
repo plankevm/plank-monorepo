@@ -62,6 +62,11 @@ impl<'a> Parser<'a> {
                 }
                 diag
             }
+            ErrorToken::UnclosedString => Diagnostic::error("unclosed string literal").primary(
+                self.source_id,
+                span,
+                "missing closing `\"`",
+            ),
         };
 
         diag.emit(self.session);
