@@ -231,11 +231,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::CompileError => {
                 let &[message] = args else { unreachable!("arg count checked") };
                 let message = self.expect_bytes_arg(message, builtin, expr_span)?;
-                let contents = self.diag_ctx.session.lookup_bytes(message.contents);
-                let message = String::from_utf8_lossy(
-                    &contents[message.start as usize..message.end as usize],
-                )
-                .into_owned();
+                let message = self.diag_ctx.session.lookup_bytes_lossy(
+                    message.contents,
+                    message.start,
+                    message.end,
+                );
                 self.diag_ctx.emit_compile_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }

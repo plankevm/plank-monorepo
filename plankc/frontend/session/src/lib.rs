@@ -79,6 +79,14 @@ impl Session {
         &self.bytes_interner[bytes]
     }
 
+    pub fn lookup_bytes_slice(&self, bytes: BytesId, start: u32, end: u32) -> &[u8] {
+        &self.lookup_bytes(bytes)[start as usize..end as usize]
+    }
+
+    pub fn lookup_bytes_lossy(&self, bytes: BytesId, start: u32, end: u32) -> String {
+        String::from_utf8_lossy(self.lookup_bytes_slice(bytes, start, end)).into_owned()
+    }
+
     pub fn next_source(&self) -> SourceId {
         self.source_map.next_idx()
     }
