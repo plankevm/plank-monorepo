@@ -1636,6 +1636,19 @@
         }
       }
     },
+    "string_literal": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "\""
+        },
+        {
+          "type": "SYMBOL",
+          "name": "_string_literal_end"
+        }
+      ]
+    },
     "block_comment": {
       "type": "SEQ",
       "members": [
@@ -1706,7 +1719,7 @@
     },
     {
       "type": "SYMBOL",
-      "name": "string_literal"
+      "name": "_string_literal_end"
     },
     {
       "type": "SYMBOL",
