@@ -35,6 +35,8 @@ pub struct Source {
 
 pub struct Session {
     name_interner: StringInterner<StrId>,
+    // Kept separate from names so arbitrary non-UTF-8 cbytes can never be read through
+    // the UTF-8-only `lookup_name` path.
     bytes_interner: BytesInterner<BytesId>,
     source_map: IndexVec<SourceId, Source>,
     total_errors: u32,

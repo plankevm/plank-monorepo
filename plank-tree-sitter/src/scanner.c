@@ -4,6 +4,7 @@
 
 enum TokenType {
     BLOCK_COMMENT_CONTENT,
+    STRING_LITERAL,
     ERROR_SENTINEL
 };
 
@@ -35,11 +36,47 @@ void tree_sitter_plank_external_scanner_deserialize(
   unsigned length
 ) { }
 
+static bool scan_string_literal(TSLexer *lexer) {
+    while (lexer->lookahead == ' ' || lexer->lookahead == '\t' || lexer->lookahead == '\n' || lexer->lookahead == '\r') {
+        lexer->advance(lexer, true);
+    }
+
+    if (lexer->lookahead != '"') {
+        return false;
+    }
+
+    lexer->advance(lexer, false);
+    while (!lexer->eof(lexer)) {
+        switch (lexer->lookahead) {
+            case '"':
+                lexer->advance(lexer, false);
+                lexer->mark_end(lexer);
+                lexer->result_symbol = STRING_LITERAL;
+                return true;
+            case '\\':
+                lexer->advance(lexer, false);
+                if (!lexer->eof(lexer)) {
+                    lexer->advance(lexer, false);
+                }
+                break;
+            default:
+                lexer->advance(lexer, false);
+                break;
+        }
+    }
+
+    return false;
+}
+
 bool tree_sitter_plank_external_scanner_scan(
   void *payload,
   TSLexer *lexer,
   const bool *valid_symbols
 ) {
+    if (valid_symbols[STRING_LITERAL] && scan_string_literal(lexer)) {
+        return true;
+    }
+
     // Recommended way of handling error state: https://tree-sitter.github.io/tree-sitter/creating-parsers/4-external-scanners.html#other-external-scanner-details
     if (valid_symbols[ERROR_SENTINEL]) {
         return false;
