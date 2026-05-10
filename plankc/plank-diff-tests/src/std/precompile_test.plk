@@ -34,15 +34,16 @@ const call_ecrecover = fn () never {
     let v = @evm_calldataload(36);
     let r = @evm_calldataload(68);
     let s = @evm_calldataload(100);
-    
+
     let addr = ecrecover(hash, v, r, s);
     let out = @malloc_uninit(32);
-    @mstore32(out, addr.inner);
+    let unwrapped = if addr.is_some { addr.inner.raw } else { 0 };
+    @mstore32(out, unwrapped);
     @evm_return(out, 32);
 };
 
 const call_sha256 = fn () never {
-    let offset = @evm_add(4, @evm_calldataload(4));
+    let offset = @evm_calldataload(4) +% 4;
     let data = bytes_from_offset(offset);
     let hash = sha256(data);
 
@@ -52,7 +53,7 @@ const call_sha256 = fn () never {
 };
 
 const call_ripemd160 = fn () never {
-    let offset = @evm_add(4, @evm_calldataload(4));
+    let offset = @evm_calldataload(4) +% 4;
     let data = bytes_from_offset(offset);
     let hash = ripemd160(data);
 
@@ -62,9 +63,9 @@ const call_ripemd160 = fn () never {
 };
 
 const call_modexp = fn () never {
-    let base_offset = @evm_add(4, @evm_calldataload(4));
-    let exp_offset = @evm_add(4, @evm_calldataload(36));
-    let mod_offset = @evm_add(4, @evm_calldataload(68));
+    let base_offset = @evm_calldataload(4) +% 4;
+    let exp_offset = @evm_calldataload(36) +% 4;
+    let mod_offset = @evm_calldataload(68) +% 4;
 
     let base = bytes_from_offset(base_offset);
     let exp = bytes_from_offset(exp_offset);
@@ -75,10 +76,10 @@ const call_modexp = fn () never {
     @evm_return(out.ptr, out.len);
 };
 
-const bytes_from_offset = fn (off: u256) membytes {
-    let len = @evm_calldataload(off);
+const bytes_from_offset = fn (offset: u256) membytes {
+    let len = @evm_calldataload(offset);
     let out = membytes_new(len);
-    @evm_calldatacopy(out.ptr, @evm_add(off, 32), len);
+    @evm_calldatacopy(out.ptr, offset +% 32, len);
 
     out
 };
