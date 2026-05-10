@@ -106,7 +106,9 @@ pub fn build_basic_block_layout_sets(
 ) -> DenseIndexMap<InOutGroupId, Layout> {
     let liveness = analyses.local_liveness(program);
     let ownership = analyses.basic_block_ownership(program);
-    let mut layout_sets = DenseIndexMap::with_capacity(in_out_bundling.total_groups() as usize);
+    let mut layout_sets = DenseIndexMap::<InOutGroupId, Layout>::with_capacity(
+        in_out_bundling.total_groups() as usize,
+    );
 
     for bb in program.blocks() {
         let owner = match ownership.get_owner(bb.id()) {
@@ -115,14 +117,12 @@ pub fn build_basic_block_layout_sets(
         };
 
         let Some(in_group) = in_out_bundling.get_in_group(bb.id()) else { continue };
+
         // Blocks will request their dependencies on the input side so we don't need to do anything
         // extra on the output side, also let's the output layout for terminating blocks be
         // naturally empty.
 
-        if !layout_sets.contains(in_group) {
-            layout_sets.insert_no_prev(in_group, Layout::default());
-        }
-        let layout = &mut layout_sets[in_group];
+        let layout = layout_sets.entry(in_group).or_insert_default();
 
         if owner != program.init_entry && Some(owner) != program.main_entry {
             layout.add(LayoutMember::ReturnDest);

@@ -1,16 +1,25 @@
 use crate::{LayoutsTracker, layouts::LayoutMember, op_model::is_flippable};
 use hashbrown::HashMap;
-use sir_data::{BlockView, ControlView, Idx, IndexVec, Span, newtype_index};
+use sir_data::{
+    BlockView, ControlView, Idx, IndexVec, Operation, OperationIdx, Span, newtype_index,
+};
 
 newtype_index! {
     pub struct OpNodeId;
     pub struct ValueNodeId;
 }
 
+pub enum OpNodeKind {
+    Flippable,
+    RetDestPush(OperationIdx),
+    Normal,
+    Control,
+}
+
 pub struct OpNode {
     pub consumes_fifo: Vec<ValueNodeId>,
     pub produces_fifo: Vec<ValueNodeId>,
-    pub can_flip: bool,
+    pub kind: OpNodeKind,
     /// The set of nodes that be executed *after* this node, regardless of data dependencies
     pub happens_before: Vec<OpNodeId>,
 }
@@ -23,6 +32,10 @@ pub struct ValueNode {
 impl ValueNode {
     fn input() -> Self {
         Self { source: None, used_by: Vec::new() }
+    }
+
+    fn output(source: OpNodeId) -> Self {
+        Self { source: Some(source), used_by: Vec::with_capacity(2) }
     }
 }
 
@@ -73,11 +86,14 @@ pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'
         let op_node = operations.push(OpNode {
             consumes_fifo: Vec::new(),
             produces_fifo: Vec::new(),
-            can_flip: is_flippable(op.op().kind()),
+            kind: if is_flippable(op.op().kind()) {
+                OpNodeKind::Flippable
+            } else {
+                OpNodeKind::Normal
+            },
             happens_before: Vec::with_capacity(1),
         });
 
-        // TODO: Track operation effects to build a more loose "must be before" graph.
         if let Some(last_op) = last_op.replace(op_node) {
             operations[last_op].happens_before.push(op_node);
         }
@@ -91,12 +107,12 @@ pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'
                 value
             })
             .collect();
+
         operations[op_node].produces_fifo = op
             .outputs()
             .iter()
             .map(|&output| {
-                let value = values
-                    .push(ValueNode { source: Some(op_node), used_by: Vec::with_capacity(2) });
+                let value = values.push(ValueNode::output(op_node));
                 local_to_value.insert(output, value);
                 value
             })
@@ -117,7 +133,7 @@ pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'
         let control_op = operations.push(OpNode {
             consumes_fifo: vec![value],
             produces_fifo: vec![],
-            can_flip: false,
+            kind: OpNodeKind::Control,
             happens_before: vec![],
         });
         values[value].used_by.push(control_op);

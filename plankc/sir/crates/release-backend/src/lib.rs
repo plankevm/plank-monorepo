@@ -1,9 +1,11 @@
-use sir_assembler::Assembler;
-use sir_data::EthIRProgram;
+use sir_data::{BasicBlockId, EthIRProgram};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
+use op_graph::build_graph_simple;
 use stack::ScheduleConfig;
+
+use crate::{scheduler::dumb_schedule, stack::StackOps};
 
 mod layouts;
 mod op_graph;
@@ -14,13 +16,26 @@ mod stack;
 pub fn lower(
     program: &EthIRProgram,
     analyses: &AnalysesStore,
-    asm: &mut Assembler,
     config: ScheduleConfig,
-) {
-    asm.clear();
-
+) -> Vec<(BasicBlockId, Vec<StackOps>)> {
     let in_out_bundling = ControlFlowGraphInOutBundling::new(program, analyses);
     let layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);
 
+    // Naively take layout sets as layouts since they are deterministically ordered.
     let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
+
+    program
+        .blocks()
+        .map(|block| {
+            let graph = build_graph_simple(block, &layouts);
+            let ops = dumb_schedule(config, &graph);
+
+            (block.id(), ops)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 }

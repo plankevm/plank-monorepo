@@ -12,7 +12,6 @@ newtype_index! {
 pub struct ControlFlowGraphInOutBundling {
     out_group: DenseIndexMap<BasicBlockId, InOutGroupId>,
     in_group: DenseIndexMap<BasicBlockId, InOutGroupId>,
-    // group_to_members: DenseIndexMap<InOutGroupId, Vec<(Side, BasicBlockId)>>,
     next_group_id: InOutGroupId,
 }
 
@@ -49,39 +48,18 @@ impl ControlFlowGraphInOutBundling {
             }
         }
 
-        // let mut group_to_members: DenseIndexMap<InOutGroupId, Vec<(Side, BasicBlockId)>> =
-        //     DenseIndexMap::with_capacity(next_group_id.idx() + 1);
-        //
-        // fn collect_member(
-        //     group_to_members: &mut DenseIndexMap<InOutGroupId, Vec<(Side, BasicBlockId)>>,
-        //     side_group: &DenseIndexMap<BasicBlockId, InOutGroupId>,
-        //     bb: BasicBlockId,
-        //     side: Side,
-        // ) {
-        //     let Some(&in_group) = side_group.get(bb) else { return };
-        //     match group_to_members.get_mut(in_group) {
-        //         Some(group) => group.push((side, bb)),
-        //         None => {
-        //             group_to_members.insert_no_prev(in_group, {
-        //                 let mut group = Vec::with_capacity(3);
-        //                 group.push((Side::In, bb));
-        //                 group
-        //             });
-        //         }
-        //     }
-        // }
-        //
-        // for bb in program.basic_blocks.iter_idx() {
-        //     collect_member(&mut group_to_members, &in_group, bb, Side::In);
-        //     collect_member(&mut group_to_members, &out_group, bb, Side::Out);
-        // }
+        for (fn_id, function) in program.functions.enumerate_idx() {
+            if fn_id == program.init_entry
+                || program.main_entry.is_some_and(|main_entry| main_entry == fn_id)
+            {
+                continue;
+            }
 
-        Self { out_group, in_group, /* group_to_members, */ next_group_id }
+            in_group.entry(function.entry()).or_insert_with(|| next_group_id.get_and_inc());
+        }
+
+        Self { out_group, in_group, next_group_id }
     }
-
-    // pub fn get_members(&self, group: InOutGroupId) -> &[(Side, BasicBlockId)] {
-    //     &self.group_to_members[group]
-    // }
 
     pub fn get_out_group(&self, bb_id: BasicBlockId) -> Option<InOutGroupId> {
         self.out_group.get(bb_id).copied()
