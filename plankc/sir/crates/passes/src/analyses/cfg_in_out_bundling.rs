@@ -1,4 +1,4 @@
-use plank_core::{DenseIndexMap, IndexVec, index, newtype_index, span::IncIterable};
+use plank_core::{DenseIndexMap, index, newtype_index, span::IncIterable};
 use sir_data::{BasicBlockId, EthIRProgram, Idx};
 use smallvec::SmallVec;
 
@@ -6,12 +6,6 @@ use crate::AnalysesStore;
 
 newtype_index! {
     pub struct InOutGroupId;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
-    Out,
-    In,
 }
 
 #[derive(Debug, Default)]
