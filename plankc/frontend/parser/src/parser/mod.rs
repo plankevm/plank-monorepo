@@ -125,9 +125,7 @@ impl<'a> Parser<'a> {
         if self.at(token) {
             return true;
         }
-        if !self.expected.contains(&token) {
-            self.expected.push(token);
-        }
+        self.expected.push(token);
         false
     }
 
@@ -145,6 +143,7 @@ impl<'a> Parser<'a> {
         }
         let (found, span) = self.tokens.peek();
         self.last_unexpected = Some(self.tokens.current());
+        self.expected.dedup();
         self.emit_unexpected_token(found, span);
         self.expected.clear();
     }
@@ -218,6 +217,7 @@ impl<'a> Parser<'a> {
         if recovery_tokens.contains(&next)
             && let Some((_, prev_span)) = self.tokens.get_prev()
         {
+            self.expected.dedup();
             self.emit_missing_token(expected, prev_span);
             self.last_unexpected = Some(self.tokens.current());
             self.expected.clear();
@@ -409,6 +409,7 @@ impl<'a> Parser<'a> {
         if self.check(Token::BuiltinName) {
             if !self.at_last_unexpected() {
                 let (_, span) = self.tokens.peek();
+                self.expected.dedup();
                 self.emit_builtin_name_used_as_ident(span);
                 self.last_unexpected = Some(self.tokens.current());
                 self.expected.clear();
