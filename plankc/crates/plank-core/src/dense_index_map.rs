@@ -58,12 +58,17 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
     /// Returns a reference to the value associated with `key`, or `None` if absent.
     #[inline]
     pub fn get_or_insert_with(&mut self, key: I, insert: impl FnOnce() -> V) -> &mut V {
+        self.entry(key).or_insert_with(insert)
+    }
+
+    #[inline]
+    pub fn entry(&mut self, key: I) -> Entry<'_, V> {
         self.ensure_size(key);
         // SAFETY: `ensure_size` above ensures `idx < self.inner.len()`.
-        let entry = unsafe { self.inner.get_unchecked_mut(key.idx()) };
-        match entry {
-            Some(entry) => entry,
-            entry @ None => entry.insert(insert()),
+        let slot = unsafe { self.inner.get_unchecked_mut(key.idx()) };
+        match slot {
+            Some(value) => Entry::Occupied(value),
+            slot @ None => Entry::Vacant(VacantEntry { slot }),
         }
     }
 
@@ -105,6 +110,47 @@ impl<I: Idx, V> DenseIndexMap<I, V> {
         // SAFETY: `resize_with` above ensures `idx < self.inner.len()`.
         let entry = unsafe { self.inner.get_unchecked_mut(idx) };
         entry.take()
+    }
+}
+
+pub enum Entry<'a, V> {
+    Occupied(&'a mut V),
+    Vacant(VacantEntry<'a, V>),
+}
+
+impl<'a, V> Entry<'a, V> {
+    pub fn or_insert(self, default: V) -> &'a mut V {
+        match self {
+            Entry::Occupied(value) => value,
+            Entry::Vacant(entry) => entry.insert(default),
+        }
+    }
+
+    pub fn or_insert_default(self) -> &'a mut V
+    where
+        V: Default,
+    {
+        match self {
+            Entry::Occupied(value) => value,
+            Entry::Vacant(entry) => entry.insert(V::default()),
+        }
+    }
+
+    pub fn or_insert_with(self, default: impl FnOnce() -> V) -> &'a mut V {
+        match self {
+            Entry::Occupied(value) => value,
+            Entry::Vacant(entry) => entry.insert(default()),
+        }
+    }
+}
+
+pub struct VacantEntry<'a, V> {
+    slot: &'a mut Option<V>,
+}
+
+impl<'a, V> VacantEntry<'a, V> {
+    pub fn insert(self, value: V) -> &'a mut V {
+        self.slot.insert(value)
     }
 }
 
@@ -217,5 +263,40 @@ mod tests {
         assert_eq!(map.get(TestIdx::new(2)), Some(&30));
         assert_eq!(map.get(TestIdx::new(3)), None);
         assert_eq!(map.get(TestIdx::new(4)), Some(&50));
+    }
+
+    #[test]
+    fn test_entry_match_vacant_occupied() {
+        let mut map: DenseIndexMap<TestIdx, i32> = DenseIndexMap::new();
+        let idx = TestIdx::ZERO + 7;
+
+        match map.entry(idx) {
+            Entry::Occupied(_) => panic!("new entry should be vacant"),
+            Entry::Vacant(vacant) => {
+                *vacant.insert(12) += 1;
+            }
+        }
+
+        match map.entry(idx) {
+            Entry::Occupied(value) => {
+                assert_eq!(*value, 13);
+                *value = 21;
+            }
+            Entry::Vacant(_) => panic!("inserted entry should be occupied"),
+        }
+
+        assert_eq!(map.get(idx), Some(&21));
+    }
+
+    #[test]
+    fn test_entry_or_insert() {
+        let mut map: DenseIndexMap<TestIdx, i32> = DenseIndexMap::new();
+        let idx = TestIdx::ZERO + 2;
+
+        *map.entry(idx).or_insert(8) += 1;
+        assert_eq!(map.get(idx), Some(&9));
+
+        *map.entry(idx).or_insert(42) += 1;
+        assert_eq!(map.get(idx), Some(&10));
     }
 }
