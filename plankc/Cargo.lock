@@ -2013,6 +2013,7 @@ dependencies = [
 name = "plank"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "anstream",
  "clap",
  "owo-colors",

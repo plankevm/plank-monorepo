@@ -14,6 +14,7 @@ plank-parser.workspace = true
 plank-source.workspace = true
 plank-hir.workspace = true
 plank-mir.workspace = true
+alloy-primitives.workspace = true
 sir-passes.workspace = true
 clap.workspace = true
 anstream.workspace = true

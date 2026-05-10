@@ -129,8 +129,9 @@ impl<const ALIGN: usize, A: Allocator> ChunkedArena<ALIGN, A> {
                 .unwrap_or_else(|AllocError| handle_alloc_error(layout))
                 .cast();
             let prev_ptr = self.chunks[chunk_index as usize].replace(Some(new_ptr));
-            #[cfg(debug_assertions)]
-            if let Some(prev_ptr) = prev_ptr {
+            if cfg!(debug_assertions)
+                && let Some(prev_ptr) = prev_ptr
+            {
                 self.alloc.deallocate(prev_ptr, layout);
                 unreachable!("invariant: chunk reallocated");
             }
