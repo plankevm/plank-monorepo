@@ -252,6 +252,7 @@ pub fn ir_to_bytecode_with_source_map(
 
     translator.translating_init_code = false;
     translator.asm.push_mark(translator.mark_map.runtime_start);
+    translator.memory_layout.emit_init_free_pointer(&mut translator.asm);
     if let Some(main_entry) = ir.main_entry {
         translator.translate_basic_blocks_from_entry_point(main_entry);
     }
@@ -279,4 +280,53 @@ pub fn ir_to_bytecode_with_source_map(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sir_data::{Control, builder::EthIRBuilder, operation::Operation};
+
+    fn append_minimal_push_u32(out: &mut Vec<u8>, value: u32) {
+        let push_size = 4 - value.leading_zeros() as u8 / 8;
+        let push_op = op::PUSH1 + push_size - 1;
+        out.push(push_op);
+        let bytes = value.to_le_bytes();
+        for i in (0..push_size).rev() {
+            out.push(bytes[i as usize]);
+        }
+    }
+
+    fn add_stop_function(builder: &mut EthIRBuilder) -> FunctionId {
+        let mut func = builder.begin_function();
+        let mut bb = func.begin_basic_block();
+        bb.add_operation(Operation::Stop(()));
+        let bb_id = bb.finish(Control::LastOpTerminates).unwrap();
+        func.finish(bb_id)
+    }
+
+    #[test]
+    fn runtime_initializes_free_pointer_before_main() {
+        let mut builder = EthIRBuilder::new();
+        let init = add_stop_function(&mut builder);
+        let main = add_stop_function(&mut builder);
+        let program = builder.build(init, Some(main));
+        let layout = StaticMemoryLayout::new(&program);
+
+        let mut bytecode = Vec::new();
+        let mut runtime_start_pc = 0;
+        ir_to_bytecode_with_source_map(&program, &mut bytecode, None, Some(&mut runtime_start_pc))
+            .unwrap();
+
+        let mut expected_prefix = Vec::new();
+        append_minimal_push_u32(&mut expected_prefix, layout.next_free);
+        append_minimal_push_u32(&mut expected_prefix, layout.free_pointer);
+        expected_prefix.push(op::MSTORE);
+
+        let runtime = &bytecode[runtime_start_pc as usize..];
+        assert!(
+            runtime.starts_with(&expected_prefix),
+            "runtime must initialize the free pointer to the static memory high-water mark before main"
+        );
+    }
 }
