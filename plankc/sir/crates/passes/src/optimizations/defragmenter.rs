@@ -255,11 +255,12 @@ impl<'a> Rewriter<'a> {
     }
 
     fn emit_static_alloc(&mut self, alloc_id: StaticAllocId) -> StaticAllocId {
-        *self
-            .state
-            .static_alloc_map
-            .entry(alloc_id)
-            .or_insert_with(|| self.dst.next_static_alloc_id.get_and_inc())
+        *self.state.static_alloc_map.entry(alloc_id).or_insert_with(|| {
+            let next_alloc_id = &self.dst.next_static_alloc_id;
+            let alloc_id = next_alloc_id.get();
+            next_alloc_id.set(alloc_id + 1);
+            alloc_id
+        })
     }
 
     fn emit_large_const(&mut self, const_id: LargeConstId) -> LargeConstId {

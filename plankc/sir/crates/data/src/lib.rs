@@ -6,7 +6,7 @@ pub mod view;
 pub use crate::{index::*, operation::Operation, view::*};
 use alloy_primitives::U256;
 use plank_core::list_of_lists::ListOfLists;
-use std::fmt;
+use std::{cell::Cell, fmt};
 
 /// Implemented in a data oriented way. Instead of each basic block and function holding its own
 /// vector of items they're all stored contiguously in the top level program
@@ -27,7 +27,7 @@ pub struct EthIRProgram {
     pub cases_bb_ids: IndexVec<CasesBasicBlocksIdx, BasicBlockId>,
     // Codegeneration helpers
     pub next_free_local_id: LocalId,
-    pub next_static_alloc_id: StaticAllocId,
+    pub next_static_alloc_id: Cell<StaticAllocId>,
 }
 
 impl Default for EthIRProgram {
@@ -44,7 +44,7 @@ impl Default for EthIRProgram {
             cases: Default::default(),
             cases_bb_ids: Default::default(),
             next_free_local_id: LocalId::ZERO,
-            next_static_alloc_id: StaticAllocId::ZERO,
+            next_static_alloc_id: Cell::new(StaticAllocId::ZERO),
         }
     }
 }
@@ -63,7 +63,7 @@ impl EthIRProgram {
         self.cases.clear();
         self.cases_bb_ids.clear();
         self.next_free_local_id = LocalId::ZERO;
-        self.next_static_alloc_id = StaticAllocId::ZERO;
+        self.next_static_alloc_id.set(StaticAllocId::ZERO);
     }
 }
 
@@ -186,7 +186,8 @@ impl EthIRProgram {
         writeln!(
             &mut output,
             "\n=== Counters ===\nnext_free_local_id: ${}\nnext_static_alloc_id: #{}",
-            self.next_free_local_id, self.next_static_alloc_id
+            self.next_free_local_id,
+            self.next_static_alloc_id.get()
         )
         .unwrap();
 

@@ -220,7 +220,7 @@ impl Legalizer {
                     return Err(LegalizerError::InvalidSegmentId(data.segment_id));
                 }
                 Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data)
-                    if data.alloc_id >= program.next_static_alloc_id =>
+                    if data.alloc_id >= program.next_static_alloc_id.get() =>
                 {
                     return Err(LegalizerError::InvalidStaticAllocId(data.alloc_id));
                 }
