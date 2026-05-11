@@ -83,7 +83,7 @@ fn count_occurences(values: &[ValueNodeId], total_values: usize) -> IndexVec<Val
 }
 
 fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &OpGraph) {
-    let target_stack = graph.outputs_fifo.as_slice();
+    let target_stack = graph.end_stack_fifo.as_slice();
     let target_counts = count_occurences(target_stack, graph.values.len());
 
     for _ in 0..stack.len() {
