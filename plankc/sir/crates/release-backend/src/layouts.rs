@@ -16,7 +16,7 @@ pub enum LayoutMember {
     Local(LocalId),
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Layout {
     members_fifo: Vec<LayoutMember>,
 }
@@ -69,13 +69,19 @@ impl<'ir> LayoutsTracker<'ir> {
     }
 
     pub fn get_input_layout(&self, bb: BasicBlockId) -> &Layout {
-        let Some(group) = self.in_out_bundling.get_in_group(bb) else { return Layout::EMPTY };
+        let Some(group) = self.in_out_bundling.get_in_group(bb) else {
+            unreachable!("getting input layout for block without IO group");
+        };
         &self.cfg_layouts[group]
     }
 
-    pub fn get_output_layout(&self, bb: BasicBlockId) -> &Layout {
-        let Some(group) = self.in_out_bundling.get_out_group(bb) else { return Layout::EMPTY };
-        self.cfg_layouts.get(group).unwrap_or(Layout::EMPTY)
+    pub fn get_input_output(&self, bb: BasicBlockId) -> Option<(&Layout, &Layout)> {
+        let in_group = self.in_out_bundling.get_in_group(bb)?;
+        let out_group = self.in_out_bundling.get_out_group(bb)?;
+
+        let input_layout = self.cfg_layouts.get(in_group)?;
+        let output_layout = self.cfg_layouts.get(out_group).unwrap_or(Layout::EMPTY);
+        Some((input_layout, output_layout))
     }
 
     pub fn get_function_dest_position(&self, function: FunctionId) -> Option<u16> {
@@ -127,9 +133,7 @@ pub fn build_basic_block_layout_sets(
             }
         }
 
-        println!("@{}", bb.id());
         let Some(in_group) = in_out_bundling.get_in_group(bb.id()) else { continue };
-        println!("  in group: {}", in_group);
 
         // Blocks will request their dependencies on the input side so we don't need to do anything
         // extra on the output side, also let's the output layout for terminating blocks be
@@ -140,8 +144,6 @@ pub fn build_basic_block_layout_sets(
         if owner != program.init_entry && Some(owner) != program.main_entry {
             layout.add(LayoutMember::ReturnDest);
         }
-
-        println!("  live at entry: {:?}", liveness.get_live_at_entry(bb.id()));
 
         // WARNING: Iteration over `HashSet` is non-deterministic, must sort!!!
         for &local in liveness.get_live_at_entry(bb.id()) as &HashSet<LocalId> {

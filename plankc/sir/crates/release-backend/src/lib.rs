@@ -11,7 +11,7 @@ mod layouts;
 mod op_graph;
 mod op_model;
 mod scheduler;
-mod stack;
+pub mod stack;
 
 pub fn lower<'ir>(
     program: &'ir EthIRProgram,
@@ -26,12 +26,12 @@ pub fn lower<'ir>(
 
     let lowered = program
         .blocks()
-        .map(|block| {
-            let graph = build_graph_simple(program, block, &layouts);
-            println!("@{}\n{graph:#?}", block.id());
+        .filter_map(|block| {
+            let (input_layout, output_layout) = layouts.get_input_output(block.id())?;
+            let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
             let ops = dumb_schedule(config, &graph);
 
-            (block.id(), ops)
+            Some((block.id(), ops))
         })
         .collect();
 

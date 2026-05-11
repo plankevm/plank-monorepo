@@ -53,22 +53,24 @@ fn schedule_op(config: ScheduleConfig, stack: &mut TrackedStack, graph: &OpGraph
             continue;
         }
 
+        let delta_to_max = depth - max_dup_depth;
+
         // Move minimum number of values out of the way.
-        for spill_slot in 0..max_dup_depth - depth {
+        for spill_slot in 0..delta_to_max {
             stack.store(spill_slot.into());
         }
 
         // Now dup and spill.
         stack.dup(config.max_dup_depth);
-        stack.store((max_dup_depth - depth).into());
+        stack.store(delta_to_max.into());
 
         // Unspill in the way in correct order.
-        for spill_slot in (0..max_dup_depth - depth).rev() {
+        for spill_slot in (0..delta_to_max).rev() {
             stack.load(spill_slot.into());
         }
 
         // Load target value back
-        stack.load((max_dup_depth - depth).into());
+        stack.load(delta_to_max.into());
     }
     stack.op(graph, op);
 }

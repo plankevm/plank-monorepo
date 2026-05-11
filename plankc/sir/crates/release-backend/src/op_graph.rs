@@ -1,4 +1,8 @@
-use crate::{LayoutsTracker, layouts::LayoutMember, op_model::is_flippable};
+use crate::{
+    LayoutsTracker,
+    layouts::{Layout, LayoutMember},
+    op_model::is_flippable,
+};
 use hashbrown::HashMap;
 use sir_data::{
     BlockView, ControlView, EthIRProgram, Idx, IndexVec, Operation, OperationIdx, Span,
@@ -63,9 +67,10 @@ impl OpGraph {
 
 pub fn build_graph_simple<'ir>(
     program: &'ir EthIRProgram,
-
     block: BlockView<'ir>,
     layouts: &LayoutsTracker<'ir>,
+    input_layout: &Layout,
+    output_layout: &Layout,
 ) -> OpGraph {
     let mut operations =
         IndexVec::<OpNodeId, OpNode>::with_capacity(block.operations().size_hint().0);
@@ -74,7 +79,6 @@ pub fn build_graph_simple<'ir>(
     let mut local_to_value = HashMap::new();
     let mut ret_dest_value = None;
 
-    let input_layout = layouts.get_input_layout(block.id());
     let inputs = block.inputs();
 
     for &member in input_layout.members_fifo() {
@@ -192,15 +196,11 @@ pub fn build_graph_simple<'ir>(
         end_stack_fifo.push(value);
     }
 
-    end_stack_fifo.extend(layouts.get_output_layout(block.id()).members_fifo().iter().map(
-        |&member| match member {
-            LayoutMember::ReturnDest => ret_dest_value.expect("no return dest despite in output"),
-            LayoutMember::InputOutput(position) => {
-                local_to_value[&block_outputs[position as usize]]
-            }
-            LayoutMember::Local(local) => local_to_value[&local],
-        },
-    ));
+    end_stack_fifo.extend(output_layout.members_fifo().iter().map(|&member| match member {
+        LayoutMember::ReturnDest => ret_dest_value.expect("no return dest despite in output"),
+        LayoutMember::InputOutput(position) => local_to_value[&block_outputs[position as usize]],
+        LayoutMember::Local(local) => local_to_value[&local],
+    }));
 
     OpGraph { operations, values, end_stack_fifo, inputs_end }
 }

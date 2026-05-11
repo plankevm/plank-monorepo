@@ -15,8 +15,6 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
     let source = dedent_preserve_blank_lines(source);
     let program = sir_parser::parse_or_panic(&source, EmitConfig::init_only());
 
-    println!("{program}\n\n");
-
     let actual = format_lowered(&program, config);
     let expected = dedent_preserve_blank_lines(expected);
 
@@ -30,7 +28,9 @@ fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let mut out = String::new();
     for (block_id, ops) in lowered {
         let block = program.block(block_id);
-        let graph = build_graph_simple(program, block, &layouts);
+        let (input_layout, output_layout) =
+            layouts.get_input_output(block_id).expect("lowered but no IO layout");
+        let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
 
         write!(out, "@{block_id} ").unwrap();
         fmt_layout(&mut out, layouts.get_input_layout(block_id), block);
@@ -89,10 +89,10 @@ fn fmt_stack_op(out: &mut String, program: &EthIRProgram, graph: &OpGraph, op: S
 }
 
 fn fmt_graph_op(out: &mut String, program: &EthIRProgram, graph: &OpGraph, op: OpNodeId) {
+    use super::op_graph::OpNodeKind;
     let op_idx = match graph.operations[op].kind {
-        super::op_graph::OpNodeKind::Flippable(op_idx)
-        | super::op_graph::OpNodeKind::Normal(op_idx) => op_idx,
-        super::op_graph::OpNodeKind::RetDestPush(op_idx) => {
+        OpNodeKind::Flippable(op_idx) | OpNodeKind::Normal(op_idx) => op_idx,
+        OpNodeKind::RetDestPush(op_idx) => {
             write!(out, "ret_dest_push #{op_idx}").unwrap();
             return;
         }
@@ -516,6 +516,82 @@ fn simple_icall() {
             pop
             pop
             pop
+            pop
+            stop
+            => []
+        "#,
+    );
+}
+
+#[test]
+fn simple_op_use_spill() {
+    assert_lowers_to(
+        ScheduleConfig {
+            max_swap_depth: 3,
+            max_dup_depth: 2,
+            max_exchange_range: 3,
+            exchange_cost: 9,
+        },
+        r#"
+        fn init:
+            entry {
+                a = const 1
+                b1 = const 0
+                b2 = const 0
+                b3 = const 0
+                b4 = const 0
+                x = not a
+
+                stop
+            }
+        "#,
+        r#"
+
+        @0 []
+            const 0x1
+            const 0x0
+            const 0x0
+            const 0x0
+            const 0x0
+            store 0
+            store 1
+            dup 2
+            store 2
+            load 1
+            load 0
+            load 2
+            not
+            pop
+            pop
+            pop
+            pop
+            pop
+            pop
+            stop
+            => []
+        "#,
+    );
+}
+
+#[test]
+fn unreachable() {
+    assert_lowers_to(
+        ScheduleConfig::default(),
+        r#"
+        fn init:
+            entry {
+                x = const 3
+                stop
+            }
+            another {
+                y = not x
+                invalid
+            }
+        "#,
+        r#"
+
+        @0 []
+            const 0x3
             pop
             stop
             => []

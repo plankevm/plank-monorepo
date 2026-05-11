@@ -98,7 +98,7 @@ pub enum StackOps {
 }
 
 impl StackOps {
-    fn is_valid(self, config: ScheduleConfig) -> bool {
+    pub fn is_valid(self, config: ScheduleConfig) -> bool {
         match self {
             StackOps::Swap(depth) => depth <= config.max_swap_depth,
             StackOps::Dup(depth) => depth <= config.max_dup_depth,
@@ -126,7 +126,7 @@ pub struct ScheduleConfig {
 
 impl Default for ScheduleConfig {
     fn default() -> Self {
-        Self { max_swap_depth: 17, max_dup_depth: 16, max_exchange_range: 17, exchange_cost: 9 }
+        Self { max_swap_depth: 16, max_dup_depth: 15, max_exchange_range: 16, exchange_cost: 9 }
     }
 }
 
