@@ -48,13 +48,7 @@ impl ControlFlowGraphInOutBundling {
             }
         }
 
-        for (fn_id, function) in program.functions.enumerate_idx() {
-            if fn_id == program.init_entry
-                || program.main_entry.is_some_and(|main_entry| main_entry == fn_id)
-            {
-                continue;
-            }
-
+        for function in program.functions.iter() {
             in_group.entry(function.entry()).or_insert_with(|| next_group_id.get_and_inc());
         }
 

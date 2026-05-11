@@ -36,6 +36,4 @@ pub fn lower(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests;

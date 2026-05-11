@@ -10,5 +10,10 @@ sir-passes.workspace = true
 plank-core.workspace = true
 hashbrown.workspace = true
 
+[dev-dependencies]
+plank-test-utils.workspace = true
+pretty_assertions.workspace = true
+sir-parser.workspace = true
+
 [lints]
 workspace = true

@@ -124,6 +124,12 @@ pub struct ScheduleConfig {
     pub exchange_cost: u8,
 }
 
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self { max_swap_depth: 17, max_dup_depth: 16, max_exchange_range: 17, exchange_cost: 9 }
+    }
+}
+
 pub struct TrackedStack {
     spilled: Vec<Option<ValueNodeId>>,
     ops: Vec<StackOps>,

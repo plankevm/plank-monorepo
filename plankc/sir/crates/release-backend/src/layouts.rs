@@ -75,7 +75,7 @@ impl<'ir> LayoutsTracker<'ir> {
 
     pub fn get_output_layout(&self, bb: BasicBlockId) -> &Layout {
         let Some(group) = self.in_out_bundling.get_out_group(bb) else { return Layout::EMPTY };
-        &self.cfg_layouts[group]
+        self.cfg_layouts.get(group).unwrap_or(Layout::EMPTY)
     }
 
     pub fn get_function_dest_position(&self, function: FunctionId) -> Option<u16> {
