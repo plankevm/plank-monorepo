@@ -29,7 +29,7 @@ pub fn lower<'ir>(
         .filter_map(|block| {
             let (input_layout, output_layout) = layouts.get_input_output(block.id())?;
             let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
-            let ops = dumb_schedule(config, &graph);
+            let ops = dumb_schedule(&program.next_static_alloc_id, config, &graph);
 
             Some((block.id(), ops))
         })

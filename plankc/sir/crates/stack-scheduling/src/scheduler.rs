@@ -1,4 +1,6 @@
-use sir_data::{IndexVec, index_vec};
+use std::cell::Cell;
+
+use sir_data::{IndexVec, StaticAllocId, index_vec};
 
 use crate::{
     op_graph::*,
@@ -120,13 +122,18 @@ fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &
     }
 }
 
-pub fn dumb_schedule(config: ScheduleConfig, graph: &OpGraph) -> Vec<StackOps> {
+pub fn dumb_schedule(
+    next_alloc_id: &Cell<StaticAllocId>,
+    config: ScheduleConfig,
+    graph: &OpGraph,
+) -> Vec<StackOps> {
     let mut stack = VirtualStack::new();
     for input in graph.input_values_fifo().iter().rev() {
         stack.push(input);
     }
 
-    let mut stack = TrackedStack::new_from_vstack(stack, graph.operations.len() * 6, 8);
+    let mut stack =
+        TrackedStack::new_from_vstack(next_alloc_id, stack, graph.operations.len() * 6, 8);
 
     let schedule = get_operation_topological_sort(graph);
     for op in schedule {

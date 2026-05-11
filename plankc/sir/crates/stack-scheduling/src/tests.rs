@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use plank_test_utils::dedent_preserve_blank_lines;
-use sir_data::{BlockView, ControlView, EthIRProgram, Idx, Operation};
+use sir_data::{BlockView, ControlView, EthIRProgram, Idx, Operation, OperationIdx};
 use sir_parser::EmitConfig;
 use sir_passes::AnalysesStore;
 
@@ -38,7 +38,7 @@ fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
 
         for op in ops {
             write!(out, "    ").unwrap();
-            fmt_stack_op(&mut out, program, &graph, op);
+            fmt_stack_op(&mut out, program, op);
             writeln!(out).unwrap();
         }
 
@@ -75,35 +75,26 @@ fn fmt_layout_member(out: &mut String, member: LayoutMember, block: BlockView<'_
     }
 }
 
-fn fmt_stack_op(out: &mut String, program: &EthIRProgram, graph: &OpGraph, op: StackOps) {
+fn fmt_stack_op(out: &mut String, program: &EthIRProgram, op: StackOps) {
     match op {
         StackOps::Swap(depth) => write!(out, "swap {depth}").unwrap(),
         StackOps::Dup(depth) => write!(out, "dup {depth}").unwrap(),
         StackOps::Pop => out.push_str("pop"),
-        StackOps::Op(op) => fmt_graph_op(out, program, graph, op),
-        StackOps::CallRetPush(operation) => write!(out, "call_ret_push @{operation}").unwrap(),
+        StackOps::Op(op) => fmt_op(out, program, op),
+        StackOps::CallRetPush(operation) => write!(out, "call_ret_push #{operation}").unwrap(),
         StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),
-        StackOps::Store(slot) => write!(out, "store {slot}").unwrap(),
-        StackOps::Load(slot) => write!(out, "load {slot}").unwrap(),
+        StackOps::Store(alloc) => write!(out, "store :{alloc}").unwrap(),
+        StackOps::Load(alloc) => write!(out, "load :{alloc}").unwrap(),
     }
 }
 
-fn fmt_graph_op(out: &mut String, program: &EthIRProgram, graph: &OpGraph, op: OpNodeId) {
-    use super::op_graph::OpNodeKind;
-    let op_idx = match graph.operations[op].kind {
-        OpNodeKind::Flippable(op_idx) | OpNodeKind::Normal(op_idx) => op_idx,
-        OpNodeKind::RetDestPush(op_idx) => {
-            write!(out, "ret_dest_push #{op_idx}").unwrap();
-            return;
-        }
-    };
-
-    match program.operations[op_idx] {
+fn fmt_op(out: &mut String, program: &EthIRProgram, op: OperationIdx) {
+    match program.operations[op] {
         Operation::SetSmallConst(data) => write!(out, "const {:#x}", data.value).unwrap(),
         Operation::SetLargeConst(data) => {
             write!(out, "large_const {:#x}", program.large_consts[data.value]).unwrap()
         }
-        Operation::InternalCall(_) => write!(out, "icall #{op_idx}").unwrap(),
+        Operation::InternalCall(_) => write!(out, "icall #{op}").unwrap(),
         op => out.push_str(op.kind().mnemonic()),
     }
 }
@@ -209,10 +200,10 @@ fn lowers_terminator_inputs() {
         @0 []
             const 0x1
             const 0x2
-            store 0
-            store 1
-            load 0
-            load 1
+            store :0
+            store :1
+            load :0
+            load :1
             return
             => [$0, $1 | ]
         "#,
@@ -354,31 +345,31 @@ fn lowers_calldata_sum_loop() {
             const 0x0
             const 0x20
             const 0x0
-            store 0
-            store 1
-            store 2
-            store 3
+            store :0
+            store :1
+            store :2
+            store :3
             pop
-            load 0
-            load 1
-            load 2
-            load 3
+            load :0
+            load :1
+            load :2
+            load :3
             jmp @1
             => [$1, $2, $3, $4]
         @1 [$5, $6, $7, $8]
             dup 0
             dup 2
             lt
-            store 0
-            store 1
-            store 2
-            store 3
-            store 4
-            load 4
-            load 3
-            load 2
-            load 1
-            load 0
+            store :4
+            store :5
+            store :6
+            store :7
+            store :8
+            load :8
+            load :7
+            load :6
+            load :5
+            load :4
             br @2 @3
             => [$9 | $5, $6, $7, $8]
         @2 [$10, $11, $12, $13]
@@ -395,20 +386,20 @@ fn lowers_calldata_sum_loop() {
             dup 0
             dup 8
             add
-            store 0
+            store :9
             pop
-            store 1
+            store :10
             pop
-            store 2
+            store :11
             pop
-            store 3
+            store :12
             pop
             pop
             pop
-            load 2
-            load 0
-            load 1
-            load 3
+            load :11
+            load :9
+            load :10
+            load :12
             jmp @1
             => [$10, $17, $19, $15]
         @3 [$20, $21, $22, $23]
@@ -418,14 +409,14 @@ fn lowers_calldata_sum_loop() {
             dup 5
             dup 1
             mstore
-            store 0
-            store 1
+            store :13
+            store :14
             pop
             pop
             pop
             pop
-            load 1
-            load 0
+            load :14
+            load :13
             return
             => [$25, $24 | ]
         "#,
@@ -458,13 +449,13 @@ fn lowers_branch_layouts() {
             const 0x0
             const 0x7
             pop
-            store 0
-            load 0
+            store :0
+            load :0
             jmp @1
             => [$0]
         @1 [$2]
-            store 0
-            load 0
+            store :1
+            load :1
             br @2 @3
             => [$2 | ]
         @2 []
@@ -497,14 +488,14 @@ fn simple_icall() {
         "#,
         r#"
         @0 [return_dest, $0]
-            store 0
-            store 1
-            load 1
-            load 0
+            store :0
+            store :1
+            load :1
+            load :0
             iret
             => [return_dest | $0]
         @1 []
-            ret_dest_push #2
+            call_ret_push #2
             caller
             const 0x0
             dup 1
@@ -553,13 +544,13 @@ fn simple_op_use_spill() {
             const 0x0
             const 0x0
             const 0x0
-            store 0
-            store 1
+            store :0
+            store :1
             dup 2
-            store 2
-            load 1
-            load 0
-            load 2
+            store :2
+            load :1
+            load :0
+            load :2
             not
             pop
             pop

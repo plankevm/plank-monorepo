@@ -1,5 +1,8 @@
-use crate::op_graph::{OpGraph, OpNodeId, ValueNodeId};
-use sir_data::{Idx, OperationIdx};
+use std::cell::Cell;
+
+use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
+use plank_core::IncIterable;
+use sir_data::{Idx, OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;
 
@@ -90,11 +93,11 @@ pub enum StackOps {
     Swap(u8),
     Dup(u8),
     Pop,
-    Op(OpNodeId),
+    Op(OperationIdx),
     CallRetPush(OperationIdx),
     Exchange(u8, u8),
-    Store(u32),
-    Load(u32),
+    Store(StaticAllocId),
+    Load(StaticAllocId),
 }
 
 impl StackOps {
@@ -130,19 +133,22 @@ impl Default for ScheduleConfig {
     }
 }
 
-pub struct TrackedStack {
-    spilled: Vec<Option<ValueNodeId>>,
+pub struct TrackedStack<'ir> {
+    next_alloc_id: &'ir Cell<StaticAllocId>,
+    spilled: Vec<Option<(StaticAllocId, ValueNodeId)>>,
     ops: Vec<StackOps>,
     inner: VirtualStack,
 }
 
-impl TrackedStack {
+impl<'ir> TrackedStack<'ir> {
     pub fn new_from_vstack(
+        next_alloc_id: &'ir Cell<StaticAllocId>,
         inner: VirtualStack,
         ops_capacity: usize,
         spilled_capacity: usize,
     ) -> Self {
         Self {
+            next_alloc_id,
             ops: Vec::with_capacity(ops_capacity),
             spilled: Vec::with_capacity(spilled_capacity),
             inner,
@@ -160,17 +166,33 @@ impl TrackedStack {
     }
 
     pub fn spilled(&self) -> impl Iterator<Item = (u32, ValueNodeId)> {
-        (0..).zip(&self.spilled).filter_map(|(i, &value)| Some((i, value?)))
+        (0..).zip(&self.spilled).filter_map(|(i, &alloc_value)| Some((i, alloc_value?.1)))
     }
 
     #[track_caller]
-    pub fn op(&mut self, graph: &OpGraph, op: OpNodeId) {
-        for &target in &graph.operations[op].consumes_fifo {
+    pub fn op(&mut self, graph: &OpGraph, op_id: OpNodeId) {
+        let op = &graph.operations[op_id];
+        let (stack_op, flippable) = match op.kind {
+            OpNodeKind::Flippable(op_idx) => (StackOps::Op(op_idx), true),
+            OpNodeKind::Normal(op_idx) => (StackOps::Op(op_idx), false),
+            OpNodeKind::RetDestPush(op_idx) => (StackOps::CallRetPush(op_idx), false),
+        };
+        let mut flipping = false;
+        for (i, &target) in (0usize..).zip(&op.consumes_fifo) {
             let actual = self.inner.pop().expect("missing input");
-            assert_eq!(target, actual, "incorrect op schedule");
+
+            let correct = if flippable && i == 0 && actual == op.consumes_fifo[1] {
+                flipping = true;
+                true
+            } else if flippable && flipping && i == 1 {
+                actual == op.consumes_fifo[0]
+            } else {
+                target == actual
+            };
+            assert!(correct, "incorrect op schedule");
         }
-        self.ops.push(StackOps::Op(op));
-        for &output in graph.operations[op].produces_fifo.iter().rev() {
+        self.ops.push(stack_op);
+        for &output in graph.operations[op_id].produces_fifo.iter().rev() {
             self.inner.push(output);
         }
     }
@@ -186,17 +208,18 @@ impl TrackedStack {
         if self.spilled.len() <= slot as usize {
             self.spilled.resize(slot as usize + 1, None);
         }
-        self.spilled[slot as usize] = Some(value);
-
-        self.ops.push(StackOps::Store(slot));
+        let new_alloc_id = self.next_alloc_id.get();
+        self.next_alloc_id.set(new_alloc_id + 1);
+        self.spilled[slot as usize] = Some((new_alloc_id, value));
+        self.ops.push(StackOps::Store(new_alloc_id));
     }
 
     #[track_caller]
     pub fn load(&mut self, slot: u32) {
-        let value = self.spilled[slot as usize].expect("nothing spilled at slot");
+        let (alloc, value) = self.spilled[slot as usize].expect("nothing spilled at slot");
         self.inner.push(value);
 
-        self.ops.push(StackOps::Load(slot));
+        self.ops.push(StackOps::Load(alloc));
     }
 
     pub fn stack(&self) -> &VirtualStack {
@@ -204,7 +227,7 @@ impl TrackedStack {
     }
 }
 
-impl std::ops::Deref for TrackedStack {
+impl std::ops::Deref for TrackedStack<'_> {
     type Target = VirtualStack;
 
     fn deref(&self) -> &Self::Target {
