@@ -13,26 +13,29 @@ mod op_model;
 mod scheduler;
 mod stack;
 
-pub fn lower(
-    program: &EthIRProgram,
+pub fn lower<'ir>(
+    program: &'ir EthIRProgram,
     analyses: &AnalysesStore,
     config: ScheduleConfig,
-) -> Vec<(BasicBlockId, Vec<StackOps>)> {
+) -> (Vec<(BasicBlockId, Vec<StackOps>)>, LayoutsTracker<'ir>) {
     let in_out_bundling = ControlFlowGraphInOutBundling::new(program, analyses);
     let layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);
 
     // Naively take layout sets as layouts since they are deterministically ordered.
     let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
 
-    program
+    let lowered = program
         .blocks()
         .map(|block| {
-            let graph = build_graph_simple(block, &layouts);
+            let graph = build_graph_simple(program, block, &layouts);
+            println!("@{}\n{graph:#?}", block.id());
             let ops = dumb_schedule(config, &graph);
 
             (block.id(), ops)
         })
-        .collect()
+        .collect();
+
+    (lowered, layouts)
 }
 
 #[cfg(test)]

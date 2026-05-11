@@ -3,10 +3,10 @@ use std::fmt::Write;
 use plank_test_utils::dedent_preserve_blank_lines;
 use sir_data::{BlockView, ControlView, EthIRProgram, Idx, Operation};
 use sir_parser::EmitConfig;
-use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
+use sir_passes::AnalysesStore;
 
 use super::{
-    layouts::{Layout, LayoutMember, LayoutsTracker, build_basic_block_layout_sets},
+    layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, OpNodeId, build_graph_simple},
     stack::{ScheduleConfig, StackOps},
 };
@@ -14,6 +14,9 @@ use super::{
 fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
     let source = dedent_preserve_blank_lines(source);
     let program = sir_parser::parse_or_panic(&source, EmitConfig::init_only());
+
+    println!("{program}\n\n");
+
     let actual = format_lowered(&program, config);
     let expected = dedent_preserve_blank_lines(expected);
 
@@ -22,23 +25,20 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
 
 fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let analyses = AnalysesStore::default();
-    let lowered = crate::lower(program, &analyses, config);
-    let in_out_bundling = ControlFlowGraphInOutBundling::new(program, &analyses);
-    let layout_sets = build_basic_block_layout_sets(program, &analyses, &in_out_bundling);
-    let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
+    let (lowered, layouts) = crate::lower(program, &analyses, config);
 
     let mut out = String::new();
     for (block_id, ops) in lowered {
         let block = program.block(block_id);
-        let graph = build_graph_simple(block, &layouts);
+        let graph = build_graph_simple(program, block, &layouts);
 
         write!(out, "@{block_id} ").unwrap();
-        fmt_layout(&mut out, layouts.get_input_layout(block_id), block, LayoutSide::Input);
+        fmt_layout(&mut out, layouts.get_input_layout(block_id), block);
         writeln!(out).unwrap();
 
         for op in ops {
             write!(out, "    ").unwrap();
-            fmt_stack_op(&mut out, program, block, op);
+            fmt_stack_op(&mut out, program, &graph, op);
             writeln!(out).unwrap();
         }
 
@@ -47,53 +47,40 @@ fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
         writeln!(out).unwrap();
 
         write!(out, "    => ").unwrap();
-        fmt_end_stack_layout(&mut out, &graph, layouts.get_input_layout(block_id), block);
+        fmt_end_stack_layout(&mut out, program, &graph, layouts.get_input_layout(block_id), block);
         writeln!(out).unwrap();
     }
     out
 }
 
-#[derive(Clone, Copy)]
-enum LayoutSide {
-    Input,
-}
-
-fn fmt_layout(out: &mut String, layout: &Layout, block: BlockView<'_>, side: LayoutSide) {
+fn fmt_layout(out: &mut String, layout: &Layout, block: BlockView<'_>) {
     out.push('[');
     for (idx, &member) in layout.members_fifo().iter().enumerate() {
         if idx != 0 {
             out.push_str(", ");
         }
-        fmt_layout_member(out, member, block, side);
+        fmt_layout_member(out, member, block);
     }
     out.push(']');
 }
 
-fn fmt_layout_member(
-    out: &mut String,
-    member: LayoutMember,
-    block: BlockView<'_>,
-    side: LayoutSide,
-) {
+fn fmt_layout_member(out: &mut String, member: LayoutMember, block: BlockView<'_>) {
     match member {
         LayoutMember::ReturnDest => out.push_str("return_dest"),
         LayoutMember::InputOutput(position) => {
-            let locals = match side {
-                LayoutSide::Input => block.inputs(),
-            };
-            let local = locals[position as usize];
+            let local = block.inputs()[position as usize];
             write!(out, "${local}").unwrap();
         }
         LayoutMember::Local(local) => write!(out, "${local}").unwrap(),
     }
 }
 
-fn fmt_stack_op(out: &mut String, program: &EthIRProgram, block: BlockView<'_>, op: StackOps) {
+fn fmt_stack_op(out: &mut String, program: &EthIRProgram, graph: &OpGraph, op: StackOps) {
     match op {
         StackOps::Swap(depth) => write!(out, "swap {depth}").unwrap(),
         StackOps::Dup(depth) => write!(out, "dup {depth}").unwrap(),
         StackOps::Pop => out.push_str("pop"),
-        StackOps::Op(op) => fmt_graph_op(out, program, block, op),
+        StackOps::Op(op) => fmt_graph_op(out, program, graph, op),
         StackOps::CallRetPush(operation) => write!(out, "call_ret_push @{operation}").unwrap(),
         StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),
         StackOps::Store(slot) => write!(out, "store {slot}").unwrap(),
@@ -101,22 +88,29 @@ fn fmt_stack_op(out: &mut String, program: &EthIRProgram, block: BlockView<'_>, 
     }
 }
 
-fn fmt_graph_op(out: &mut String, program: &EthIRProgram, block: BlockView<'_>, op: OpNodeId) {
-    let op_view = block
-        .operations()
-        .nth(op.idx())
-        .expect("operation graph node should map to a block operation");
-    match op_view.op() {
+fn fmt_graph_op(out: &mut String, program: &EthIRProgram, graph: &OpGraph, op: OpNodeId) {
+    let op_idx = match graph.operations[op].kind {
+        super::op_graph::OpNodeKind::Flippable(op_idx)
+        | super::op_graph::OpNodeKind::Normal(op_idx) => op_idx,
+        super::op_graph::OpNodeKind::RetDestPush(op_idx) => {
+            write!(out, "ret_dest_push #{op_idx}").unwrap();
+            return;
+        }
+    };
+
+    match program.operations[op_idx] {
         Operation::SetSmallConst(data) => write!(out, "const {:#x}", data.value).unwrap(),
         Operation::SetLargeConst(data) => {
             write!(out, "large_const {:#x}", program.large_consts[data.value]).unwrap()
         }
+        Operation::InternalCall(_) => write!(out, "icall #{op_idx}").unwrap(),
         op => out.push_str(op.kind().mnemonic()),
     }
 }
 
 fn fmt_end_stack_layout(
     out: &mut String,
+    program: &EthIRProgram,
     graph: &OpGraph,
     input_layout: &Layout,
     block: BlockView<'_>,
@@ -136,7 +130,7 @@ fn fmt_end_stack_layout(
         } else if idx != 0 {
             out.push_str(", ");
         }
-        fmt_value(out, graph, input_layout, block, value);
+        fmt_value(out, program, graph, input_layout, block, value);
     }
     if terminator_inputs == graph.end_stack_fifo.len() && terminator_inputs != 0 {
         out.push_str(" | ");
@@ -156,13 +150,14 @@ fn terminator_input_count(block: BlockView<'_>) -> usize {
 
 fn fmt_value(
     out: &mut String,
+    program: &EthIRProgram,
     graph: &OpGraph,
     input_layout: &Layout,
     block: BlockView<'_>,
     value: super::op_graph::ValueNodeId,
 ) {
     if graph.is_input(value) {
-        fmt_layout_member(out, input_layout.members_fifo()[value.idx()], block, LayoutSide::Input);
+        fmt_layout_member(out, input_layout.members_fifo()[value.idx()], block);
         return;
     }
 
@@ -172,11 +167,14 @@ fn fmt_value(
         .iter()
         .position(|&output| output == value)
         .expect("value should be in producing op outputs");
-    let op_view = block
-        .operations()
-        .nth(source.idx())
-        .expect("operation graph node should map to a block operation");
-    let local = op_view.outputs()[output_position];
+    let op_idx = match graph.operations[source].kind {
+        super::op_graph::OpNodeKind::Flippable(op_idx)
+        | super::op_graph::OpNodeKind::Normal(op_idx) => op_idx,
+        super::op_graph::OpNodeKind::RetDestPush(_) => {
+            panic!("return destination push should not produce local outputs")
+        }
+    };
+    let local = program.operations[op_idx].outputs(program)[output_position];
     write!(out, "${local}").unwrap();
 }
 
@@ -474,6 +472,52 @@ fn lowers_branch_layouts() {
             => []
         @3 []
             invalid
+            => []
+        "#,
+    );
+}
+
+#[test]
+fn simple_icall() {
+    assert_lowers_to(
+        ScheduleConfig::default(),
+        r#"
+        fn init:
+            entry {
+                value = caller
+                other = const 0
+                stuff = icall @ident value other
+                sstore stuff other
+                stop
+            }
+        fn ident:
+            entry x y -> x {
+                iret
+            }
+        "#,
+        r#"
+        @0 [return_dest, $0]
+            store 0
+            store 1
+            load 1
+            load 0
+            iret
+            => [return_dest | $0]
+        @1 []
+            ret_dest_push #2
+            caller
+            const 0x0
+            dup 1
+            dup 3
+            icall #2
+            dup 1
+            dup 1
+            sstore
+            pop
+            pop
+            pop
+            pop
+            stop
             => []
         "#,
     );

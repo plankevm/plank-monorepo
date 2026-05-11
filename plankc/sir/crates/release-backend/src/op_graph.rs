@@ -1,7 +1,8 @@
 use crate::{LayoutsTracker, layouts::LayoutMember, op_model::is_flippable};
 use hashbrown::HashMap;
 use sir_data::{
-    BlockView, ControlView, Idx, IndexVec, Operation, OperationIdx, Span, newtype_index,
+    BlockView, ControlView, EthIRProgram, Idx, IndexVec, Operation, OperationIdx, Span,
+    newtype_index,
 };
 
 newtype_index! {
@@ -9,21 +10,24 @@ newtype_index! {
     pub struct ValueNodeId;
 }
 
+#[derive(Debug)]
 pub enum OpNodeKind {
-    Flippable,
+    Flippable(OperationIdx),
     RetDestPush(OperationIdx),
-    Normal,
-    Control,
+    Normal(OperationIdx),
 }
 
+#[derive(Debug)]
 pub struct OpNode {
     pub consumes_fifo: Vec<ValueNodeId>,
     pub produces_fifo: Vec<ValueNodeId>,
     pub kind: OpNodeKind,
-    /// The set of nodes that be executed *after* this node, regardless of data dependencies
+    /// The set of nodes that need to be executed *after* this node, regardless of data
+    /// dependencies
     pub happens_before: Vec<OpNodeId>,
 }
 
+#[derive(Debug)]
 pub struct ValueNode {
     pub source: Option<OpNodeId>,
     pub used_by: Vec<OpNodeId>,
@@ -39,6 +43,7 @@ impl ValueNode {
     }
 }
 
+#[derive(Debug)]
 pub struct OpGraph {
     pub operations: IndexVec<OpNodeId, OpNode>,
     pub values: IndexVec<ValueNodeId, ValueNode>,
@@ -56,7 +61,12 @@ impl OpGraph {
     }
 }
 
-pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'ir>) -> OpGraph {
+pub fn build_graph_simple<'ir>(
+    program: &'ir EthIRProgram,
+
+    block: BlockView<'ir>,
+    layouts: &LayoutsTracker<'ir>,
+) -> OpGraph {
     let mut operations =
         IndexVec::<OpNodeId, OpNode>::with_capacity(block.operations().size_hint().0);
     let mut values = IndexVec::<ValueNodeId, ValueNode>::new();
@@ -97,9 +107,9 @@ pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'
             consumes_fifo: Vec::new(),
             produces_fifo: Vec::new(),
             kind: if is_flippable(op.op().kind()) {
-                OpNodeKind::Flippable
+                OpNodeKind::Flippable(op.id())
             } else {
-                OpNodeKind::Normal
+                OpNodeKind::Normal(op.id())
             },
             happens_before: Vec::with_capacity(1),
         });
@@ -108,22 +118,58 @@ pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'
             operations[last_op].happens_before.push(op_node);
         }
 
-        operations[op_node].consumes_fifo = op
-            .inputs()
-            .iter()
-            .map(|input| {
-                let value = local_to_value[input];
-                values[value].used_by.push(op_node);
-                value
-            })
-            .collect();
+        operations[op_node].consumes_fifo = if let Operation::InternalCall(icall) = op.op() {
+            let call_inputs = icall.get_inputs(program);
+            let callee = program.function(icall.function);
+            let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
+            callee_entry_layout
+                .members_fifo()
+                .iter()
+                .map(|&member| match member {
+                    LayoutMember::InputOutput(i) => {
+                        let value = local_to_value[&call_inputs[i as usize]];
+                        values[value].used_by.push(op_node);
+                        value
+                    }
+                    LayoutMember::ReturnDest => {
+                        let return_destination_push = operations.push(OpNode {
+                            consumes_fifo: vec![],
+                            produces_fifo: Vec::with_capacity(1),
+                            kind: OpNodeKind::RetDestPush(op.id()),
+                            happens_before: vec![],
+                        });
+                        let return_destination = values.push(ValueNode {
+                            source: Some(return_destination_push),
+                            used_by: vec![op_node],
+                        });
+                        operations[return_destination_push].produces_fifo.push(return_destination);
+                        return_destination
+                    }
+                    LayoutMember::Local(_) => {
+                        unreachable!(
+                            "internal function entry should not have non-block-input members"
+                        )
+                    }
+                })
+                .collect()
+        } else {
+            op.inputs()
+                .iter()
+                .map(|input| {
+                    let value = local_to_value[input];
+                    values[value].used_by.push(op_node);
+                    value
+                })
+                .collect()
+        };
 
         operations[op_node].produces_fifo = op
             .outputs()
             .iter()
             .map(|&output| {
                 let value = values.push(ValueNode::output(op_node));
-                local_to_value.insert(output, value);
+                let prev = local_to_value.insert(output, value);
+                assert!(prev.is_none());
                 value
             })
             .collect();

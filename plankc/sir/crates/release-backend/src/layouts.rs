@@ -1,6 +1,6 @@
-use hashbrown::{self as _, HashSet}; // TODO: Remove
+use hashbrown::HashSet;
 use plank_core::DenseIndexMap;
-use sir_data::{BasicBlockId, EthIRProgram, FunctionId, LocalId, newtype_index};
+use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, newtype_index};
 use sir_passes::{
     AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, analyses::Unreachable,
 };
@@ -17,7 +17,7 @@ pub enum LayoutMember {
 }
 
 #[derive(Default)]
-pub(crate) struct Layout {
+pub struct Layout {
     members_fifo: Vec<LayoutMember>,
 }
 
@@ -45,7 +45,7 @@ impl std::ops::Deref for Layout {
     }
 }
 
-pub(crate) struct LayoutsTracker<'ir> {
+pub struct LayoutsTracker<'ir> {
     cfg_layouts: DenseIndexMap<InOutGroupId, Layout>,
     function_dest_position: DenseIndexMap<FunctionId, u16>,
     in_out_bundling: ControlFlowGraphInOutBundling,
@@ -116,7 +116,20 @@ pub fn build_basic_block_layout_sets(
             Err(Unreachable) => continue,
         };
 
+        // `iret` needs to get special-cased because it's a terminator in terms of the CFG but its
+        // outputs matter because
+        if matches!(bb.control(), ControlView::InternalReturn)
+            && let Some(out_group) = in_out_bundling.get_out_group(bb.id())
+        {
+            let layout = layout_sets.entry(out_group).or_insert_default();
+            for i in 0..bb.outputs().len() {
+                layout.add(LayoutMember::InputOutput(i as u32));
+            }
+        }
+
+        println!("@{}", bb.id());
         let Some(in_group) = in_out_bundling.get_in_group(bb.id()) else { continue };
+        println!("  in group: {}", in_group);
 
         // Blocks will request their dependencies on the input side so we don't need to do anything
         // extra on the output side, also let's the output layout for terminating blocks be
@@ -127,6 +140,8 @@ pub fn build_basic_block_layout_sets(
         if owner != program.init_entry && Some(owner) != program.main_entry {
             layout.add(LayoutMember::ReturnDest);
         }
+
+        println!("  live at entry: {:?}", liveness.get_live_at_entry(bb.id()));
 
         // WARNING: Iteration over `HashSet` is non-deterministic, must sort!!!
         for &local in liveness.get_live_at_entry(bb.id()) as &HashSet<LocalId> {

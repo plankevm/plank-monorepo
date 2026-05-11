@@ -2,7 +2,9 @@ use hashbrown::{HashMap, HashSet};
 
 use crate::analyses::{AnalysesStore, Predecessors, ReversePostOrder, cache::Analysis};
 use plank_core::Idx;
-use sir_data::{BasicBlockId, ControlView, EthIRProgram, IndexVec, LocalId, OperationIdx};
+use sir_data::{
+    BasicBlockId, BlockView, ControlView, EthIRProgram, IndexVec, LocalId, OperationIdx,
+};
 use std::cmp::{Ord, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +121,7 @@ impl LocalLiveness {
             changed = false;
             for bb_id in rpo.global_post_order() {
                 Self::compute_liveness_at_block_entry(
-                    program,
-                    bb_id,
+                    program.block(bb_id),
                     &self.locals_live_at_exit[bb_id],
                     &mut self.locals_live_at_entry[bb_id],
                 );
@@ -137,30 +138,30 @@ impl LocalLiveness {
     }
 
     fn compute_liveness_at_block_entry(
-        program: &EthIRProgram,
-        bb_id: BasicBlockId,
+        block: BlockView<'_>,
         exit_liveness: &HashSet<LocalId>,
         entry_liveness: &mut HashSet<LocalId>,
     ) {
-        let block = &program.basic_blocks[bb_id];
         entry_liveness.clone_from(exit_liveness);
 
-        match program.block(bb_id).control() {
+        match block.control() {
             ControlView::Branches { condition, .. } => {
                 entry_liveness.insert(condition);
             }
             ControlView::Switch(switch) => {
                 entry_liveness.insert(switch.condition());
             }
+            ControlView::InternalReturn => {
+                entry_liveness.extend(block.outputs());
+            }
             _ => {}
         }
 
-        for op_idx in block.operations.iter().rev() {
-            let op = program.operations[op_idx];
-            for out in op.outputs(program) {
+        for op in block.operations().rev() {
+            for out in op.outputs() {
                 entry_liveness.remove(out);
             }
-            for input in op.inputs(program) {
+            for input in op.inputs() {
                 entry_liveness.insert(*input);
             }
         }
@@ -206,18 +207,23 @@ impl LocalLiveness {
                 ControlView::Switch(switch) => {
                     local_interval_ends.insert(switch.condition(), IntervalEnd::BlockEnd);
                 }
+                ControlView::InternalReturn => {
+                    for &output in block.outputs() {
+                        local_interval_ends.insert(output, IntervalEnd::BlockEnd);
+                    }
+                }
                 _ => {}
             }
 
             for op in block.operations().rev() {
-                for out in op.op().outputs(program) {
+                for out in op.outputs() {
                     if let Some(end) = local_interval_ends.remove(out) {
                         self.local_intervals[*out]
                             .push((bb_id, Interval { start: IntervalStart::At(op.id()), end }));
                     }
                 }
 
-                for input in op.op().inputs(program) {
+                for input in op.inputs() {
                     local_interval_ends.entry(*input).or_insert(IntervalEnd::At(op.id()));
                 }
             }
@@ -533,5 +539,184 @@ mod tests {
             IntervalStart::At(op_at(&ir, bb0, 0)),
             IntervalEnd::At(op_at(&ir, bb0, 2)),
         );
+    }
+
+    fn assert_live_at_entry_eq(liveness: &LocalLiveness, bb: BasicBlockId, expected: &[LocalId]) {
+        let mut actual: Vec<_> = liveness.locals_live_at_entry[bb].iter().copied().collect();
+        actual.sort();
+
+        let mut expected = expected.to_vec();
+        expected.sort();
+
+        assert_eq!(actual, expected, "live-at-entry mismatch for @{bb}");
+    }
+
+    fn internal_function_entry(ir: &EthIRProgram) -> BasicBlockId {
+        ir.functions_iter()
+            .find(|func| func.id() != ir.init_entry)
+            .expect("test should have an internal function")
+            .entry()
+            .id()
+    }
+
+    #[test]
+    fn iret_direct_input_output_liveness() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    value = caller
+                    zero = const 0
+                    out = icall @ident value zero
+                    sstore out zero
+                    stop
+                }
+            fn ident:
+                entry x y -> x {
+                    iret
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let store = AnalysesStore::default();
+        let liveness = store.local_liveness(&ir);
+
+        let bb = internal_function_entry(&ir);
+        let x = ir.block(bb).inputs()[0];
+
+        assert_live_at_entry_eq(&liveness, bb, &[x]);
+        assert_has_interval(&liveness, x, bb, IntervalStart::BlockStart, IntervalEnd::BlockEnd);
+    }
+
+    #[test]
+    fn iret_computed_output_liveness() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    one = const 1
+                    two = const 2
+                    out = icall @add_one one two
+                    sstore out two
+                    stop
+                }
+            fn add_one:
+                entry x y -> sum {
+                    sum = add x y
+                    iret
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let store = AnalysesStore::default();
+        let liveness = store.local_liveness(&ir);
+
+        let bb = internal_function_entry(&ir);
+        let inputs = ir.block(bb).inputs();
+        let sum = first_output(&ir, bb, 0);
+
+        assert_live_at_entry_eq(&liveness, bb, inputs);
+        assert_has_interval(
+            &liveness,
+            inputs[0],
+            bb,
+            IntervalStart::BlockStart,
+            IntervalEnd::At(op_at(&ir, bb, 0)),
+        );
+        assert_has_interval(
+            &liveness,
+            inputs[1],
+            bb,
+            IntervalStart::BlockStart,
+            IntervalEnd::At(op_at(&ir, bb, 0)),
+        );
+        assert_has_interval(
+            &liveness,
+            sum,
+            bb,
+            IntervalStart::At(op_at(&ir, bb, 0)),
+            IntervalEnd::BlockEnd,
+        );
+    }
+
+    #[test]
+    fn iret_multi_output_forwarding_liveness() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    a = caller
+                    b = callvalue
+                    x y = icall @swap a b
+                    sstore x y
+                    stop
+                }
+            fn swap:
+                entry lhs rhs -> rhs lhs {
+                    iret
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let store = AnalysesStore::default();
+        let liveness = store.local_liveness(&ir);
+
+        let bb = internal_function_entry(&ir);
+        let inputs = ir.block(bb).inputs();
+
+        assert_live_at_entry_eq(&liveness, bb, inputs);
+        assert_has_interval(
+            &liveness,
+            inputs[0],
+            bb,
+            IntervalStart::BlockStart,
+            IntervalEnd::BlockEnd,
+        );
+        assert_has_interval(
+            &liveness,
+            inputs[1],
+            bb,
+            IntervalStart::BlockStart,
+            IntervalEnd::BlockEnd,
+        );
+    }
+
+    #[test]
+    fn iret_output_liveness_propagates_through_cfg() {
+        let ir = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    a = caller
+                    zero = const 0
+                    out = icall @via_block a zero
+                    sstore out zero
+                    stop
+                }
+            fn via_block:
+                entry x y -> x {
+                    => @ret
+                }
+                ret z -> z {
+                    iret
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let store = AnalysesStore::default();
+        let liveness = store.local_liveness(&ir);
+
+        let entry = internal_function_entry(&ir);
+        let ret = match ir.block(entry).control() {
+            ControlView::ContinuesTo(ret) => ret,
+            _ => panic!("expected entry to continue to return block"),
+        };
+        let x = ir.block(entry).inputs()[0];
+        let z = ir.block(ret).inputs()[0];
+
+        assert_live_at_entry_eq(&liveness, entry, &[x]);
+        assert_live_at_entry_eq(&liveness, ret, &[z]);
+        assert_has_interval(&liveness, x, entry, IntervalStart::BlockStart, IntervalEnd::BlockEnd);
+        assert_has_interval(&liveness, z, ret, IntervalStart::BlockStart, IntervalEnd::BlockEnd);
     }
 }
