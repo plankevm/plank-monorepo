@@ -1,5 +1,5 @@
 [package]
-name = "sir-release-backend"
+name = "sir-stack-scheduling"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
