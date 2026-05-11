@@ -90,6 +90,7 @@ pub fn build_graph_simple<'ir>(block: BlockView<'ir>, layouts: &LayoutsTracker<'
     for op in block.operations() {
         if terminating.is_some_and(|terminating| terminating.id() == op.id()) {
             end_stack_fifo.extend(op.inputs().iter().map(|input| local_to_value[input]));
+            break;
         }
 
         let op_node = operations.push(OpNode {

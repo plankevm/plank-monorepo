@@ -37,9 +37,6 @@ fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
         writeln!(out).unwrap();
 
         for op in ops {
-            if is_formatted_as_control(block, op) {
-                continue;
-            }
             write!(out, "    ").unwrap();
             fmt_stack_op(&mut out, program, block, op);
             writeln!(out).unwrap();
@@ -89,17 +86,6 @@ fn fmt_layout_member(
         }
         LayoutMember::Local(local) => write!(out, "${local}").unwrap(),
     }
-}
-
-fn is_formatted_as_control(block: BlockView<'_>, op: StackOps) -> bool {
-    let StackOps::Op(op) = op else { return false };
-    let ControlView::LastOpTerminates = block.control() else { return false };
-    let scheduled_op = block
-        .operations()
-        .nth(op.idx())
-        .expect("operation graph node should map to a block operation");
-    let terminator = block.operations().last().expect("last op terminates but no last op");
-    scheduled_op.id() == terminator.id()
 }
 
 fn fmt_stack_op(out: &mut String, program: &EthIRProgram, block: BlockView<'_>, op: StackOps) {
@@ -225,8 +211,6 @@ fn lowers_terminator_inputs() {
         @0 []
             const 0x1
             const 0x2
-            dup 0
-            dup 2
             store 0
             store 1
             load 0
@@ -436,8 +420,6 @@ fn lowers_calldata_sum_loop() {
             dup 5
             dup 1
             mstore
-            dup 1
-            dup 1
             store 0
             store 1
             pop
