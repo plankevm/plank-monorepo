@@ -1,6 +1,7 @@
 use std::cell::Cell;
 
-use sir_data::{IndexVec, StaticAllocId, index_vec};
+use plank_core::list_of_lists::ListOfListsPusher;
+use sir_data::{BasicBlockId, IndexVec, StaticAllocId, index_vec};
 
 use crate::{
     op_graph::*,
@@ -122,18 +123,18 @@ fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &
     }
 }
 
-pub fn dumb_schedule(
-    next_alloc_id: &Cell<StaticAllocId>,
+pub fn dumb_schedule<'p, 'a: 'p>(
+    ops_sink: &'p mut ListOfListsPusher<'a, BasicBlockId, StackOps>,
+    next_alloc_id: &'a Cell<StaticAllocId>,
     config: ScheduleConfig,
-    graph: &OpGraph,
-) -> Vec<StackOps> {
+    graph: &'a OpGraph,
+) {
     let mut stack = VirtualStack::new();
     for input in graph.input_values_fifo().iter().rev() {
         stack.push(input);
     }
 
-    let mut stack =
-        TrackedStack::new_from_vstack(next_alloc_id, stack, graph.operations.len() * 6, 8);
+    let mut stack = TrackedStack::new_from_vstack(next_alloc_id, ops_sink, stack, 8);
 
     let schedule = get_operation_topological_sort(graph);
     for op in schedule {
@@ -141,6 +142,4 @@ pub fn dumb_schedule(
     }
 
     shuffle_to_output(config, &mut stack, graph);
-
-    stack.into_ops()
 }

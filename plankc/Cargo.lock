@@ -2883,6 +2883,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sir-release-backend"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "plank-core",
+ "sir-assembler",
+ "sir-data",
+]
+
+[[package]]
 name = "sir-stack-scheduling"
 version = "0.1.0"
 dependencies = [
@@ -2893,6 +2903,14 @@ dependencies = [
  "sir-data",
  "sir-parser",
  "sir-passes",
+]
+
+[[package]]
+name = "sir-static-memory-allocator"
+version = "0.1.0"
+dependencies = [
+ "hashbrown 0.16.1",
+ "sir-data",
 ]
 
 [[package]]

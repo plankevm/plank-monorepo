@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
-use plank_core::IncIterable;
-use sir_data::{Idx, OperationIdx, StaticAllocId};
+use plank_core::{IncIterable, list_of_lists::ListOfListsPusher};
+use sir_data::{BasicBlockId, Idx, OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;
 
@@ -133,36 +133,27 @@ impl Default for ScheduleConfig {
     }
 }
 
-pub struct TrackedStack<'ir> {
-    next_alloc_id: &'ir Cell<StaticAllocId>,
+pub struct TrackedStack<'a> {
+    next_alloc_id: &'a Cell<StaticAllocId>,
+    ops_sink: &'a mut ListOfListsPusher<'a, BasicBlockId, StackOps>,
     spilled: Vec<Option<(StaticAllocId, ValueNodeId)>>,
-    ops: Vec<StackOps>,
     inner: VirtualStack,
 }
 
-impl<'ir> TrackedStack<'ir> {
+impl<'a> TrackedStack<'a> {
     pub fn new_from_vstack(
-        next_alloc_id: &'ir Cell<StaticAllocId>,
+        next_alloc_id: &'a Cell<StaticAllocId>,
+        ops_sink: &'a mut ListOfListsPusher<'a, BasicBlockId, StackOps>,
         inner: VirtualStack,
-        ops_capacity: usize,
         spilled_capacity: usize,
     ) -> Self {
-        Self {
-            next_alloc_id,
-            ops: Vec::with_capacity(ops_capacity),
-            spilled: Vec::with_capacity(spilled_capacity),
-            inner,
-        }
-    }
-
-    pub fn into_ops(self) -> Vec<StackOps> {
-        self.ops
+        Self { next_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
     }
 
     #[track_caller]
     pub fn pop(&mut self) {
         self.inner.pop().expect("nothing to pop");
-        self.ops.push(StackOps::Pop);
+        self.ops_sink.push(StackOps::Pop);
     }
 
     pub fn spilled(&self) -> impl Iterator<Item = (u32, ValueNodeId)> {
@@ -191,7 +182,7 @@ impl<'ir> TrackedStack<'ir> {
             };
             assert!(correct, "incorrect op schedule");
         }
-        self.ops.push(stack_op);
+        self.ops_sink.push(stack_op);
         for &output in graph.operations[op_id].produces_fifo.iter().rev() {
             self.inner.push(output);
         }
@@ -199,7 +190,7 @@ impl<'ir> TrackedStack<'ir> {
 
     pub fn dup(&mut self, depth: u8) {
         self.inner.duplicate(depth.into());
-        self.ops.push(StackOps::Dup(depth));
+        self.ops_sink.push(StackOps::Dup(depth));
     }
 
     #[track_caller]
@@ -211,7 +202,7 @@ impl<'ir> TrackedStack<'ir> {
         let new_alloc_id = self.next_alloc_id.get();
         self.next_alloc_id.set(new_alloc_id + 1);
         self.spilled[slot as usize] = Some((new_alloc_id, value));
-        self.ops.push(StackOps::Store(new_alloc_id));
+        self.ops_sink.push(StackOps::Store(new_alloc_id));
     }
 
     #[track_caller]
@@ -219,7 +210,7 @@ impl<'ir> TrackedStack<'ir> {
         let (alloc, value) = self.spilled[slot as usize].expect("nothing spilled at slot");
         self.inner.push(value);
 
-        self.ops.push(StackOps::Load(alloc));
+        self.ops_sink.push(StackOps::Load(alloc));
     }
 
     pub fn stack(&self) -> &VirtualStack {
