@@ -7,7 +7,7 @@ use sir_passes::AnalysesStore;
 
 use super::{
     layouts::{Layout, LayoutMember},
-    op_graph::{OpGraph, OpNodeId, build_graph_simple},
+    op_graph::{OpGraph, build_graph_simple},
     stack::{ScheduleConfig, StackOps},
 };
 
@@ -26,17 +26,18 @@ fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let (lowered, layouts) = crate::lower(program, &analyses, config);
 
     let mut out = String::new();
-    for (block_id, ops) in lowered {
+    for (block_id, ops) in lowered.enumerate_idx() {
+        let Some((input_layout, output_layout)) = layouts.get_input_output(block_id) else {
+            continue;
+        };
         let block = program.block(block_id);
-        let (input_layout, output_layout) =
-            layouts.get_input_output(block_id).expect("lowered but no IO layout");
         let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
 
         write!(out, "@{block_id} ").unwrap();
         fmt_layout(&mut out, layouts.get_input_layout(block_id), block);
         writeln!(out).unwrap();
 
-        for op in ops {
+        for &op in ops {
             write!(out, "    ").unwrap();
             fmt_stack_op(&mut out, program, op);
             writeln!(out).unwrap();

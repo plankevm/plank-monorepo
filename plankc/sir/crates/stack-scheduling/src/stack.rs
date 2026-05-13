@@ -1,7 +1,7 @@
 use std::cell::Cell;
 
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
-use plank_core::{IncIterable, list_of_lists::ListOfListsPusher};
+use plank_core::list_of_lists::ListOfListsPusher;
 use sir_data::{BasicBlockId, Idx, OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;
@@ -133,17 +133,17 @@ impl Default for ScheduleConfig {
     }
 }
 
-pub struct TrackedStack<'a> {
-    next_alloc_id: &'a Cell<StaticAllocId>,
-    ops_sink: &'a mut ListOfListsPusher<'a, BasicBlockId, StackOps>,
+pub struct TrackedStack<'ir, 'sink, 'list> {
+    next_alloc_id: &'ir Cell<StaticAllocId>,
+    ops_sink: &'sink mut ListOfListsPusher<'list, BasicBlockId, StackOps>,
     spilled: Vec<Option<(StaticAllocId, ValueNodeId)>>,
     inner: VirtualStack,
 }
 
-impl<'a> TrackedStack<'a> {
+impl<'ir, 'sink, 'list> TrackedStack<'ir, 'sink, 'list> {
     pub fn new_from_vstack(
-        next_alloc_id: &'a Cell<StaticAllocId>,
-        ops_sink: &'a mut ListOfListsPusher<'a, BasicBlockId, StackOps>,
+        next_alloc_id: &'ir Cell<StaticAllocId>,
+        ops_sink: &'sink mut ListOfListsPusher<'list, BasicBlockId, StackOps>,
         inner: VirtualStack,
         spilled_capacity: usize,
     ) -> Self {
@@ -218,7 +218,7 @@ impl<'a> TrackedStack<'a> {
     }
 }
 
-impl std::ops::Deref for TrackedStack<'_> {
+impl std::ops::Deref for TrackedStack<'_, '_, '_> {
     type Target = VirtualStack;
 
     fn deref(&self) -> &Self::Target {

@@ -123,11 +123,11 @@ fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &
     }
 }
 
-pub fn dumb_schedule<'p, 'a: 'p>(
-    ops_sink: &'p mut ListOfListsPusher<'a, BasicBlockId, StackOps>,
-    next_alloc_id: &'a Cell<StaticAllocId>,
+pub fn dumb_schedule(
+    ops_sink: &mut ListOfListsPusher<'_, BasicBlockId, StackOps>,
+    next_alloc_id: &Cell<StaticAllocId>,
     config: ScheduleConfig,
-    graph: &'a OpGraph,
+    graph: &OpGraph,
 ) {
     let mut stack = VirtualStack::new();
     for input in graph.input_values_fifo().iter().rev() {

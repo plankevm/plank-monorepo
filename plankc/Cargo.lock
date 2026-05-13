@@ -2886,10 +2886,8 @@ dependencies = [
 name = "sir-release-backend"
 version = "0.1.0"
 dependencies = [
- "hashbrown 0.16.1",
  "plank-core",
  "sir-assembler",
- "sir-data",
 ]
 
 [[package]]

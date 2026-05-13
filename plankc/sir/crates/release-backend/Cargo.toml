@@ -7,8 +7,6 @@ license.workspace = true
 [dependencies]
 sir-assembler.workspace = true
 plank-core.workspace = true
-hashbrown.workspace = true
-sir-data.workspace = true
 
 [lints]
 workspace = true
