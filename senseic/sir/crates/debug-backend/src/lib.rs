@@ -329,4 +329,34 @@ mod tests {
             "runtime must initialize the free pointer to the static memory high-water mark before main"
         );
     }
+
+    #[test]
+    fn transfer_buffer_covers_function_entry_inputs() {
+        let mut builder = EthIRBuilder::new();
+        let init = add_stop_function(&mut builder);
+
+        let mut func = builder.begin_function();
+        let inputs = [
+            func.new_local(),
+            func.new_local(),
+            func.new_local(),
+            func.new_local(),
+            func.new_local(),
+            func.new_local(),
+        ];
+        let mut bb = func.begin_basic_block();
+        bb.set_inputs(&inputs);
+        bb.add_operation(Operation::Stop(()));
+        let bb_id = bb.finish(Control::LastOpTerminates).unwrap();
+        let main = func.finish(bb_id);
+
+        let program = builder.build(init, Some(main));
+        let layout = StaticMemoryLayout::new(&program);
+        let transfer_end = layout.basic_block_locals_transfer + inputs.len() as u32 * 0x20;
+
+        assert!(
+            layout.locals_start >= transfer_end,
+            "high-arity function entry inputs must not overflow the transfer buffer into locals"
+        );
+    }
 }

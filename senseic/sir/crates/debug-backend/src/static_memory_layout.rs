@@ -33,8 +33,17 @@ impl StaticMemoryLayout {
         let switch_store = next_free.alloc_bytes(EVM_WORD_IN_BYTES);
         let free_pointer = next_free.alloc_bytes(EVM_WORD_IN_BYTES);
 
-        let max_locals_transfer =
-            ir.blocks().map(|b| b.outputs().len() as u32).max().expect("at least 1 bb in valid IR");
+        let max_block_transfer = ir
+            .blocks()
+            .map(|b| b.inputs().len().max(b.outputs().len()) as u32)
+            .max()
+            .expect("at least 1 bb in valid IR");
+        let max_function_transfer = ir
+            .functions_iter()
+            .map(|f| f.num_inputs().max(f.num_outputs()))
+            .max()
+            .unwrap_or(0);
+        let max_locals_transfer = max_block_transfer.max(max_function_transfer);
         let basic_block_locals_transfer =
             next_free.alloc_bytes(max_locals_transfer * EVM_WORD_IN_BYTES);
 
