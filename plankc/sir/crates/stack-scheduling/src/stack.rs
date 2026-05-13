@@ -1,7 +1,6 @@
 use std::cell::Cell;
 
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
-use hashbrown::HashMap;
 use plank_core::list_of_lists::ListOfListsPusher;
 use sir_data::{BasicBlockId, Idx, OperationIdx, StaticAllocId};
 
@@ -190,32 +189,29 @@ impl<'ir, 'sink, 'list> TrackedStack<'ir, 'sink, 'list> {
         self.ops_sink.push(StackOps::Dup(depth));
     }
 
-    pub fn spilled(&self) -> &[(ValueNodeId, StaticAllocId)] {
-        &self.spilled
+    pub fn get_spilled(&self, target: ValueNodeId) -> Option<StaticAllocId> {
+        self.spilled.iter().rev().find_map(|&(value, alloc)| (value == target).then_some(alloc))
     }
 
     #[track_caller]
-    pub fn store(&mut self) -> StaticAllocId {
+    pub fn spill_top(&mut self) -> StaticAllocId {
         let target = self.inner.pop().expect("nothing to pop");
         let new_alloc_id = self.next_alloc_id.get();
         self.next_alloc_id.set(new_alloc_id + 1);
-        match self.spilled.iter_mut().find(|(value, _)| *value == target) {
-            Some((_value, alloc_id)) => {
-                *alloc_id = new_alloc_id;
-            }
-            None => {
-                self.spilled.push((target, new_alloc_id));
-            }
-        }
         self.ops_sink.push(StackOps::Store(new_alloc_id));
+        self.spilled.push((target, new_alloc_id));
         new_alloc_id
     }
 
     #[track_caller]
-    pub fn forget_spilled(&mut self, target: ValueNodeId) {
-        let entry_idx =
-            self.spilled.iter().position(|&(value, _)| value == target).expect("wasn't spilled");
-        self.spilled.swap_remove(entry_idx);
+    pub fn unspill(&mut self, target: ValueNodeId) {
+        let &(_, alloc) = self
+            .spilled
+            .iter()
+            .find(|&&(value, _)| value == target)
+            .expect("nothing spilled at alloc");
+        self.inner.push(target);
+        self.ops_sink.push(StackOps::Load(alloc));
     }
 
     #[track_caller]

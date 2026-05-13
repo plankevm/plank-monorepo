@@ -49,31 +49,46 @@ fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
 // dumb intra-instruction scheduler that always dups its inputs.
 fn schedule_op(config: ScheduleConfig, stack: &mut TrackedStack, graph: &OpGraph, op: OpNodeId) {
     let max_dup_depth = u16::from(config.max_dup_depth);
+
+    let mut in_the_way_buf = Vec::new();
+
     for &input in graph.operations[op].consumes_fifo.iter().rev() {
         let depth = stack.stack().find_first(input).expect("input missing");
         if depth <= max_dup_depth {
             stack.dup(depth as u8);
             continue;
+        } else if let Some(spilled) = stack.get_spilled(input) {
+            stack.load(spilled);
+            continue;
         }
 
         let delta_to_max = depth - max_dup_depth;
 
+        in_the_way_buf.clear();
+        in_the_way_buf.extend_from_slice(&stack.fifo()[..delta_to_max as usize]);
+
         // Move minimum number of values out of the way.
-        for spill_slot in 0..delta_to_max {
-            stack.store(spill_slot.into());
+        for _ in 0..delta_to_max {
+            let top = stack.top().expect("no top despite beyond max depth");
+            match stack.get_spilled(top) {
+                Some(_) => stack.pop(),
+                None => {
+                    stack.spill_top();
+                }
+            }
         }
 
         // Now dup and spill.
         stack.dup(config.max_dup_depth);
-        stack.store(delta_to_max.into());
+        stack.spill_top();
 
         // Unspill in the way in correct order.
-        for spill_slot in (0..delta_to_max).rev() {
-            stack.load(spill_slot.into());
+        for &spilled in in_the_way_buf.iter().rev() {
+            stack.unspill(spilled);
         }
 
         // Load target value back
-        stack.load(delta_to_max.into());
+        stack.unspill(input);
     }
     stack.op(graph, op);
 }
@@ -93,32 +108,15 @@ fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &
 
     for _ in 0..stack.len() {
         let top = stack.top().expect("shouldn't pop more than one per loop");
-        if target_counts[top] == 0 {
+        if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
             stack.pop();
-            continue;
+        } else {
+            stack.spill_top();
         }
-        // Already spilled.
-        if stack.spilled().any(|(_slot, value)| value == top) {
-            stack.pop();
-            continue;
-        }
-        stack.store('next_free_slot: {
-            let mut free_slot = 0u32;
-            for (slot, _) in stack.spilled() {
-                if free_slot < slot {
-                    break 'next_free_slot free_slot;
-                }
-                free_slot = slot + 1;
-            }
-            free_slot
-        });
     }
 
     for &target in target_stack.iter().rev() {
-        let slot = stack
-            .spilled()
-            .find_map(|(slot, value)| (value == target).then_some(slot))
-            .expect("missing value in spilled");
+        let slot = stack.get_spilled(target).expect("missing value in spilled");
         stack.load(slot);
     }
 }
