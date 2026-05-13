@@ -1,5 +1,10 @@
 default: check test
 
+link-dev-local:
+    rm -rf $HOME/.plank/bin/plank $HOME/.plank/stdlib/
+    ln -s $PWD/../std $HOME/.plank/stdlib
+    ln -s $PWD/target/release-safe/plank $HOME/.plank/bin/plank
+
 fmt:
     cargo +nightly fmt --all
 
