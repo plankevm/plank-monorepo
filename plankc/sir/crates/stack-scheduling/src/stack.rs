@@ -205,11 +205,7 @@ impl<'ir, 'sink, 'list> TrackedStack<'ir, 'sink, 'list> {
 
     #[track_caller]
     pub fn unspill(&mut self, target: ValueNodeId) {
-        let &(_, alloc) = self
-            .spilled
-            .iter()
-            .find(|&&(value, _)| value == target)
-            .expect("nothing spilled at alloc");
+        let alloc = self.get_spilled(target).expect("nothing spilled at alloc");
         self.inner.push(target);
         self.ops_sink.push(StackOps::Load(alloc));
     }
