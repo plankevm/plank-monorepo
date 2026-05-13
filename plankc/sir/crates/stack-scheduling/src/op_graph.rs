@@ -34,6 +34,7 @@ pub struct OpNode {
 #[derive(Debug)]
 pub struct ValueNode {
     pub source: Option<OpNodeId>,
+    // TODO: Are duplicates ok?
     pub used_by: Vec<OpNodeId>,
 }
 
@@ -95,18 +96,10 @@ pub fn build_graph_simple<'ir>(
 
     let mut last_op = None;
 
-    let terminating = matches!(block.control(), ControlView::LastOpTerminates)
-        .then(|| block.operations().last().expect("last op terminates but no last"));
-
     let block_outputs = block.outputs();
     let mut end_stack_fifo = Vec::with_capacity(block_outputs.len() + 2);
 
     for op in block.operations() {
-        if terminating.is_some_and(|terminating| terminating.id() == op.id()) {
-            end_stack_fifo.extend(op.inputs().iter().map(|input| local_to_value[input]));
-            break;
-        }
-
         let op_node = operations.push(OpNode {
             consumes_fifo: Vec::new(),
             produces_fifo: Vec::new(),

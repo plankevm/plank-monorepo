@@ -43,12 +43,12 @@ fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
             writeln!(out).unwrap();
         }
 
-        write!(out, "    ").unwrap();
-        fmt_control(&mut out, block);
-        writeln!(out).unwrap();
-
         write!(out, "    => ").unwrap();
         fmt_end_stack_layout(&mut out, program, &graph, layouts.get_input_layout(block_id), block);
+        writeln!(out).unwrap();
+
+        write!(out, "    ").unwrap();
+        fmt_control(&mut out, block);
         writeln!(out).unwrap();
     }
     out
@@ -171,6 +171,7 @@ fn fmt_value(
 }
 
 fn fmt_control(out: &mut String, block: BlockView<'_>) {
+    out.push('(');
     match block.control() {
         ControlView::LastOpTerminates => {
             let terminator = block.operations().last().expect("last op terminates but no last op");
@@ -183,6 +184,7 @@ fn fmt_control(out: &mut String, block: BlockView<'_>) {
         }
         ControlView::Switch(switch) => write!(out, "switch ${}", switch.condition()).unwrap(),
     }
+    out.push(')');
 }
 
 #[test]
@@ -201,12 +203,11 @@ fn lowers_terminator_inputs() {
         @0 []
             const 0x1
             const 0x2
-            store :0
-            store :1
-            load :0
-            load :1
+            dup 0
+            dup 2
             return
-            => [$0, $1 | ]
+            => []
+            (return)
         "#,
     );
 }
@@ -231,11 +232,9 @@ fn lowers_binary_operation_inputs() {
             dup 0
             dup 2
             add
-            pop
-            pop
-            pop
             stop
             => []
+            (stop)
         "#,
     );
 }
@@ -289,17 +288,9 @@ fn lowers_memory_hash_and_store() {
             dup 5
             dup 1
             sstore
-            pop
-            pop
-            pop
-            pop
-            pop
-            pop
-            pop
-            pop
-            pop
             stop
             => []
+            (stop)
         "#,
     );
 }
@@ -355,8 +346,8 @@ fn lowers_calldata_sum_loop() {
             load :1
             load :2
             load :3
-            jmp @1
             => [$1, $2, $3, $4]
+            (jmp @1)
         @1 [$5, $6, $7, $8]
             dup 0
             dup 2
@@ -371,8 +362,8 @@ fn lowers_calldata_sum_loop() {
             load :6
             load :5
             load :4
-            br @2 @3
             => [$9 | $5, $6, $7, $8]
+            (br @2 @3)
         @2 [$10, $11, $12, $13]
             dup 2
             calldataload
@@ -401,8 +392,8 @@ fn lowers_calldata_sum_loop() {
             load :9
             load :10
             load :12
-            jmp @1
             => [$10, $17, $19, $15]
+            (jmp @1)
         @3 [$20, $21, $22, $23]
             const 0x20
             dup 0
@@ -410,16 +401,11 @@ fn lowers_calldata_sum_loop() {
             dup 5
             dup 1
             mstore
-            store :13
-            store :14
-            pop
-            pop
-            pop
-            pop
-            load :14
-            load :13
+            dup 1
+            dup 1
             return
-            => [$25, $24 | ]
+            => []
+            (return)
         "#,
     );
 }
@@ -452,19 +438,21 @@ fn lowers_branch_layouts() {
             pop
             store :0
             load :0
-            jmp @1
             => [$0]
+            (jmp @1)
         @1 [$2]
             store :1
             load :1
-            br @2 @3
             => [$2 | ]
+            (br @2 @3)
         @2 []
             stop
             => []
+            (stop)
         @3 []
             invalid
             => []
+            (invalid)
         "#,
     );
 }
@@ -493,8 +481,8 @@ fn simple_icall() {
             store :1
             load :1
             load :0
-            iret
             => [return_dest | $0]
+            (iret)
         @1 []
             call_ret_push #2
             caller
@@ -505,12 +493,9 @@ fn simple_icall() {
             dup 1
             dup 1
             sstore
-            pop
-            pop
-            pop
-            pop
             stop
             => []
+            (stop)
         "#,
     );
 }
@@ -553,14 +538,9 @@ fn simple_op_use_spill() {
             load :0
             load :2
             not
-            pop
-            pop
-            pop
-            pop
-            pop
-            pop
             stop
             => []
+            (stop)
         "#,
     );
 }
@@ -584,9 +564,9 @@ fn unreachable() {
 
         @0 []
             const 0x3
-            pop
             stop
             => []
+            (stop)
         "#,
     );
 }

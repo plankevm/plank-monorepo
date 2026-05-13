@@ -33,7 +33,7 @@ pub fn lower<'ir>(
         };
         let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
         let bb_id = stack_ops.push_with(|mut pusher| {
-            dumb_schedule(&mut pusher, &program.next_static_alloc_id, config, &graph);
+            dumb_schedule(&mut pusher, block, &program.next_static_alloc_id, config, &graph);
         });
         assert_eq!(bb_id, block.id());
     }

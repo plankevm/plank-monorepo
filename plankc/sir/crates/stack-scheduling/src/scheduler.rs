@@ -1,11 +1,11 @@
 use std::cell::Cell;
 
 use plank_core::list_of_lists::ListOfListsPusher;
-use sir_data::{BasicBlockId, IndexVec, StaticAllocId, index_vec};
+use sir_data::{BasicBlockId, BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
 
 use crate::{
     op_graph::*,
-    stack::{ScheduleConfig, StackOps, TrackedStack, VirtualStack},
+    stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
 
 fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
@@ -125,21 +125,24 @@ fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &
 
 pub fn dumb_schedule(
     ops_sink: &mut ListOfListsPusher<'_, BasicBlockId, StackOps>,
+    block: BlockView<'_>,
     next_alloc_id: &Cell<StaticAllocId>,
     config: ScheduleConfig,
     graph: &OpGraph,
 ) {
-    let mut stack = VirtualStack::new();
+    let mut stack = EvmStack::new();
     for input in graph.input_values_fifo().iter().rev() {
         stack.push(input);
     }
 
-    let mut stack = TrackedStack::new_from_vstack(next_alloc_id, ops_sink, stack, 8);
+    let mut stack = TrackedStack::new_from_evm(next_alloc_id, ops_sink, stack, 8);
 
     let schedule = get_operation_topological_sort(graph);
     for op in schedule {
         schedule_op(config, &mut stack, graph, op);
     }
 
-    shuffle_to_output(config, &mut stack, graph);
+    if !matches!(block.control(), ControlView::LastOpTerminates) {
+        shuffle_to_output(config, &mut stack, graph);
+    }
 }

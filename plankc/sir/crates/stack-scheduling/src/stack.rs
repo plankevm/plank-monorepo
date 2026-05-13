@@ -1,24 +1,25 @@
 use std::cell::Cell;
 
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
+use hashbrown::HashMap;
 use plank_core::list_of_lists::ListOfListsPusher;
 use sir_data::{BasicBlockId, Idx, OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;
 
 #[derive(Debug, Clone, Copy)]
-pub struct VirtualStack {
+pub struct EvmStack {
     stack_raw: [ValueNodeId; MAX_STACK_LENGTH],
     stack_len: u16,
 }
 
-impl Default for VirtualStack {
+impl Default for EvmStack {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl VirtualStack {
+impl EvmStack {
     pub const fn new() -> Self {
         Self { stack_raw: [ValueNodeId::ZERO; MAX_STACK_LENGTH], stack_len: 0 }
     }
@@ -136,15 +137,15 @@ impl Default for ScheduleConfig {
 pub struct TrackedStack<'ir, 'sink, 'list> {
     next_alloc_id: &'ir Cell<StaticAllocId>,
     ops_sink: &'sink mut ListOfListsPusher<'list, BasicBlockId, StackOps>,
-    spilled: Vec<Option<(StaticAllocId, ValueNodeId)>>,
-    inner: VirtualStack,
+    spilled: Vec<(ValueNodeId, StaticAllocId)>,
+    inner: EvmStack,
 }
 
 impl<'ir, 'sink, 'list> TrackedStack<'ir, 'sink, 'list> {
-    pub fn new_from_vstack(
+    pub fn new_from_evm(
         next_alloc_id: &'ir Cell<StaticAllocId>,
         ops_sink: &'sink mut ListOfListsPusher<'list, BasicBlockId, StackOps>,
-        inner: VirtualStack,
+        inner: EvmStack,
         spilled_capacity: usize,
     ) -> Self {
         Self { next_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
@@ -154,10 +155,6 @@ impl<'ir, 'sink, 'list> TrackedStack<'ir, 'sink, 'list> {
     pub fn pop(&mut self) {
         self.inner.pop().expect("nothing to pop");
         self.ops_sink.push(StackOps::Pop);
-    }
-
-    pub fn spilled(&self) -> impl Iterator<Item = (u32, ValueNodeId)> {
-        (0..).zip(&self.spilled).filter_map(|(i, &alloc_value)| Some((i, alloc_value?.1)))
     }
 
     #[track_caller]
@@ -193,33 +190,52 @@ impl<'ir, 'sink, 'list> TrackedStack<'ir, 'sink, 'list> {
         self.ops_sink.push(StackOps::Dup(depth));
     }
 
+    pub fn spilled(&self) -> &[(ValueNodeId, StaticAllocId)] {
+        &self.spilled
+    }
+
     #[track_caller]
-    pub fn store(&mut self, slot: u32) {
-        let value = self.inner.pop().expect("nothing to pop");
-        if self.spilled.len() <= slot as usize {
-            self.spilled.resize(slot as usize + 1, None);
-        }
+    pub fn store(&mut self) -> StaticAllocId {
+        let target = self.inner.pop().expect("nothing to pop");
         let new_alloc_id = self.next_alloc_id.get();
         self.next_alloc_id.set(new_alloc_id + 1);
-        self.spilled[slot as usize] = Some((new_alloc_id, value));
+        match self.spilled.iter_mut().find(|(value, _)| *value == target) {
+            Some((_value, alloc_id)) => {
+                *alloc_id = new_alloc_id;
+            }
+            None => {
+                self.spilled.push((target, new_alloc_id));
+            }
+        }
         self.ops_sink.push(StackOps::Store(new_alloc_id));
+        new_alloc_id
     }
 
     #[track_caller]
-    pub fn load(&mut self, slot: u32) {
-        let (alloc, value) = self.spilled[slot as usize].expect("nothing spilled at slot");
-        self.inner.push(value);
-
-        self.ops_sink.push(StackOps::Load(alloc));
+    pub fn forget_spilled(&mut self, target: ValueNodeId) {
+        let entry_idx =
+            self.spilled.iter().position(|&(value, _)| value == target).expect("wasn't spilled");
+        self.spilled.swap_remove(entry_idx);
     }
 
-    pub fn stack(&self) -> &VirtualStack {
+    #[track_caller]
+    pub fn load(&mut self, target: StaticAllocId) {
+        let &(value, _) = self
+            .spilled
+            .iter()
+            .find(|&&(_, alloc)| alloc == target)
+            .expect("nothing spilled at alloc");
+        self.inner.push(value);
+        self.ops_sink.push(StackOps::Load(target));
+    }
+
+    pub fn stack(&self) -> &EvmStack {
         &self.inner
     }
 }
 
 impl std::ops::Deref for TrackedStack<'_, '_, '_> {
-    type Target = VirtualStack;
+    type Target = EvmStack;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -232,13 +248,13 @@ mod tests {
 
     #[test]
     fn stack_new() {
-        let stack = VirtualStack::new();
+        let stack = EvmStack::new();
         assert_eq!(stack.len(), 0);
     }
 
     #[test]
     fn basic_push_pop() {
-        let mut stack = VirtualStack::new();
+        let mut stack = EvmStack::new();
         assert_eq!(stack.len(), 0);
 
         stack.push(ValueNodeId::new(0));
@@ -254,7 +270,7 @@ mod tests {
 
     #[test]
     fn basic_find_first() {
-        let mut stack = VirtualStack::new();
+        let mut stack = EvmStack::new();
 
         stack.push(ValueNodeId::new(0));
         stack.push(ValueNodeId::new(1));
