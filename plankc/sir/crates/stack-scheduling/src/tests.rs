@@ -23,7 +23,7 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
 
 fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let analyses = AnalysesStore::default();
-    let (lowered, layouts) = crate::lower(program, &analyses, config);
+    let (lowered, layouts) = crate::schedule(program, &analyses, config);
 
     let mut out = String::new();
     for (block_id, ops) in lowered.enumerate_idx() {

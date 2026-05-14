@@ -1,10 +1,10 @@
-use plank_core::list_of_lists::ListOfLists;
-use sir_data::{BasicBlockId, EthIRProgram};
+use plank_core::{DenseIndexMap, list_of_lists::ListOfLists};
+use sir_data::{BasicBlockId, EthIRProgram, newtype_index};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 use op_graph::build_graph_simple;
-use stack::ScheduleConfig;
+pub use stack::ScheduleConfig;
 
 use crate::{scheduler::dumb_schedule, stack::StackOps};
 
@@ -14,31 +14,64 @@ mod op_model;
 mod scheduler;
 pub mod stack;
 
-pub fn lower<'ir>(
+newtype_index! {
+    pub struct StackOpIdx;
+}
+
+const AVG_OPS_PER_BLOCK: usize = 20;
+
+#[derive(Debug)]
+pub struct ScheduledOps {
+    bb_to_ops: DenseIndexMap<BasicBlockId, StackOpIdx>,
+    ops: ListOfLists<StackOpIdx, StackOps>,
+}
+
+impl ScheduledOps {
+    pub fn get(&self, bb: BasicBlockId) -> Option<&[StackOps]> {
+        self.bb_to_ops.get(bb).map(|&idx| &self.ops[idx])
+    }
+
+    pub fn enumerate_idx(&self) -> impl Iterator<Item = (BasicBlockId, &[StackOps])> {
+        self.bb_to_ops.iter().map(|(bb_id, &idx)| (bb_id, &self.ops[idx]))
+    }
+}
+
+pub fn schedule<'ir>(
     program: &'ir EthIRProgram,
     analyses: &AnalysesStore,
     config: ScheduleConfig,
-) -> (ListOfLists<BasicBlockId, StackOps>, LayoutsTracker<'ir>) {
+) -> (ScheduledOps, LayoutsTracker<'ir>) {
     let in_out_bundling = ControlFlowGraphInOutBundling::new(program, analyses);
     let layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);
 
     // Naively take layout sets as layouts since they are deterministically ordered.
     let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
 
-    let mut stack_ops = ListOfLists::new();
+    let mut bb_to_ops = DenseIndexMap::with_capacity(program.basic_blocks.len());
+    let mut ops = ListOfLists::with_capacities(
+        program.basic_blocks.len(),
+        program.basic_blocks.len() * AVG_OPS_PER_BLOCK,
+    );
+
     for block in program.blocks() {
         let Some((input_layout, output_layout)) = layouts.get_input_output(block.id()) else {
-            assert_eq!(stack_ops.push_copy_slice(&[]), block.id());
             continue;
         };
+
         let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
-        let bb_id = stack_ops.push_with(|mut pusher| {
-            dumb_schedule(&mut pusher, block, &program.next_static_alloc_id, config, &graph);
+        let ops_idx = ops.push_with(|mut pusher| {
+            dumb_schedule(
+                |op| pusher.push(op),
+                block,
+                &program.next_static_alloc_id,
+                config,
+                &graph,
+            );
         });
-        assert_eq!(bb_id, block.id());
+        bb_to_ops.insert(block.id(), ops_idx);
     }
 
-    (stack_ops, layouts)
+    (ScheduledOps { bb_to_ops, ops }, layouts)
 }
 
 #[cfg(test)]

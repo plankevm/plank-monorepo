@@ -1,7 +1,5 @@
+use sir_data::{BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
 use std::cell::Cell;
-
-use plank_core::list_of_lists::ListOfListsPusher;
-use sir_data::{BasicBlockId, BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
 
 use crate::{
     op_graph::*,
@@ -47,7 +45,12 @@ fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
 }
 
 // dumb intra-instruction scheduler that always dups its inputs.
-fn schedule_op(config: ScheduleConfig, stack: &mut TrackedStack, graph: &OpGraph, op: OpNodeId) {
+fn schedule_op<Sink: FnMut(StackOps)>(
+    config: ScheduleConfig,
+    stack: &mut TrackedStack<'_, Sink>,
+    graph: &OpGraph,
+    op: OpNodeId,
+) {
     let max_dup_depth = u16::from(config.max_dup_depth);
 
     let mut in_the_way_buf = Vec::new();
@@ -102,7 +105,11 @@ fn count_occurences(values: &[ValueNodeId], total_values: usize) -> IndexVec<Val
     counts
 }
 
-fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &OpGraph) {
+fn shuffle_to_output<Sink: FnMut(StackOps)>(
+    _config: ScheduleConfig,
+    stack: &mut TrackedStack<'_, Sink>,
+    graph: &OpGraph,
+) {
     let target_stack = graph.end_stack_fifo.as_slice();
     let target_counts = count_occurences(target_stack, graph.values.len());
 
@@ -122,7 +129,7 @@ fn shuffle_to_output(_config: ScheduleConfig, stack: &mut TrackedStack, graph: &
 }
 
 pub fn dumb_schedule(
-    ops_sink: &mut ListOfListsPusher<'_, BasicBlockId, StackOps>,
+    ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
     next_alloc_id: &Cell<StaticAllocId>,
     config: ScheduleConfig,
