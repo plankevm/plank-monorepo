@@ -5,7 +5,7 @@ Plank is a compiler frontend for the Plank programming language that lowers to S
 ## Commands
 
 ```bash
-cargo test -p <crate name> # Run during work on a specific crate for validation
+cargo nextest run -p <crate name> # Run during work on a specific crate for validation
 
 # Run formatter & linter (clippy) at the end of tasks
 just check
