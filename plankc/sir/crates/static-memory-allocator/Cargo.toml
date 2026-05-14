@@ -6,7 +6,10 @@ license.workspace = true
 
 [dependencies]
 hashbrown.workspace = true
+plank-core.workspace = true
 sir-data.workspace = true
+sir-passes.workspace = true
+sir-stack-scheduling.workspace = true
 
 [lints]
 workspace = true

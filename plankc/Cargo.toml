@@ -35,6 +35,9 @@ sir-passes = { path = "sir/crates/passes" }
 sir-parser = { path = "sir/crates/parser" }
 sir-assembler = { path = "sir/crates/assembler" }
 sir-debug-backend = { path = "sir/crates/debug-backend" }
+sir-release-backend = { path = "sir/crates/release-backend" }
+sir-stack-scheduling = { path = "sir/crates/stack-scheduling" }
+sir-static-memory-allocator = { path = "sir/crates/static-memory-allocator" }
 
 # Shared Dependencies
 bumpalo = { version = "3.19.0", features = ["allocator-api2", "collections"] }

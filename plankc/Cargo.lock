@@ -3101,6 +3101,10 @@ version = "0.1.0"
 dependencies = [
  "plank-core",
  "sir-assembler",
+ "sir-data",
+ "sir-passes",
+ "sir-stack-scheduling",
+ "sir-static-memory-allocator",
 ]
 
 [[package]]
@@ -3121,7 +3125,10 @@ name = "sir-static-memory-allocator"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.16.1",
+ "plank-core",
  "sir-data",
+ "sir-passes",
+ "sir-stack-scheduling",
 ]
 
 [[package]]
