@@ -199,70 +199,102 @@ impl Shuffler for GreedyShuffler {
         stack: &mut TrackedStack<'_, Sink>,
         graph: &OpGraph,
     ) {
-        let mut reverse_target_stack = graph.end_stack_fifo.clone();
-        reverse_target_stack.reverse();
-        let mut target_counts = count_occurences(&reverse_target_stack, graph.values.len());
+        let target_stack = graph.end_stack_fifo.as_slice();
+        if target_stack.is_empty() {
+            while !stack.is_empty() {
+                stack.pop();
+            }
+            return;
+        }
+
+        let mut target_counts = count_occurences(target_stack, graph.values.len());
+
+        let max_depth = config.max_swap_depth as usize;
 
         let mut limit = LoopLimit::new();
-        while stack.len() > config.max_swap_depth as u16 + 1 {
+        while stack.len() as usize > max_depth + 1 {
             limit.tick();
             let top = stack.top().expect("top should exist");
-            if stack.get_spilled(top).is_none() {
+            if target_counts[top] != 0 && stack.get_spilled(top).is_none() {
                 stack.spill_top();
-            }
-            stack.pop();
-        }
-
-        let mut bottom = 0;
-
-        loop {
-            limit.tick();
-            let top = stack.top().expect("top must exist");
-            if let Some(final_pos) = reverse_target_stack
-                [bottom..bottom + config.max_swap_depth as usize]
-                .iter()
-                .position(|&v| v == top)
-            {
-                stack.swap(final_pos.try_into().expect("valid final pos"));
             } else {
-                let Some((index, final_pos)) =
-                    stack.fifo()[1..].iter().enumerate().find_map(|(index, swap_candidate)| {
-                        for (target_pos, value) in reverse_target_stack
-                            [bottom..bottom + config.max_swap_depth as usize]
-                            .iter()
-                            .enumerate()
-                        {
-                            if swap_candidate == value && index != target_pos {
-                                return Some((index, target_pos));
-                            }
-                        }
-                        None
-                    })
-                else {
-                    break;
-                };
-                stack.swap(index.try_into().expect("valid index"));
-                stack.swap(final_pos.try_into().expect("valid final pos"));
+                stack.pop();
             }
         }
 
-        while bottom < reverse_target_stack.len() {
+        'rearrange: loop {
             limit.tick();
-            let stack_values = stack.fifo();
-            let needed = reverse_target_stack[bottom];
-            let reachable = stack.len() as usize - 1 - bottom;
-            if stack_values[reachable] == needed {
-                bottom += 1;
+            let stack_depth = stack.len() as usize - 1;
+            let target_depth = target_stack.len() - 1;
+            let reachable_depth = stack_depth.min(target_depth).min(max_depth);
+            let top = stack.top().expect("top should exist");
+            if let Some(pos) = target_stack[..=reachable_depth].iter().position(|&v| v == top)
+                && pos != 0
+                && stack.fifo()[pos] != top
+            {
+                stack.swap(pos.try_into().expect("valid pos"));
+            } else {
+                for depth in 1..=reachable_depth {
+                    let value = stack.fifo()[depth];
+
+                    if value == top {
+                        continue;
+                    }
+
+                    let Some(pos) =
+                        target_stack[..=reachable_depth].iter().position(|&v| v == value)
+                    else {
+                        continue;
+                    };
+                    if pos == depth || stack.fifo()[pos] == value {
+                        continue;
+                    }
+                    stack.swap(depth.try_into().expect("valid depth"));
+                    if pos != 0 {
+                        stack.swap(pos.try_into().expect("valid pos"));
+                    }
+
+                    continue 'rearrange;
+                }
+                break;
+            }
+        }
+
+        let mut placed = 0;
+
+        while placed < target_stack.len() {
+            limit.tick();
+
+            let remaining_target_len = target_stack.len() - placed;
+            let remaining_stack_len = stack.len() as usize - placed;
+            let target_depth = remaining_target_len - 1;
+            let needed = target_stack[target_depth];
+
+            if remaining_stack_len == 0 {
+                let slot = stack.get_spilled(needed).expect("needed value missing in spilled");
+                stack.load(slot);
                 continue;
             }
 
-            if let Some(pos) = stack_values[..reachable].iter().position(|&v| v == needed) {
+            let stack_depth = remaining_stack_len - 1;
+
+            if stack.fifo()[stack_depth] == needed {
+                target_counts[needed] -= 1;
+                if target_counts[needed] > 0 && stack.get_spilled(needed).is_none() {
+                    stack.dup(stack_depth.try_into().expect("valid stack_depth"));
+                }
+                placed += 1;
+                continue;
+            }
+
+            if let Some(pos) = stack.fifo()[..stack_depth].iter().position(|&v| v == needed) {
                 if pos != 0 {
                     stack.swap(pos.try_into().expect("valid pos"));
                 }
-                stack.swap(bottom.try_into().expect("valid bottom"));
+                stack.swap(stack_depth.try_into().expect("valid stack depth"));
             } else {
-                if reachable == config.max_swap_depth as usize {
+                // value not on the stack, need to load it
+                if stack.len() == max_depth.try_into().expect("max depth is u16") {
                     let top = stack.top().expect("top should exist");
                     if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
                         stack.pop();
@@ -270,15 +302,276 @@ impl Shuffler for GreedyShuffler {
                         stack.spill_top();
                     }
                 }
+
                 let slot = stack.get_spilled(needed).expect("needed value missing in spilled");
                 stack.load(slot);
-                stack.swap(bottom.try_into().expect("valid bottom"));
+                stack.swap((stack_depth + 1).try_into().expect("valid stack_depth"));
             }
+
             target_counts[needed] -= 1;
             if target_counts[needed] > 0 && stack.get_spilled(needed).is_none() {
-                stack.dup(bottom.try_into().expect("valid bottom"));
+                stack.dup(stack_depth.try_into().expect("valid stack_depth"));
             }
-            bottom += 1;
+            placed += 1;
         }
+
+        while stack.len() as usize > target_stack.len() {
+            limit.tick();
+            stack.pop();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use plank_core::list_of_lists::ListOfLists;
+    use sir_data::{BasicBlockId, Idx, IndexVec, StaticAllocId};
+
+    use super::*;
+
+    fn value(id: u32) -> ValueNodeId {
+        ValueNodeId::new(id)
+    }
+
+    fn graph_with_target(value_count: usize, end_stack_fifo: Vec<ValueNodeId>) -> OpGraph {
+        let mut values = IndexVec::<ValueNodeId, ValueNode>::new();
+        for _ in 0..value_count {
+            values.push(ValueNode { source: None, used_by: Vec::new() });
+        }
+
+        OpGraph {
+            operations: IndexVec::new(),
+            values,
+            inputs_end: ValueNodeId::ZERO,
+            end_stack_fifo,
+        }
+    }
+
+    fn greedy_shuffle_ops(
+        config: ScheduleConfig,
+        initial_stack_top_first: &[ValueNodeId],
+        target_stack_top_first: Vec<ValueNodeId>,
+    ) -> Vec<StackOps> {
+        let mut evm_stack = EvmStack::new();
+        for &value in initial_stack_top_first.iter().rev() {
+            evm_stack.push(value);
+        }
+
+        let graph = graph_with_target(3, target_stack_top_first);
+        let next_alloc_id = Cell::new(StaticAllocId::ZERO);
+        let mut ops = ListOfLists::<BasicBlockId, StackOps>::new();
+        let block = ops.push_with(|mut pusher| {
+            let mut stack =
+                TrackedStack::new_from_evm(&next_alloc_id, |op| pusher.push(op), evm_stack, 8);
+            <GreedyShuffler as Shuffler>::shuffle_to_output(config, &mut stack, &graph);
+        });
+
+        ops[block].to_vec()
+    }
+
+    fn replay_shuffle_ops(
+        initial_stack_top_first: &[ValueNodeId],
+        ops: &[StackOps],
+    ) -> Vec<ValueNodeId> {
+        let mut stack = initial_stack_top_first.to_vec();
+        let mut static_allocs = Vec::<(StaticAllocId, ValueNodeId)>::new();
+
+        for &op in ops {
+            match op {
+                StackOps::Swap(depth) => stack.swap(0, depth as usize),
+                StackOps::Dup(depth) => stack.insert(0, stack[depth as usize]),
+                StackOps::Pop => {
+                    stack.remove(0);
+                }
+                StackOps::Store(alloc) => static_allocs.push((alloc, stack.remove(0))),
+                StackOps::Load(alloc) => {
+                    let &(_, value) = static_allocs
+                        .iter()
+                        .find(|&&(stored_alloc, _)| stored_alloc == alloc)
+                        .expect("load should reference previous store");
+                    stack.insert(0, value);
+                }
+                StackOps::Op(_) | StackOps::CallRetPush(_) | StackOps::Exchange(_, _) => {
+                    panic!("unexpected op in shuffler test")
+                }
+            }
+        }
+
+        stack
+    }
+
+    #[test]
+    fn greedy_spills_until_deep_target_value_is_reachable() {
+        let config = ScheduleConfig {
+            max_swap_depth: 1,
+            max_dup_depth: 1,
+            max_exchange_range: 1,
+            exchange_cost: 9,
+        };
+        let a = value(0);
+        let b = value(1);
+        let c = value(2);
+
+        let initial_stack = [c, b, a];
+        let target_stack = vec![b];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_handles_target_shorter_than_swap_window() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+        let b = value(1);
+
+        let initial_stack = [a, b];
+        let target_stack = vec![b, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_duplicates_needed_value_while_reordering() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+        let b = value(1);
+        let c = value(2);
+
+        let initial_stack = [c, b, a];
+        let target_stack = vec![b, c, b];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert!(ops.iter().any(|op| matches!(op, StackOps::Dup(_))));
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_does_not_loop_when_top_value_has_multiple_target_positions() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+        let b = value(1);
+
+        let initial_stack = [a, a, b];
+        let target_stack = vec![a, b, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_rearranges_repeated_values_when_first_target_match_is_already_correct() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+        let b = value(1);
+
+        let initial_stack = [a, b, b, a, a];
+        let target_stack = vec![a, b, a, b, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_rearranges_with_stack_deeper_than_target() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+        let b = value(1);
+        let c = value(2);
+
+        let initial_stack = [a, b, a, c, a];
+        let target_stack = vec![a, c, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_can_extend_stack_with_duplicate() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+
+        let initial_stack = [a];
+        let target_stack = vec![a, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert!(ops.iter().any(|op| matches!(op, StackOps::Dup(_))));
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_handles_missing_value_after_current_stack_is_placed() {
+        let config = ScheduleConfig {
+            max_swap_depth: 1,
+            max_dup_depth: 1,
+            max_exchange_range: 1,
+            exchange_cost: 9,
+        };
+        let a = value(0);
+        let b = value(1);
+        let c = value(2);
+
+        let initial_stack = [b, c, a];
+        let target_stack = vec![b, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_pops_everything_for_empty_target() {
+        let config = ScheduleConfig::default();
+        let a = value(0);
+        let b = value(1);
+        let c = value(2);
+
+        let initial_stack = [a, b, c];
+        let target_stack = vec![];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_uses_max_depth_swap_without_spilling() {
+        let config = ScheduleConfig {
+            max_swap_depth: 1,
+            max_dup_depth: 1,
+            max_exchange_range: 1,
+            exchange_cost: 9,
+        };
+        let a = value(0);
+        let b = value(1);
+
+        let initial_stack = [a, b];
+        let target_stack = vec![b, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert_eq!(ops, vec![StackOps::Swap(1)]);
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
+    }
+
+    #[test]
+    fn greedy_spills_duplicated_value_to_make_room_for_load() {
+        let config = ScheduleConfig {
+            max_swap_depth: 1,
+            max_dup_depth: 1,
+            max_exchange_range: 1,
+            exchange_cost: 9,
+        };
+        let a = value(0);
+        let b = value(1);
+        let c = value(2);
+
+        let initial_stack = [b, c, a];
+        let target_stack = vec![a, b, a];
+        let ops = greedy_shuffle_ops(config, &initial_stack, target_stack.clone());
+
+        assert!(ops.iter().any(|op| matches!(op, StackOps::Dup(_))));
+        assert!(ops.iter().any(|op| matches!(op, StackOps::Load(_))));
+        assert_eq!(replay_shuffle_ops(&initial_stack, &ops), target_stack);
     }
 }
