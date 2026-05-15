@@ -3,6 +3,9 @@ use plank_core::IncIterable;
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
     BasicBlockId, DataId, DenseIndexSet, EthIRProgram, FunctionId, Operation, OperationIdx, Span,
+    operation::{
+        IRMemoryIOByteSize, InlineOperands, MemoryLoadData, MemoryStoreData, StaticAllocData,
+    },
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;
@@ -126,7 +129,7 @@ impl<'a> CodeToAsmEmitter<'a> {
         if let Some(free_pointer) = state.layout().dyn_free_pointer {
             self.asm.push_minimal_u32(free_pointer.start_value.get());
             self.asm.push_minimal_u32(free_pointer.store_slot.get());
-            self.asm.push_op_byte(op::MSTORE8);
+            self.asm.push_op_byte(op::MSTORE);
         }
 
         let entry_bb = self.ir.function(entrypoint).entry().id();
@@ -187,18 +190,20 @@ impl<'a> CodeToAsmEmitter<'a> {
             Operation::InternalCall(args) => {
                 todo!("icall")
             }
-            Operation::DynamicAllocZeroed(args) => {}
-            Operation::DynamicAllocAnyBytes(args) => {}
-            Operation::AcquireFreePointer(_) => {}
-            Operation::StaticAllocZeroed(args) => {}
-            Operation::StaticAllocAnyBytes(args) => {}
+            Operation::DynamicAllocZeroed(_) => self.emit_dynamic_alloc_zeroed(state),
+            Operation::DynamicAllocAnyBytes(_) => self.emit_dynamic_alloc_any_bytes(state),
+            Operation::AcquireFreePointer(_) => self.emit_acquire_free_pointer(state),
+            Operation::StaticAllocZeroed(args) => self.emit_static_alloc(state, args),
+            Operation::StaticAllocAnyBytes(args) => self.emit_static_alloc(state, args),
             Operation::MemoryLoad(data) => self.emit_memory_load(data),
             Operation::MemoryStore(data) => self.emit_memory_store(data),
             Operation::SetSmallConst(args) => self.asm.push_minimal_u32(args.value),
             Operation::SetLargeConst(args) => {
                 self.asm.push_minimal_u256(self.ir.large_consts[args.value]);
             }
-            Operation::SetDataOffset(args) => {}
+            Operation::SetDataOffset(args) => {
+                todo!("SetDataOffset")
+            }
             Operation::RuntimeStartOffset(_) => {
                 assert!(
                     State::ALLOW_INITCODE_INTROSPECTION,
@@ -222,6 +227,89 @@ impl<'a> CodeToAsmEmitter<'a> {
             Operation::SetCopy(_) => { /* noop in terms of effect on the stack */ }
             Operation::Noop(()) => {}
             _ => unreachable!("op neither 'special' or literal EVM: {:?}", op.kind()),
+        }
+    }
+
+    fn emit_dynamic_alloc_zeroed(&mut self, state: &impl CodegenState) {
+        let free_pointer =
+            state.layout().dyn_free_pointer.expect("dynamic allocation without free pointer slot");
+        let free_ptr_slot = free_pointer.store_slot.get();
+
+        // Stack shown deepest => highest; input:    [alloc_size]
+        self.asm.push_minimal_u32(free_ptr_slot); // [alloc_size, free_ptr_slot]
+        self.asm.push_op_byte(op::MLOAD); //         [alloc_size, free_ptr]
+        self.asm.push_op_byte(op::DUP2); //          [alloc_size, free_ptr, alloc_size]
+        self.asm.push_op_byte(op::DUP2); //          [alloc_size, free_ptr, alloc_size, free_ptr]
+        self.asm.push_op_byte(op::ADD); //           [alloc_size, free_ptr, updated_free_ptr]
+        self.asm.push_minimal_u32(free_ptr_slot); // [alloc_size, free_ptr, updated_free_ptr, free_ptr_slot]
+        self.asm.push_op_byte(op::MSTORE); //        [alloc_size, free_ptr]
+        self.asm.push_op_byte(op::SWAP1); //         [free_ptr, alloc_size]
+        self.asm.push_op_byte(op::CALLDATASIZE); //  [free_ptr, alloc_size, cd_size]
+        self.asm.push_op_byte(op::DUP3); //          [free_ptr, alloc_size, cd_size, free_ptr]
+        self.asm.push_op_byte(op::CALLDATACOPY); //  [free_ptr]
+    }
+
+    fn emit_dynamic_alloc_any_bytes(&mut self, state: &impl CodegenState) {
+        let free_pointer =
+            state.layout().dyn_free_pointer.expect("dynamic allocation without free pointer slot");
+        let free_ptr_slot = free_pointer.store_slot.get();
+
+        // Stack shown deepest => highest; input:    [alloc_size]
+        self.asm.push_minimal_u32(free_ptr_slot); // [alloc_size, free_ptr_slot]
+        self.asm.push_op_byte(op::MLOAD); //         [alloc_size, free_ptr]
+        self.asm.push_op_byte(op::SWAP1); //         [free_ptr, alloc_size]
+        self.asm.push_op_byte(op::DUP2); //          [free_ptr, alloc_size, free_ptr]
+        self.asm.push_op_byte(op::ADD); //           [free_ptr, updated_free_ptr]
+        self.asm.push_minimal_u32(free_ptr_slot); // [free_ptr, updated_free_ptr, free_ptr_slot]
+        self.asm.push_op_byte(op::MSTORE); //        [free_ptr]
+    }
+
+    fn emit_acquire_free_pointer(&mut self, state: &impl CodegenState) {
+        let free_pointer = state
+            .layout()
+            .dyn_free_pointer
+            .expect("free pointer acquisition without free pointer slot");
+        self.asm.push_minimal_u32(free_pointer.store_slot.get());
+        self.asm.push_op_byte(op::MLOAD);
+    }
+
+    fn emit_static_alloc(&mut self, state: &impl CodegenState, args: StaticAllocData) {
+        let addr = state.layout().alloc_start[&args.alloc_id];
+        self.asm.push_minimal_u32(addr.get());
+    }
+
+    fn emit_memory_load(&mut self, data: MemoryLoadData) {
+        match data.size {
+            IRMemoryIOByteSize::B32 => self.asm.push_op_byte(op::MLOAD),
+            non_native_load_size => {
+                self.asm.push_minimal_u32(256 - u32::from(non_native_load_size.bits()));
+                self.asm.push_op_byte(op::SHR);
+            }
+        }
+    }
+
+    fn emit_memory_store(&mut self, data: MemoryStoreData) {
+        match data.size {
+            IRMemoryIOByteSize::B1 => self.asm.push_op_byte(op::MSTORE8),
+            IRMemoryIOByteSize::B32 => self.asm.push_op_byte(op::MSTORE),
+            non_native_size => {
+                let bits = u32::from(non_native_size.bits());
+                // Stack states are shown deepest => highest.
+                // start:                                           [value, ptr]
+                self.asm.push_op_byte(op::DUP1); //                 [value, ptr, ptr]
+                self.asm.push_op_byte(op::MLOAD); //                [value, ptr, full_word]
+                self.asm.push_minimal_u32(bits); //                 [value, ptr, full_word, bits]
+                self.asm.push_op_byte(op::SHL); //                  [value, ptr, shifted_word]
+                self.asm.push_minimal_u32(bits); //                 [value, ptr, shifted_word, bits]
+                self.asm.push_op_byte(op::SHR); //                  [value, ptr, cleaned_word]
+                self.asm.push_op_byte(op::DUP3); //                 [value, ptr, cleaned_word, value]
+                self.asm.push_minimal_u32(256 - bits); //           [value, ptr, cleaned_word, value, value_shift]
+                self.asm.push_op_byte(op::SHL); //                  [value, ptr, cleaned_word, shifted_value]
+                self.asm.push_op_byte(op::OR); //                   [value, ptr, updated_word]
+                self.asm.push_op_byte(op::SWAP1); //                [value, updated_word, ptr]
+                self.asm.push_op_byte(op::MSTORE); //               [value]
+                self.asm.push_op_byte(op::POP); //                  []
+            }
         }
     }
 }

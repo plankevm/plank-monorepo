@@ -1,6 +1,6 @@
 use crate::code_to_asm::{CodeToAsmEmitter, CodegenState};
 use hashbrown::HashSet;
-use sir_assembler::MarkId;
+use sir_assembler::{MarkId, MarkReference};
 use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Span};
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
@@ -25,6 +25,8 @@ pub(crate) struct CodegenOrchestrator<'a, State: CodegenState> {
 }
 
 impl CodegenState for EmitInitcode {
+    const ALLOW_INITCODE_INTROSPECTION: bool = true;
+
     fn layout(&self) -> &sir_static_memory_allocator::Layout {
         &self.memory
     }
@@ -33,6 +35,28 @@ impl CodegenState for EmitInitcode {
         let mark = self.bb_marks.start + bb.const_get();
         assert!(mark < self.bb_marks.end, "unexpected basic block id");
         mark
+    }
+
+    fn mark_to_ref(&self, _map: &crate::mark_map::MarkMap, mark: MarkId) -> MarkReference {
+        MarkReference::Direct(mark)
+    }
+}
+
+impl CodegenState for EmitRuncode {
+    const ALLOW_INITCODE_INTROSPECTION: bool = false;
+
+    fn layout(&self) -> &sir_static_memory_allocator::Layout {
+        &self.memory
+    }
+
+    fn bb_to_jumpdest_mark(&self, bb: BasicBlockId) -> MarkId {
+        let mark = self.bb_marks.start + bb.const_get();
+        assert!(mark < self.bb_marks.end, "unexpected basic block id");
+        mark
+    }
+
+    fn mark_to_ref(&self, map: &crate::mark_map::MarkMap, mark: MarkId) -> MarkReference {
+        MarkReference::Delta(Span::new(map.runcode_start, mark))
     }
 }
 
@@ -50,7 +74,6 @@ impl<'a> CodegenOrchestrator<'a, EmitInitcode> {
             bb_marks: init_bb_marks,
         };
 
-        emitter.asm.push_mark(emitter.mark_map.initcode_start);
         emitter.emit_from_entrypoint(&mut state, ir.init_entry);
 
         CodegenOrchestrator { emitter, state }
