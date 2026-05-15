@@ -3053,6 +3053,7 @@ dependencies = [
  "plank-core",
  "plank-test-utils",
  "pretty_assertions",
+ "sir-assembler",
  "thiserror",
 ]
 
@@ -3099,12 +3100,14 @@ dependencies = [
 name = "sir-release-backend"
 version = "0.1.0"
 dependencies = [
+ "hashbrown 0.16.1",
  "plank-core",
  "sir-assembler",
  "sir-data",
  "sir-passes",
  "sir-stack-scheduling",
  "sir-static-memory-allocator",
+ "smallvec",
 ]
 
 [[package]]
@@ -3127,7 +3130,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "plank-core",
  "sir-data",
- "sir-passes",
  "sir-stack-scheduling",
 ]
 

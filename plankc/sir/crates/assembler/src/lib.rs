@@ -186,7 +186,7 @@ impl AsmReference {
         Self { mark_ref: MarkReference::Delta(Span { start, end }), set_size: None, pushed: true }
     }
 
-    pub fn pushed_ref(mark_ref: MarkReference) -> Self {
+    pub fn pushed(mark_ref: MarkReference) -> Self {
         Self { mark_ref, set_size: None, pushed: true }
     }
 }

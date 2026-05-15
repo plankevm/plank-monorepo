@@ -7,6 +7,12 @@ license.workspace = true
 [dependencies]
 sir-assembler.workspace = true
 plank-core.workspace = true
+sir-data.workspace = true
+sir-stack-scheduling.workspace = true
+sir-passes.workspace = true
+sir-static-memory-allocator.workspace = true
+hashbrown.workspace = true
+smallvec.workspace = true
 
 [lints]
 workspace = true
