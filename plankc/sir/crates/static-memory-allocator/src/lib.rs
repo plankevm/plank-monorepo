@@ -1,13 +1,12 @@
 use hashbrown::{HashMap, HashSet};
 use plank_core::list_of_lists::ListOfLists;
-use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
-use sir_passes::AnalysesStore;
+use sir_data::{BasicBlockId, EthIRProgram, FunctionId, StaticAllocId};
 use sir_stack_scheduling::stack::StackOps;
 use std::num::NonZero;
 
-mod noob;
+mod bump_allocate_all;
 
-pub use noob::EvmStaticAllocator;
+pub use bump_allocate_all::BumpAllocateAll;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -36,21 +35,6 @@ pub struct Layout {
     pub switch_store: Option<EvmMemAddr>,
     pub alloc_start: HashMap<StaticAllocId, EvmMemAddr>,
     pub alloc_needs_zeroing: HashSet<StaticAllocId>,
-}
-
-pub enum EntrypointKind {
-    Init,
-    Run,
-}
-
-pub trait LayoutGenerator {
-    fn generate(
-        &mut self,
-        program: &EthIRProgram,
-        analyses: &AnalysesStore,
-        entrypoint: EntrypointKind,
-        stack_ops: &ListOfLists<BasicBlockId, StackOps>,
-    ) -> Layout;
 }
 
 #[cfg(test)]
