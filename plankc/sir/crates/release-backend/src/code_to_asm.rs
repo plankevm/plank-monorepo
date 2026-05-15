@@ -296,19 +296,8 @@ impl<'a> CodeToAsmEmitter<'a> {
                 let bits = u32::from(non_native_size.bits());
                 // Stack states are shown deepest => highest.
                 // start:                                           [value, ptr]
-                self.asm.push_op_byte(op::DUP1); //                 [value, ptr, ptr]
-                self.asm.push_op_byte(op::MLOAD); //                [value, ptr, full_word]
-                self.asm.push_minimal_u32(bits); //                 [value, ptr, full_word, bits]
-                self.asm.push_op_byte(op::SHL); //                  [value, ptr, shifted_word]
-                self.asm.push_minimal_u32(bits); //                 [value, ptr, shifted_word, bits]
-                self.asm.push_op_byte(op::SHR); //                  [value, ptr, cleaned_word]
-                self.asm.push_op_byte(op::DUP3); //                 [value, ptr, cleaned_word, value]
-                self.asm.push_minimal_u32(256 - bits); //           [value, ptr, cleaned_word, value, value_shift]
-                self.asm.push_op_byte(op::SHL); //                  [value, ptr, cleaned_word, shifted_value]
-                self.asm.push_op_byte(op::OR); //                   [value, ptr, updated_word]
-                self.asm.push_op_byte(op::SWAP1); //                [value, updated_word, ptr]
-                self.asm.push_op_byte(op::MSTORE); //               [value]
-                self.asm.push_op_byte(op::POP); //                  []
+                self.asm.push_op_byte(op::SWAP1); //                [ptr, value]
+                self.asm.push_op_byte(op::MSTORE); //               []
             }
         }
     }
