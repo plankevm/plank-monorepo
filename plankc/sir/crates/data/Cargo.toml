@@ -13,3 +13,4 @@ plank-core.workspace = true
 thiserror.workspace = true
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
+sir-assembler.workspace = true
