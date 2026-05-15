@@ -6,7 +6,10 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 use op_graph::build_graph_simple;
 pub use stack::ScheduleConfig;
 
-use crate::{scheduler::dumb_schedule, stack::StackOps};
+use crate::{
+    scheduler::{DumbScheduler, DumbShuffler, Scheduler},
+    stack::StackOps,
+};
 
 mod layouts;
 mod op_graph;
@@ -60,7 +63,7 @@ pub fn schedule<'ir>(
 
         let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
         let ops_idx = ops.push_with(|mut pusher| {
-            dumb_schedule(
+            DumbScheduler::<DumbShuffler>::schedule(
                 |op| pusher.push(op),
                 block,
                 &program.next_static_alloc_id,

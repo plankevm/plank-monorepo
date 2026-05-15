@@ -1,10 +1,49 @@
-use sir_data::{BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
-use std::cell::Cell;
+use plank_core::{LoopLimit, list_of_lists::ListOfListsPusher};
+use sir_data::{BasicBlockId, BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
+use std::{cell::Cell, marker::PhantomData};
 
 use crate::{
     op_graph::*,
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
+
+pub trait Scheduler {
+    fn schedule<Sink: FnMut(StackOps)>(
+        ops_sink: Sink,
+        block: BlockView<'_>,
+        next_alloc_id: &Cell<StaticAllocId>,
+        config: ScheduleConfig,
+        graph: &OpGraph,
+    );
+}
+
+pub struct DumbScheduler<S: Shuffler = DumbShuffler>(PhantomData<S>);
+
+impl<S: Shuffler> Scheduler for DumbScheduler<S> {
+    fn schedule<Sink: FnMut(StackOps)>(
+        ops_sink: Sink,
+        block: BlockView<'_>,
+        next_alloc_id: &Cell<StaticAllocId>,
+        config: ScheduleConfig,
+        graph: &OpGraph,
+    ) {
+        let mut stack = EvmStack::new();
+        for input in graph.input_values_fifo().iter().rev() {
+            stack.push(input);
+        }
+
+        let mut stack = TrackedStack::new_from_evm(next_alloc_id, ops_sink, stack, 8);
+
+        let schedule = get_operation_topological_sort(graph);
+        for op in schedule {
+            DumbOpScheduler::schedule_op(config, &mut stack, graph, op);
+        }
+
+        if !matches!(block.control(), ControlView::LastOpTerminates) {
+            S::shuffle_to_output(config, &mut stack, graph);
+        }
+    }
+}
 
 fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
     let mut in_degrees: IndexVec<OpNodeId, u32> = index_vec![0; graph.operations.len()];
@@ -44,56 +83,68 @@ fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
     topo_sort
 }
 
-// dumb intra-instruction scheduler that always dups its inputs.
-fn schedule_op<Sink: FnMut(StackOps)>(
-    config: ScheduleConfig,
-    stack: &mut TrackedStack<'_, Sink>,
-    graph: &OpGraph,
-    op: OpNodeId,
-) {
-    let max_dup_depth = u16::from(config.max_dup_depth);
+pub trait OpScheduler {
+    fn schedule_op<Sink: FnMut(StackOps)>(
+        config: ScheduleConfig,
+        stack: &mut TrackedStack<'_, Sink>,
+        graph: &OpGraph,
+        op: OpNodeId,
+    );
+}
 
-    let mut in_the_way_buf = Vec::new();
+pub struct DumbOpScheduler;
 
-    for &input in graph.operations[op].consumes_fifo.iter().rev() {
-        let depth = stack.stack().find_first(input).expect("input missing");
-        if depth <= max_dup_depth {
-            stack.dup(depth as u8);
-            continue;
-        } else if let Some(spilled) = stack.get_spilled(input) {
-            stack.load(spilled);
-            continue;
-        }
+impl OpScheduler for DumbOpScheduler {
+    fn schedule_op<Sink: FnMut(StackOps)>(
+        config: ScheduleConfig,
+        stack: &mut TrackedStack<'_, Sink>,
+        graph: &OpGraph,
+        op: OpNodeId,
+    ) {
+        let max_dup_depth = u16::from(config.max_dup_depth);
 
-        let delta_to_max = depth - max_dup_depth;
+        let mut in_the_way_buf = Vec::new();
 
-        in_the_way_buf.clear();
-        in_the_way_buf.extend_from_slice(&stack.fifo()[..delta_to_max as usize]);
+        for &input in graph.operations[op].consumes_fifo.iter().rev() {
+            let depth = stack.stack().find_first(input).expect("input missing");
+            if depth <= max_dup_depth {
+                stack.dup(depth as u8);
+                continue;
+            } else if let Some(spilled) = stack.get_spilled(input) {
+                stack.load(spilled);
+                continue;
+            }
 
-        // Move minimum number of values out of the way.
-        for _ in 0..delta_to_max {
-            let top = stack.top().expect("no top despite beyond max depth");
-            match stack.get_spilled(top) {
-                Some(_) => stack.pop(),
-                None => {
-                    stack.spill_top();
+            let delta_to_max = depth - max_dup_depth;
+
+            in_the_way_buf.clear();
+            in_the_way_buf.extend_from_slice(&stack.fifo()[..delta_to_max as usize]);
+
+            // Move minimum number of values out of the way.
+            for _ in 0..delta_to_max {
+                let top = stack.top().expect("no top despite beyond max depth");
+                match stack.get_spilled(top) {
+                    Some(_) => stack.pop(),
+                    None => {
+                        stack.spill_top();
+                    }
                 }
             }
+
+            // Now dup and spill.
+            stack.dup(config.max_dup_depth);
+            stack.spill_top();
+
+            // Unspill in the way in correct order.
+            for &spilled in in_the_way_buf.iter().rev() {
+                stack.unspill(spilled);
+            }
+
+            // Load target value back
+            stack.unspill(input);
         }
-
-        // Now dup and spill.
-        stack.dup(config.max_dup_depth);
-        stack.spill_top();
-
-        // Unspill in the way in correct order.
-        for &spilled in in_the_way_buf.iter().rev() {
-            stack.unspill(spilled);
-        }
-
-        // Load target value back
-        stack.unspill(input);
+        stack.op(graph, op);
     }
-    stack.op(graph, op);
 }
 
 fn count_occurences(values: &[ValueNodeId], total_values: usize) -> IndexVec<ValueNodeId, u16> {
@@ -105,49 +156,129 @@ fn count_occurences(values: &[ValueNodeId], total_values: usize) -> IndexVec<Val
     counts
 }
 
-fn shuffle_to_output<Sink: FnMut(StackOps)>(
-    _config: ScheduleConfig,
-    stack: &mut TrackedStack<'_, Sink>,
-    graph: &OpGraph,
-) {
-    let target_stack = graph.end_stack_fifo.as_slice();
-    let target_counts = count_occurences(target_stack, graph.values.len());
+pub trait Shuffler {
+    fn shuffle_to_output<Sink: FnMut(StackOps)>(
+        config: ScheduleConfig,
+        stack: &mut TrackedStack<'_, Sink>,
+        graph: &OpGraph,
+    );
+}
 
-    for _ in 0..stack.len() {
-        let top = stack.top().expect("shouldn't pop more than one per loop");
-        if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
-            stack.pop();
-        } else {
-            stack.spill_top();
+pub struct DumbShuffler;
+
+impl Shuffler for DumbShuffler {
+    fn shuffle_to_output<Sink: FnMut(StackOps)>(
+        _config: ScheduleConfig,
+        stack: &mut TrackedStack<'_, Sink>,
+        graph: &OpGraph,
+    ) {
+        let target_stack = graph.end_stack_fifo.as_slice();
+        let target_counts = count_occurences(target_stack, graph.values.len());
+
+        for _ in 0..stack.len() {
+            let top = stack.top().expect("shouldn't pop more than one per loop");
+            if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
+                stack.pop();
+            } else {
+                stack.spill_top();
+            }
         }
-    }
 
-    for &target in target_stack.iter().rev() {
-        let slot = stack.get_spilled(target).expect("missing value in spilled");
-        stack.load(slot);
+        for &target in target_stack.iter().rev() {
+            let slot = stack.get_spilled(target).expect("missing value in spilled");
+            stack.load(slot);
+        }
     }
 }
 
-pub fn dumb_schedule(
-    ops_sink: impl FnMut(StackOps),
-    block: BlockView<'_>,
-    next_alloc_id: &Cell<StaticAllocId>,
-    config: ScheduleConfig,
-    graph: &OpGraph,
-) {
-    let mut stack = EvmStack::new();
-    for input in graph.input_values_fifo().iter().rev() {
-        stack.push(input);
-    }
+pub struct GreedyShuffler;
 
-    let mut stack = TrackedStack::new_from_evm(next_alloc_id, ops_sink, stack, 8);
+impl Shuffler for GreedyShuffler {
+    fn shuffle_to_output<Sink: FnMut(StackOps)>(
+        config: ScheduleConfig,
+        stack: &mut TrackedStack<'_, Sink>,
+        graph: &OpGraph,
+    ) {
+        let mut reverse_target_stack = graph.end_stack_fifo.clone();
+        reverse_target_stack.reverse();
+        let mut target_counts = count_occurences(&reverse_target_stack, graph.values.len());
 
-    let schedule = get_operation_topological_sort(graph);
-    for op in schedule {
-        schedule_op(config, &mut stack, graph, op);
-    }
+        let mut limit = LoopLimit::new();
+        while stack.len() > config.max_swap_depth as u16 + 1 {
+            limit.tick();
+            let top = stack.top().expect("top should exist");
+            if stack.get_spilled(top).is_none() {
+                stack.spill_top();
+            }
+            stack.pop();
+        }
 
-    if !matches!(block.control(), ControlView::LastOpTerminates) {
-        shuffle_to_output(config, &mut stack, graph);
+        let mut bottom = 0;
+
+        loop {
+            limit.tick();
+            let top = stack.top().expect("top must exist");
+            if let Some(final_pos) = reverse_target_stack
+                [bottom..bottom + config.max_swap_depth as usize]
+                .iter()
+                .position(|&v| v == top)
+            {
+                stack.swap(final_pos.try_into().expect("valid final pos"));
+            } else {
+                let Some((index, final_pos)) =
+                    stack.fifo()[1..].iter().enumerate().find_map(|(index, swap_candidate)| {
+                        for (target_pos, value) in reverse_target_stack
+                            [bottom..bottom + config.max_swap_depth as usize]
+                            .iter()
+                            .enumerate()
+                        {
+                            if swap_candidate == value && index != target_pos {
+                                return Some((index, target_pos));
+                            }
+                        }
+                        None
+                    })
+                else {
+                    break;
+                };
+                stack.swap(index.try_into().expect("valid index"));
+                stack.swap(final_pos.try_into().expect("valid final pos"));
+            }
+        }
+
+        while bottom < reverse_target_stack.len() {
+            limit.tick();
+            let stack_values = stack.fifo();
+            let needed = reverse_target_stack[bottom];
+            let reachable = stack.len() as usize - 1 - bottom;
+            if stack_values[reachable] == needed {
+                bottom += 1;
+                continue;
+            }
+
+            if let Some(pos) = stack_values[..reachable].iter().position(|&v| v == needed) {
+                if pos != 0 {
+                    stack.swap(pos.try_into().expect("valid pos"));
+                }
+                stack.swap(bottom.try_into().expect("valid bottom"));
+            } else {
+                if reachable == config.max_swap_depth as usize {
+                    let top = stack.top().expect("top should exist");
+                    if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
+                        stack.pop();
+                    } else {
+                        stack.spill_top();
+                    }
+                }
+                let slot = stack.get_spilled(needed).expect("needed value missing in spilled");
+                stack.load(slot);
+                stack.swap(bottom.try_into().expect("valid bottom"));
+            }
+            target_counts[needed] -= 1;
+            if target_counts[needed] > 0 && stack.get_spilled(needed).is_none() {
+                stack.dup(bottom.try_into().expect("valid bottom"));
+            }
+            bottom += 1;
+        }
     }
 }

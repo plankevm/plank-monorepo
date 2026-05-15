@@ -193,6 +193,11 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
         (self.ops_sink)(StackOps::Dup(depth));
     }
 
+    pub fn swap(&mut self, depth: u8) {
+        self.inner.swap_with_top(depth.into());
+        (self.ops_sink)(StackOps::Swap(depth));
+    }
+
     pub fn get_spilled(&self, target: ValueNodeId) -> Option<StaticAllocId> {
         self.spilled.iter().rev().find_map(|&(value, alloc)| (value == target).then_some(alloc))
     }
