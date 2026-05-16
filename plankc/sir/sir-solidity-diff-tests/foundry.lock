@@ -4,8 +4,11 @@
   },
   "lib/forge-std": {
     "tag": {
-      "name": "v1.15.0",
-      "rev": "0844d7e1fc5e60d77b68e469bff60265f236c398"
+      "name": "v1.16.1",
+      "rev": "620536fa5277db4e3fd46772d5cbc1ea0696fb43"
     }
+  },
+  "plankc/plank-diff-tests/lib/forge-std": {
+    "rev": "8987040ede9553cea20c95ad40d0455930f9c8e0"
   }
 }
