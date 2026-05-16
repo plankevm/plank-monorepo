@@ -31,7 +31,7 @@ pub fn run_pass<T: Pass>(pass: &mut T, program: &mut EthIRProgram, store: &Analy
 
 pub struct PassManager<'a> {
     program: &'a mut EthIRProgram,
-    store: AnalysesStore,
+    pub store: AnalysesStore,
 
     legalizer: Option<Legalizer>,
     sccp: Option<SCCP>,

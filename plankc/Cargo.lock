@@ -3039,10 +3039,12 @@ dependencies = [
 name = "sir-cli"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "clap",
  "sir-debug-backend",
  "sir-parser",
  "sir-passes",
+ "sir-release-backend",
 ]
 
 [[package]]

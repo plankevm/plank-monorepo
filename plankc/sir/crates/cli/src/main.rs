@@ -29,6 +29,9 @@ struct Cli {
 
     #[arg(short = 'O', long = "optimize", help = OPTIMIZE_HELP, value_parser = parse_optimizations_string)]
     optimize: Option<String>,
+
+    #[arg(long, help = "enables the release backend")]
+    release: bool,
 }
 
 fn read_input(input: Option<PathBuf>) -> String {
@@ -64,17 +67,22 @@ fn main() {
     // Parse IR to EthIRProgram
     let mut program = parse_or_panic(&source, config);
 
-    if let Some(passes) = cli.optimize {
-        PassManager::new(&mut program).run_optimizations(&passes);
-    }
+    let analyses = match cli.optimize {
+        Some(passes) => {
+            let mut pass_manager = PassManager::new(&mut program);
+            pass_manager.run_optimizations(&passes);
+            pass_manager.store
+        }
+        None => sir_passes::AnalysesStore::default(),
+    };
 
     let mut bytecode = Vec::with_capacity(0x6000);
-    sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
+    if cli.release {
+        sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode);
+    } else {
+        sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
+    }
 
     // Format and print output
-    print!("0x");
-    for byte in bytecode {
-        print!("{:02x}", byte);
-    }
-    println!();
+    println!("{:#}", alloy_primitives::hex::display(bytecode));
 }

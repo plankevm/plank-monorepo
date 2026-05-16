@@ -14,5 +14,7 @@ path = "src/main.rs"
 [dependencies]
 sir-parser.workspace = true
 sir-debug-backend.workspace = true
+sir-release-backend.workspace = true
 sir-passes.workspace = true
 clap.workspace = true
+alloy-primitives.workspace = true

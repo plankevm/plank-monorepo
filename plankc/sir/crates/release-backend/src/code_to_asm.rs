@@ -1,9 +1,10 @@
-use crate::mark_map::MarkMap;
+use crate::mark_map::{ContinuousMarkMap, MarkMap};
 use alloy_primitives::U256;
 use plank_core::IncIterable;
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
-    BasicBlockId, DataId, DenseIndexSet, EthIRProgram, FunctionId, Operation, OperationIdx, Span,
+    BasicBlockId, ControlView, DataId, DenseIndexSet, EthIRProgram, FunctionId, Operation,
+    OperationIdx, Span,
     operation::{
         IRMemoryIOByteSize, InlineOperands, MemoryLoadData, MemoryStoreData, StaticAllocData,
     },
@@ -12,7 +13,6 @@ use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;
 use smallvec::SmallVec;
 
-const BB_WORKLIST_CAPACITY: usize = 128;
 const ASM_BYTES_CAPACITY: usize = 20_000;
 const ASM_SECTIONS_CAPACITY: usize = 2048;
 const ICALL_RETURNS_INLINE_CAPACITY: usize = 16;
@@ -23,96 +23,44 @@ pub(crate) trait CodegenState {
     const ALLOW_INITCODE_INTROSPECTION: bool;
 
     fn layout(&self) -> &static_mem::Layout;
-    fn bb_to_jumpdest_mark(&self, bb: BasicBlockId) -> MarkId;
-    fn mark_to_ref(&self, map: &MarkMap, mark: MarkId) -> MarkReference;
+    fn bb_marks(&self) -> ContinuousMarkMap<BasicBlockId>;
+    fn mark_to_ref(&self, marks: &MarkMap, mark: MarkId) -> MarkReference;
+    fn data_to_ref(&mut self, marks: &MarkMap, data: DataId) -> MarkReference;
 }
 
 pub(crate) struct CodeToAsmEmitter<'a> {
     pub mark_map: MarkMap,
     pub asm: Assembler,
-    ir: &'a EthIRProgram,
+    pub ir: &'a EthIRProgram,
     ops: &'a ScheduledOps,
     visited_bbs: DenseIndexSet<BasicBlockId>,
     basic_blocks_worklist: Vec<BasicBlockId>,
-    runtime_datas: DenseIndexSet<DataId>,
 }
 
 impl<'a> CodeToAsmEmitter<'a> {
-    pub fn new(ir: &'a EthIRProgram, ops: &'a ScheduledOps) -> Self {
-        let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
-        let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_CAPACITY);
-
-        let runtime_datas = match ir.main_entry {
-            Some(runtime_entrypoint) => {
-                let mut runtime_datas =
-                    DenseIndexSet::with_capacity_in_bits(ir.data_segments.len());
-                Self::collect_runtime_datas(
-                    ir,
-                    &mut visited_bbs,
-                    &mut basic_blocks_worklist,
-                    &mut runtime_datas,
-                    runtime_entrypoint,
-                );
-                runtime_datas
-            }
-            None => DenseIndexSet::new(),
-        };
-
+    pub fn new(
+        ir: &'a EthIRProgram,
+        ops: &'a ScheduledOps,
+        mut visited_bbs: DenseIndexSet<BasicBlockId>,
+        mut basic_blocks_worklist: Vec<BasicBlockId>,
+    ) -> Self {
         let mark_map = MarkMap::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
 
-        Self { ir, ops, mark_map, visited_bbs, basic_blocks_worklist, asm, runtime_datas }
+        // Extra clear just to be safe.
+        visited_bbs.clear();
+        basic_blocks_worklist.clear();
+
+        Self { ir, ops, mark_map, visited_bbs, basic_blocks_worklist, asm }
     }
 
-    pub fn asm_mut(&mut self) -> &mut Assembler {
-        &mut self.asm
-    }
-
-    pub fn mark_map(&self) -> &MarkMap {
-        &self.mark_map
-    }
-
-    pub fn alloc_bb_marks(&mut self) -> Span<MarkId> {
-        MarkMap::alloc_id_span(&mut self.mark_map.next_mark_id, self.ir.basic_blocks.len())
+    pub fn alloc_bb_marks(&mut self) -> ContinuousMarkMap<BasicBlockId> {
+        MarkMap::alloc_map(&mut self.mark_map.next_mark_id, self.ir.basic_blocks.len())
     }
 
     fn reset_for_entrypoint(&mut self) {
         self.basic_blocks_worklist.clear();
         self.visited_bbs.clear();
-    }
-
-    fn collect_runtime_datas(
-        ir: &'a EthIRProgram,
-        visited_bbs: &mut DenseIndexSet<BasicBlockId>,
-        basic_blocks_worklist: &mut Vec<BasicBlockId>,
-        runtime_datas: &mut DenseIndexSet<DataId>,
-        runtime_entrypoint: FunctionId,
-    ) {
-        let entry_bb = ir.function(runtime_entrypoint).entry().id();
-        visited_bbs.add(entry_bb);
-        basic_blocks_worklist.push(entry_bb);
-        while let Some(bb_id) = basic_blocks_worklist.pop() {
-            let block = ir.block(bb_id);
-            for op in block.operations() {
-                match op.op() {
-                    Operation::SetDataOffset(set_data) => {
-                        runtime_datas.add(set_data.segment_id);
-                    }
-                    Operation::InternalCall(icall) => {
-                        let fn_entry = ir.functions[icall.function].entry();
-                        if visited_bbs.add(fn_entry) {
-                            basic_blocks_worklist.push(fn_entry);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            for succ in block.successors() {
-                if visited_bbs.add(succ) {
-                    basic_blocks_worklist.push(succ);
-                }
-            }
-        }
     }
 
     fn enqueue_bb(&mut self, bb: BasicBlockId) -> bool {
@@ -139,7 +87,7 @@ impl<'a> CodeToAsmEmitter<'a> {
         let mut icall_returns = ICallReturns::new();
 
         while let Some(bb_id) = self.basic_blocks_worklist.pop() {
-            let jumpdest_mark = state.bb_to_jumpdest_mark(bb_id);
+            let jumpdest_mark = state.bb_marks().get(bb_id);
             self.asm.push_mark(jumpdest_mark);
             self.asm.push_op_byte(op::JUMPDEST);
 
@@ -172,6 +120,61 @@ impl<'a> CodeToAsmEmitter<'a> {
                     }
                 }
             }
+
+            let block = self.ir.block(bb_id);
+
+            match block.control() {
+                ControlView::LastOpTerminates => { /* scheduled and handled above */ }
+                ControlView::InternalReturn => {
+                    self.asm.push_op_byte(op::JUMP);
+                }
+                ControlView::ContinuesTo(to) => {
+                    let to_mark = state.bb_marks().get(to);
+                    let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
+                    self.asm.push_reference(AsmReference::pushed(to_ref));
+                    self.asm.push_op_byte(op::JUMP);
+                }
+                ControlView::Branches { condition: _, non_zero_target, zero_target } => {
+                    let non_zero_mark = state.bb_marks().get(non_zero_target);
+                    let non_zero_ref = state.mark_to_ref(&self.mark_map, non_zero_mark);
+                    let zero_mark = state.bb_marks().get(zero_target);
+                    let zero_ref = state.mark_to_ref(&self.mark_map, zero_mark);
+
+                    self.asm.push_reference(AsmReference::pushed(non_zero_ref));
+                    self.asm.push_op_byte(op::JUMPI);
+                    self.asm.push_reference(AsmReference::pushed(zero_ref));
+                    self.asm.push_op_byte(op::JUMP);
+                }
+                ControlView::Switch(switch) => {
+                    let switch_store_addr =
+                        state.layout().switch_store.expect("missing switch allocation").get();
+
+                    self.asm.push_minimal_u32(switch_store_addr);
+                    self.asm.push_op_byte(op::MSTORE);
+
+                    for (value, to) in switch.cases() {
+                        let to_mark = state.bb_marks().get(to);
+                        let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
+                        self.asm.push_minimal_u32(switch_store_addr);
+                        self.asm.push_op_byte(op::MLOAD);
+                        self.asm.push_minimal_u256(value);
+                        self.asm.push_op_byte(op::EQ);
+                        self.asm.push_reference(AsmReference::pushed(to_ref));
+                        self.asm.push_op_byte(op::JUMPI);
+                    }
+
+                    if let Some(to) = switch.fallback() {
+                        let to_mark = state.bb_marks().get(to);
+                        let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
+                        self.asm.push_reference(AsmReference::pushed(to_ref));
+                        self.asm.push_op_byte(op::JUMP);
+                    }
+                }
+            }
+
+            for succ in block.successors() {
+                self.enqueue_bb(succ);
+            }
         }
     }
 
@@ -189,7 +192,28 @@ impl<'a> CodeToAsmEmitter<'a> {
 
         match op {
             Operation::InternalCall(args) => {
-                todo!("icall")
+                let call_entry_ref = {
+                    let call_entry_bb = self.ir.function(args.function).entry().id();
+                    self.enqueue_bb(call_entry_bb);
+                    let bb_entry_mark = state.bb_marks().get(call_entry_bb);
+                    state.mark_to_ref(&self.mark_map, bb_entry_mark)
+                };
+                let call_return_dest = {
+                    let (i, mark) = icall_returns
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, &(ret_dest_op_idx, mark))| {
+                            (ret_dest_op_idx == op_idx).then_some((i, mark))
+                        })
+                        .expect("return dest not emitted *before* icall");
+                    icall_returns.swap_remove(i);
+                    mark
+                };
+
+                self.asm.push_reference(AsmReference::pushed(call_entry_ref));
+                self.asm.push_op_byte(op::JUMP);
+                self.asm.push_mark(call_return_dest);
+                self.asm.push_op_byte(op::JUMPDEST);
             }
             Operation::DynamicAllocZeroed(_) => self.emit_dynamic_alloc_zeroed(state),
             Operation::DynamicAllocAnyBytes(_) => self.emit_dynamic_alloc_any_bytes(state),
@@ -203,7 +227,8 @@ impl<'a> CodeToAsmEmitter<'a> {
                 self.asm.push_minimal_u256(self.ir.large_consts[args.value]);
             }
             Operation::SetDataOffset(args) => {
-                todo!("SetDataOffset")
+                let r#ref = state.data_to_ref(&self.mark_map, args.segment_id);
+                self.asm.push_reference(AsmReference::pushed(r#ref));
             }
             Operation::RuntimeStartOffset(_) => {
                 assert!(
@@ -225,8 +250,10 @@ impl<'a> CodeToAsmEmitter<'a> {
                 let asm_ref = AsmReference::pushed(MarkReference::Delta(self.mark_map.runcode()));
                 self.asm.push_reference(asm_ref);
             }
-            Operation::SetCopy(_) => { /* noop in terms of effect on the stack */ }
-            Operation::Noop(()) => {}
+            Operation::SetCopy(_) | Operation::Noop(()) => {
+                // interpreted as a stack operation "setcopy" would pop and push back the top
+                // making it a noop.
+            }
             _ => unreachable!("op neither 'special' or literal EVM: {:?}", op.kind()),
         }
     }
@@ -306,41 +333,27 @@ impl<'a> CodeToAsmEmitter<'a> {
             MemSize::B32 => self.asm.push_op_byte(op::MSTORE),
             non_native_size => {
                 let bits = u32::from(non_native_size.bits());
-                // Stack states are shown deepest => highest.
-                // start:    [value, ptr]
-                // swap1     [ptr, value]
-                // <256-bits>[ptr, value, hisft]
-                // shl       [ptr, shf_value]
-                // dup2      [ptr, shf_value, ptr]
-                // mload     [ptr, shf_value, full_word]
-                // <clean> => bits shl bits shr   // 6 bytes, 12 gas
-                //            mask and            // 2 + mask bytes, 6 gas
-                //            0 not bits shr and  // 6 bytes, 14 gas
-                //         [ptr, shf_value, cleaned_word]
-                // or      [ptr, new_word]
-                // swap1   [new_word, ptr]
-                // mstore
-
-                self.asm.push_op_byte(op::SWAP1);
-                self.asm.push_minimal_u32(256 - bits);
-                self.asm.push_op_byte(op::SHL);
-                self.asm.push_op_byte(op::DUP2);
-                self.asm.push_op_byte(op::MLOAD);
+                // Stack shown deepest => highest;  input: [value, ptr]
+                self.asm.push_op_byte(op::SWAP1); //       [ptr, value]
+                self.asm.push_minimal_u32(256 - bits); //  [ptr, value, value_shift]
+                self.asm.push_op_byte(op::SHL); //         [ptr, shifted_value]
+                self.asm.push_op_byte(op::DUP2); //        [ptr, shifted_value, ptr]
+                self.asm.push_op_byte(op::MLOAD); //       [ptr, shifted_value, full_word]
 
                 if (non_native_size as u8) >= 28 {
                     let mask = U256::ONE.wrapping_shl(256 - bits as usize).wrapping_sub(U256::ONE);
-                    self.asm.push_minimal_u256(mask);
-                    self.asm.push_op_byte(op::AND);
+                    self.asm.push_minimal_u256(mask); //   [ptr, shifted_value, full_word, preserved_word_mask]
+                    self.asm.push_op_byte(op::AND); //     [ptr, shifted_value, cleaned_word]
                 } else {
-                    self.asm.push_minimal_u32(bits);
-                    self.asm.push_op_byte(op::SHL);
-                    self.asm.push_minimal_u32(bits);
-                    self.asm.push_op_byte(op::SHR);
+                    self.asm.push_minimal_u32(bits); //    [ptr, shifted_value, full_word, bits]
+                    self.asm.push_op_byte(op::SHL); //     [ptr, shifted_value, shifted_word]
+                    self.asm.push_minimal_u32(bits); //    [ptr, shifted_value, shifted_word, bits]
+                    self.asm.push_op_byte(op::SHR); //     [ptr, shifted_value, cleaned_word]
                 }
 
-                self.asm.push_op_byte(op::XOR);
-                self.asm.push_op_byte(op::SWAP1);
-                self.asm.push_op_byte(op::MSTORE);
+                self.asm.push_op_byte(op::XOR); //         [ptr, new_word]
+                self.asm.push_op_byte(op::SWAP1); //       [new_word, ptr]
+                self.asm.push_op_byte(op::MSTORE); //      []
             }
         }
     }
