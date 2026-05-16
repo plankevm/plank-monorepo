@@ -16,7 +16,8 @@ test:
 
 [working-directory: 'sir/sir-solidity-diff-tests']
 test-sir-diff:
-     forge test --ffi
+     SIR_RELEASE_BACKEND=0 forge test --ffi
+     SIR_RELEASE_BACKEND=1 forge test --ffi
 
 [working-directory: 'plank-diff-tests/']
 test-plank-diff: test-plank-diff-sir test-plank-diff-sona

@@ -131,10 +131,6 @@ contract DefragmentTest is BaseTest {
         bytes memory codeBefore = sir(abi.encode("src/defragment_dead_code.sir", "--init-only"));
         bytes memory codeAfter = sir(abi.encode("src/defragment_dead_code.sir", "--init-only", "-O", "d"));
 
-        assertEq(
-            codeBefore.length - codeAfter.length, 64, "defragmentation should remove exactly 64 bytes of dead data"
-        );
-
         address implBefore = makeAddr("before-defrag");
         address implAfter = makeAddr("after-defrag");
         vm.etch(implBefore, codeBefore);

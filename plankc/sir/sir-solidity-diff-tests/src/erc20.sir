@@ -1,0 +1,551 @@
+fn main:
+    b0 {
+        v0 = const 0x0
+        v1 = calldataload v0
+        v2 = const 0xe0
+        v3 = shr v2 v1
+        v4 = const 0x70a08231
+        v5 = eq v3 v4
+        => v5 ? @b18 : @b1
+    }
+
+    b1 {
+        v6 = const 0x18160ddd
+        v7 = eq v3 v6
+        => v7 ? @b17 : @b2
+    }
+
+    b2 {
+        v8 = const 0xa9059cbb
+        v9 = eq v3 v8
+        => v9 ? @b16 : @b3
+    }
+
+    b3 {
+        v10 = const 0xdd62ed3e
+        v11 = eq v3 v10
+        => v11 ? @b15 : @b4
+    }
+
+    b4 {
+        v12 = const 0x95ea7b3
+        v13 = eq v3 v12
+        => v13 ? @b14 : @b5
+    }
+
+    b5 {
+        v14 = const 0x23b872dd
+        v15 = eq v3 v14
+        => v15 ? @b13 : @b6
+    }
+
+    b6 {
+        v16 = const 0x313ce567
+        v17 = eq v3 v16
+        => v17 ? @b12 : @b7
+    }
+
+    b7 {
+        v18 = const 0x6fdde03
+        v19 = eq v3 v18
+        => v19 ? @b11 : @b8
+    }
+
+    b8 {
+        v20 = const 0x95d89b41
+        v21 = eq v3 v20
+        => v21 ? @b10 : @b9
+    }
+
+    b9 {
+        v22 = const 0x0
+        v23 = mallocany v22
+        v24 = const 0x0
+        revert v23 v24
+    }
+
+    b10 {
+        icall @f1
+        invalid
+    }
+
+    b11 {
+        icall @f2
+        invalid
+    }
+
+    b12 {
+        icall @f3
+        invalid
+    }
+
+    b13 {
+        icall @f4
+        invalid
+    }
+
+    b14 {
+        icall @f5
+        invalid
+    }
+
+    b15 {
+        icall @f6
+        invalid
+    }
+
+    b16 {
+        icall @f7
+        invalid
+    }
+
+    b17 {
+        icall @f8
+        invalid
+    }
+
+    b18 {
+        v25 = const 0x4
+        v26 = calldataload v25
+        icall @f9 v26
+        invalid
+    }
+
+
+fn f1:
+    b60 {
+        v213 = const 0x3
+        v214 = mallocany v213
+        v215 = const 0x504c4b
+        mstore24 v214 v215
+        v216 = const 0x3
+        v217 v218 = icall @f15 v214 v216
+        v219 v220 = icall @f16 v217 v218
+        return v219 v220
+    }
+
+
+fn f2:
+    b43 {
+        v143 = const 0xa
+        v144 = mallocany v143
+        v145 = large_const 0x506c616e6b546f6b656e
+        mstore80 v144 v145
+        v146 = const 0xa
+        v147 v148 = icall @f15 v144 v146
+        v149 v150 = icall @f16 v147 v148
+        return v149 v150
+    }
+
+
+fn f3:
+    b42 {
+        v139 = const 0x20
+        v140 = mallocany v139
+        v141 = const 0x12
+        mstore256 v140 v141
+        v142 = const 0x20
+        return v140 v142
+    }
+
+
+fn f4:
+    b38 {
+        v119 = const 0x4
+        v120 = calldataload v119
+        v121 = const 0x24
+        v122 = calldataload v121
+        v123 = const 0x44
+        v124 = calldataload v123
+        v125 = caller
+        v126 = const 0x2
+        v127 = icall @f10 v120 v126
+        v128 = icall @f10 v125 v127
+        v129 = sload v128
+        v130 = lt v129 v124
+        => v130 ? @b41 : @b39
+    }
+
+    b39 {
+        => @b40
+    }
+
+    b40 {
+        v131 = icall @f12 v129 v124
+        sstore v128 v131
+        icall @f11 v120 v122 v124
+        v132 = const 0x20
+        v133 = mallocany v132
+        v134 = const 0x1
+        mstore256 v133 v134
+        v135 = const 0x20
+        return v133 v135
+    }
+
+    b41 {
+        v136 = const 0x0
+        v137 = mallocany v136
+        v138 = const 0x0
+        revert v137 v138
+    }
+
+
+fn f5:
+    b37 {
+        v105 = const 0x4
+        v106 = calldataload v105
+        v107 = const 0x24
+        v108 = calldataload v107
+        v109 = caller
+        v110 = const 0x2
+        v111 = icall @f10 v109 v110
+        v112 = icall @f10 v106 v111
+        sstore v112 v108
+        v113 = const 0x20
+        v114 = mallocany v113
+        mstore256 v114 v108
+        v115 = const 0x20
+        v116 = large_const 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925
+        log3 v114 v115 v116 v109 v106
+        v117 = const 0x1
+        mstore256 v114 v117
+        v118 = const 0x20
+        return v114 v118
+    }
+
+
+fn f6:
+    b36 {
+        v94 = const 0x4
+        v95 = calldataload v94
+        v96 = const 0x24
+        v97 = calldataload v96
+        v98 = const 0x2
+        v99 = icall @f10 v95 v98
+        v100 = icall @f10 v97 v99
+        v101 = sload v100
+        v102 = const 0x20
+        v103 = mallocany v102
+        mstore256 v103 v101
+        v104 = const 0x20
+        return v103 v104
+    }
+
+
+fn f7:
+    b22 {
+        v47 = const 0x4
+        v48 = calldataload v47
+        v49 = const 0x24
+        v50 = calldataload v49
+        v51 = caller
+        icall @f11 v51 v48 v50
+        v52 = const 0x20
+        v53 = mallocany v52
+        v54 = const 0x1
+        mstore256 v53 v54
+        v55 = const 0x20
+        return v53 v55
+    }
+
+
+fn f8:
+    b21 {
+        v42 = const 0x20
+        v43 = mallocany v42
+        v44 = const 0x0
+        v45 = sload v44
+        mstore256 v43 v45
+        v46 = const 0x20
+        return v43 v46
+    }
+
+
+fn f9:
+    b19 v27 {
+        v28 = const 0x1
+        v29 = icall @f10 v27 v28
+        v30 = const 0x20
+        v31 = mallocany v30
+        v32 = sload v29
+        mstore256 v31 v32
+        v33 = const 0x20
+        return v31 v33
+    }
+
+
+fn f10:
+    b20 v34 v35 -> v41 {
+        v36 = const 0x40
+        v37 = mallocany v36
+        mstore256 v37 v34
+        v38 = const 0x20
+        v39 = add v37 v38
+        mstore256 v39 v35
+        v40 = const 0x40
+        v41 = keccak256 v37 v40
+        iret
+    }
+
+
+fn f11:
+    b23 v56 v57 v58 {
+        v59 = const 0x1
+        v60 = icall @f10 v56 v59
+        v61 = sload v60
+        v62 = lt v61 v58
+        => v62 ? @b26 : @b24
+    }
+
+    b24 {
+        => @b25
+    }
+
+    b25 {
+        v63 = icall @f12 v61 v58
+        sstore v60 v63
+        v64 = const 0x1
+        v65 = icall @f10 v57 v64
+        v66 = sload v65
+        v67 = icall @f13 v66 v58
+        sstore v65 v67
+        v68 = const 0x20
+        v69 = mallocany v68
+        mstore256 v69 v58
+        v70 = const 0x20
+        v71 = large_const 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+        log3 v69 v70 v71 v56 v57
+        iret
+    }
+
+    b26 {
+        v72 = const 0x0
+        v73 = mallocany v72
+        v74 = const 0x0
+        revert v73 v74
+    }
+
+
+fn f12:
+    b32 v90 v91 {
+        v92 = sub v90 v91
+        v93 = gt v92 v90
+        => v93 ? @b35 : @b33
+    }
+
+    b33 {
+        => @b34
+    }
+
+    b34 -> v92 {
+        iret
+    }
+
+    b35 {
+        icall @f14
+        invalid
+    }
+
+
+fn f13:
+    b27 v75 v76 {
+        v77 = add v75 v76
+        v78 = lt v77 v75
+        => v78 ? @b30 : @b28
+    }
+
+    b28 {
+        => @b29
+    }
+
+    b29 -> v77 {
+        iret
+    }
+
+    b30 {
+        icall @f14
+        invalid
+    }
+
+
+fn f14:
+    b31 {
+        v79 = const 0x40
+        v80 = mallocany v79
+        v81 = const 0x0
+        v82 = add v80 v81
+        v83 = const 0x4e487b71
+        mstore256 v82 v83
+        v84 = const 0x20
+        v85 = add v80 v84
+        v86 = const 0x11
+        mstore256 v85 v86
+        v87 = const 0x1c
+        v88 = add v80 v87
+        v89 = const 0x24
+        revert v88 v89
+    }
+
+
+fn f15:
+    b59 v211 v212 -> v211 v212 {
+        iret
+    }
+
+
+fn f16:
+    b44 v151 v152 -> v154 v155 {
+        v153 = icall @f17 v151 v152
+        v154 v155 = icall @f18 v153
+        v156 = const 0x0
+        v157 = icall @f19 v154 v156 v151 v152
+        iret
+    }
+
+
+fn f17:
+    b58 v206 v207 -> v210 {
+        v208 = icall @f22 v207
+        v209 = const 0x20
+        v210 = icall @f13 v209 v208
+        iret
+    }
+
+
+fn f18:
+    b57 v204 -> v205 v204 {
+        v205 = malloc v204
+        iret
+    }
+
+
+fn f19:
+    b45 v158 v159 v160 v161 -> v168 {
+        v162 = icall @f20 v158 v159 v161
+        v163 = const 0x20
+        v164 = icall @f13 v159 v163
+        v165 = icall @f21 v158 v164 v160 v161
+        v166 = icall @f22 v161
+        v167 = const 0x20
+        v168 = icall @f13 v167 v166
+        iret
+    }
+
+
+fn f20:
+    b56 v199 v200 v201 -> v203 {
+        v202 = add v199 v200
+        mstore256 v202 v201
+        v203 = const 0x20
+        iret
+    }
+
+
+fn f21:
+    b55 v194 v195 v196 v197 -> v197 {
+        v198 = add v194 v195
+        mcopy v198 v196 v197
+        iret
+    }
+
+
+fn f22:
+    b46 v169 {
+        v170 = const 0x20
+        v171 = icall @f23 v169 v170
+        v172 = const 0x0
+        v173 = eq v171 v172
+        => v173 ? @b49 : @b47
+    }
+
+    b47 -> v176 {
+        v174 = const 0x20
+        v175 = add v169 v174
+        v176 = sub v175 v171
+        => @b48
+    }
+
+    b48 v177 -> v177 {
+        iret
+    }
+
+    b49 -> v169 {
+        => @b48
+    }
+
+
+fn f23:
+    b50 v178 v179 {
+        v180 = const 0x0
+        v181 = eq v179 v180
+        => v181 ? @b53 : @b51
+    }
+
+    b51 {
+        => @b52
+    }
+
+    b52 -> v182 {
+        v182 = mod v178 v179
+        iret
+    }
+
+    b53 {
+        icall @f24
+        invalid
+    }
+
+
+fn f24:
+    b54 {
+        v183 = const 0x40
+        v184 = mallocany v183
+        v185 = const 0x0
+        v186 = add v184 v185
+        v187 = const 0x4e487b71
+        mstore256 v186 v187
+        v188 = const 0x20
+        v189 = add v184 v188
+        v190 = const 0x12
+        mstore256 v189 v190
+        v191 = const 0x1c
+        v192 = add v184 v191
+        v193 = const 0x24
+        revert v192 v193
+    }
+
+
+fn init:
+    b61 {
+        v221 = const 0x0
+        v222 = const 0xf4240
+        sstore v221 v222
+        v223 = caller
+        v224 = const 0x1
+        v225 = icall @f10 v223 v224
+        v226 = const 0x20
+        v227 = mallocany v226
+        v228 = const 0xf4240
+        sstore v225 v228
+        v229 = const 0xf4240
+        mstore256 v227 v229
+        v230 = const 0x20
+        v231 = large_const 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
+        v232 = const 0x0
+        log3 v227 v230 v231 v232 v223
+        icall @f26
+        invalid
+    }
+
+
+fn f26:
+    b62 {
+        v233 = runtime_length
+        v234 = mallocany v233
+        v235 = runtime_start_offset
+        v236 = runtime_length
+        codecopy v234 v235 v236
+        v237 = runtime_length
+        return v234 v237
+    }
+
