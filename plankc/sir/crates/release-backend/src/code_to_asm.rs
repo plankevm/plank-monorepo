@@ -1,4 +1,5 @@
 use crate::mark_map::MarkMap;
+use alloy_primitives::U256;
 use plank_core::IncIterable;
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
@@ -274,14 +275,23 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_static_alloc(&mut self, state: &impl CodegenState, args: StaticAllocData) {
-        let addr = state.layout().alloc_start[&args.alloc_id];
-        self.asm.push_minimal_u32(addr.get());
+        let layout = state.layout();
+        let addr = layout.alloc_start[&args.alloc_id];
+        self.asm.push_minimal_u32(addr.get()); //       [alloc_ptr]
+        let needs_zeroing = layout.alloc_needs_zeroing.contains(&args.alloc_id);
+        if needs_zeroing {
+            self.asm.push_minimal_u32(args.size); //    [alloc_ptr, alloc_size]
+            self.asm.push_op_byte(op::CALLDATASIZE); // [alloc_ptr, alloc_size, cd_size]
+            self.asm.push_op_byte(op::DUP3); //         [alloc_ptr, alloc_size, cd_size, alloc_ptr]
+            self.asm.push_op_byte(op::CALLDATACOPY); // [alloc_ptr]
+        }
     }
 
     fn emit_memory_load(&mut self, data: MemoryLoadData) {
         match data.size {
             IRMemoryIOByteSize::B32 => self.asm.push_op_byte(op::MLOAD),
             non_native_load_size => {
+                self.asm.push_op_byte(op::MLOAD);
                 self.asm.push_minimal_u32(256 - u32::from(non_native_load_size.bits()));
                 self.asm.push_op_byte(op::SHR);
             }
@@ -289,15 +299,48 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_memory_store(&mut self, data: MemoryStoreData) {
+        use IRMemoryIOByteSize as MemSize;
+
         match data.size {
-            IRMemoryIOByteSize::B1 => self.asm.push_op_byte(op::MSTORE8),
-            IRMemoryIOByteSize::B32 => self.asm.push_op_byte(op::MSTORE),
+            MemSize::B1 => self.asm.push_op_byte(op::MSTORE8),
+            MemSize::B32 => self.asm.push_op_byte(op::MSTORE),
             non_native_size => {
                 let bits = u32::from(non_native_size.bits());
                 // Stack states are shown deepest => highest.
-                // start:                                           [value, ptr]
-                self.asm.push_op_byte(op::SWAP1); //                [ptr, value]
-                self.asm.push_op_byte(op::MSTORE); //               []
+                // start:    [value, ptr]
+                // swap1     [ptr, value]
+                // <256-bits>[ptr, value, hisft]
+                // shl       [ptr, shf_value]
+                // dup2      [ptr, shf_value, ptr]
+                // mload     [ptr, shf_value, full_word]
+                // <clean> => bits shl bits shr   // 6 bytes, 12 gas
+                //            mask and            // 2 + mask bytes, 6 gas
+                //            0 not bits shr and  // 6 bytes, 14 gas
+                //         [ptr, shf_value, cleaned_word]
+                // or      [ptr, new_word]
+                // swap1   [new_word, ptr]
+                // mstore
+
+                self.asm.push_op_byte(op::SWAP1);
+                self.asm.push_minimal_u32(256 - bits);
+                self.asm.push_op_byte(op::SHL);
+                self.asm.push_op_byte(op::DUP2);
+                self.asm.push_op_byte(op::MLOAD);
+
+                if (non_native_size as u8) >= 28 {
+                    let mask = U256::ONE.wrapping_shl(256 - bits as usize).wrapping_sub(U256::ONE);
+                    self.asm.push_minimal_u256(mask);
+                    self.asm.push_op_byte(op::AND);
+                } else {
+                    self.asm.push_minimal_u32(bits);
+                    self.asm.push_op_byte(op::SHL);
+                    self.asm.push_minimal_u32(bits);
+                    self.asm.push_op_byte(op::SHR);
+                }
+
+                self.asm.push_op_byte(op::XOR);
+                self.asm.push_op_byte(op::SWAP1);
+                self.asm.push_op_byte(op::MSTORE);
             }
         }
     }

@@ -13,6 +13,7 @@ sir-passes.workspace = true
 sir-static-memory-allocator.workspace = true
 hashbrown.workspace = true
 smallvec.workspace = true
+alloy-primitives.workspace = true
 
 [lints]
 workspace = true
