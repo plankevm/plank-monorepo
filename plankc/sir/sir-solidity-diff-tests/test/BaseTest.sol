@@ -15,6 +15,19 @@ abstract contract BaseTest is Test {
     }
 
     function sir(bytes memory encodedSirArgs) internal returns (bytes memory) {
+        bool releaseBackendEnabled;
+        {
+            string memory releaseBackendEnabledStr = vm.envOr(string("SIR_RELEASE_BACKEND"), string("false"));
+            bytes32 releaseBackendEnabledHash = keccak256(bytes(releaseBackendEnabledStr));
+            if (releaseBackendEnabledHash == keccak256("true") || releaseBackendEnabledHash == keccak256("1")) {
+                releaseBackendEnabled = true;
+            } else if (releaseBackendEnabledHash == keccak256("false") || releaseBackendEnabledHash == keccak256("0")) {
+                releaseBackendEnabled = false;
+            } else {
+                revert(string.concat("unexpected/invalid SIR_RELEASE_BACKEND value '", releaseBackendEnabledStr, "'"));
+            }
+        }
+
         uint256 totalArgs;
         assembly ("memory-safe") {
             let firstOffset := mload(add(encodedSirArgs, 0x20))
@@ -22,14 +35,24 @@ abstract contract BaseTest is Test {
         }
         string[] memory sirArgs =
             abi.decode(bytes.concat(bytes32(uint256(0x20)), bytes32(totalArgs), encodedSirArgs), (string[]));
-        string[] memory args = new string[](5 + sirArgs.length);
+
+        totalArgs = 5 + sirArgs.length;
+        if (releaseBackendEnabled) totalArgs++;
+
+        string[] memory args = new string[](totalArgs);
+
+        uint256 argIdx = 0;
         string[5] memory runSir = ["cargo", "run", "-p", "sir-cli", "--"];
         for (uint256 i = 0; i < runSir.length; i++) {
-            args[i] = runSir[i];
+            args[argIdx++] = runSir[i];
+        }
+        if (releaseBackendEnabled) {
+            args[argIdx++] = "--release";
         }
         for (uint256 i = 0; i < sirArgs.length; i++) {
-            args[i + runSir.length] = sirArgs[i];
+            args[argIdx++] = sirArgs[i];
         }
+
         return vm.ffi(args);
     }
 }
