@@ -303,46 +303,28 @@ impl Assembler {
     }
 
     pub fn push_minimal_u256(&mut self, value: U256) {
+        if value.is_zero() {
+            self.push_op_byte(op::PUSH0);
+            return;
+        }
+
         let push_size = 32 - value.leading_zeros() / 8;
-        debug_assert!(push_size <= u8::MAX as usize);
+        assert!(push_size <= u8::MAX as usize);
         let push_op = op::PUSH1 + push_size as u8 - 1;
-        debug_assert!(
-            (value == U256::ZERO) == (push_size == 0) && (push_size == 0) == (push_op == op::PUSH0),
-            "push0 handled incorrectly"
-        );
+        assert!(op::PUSH1 <= push_op && push_op <= op::PUSH32);
+
         self.push_op_byte(push_op);
-        let bytes = value.to_le_bytes::<32>();
-        for i in (0..push_size).rev() {
-            self.push_op_byte(bytes[i]);
+        for &byte in value.to_le_bytes::<32>()[..push_size].iter().rev() {
+            self.push_op_byte(byte);
         }
     }
 
     pub fn push_minimal_u64(&mut self, value: u64) {
-        let push_size = 8 - value.leading_zeros() as u8 / 8;
-        let push_op = op::PUSH1 + push_size - 1;
-        debug_assert!(
-            (value == 0) == (push_size == 0) && (push_size == 0) == (push_op == op::PUSH0),
-            "push0 handled incorrectly"
-        );
-        self.push_op_byte(push_op);
-        let bytes = value.to_le_bytes();
-        for i in (0..push_size).rev() {
-            self.push_op_byte(bytes[i as usize]);
-        }
+        self.push_minimal_u256(U256::from(value));
     }
 
     pub fn push_minimal_u32(&mut self, value: u32) {
-        let push_size = 4 - value.leading_zeros() as u8 / 8;
-        let push_op = op::PUSH1 + push_size - 1;
-        debug_assert!(
-            (value == 0) == (push_size == 0) && (push_size == 0) == (push_op == op::PUSH0),
-            "push0 handled incorrectly"
-        );
-        self.push_op_byte(push_op);
-        let bytes = value.to_le_bytes();
-        for i in (0..push_size).rev() {
-            self.push_op_byte(bytes[i as usize]);
-        }
+        self.push_minimal_u256(U256::from(value));
     }
 
     pub fn push_data(&mut self, data: &[u8]) {
