@@ -265,5 +265,5 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         )
         .unwrap_or_else(|err| cli_error_and_exit(err));
 
-    println!("{}", alloy_primitives::hex::display(bytecode));
+    println!("{:#}", alloy_primitives::hex::display(bytecode));
 }
