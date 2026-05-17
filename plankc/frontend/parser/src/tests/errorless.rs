@@ -1407,6 +1407,49 @@ fn test_fn_def_mixed_comptime_and_runtime_params() {
     );
 }
 
+#[test]
+fn test_fn_def_any_type_param() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const f = fn(value: $T) void {};
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "f"
+                " "
+                "="
+                " "
+                FnDef
+                    "fn"
+                    ParamList
+                        "("
+                        Parameter
+                            Identifier
+                                "value"
+                            ":"
+                            " "
+                            ParamAnyType
+                                "$"
+                                Identifier
+                                    "T"
+                        ")"
+                    " "
+                    Identifier
+                        "void"
+                    " "
+                    Block
+                        "{"
+                        StatementsList
+                        "}"
+                ";"
+        "#,
+    );
+}
+
 // =============================================================================
 // Struct Definitions
 // =============================================================================

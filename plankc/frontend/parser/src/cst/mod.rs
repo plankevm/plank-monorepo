@@ -109,6 +109,7 @@ pub enum NodeKind {
     ParamList,
     Parameter,
     ComptimeParameter,
+    ParamAnyType,
 
     // Misc
     Operator,
@@ -159,6 +160,7 @@ impl std::fmt::Debug for NodeKind {
             Self::ParamList => write!(f, "ParamList"),
             Self::Parameter => write!(f, "Parameter"),
             Self::ComptimeParameter => write!(f, "ComptimeParameter"),
+            Self::ParamAnyType => write!(f, "ParamAnyType"),
             Self::Operator => write!(f, "Operator"),
             Self::StatementsList => write!(f, "StatementsList"),
             Self::ImportPath => write!(f, "ImportPath"),

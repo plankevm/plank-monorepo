@@ -550,7 +550,17 @@ impl<'a> Parser<'a> {
             };
 
             parser.expect(Token::Colon);
-            let r#type = parser.parse_expr(ParseExprMode::AllowAll);
+            let r#type = if parser.check(Token::Dollar) {
+                let any_type_start = parser.tokens.current();
+                parser.expect(Token::Dollar);
+
+                let mut any_type = parser.alloc_node_from(any_type_start, NodeKind::ParamAnyType);
+                let name = parser.expect_ident();
+                parser.push_child(&mut any_type, name);
+                parser.close_node(any_type)
+            } else {
+                parser.parse_expr(ParseExprMode::AllowAll)
+            };
             parser.push_child(&mut parameter, r#type);
 
             let parameter = parser.close_node(parameter);

@@ -71,6 +71,8 @@ pub enum Token {
     Colon,
     #[token(".")]
     Dot,
+    #[token("$")]
+    Dollar,
     #[token("{")]
     LeftCurly,
     #[token("}")]
@@ -258,6 +260,7 @@ impl Token {
             Token::Comma => ",",
             Token::Colon => ":",
             Token::Dot => ".",
+            Token::Dollar => "$",
             Token::LeftCurly => "{",
             Token::RightCurly => "}",
             Token::LeftRound => "(",
@@ -336,6 +339,7 @@ impl Token {
             Token::Comma => "`,`",
             Token::Colon => "`:`",
             Token::Dot => "`.`",
+            Token::Dollar => "`$`",
             Token::LeftCurly => "`{`",
             Token::RightCurly => "`}`",
             Token::LeftRound => "`(`",
