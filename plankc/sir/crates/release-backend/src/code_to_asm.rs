@@ -4,10 +4,8 @@ use plank_core::IncIterable;
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
     BasicBlockId, ControlView, DataId, DenseIndexSet, EthIRProgram, FunctionId, Operation,
-    OperationIdx, Span,
-    operation::{
-        IRMemoryIOByteSize, InlineOperands, MemoryLoadData, MemoryStoreData, StaticAllocData,
-    },
+    OperationIdx,
+    operation::{IRMemoryIOByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;

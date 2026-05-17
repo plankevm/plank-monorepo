@@ -1,5 +1,4 @@
 use hashbrown::{HashMap, HashSet};
-use plank_core::list_of_lists::ListOfLists;
 use sir_data::{
     BasicBlockId, ControlView, DenseIndexSet, EthIRProgram, FunctionId, Idx, Operation,
     StaticAllocId,
@@ -126,10 +125,8 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
             Operation::StaticAllocAnyBytes(data) => {
                 self.alloc_static(data.alloc_id, data.size, false);
             }
-            Operation::InternalCall(data) => {
-                if self.seen_functions.add(data.function) {
-                    self.function_worklist.push(data.function);
-                }
+            Operation::InternalCall(data) if self.seen_functions.add(data.function) => {
+                self.function_worklist.push(data.function);
             }
             _ => {}
         }

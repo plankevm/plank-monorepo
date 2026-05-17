@@ -311,7 +311,7 @@ impl Assembler {
         let push_size = 32 - value.leading_zeros() / 8;
         assert!(push_size <= u8::MAX as usize);
         let push_op = op::PUSH1 + push_size as u8 - 1;
-        assert!(op::PUSH1 <= push_op && push_op <= op::PUSH32);
+        assert!((op::PUSH1..=op::PUSH32).contains(&push_op));
 
         self.push_op_byte(push_op);
         for &byte in value.to_le_bytes::<32>()[..push_size].iter().rev() {

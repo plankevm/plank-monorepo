@@ -1,7 +1,5 @@
 use hashbrown::{HashMap, HashSet};
-use plank_core::list_of_lists::ListOfLists;
-use sir_data::{BasicBlockId, EthIRProgram, FunctionId, StaticAllocId};
-use sir_stack_scheduling::stack::StackOps;
+use sir_data::StaticAllocId;
 use std::num::NonZero;
 
 mod bump_allocate_all;
