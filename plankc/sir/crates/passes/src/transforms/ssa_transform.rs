@@ -253,6 +253,7 @@ mod tests {
     use plank_test_utils::dedent_preserve_indent;
     use sir_parser::EmitConfig;
 
+    #[track_caller]
     fn assert_transforms_to(input: &str, expected_out: &str) {
         let mut config = EmitConfig::init_only();
         config.allow_duplicate_locals = true;
@@ -308,7 +309,7 @@ mod tests {
                     $3 = const 0x0
                     => $3 ? @1 : @5
                 }
-                @1 -> $4 {
+                @1 {
                     $4 = const 0x1
                     => @3
                 }
@@ -316,12 +317,12 @@ mod tests {
                     $0 = const 0x2
                     => @3
                 }
-                @3 $5 -> $5 {
-                    $6 = copy $5
+                @3 -> $4 {
+                    $5 = copy $4
                     => @4
                 }
-                @4 $7 {
-                    $8 = copy $7
+                @4 $6 {
+                    $7 = copy $6
                     stop
                 }
                 @5 -> $3 {
