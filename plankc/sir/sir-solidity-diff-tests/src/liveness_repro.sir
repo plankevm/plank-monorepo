@@ -1,0 +1,55 @@
+fn init:
+    @0 {
+        $24 = runtime_length
+        $25 = mallocany $24
+        $26 = copy $25
+        $27 = runtime_start_offset
+        $28 = runtime_length
+        codecopy $26 $27 $28
+        $29 = copy $25
+        $30 = runtime_length
+        return $29 $30
+    }
+
+fn inner:
+    @1 {
+        $15 = const 0x0
+        $16 = copy $15
+        $17 = const 0x0
+        $18 = gt $16 $17
+        => $18 ? @2 : @6
+    }
+
+    @2 {
+        $19 = copy $15
+        $20 = const 0x0
+        $21 = eq $19 $20
+        => $21 ? @3 : @4
+    }
+
+    @3 {
+        iret
+    }
+
+    @4 {
+        iret
+    }
+
+    @5 {
+        => @7
+    }
+
+    @6 -> $15 {
+        => @7
+    }
+
+    @7 $22 {
+        $23 = copy $22
+        stop
+    }
+
+fn main:
+    @8 {
+        icall @inner
+        stop
+    }
