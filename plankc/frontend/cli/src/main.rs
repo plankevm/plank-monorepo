@@ -70,7 +70,7 @@ struct BuildArgs {
     #[arg(short = 'O', long = "optimize", help = optimize_help())]
     optimize: Option<String>,
 
-    #[arg(long = "backend", value_enum, default_value_t = BackendArg::Sir)]
+    #[arg(long = "backend", value_enum, default_value_t = BackendArg::SirDebug)]
     backend: BackendArg,
 
     #[arg(long = "module-name")]
@@ -85,14 +85,16 @@ struct BuildArgs {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum BackendArg {
-    Sir,
+    SirDebug,
+    SirRelease,
     Sona,
 }
 
 impl From<BackendArg> for BackendKind {
     fn from(value: BackendArg) -> Self {
         match value {
-            BackendArg::Sir => BackendKind::Sir,
+            BackendArg::SirDebug => BackendKind::SirDebug,
+            BackendArg::SirRelease => BackendKind::SirRelease,
             BackendArg::Sona => BackendKind::Sona,
         }
     }

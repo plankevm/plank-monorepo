@@ -46,7 +46,7 @@ abstract contract BaseTest is Test {
     }
 
     function plank(string memory sourcePath) internal returns (bytes memory) {
-        string memory backend = vm.envOr("PLANK_BACKEND", string("sir"));
+        string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
         bool hasOptimize = bytes(optimize).length != 0;
 

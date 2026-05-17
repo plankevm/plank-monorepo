@@ -13,7 +13,8 @@ use std::{
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BackendKind {
     #[default]
-    Sir,
+    SirDebug,
+    SirRelease,
     Sona,
 }
 
@@ -81,25 +82,6 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         plank_hir_eval::evaluate(hir, core_ops_source, &mut self.values, &mut self.session)
     }
 
-    pub fn emit_bytecode(
-        &self,
-        mir: &plank_mir::Mir,
-        optimizations: Option<&str>,
-        disp_needs_separators: bool,
-        show_sir_in: bool,
-        show_sir_last: bool,
-    ) -> Vec<u8> {
-        self.emit_bytecode_with_backend(
-            mir,
-            optimizations,
-            disp_needs_separators,
-            show_sir_in,
-            show_sir_last,
-            BackendKind::Sir,
-        )
-        .expect("SIR bytecode emission should not fail")
-    }
-
     pub fn emit_bytecode_with_backend(
         &self,
         mir: &plank_mir::Mir,
@@ -109,22 +91,27 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         show_sir_last: bool,
         backend: BackendKind,
     ) -> Result<Vec<u8>, String> {
-        match backend {
-            BackendKind::Sir => self.emit_sir_bytecode(
-                mir,
-                optimizations,
-                disp_needs_separators,
-                show_sir_in,
-                show_sir_last,
-            ),
-            BackendKind::Sona => self.emit_sona_bytecode(
-                mir,
-                optimizations,
-                disp_needs_separators,
-                show_sir_in,
-                show_sir_last,
-            ),
-        }
+        let is_sir_debug = match backend {
+            BackendKind::Sona => {
+                return self.emit_sona_bytecode(
+                    mir,
+                    optimizations,
+                    disp_needs_separators,
+                    show_sir_in,
+                    show_sir_last,
+                );
+            }
+            BackendKind::SirDebug => true,
+            BackendKind::SirRelease => false,
+        };
+        self.emit_sir_bytecode(
+            mir,
+            optimizations,
+            disp_needs_separators,
+            show_sir_in,
+            show_sir_last,
+            is_sir_debug,
+        )
     }
 
     fn emit_sir_bytecode(
@@ -134,6 +121,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         disp_needs_separators: bool,
         show_sir_in: bool,
         show_sir_last: bool,
+        is_sir_debug_backend: bool,
     ) -> Result<Vec<u8>, String> {
         let mut program = plank_mir_lower::lower(mir, &self.values);
         if show_sir_in {
@@ -146,10 +134,16 @@ impl<'a, F: SourceFs> Driver<'a, F> {
             pass_manager.run_optimizations(passes);
         }
         if show_sir_last {
-            print_backend_ir("SIR LAST", disp_needs_separators, &program);
+            print_backend_ir("SIR LAST", disp_needs_separators, &pass_manager.program);
         }
+
         let mut bytecode = Vec::with_capacity(0x6000);
-        sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
+        if is_sir_debug_backend {
+            sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
+        } else {
+            let PassManager { store: analyses, .. } = pass_manager;
+            sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode);
+        }
         Ok(bytecode)
     }
 
