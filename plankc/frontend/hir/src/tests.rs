@@ -218,6 +218,126 @@ fn test_return_in_fn_param_type_expression() {
 }
 
 #[test]
+fn test_duplicate_any_type_capture() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(a: $T, b: $T) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: any-type capture conflicts with existing binding
+         --> main.plk:1:25
+          |
+        1 | const f = fn(a: $T, b: $T) void {};
+          |                  -      ^ `T` is already defined
+          |                  |
+          |                  previous binding here
+          |
+          = help: use `T` directly to refer to the existing type
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_any_type_capture_conflicts_with_comptime_param() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(comptime T: type, value: $T) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: any-type capture conflicts with existing binding
+         --> main.plk:1:40
+          |
+        1 | const f = fn(comptime T: type, value: $T) void {};
+          |                       -                ^ `T` is already defined
+          |                       |
+          |                       previous binding here
+          |
+          = help: use `T` directly to refer to the existing type
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_comptime_param_conflicts_with_previous_any_type_capture() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(value: $T, comptime T: type) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: duplicate function parameter
+         --> main.plk:1:34
+          |
+        1 | const f = fn(value: $T, comptime T: type) void {};
+          |                      -           ^ `T` is already defined
+          |                      |
+          |                      previous parameter here
+          |
+          = help: choose a different parameter name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_duplicate_comptime_param() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(comptime T: type, comptime T: type) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: duplicate function parameter
+         --> main.plk:1:41
+          |
+        1 | const f = fn(comptime T: type, comptime T: type) void {};
+          |                       -                 ^ `T` is already defined
+          |                       |
+          |                       previous parameter here
+          |
+          = help: choose a different parameter name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_duplicate_runtime_param() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(a: u256, a: bool) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: duplicate function parameter
+         --> main.plk:1:23
+          |
+        1 | const f = fn(a: u256, a: bool) void {};
+          |              -        ^ `a` is already defined
+          |              |
+          |              previous parameter here
+          |
+          = help: choose a different parameter name
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_fn_struct_return() {
     assert_lowers_to(
         r#"

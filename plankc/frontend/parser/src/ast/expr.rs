@@ -400,7 +400,12 @@ impl<'cst> FnDef<'cst> {
     }
 }
 
-/// Function parameter: `name: Type` or `comptime name: Type`
+pub enum ParamType<'cst> {
+    Explicit(Expr<'cst>),
+    Any { name: StrId, name_span: TokenSpan },
+}
+
+/// Function parameter: `name: Type`, `name: $T`, or `comptime name: Type`
 #[derive(Debug, Clone, Copy)]
 pub struct Param<'cst> {
     pub name: StrId,
@@ -422,8 +427,17 @@ impl<'cst> Param<'cst> {
         Ok(Some(Self { name, name_span: name_node.span(), is_comptime, view }))
     }
 
-    pub fn type_expr(&self) -> Expr<'cst> {
-        self.view.child(1).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
+    pub fn param_type(&self) -> Result<ParamType<'cst>, TokenSpan> {
+        let type_node = self.view.child(1).ok_or(self.view.span())?;
+
+        match type_node.kind() {
+            NodeKind::ParamAnyType => {
+                let name_node = type_node.child(0).ok_or(type_node.span())?;
+                let name = name_node.kind().as_ident().ok_or(type_node.span())?;
+                Ok(ParamType::Any { name, name_span: name_node.span() })
+            }
+            _ => Ok(ParamType::Explicit(Expr::new_unwrap(type_node))),
+        }
     }
 
     pub fn name_span(&self) -> TokenSpan {

@@ -218,7 +218,16 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "param#{idx} ")?;
                 self.fmt_local(f, arg)?;
                 write!(f, " : ")?;
-                self.fmt_local(f, r#type)?;
+                match r#type {
+                    ParamType::Explicit(local_id) => self.fmt_local(f, local_id)?,
+                    ParamType::Any { capture } => {
+                        write!(f, "$")?;
+                        self.fmt_local(f, capture)?;
+                    }
+                    ParamType::Poisoned => {
+                        write!(f, "<poison>")?;
+                    }
+                }
                 writeln!(f)
             }
         }
@@ -255,7 +264,16 @@ impl<'a> DisplayHir<'a> {
             }
             self.fmt_local(f, param.value)?;
             write!(f, ": ")?;
-            self.fmt_local(f, param.r#type)?;
+            match param.r#type {
+                ParamType::Explicit(local) => self.fmt_local(f, local)?,
+                ParamType::Any { capture } => {
+                    write!(f, "$")?;
+                    self.fmt_local(f, capture)?;
+                }
+                ParamType::Poisoned => {
+                    write!(f, "<poison>")?;
+                }
+            }
         }
         write!(f, ") -> ")?;
         self.fmt_local(f, fn_def.return_type)?;

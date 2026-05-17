@@ -77,7 +77,7 @@ pub enum InstructionKind {
     Param {
         comptime: bool,
         arg: LocalId,
-        r#type: LocalId,
+        r#type: ParamType,
         idx: u32,
     },
     Set {
@@ -131,8 +131,15 @@ const _INSTR_SIZE: () = const_assert_mem_size::<Instruction>(32);
 pub struct ParamInfo {
     pub is_comptime: bool,
     pub value: LocalId,
-    pub r#type: LocalId,
+    pub r#type: ParamType,
     pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ParamType {
+    Explicit(LocalId),
+    Any { capture: LocalId },
+    Poisoned,
 }
 
 #[derive(Debug, Clone, Copy)]

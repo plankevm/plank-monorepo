@@ -79,6 +79,7 @@ struct BlockLowerer<'a> {
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
+    param_info_buf: Vec<ParamInfo>,
     captures_buf: Vec<CaptureInfo>,
 
     lexed: &'a Lexed,
@@ -175,6 +176,7 @@ impl BlockLowerer<'_> {
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
+        debug_assert!(self.param_info_buf.is_empty());
         debug_assert!(self.captures_buf.is_empty());
     }
 
@@ -532,15 +534,44 @@ impl BlockLowerer<'_> {
         let saved_captures_start =
             std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
 
-        let param_locals_start = self.locals_buf.len();
+        let param_infos_start = self.param_info_buf.len();
         let return_type;
         let type_preamble = {
             let preamble_block_start = self.instructions_buf.len();
             for (idx, param) in fn_def.params().filter_map(Result::ok).enumerate() {
-                let param_type = self.lower_expr_to_local(param.type_expr());
-                self.locals_buf.push(param_type);
-                let param_value = self.add_param_to_scope_as_local(param);
-                self.locals_buf.push(param_value);
+                let param_type = match param.param_type() {
+                    Ok(ast::ParamType::Explicit(expr)) => {
+                        let local = self.lower_expr_to_local(expr);
+                        ParamType::Explicit(local)
+                    }
+                    Ok(ast::ParamType::Any { name, name_span }) => {
+                        if let Some(prev) = self.find_local(name) {
+                            self.error_duplicate_param_any_type_capture(name, name_span, prev.span);
+                            ParamType::Poisoned
+                        } else {
+                            let capture = self.alloc_local(name, false, name_span);
+                            ParamType::Any { capture }
+                        }
+                    }
+                    Err(_span) => ParamType::Poisoned,
+                };
+                let param_value = if let Some(prev) = self.find_local(param.name) {
+                    self.error_duplicate_function_parameter(
+                        param.name,
+                        param.name_span(),
+                        prev.span,
+                    );
+                    self.alloc_temp()
+                } else {
+                    self.add_param_to_scope_as_local(param)
+                };
+                let span = self.lexed.tokens_src_span(param.node().span());
+                self.param_info_buf.push(ParamInfo {
+                    is_comptime: param.is_comptime,
+                    value: param_value,
+                    r#type: param_type,
+                    span,
+                });
                 self.emit(InstructionKind::Param {
                     comptime: param.is_comptime,
                     arg: param_value,
@@ -566,18 +597,8 @@ impl BlockLowerer<'_> {
             param_list_span,
         });
 
-        let (type_value_pairs, []) = self.locals_buf[param_locals_start..].as_chunks() else {
-            unreachable!("not only pairs?")
-        };
-        let fn_params_id = self.builder.fn_params.push_iter(
-            type_value_pairs.iter().zip(fn_def.params().flatten()).map(
-                |(&[r#type, value], param)| {
-                    let span = self.lexed.tokens_src_span(param.node().span());
-                    ParamInfo { is_comptime: param.is_comptime, value, r#type, span }
-                },
-            ),
-        );
-        self.locals_buf.truncate(param_locals_start);
+        let fn_params_id =
+            self.builder.fn_params.push_iter(self.param_info_buf.drain(param_infos_start..));
         let fn_captures_id =
             self.builder.fn_captures.push_iter(self.captures_buf.drain(self.fn_captures_start..));
         assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
@@ -763,6 +784,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
+        param_info_buf: Vec::new(),
         captures_buf: Vec::new(),
 
         lexed: &project.parsed_sources[SourceId::ROOT].lexed,

@@ -100,6 +100,58 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
+    pub(crate) fn error_duplicate_param_any_type_capture(
+        &self,
+        name: StrId,
+        span: TokenSpan,
+        prev_span: Option<TokenSpan>,
+    ) {
+        let name_str = self.lookup_name(name);
+        let source_span = self.lexed.tokens_src_span(span);
+        let mut diagnostic = Diagnostic::error("any-type capture conflicts with existing binding");
+        if let Some(prev_span) = prev_span {
+            diagnostic = diagnostic.element(
+                Annotations::new(self.source_id)
+                    .primary(source_span, format!("`{name_str}` is already defined"))
+                    .secondary(self.lexed.tokens_src_span(prev_span), "previous binding here"),
+            );
+        } else {
+            diagnostic = diagnostic.primary(
+                self.source_id,
+                source_span,
+                format!("`{name_str}` is already defined"),
+            );
+        }
+        diagnostic
+            .help(format!("use `{name_str}` directly to refer to the existing type"))
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_duplicate_function_parameter(
+        &self,
+        name: StrId,
+        span: TokenSpan,
+        prev_span: Option<TokenSpan>,
+    ) {
+        let name_str = self.lookup_name(name);
+        let source_span = self.lexed.tokens_src_span(span);
+        let mut diagnostic = Diagnostic::error("duplicate function parameter");
+        if let Some(prev_span) = prev_span {
+            diagnostic = diagnostic.element(
+                Annotations::new(self.source_id)
+                    .primary(source_span, format!("`{name_str}` is already defined"))
+                    .secondary(self.lexed.tokens_src_span(prev_span), "previous parameter here"),
+            );
+        } else {
+            diagnostic = diagnostic.primary(
+                self.source_id,
+                source_span,
+                format!("`{name_str}` is already defined"),
+            );
+        }
+        diagnostic.help("choose a different parameter name").emit(*self.session.borrow_mut());
+    }
+
     pub(crate) fn error_unknown_builtin(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
