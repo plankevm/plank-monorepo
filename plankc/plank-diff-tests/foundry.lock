@@ -1,6 +1,6 @@
 {
   "../sir/sir-solidity-diff-tests/lib/forge-std": {
-    "rev": "0844d7e1fc5e60d77b68e469bff60265f236c398"
+    "rev": "b090968353a209833d4a6f1383230477e96d8438"
   },
   "lib/forge-std": {
     "tag": {
@@ -9,6 +9,12 @@
     }
   },
   "lib/plank-foundry-deployer": {
-    "rev": "259b015"
+    "rev": "79879d7"
+  },
+  "plankc/plank-diff-tests/lib/forge-std": {
+    "rev": "8987040ede9553cea20c95ad40d0455930f9c8e0"
+  },
+  "plankc/sir/sir-solidity-diff-tests/lib/forge-std": {
+    "rev": "b090968353a209833d4a6f1383230477e96d8438"
   }
 }

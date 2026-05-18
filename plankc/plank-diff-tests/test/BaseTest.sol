@@ -2,8 +2,9 @@
 pragma solidity ^0.8.0;
 
 import {Test, Vm} from "forge-std/Test.sol";
+import {PlankDeployer, BuildOptions} from "plank-foundry-deployer/PlankDeployer.sol";
 
-abstract contract BaseTest is Test {
+abstract contract BaseTest is Test, PlankDeployer {
     function deployCode(bytes memory initcode) internal returns (address addr) {
         addr = deployCode(initcode, "");
     }
@@ -48,24 +49,19 @@ abstract contract BaseTest is Test {
     function plank(string memory sourcePath) internal returns (bytes memory) {
         string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
-        bool hasOptimize = bytes(optimize).length != 0;
 
-        string[] memory args = new string[](hasOptimize ? 13 : 11);
-        args[0] = "cargo";
-        args[1] = "run";
-        args[2] = "-p";
-        args[3] = "plank";
-        args[4] = "--";
-        args[5] = "build";
-        args[6] = sourcePath;
-        args[7] = "--backend";
-        args[8] = backend;
-        args[9] = "--dep";
-        args[10] = string.concat("std=", vm.projectRoot(), "/../../std");
-        if (hasOptimize) {
-            args[11] = "-O";
-            args[12] = optimize;
+        BuildOptions memory options =
+            initBuildOptions().dependency("std", string.concat(vm.projectRoot(), "/../../std")).withBackend(backend);
+
+        if (bytes(optimize).length != 0) {
+            options = options.withOptimizations(optimize);
+        } else {
+            options = options.disableOptimizations();
         }
-        return vm.ffi(args);
+
+        string[] memory bin = new string[](1);
+        bin[0] = "../target/debug/plank";
+
+        return plankBuildFFI(bin, sourcePath, options);
     }
 }
