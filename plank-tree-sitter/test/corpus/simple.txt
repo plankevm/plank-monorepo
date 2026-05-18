@@ -224,6 +224,30 @@ const f = fn (comptime T: Type, x: T) T {
         (identifier)))))
 
 ================================================================================
+Function with any-type param
+================================================================================
+const f = fn (value: $T, y: T) T {
+    y
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (fn_def
+      (param_def
+        (identifier)
+        (param_any_type
+          (identifier)))
+      (param_def
+        (identifier)
+        (identifier))
+      (identifier)
+      (block
+        (identifier)))))
+
+================================================================================
 Return statement
 ================================================================================
 const f = fn () u256 {

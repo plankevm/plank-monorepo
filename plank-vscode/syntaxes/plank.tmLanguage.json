@@ -6,6 +6,7 @@
     { "include": "#comments" },
     { "include": "#imports" },
     { "include": "#keywords" },
+    { "include": "#anyTypes" },
     { "include": "#types" },
     { "include": "#strings" },
     { "include": "#literals" },
@@ -70,6 +71,17 @@
         {
           "name": "keyword.operator.logical.plank",
           "match": "\\b(and|or)\\b"
+        }
+      ]
+    },
+    "anyTypes": {
+      "patterns": [
+        {
+          "match": "(\\$)([a-zA-Z_][a-zA-Z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "punctuation.definition.any-type.plank" },
+            "2": { "name": "support.type.any.plank" }
+          }
         }
       ]
     },

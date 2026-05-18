@@ -138,8 +138,9 @@ module.exports = grammar({
       optional("comptime"),
       field("name", $.identifier),
       ":",
-      field("type", $._expr)
+      field("type", choice($.param_any_type, $._expr))
     ),
+    param_any_type: ($) => seq("$", field("name", $.identifier)),
 
     struct_def: ($) => seq(
       "struct",

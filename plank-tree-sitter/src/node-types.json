@@ -1324,6 +1324,22 @@
     }
   },
   {
+    "type": "param_any_type",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "param_def",
     "named": true,
     "fields": {
@@ -1387,6 +1403,10 @@
           },
           {
             "type": "member",
+            "named": true
+          },
+          {
+            "type": "param_any_type",
             "named": true
           },
           {
@@ -1995,6 +2015,10 @@
   },
   {
     "type": "!=",
+    "named": false
+  },
+  {
+    "type": "$",
     "named": false
   },
   {
