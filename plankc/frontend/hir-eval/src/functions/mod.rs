@@ -544,7 +544,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         comptime: bool,
         arg: hir::LocalId,
-        r#type: hir::ParamType,
+        param_kind: hir::ParamType,
         idx: u32,
     ) {
         let EvalContext::FunctionPreamble { arg_spans, call_source } = self.ctx else {
@@ -553,11 +553,32 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
         let arg_loc = SrcLoc::new(call_source, arg_span);
-        let Ok((param_ty, param_ty_loc)) = (match r#type {
-            plank_hir::ParamType::Explicit(local_id) => self
-                .expect_type(local_id)
-                .map(|ty| (ty, self.origin_loc(self.bindings[local_id].origin))),
-            plank_hir::ParamType::Any { capture } => {
+
+        match param_kind {
+            hir::ParamType::Explicit(local_id) => {
+                let Ok(param_ty) = self.expect_type(local_id) else {
+                    self.bindings[arg].state = Err(Poisoned);
+                    return;
+                };
+                let arg_binding = self.bindings[arg];
+                let Ok(state) = arg_binding.state else { return };
+                assert!(
+                    !comptime || matches!(state, LocalState::Comptime(_)),
+                    "invariant: comptime param not comptime in eval"
+                );
+                let arg_ty = self.state_type(state);
+                if !arg_ty.is_assignable_to(param_ty) {
+                    self.diag_ctx.emit_type_mismatch(
+                        param_ty,
+                        self.origin_loc(self.bindings[local_id].origin),
+                        arg_ty,
+                        arg_loc,
+                        false,
+                    );
+                    self.bindings[arg].state = Err(Poisoned);
+                }
+            }
+            hir::ParamType::Any { capture } => {
                 let arg_binding = self.bindings[arg];
                 let Ok(state) = arg_binding.state else {
                     self.bindings.insert_no_prev(
@@ -570,6 +591,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     );
                     return;
                 };
+                assert!(
+                    !comptime || matches!(state, LocalState::Comptime(_)),
+                    "invariant: comptime param not comptime in eval"
+                );
                 let arg_ty = self.state_type(state);
                 let type_value = self.values.intern_type(arg_ty);
                 self.bindings.insert_no_prev(
@@ -580,29 +605,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         DefOrigin::Local(arg_binding.use_span),
                     ),
                 );
-                Ok((arg_ty, self.loc(arg_binding.use_span)))
             }
-            plank_hir::ParamType::Poisoned => {
+            hir::ParamType::Poisoned => {
                 self.bindings[arg].state = Err(Poisoned);
-                return;
             }
-        }) else {
-            self.bindings[arg].state = Err(Poisoned);
-            return;
-        };
-
-        let arg_binding = self.bindings[arg];
-        let Ok(state) = arg_binding.state else { return };
-        if comptime {
-            assert!(
-                matches!(state, LocalState::Comptime(_)),
-                "invariant: comptime param not comptime in eval"
-            );
-        }
-        let arg_ty = self.state_type(state);
-        if !arg_ty.is_assignable_to(param_ty) {
-            self.diag_ctx.emit_type_mismatch(param_ty, param_ty_loc, arg_ty, arg_loc, false);
-            self.bindings[arg].state = Err(Poisoned);
         }
     }
 
