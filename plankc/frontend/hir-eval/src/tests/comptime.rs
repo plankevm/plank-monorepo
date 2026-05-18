@@ -583,8 +583,8 @@ fn test_any_type_params_monomorphize_uniquely_at_runtime() {
             }
         };
 
-        const get_len = fn (arr: $T) u256 {
-            arr.len
+        const get_len = fn (arr: $T) @field_type(T, 0) {
+            arr.inner
         };
 
         const captured_type = fn(value: $T) type { T };
@@ -611,13 +611,13 @@ fn test_any_type_params_monomorphize_uniquely_at_runtime() {
         ==== Functions ====
         @fn0(%0: struct#0@main.plk:2:5) -> u256 {
             %1 : struct#0@main.plk:2:5 = %0
-            %2 : u256 = %1.1
+            %2 : u256 = %1.0
             ret %2
         }
 
-        @fn1(%0: struct#56@main.plk:2:5) -> u256 {
+        @fn1(%0: struct#56@main.plk:2:5) -> bool {
             %1 : struct#56@main.plk:2:5 = %0
-            %2 : u256 = %1.1
+            %2 : bool = %1.0
             ret %2
         }
 
@@ -642,7 +642,7 @@ fn test_any_type_params_monomorphize_uniquely_at_runtime() {
                 false,
                 33,
             }
-            %3 : u256 = call @fn1(%2)
+            %3 : bool = call @fn1(%2)
             %4 : u256 = 2
             %5 : u256 = 3
             %6 : u256 = 4
