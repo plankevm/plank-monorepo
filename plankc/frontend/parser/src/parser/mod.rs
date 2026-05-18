@@ -554,10 +554,15 @@ impl<'a> Parser<'a> {
                 let any_type_start = parser.tokens.current();
                 parser.expect(Token::Dollar);
 
-                let mut any_type = parser.alloc_node_from(any_type_start, NodeKind::ParamAnyType);
-                let name = parser.expect_ident();
-                parser.push_child(&mut any_type, name);
-                parser.close_node(any_type)
+                if parser.expect(Token::Identifier) {
+                    let ident = parser.intern(parser.tokens.current() - 1);
+                    let any_type =
+                        parser.alloc_node_from(any_type_start, NodeKind::ParamAnyType { ident });
+                    parser.close_node(any_type)
+                } else {
+                    let error = parser.alloc_node_from(any_type_start, NodeKind::Error);
+                    parser.close_node(error)
+                }
             } else {
                 parser.parse_expr(ParseExprMode::AllowAll)
             };

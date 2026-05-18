@@ -1434,8 +1434,7 @@ fn test_fn_def_any_type_param() {
                             " "
                             ParamAnyType
                                 "$"
-                                Identifier
-                                    "T"
+                                "T"
                         ")"
                     " "
                     Identifier

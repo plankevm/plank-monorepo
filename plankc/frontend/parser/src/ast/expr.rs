@@ -431,10 +431,8 @@ impl<'cst> Param<'cst> {
         let type_node = self.view.child(1).ok_or(self.view.span())?;
 
         match type_node.kind() {
-            NodeKind::ParamAnyType => {
-                let name_node = type_node.child(0).ok_or(type_node.span())?;
-                let name = name_node.kind().as_ident().ok_or(type_node.span())?;
-                Ok(ParamType::Any { name, name_span: name_node.span() })
+            NodeKind::ParamAnyType { ident } => {
+                Ok(ParamType::Any { name: ident, name_span: type_node.span() })
             }
             _ => Ok(ParamType::Explicit(Expr::new_unwrap(type_node))),
         }

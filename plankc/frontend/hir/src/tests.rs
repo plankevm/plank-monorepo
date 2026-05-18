@@ -228,12 +228,12 @@ fn test_duplicate_any_type_capture() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: any-type capture conflicts with existing binding
-         --> main.plk:1:25
+         --> main.plk:1:24
           |
         1 | const f = fn(a: $T, b: $T) void {};
-          |                  -      ^ `T` is already defined
-          |                  |
-          |                  previous binding here
+          |                 --     ^^ `T` is already defined
+          |                 |
+          |                 previous binding here
           |
           = help: use `T` directly to refer to the existing type
         "#,
@@ -252,10 +252,10 @@ fn test_any_type_capture_conflicts_with_comptime_param() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: any-type capture conflicts with existing binding
-         --> main.plk:1:40
+         --> main.plk:1:39
           |
         1 | const f = fn(comptime T: type, value: $T) void {};
-          |                       -                ^ `T` is already defined
+          |                       -               ^^ `T` is already defined
           |                       |
           |                       previous binding here
           |
@@ -279,9 +279,9 @@ fn test_comptime_param_conflicts_with_previous_any_type_capture() {
          --> main.plk:1:34
           |
         1 | const f = fn(value: $T, comptime T: type) void {};
-          |                      -           ^ `T` is already defined
-          |                      |
-          |                      previous parameter here
+          |                     --           ^ `T` is already defined
+          |                     |
+          |                     previous parameter here
           |
           = help: choose a different parameter name
         "#,
