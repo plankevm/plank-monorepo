@@ -11,7 +11,6 @@ const sizeof = fn (comptime T: type) u256 {
         32
     } else if @is_struct(T) {
         fold(
-            u256,
             @field_count(T),
             fn (comptime i: u256, acc: u256) u256 {
                 acc + sizeof(@field_type(T, i))

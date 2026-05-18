@@ -5,7 +5,7 @@ const Option = fn (comptime T: type) type {
     }
 };
 
-const Some = fn (comptime T: type, value: T) Option(T) {
+const Some = fn (value: $T) Option(T) {
     Option(T) { inner: value, is_some: true }
 };
 

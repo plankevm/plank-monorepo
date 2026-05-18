@@ -8,8 +8,8 @@ init {
     let ptr = @malloc_zeroed(size);
     @evm_calldatacopy(ptr, 0, size);
     let decoded = unsafe_abi_decode(WithBytes, ptr, size);
-    let out_size = abi_encoded_size(WithBytes, decoded);
+    let out_size = abi_encoded_size(decoded);
     let out = @malloc_zeroed(out_size);
-    let written = unsafe_abi_encode(WithBytes, out, decoded);
+    let written = unsafe_abi_encode(out, decoded);
     @evm_return(out, written);
 }

@@ -19,7 +19,7 @@ const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(addr) {
 
     let success = @evm_staticcall(@evm_gas(), ECRECOVER_ADDR.raw, buf, len, buf, 32);
     if success {
-        Some(addr, addr { raw: @mload32(buf) })
+        Some(addr { raw: @mload32(buf) })
     } else {
         None(addr)
     }

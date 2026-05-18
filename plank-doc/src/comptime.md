@@ -50,7 +50,7 @@ For example, this is how ABI encoding is handled through the standard library:
 
 ```plank
 const Transfer = struct { to: u256, amount: u256 };
-let encoded = abi_encode(Transfer, transfer);
+let encoded = abi_encode(transfer);
 ```
 
 As long as your struct is defined, this call never changes. Add a new field to `Transfer`, and the encoding updates automatically - no manual fixes, no risk of missing fields.

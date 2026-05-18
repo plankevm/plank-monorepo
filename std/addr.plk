@@ -28,7 +28,7 @@ const raw_create = fn (value: u256, code: membytes) Option(addr) {
     if account == 0 {
         return None(addr);
     }
-    Some(addr, addr { raw: account })
+    Some(addr { raw: account })
 };
 
 const raw_create2 = fn (value: u256, code: membytes, salt: bytes32) Option(addr) {
@@ -36,5 +36,5 @@ const raw_create2 = fn (value: u256, code: membytes, salt: bytes32) Option(addr)
     if account == 0 {
         return None(addr);
     }
-    Some(addr, addr { raw: account })
+    Some(addr { raw: account })
 };

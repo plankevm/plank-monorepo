@@ -9,6 +9,6 @@ init {
     @evm_calldatacopy(ptr, 0, size);
     let input = membytes_from_ptr(ptr, size);
     let decoded = abi_decode(Pair, input);
-    let encoded = abi_encode(Pair, decoded);
+    let encoded = abi_encode(decoded);
     @evm_return(encoded.ptr, encoded.len);
 }

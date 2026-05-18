@@ -19,7 +19,7 @@ const AbiSizeAccumulator = fn (comptime T: type) type {
 };
 
 // Returns the total byte size of the ABI encoding for a given value.
-const abi_encoded_size = fn (comptime T: type, value: T) u256 {
+const abi_encoded_size = fn (value: $T) u256 {
     if T == void {
         0
     } else if T == u256 {
@@ -35,14 +35,10 @@ const abi_encoded_size = fn (comptime T: type, value: T) u256 {
             total_size: abi_head_size(T)
         };
         let result = fold(
-            AbiSizeAccumulator(T),
             @field_count(T),
             fn (comptime i: u256, acc: AbiSizeAccumulator(T)) AbiSizeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
-                    let field_size = abi_encoded_size(
-                        @field_type(T, i),
-                        @get_field(acc.encoded_value, i)
-                    );
+                    let field_size = abi_encoded_size(@get_field(acc.encoded_value, i));
                     @set_field(acc, 1, acc.total_size + field_size)
                 } else {
                     acc
@@ -59,25 +55,25 @@ const abi_encoded_size = fn (comptime T: type, value: T) u256 {
 
 // Encodes `value` into pre-allocated memory at `ptr`. Caller must ensure
 // the region is large enough. Returns the number of bytes written.
-const unsafe_abi_encode = fn (comptime T: type, ptr: memptr, value: T) u256 {
-    unsafe_abi_encode_to(T, ptr, 0, value)
+const unsafe_abi_encode = fn (ptr: memptr, value: $T) u256 {
+    unsafe_abi_encode_to(ptr, 0, value)
 };
 
 // Encodes `value` into `buf`. Returns the number of bytes written,
 // or None if the buffer is too small to hold the encoding.
-const abi_encode_try = fn (comptime T: type, buf: membytes, value: T) Option(u256) {
-    let size = abi_encoded_size(T, value);
+const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
+    let size = abi_encoded_size(value);
     if size > buf.len {
         return None(u256);
     }
-    Some(u256, unsafe_abi_encode_to(T, buf.ptr, 0, value))
+    Some(unsafe_abi_encode_to(buf.ptr, 0, value))
 };
 
 // Encodes `value`, allocating a new buffer of the exact size needed.
-const abi_encode = fn (comptime T: type, value: T) membytes {
-    let size = abi_encoded_size(T, value);
+const abi_encode = fn (value: $T) membytes {
+    let size = abi_encoded_size(value);
     let buf = membytes_new(size);
-    unsafe_abi_encode_to(T, buf.ptr, 0, value);
+    unsafe_abi_encode_to(buf.ptr, 0, value);
     buf
 };
 
@@ -93,7 +89,7 @@ const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
     if !abi_buf_fits(T, buf, 0) {
         return None(T);
     }
-    Some(T, unsafe_abi_decode_from(T, buf.ptr, 0))
+    Some(unsafe_abi_decode_from(T, buf.ptr, 0))
 };
 
 // Decodes a value of type T from `buf`. Reverts if the buffer

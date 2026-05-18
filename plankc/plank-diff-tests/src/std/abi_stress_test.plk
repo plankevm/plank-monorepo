@@ -10,8 +10,8 @@ init {
     @evm_calldatacopy(ptr, 0, size);
     let buf = membytes_from_ptr(ptr, size);
     let decoded = abi_decode(Outer, buf);
-    let esize = abi_encoded_size(Outer, decoded);
-    let encoded = abi_encode(Outer, decoded);
+    let esize = abi_encoded_size(decoded);
+    let encoded = abi_encode(decoded);
     let out_ptr = @malloc_zeroed(@evm_add(32, encoded.len));
     @mstore32(out_ptr, esize);
     @mcopy(@evm_add(out_ptr, 32), encoded.ptr, encoded.len);

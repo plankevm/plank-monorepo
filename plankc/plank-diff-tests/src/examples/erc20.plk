@@ -134,14 +134,14 @@ const decimals = fn () never {
 const name = fn () never {
     let ptr = @malloc_uninit(10);
     @mstore10(ptr, 0x506c616e6b546f6b656e);
-    let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 10));
+    let encoded = abi_encode(membytes_from_ptr(ptr, 10));
     @evm_return(encoded.ptr, encoded.len);
 };
 
 const symbol = fn () never {
     let ptr = @malloc_uninit(3);
     @mstore3(ptr, 0x504c4b);
-    let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 3));
+    let encoded = abi_encode(membytes_from_ptr(ptr, 3));
     @evm_return(encoded.ptr, encoded.len);
 };
 
@@ -161,4 +161,3 @@ const transfer_balance = fn (from: u256, to: u256, amount: u256) void {
     @mstore32(buf, amount);
     @evm_log3(buf, 32, TRANSFER_TOPIC, from, to);
 };
-

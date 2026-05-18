@@ -15,7 +15,6 @@ const is_abi_dynamic = fn (comptime T: type) bool {
         true
     } else if @is_struct(T) {
         fold(
-            bool,
             @field_count(T),
             fn (comptime i: u256, has_dynamic: bool) bool {
                 if has_dynamic {
@@ -43,7 +42,6 @@ const abi_head_size = fn (comptime T: type) u256 {
         32
     } else if @is_struct(T) {
         fold(
-            u256,
             @field_count(T),
             fn (comptime i: u256, total_head_size: u256) u256 {
                 if is_abi_dynamic(@field_type(T, i)) {
@@ -83,7 +81,7 @@ const AbiEncodeAccumulator = fn (comptime T: type) type {
 // ABI-encodes `value` of type `T` into `buf` starting at `offset`.
 // Returns the number of bytes written.
 // Caller must ensure `buf` is large enough for the full encoding (use `abi_encoded_size`).
-const unsafe_abi_encode_to = fn (comptime T: type, buf: memptr, offset: u256, value: T) u256 {
+const unsafe_abi_encode_to = fn (buf: memptr, offset: u256, value: $T) u256 {
     if T == void {
         0
     } else if T == u256 {
@@ -106,7 +104,6 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: memptr, offset: u256, va
             tail_offset: offset + abi_head_size(T)
         };
         let result = fold(
-            AbiEncodeAccumulator(T),
             @field_count(T),
             fn (comptime i: u256, acc: AbiEncodeAccumulator(T)) AbiEncodeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
@@ -116,7 +113,6 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: memptr, offset: u256, va
                         acc.tail_offset - acc.base_offset
                     );
                     let written = unsafe_abi_encode_to(
-                        @field_type(T, i),
                         acc.buf,
                         acc.tail_offset,
                         @get_field(acc.encoded_value, i)
@@ -127,7 +123,6 @@ const unsafe_abi_encode_to = fn (comptime T: type, buf: memptr, offset: u256, va
                     next
                 } else {
                     let written = unsafe_abi_encode_to(
-                        @field_type(T, i),
                         acc.buf,
                         acc.head_offset,
                         @get_field(acc.encoded_value, i)
@@ -184,7 +179,6 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: memptr, offset: u256) 
             decoded_value: @uninit(T)
         };
         let result = fold(
-            AbiDecodeAccumulator(T),
             @field_count(T),
             fn (comptime i: u256, acc: AbiDecodeAccumulator(T)) AbiDecodeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
@@ -259,7 +253,6 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
             fits: true
         };
         let result = fold(
-            AbiBufFitsAccumulator,
             @field_count(T),
             fn (comptime i: u256, acc: AbiBufFitsAccumulator) AbiBufFitsAccumulator {
                 if !acc.fits {

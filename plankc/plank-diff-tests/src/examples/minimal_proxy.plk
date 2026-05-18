@@ -21,15 +21,15 @@ run {
 }
 
 const clone = fn () never {
-    deploy_clone(void, {});
+    deploy_clone({});
 };
 
 const clone_deterministic = fn () never {
     let salt = @evm_calldataload(36);
-    deploy_clone(u256, salt);
+    deploy_clone(salt);
 };
 
-const deploy_clone = fn (comptime SaltT: type, salt: SaltT) never {
+const deploy_clone = fn (salt: $SaltT) never {
     let address = @evm_calldataload(4);
     let len = 32 + 20 + 15;
     let buf = @malloc_uninit(len);

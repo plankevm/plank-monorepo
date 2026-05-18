@@ -16,5 +16,5 @@ const membytes_read_bytes32 = fn (buf: membytes, offset: u256) Option(bytes32) {
         return None(bytes32);
     }
     let raw = unsafe_mem_read_u256(buf.ptr, offset);
-    Some(bytes32, bytes32 { raw: raw })
+    Some(bytes32 { raw: raw })
 };

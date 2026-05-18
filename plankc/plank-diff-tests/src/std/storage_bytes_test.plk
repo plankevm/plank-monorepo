@@ -38,6 +38,6 @@ const store = fn () never {
 // load() returns (bytes)
 const load = fn () never {
     let data = sload_bytes(DATA_SLOT);
-    let encoded = abi_encode(BytesResult, BytesResult { data: data });
+    let encoded = abi_encode(BytesResult { data: data });
     @evm_return(encoded.ptr, encoded.len);
 };

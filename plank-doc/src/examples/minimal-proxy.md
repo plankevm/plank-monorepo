@@ -42,29 +42,29 @@ future.
 
 ## Comptime Generic Dispatch
 
-Both `clone` and `clone_deterministic` share the same `deploy_clone` helper. The difference is the comptime type argument passed to it: `clone` uses `void`, meaning no salt specialization is required, while `clone_deterministic` uses `u256` for the salt type.
+Both `clone` and `clone_deterministic` share the same `deploy_clone` helper. The difference is the type captured from the salt argument: `clone` passes `void`, meaning no salt specialization is required, while `clone_deterministic` passes a `u256` salt.
 
 ```plank
 const clone = fn () never {
-    deploy_clone(void, {});
+    deploy_clone({});
 };
 
 const clone_deterministic = fn () never {
     let salt = @evm_calldataload(36);
-    deploy_clone(u256, salt);
+    deploy_clone(salt);
 };
 ```
 
-The helper takes a comptime type `SaltT` (`void` or `u256`) and a value of that type. Because `SaltT` is comptime, the compiler specializes each branch and removes runtime checks, allowing shared logic to be written without any runtime branching cost.
+Because `SaltT` is comptime, the compiler specializes each branch and removes runtime checks, allowing shared logic to be written without any runtime branching cost.
 
-In theory, `deploy_clone` could be called with any type, e.g., `deploy_clone(bool, some_value_of_type_bool)`. However, this does not make sense in the context of the proxy. To restrict usages, any type other than `void` and `u256` triggers a compile-time error via the `else` branch:
+In theory, `deploy_clone` could be called with any salt type, e.g. a `bool`. However, this does not make sense in the context of the proxy. To restrict usages, any type other than `void` and `u256` triggers a compile-time error via the `else` branch:
 
 ```plank
-const deploy_clone = fn (comptime SaltT: type, salt: SaltT) never {
+const deploy_clone = fn (salt: $SaltT) never {
     let address = if SaltT == void {
-        @evm_create(0, buf, 55)
+        @evm_create(0, buf +% (32 - 20), 55)
     } else if SaltT == u256 {
-        @evm_create2(0, buf, 55, salt)
+        @evm_create2(0, buf +% (32 - 20), 55, salt)
     } else {
         // compile-time error.
         let _unsupported_clone_type_error: u256 = true;

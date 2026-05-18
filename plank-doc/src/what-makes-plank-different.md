@@ -81,14 +81,14 @@ There are no virtual functions, no inheritance linearization, and no diamond pro
 
 ## ABI Encode and Decode
 
-Plank's standard library provides ABI encoding and decoding utilities. With comptime, the compiler inspects struct fields and generates the correct encoding logic automatically - you only pass the type and data.
+Plank's standard library provides ABI encoding and decoding utilities. With comptime, the compiler inspects struct fields and generates the correct encoding logic automatically from the value you pass.
 
 ```plank
 import std::abi::abi_encode;
 
 const Transfer = struct { to: u256, amount: u256 };
 
-let encoded = abi_encode(Transfer, transfer);
+let encoded = abi_encode(transfer);
 @evm_return(encoded.ptr, encoded.len);
 ```
 

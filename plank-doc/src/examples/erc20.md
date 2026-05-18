@@ -50,7 +50,7 @@ Events are emitted using `@evm_log3` (three indexed topics plus data):
 ```plank
 let ptr = @malloc_uninit(10);
 @mstore10(ptr, 0x506c616e6b546f6b656e);
-let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 10));
+let encoded = abi_encode(membytes_from_ptr(ptr, 10));
 @evm_return(encoded.ptr, encoded.len);
 ```
 

@@ -16,7 +16,7 @@ const unsafe_mem_write_bytes = fn (dst: memptr, dst_offset: u256, src: memptr, l
 
 // Writes a value of type T at `offset`. For structs, fields are serialized contiguously.
 // No bounds check. Returns bytes written.
-const unsafe_mem_write = fn (comptime T: type, ptr: memptr, offset: u256, value: T) u256 {
+const unsafe_mem_write = fn (ptr: memptr, offset: u256, value: $T) u256 {
     if T == void {
         0
     } else if T == u256 {
@@ -25,11 +25,9 @@ const unsafe_mem_write = fn (comptime T: type, ptr: memptr, offset: u256, value:
         unsafe_mem_write_u256(ptr, offset, if value { 1 } else { 0 })
     } else if @is_struct(T) {
         fold(
-            u256,
             @field_count(T),
             fn (comptime i: u256, bytes_written: u256) u256 {
                 let written = unsafe_mem_write(
-                    @field_type(T, i),
                     ptr,
                     offset + bytes_written,
                     @get_field(value, i)

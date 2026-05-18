@@ -1,17 +1,16 @@
 // Iterates from 0 to n, calling f at each step to produce a new accumulator value.
-// - Accumulator: the type of the accumulator (e.g. u256, bool, or a struct for complex state)
 // - n: number of iterations
 // - f: step function with signature fn (comptime i: u256, acc: Accumulator) Accumulator
-// - initial: initial accumulator value
+// - initial: initial accumulator value, whose type is used as Accumulator
 // Returns the final accumulator after n iterations.
-const fold = fn (comptime Accumulator: type, comptime n: u256, comptime f: function, initial: Accumulator) Accumulator {
-    fold_from(Accumulator, n, 0, f, initial)
+const fold = fn (comptime n: u256, comptime f: function, initial: $Accumulator) Accumulator {
+    fold_from(n, 0, f, initial)
 };
 
-const fold_from = fn (comptime Accumulator: type, comptime n: u256, comptime i: u256, comptime f: function, acc: Accumulator) Accumulator {
+const fold_from = fn (comptime n: u256, comptime i: u256, comptime f: function, acc: $Accumulator) Accumulator {
     if @evm_eq(i, n) {
         acc
     } else {
-        fold_from(Accumulator, n, i + 1, f, f(i, acc))
+        fold_from(n, i + 1, f, f(i, acc))
     }
 };

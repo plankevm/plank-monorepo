@@ -72,7 +72,7 @@ const call_modexp = fn () never {
     let mod = bytes_from_offset(mod_offset);
 
     let result = modexp(base, exp, mod);
-    let out = abi_encode(BytesResult, BytesResult { data: result });
+    let out = abi_encode(BytesResult { data: result });
     @evm_return(out.ptr, out.len);
 };
 
