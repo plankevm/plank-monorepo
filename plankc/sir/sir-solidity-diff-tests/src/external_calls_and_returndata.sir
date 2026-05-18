@@ -1,0 +1,53 @@
+fn init:
+    init_entry {
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = malloc runtime_len
+        codecopy buf runtime_off runtime_len
+        return buf runtime_len
+    }
+
+fn main:
+    entry {
+        c0 = const 0
+        c32 = const 32
+        c64 = const 64
+        c96 = const 96
+        c128 = const 128
+        c160 = const 160
+        c192 = const 192
+        c256 = const 256
+
+        target = calldataload c0
+        call_value = calldataload c32
+        payload1 = calldataload c64
+        payload2 = calldataload c96
+
+        inbuf = mallocany c64
+        inbuf32 = add inbuf c32
+        mstore256 inbuf payload1
+        mstore256 inbuf32 payload2
+
+        out = sallocany 256
+        out32 = add out c32
+        out64 = add out c64
+        out128 = add out c128
+        out160 = add out c160
+        out192 = add out c192
+
+        call_gas = gas
+        call_success = call call_gas target call_value inbuf c32 c0 c0
+        call_ret_size = returndatasize
+        mstore256 out call_success
+        mstore256 out32 call_ret_size
+        returndatacopy out64 c0 call_ret_size
+
+        static_gas = gas
+        static_success = staticcall static_gas target inbuf32 c32 c0 c0
+        static_ret_size = returndatasize
+        mstore256 out128 static_success
+        mstore256 out160 static_ret_size
+        returndatacopy out192 c0 static_ret_size
+
+        return out c256
+    }

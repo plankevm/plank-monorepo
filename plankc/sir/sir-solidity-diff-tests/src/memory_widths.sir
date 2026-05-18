@@ -1,0 +1,132 @@
+fn init:
+    init_entry {
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = malloc runtime_len
+        codecopy buf runtime_off runtime_len
+        return buf runtime_len
+    }
+
+fn main:
+    entry {
+        c0 = const 0
+        c1 = const 1
+        c16 = const 16
+        c29 = const 29
+        c30 = const 30
+        c31 = const 31
+        c32 = const 32
+        c64 = const 64
+        c96 = const 96
+        c128 = const 128
+        c160 = const 160
+        c192 = const 192
+        c224 = const 224
+        c256 = const 256
+        c288 = const 288
+        c320 = const 320
+        c352 = const 352
+        c384 = const 384
+        c416 = const 416
+        c448 = const 448
+        c480 = const 480
+
+        v1 = calldataload c0
+        v2 = calldataload c32
+        v3 = calldataload c64
+        v4 = calldataload c96
+        v5 = calldataload c128
+
+        left_sentinel1 = large_const 0x1111111111111111111111111111111111111111111111111111111111111111
+        right_sentinel1 = large_const 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        left1 = mallocany c32
+        right1 = mallocany c32
+        mstore256 left1 left_sentinel1
+        mstore256 right1 right_sentinel1
+        edge1 = add left1 c31
+        mstore8 edge1 v1
+        loaded1 = mload8 edge1
+        left_word1 = mload256 left1
+        right_word1 = mload256 right1
+
+        left_sentinel2 = large_const 0x2222222222222222222222222222222222222222222222222222222222222222
+        right_sentinel2 = large_const 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        left2 = mallocany c32
+        right2 = mallocany c32
+        mstore256 left2 left_sentinel2
+        mstore256 right2 right_sentinel2
+        edge2 = add left2 c30
+        mstore16 edge2 v2
+        loaded2 = mload16 edge2
+        left_word2 = mload256 left2
+        right_word2 = mload256 right2
+
+        left_sentinel3 = large_const 0x3333333333333333333333333333333333333333333333333333333333333333
+        right_sentinel3 = large_const 0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+        left3 = mallocany c32
+        right3 = mallocany c32
+        mstore256 left3 left_sentinel3
+        mstore256 right3 right_sentinel3
+        edge3 = add left3 c29
+        mstore24 edge3 v3
+        loaded3 = mload24 edge3
+        left_word3 = mload256 left3
+        right_word3 = mload256 right3
+
+        left_sentinel4 = large_const 0x4444444444444444444444444444444444444444444444444444444444444444
+        right_sentinel4 = large_const 0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+        left4 = mallocany c32
+        right4 = mallocany c32
+        mstore256 left4 left_sentinel4
+        mstore256 right4 right_sentinel4
+        edge4 = add left4 c16
+        mstore128 edge4 v4
+        loaded4 = mload128 edge4
+        left_word4 = mload256 left4
+        right_word4 = mload256 right4
+
+        left_sentinel5 = large_const 0x5555555555555555555555555555555555555555555555555555555555555555
+        right_sentinel5 = large_const 0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+        left5 = mallocany c32
+        right5 = mallocany c32
+        mstore256 left5 left_sentinel5
+        mstore256 right5 right_sentinel5
+        edge5 = add left5 c1
+        mstore248 edge5 v5
+        loaded5 = mload248 edge5
+        left_word5 = mload256 left5
+        right_word5 = mload256 right5
+
+        out = sallocany 480
+        out32 = add out c32
+        out64 = add out c64
+        out96 = add out c96
+        out128 = add out c128
+        out160 = add out c160
+        out192 = add out c192
+        out224 = add out c224
+        out256 = add out c256
+        out288 = add out c288
+        out320 = add out c320
+        out352 = add out c352
+        out384 = add out c384
+        out416 = add out c416
+        out448 = add out c448
+
+        mstore256 out loaded1
+        mstore256 out32 left_word1
+        mstore256 out64 right_word1
+        mstore256 out96 loaded2
+        mstore256 out128 left_word2
+        mstore256 out160 right_word2
+        mstore256 out192 loaded3
+        mstore256 out224 left_word3
+        mstore256 out256 right_word3
+        mstore256 out288 loaded4
+        mstore256 out320 left_word4
+        mstore256 out352 right_word4
+        mstore256 out384 loaded5
+        mstore256 out416 left_word5
+        mstore256 out448 right_word5
+        return out c480
+    }

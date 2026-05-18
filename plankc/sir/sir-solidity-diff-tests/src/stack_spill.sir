@@ -1,0 +1,117 @@
+fn init:
+    init_entry {
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = malloc runtime_len
+        codecopy buf runtime_off runtime_len
+        return buf runtime_len
+    }
+
+fn main:
+    entry {
+        c0 = const 0
+        c32 = const 32
+        c64 = const 64
+        c96 = const 96
+        c128 = const 128
+        c160 = const 160
+        c192 = const 192
+        c224 = const 224
+        c256 = const 256
+        c288 = const 288
+        c320 = const 320
+        c352 = const 352
+        c384 = const 384
+        c416 = const 416
+        c448 = const 448
+        c480 = const 480
+        c512 = const 512
+        c544 = const 544
+        c576 = const 576
+        c608 = const 608
+        c640 = const 640
+        c672 = const 672
+        c704 = const 704
+        c736 = const 736
+        v0 = calldataload c0
+        v1 = calldataload c32
+        v2 = calldataload c64
+        v3 = calldataload c96
+        v4 = calldataload c128
+        v5 = calldataload c160
+        v6 = calldataload c192
+        v7 = calldataload c224
+        v8 = calldataload c256
+        v9 = calldataload c288
+        v10 = calldataload c320
+        v11 = calldataload c352
+        v12 = calldataload c384
+        v13 = calldataload c416
+        v14 = calldataload c448
+        v15 = calldataload c480
+        v16 = calldataload c512
+        v17 = calldataload c544
+        v18 = calldataload c576
+        v19 = calldataload c608
+        v20 = calldataload c640
+        v21 = calldataload c672
+        v22 = calldataload c704
+        v23 = calldataload c736
+
+        sum01 = add v0 v1
+        sum2 = add sum01 v2
+        sum3 = add sum2 v3
+        sum4 = add sum3 v4
+        sum5 = add sum4 v5
+        sum6 = add sum5 v6
+        sum7 = add sum6 v7
+        sum8 = add sum7 v8
+        sum9 = add sum8 v9
+        sum10 = add sum9 v10
+        sum11 = add sum10 v11
+        sum12 = add sum11 v12
+        sum13 = add sum12 v13
+        sum14 = add sum13 v14
+        sum15 = add sum14 v15
+        sum16 = add sum15 v16
+        sum17 = add sum16 v17
+        sum18 = add sum17 v18
+        sum19 = add sum18 v19
+        sum20 = add sum19 v20
+        sum21 = add sum20 v21
+        sum22 = add sum21 v22
+        sum23 = add sum22 v23
+
+        mix01 = xor v0 v1
+        mix2 = xor mix01 v2
+        mix3 = xor mix2 v3
+        mix4 = xor mix3 v4
+        mix5 = xor mix4 v5
+        mix6 = xor mix5 v6
+        mix7 = xor mix6 v7
+        mix8 = xor mix7 v8
+        mix9 = xor mix8 v9
+        mix10 = xor mix9 v10
+        mix11 = xor mix10 v11
+        mix12 = xor mix11 v12
+        mix13 = xor mix12 v13
+        mix14 = xor mix13 v14
+        mix15 = xor mix14 v15
+        mix16 = xor mix15 v16
+        mix17 = xor mix16 v17
+        mix18 = xor mix17 v18
+        mix19 = xor mix18 v19
+        mix20 = xor mix19 v20
+        mix21 = xor mix20 v21
+        mix22 = xor mix21 v22
+        mix23 = xor mix22 v23
+
+        prod0 = mul sum23 mix23
+        folded = add prod0 v17
+        shifted = shr v3 folded
+        result = xor shifted sum23
+
+        out = sallocany 32
+        mstore256 out result
+        return out c32
+    }

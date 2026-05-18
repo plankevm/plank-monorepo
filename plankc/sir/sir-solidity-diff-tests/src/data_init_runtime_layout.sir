@@ -1,0 +1,56 @@
+fn init:
+    init_entry {
+        c0 = const 0
+        c32 = const 32
+        init_only_off = data_offset .init_only
+        init_and_runtime_off = data_offset .init_and_runtime
+        check_buf = mallocany c32
+        codecopy check_buf init_only_off c32
+        got_init_only = mload256 check_buf
+        expected_init_only = large_const 0x11223344556677889900aabbccddeeff102132435465768798a9babbdcfd0e1f
+        ok_init_only = eq got_init_only expected_init_only
+        => ok_init_only ? @check_shared : @bad_init
+    }
+
+    check_shared {
+        codecopy check_buf init_and_runtime_off c32
+        got_shared = mload256 check_buf
+        expected_shared = large_const 0xaabbccddeeff001122334455667788999887766554433221100ffeeddccbbaa0
+        ok_shared = eq got_shared expected_shared
+        => ok_shared ? @copy_runtime : @bad_init
+    }
+
+    copy_runtime {
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = malloc runtime_len
+        codecopy buf runtime_off runtime_len
+        return buf runtime_len
+    }
+
+    bad_init {
+        c0_bad = const 0
+        revert c0_bad c0_bad
+    }
+
+fn main:
+    main_entry {
+        c0 = const 0
+        c32 = const 32
+        c64 = const 64
+
+        init_and_runtime_off = data_offset .init_and_runtime
+        runtime_only_off = data_offset .runtime_only
+        out = sallocany 64
+        out32 = add out c32
+        codecopy out init_and_runtime_off c32
+        codecopy out32 runtime_only_off c32
+        return out c64
+    }
+
+data init_only
+    0x11223344556677889900aabbccddeeff102132435465768798a9babbdcfd0e1f
+data init_and_runtime
+    0xaabbccddeeff001122334455667788999887766554433221100ffeeddccbbaa0
+data runtime_only
+    0x000102030405060708090a0b0c0d0e0f10f0efeeedecebeae9e8e7e6e5e4e3

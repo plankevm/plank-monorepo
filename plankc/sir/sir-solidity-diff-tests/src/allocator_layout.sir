@@ -1,0 +1,111 @@
+fn init:
+    init_entry {
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = malloc runtime_len
+        codecopy buf runtime_off runtime_len
+        return buf runtime_len
+    }
+
+fn main:
+    entry {
+        c0 = const 0
+        c3 = const 3
+        c32 = const 32
+        c64 = const 64
+        c96 = const 96
+        c128 = const 128
+        c160 = const 160
+        c192 = const 192
+        c224 = const 224
+        c256 = const 256
+        c288 = const 288
+
+        selector_word = calldataload c0
+        selector = and selector_word c3
+        val_static = calldataload c32
+        val_static_any = calldataload c64
+        val_dyn0 = calldataload c96
+        val_dyn1 = calldataload c128
+        val_dyn_any = calldataload c160
+
+        static_zero = salloc 32
+        static_any = sallocany 32
+        zero_static = mload256 static_zero
+
+        dyn_zero = malloc c64
+        dyn_zero_plus32 = add dyn_zero c32
+        dyn_any = mallocany c32
+
+        zero_dyn0 = mload256 dyn_zero
+        zero_dyn1 = mload256 dyn_zero_plus32
+
+        mstore256 static_zero val_static
+        mstore256 static_any val_static_any
+        mstore256 dyn_zero val_dyn0
+        mstore256 dyn_zero_plus32 val_dyn1
+        mstore256 dyn_any val_dyn_any
+
+        load_static = mload256 static_zero
+        load_static_any = mload256 static_any
+        load_dyn0 = mload256 dyn_zero
+        load_dyn1 = mload256 dyn_zero_plus32
+        load_dyn_any = mload256 dyn_any
+
+        branch_slot = sallocany 32
+        switch selector {
+            0 => @case0
+            1 => @case1
+            2 => @case2
+            default => @case3
+        }
+    }
+
+    case0 {
+        branch_value0 = const 0xa0
+        mstore256 branch_slot branch_value0
+        => @after_switch
+    }
+
+    case1 {
+        branch_value1 = const 0xb1
+        mstore256 branch_slot branch_value1
+        => @after_switch
+    }
+
+    case2 {
+        branch_value2 = const 0xc2
+        mstore256 branch_slot branch_value2
+        => @after_switch
+    }
+
+    case3 {
+        branch_value3 = const 0xd3
+        mstore256 branch_slot branch_value3
+        => @after_switch
+    }
+
+    after_switch {
+        branch_load = mload256 branch_slot
+
+        out = sallocany 288
+        out32 = add out c32
+        out64 = add out c64
+        out96 = add out c96
+        out128 = add out c128
+        out160 = add out c160
+        out192 = add out c192
+        out224 = add out c224
+        out256 = add out c256
+
+        mstore256 out zero_static
+        mstore256 out32 zero_dyn0
+        mstore256 out64 zero_dyn1
+        mstore256 out96 load_static
+        mstore256 out128 load_static_any
+        mstore256 out160 load_dyn0
+        mstore256 out192 load_dyn1
+        mstore256 out224 load_dyn_any
+        mstore256 out256 branch_load
+        return out c288
+    }
