@@ -46,6 +46,14 @@ abstract contract BaseTest is Test, PlankDeployer {
         }
     }
 
+    function rawCreate(bytes memory initcode) internal returns (address) {
+        return _deploy(initcode, 0);
+    }
+
+    function plankDeploy(string memory sourcePath) internal returns (address) {
+        return _deploy(plank(sourcePath), 0);
+    }
+
     function plank(string memory sourcePath) internal returns (bytes memory) {
         string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));

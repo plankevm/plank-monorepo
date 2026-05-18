@@ -27,17 +27,21 @@ test-plank-diff: test-plank-diff-sir test-plank-diff-sona
 
 [working-directory: 'plank-diff-tests/']
 test-plank-diff-sir: build-debug
-     PLANK_BACKEND=sir-debug PLANK_OPTIMIZE= forge test --ffi
-     PLANK_BACKEND=sir-debug PLANK_OPTIMIZE=csud forge test --ffi
-     PLANK_BACKEND=sir-release PLANK_OPTIMIZE= forge test --ffi
-     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=csud forge test --ffi
+     PLANK_BACKEND=sir-debug   PLANK_OPTIMIZE=     forge test --nmp test/benchmark/*
+     PLANK_BACKEND=sir-debug   PLANK_OPTIMIZE=csud forge test --nmp test/benchmark/*
+     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=     forge test --nmp test/benchmark/*
+     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=csud forge test --nmp test/benchmark/*
 
 [working-directory: 'plank-diff-tests/']
 test-plank-diff-sona: build-debug
-     PLANK_BACKEND=sona PLANK_OPTIMIZE= forge test --ffi
-     PLANK_BACKEND=sona PLANK_OPTIMIZE=O1 forge test --ffi
+     PLANK_BACKEND=sona PLANK_OPTIMIZE=   forge test --nmp test/benchmark/*
+     PLANK_BACKEND=sona PLANK_OPTIMIZE=O1 forge test --nmp test/benchmark/*
 
-test-all: test test-sir-diff test-plank-diff
+[working-directory: 'plank-diff-tests/']
+bytecode-bench: build-debug
+    forge test --mp test/benchmark/* --gas-snapshot-check true
+
+test-all: test test-sir-diff test-plank-diff bytecode-bench
 
 ci-fmt:
     (cd sir/sir-solidity-diff-tests/ && forge fmt --check)

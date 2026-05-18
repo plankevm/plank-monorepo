@@ -22,15 +22,6 @@ contract ERC20Test is BaseTest {
         assertEq(plankToken.balanceOf(minter), plankToken.totalSupply());
     }
 
-    function test_benchmark_transferNonZeroToNonZero() public {
-        address user = makeAddr("user");
-        vm.prank(minter);
-        plankToken.transfer(user, 1000);
-
-        vm.prank(user);
-        plankToken.transfer(minter, 20);
-    }
-
     // --- helpers ---
 
     function assertCallEq(bytes memory data) internal {
