@@ -38,10 +38,14 @@ test-plank-diff-sona: build-debug
      PLANK_BACKEND=sona PLANK_OPTIMIZE=O1 forge test --nmp test/benchmark/*
 
 [working-directory: 'plank-diff-tests/']
-bytecode-bench: build-debug
+bytecode-bench-check: build-debug
     forge test --mp test/benchmark/* --gas-snapshot-check true
 
-test-all: test test-sir-diff test-plank-diff bytecode-bench
+[working-directory: 'plank-diff-tests/']
+bytecode-bench-update: build-debug
+    forge test --mp test/benchmark/*
+
+test-all: test test-sir-diff test-plank-diff bytecode-bench-check
 
 ci-fmt:
     (cd sir/sir-solidity-diff-tests/ && forge fmt --check)
