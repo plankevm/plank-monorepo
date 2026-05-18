@@ -573,7 +573,48 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
 }
 
 #[test]
-fn test_comptime_any() {
+fn comptime_arg_in_runtime_does_not_monomorphize() {
+    assert_lowers_to(
+        r#"
+        const meta_add = fn (x: u256, y: u256) u256 {
+            @evm_add(x, y)
+        };
+
+        init {
+            let mut x = 3;
+            let mut y = 4;
+            let z1 = meta_add(x, y);
+            let z2 = meta_add(3, y);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            %3 : u256 = %1
+            %4 : u256 = @evm_add(%2, %3)
+            ret %4
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 3
+            %1 : u256 = 4
+            %2 : u256 = %0
+            %3 : u256 = %1
+            %4 : u256 = call @fn0(%2, %3)
+            %5 : u256 = %1
+            %6 : u256 = 3
+            %7 : u256 = call @fn0(%6, %5)
+            %8 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn comptime_any_parameter() {
     assert_lowers_to(
         r#"
         const meta_mul = fn (comptime x: $T, comptime y: T) T {

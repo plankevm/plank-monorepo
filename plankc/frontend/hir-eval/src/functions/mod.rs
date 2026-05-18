@@ -340,9 +340,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
             if let Some(value) = param_key_value {
                 fn_scope.eval.maybe_values_buf.push(value);
-            }
-
-            if let hir::ParamType::Any { capture } = param.r#type {
+            } else if let hir::ParamType::Any { capture } = param.r#type {
                 let capture_key_value = match fn_scope.bindings[capture].state {
                     Ok(LocalState::Comptime(value)) => Ok(value),
                     Err(Poisoned) => Err(Poisoned),
