@@ -314,23 +314,44 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             preamble?
         };
 
+        let mut runtime_param_count = 0;
+
         // Assemble comptime parameters for the function key.
         for (&param, &arg) in params.iter().zip(args) {
-            let value = match fn_scope.bindings[param.value].state {
-                Ok(LocalState::Comptime(value)) => Ok(value),
-                Err(Poisoned) => Err(Poisoned),
-                Ok(LocalState::Runtime(_)) => match call.caller_bindings[arg].state {
+            let param_key_value = match fn_scope.bindings[param.value].state {
+                Ok(LocalState::Comptime(value)) => Some(Ok(value)),
+                Err(Poisoned) => Some(Err(Poisoned)),
+                Ok(LocalState::Runtime(_)) => {
+                    runtime_param_count += 1;
                     // `create_fn_scope` optimistically makes params runtime in runtime contexts,
                     // if we find out we need to evaluate as comptime we need to make sure all
                     // arguments are added to the key.
-                    Ok(LocalState::Comptime(value)) if preamble.is_comptime_only => Ok(value),
-                    _ => {
-                        let ArgParamComptimenessMatch = validated;
-                        continue;
+                    match call.caller_bindings[arg].state {
+                        Ok(LocalState::Comptime(value)) if preamble.is_comptime_only => {
+                            Some(Ok(value))
+                        }
+                        _ => {
+                            let ArgParamComptimenessMatch = validated;
+                            None
+                        }
                     }
-                },
+                }
             };
-            fn_scope.eval.maybe_values_buf.push(value);
+
+            if let Some(value) = param_key_value {
+                fn_scope.eval.maybe_values_buf.push(value);
+            }
+
+            if let hir::ParamType::Any { capture } = param.r#type {
+                let capture_key_value = match fn_scope.bindings[capture].state {
+                    Ok(LocalState::Comptime(value)) => Ok(value),
+                    Err(Poisoned) => Err(Poisoned),
+                    Ok(LocalState::Runtime(_)) => {
+                        unreachable!("any-type capture should be comptime")
+                    }
+                };
+                fn_scope.eval.maybe_values_buf.push(capture_key_value);
+            }
         }
 
         if call.caller_comptime || preamble.is_comptime_only {
@@ -341,7 +362,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Non-comptime params are already bound as Runtime in `create_fn_scope`.
         let function =
             FunctionKey::new(closure, &fn_scope.eval.maybe_values_buf[values_buf_offset..]);
-        let param_count = (params.len() - function.params.len()) as u32;
 
         let lowered = match fn_scope.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
             Ok(&mut State::Done(fn_id)) => fn_id,
@@ -360,8 +380,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     let return_type = preamble.return_type?;
                     let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
-                    let fn_id2 =
-                        fn_scope.eval.mir_fns.push(mir::FnDef { body, param_count, return_type });
+                    let fn_id2 = fn_scope.eval.mir_fns.push(mir::FnDef {
+                        body,
+                        param_count: runtime_param_count,
+                        return_type,
+                    });
                     assert_eq!(fn_id1, fn_id2);
                     Ok(fn_id1)
                 })();
@@ -521,7 +544,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         comptime: bool,
         arg: hir::LocalId,
-        r#type: hir::LocalId,
+        r#type: hir::ParamType,
         idx: u32,
     ) {
         let EvalContext::FunctionPreamble { arg_spans, call_source } = self.ctx else {
@@ -530,10 +553,44 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
         let arg_loc = SrcLoc::new(call_source, arg_span);
-        let Ok(param_ty) = self.expect_type(r#type) else {
+        let Ok((param_ty, param_ty_loc)) = (match r#type {
+            plank_hir::ParamType::Explicit(local_id) => self
+                .expect_type(local_id)
+                .map(|ty| (ty, self.origin_loc(self.bindings[local_id].origin))),
+            plank_hir::ParamType::Any { capture } => {
+                let arg_binding = self.bindings[arg];
+                let Ok(state) = arg_binding.state else {
+                    self.bindings.insert_no_prev(
+                        capture,
+                        Local {
+                            state: Err(Poisoned),
+                            use_span: arg_binding.use_span,
+                            origin: DefOrigin::Local(arg_binding.use_span),
+                        },
+                    );
+                    return;
+                };
+                let arg_ty = self.state_type(state);
+                let type_value = self.values.intern_type(arg_ty);
+                self.bindings.insert_no_prev(
+                    capture,
+                    Local::comptime(
+                        type_value,
+                        arg_binding.use_span,
+                        DefOrigin::Local(arg_binding.use_span),
+                    ),
+                );
+                Ok((arg_ty, self.loc(arg_binding.use_span)))
+            }
+            plank_hir::ParamType::Poisoned => {
+                self.bindings[arg].state = Err(Poisoned);
+                return;
+            }
+        }) else {
             self.bindings[arg].state = Err(Poisoned);
             return;
         };
+
         let arg_binding = self.bindings[arg];
         let Ok(state) = arg_binding.state else { return };
         if comptime {
@@ -544,13 +601,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
         let arg_ty = self.state_type(state);
         if !arg_ty.is_assignable_to(param_ty) {
-            self.diag_ctx.emit_type_mismatch(
-                param_ty,
-                self.origin_loc(self.bindings[r#type].origin),
-                arg_ty,
-                arg_loc,
-                false,
-            );
+            self.diag_ctx.emit_type_mismatch(param_ty, param_ty_loc, arg_ty, arg_loc, false);
             self.bindings[arg].state = Err(Poisoned);
         }
     }

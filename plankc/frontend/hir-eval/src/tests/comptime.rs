@@ -573,6 +573,133 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
 }
 
 #[test]
+fn test_any_type_params_monomorphize_uniquely_at_runtime() {
+    assert_lowers_to(
+        r#"
+        const Gen = fn (comptime T: type) type {
+            struct {
+                inner: T,
+                len: u256
+            }
+        };
+
+        const get_len = fn (arr: $T) u256 {
+            arr.len
+        };
+
+        const captured_type = fn(value: $T) type { T };
+        const same_type = fn(x: $T, y: T) T { y };
+        const comptime_value = fn(comptime value: $T) T { value };
+
+        init {
+            let mut x = get_len(comptime { Gen(u256) } {
+                inner: 0,
+                len: 34
+            });
+            let mut y = get_len(comptime { Gen(bool) } {
+                inner: false,
+                len: 33
+            });
+            let mut a: captured_type(1) = 2;
+            let mut b = same_type(3, 4);
+            let mut c = comptime_value(5);
+            @evm_stop();
+        }
+        "#,
+        r#"
+
+        ==== Functions ====
+        @fn0(%0: struct#0@main.plk:2:5) -> u256 {
+            %1 : struct#0@main.plk:2:5 = %0
+            %2 : u256 = %1.1
+            ret %2
+        }
+
+        @fn1(%0: struct#56@main.plk:2:5) -> u256 {
+            %1 : struct#56@main.plk:2:5 = %0
+            %2 : u256 = %1.1
+            ret %2
+        }
+
+        @fn2(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %1
+            ret %2
+        }
+
+        @fn3() -> u256 {
+            %0 : u256 = 5
+            ret %0
+        }
+
+        ; init
+        @fn4() -> never {
+            %0 : struct#0@main.plk:2:5 = struct#0 {
+                0,
+                34,
+            }
+            %1 : u256 = call @fn0(%0)
+            %2 : struct#56@main.plk:2:5 = struct#56 {
+                false,
+                33,
+            }
+            %3 : u256 = call @fn1(%2)
+            %4 : u256 = 2
+            %5 : u256 = 3
+            %6 : u256 = 4
+            %7 : u256 = call @fn2(%5, %6)
+            %8 : u256 = call @fn3()
+            %9 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_poisoned_any_type_arg_does_not_panic() {
+    assert_diagnostics(
+        r#"
+        const f = fn (value: $T) void {};
+
+        init {
+            f(missing);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unresolved identifier 'missing'
+         --> main.plk:3:7
+          |
+        3 |     f(missing);
+          |       ^^^^^^^ not found in this scope
+        "#],
+    );
+}
+
+#[test]
+fn test_any_type_capture_used_by_later_param_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const f = fn (x: $T, y: T) T { y };
+
+        init {
+            f(1, false);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:10
+          |
+        1 | const f = fn (x: $T, y: T) T { y };
+          |                         - `u256` expected because of this
+        2 | init {
+        3 |     f(1, false);
+          |          ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
 fn test_basic_polymorphic_function() {
     assert_lowers_to(
         r#"
