@@ -573,6 +573,38 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
 }
 
 #[test]
+fn test_comptime_any() {
+    assert_lowers_to(
+        r#"
+        const meta_mul = fn (comptime x: $T, comptime y: T) T {
+            if T == bool {
+                x and y
+            } else if T == u256 {
+                @evm_mul(x, y)
+            }
+        };
+
+        init {
+            let mut x = comptime { meta_mul(true, true) };
+            let mut x = comptime { meta_mul(true, false) };
+            let mut x = comptime { meta_mul(3, 21) };
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = false
+            %2 : u256 = 63
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_any_type_params_monomorphize_uniquely_at_runtime() {
     assert_lowers_to(
         r#"
