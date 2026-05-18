@@ -95,8 +95,7 @@ contract RawEvmOpsTest is BaseTest {
         assertReturns(selfbalanceImpl, "", balance);
     }
 
-    function test_fuzzing_addressThis(uint256 rawAddress) public {
-        address impl = address(uint160(rawAddress));
+    function test_fuzzing_addressThis(address impl) public {
         vm.assume(uint160(impl) > 1024);
         vm.etch(impl, addressThisCode);
         assertReturns(impl, "", uint160(impl));
