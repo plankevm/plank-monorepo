@@ -6,23 +6,39 @@ import {ERC20} from "src/examples/ERC20.sol";
 
 contract ERC20Test is BaseTest {
     ERC20 solRef;
-    address plankImpl = makeAddr("plank-implementation");
+    ERC20 plankToken = ERC20(makeAddr("plank-implementation"));
+    address minter = makeAddr("owner");
 
     function setUp() public {
+        vm.startPrank(minter);
         solRef = new ERC20();
 
         bytes memory plankCode = plank("src/examples/erc20.plk");
-        plankImpl = deployCode(plankCode);
+        plankToken = ERC20(deployCode(plankCode));
+        vm.stopPrank();
+    }
+
+    function test_initialState() public view {
+        assertEq(plankToken.balanceOf(minter), plankToken.totalSupply());
+    }
+
+    function test_benchmark_transferNonZeroToNonZero() public {
+        address user = makeAddr("user");
+        vm.prank(minter);
+        plankToken.transfer(user, 1000);
+
+        vm.prank(user);
+        plankToken.transfer(minter, 20);
     }
 
     // --- helpers ---
 
     function assertCallEq(bytes memory data) internal {
-        assertCallEq(address(solRef), plankImpl, data);
+        assertCallEq(address(solRef), address(plankToken), data);
     }
 
     function assertCallEqFrom(bytes memory data, address sender) internal {
-        assertCallEqFrom(address(solRef), plankImpl, data, sender);
+        assertCallEqFrom(address(solRef), address(plankToken), data, sender);
     }
 
     // --- view functions ---
@@ -32,7 +48,7 @@ contract ERC20Test is BaseTest {
     }
 
     function test_balanceOf_deployer() public {
-        assertCallEq(abi.encodeWithSignature("balanceOf(address)", address(this)));
+        assertCallEq(abi.encodeWithSignature("balanceOf(address)", minter));
     }
 
     function test_fuzzing_balanceOf(address who) public {

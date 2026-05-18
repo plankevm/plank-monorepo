@@ -1,0 +1,5 @@
+init {
+    let out = @malloc_uninit(32);
+    @mstore32(out, @evm_origin());
+    @evm_return(out, 32);
+}

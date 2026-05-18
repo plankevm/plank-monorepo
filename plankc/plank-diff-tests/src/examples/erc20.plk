@@ -1,4 +1,4 @@
-import std::abi::{abi_encode};
+import std::abi::abi_encode;
 import std::membytes::{membytes, membytes_from_ptr};
 import std::storage::map_slot_hash;
 import std::constructor::return_runtime;
@@ -57,7 +57,7 @@ run {
         symbol();
     } else {
         @evm_revert(@malloc_uninit(0), 0);
-    } 
+    }
 }
 
 const balance_of = fn (address: u256) never {
@@ -133,15 +133,15 @@ const decimals = fn () never {
 
 const name = fn () never {
     let ptr = @malloc_uninit(10);
-    @mstore10(ptr, 0x506c616e6b546f6b656e);
-    let encoded = abi_encode(membytes_from_ptr(ptr, 10));
+    @mstore10(ptr, 0x5465737420546f6b656e /* "Test Token" */);
+    let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 10));
     @evm_return(encoded.ptr, encoded.len);
 };
 
 const symbol = fn () never {
     let ptr = @malloc_uninit(3);
-    @mstore3(ptr, 0x504c4b);
-    let encoded = abi_encode(membytes_from_ptr(ptr, 3));
+    @mstore3(ptr, 0x545354 /* "TST" */);
+    let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 3));
     @evm_return(encoded.ptr, encoded.len);
 };
 
