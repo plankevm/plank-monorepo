@@ -93,7 +93,14 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Diagnostic::error(format!("unexpected {}", found)).primary(self.source_id, span, label)
+        let mut diagnostic =
+            Diagnostic::error(format!("unexpected {}", found)).primary(self.source_id, span, label);
+        if found == Token::Dollar {
+            diagnostic = diagnostic.help(
+                "`$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`",
+            );
+        }
+        diagnostic
     }
 
     pub(crate) fn emit_missing_token(&mut self, missing: Token, span: SourceSpan) {

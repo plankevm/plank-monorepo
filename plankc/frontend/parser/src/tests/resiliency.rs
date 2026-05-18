@@ -324,6 +324,60 @@ fn test_param_list_empty_after_comma() {
 }
 
 #[test]
+fn test_any_type_not_allowed_in_let_type() {
+    assert_parser_errors(
+        r#"
+            run { let x: $T = 1; }
+        "#,
+        &[r#"
+            error: unexpected `$`
+             --> test.plk:1:14
+              |
+            1 | run { let x: $T = 1; }
+              |              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              |
+              = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
+        "#],
+    );
+}
+
+#[test]
+fn test_any_type_not_allowed_in_const_type() {
+    assert_parser_errors(
+        r#"
+            const X: $T = 1;
+        "#,
+        &[r#"
+            error: unexpected `$`
+             --> test.plk:1:10
+              |
+            1 | const X: $T = 1;
+              |          ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              |
+              = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
+        "#],
+    );
+}
+
+#[test]
+fn test_any_type_not_allowed_nested_in_param_type() {
+    assert_parser_errors(
+        r#"
+            const f = fn(value: Array(4, $T)) void {};
+        "#,
+        &[r#"
+            error: unexpected `$`
+             --> test.plk:1:30
+              |
+            1 | const f = fn(value: Array(4, $T)) void {};
+              |                              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`, `)`
+              |
+              = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
+        "#],
+    );
+}
+
+#[test]
 fn test_member_access_missing_ident() {
     assert_parser_errors(
         r#"
