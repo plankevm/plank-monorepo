@@ -7,7 +7,7 @@ use op_graph::build_graph_simple;
 pub use stack::ScheduleConfig;
 
 use crate::{
-    scheduler::{DumbScheduler, DumbShuffler, Scheduler},
+    scheduler::{dumb_schedule, dumb_shuffle_to_output},
     stack::StackOps,
 };
 
@@ -63,7 +63,8 @@ pub fn schedule<'ir>(
 
         let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
         let ops_idx = ops.push_with(|mut pusher| {
-            DumbScheduler::<DumbShuffler>::schedule(
+            dumb_schedule(
+                dumb_shuffle_to_output,
                 |op| pusher.push(op),
                 block,
                 &program.next_static_alloc_id,
