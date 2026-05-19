@@ -317,7 +317,8 @@ impl<'a> Parser<'a> {
     fn try_parse_string_literal(&mut self) -> Option<NodeKind> {
         self.skip_trivia();
         let token_idx = self.tokens.current();
-        if !matches!(self.current_token(), Token::StringLiteral | Token::HexStringLiteral) {
+        if !matches!(self.current_token(), Token::LooseStringLiteral | Token::LooseHexStringLiteral)
+        {
             return None;
         }
         self.advance();

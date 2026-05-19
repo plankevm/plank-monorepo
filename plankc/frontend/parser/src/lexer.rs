@@ -59,13 +59,16 @@ fn lex_number_literal<const RADIX: u32>(lexer: &mut LogosLexer<Token>) -> Result
     inner_do_lex(lexer, inner::<RADIX>)
 }
 
-fn lex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
+fn lex_loose_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     fn inner<'a>(chars: &mut CharsPeekable<'a>) -> Result<(), Token> {
         let mut malformed = false;
         while let Some((_, c)) = chars.next() {
             match c {
                 '"' => {
-                    return if malformed { Err(Token::UnclosedStringError) } else { Ok(()) };
+                    if malformed {
+                        return Err(Token::MalformedStringError);
+                    }
+                    return Ok(());
                 }
                 '\\' => {
                     chars.next();
@@ -80,19 +83,18 @@ fn lex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     inner_do_lex(lexer, inner)
 }
 
-fn lex_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
+fn lex_loose_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     fn inner<'a>(chars: &mut CharsPeekable<'a>) -> Result<(), Token> {
-        let mut digits = 0;
         let mut malformed = false;
-        for (_, c) in chars.by_ref() {
+        for (_, c) in chars {
             match c {
                 '"' => {
-                    if !malformed && digits % 2 == 0 {
-                        return Ok(());
+                    if malformed {
+                        return Err(Token::MalformedStringError);
                     }
-                    return Err(Token::MalformedHexStringError);
+                    return Ok(());
                 }
-                '0'..='9' | 'A'..='F' | 'a'..='f' => digits += 1,
+                '0'..='9' | 'A'..='F' | 'a'..='f' => {}
                 '\n' | '\r' => malformed = true,
                 _ => malformed = true,
             }
@@ -322,10 +324,10 @@ pub enum Token {
     #[regex("0b[01]", lex_number_literal::<2>)]
     BinLiteral,
 
-    #[token("\"", lex_string_literal)]
-    StringLiteral,
-    #[token("hex\"", lex_hex_string_literal)]
-    HexStringLiteral,
+    #[token("\"", lex_loose_string_literal)]
+    LooseStringLiteral,
+    #[token("hex\"", lex_loose_hex_string_literal)]
+    LooseHexStringLiteral,
 
     // Trivia
     #[regex("[ \t\n\r]+")]
@@ -341,7 +343,7 @@ pub enum Token {
     #[default]
     InvalidCharError,
     MalformedIdentError,
-    MalformedHexStringError,
+    MalformedStringError,
     UnclosedBlockCommentError,
     UnclosedStringError,
 
@@ -352,7 +354,7 @@ pub enum Token {
 pub enum ErrorToken {
     InvalidChar,
     MalformedIdent,
-    MalformedHexString,
+    MalformedString,
     UnclosedBlockComment,
     UnclosedString,
     AtWithoutIdent,
@@ -374,7 +376,7 @@ impl Token {
         match self {
             Token::InvalidCharError => Some(ErrorToken::InvalidChar),
             Token::MalformedIdentError => Some(ErrorToken::MalformedIdent),
-            Token::MalformedHexStringError => Some(ErrorToken::MalformedHexString),
+            Token::MalformedStringError => Some(ErrorToken::MalformedString),
             Token::UnclosedBlockCommentError => Some(ErrorToken::UnclosedBlockComment),
             Token::UnclosedStringError => Some(ErrorToken::UnclosedString),
             Token::AtWithoutIdentError => Some(ErrorToken::AtWithoutIdent),
@@ -449,14 +451,14 @@ impl Token {
             | Token::DecimalLiteral
             | Token::HexLiteral
             | Token::BinLiteral
-            | Token::StringLiteral
-            | Token::HexStringLiteral
+            | Token::LooseStringLiteral
+            | Token::LooseHexStringLiteral
             | Token::Whitespace
             | Token::LineComment
             | Token::BlockComment
             | Token::InvalidCharError
             | Token::MalformedIdentError
-            | Token::MalformedHexStringError
+            | Token::MalformedStringError
             | Token::UnclosedBlockCommentError
             | Token::UnclosedStringError
             | Token::AtWithoutIdentError
@@ -531,14 +533,14 @@ impl Token {
             Token::DecimalLiteral => "decimal literal",
             Token::HexLiteral => "hex literal",
             Token::BinLiteral => "binary literal",
-            Token::StringLiteral => "string literal",
-            Token::HexStringLiteral => "hex string literal",
+            Token::LooseStringLiteral => "string literal",
+            Token::LooseHexStringLiteral => "hex string literal",
             Token::Whitespace => "whitespace",
             Token::LineComment => "line comment",
             Token::BlockComment => "block comment",
             Token::InvalidCharError => "invalid character",
-            Token::MalformedIdentError => "malformed literal",
-            Token::MalformedHexStringError => "malformed hex string literal",
+            Token::MalformedIdentError => "malformed identifier",
+            Token::MalformedStringError => "malformed string literal",
             Token::UnclosedBlockCommentError => "unclosed block comment",
             Token::UnclosedStringError => "unclosed string literal",
             Token::AtWithoutIdentError => "invalid builtin name",
@@ -557,7 +559,6 @@ pub type TokenSpan = Span<TokenIdx>;
 pub struct Lexed {
     tokens: IndexVec<TokenIdx, Token>,
     source_ends: IndexVec<TokenIdx, SourceByteOffset>,
-    bytes_literals: IndexVec<TokenIdx, Option<Vec<u8>>>,
 }
 
 const LEN_TO_TOKEN_CAPACITY: usize = 4;
@@ -575,8 +576,8 @@ impl Lexed {
             let (tok, span) = lexer.next_with_eof();
             let token_source = &source[span.usize_range()];
             let bytes_literal = match tok {
-                Token::StringLiteral => decode_string_literal(token_source),
-                Token::HexStringLiteral => Some(decode_hex_string_literal(token_source)),
+                Token::LooseStringLiteral => decode_string_literal(token_source),
+                Token::LooseHexStringLiteral => Some(decode_hex_string_literal(token_source)),
                 _ => None,
             };
             tokens.push(tok);
@@ -617,7 +618,7 @@ impl Lexed {
             return Cow::Borrowed(value);
         }
 
-        assert_eq!(self.tokens[index], Token::StringLiteral);
+        assert_eq!(self.tokens[index], Token::LooseStringLiteral);
         let span = self.token_src_span(index);
         let src = &source[span.usize_range()];
         Cow::Borrowed(&src.as_bytes()[1..src.len() - 1])
@@ -787,30 +788,28 @@ mod tests {
 
     #[test]
     fn test_string_literals() {
-        let results =
-            lex_all("\"hello\" \"\" \"escaped \\\" quote\" \"path \\\\ tmp\" hex\"01af\"");
+        let results = lex_all(r#""hello" "" "escaped \" quote" "path \\ tmp" hex"01af""#);
         assert_eq!(results.len(), 9);
-        assert_eq!(results[0], (Token::StringLiteral, 0..7, r#""hello""#));
+        assert_eq!(results[0], (Token::LooseStringLiteral, 0..7, r#""hello""#));
         assert_eq!(results[1], (Token::Whitespace, 7..8, " "));
-        assert_eq!(results[2], (Token::StringLiteral, 8..10, r#""""#));
+        assert_eq!(results[2], (Token::LooseStringLiteral, 8..10, r#""""#));
         assert_eq!(results[3], (Token::Whitespace, 10..11, " "));
-        assert_eq!(results[4], (Token::StringLiteral, 11..29, r#""escaped \" quote""#));
+        assert_eq!(results[4], (Token::LooseStringLiteral, 11..29, r#""escaped \" quote""#));
         assert_eq!(results[5], (Token::Whitespace, 29..30, " "));
-        assert_eq!(results[6], (Token::StringLiteral, 30..43, r#""path \\ tmp""#));
+        assert_eq!(results[6], (Token::LooseStringLiteral, 30..43, r#""path \\ tmp""#));
         assert_eq!(results[7], (Token::Whitespace, 43..44, " "));
-        assert_eq!(results[8], (Token::HexStringLiteral, 44..53, "hex\"01af\""));
+        assert_eq!(results[8], (Token::LooseHexStringLiteral, 44..53, r#"hex"01af""#));
     }
 
     #[test]
     fn test_string_literal_values() {
-        let source =
-            "\"hello\" \"\" \"quote: \\\" slash: \\\\\" \"line\\n\" \"nul\\x00\" hex\"00ff\"";
+        let source = r#""hello" "" "quote: \" slash: \\" "line\n" "nul\x00" hex"00ff""#;
         let lexed = Lexed::lex(source);
         assert_eq!(lexed.bytes_literal_value(TokenIdx::new(0), source), "hello".as_bytes());
         assert_eq!(lexed.bytes_literal_value(TokenIdx::new(2), source), "".as_bytes());
         assert_eq!(
             lexed.bytes_literal_value(TokenIdx::new(4), source),
-            "quote: \" slash: \\".as_bytes()
+            r#"quote: " slash: \"#.as_bytes()
         );
         assert_eq!(lexed.bytes_literal_value(TokenIdx::new(6), source), "line\n".as_bytes());
         assert_eq!(lexed.bytes_literal_value(TokenIdx::new(8), source), b"nul\0".as_slice());
@@ -820,22 +819,43 @@ mod tests {
     #[test]
     fn test_malformed_hex_string_literals() {
         assert_eq!(
-            lex_all("hex\"abc\""),
-            vec![(Token::MalformedHexStringError, 0..8, "hex\"abc\"")]
+            lex_all(r#"hex"01aFzz""#),
+            vec![(Token::MalformedStringError, 0..11, r#"hex"01aFzz""#)]
         );
-        assert_eq!(lex_all("hex\"zz\""), vec![(Token::MalformedHexStringError, 0..7, "hex\"zz\"")]);
     }
 
     #[test]
     fn test_unclosed_string_literal() {
-        let results = lex_all("\"unterminated");
-        assert_eq!(results, vec![(Token::UnclosedStringError, 0..13, "\"unterminated")]);
+        let results = lex_all(r#""unterminated"#);
+        assert_eq!(results, vec![(Token::UnclosedStringError, 0..13, r#""unterminated"#)]);
 
-        let results = lex_all("\"unterminated\nnext");
-        assert_eq!(results, vec![(Token::UnclosedStringError, 0..18, "\"unterminated\nnext")]);
+        let results = lex_all(
+            r#""unterminated
+next"#,
+        );
+        assert_eq!(
+            results,
+            vec![(
+                Token::UnclosedStringError,
+                0..18,
+                r#""unterminated
+next"#
+            )]
+        );
 
-        let results = lex_all("\"line\ncontinued\"");
-        assert_eq!(results, vec![(Token::UnclosedStringError, 0..16, "\"line\ncontinued\"")]);
+        let results = lex_all(
+            r#""line
+continued""#,
+        );
+        assert_eq!(
+            results,
+            vec![(
+                Token::MalformedStringError,
+                0..16,
+                r#""line
+continued""#
+            )]
+        );
     }
 
     #[test]
