@@ -11,6 +11,16 @@ license = "MIT"
 inherits = "release"
 debug-assertions = true
 
+[profile.profiling]
+inherits = "release"
+
+# Keep optimized code, but retain enough debug info for useful stacks.
+debug = true
+strip = false
+
+# Makes sampling stack traces much more reliable.
+incremental = false
+
 [workspace.dependencies]
 # Core
 plank-core = { path = "crates/plank-core" }
