@@ -1,4 +1,4 @@
-use crate::module::{RuntimeShapes, runtime_shape};
+use crate::module::{RuntimeShapes, SectionContext, runtime_shape};
 use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::RuntimeBuiltin;
@@ -73,15 +73,21 @@ fn memory_op(b: RuntimeBuiltin) -> Option<MemoryOp> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct LoweringContext<'a> {
+    pub(crate) funcs: &'a DenseIndexMap<mir::FnId, FuncRef>,
+    pub(crate) runtime_shapes: &'a RuntimeShapes,
+    pub(crate) section_context: SectionContext,
+}
+
 pub(crate) struct FunctionLowerer<'a> {
     mir: &'a Mir,
     values: &'a ValueInterner,
     fn_id: mir::FnId,
     fb: FunctionBuilder<InstInserter>,
     is: &'static EvmInstSet,
-    funcs: &'a DenseIndexMap<mir::FnId, FuncRef>,
+    context: LoweringContext<'a>,
     local_vars: DenseIndexMap<mir::LocalId, Option<(Variable, SonaType)>>,
-    runtime_shapes: &'a RuntimeShapes,
 }
 
 impl<'a> FunctionLowerer<'a> {
@@ -90,11 +96,10 @@ impl<'a> FunctionLowerer<'a> {
         is: &'static EvmInstSet,
         mir: &'a Mir,
         values: &'a ValueInterner,
-        funcs: &'a DenseIndexMap<mir::FnId, FuncRef>,
-        runtime_shapes: &'a RuntimeShapes,
         fn_id: mir::FnId,
+        context: LoweringContext<'a>,
     ) -> Self {
-        let mut fb = builder.func_builder::<InstInserter>(funcs[fn_id]);
+        let mut fb = builder.func_builder::<InstInserter>(context.funcs[fn_id]);
         let entry = fb.append_block();
         fb.switch_to_block(entry);
         Self {
@@ -103,9 +108,8 @@ impl<'a> FunctionLowerer<'a> {
             fn_id,
             fb,
             is,
-            funcs,
+            context,
             local_vars: DenseIndexMap::with_capacity(mir.fn_locals[fn_id].len()),
-            runtime_shapes,
         }
     }
 
@@ -183,7 +187,7 @@ impl<'a> FunctionLowerer<'a> {
                     .iter()
                     .filter_map(|&arg| self.read_local(arg))
                     .collect::<SmallVec<[SonaValueId; 8]>>();
-                let results = self.fb.insert_call_results(self.funcs[callee], call_args);
+                let results = self.fb.insert_call_results(self.context.funcs[callee], call_args);
                 let value = match self.local_slot(target) {
                     None => {
                         assert!(results.is_empty());
@@ -303,7 +307,7 @@ impl<'a> FunctionLowerer<'a> {
     }
 
     fn shape(&self, ty: TypeId) -> Option<SonaType> {
-        runtime_shape(self.runtime_shapes, ty)
+        runtime_shape(self.context.runtime_shapes, ty)
     }
 
     fn read_condition(&mut self, local: mir::LocalId) -> SonaValueId {
@@ -484,11 +488,17 @@ impl<'a> FunctionLowerer<'a> {
 
             B::RuntimeStartOffset => {
                 let result_ty = rty.expect("builtin should produce a value");
-                let result = if self.mir.run.is_some() {
-                    let symbol = SymbolRef::Embed(EmbedSymbol::from(crate::RUNTIME_SECTION));
-                    self.fb.insert_inst(SymAddr::new(self.is, symbol), result_ty)
-                } else {
-                    self.fb.insert_inst(SymSize::new(self.is, SymbolRef::CurrentSection), result_ty)
+                let result = match (self.context.section_context, self.mir.run.is_some()) {
+                    (SectionContext::Init, true) => {
+                        let symbol = SymbolRef::Embed(EmbedSymbol::from(crate::RUNTIME_SECTION));
+                        self.fb.insert_inst(SymAddr::new(self.is, symbol), result_ty)
+                    }
+                    (SectionContext::Init, false) => self
+                        .fb
+                        .insert_inst(SymSize::new(self.is, SymbolRef::CurrentSection), result_ty),
+                    (SectionContext::Runtime, _) => self
+                        .fb
+                        .insert_inst(SymAddr::new(self.is, SymbolRef::CurrentSection), result_ty),
                 };
                 BuiltinOutput::Value(result)
             }
@@ -501,11 +511,15 @@ impl<'a> FunctionLowerer<'a> {
             }
             B::RuntimeLength => {
                 let result_ty = rty.expect("builtin should produce a value");
-                let result = if self.mir.run.is_some() {
-                    let symbol = SymbolRef::Embed(EmbedSymbol::from(crate::RUNTIME_SECTION));
-                    self.fb.insert_inst(SymSize::new(self.is, symbol), result_ty)
-                } else {
-                    self.imm_256(0)
+                let result = match (self.context.section_context, self.mir.run.is_some()) {
+                    (SectionContext::Init, true) => {
+                        let symbol = SymbolRef::Embed(EmbedSymbol::from(crate::RUNTIME_SECTION));
+                        self.fb.insert_inst(SymSize::new(self.is, symbol), result_ty)
+                    }
+                    (SectionContext::Init, false) => self.imm_256(0),
+                    (SectionContext::Runtime, _) => self
+                        .fb
+                        .insert_inst(SymSize::new(self.is, SymbolRef::CurrentSection), result_ty),
                 };
                 BuiltinOutput::Value(result)
             }

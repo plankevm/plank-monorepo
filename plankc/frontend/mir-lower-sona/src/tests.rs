@@ -343,6 +343,146 @@ fn lowers_runtime_introspection_symbols() {
 }
 
 #[test]
+fn compiles_runtime_length_used_from_runtime_section() {
+    let source = r#"
+        const len = fn () u256 {
+            @runtime_length()
+        };
+
+        init {
+            let runtime = @malloc_uninit(@runtime_length());
+            @evm_codecopy(runtime, @runtime_start_offset(), @runtime_length());
+            @evm_return(runtime, @runtime_length());
+        }
+
+        run {
+            let ptr = @malloc_uninit(32);
+            @mstore32(ptr, len());
+            @evm_return(ptr, 32);
+        }
+        "#;
+
+    assert_lowers_to_ir(
+        source,
+        r#"
+        target = "evm-ethereum-osaka"
+
+        func public %init() {
+            block0:
+                v0.i256 = sym_size &runtime;
+                v1.*i8 = evm_malloc v0;
+                v2.i256 = ptr_to_int v1 i256;
+                v3.i256 = sym_addr &runtime;
+                v4.i256 = sym_size &runtime;
+                evm_code_copy v2 v3 v4;
+                v5.i256 = sym_size &runtime;
+                evm_return v2 v5;
+        }
+
+        func private %fn_1() -> i256 {
+            block0:
+                v0.i256 = sym_size .;
+                return v0;
+        }
+
+        func public %run() {
+            block0:
+                v1.*i8 = evm_malloc 32.i256;
+                v2.i256 = ptr_to_int v1 i256;
+                v3.i256 = call %fn_1;
+                mstore v2 v3 i256;
+                evm_return v2 32.i256;
+        }
+
+
+        object @Contract {
+            section runtime {
+                entry %run;
+            }
+            section init {
+                entry %init;
+                embed .runtime as &runtime;
+            }
+        }
+        "#,
+    );
+    assert!(!lower_bytecode(source).is_empty());
+}
+
+#[test]
+fn duplicates_runtime_introspection_helpers_per_section() {
+    let source = r#"
+        const len = fn () u256 {
+            @runtime_length()
+        };
+
+        init {
+            let runtime = @malloc_uninit(len());
+            @evm_codecopy(runtime, @runtime_start_offset(), len());
+            @evm_return(runtime, len());
+        }
+
+        run {
+            let ptr = @malloc_uninit(32);
+            @mstore32(ptr, len());
+            @evm_return(ptr, 32);
+        }
+        "#;
+
+    assert_lowers_to_ir(
+        source,
+        r#"
+        target = "evm-ethereum-osaka"
+
+        func private %fn_0() -> i256 {
+            block0:
+                v0.i256 = sym_size &runtime;
+                return v0;
+        }
+
+        func private %fn_0_runtime() -> i256 {
+            block0:
+                v0.i256 = sym_size .;
+                return v0;
+        }
+
+        func public %init() {
+            block0:
+                v0.i256 = call %fn_0;
+                v1.*i8 = evm_malloc v0;
+                v2.i256 = ptr_to_int v1 i256;
+                v3.i256 = sym_addr &runtime;
+                v4.i256 = call %fn_0;
+                evm_code_copy v2 v3 v4;
+                v5.i256 = call %fn_0;
+                evm_return v2 v5;
+        }
+
+        func public %run() {
+            block0:
+                v1.*i8 = evm_malloc 32.i256;
+                v2.i256 = ptr_to_int v1 i256;
+                v3.i256 = call %fn_0_runtime;
+                mstore v2 v3 i256;
+                evm_return v2 32.i256;
+        }
+
+
+        object @Contract {
+            section runtime {
+                entry %run;
+            }
+            section init {
+                entry %init;
+                embed .runtime as &runtime;
+            }
+        }
+        "#,
+    );
+    assert!(!lower_bytecode(source).is_empty());
+}
+
+#[test]
 fn lowers_bool_builtins_as_i1_without_zext() {
     let ir = lower_ir(
         r#"
