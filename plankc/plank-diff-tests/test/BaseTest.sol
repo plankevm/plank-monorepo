@@ -9,6 +9,17 @@ abstract contract BaseTest is Test, PlankDeployer {
         addr = deployCode(initcode, "");
     }
 
+    function deployCodeTo(address to, bytes memory initcode) internal {
+        vm.etch(to, initcode);
+        (bool success, bytes memory retdata) = to.call("");
+        if (!success) {
+            assembly ("memory-safe") {
+                revert(add(retdata, 32), mload(retdata))
+            }
+        }
+        vm.etch(to, retdata);
+    }
+
     function deployCode(bytes memory initcode, bytes memory args) internal returns (address addr) {
         initcode = bytes.concat(initcode, args);
         assembly ("memory-safe") {

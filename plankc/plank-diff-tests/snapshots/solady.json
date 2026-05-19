@@ -4,6 +4,7 @@
   "erc20.deploy": "641431",
   "erc20.deployed_size": "2301",
   "erc20.initcode_size": "2467",
+  "erc20.permit": "73699",
   "erc20.transfer": "33937",
   "erc20.transferFrom": "53752"
 }
