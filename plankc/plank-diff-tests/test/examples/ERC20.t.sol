@@ -64,6 +64,13 @@ contract ERC20Test is BaseTest {
         assertEq(plankToken.balanceOf(recipient), amount);
     }
 
+    function test_selfTransfer() public {
+        uint256 amount = 2000;
+        assertCallEqFrom(abi.encodeCall(IERC20.transfer, (minter, amount)), minter);
+
+        assertEq(plankToken.balanceOf(minter), plankToken.totalSupply());
+    }
+
     function test_fuzzing_permit2Allowance(address owner) public {
         assertCallEq(abi.encodeCall(IERC20.allowance, (owner, PERMIT2)));
     }
@@ -77,6 +84,23 @@ contract ERC20Test is BaseTest {
 
     function test_fuzzing_approvePermit2(address owner, uint256 amount) public {
         assertCallEqFrom(abi.encodeCall(IERC20.approve, (PERMIT2, amount)), owner);
+    }
+
+    function test_permit2ApproveMax() public {
+        address owner = makeAddr("permit2-owner");
+        assertCallEqFrom(abi.encodeCall(IERC20.approve, (PERMIT2, type(uint256).max)), owner);
+
+        assertEq(plankToken.allowance(owner, PERMIT2), type(uint256).max);
+    }
+
+    function test_permit2TransferFrom() public {
+        address recipient = makeAddr("recipient");
+        uint256 amount = 2000;
+        assertCallEqFrom(abi.encodeCall(IERC20.transferFrom, (minter, recipient, amount)), PERMIT2);
+
+        assertEq(plankToken.balanceOf(minter), plankToken.totalSupply() - amount);
+        assertEq(plankToken.balanceOf(recipient), amount);
+        assertEq(plankToken.allowance(minter, PERMIT2), type(uint256).max);
     }
 
     function test_fuzzing_approve(address owner, address spender, uint256 amount) public {
@@ -117,5 +141,16 @@ contract ERC20Test is BaseTest {
 
         assertCallEqFrom(abi.encodeCall(IERC20.approve, (spender, allowance)), minter);
         assertCallEqFrom(abi.encodeCall(IERC20.transferFrom, (minter, recipient, amount)), spender);
+    }
+
+    function test_fuzzing_transferFromInsufficientBalance(uint256 amount) public {
+        amount = bound(amount, plankToken.balanceOf(minter) + 1, type(uint256).max);
+
+        address spender = makeAddr("spender");
+        address recipient = makeAddr("recipient");
+
+        assertCallEqFrom(abi.encodeCall(IERC20.approve, (spender, amount)), minter);
+        assertCallEqFrom(abi.encodeCall(IERC20.transferFrom, (minter, recipient, amount)), spender);
+        assertEq(plankToken.allowance(minter, spender), amount);
     }
 }

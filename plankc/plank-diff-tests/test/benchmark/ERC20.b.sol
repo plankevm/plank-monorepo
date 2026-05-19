@@ -5,7 +5,6 @@ import {BaseTest} from "test/BaseTest.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 import {ERC20} from "src/examples/ERC20.sol";
 
-/// forge-config: default.isolate = true
 abstract contract ERC20BenchmarkBase is BaseTest {
     IERC20 token = IERC20(makeAddr("plank_test_token"));
     address initialSupplyHolder = makeAddr("initial_supply_holder");
@@ -40,10 +39,31 @@ abstract contract ERC20BenchmarkBase is BaseTest {
     function test_balanceOf() public {
         address user = makeAddr("user");
         token.balanceOf(user);
-        vm.snapshotGasLastCall(group(), "erc20.balance_of");
+        vm.snapshotGasLastCall(group(), "erc20.balanceOf");
+    }
+
+    function test_approve() public {
+        address user = makeAddr("user");
+        address spender = makeAddr("spender");
+
+        vm.prank(user);
+        token.approve(spender, 1000);
+        vm.snapshotGasLastCall(group(), "erc20.approve");
+    }
+
+    function test_transferFrom() public {
+        address spender = makeAddr("spender");
+
+        vm.prank(initialSupplyHolder);
+        token.approve(spender, type(uint256).max);
+
+        vm.prank(spender);
+        token.transferFrom(initialSupplyHolder, spender, 1000);
+        vm.snapshotGasLastCall(group(), "erc20.transferFrom");
     }
 }
 
+/// forge-config: default.isolate = true
 contract ERC20PlankRelease is ERC20BenchmarkBase {
     function group() internal pure override returns (string memory) {
         return "plank-release";
@@ -57,6 +77,7 @@ contract ERC20PlankRelease is ERC20BenchmarkBase {
     }
 }
 
+/// forge-config: default.isolate = true
 contract ERC20Solady is ERC20BenchmarkBase {
     function group() internal pure override returns (string memory) {
         return "solady";

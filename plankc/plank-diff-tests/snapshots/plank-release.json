@@ -1,7 +1,9 @@
 {
-  "erc20.balance_of": "3255",
-  "erc20.deploy": "702260",
+  "erc20.approve": "47299",
+  "erc20.balanceOf": "3255",
+  "erc20.deploy": "806400",
   "erc20.deployed_size": "2987",
   "erc20.initcode_size": "3239",
-  "erc20.transfer": "4570"
+  "erc20.transfer": "35742",
+  "erc20.transferFrom": "56234"
 }
