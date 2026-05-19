@@ -54,12 +54,21 @@ abstract contract BaseTest is Test, PlankDeployer {
         return _deploy(plank(sourcePath), 0);
     }
 
+    function baseBuildOptions() internal view returns (BuildOptions memory) {
+        return initBuildOptions().dependency("std", string.concat(vm.projectRoot(), "/../../std"));
+    }
+
+    function plankBuild(string memory sourcePath, BuildOptions memory options) internal returns (bytes memory) {
+        string[] memory bin = new string[](1);
+        bin[0] = "../target/debug/plank";
+        return plankBuildFFI(bin, sourcePath, options);
+    }
+
     function plank(string memory sourcePath) internal returns (bytes memory) {
         string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
 
-        BuildOptions memory options =
-            initBuildOptions().dependency("std", string.concat(vm.projectRoot(), "/../../std")).withBackend(backend);
+        BuildOptions memory options = baseBuildOptions().withBackend(backend);
 
         if (bytes(optimize).length != 0) {
             options = options.withOptimizations(optimize);
@@ -67,9 +76,6 @@ abstract contract BaseTest is Test, PlankDeployer {
             options = options.disableOptimizations();
         }
 
-        string[] memory bin = new string[](1);
-        bin[0] = "../target/debug/plank";
-
-        return plankBuildFFI(bin, sourcePath, options);
+        return plankBuild(sourcePath, options);
     }
 }

@@ -2,6 +2,9 @@ import std::abi::abi_encode;
 import std::membytes::{membytes, membytes_from_ptr};
 import std::storage::map_slot_hash;
 import std::constructor::return_runtime;
+import std::addr::*;
+
+const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
 const TOTAL_SUPPLY = 1000000;
 
@@ -22,142 +25,224 @@ const SYMBOL_SELECTOR = 0x95d89b41;
 const TRANSFER_TOPIC = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
 const APPROVAL_TOPIC = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
 
+const PERMIT2 = addr_from_u256(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+
+const INSUFFICIENT_BALANCE_SELECTOR = 0xf4d678b8 /* InsufficientBalance() */;
+const INSUFFICIENT_ALLOWANCE_SELECTOR = 0x13be252b /* InsufficientAllowance() */;
+const PERMIT2_ALLOWANCE_FIXED = 0x3f68539a /* Permit2AllowanceIsFixedAtInfinity() */;
+
+const balance_slot = fn (owner: addr) u256 {
+    map_slot_hash(owner.raw, BALANCE_SLOT_BASE)
+};
+
+const addr_eq = fn (a: addr, b: addr) bool {
+    a.raw == b.raw
+};
+
+const allowance_slot = fn (owner: addr, spender: addr) u256 {
+    comptime {
+        if ALLOWANCE_SLOT_BASE > 0xff {
+            let _allowance_slot_larger_than_one_byte: void = true;
+        }
+    }
+    let buf = @malloc_uninit(64);
+    @mstore32(buf +% 32, ALLOWANCE_SLOT_BASE);
+    @mstore32(buf +% 31, spender.raw);
+    @mstore32(buf +% (31 - 20), owner.raw);
+    @evm_keccak256(buf +% (31 - 20 + 12), 20 + 20 + 1)
+};
+
+const emit_transfer = fn (from: addr, to: addr, amount: u256) void {
+    let buf = @malloc_uninit(32);
+    @mstore32(buf, amount);
+    @evm_log3(buf, 32, TRANSFER_TOPIC, from.raw, to.raw);
+};
+
+const emit_approval = fn (owner: addr, spender: addr, amount: u256) void {
+    let buf = @malloc_uninit(32);
+    @mstore32(buf, amount);
+    @evm_log3(buf, 32, APPROVAL_TOPIC, owner.raw, spender.raw);
+};
+
+const revert_4byte = fn (comptime selector: u256) never {
+    if selector >= (1 << 32) {
+        let _invalid_selector: void = true;
+    }
+    let buf = @malloc_uninit(32);
+    @mstore32(buf, selector);
+    @evm_revert(buf +% (32 - 4), 4);
+};
+
+const require_4byte = fn (condition: bool, comptime selector: u256) void {
+    if !condition {
+        revert_4byte(selector);
+    }
+};
+
+const calldataload_addr = fn (comptime offset: u256) addr {
+    let raw = @evm_calldataload(offset);
+    if raw >= (1 << 160) {
+        @evm_revert(@malloc_uninit(0), 0);
+    }
+    addr { raw: raw }
+};
+
+const return_word = fn (word: u256) never {
+    let buf = @malloc_uninit(32);
+    @mstore32(buf, word);
+    @evm_return(buf, 32);
+};
+
 init {
     @evm_sstore(TOTAL_SUPPLY_SLOT, TOTAL_SUPPLY);
-    let caller = @evm_caller();
-    let slot = map_slot_hash(caller, BALANCE_SLOT_BASE);
-    let buf = @malloc_uninit(32);
-    @evm_sstore(slot, TOTAL_SUPPLY);
 
-    @mstore32(buf, TOTAL_SUPPLY);
-    @evm_log3(buf, 32, TRANSFER_TOPIC, 0, caller);
+    let slot = balance_slot(msg_sender());
+    @evm_sstore(slot, TOTAL_SUPPLY);
+    emit_transfer(addr { raw: 0 }, msg_sender(), TOTAL_SUPPLY);
 
     return_runtime();
 }
 
 run {
     let selector = @evm_calldataload(0) >> 224;
-    if selector == BALANCE_OF_SELECTOR {
-        balance_of(@evm_calldataload(4));
+    if selector == TRANSFER_FROM_SELECTOR {
+        let from = calldataload_addr(0x04);
+        let to = calldataload_addr(0x24);
+        let amount = @evm_calldataload(0x44);
+        transfer_from(from, to, amount);
+    } else if selector == BALANCE_OF_SELECTOR {
+        let owner = calldataload_addr(0x04);
+        balance_of(owner);
+    } else if selector == TRANSFER_SELECTOR {
+        let to = calldataload_addr(0x04);
+        let amount = @evm_calldataload(0x24);
+        transfer(to, amount);
+    }  else if selector == APPROVE_SELECTOR {
+        let spender = calldataload_addr(0x04);
+        let amount = @evm_calldataload(0x24);
+        approve(spender, amount);
+    } else if selector == ALLOWANCE_SELECTOR {
+        let owner = calldataload_addr(0x04);
+        let spender = calldataload_addr(0x24);
+        allowance(owner, spender);
     } else if selector == TOTAL_SUPPLY_SELECTOR {
         total_supply();
-    } else if selector == TRANSFER_SELECTOR {
-        transfer();
-    } else if selector == ALLOWANCE_SELECTOR {
-        allowance();
-    } else if selector == APPROVE_SELECTOR {
-        approve();
-    } else if selector == TRANSFER_FROM_SELECTOR {
-        transfer_from();
     } else if selector == DECIMALS_SELECTOR {
         decimals();
     } else if selector == NAME_SELECTOR {
         name();
     } else if selector == SYMBOL_SELECTOR {
         symbol();
-    } else {
-        @evm_revert(@malloc_uninit(0), 0);
     }
+
+    @evm_revert(@malloc_uninit(0), 0);
 }
 
-const balance_of = fn (address: u256) never {
-    let slot = map_slot_hash(address, BALANCE_SLOT_BASE);
-    let buf = @malloc_uninit(32);
+const balance_of = fn (owner: addr) never {
+    let slot = balance_slot(owner);
     let balance = @evm_sload(slot);
-    @mstore32(buf, balance);
-    @evm_return(buf, 32);
+
+    return_word(balance);
 };
 
 const total_supply = fn () never {
-    let buf = @malloc_uninit(32);
     let supply = @evm_sload(TOTAL_SUPPLY_SLOT);
-    @mstore32(buf, supply);
-    @evm_return(buf, 32);
+
+    return_word(supply);
 };
 
-const transfer = fn () never {
-    let to = @evm_calldataload(4);
-    let amount = @evm_calldataload(36);
-    transfer_balance(@evm_caller(), to, amount);
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, 1);
-    @evm_return(buf, 32);
+const transfer = fn (to: addr, amount: u256) never {
+    transfer_balance(msg_sender(), to, amount);
+
+    return_word(1);
 };
 
-const allowance = fn () never {
-    let owner = @evm_calldataload(4);
-    let spender = @evm_calldataload(36);
-    let slot = map_slot_hash(spender, map_slot_hash(owner, ALLOWANCE_SLOT_BASE));
-    let allowance = @evm_sload(slot);
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, allowance);
-    @evm_return(buf, 32);
-};
+const CONSOLE_ADDR = 0x000000000000000000636F6e736F6c652e6c6f67;
+const LOG_UINT_SELECTOR = 0xf82c50f1;
 
-const approve = fn () never {
-    let spender = @evm_calldataload(4);
-    let amount = @evm_calldataload(36);
-    let caller = @evm_caller();
-    let slot = map_slot_hash(spender, map_slot_hash(caller, ALLOWANCE_SLOT_BASE));
-    @evm_sstore(slot, amount);
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, amount);
-    @evm_log3(buf, 32, APPROVAL_TOPIC, caller, spender);
-    @mstore32(buf, 1);
-    @evm_return(buf, 32);
-};
-
-const transfer_from = fn () never {
-    let from = @evm_calldataload(4);
-    let to = @evm_calldataload(36);
-    let amount = @evm_calldataload(68);
-
-    let allowance_slot = map_slot_hash(@evm_caller(), map_slot_hash(from, ALLOWANCE_SLOT_BASE));
-    let allowance_val = @evm_sload(allowance_slot);
-    if allowance_val < amount {
-        @evm_revert(@malloc_uninit(0), 0);
+const console = (struct { log: function }) {
+    log: fn (value: u256) void {
+        let buf = @malloc_uninit(64);
+        @mstore32(buf, LOG_UINT_SELECTOR);
+        @mstore32(buf +% 32, value);
+        if !@evm_staticcall(@evm_gas(), CONSOLE_ADDR, buf +% 28, 36, @malloc_uninit(0), 0) {
+            @evm_revert(@malloc_uninit(0), 0);
+        }
     }
-    @evm_sstore(allowance_slot, allowance_val - amount);
+};
+
+const allowance = fn (owner: addr, spender: addr) never {
+    let allowance = if addr_eq(spender, PERMIT2) {
+        U256_MAX
+    } else {
+        let slot = allowance_slot(owner, spender);
+        @evm_sload(slot)
+    };
+
+    return_word(allowance);
+};
+
+const approve = fn (spender: addr, amount: u256) never {
+    require_4byte(!addr_eq(spender, PERMIT2) or amount == U256_MAX, PERMIT2_ALLOWANCE_FIXED);
+
+    let slot = allowance_slot(msg_sender(), spender);
+    @evm_sstore(slot, amount);
+    emit_approval(msg_sender(), spender, amount);
+
+    return_word(1);
+};
+
+const allowance_consume = fn (owner: addr, amount: u256) bool {
+    if addr_eq(msg_sender(), PERMIT2) {
+        return true;
+    }
+    let allowance_slot = allowance_slot(owner, msg_sender());
+    let allowance_val = @evm_sload(allowance_slot);
+    if allowance_val == U256_MAX {
+        return true;
+    }
+    if allowance_val >= amount {
+        @evm_sstore(allowance_slot, allowance_val -% amount);
+        return true;
+    }
+    return false;
+};
+
+const transfer_from = fn (from: addr, to: addr, amount: u256) never {
+    require_4byte(allowance_consume(from, amount), INSUFFICIENT_ALLOWANCE_SELECTOR);
 
     transfer_balance(from, to, amount);
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, 1);
-    @evm_return(buf, 32);
+
+    return_word(1);
 };
 
 const decimals = fn () never {
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, 18);
-    @evm_return(buf, 32);
+    return_word(18);
 };
 
 const name = fn () never {
-    let ptr = @malloc_uninit(10);
-    @mstore10(ptr, 0x5465737420546f6b656e /* "Test Token" */);
-    let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 10));
-    @evm_return(encoded.ptr, encoded.len);
+    let buf = @malloc_zeroed(32 * 3);
+    @mstore32(buf, 32);
+    @mstore32(buf +% 32 +% 10, 0x0a5465737420546f6b656e /* "Test Token" */);
+    @evm_return(buf, 32 * 3);
 };
 
 const symbol = fn () never {
-    let ptr = @malloc_uninit(3);
-    @mstore3(ptr, 0x545354 /* "TST" */);
-    let encoded = abi_encode(membytes, membytes_from_ptr(ptr, 3));
-    @evm_return(encoded.ptr, encoded.len);
+    let buf = @malloc_zeroed(32 * 3);
+    @mstore32(buf, 32);
+    @mstore32(buf +% 32 +% 3, 0x03545354 /* "TST" */);
+    @evm_return(buf, 32 * 3);
 };
 
-const transfer_balance = fn (from: u256, to: u256, amount: u256) void {
-    let slot = map_slot_hash(from, BALANCE_SLOT_BASE);
-    let balance_from = @evm_sload(slot);
-    if balance_from < amount {
-        @evm_revert(@malloc_uninit(0), 0);
-    }
-    @evm_sstore(slot, balance_from - amount);
+const transfer_balance = fn (from: addr, to: addr, amount: u256) void {
+    let from_slot = balance_slot(from);
+    let balance_from = @evm_sload(from_slot);
+    require_4byte(balance_from >= amount, INSUFFICIENT_BALANCE_SELECTOR);
+    @evm_sstore(from_slot, balance_from - amount);
 
-    let slot = map_slot_hash(to, BALANCE_SLOT_BASE);
-    let balance_to = @evm_sload(slot);
-    @evm_sstore(slot, balance_to + amount);
+    let to_slot = balance_slot(to);
+    let balance_to = @evm_sload(to_slot);
+    @evm_sstore(to_slot, balance_to + amount);
 
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, amount);
-    @evm_log3(buf, 32, TRANSFER_TOPIC, from, to);
+    emit_transfer(from, to, amount);
 };
