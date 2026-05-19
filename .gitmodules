@@ -7,3 +7,6 @@
 [submodule "plankc/plank-diff-tests/lib/plank-foundry-deployer"]
 	path = plankc/plank-diff-tests/lib/plank-foundry-deployer
 	url = https://github.com/plankevm/plank-foundry-deployer
+[submodule "plankc/plank-diff-tests/lib/solady"]
+	path = plankc/plank-diff-tests/lib/solady
+	url = https://github.com/vectorized/solady
