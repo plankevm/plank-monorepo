@@ -183,7 +183,8 @@ contract ERC20Test is BaseTest {
         uint256 amount = 2000;
         uint256 deadline = block.timestamp;
 
-        bytes memory solPermit = signPermitData(IERC20Permit(address(solRef)), privateKey, owner, spender, amount, deadline);
+        bytes memory solPermit =
+            signPermitData(IERC20Permit(address(solRef)), privateKey, owner, spender, amount, deadline);
         bytes memory sirPermit =
             signPermitData(IERC20Permit(address(sirToken)), privateKey, owner, spender, amount, deadline);
 
@@ -209,7 +210,8 @@ contract ERC20Test is BaseTest {
         uint256 amount = 2000;
         uint256 deadline = 1;
 
-        bytes memory solPermit = signPermitData(IERC20Permit(address(solRef)), privateKey, owner, spender, amount, deadline);
+        bytes memory solPermit =
+            signPermitData(IERC20Permit(address(solRef)), privateKey, owner, spender, amount, deadline);
         bytes memory sirPermit =
             signPermitData(IERC20Permit(address(sirToken)), privateKey, owner, spender, amount, deadline);
 

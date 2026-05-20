@@ -14,6 +14,8 @@ link-dev-local: build-debug
     ln -s "$PWD/target/debug/plank" "$HOME/.plank/bin/plank"
 
 fmt:
+    (cd sir/sir-solidity-diff-tests/ && forge fmt)
+    (cd plank-diff-tests/ && forge fmt)
     cargo +nightly fmt --all
 
 check: fmt
@@ -55,6 +57,7 @@ test-all: test test-sir-diff test-plank-diff bytecode-bench-check
 
 ci-fmt:
     (cd sir/sir-solidity-diff-tests/ && forge fmt --check)
+    (cd plank-diff-tests/ && forge fmt --check)
     cargo +nightly fmt --all --check
 
 ci-clippy:
