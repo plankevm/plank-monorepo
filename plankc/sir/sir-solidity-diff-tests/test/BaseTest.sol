@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, Vm} from "forge-std/Test.sol";
 
 /// @author philogy <https://github.com/philogy>
 abstract contract BaseTest is Test {
@@ -36,23 +36,49 @@ abstract contract BaseTest is Test {
         string[] memory sirArgs =
             abi.decode(bytes.concat(bytes32(uint256(0x20)), bytes32(totalArgs), encodedSirArgs), (string[]));
 
-        totalArgs = 5 + sirArgs.length;
-        if (releaseBackendEnabled) totalArgs++;
+        string[] memory args = new string[](300);
 
-        string[] memory args = new string[](totalArgs);
-
-        uint256 argIdx = 0;
-        string[5] memory runSir = ["cargo", "run", "-p", "sir-cli", "--"];
-        for (uint256 i = 0; i < runSir.length; i++) {
-            args[argIdx++] = runSir[i];
-        }
+        uint256 argLen = 0;
+        args[argLen++] = "../../target/debug/sir";
         if (releaseBackendEnabled) {
-            args[argIdx++] = "--release";
+            args[argLen++] = "--release";
         }
         for (uint256 i = 0; i < sirArgs.length; i++) {
-            args[argIdx++] = sirArgs[i];
+            args[argLen++] = sirArgs[i];
+        }
+        assembly ("memory-safe") {
+            mstore(args, argLen)
         }
 
         return vm.ffi(args);
+    }
+
+    function assertCallEq(address ref, address impl, bytes memory data) internal {
+        assertCallEqFrom(ref, impl, data, address(this));
+    }
+
+    function assertCallEqFrom(address ref, address impl, bytes memory data, address sender) internal {
+        vm.startPrank(sender);
+
+        vm.recordLogs();
+        (bool refSucc, bytes memory refOut) = ref.call(data);
+        Vm.Log[] memory refLogs = vm.getRecordedLogs();
+
+        vm.recordLogs();
+        (bool plankSucc, bytes memory plankOut) = impl.call(data);
+        Vm.Log[] memory plankLogs = vm.getRecordedLogs();
+
+        vm.stopPrank();
+
+        assertEq(refSucc, plankSucc, "success mismatch");
+        assertEq(refOut, plankOut, "output mismatch");
+        assertEq(refLogs.length, plankLogs.length, "log count mismatch");
+        for (uint256 i = 0; i < refLogs.length; i++) {
+            assertEq(refLogs[i].data, plankLogs[i].data, "log data mismatch");
+            assertEq(refLogs[i].topics.length, plankLogs[i].topics.length, "topic count mismatch");
+            for (uint256 j = 0; j < refLogs[i].topics.length; j++) {
+                assertEq(refLogs[i].topics[j], plankLogs[i].topics[j], "topic mismatch");
+            }
+        }
     }
 }
