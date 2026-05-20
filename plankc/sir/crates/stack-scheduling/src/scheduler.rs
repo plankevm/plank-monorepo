@@ -256,6 +256,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         }
     }
 
+    fn load(&mut self, target: ValueNodeId) {
+        let slot = self.stack.get_spilled(target).expect("missing value in spilled");
+        self.stack.load(slot);
+        self.current_stack.push_front(target);
+    }
+
     fn run(&mut self) {
         let current_stack_desired_len = self.swap_depth as usize + 1;
         self.shrink_current_stack(current_stack_desired_len);
@@ -265,6 +271,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     fn swap(&mut self, depth: u8) {
         self.stack.swap(depth);
         self.current_stack.swap(0, depth as usize);
+    }
+
+    fn dup(&mut self, depth: u8) {
+        self.stack.dup(depth);
+        let value = self.current_stack[depth as usize].clone();
+        self.current_stack.push_front(value);
     }
 
     fn shrink_current_stack(&mut self, current_stack_desired_len: usize) {
@@ -346,7 +358,51 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         }
     }
 
-    fn grow(&mut self) {}
+    fn grow(&mut self) {
+        while !self.target_stack.is_empty() {
+            self.limit.tick();
+
+            if self.current_stack.is_empty() {
+                let target = self.target_stack.last().expect("target must exist");
+                self.load(*target);
+            }
+            let top = self.current_stack.front().expect("top exists");
+
+            let mut target_pos_from_top = None;
+            for (i, value) in self.target_stack[1..].iter().enumerate() {
+                if value == top {
+                    // TODO: need to check that this value is not already in the correct position on the stack already
+                    target_pos_from_top = Some(i);
+                }
+            }
+
+            if let Some(target_pos_from_top) = target_pos_from_top {
+                let target_pos_from_bottom = self.target_stack.len() - target_pos_from_top - 1;
+                let stack_pos_from_top = self.current_stack.len() - target_pos_from_bottom - 1;
+                self.swap(stack_pos_from_top.try_into().expect("should be able to swap"));
+                continue;
+            }
+
+            let last = self.target_stack.last().expect("last exists");
+            if self.current_stack.back().expect("back exists") == last {
+                // if the target still has last but we don't have it in the stack anymore
+                if self.target_stack[..self.target_stack.len() - 1].contains(last)
+                    && !self.current_stack.range(..self.current_stack.len() - 1).any(|v| v == last)
+                {
+                    if self.current_stack.len() > self.dup_depth as usize + 1 {
+                        self.shrink_current_stack(self.dup_depth as usize + 1);
+                    }
+                    self.dup((self.current_stack.len() - 1).try_into().expect("valid dup depth"));
+
+                    self.current_stack.pop_back();
+                    self.target_stack.pop();
+                    continue;
+                }
+            }
+
+            // try to bring last in position
+        }
+    }
 }
 
 #[cfg(test)]
