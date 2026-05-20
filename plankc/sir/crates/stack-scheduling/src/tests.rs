@@ -15,13 +15,13 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
     let source = dedent_preserve_blank_lines(source);
     let program = sir_parser::parse_or_panic(&source, EmitConfig::init_only());
 
-    let actual = format_lowered(&program, config);
+    let actual = format_scheduled(&program, config);
     let expected = dedent_preserve_blank_lines(expected);
 
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
 }
 
-fn format_lowered(program: &EthIRProgram, config: ScheduleConfig) -> String {
+fn format_scheduled(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let analyses = AnalysesStore::default();
     let (lowered, layouts) = crate::schedule(program, &analyses, config);
 
