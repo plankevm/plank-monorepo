@@ -13,9 +13,9 @@ use smallvec::SmallVec;
 
 const ASM_BYTES_CAPACITY: usize = 20_000;
 const ASM_SECTIONS_CAPACITY: usize = 2048;
-const ICALL_RETURNS_INLINE_CAPACITY: usize = 16;
+const ICALL_RETURN_MARKS_INLINE_CAPACITY: usize = 16;
 
-type ICallReturns = SmallVec<[(OperationIdx, MarkId); ICALL_RETURNS_INLINE_CAPACITY]>;
+type ICallReturnMarks = SmallVec<[(OperationIdx, MarkId); ICALL_RETURN_MARKS_INLINE_CAPACITY]>;
 
 pub(crate) trait CodegenState {
     const ALLOW_INITCODE_INTROSPECTION: bool;
@@ -82,7 +82,7 @@ impl<'a> CodeToAsmEmitter<'a> {
         let entry_bb = self.ir.function(entrypoint).entry().id();
         assert!(self.enqueue_bb(entry_bb));
 
-        let mut icall_returns = ICallReturns::new();
+        let mut icall_return_marks = ICallReturnMarks::new();
 
         while let Some(bb_id) = self.basic_blocks_worklist.pop() {
             let jumpdest_mark = state.bb_marks().get(bb_id);
@@ -108,13 +108,13 @@ impl<'a> CodeToAsmEmitter<'a> {
                     }
                     StackOps::CallRetPush(op_idx) => {
                         let return_dest_mark = self.mark_map.next_mark_id.get_and_inc();
-                        icall_returns.push((op_idx, return_dest_mark));
+                        icall_return_marks.push((op_idx, return_dest_mark));
 
                         let mark_ref = state.mark_to_ref(&self.mark_map, return_dest_mark);
                         self.asm.push_reference(AsmReference::pushed(mark_ref));
                     }
                     StackOps::Op(op_idx) => {
-                        self.emit_op(state, &mut icall_returns, op_idx);
+                        self.emit_op(state, &mut icall_return_marks, op_idx);
                     }
                 }
             }
@@ -179,7 +179,7 @@ impl<'a> CodeToAsmEmitter<'a> {
     fn emit_op<State: CodegenState>(
         &mut self,
         state: &mut State,
-        icall_returns: &mut ICallReturns,
+        icall_return_marks: &mut ICallReturnMarks,
         op_idx: OperationIdx,
     ) {
         let op = self.ir.operations[op_idx];
@@ -190,25 +190,25 @@ impl<'a> CodeToAsmEmitter<'a> {
 
         match op {
             Operation::InternalCall(args) => {
-                let call_entry_ref = {
+                let function_entry_ref = {
                     let call_entry_bb = self.ir.function(args.function).entry().id();
                     self.enqueue_bb(call_entry_bb);
                     let bb_entry_mark = state.bb_marks().get(call_entry_bb);
                     state.mark_to_ref(&self.mark_map, bb_entry_mark)
                 };
                 let call_return_dest = {
-                    let (i, mark) = icall_returns
+                    let (i, mark) = icall_return_marks
                         .iter()
                         .enumerate()
                         .find_map(|(i, &(ret_dest_op_idx, mark))| {
                             (ret_dest_op_idx == op_idx).then_some((i, mark))
                         })
                         .expect("return dest not emitted *before* icall");
-                    icall_returns.swap_remove(i);
+                    icall_return_marks.swap_remove(i);
                     mark
                 };
 
-                self.asm.push_reference(AsmReference::pushed(call_entry_ref));
+                self.asm.push_reference(AsmReference::pushed(function_entry_ref));
                 self.asm.push_op_byte(op::JUMP);
                 self.asm.push_mark(call_return_dest);
                 self.asm.push_op_byte(op::JUMPDEST);
