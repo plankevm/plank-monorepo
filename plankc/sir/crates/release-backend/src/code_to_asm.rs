@@ -190,28 +190,7 @@ impl<'a> CodeToAsmEmitter<'a> {
 
         match op {
             Operation::InternalCall(args) => {
-                let function_entry_ref = {
-                    let call_entry_bb = self.ir.function(args.function).entry().id();
-                    self.enqueue_bb(call_entry_bb);
-                    let bb_entry_mark = state.bb_marks().get(call_entry_bb);
-                    state.mark_to_ref(&self.mark_map, bb_entry_mark)
-                };
-                let call_return_dest = {
-                    let (i, mark) = icall_return_marks
-                        .iter()
-                        .enumerate()
-                        .find_map(|(i, &(ret_dest_op_idx, mark))| {
-                            (ret_dest_op_idx == op_idx).then_some((i, mark))
-                        })
-                        .expect("return dest not emitted *before* icall");
-                    icall_return_marks.swap_remove(i);
-                    mark
-                };
-
-                self.asm.push_reference(AsmReference::pushed(function_entry_ref));
-                self.asm.push_op_byte(op::JUMP);
-                self.asm.push_mark(call_return_dest);
-                self.asm.push_op_byte(op::JUMPDEST);
+                self.emit_icall(state, icall_return_marks, op_idx, args.function)
             }
             Operation::DynamicAllocZeroed(_) => self.emit_dynamic_alloc_zeroed(state),
             Operation::DynamicAllocAnyBytes(_) => self.emit_dynamic_alloc_any_bytes(state),
@@ -254,6 +233,37 @@ impl<'a> CodeToAsmEmitter<'a> {
             }
             _ => unreachable!("op neither 'special' or literal EVM: {:?}", op.kind()),
         }
+    }
+
+    fn emit_icall(
+        &mut self,
+        state: &impl CodegenState,
+        icall_return_marks: &mut ICallReturnMarks,
+        op_idx: OperationIdx,
+        function: FunctionId,
+    ) {
+        let function_entry_ref = {
+            let call_entry_bb = self.ir.function(function).entry().id();
+            self.enqueue_bb(call_entry_bb);
+            let bb_entry_mark = state.bb_marks().get(call_entry_bb);
+            state.mark_to_ref(&self.mark_map, bb_entry_mark)
+        };
+        let call_return_dest = {
+            let (i, mark) = icall_return_marks
+                .iter()
+                .enumerate()
+                .find_map(|(i, &(ret_dest_op_idx, mark))| {
+                    (ret_dest_op_idx == op_idx).then_some((i, mark))
+                })
+                .expect("return dest not emitted *before* icall");
+            icall_return_marks.swap_remove(i);
+            mark
+        };
+
+        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
+        self.asm.push_op_byte(op::JUMP);
+        self.asm.push_mark(call_return_dest);
+        self.asm.push_op_byte(op::JUMPDEST);
     }
 
     fn emit_dynamic_alloc_zeroed(&mut self, state: &impl CodegenState) {

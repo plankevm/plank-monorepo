@@ -39,7 +39,7 @@ impl CodegenState for EmitInitcode {
         self.bb_marks
     }
 
-    fn mark_to_ref(&self, _map: &MarkMap, mark: MarkId) -> MarkReference {
+    fn mark_to_ref(&self, _marks: &MarkMap, mark: MarkId) -> MarkReference {
         MarkReference::Direct(mark)
     }
 
