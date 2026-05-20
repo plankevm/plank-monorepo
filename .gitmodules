@@ -10,3 +10,6 @@
 [submodule "plankc/plank-diff-tests/lib/solady"]
 	path = plankc/plank-diff-tests/lib/solady
 	url = https://github.com/vectorized/solady
+[submodule "plankc/sir/sir-solidity-diff-tests/lib/solady"]
+	path = plankc/sir/sir-solidity-diff-tests/lib/solady
+	url = https://github.com/vectorized/solady

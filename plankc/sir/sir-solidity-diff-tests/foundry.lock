@@ -2,10 +2,22 @@
   "../../plank-diff-tests/lib/forge-std": {
     "rev": "8987040ede9553cea20c95ad40d0455930f9c8e0"
   },
+  "../../plank-diff-tests/lib/plank-foundry-deployer": {
+    "rev": "79879d745f176d2ee79975a86cde67b5b0b9f92d"
+  },
+  "../../plank-diff-tests/lib/solady": {
+    "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.16.1",
       "rev": "620536fa5277db4e3fd46772d5cbc1ea0696fb43"
+    }
+  },
+  "lib/solady": {
+    "tag": {
+      "name": "v0.1.26",
+      "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
     }
   },
   "plankc/plank-diff-tests/lib/forge-std": {
