@@ -30,8 +30,8 @@ pub fn run_pass<T: Pass>(pass: &mut T, program: &mut EthIRProgram, store: &Analy
 }
 
 pub struct PassManager<'a> {
-    pub program: &'a mut EthIRProgram,
-    pub store: AnalysesStore,
+    program: &'a mut EthIRProgram,
+    store: AnalysesStore,
 
     legalizer: Option<Legalizer>,
     sccp: Option<SCCP>,
@@ -53,6 +53,10 @@ impl<'a> PassManager<'a> {
             defragmenter: None,
             switch_peephole: None,
         }
+    }
+
+    pub fn into_store(self) -> AnalysesStore {
+        self.store
     }
 
     pub fn run_legalize(&mut self) -> Result<(), analyses::LegalizerError> {

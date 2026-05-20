@@ -133,15 +133,15 @@ impl<'a, F: SourceFs> Driver<'a, F> {
             parse_optimizations_string(passes)?;
             pass_manager.run_optimizations(passes);
         }
+        let analyses = pass_manager.into_store();
         if show_sir_last {
-            print_backend_ir("SIR LAST", disp_needs_separators, &pass_manager.program);
+            print_backend_ir("SIR LAST", disp_needs_separators, &program);
         }
 
         let mut bytecode = Vec::with_capacity(0x6000);
         if is_sir_debug_backend {
             sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
         } else {
-            let PassManager { store: analyses, .. } = pass_manager;
             sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode);
         }
         Ok(bytecode)

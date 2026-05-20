@@ -71,7 +71,7 @@ fn main() {
         Some(passes) => {
             let mut pass_manager = PassManager::new(&mut program);
             pass_manager.run_optimizations(&passes);
-            pass_manager.store
+            pass_manager.into_store()
         }
         None => sir_passes::AnalysesStore::default(),
     };
