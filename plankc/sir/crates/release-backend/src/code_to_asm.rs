@@ -1,4 +1,4 @@
-use crate::mark_map::{ContinuousMarkMap, MarkMap};
+use crate::mark_map::{IndexableMarkSpan, MarkMap};
 use alloy_primitives::U256;
 use plank_core::IncIterable;
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
@@ -21,7 +21,7 @@ pub(crate) trait CodegenState {
     const ALLOW_INITCODE_INTROSPECTION: bool;
 
     fn layout(&self) -> &static_mem::Layout;
-    fn bb_marks(&self) -> ContinuousMarkMap<BasicBlockId>;
+    fn bb_marks(&self) -> IndexableMarkSpan<BasicBlockId>;
     fn mark_to_ref(&self, marks: &MarkMap, mark: MarkId) -> MarkReference;
     fn data_to_ref(&mut self, marks: &MarkMap, data: DataId) -> MarkReference;
 }
@@ -52,7 +52,7 @@ impl<'a> CodeToAsmEmitter<'a> {
         Self { ir, ops, mark_map, visited_bbs, basic_blocks_worklist, asm }
     }
 
-    pub fn alloc_bb_marks(&mut self) -> ContinuousMarkMap<BasicBlockId> {
+    pub fn alloc_bb_marks(&mut self) -> IndexableMarkSpan<BasicBlockId> {
         MarkMap::alloc_map(&mut self.mark_map.next_mark_id, self.ir.basic_blocks.len())
     }
 

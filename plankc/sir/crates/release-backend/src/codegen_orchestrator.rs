@@ -1,6 +1,6 @@
 use crate::{
     code_to_asm::{CodeToAsmEmitter, CodegenState},
-    mark_map::{ContinuousMarkMap, MarkMap},
+    mark_map::{IndexableMarkSpan, MarkMap},
 };
 use hashbrown::HashSet;
 use sir_assembler::{Assembler, MarkId, MarkReference};
@@ -14,13 +14,13 @@ const INIT_ONLY_DATAS_CAPACITY: usize = 16;
 pub(crate) struct EmitInitcode {
     memory: static_mem::Layout,
     init_only_data: HashSet<DataId>,
-    bb_marks: ContinuousMarkMap<BasicBlockId>,
+    bb_marks: IndexableMarkSpan<BasicBlockId>,
     runtime_datas: DenseIndexSet<DataId>,
 }
 
 pub(crate) struct EmitRuncode {
     memory: static_mem::Layout,
-    bb_marks: ContinuousMarkMap<BasicBlockId>,
+    bb_marks: IndexableMarkSpan<BasicBlockId>,
 }
 
 pub(crate) struct InitcodeEmitted<'a> {
@@ -35,7 +35,7 @@ impl CodegenState for EmitInitcode {
         &self.memory
     }
 
-    fn bb_marks(&self) -> ContinuousMarkMap<BasicBlockId> {
+    fn bb_marks(&self) -> IndexableMarkSpan<BasicBlockId> {
         self.bb_marks
     }
 
@@ -60,7 +60,7 @@ impl CodegenState for EmitRuncode {
         &self.memory
     }
 
-    fn bb_marks(&self) -> ContinuousMarkMap<BasicBlockId> {
+    fn bb_marks(&self) -> IndexableMarkSpan<BasicBlockId> {
         self.bb_marks
     }
 

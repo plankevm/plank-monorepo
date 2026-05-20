@@ -21,12 +21,12 @@ use sir_assembler::MarkId;
 use sir_data::{DataId, EthIRProgram, Idx};
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ContinuousMarkMap<I: Idx> {
+pub(crate) struct IndexableMarkSpan<I: Idx> {
     span: Span<MarkId>,
     _key: PhantomData<I>,
 }
 
-impl<I: Idx> ContinuousMarkMap<I> {
+impl<I: Idx> IndexableMarkSpan<I> {
     pub fn get(self, index: I) -> MarkId {
         let mark = self.span.start + index.get();
         assert!(mark < self.span.end, "unexpected ID");
@@ -41,7 +41,7 @@ pub(crate) struct MarkMap {
     pub runcode_start: MarkId,
     pub initcode_end: MarkId,
 
-    pub datas: ContinuousMarkMap<DataId>,
+    pub datas: IndexableMarkSpan<DataId>,
 }
 
 impl MarkMap {
@@ -55,11 +55,11 @@ impl MarkMap {
         Self { next_mark_id, runcode_start, initcode_end, datas }
     }
 
-    pub fn alloc_map<I: Idx>(next_mark_id: &mut MarkId, size: usize) -> ContinuousMarkMap<I> {
+    pub fn alloc_map<I: Idx>(next_mark_id: &mut MarkId, size: usize) -> IndexableMarkSpan<I> {
         let start = *next_mark_id;
         let end = start + u32::try_from(size).expect("mark span size overflow");
         *next_mark_id = end;
-        ContinuousMarkMap { span: Span::new(start, end), _key: PhantomData }
+        IndexableMarkSpan { span: Span::new(start, end), _key: PhantomData }
     }
 
     pub fn runcode(&self) -> Span<MarkId> {
