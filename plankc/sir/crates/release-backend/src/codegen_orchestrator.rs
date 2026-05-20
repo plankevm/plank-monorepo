@@ -8,8 +8,8 @@ use sir_data::{BasicBlockId, DataId, DenseIndexSet, EthIRProgram, FunctionId, Op
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
 
-const BB_WORKLIST_CAPACITY: usize = 128;
-const INIT_ONLY_DATAS_CAPACITY: usize = 16;
+const BB_WORKLIST_START_CAPACITY: usize = 128;
+const INIT_ONLY_DATAS_START_CAPACITY: usize = 16;
 
 pub(crate) struct EmitInitcode {
     memory: static_mem::Layout,
@@ -31,7 +31,7 @@ pub(crate) struct InitcodeEmitted<'a> {
 impl CodegenState for EmitInitcode {
     const ALLOW_INITCODE_INTROSPECTION: bool = true;
 
-    fn layout(&self) -> &sir_static_memory_allocator::Layout {
+    fn layout(&self) -> &static_mem::Layout {
         &self.memory
     }
 
@@ -56,7 +56,7 @@ impl CodegenState for EmitInitcode {
 impl CodegenState for EmitRuncode {
     const ALLOW_INITCODE_INTROSPECTION: bool = false;
 
-    fn layout(&self) -> &sir_static_memory_allocator::Layout {
+    fn layout(&self) -> &static_mem::Layout {
         &self.memory
     }
 
@@ -115,7 +115,7 @@ impl<'a> InitcodeEmitted<'a> {
         init_memory_layout: static_mem::Layout,
     ) -> Self {
         let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
-        let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_CAPACITY);
+        let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_START_CAPACITY);
         let runtime_datas = match ir.main_entry {
             Some(runtime_entrypoint) => {
                 let mut runtime_datas =
@@ -135,7 +135,7 @@ impl<'a> InitcodeEmitted<'a> {
         let mut emitter = CodeToAsmEmitter::new(ir, ops, visited_bbs, basic_blocks_worklist);
         let mut state = EmitInitcode {
             memory: init_memory_layout,
-            init_only_data: HashSet::with_capacity(INIT_ONLY_DATAS_CAPACITY),
+            init_only_data: HashSet::with_capacity(INIT_ONLY_DATAS_START_CAPACITY),
             bb_marks: emitter.alloc_bb_marks(),
             runtime_datas,
         };
