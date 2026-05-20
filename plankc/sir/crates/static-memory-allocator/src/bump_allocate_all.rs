@@ -103,8 +103,10 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
                 }
             }
 
-            if let ControlView::Switch(_) = block.control() {
-                self.switch_store.get_or_insert_with(|| self.bump.alloc(EVM_WORD_IN_BYTES));
+            if let ControlView::Switch(_) = block.control()
+                && self.switch_store.is_none()
+            {
+                self.switch_store = Some(self.bump.alloc(EVM_WORD_IN_BYTES));
             }
 
             self.block_worklist
@@ -116,8 +118,10 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
         match operation {
             Operation::DynamicAllocZeroed(_)
             | Operation::DynamicAllocAnyBytes(_)
-            | Operation::AcquireFreePointer(_) => {
-                self.dyn_free_pointer.get_or_insert_with(|| self.bump.alloc(EVM_WORD_IN_BYTES));
+            | Operation::AcquireFreePointer(_)
+                if self.dyn_free_pointer.is_none() =>
+            {
+                self.dyn_free_pointer = Some(self.bump.alloc(EVM_WORD_IN_BYTES));
             }
             Operation::StaticAllocZeroed(data) => {
                 self.alloc_static(data.alloc_id, data.size, true);
