@@ -6,7 +6,7 @@ pub mod view;
 pub use crate::{index::*, operation::Operation, view::*};
 use alloy_primitives::U256;
 use plank_core::list_of_lists::ListOfLists;
-use std::{cell::Cell, fmt};
+use std::{cell::Cell, collections::HashSet, fmt};
 
 /// Implemented in a data oriented way. Instead of each basic block and function holding its own
 /// vector of items they're all stored contiguously in the top level program
@@ -252,7 +252,131 @@ pub fn display_program(ir: &EthIRProgram) -> String {
 
 impl fmt::Display for EthIRProgram {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", display_program(self))
+        let mut processed_fns = HashSet::new();
+        let mut processed_bbs = HashSet::new();
+        let mut datas = Vec::new();
+
+        let mut function_worklist = vec![self.init_entry];
+        function_worklist.extend(self.main_entry);
+
+        let mut bb_worklist = vec![];
+
+        while !function_worklist.is_empty() {
+            let func_id = function_worklist.remove(0);
+            if !processed_fns.insert(func_id) {
+                continue;
+            }
+
+            if func_id == self.init_entry {
+                writeln!(f, "fn init:")?;
+            } else if self.main_entry.is_some_and(|main_entry| main_entry == func_id) {
+                writeln!(f, "\nfn main:")?;
+            } else {
+                writeln!(f, "\nfn f{}:", func_id)?;
+            }
+
+            bb_worklist.push(self.function(func_id).entry().id());
+
+            while !bb_worklist.is_empty() {
+                let bb_id = bb_worklist.remove(0);
+                if !processed_bbs.insert(bb_id) {
+                    continue;
+                }
+                let bb = self.block(bb_id);
+                write!(f, "    bb{}", bb_id)?;
+                for &l in bb.inputs() {
+                    write!(f, " v{}", l)?
+                }
+                if !bb.outputs().is_empty() {
+                    write!(f, " ->")?;
+                    for &l in bb.outputs() {
+                        write!(f, " v{}", l)?;
+                    }
+                }
+                writeln!(f, " {{")?;
+                for op in bb.operations() {
+                    let outs = op.outputs();
+                    write!(f, "        ")?;
+                    if !outs.is_empty() {
+                        for &out in outs {
+                            write!(f, "v{} ", out)?;
+                        }
+                        write!(f, "= ")?;
+                    }
+                    write!(f, "{}", op.op().kind().mnemonic())?;
+                    match op.op() {
+                        Operation::SetSmallConst(set_small) => {
+                            write!(f, " {}", set_small.value)?;
+                        }
+                        Operation::SetLargeConst(set_large) => {
+                            write!(f, " {:#x}", self.large_consts[set_large.value])?;
+                        }
+                        Operation::SetDataOffset(set_data) => {
+                            datas.push(set_data.segment_id);
+                            write!(f, " .d{}", set_data.segment_id)?;
+                        }
+                        Operation::InternalCall(icall) => {
+                            function_worklist.push(icall.function);
+                            write!(f, " @f{}", icall.function)?;
+                        }
+                        Operation::StaticAllocZeroed(static_alloc)
+                        | Operation::StaticAllocAnyBytes(static_alloc) => {
+                            write!(f, " {}", static_alloc.size)?;
+                        }
+                        Operation::MemoryLoad(mem_load) => {
+                            write!(f, "{}", mem_load.size.bits())?;
+                        }
+                        Operation::MemoryStore(mem_store) => {
+                            write!(f, "{}", mem_store.size.bits())?;
+                        }
+                        _ => {}
+                    }
+                    for &inp in op.inputs() {
+                        write!(f, " v{}", inp)?;
+                    }
+                    writeln!(f)?;
+                }
+
+                match bb.control() {
+                    ControlView::InternalReturn => writeln!(f, "        iret")?,
+                    ControlView::LastOpTerminates => {}
+                    ControlView::ContinuesTo(to) => writeln!(f, "        => @bb{}", to)?,
+                    ControlView::Branches { condition, non_zero_target, zero_target } => writeln!(
+                        f,
+                        "        => v{} ? @bb{} : @bb{}",
+                        condition, non_zero_target, zero_target
+                    )?,
+                    ControlView::Switch(switch) => {
+                        writeln!(f, "        switch v{} {{", switch.condition())?;
+                        for (value, bb) in switch.cases() {
+                            writeln!(f, "            {:#x} => @bb{}", value, bb)?;
+                        }
+                        writeln!(f, "    }}")?;
+                    }
+                }
+
+                bb_worklist.extend(bb.successors());
+
+                writeln!(f, "    }}")?;
+            }
+        }
+
+        datas.dedup();
+
+        if !datas.is_empty() {
+            writeln!(f)?;
+        }
+
+        for data in datas {
+            writeln!(
+                f,
+                "data d{} {:#}",
+                data,
+                alloy_primitives::hex::display(&self.data_segments[data])
+            )?;
+        }
+
+        Ok(())
     }
 }
 
