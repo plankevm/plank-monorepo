@@ -2,6 +2,9 @@
   "../sir/sir-solidity-diff-tests/lib/forge-std": {
     "rev": "b090968353a209833d4a6f1383230477e96d8438"
   },
+  "../sir/sir-solidity-diff-tests/lib/solady": {
+    "rev": "acd959aa4bd04720d640bf4e6a5c71037510cc4b"
+  },
   "lib/forge-std": {
     "tag": {
       "name": "v1.16.0",

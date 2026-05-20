@@ -3,6 +3,10 @@ default: check test
 build-debug:
     cargo build -p plank
 
+build-debug-sir:
+    cargo build -p sir-cli
+
+
 link-dev-local: build-debug
     mkdir -p "$HOME/.plank/bin"
     rm -rf "$HOME/.plank/bin/plank" "$HOME/.plank/stdlib"
@@ -18,10 +22,12 @@ check: fmt
 test:
     cargo nextest run --workspace
 
+
+
 [working-directory: 'sir/sir-solidity-diff-tests']
-test-sir-diff:
-     SIR_RELEASE_BACKEND=0 forge test --ffi
-     SIR_RELEASE_BACKEND=1 forge test --ffi
+test-sir-diff: build-debug-sir
+    SIR_RELEASE_BACKEND=0 forge test
+    SIR_RELEASE_BACKEND=1 forge test
 
 test-plank-diff: test-plank-diff-sir test-plank-diff-sona
 

@@ -301,32 +301,25 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @0
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-            Basic Blocks:
-                @0 {
-                    $3 = const 0x0
-                    => $3 ? @1 : @5
+            fn init:
+                bb0 {
+                    v3 = const 0
+                    => v3 ? @bb1 : @bb5
                 }
-                @1 {
-                    $4 = const 0x1
-                    => @3
+                bb5 -> v3 {
+                    => @bb4
                 }
-                @2 {
-                    $0 = const 0x2
-                    => @3
+                bb1 {
+                    v4 = const 1
+                    => @bb3
                 }
-                @3 -> $4 {
-                    $5 = copy $4
-                    => @4
-                }
-                @4 $6 {
-                    $7 = copy $6
+                bb4 v6 {
+                    v7 = copy v6
                     stop
                 }
-                @5 -> $3 {
-                    => @4
+                bb3 -> v4 {
+                    v5 = copy v4
+                    => @bb4
                 }
             "#,
         );
@@ -369,36 +362,33 @@ mod tests {
 
             "#,
             r#"
-            Init: @0
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-            Basic Blocks:
-                @0 {
-                    $4 = const 0x0
-                    => $4 ? @1 : @6
+            fn init:
+                bb0 {
+                    v4 = const 0
+                    => v4 ? @bb1 : @bb6
                 }
-                @1 {
-                    $5 = const 0x0
-                    => $5 ? @2 : @3
+                bb6 -> v4 {
+                    => @bb5
                 }
-                @2 -> $6 {
-                    $6 = const 0x1
-                    => @4
+                bb1 {
+                    v5 = const 0
+                    => v5 ? @bb2 : @bb3
                 }
-                @3 -> $7 {
-                    $7 = const 0x2
-                    => @4
-                }
-                @4 $8 -> $8 {
-                    $9 = copy $8
-                    => @5
-                }
-                @5 $10 {
-                    $11 = copy $10
+                bb5 v10 {
+                    v11 = copy v10
                     stop
                 }
-                @6 -> $4 {
-                    => @5
+                bb3 -> v7 {
+                    v7 = const 2
+                    => @bb4
+                }
+                bb2 -> v6 {
+                    v6 = const 1
+                    => @bb4
+                }
+                bb4 v8 -> v8 {
+                    v9 = copy v8
+                    => @bb5
                 }
             "#,
         );
@@ -439,35 +429,32 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @0
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-            Basic Blocks:
-                @0 {
-                    $4 = const 0x0
-                    => $4 ? @1 : @6
+            fn init:
+                bb0 {
+                    v4 = const 0
+                    => v4 ? @bb1 : @bb6
                 }
-                @1 {
-                    $5 = const 0x0
-                    => $5 ? @2 : @3
+                bb6 {
+                    => @bb5
                 }
-                @2 -> $6 {
-                    $6 = const 0x1
-                    => @4
+                bb1 {
+                    v5 = const 0
+                    => v5 ? @bb2 : @bb3
                 }
-                @3 -> $7 {
-                    $7 = const 0x2
-                    => @4
-                }
-                @4 $8 {
-                    $9 = copy $8
-                    => @5
-                }
-                @5 {
+                bb5 {
                     stop
                 }
-                @6 {
-                    => @5
+                bb3 -> v7 {
+                    v7 = const 2
+                    => @bb4
+                }
+                bb2 -> v6 {
+                    v6 = const 1
+                    => @bb4
+                }
+                bb4 v8 {
+                    v9 = copy v8
+                    => @bb5
                 }
             "#,
         );
@@ -499,25 +486,22 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @0
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-            Basic Blocks:
-                @0 -> $3 {
-                    $3 = const 0x0
-                    => @1
+            fn init:
+                bb0 -> v3 {
+                    v3 = const 0
+                    => @bb1
                 }
-                @1 $6 {
-                    $4 = const 0x1
-                    => $4 ? @2 : @3
+                bb1 v6 {
+                    v4 = const 1
+                    => v4 ? @bb2 : @bb3
                 }
-                @2 -> $7 {
-                    $5 = const 0x1
-                    $7 = add $6 $5
-                    => @1
-                }
-                @3 {
+                bb3 {
                     stop
+                }
+                bb2 -> v7 {
+                    v5 = const 1
+                    v7 = add v6 v5
+                    => @bb1
                 }
             "#,
         );
@@ -550,25 +534,22 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @0
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-            Basic Blocks:
-                @0 {
-                    $3 = const 0x0
-                    $4 = const 0x0
-                    => $4 ? @1 : @2
+            fn init:
+                bb0 {
+                    v3 = const 0
+                    v4 = const 0
+                    => v4 ? @bb1 : @bb2
                 }
-                @1 -> $5 $4 {
-                    $5 = const 0x1
-                    => @3
+                bb2 -> v3 v6 {
+                    v6 = const 4
+                    => @bb3
                 }
-                @2 -> $3 $6 {
-                    $6 = const 0x4
-                    => @3
+                bb1 -> v5 v4 {
+                    v5 = const 1
+                    => @bb3
                 }
-                @3 $7 $8 {
-                    $9 = add $7 $8
+                bb3 v7 v8 {
+                    v9 = add v7 v8
                     stop
                 }
             "#,
@@ -604,30 +585,27 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @1
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @4  (outputs: 0)
-            Basic Blocks:
-                @0 {
-                    $2 = const 0x0
-                    => $2 ? @1 : @2
-                }
-                @1 -> $3 {
-                    $3 = const 0x1
-                    => @3
-                }
-                @2 -> $4 {
-                    $4 = const 0x2
-                    => @3
-                }
-                @3 $5 {
-                    sstore $5 $5
-                    iret
-                }
-                @4 {
-                    icall @0
+            fn init:
+                bb4 {
+                    icall @f0
                     stop
+                }
+            fn f0:
+                bb0 {
+                    v2 = const 0
+                    => v2 ? @bb1 : @bb2
+                }
+                bb2 -> v4 {
+                    v4 = const 2
+                    => @bb3
+                }
+                bb1 -> v3 {
+                    v3 = const 1
+                    => @bb3
+                }
+                bb3 v5 {
+                    sstore v5 v5
+                    iret
                 }
             "#,
         );
@@ -662,30 +640,27 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @1
-            Functions:
-                fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @4  (outputs: 0)
-            Basic Blocks:
-                @0 $7 {
-                    $8 = const 0x0
-                    => $8 ? @1 : @2
-                }
-                @1 -> $9 {
-                    $9 = const 0x1
-                    => @3
-                }
-                @2 -> $10 {
-                    $10 = const 0x2
-                    => @3
-                }
-                @3 $11 -> $11 {
-                    iret
-                }
-                @4 {
-                    $5 = const 0x0
-                    $6 = icall @0 $5
+            fn init:
+                bb4 {
+                    v5 = const 0
+                    v6 = icall @f0 v5
                     stop
+                }
+            fn f0:
+                bb0 v7 {
+                    v8 = const 0
+                    => v8 ? @bb1 : @bb2
+                }
+                bb2 -> v10 {
+                    v10 = const 2
+                    => @bb3
+                }
+                bb1 -> v9 {
+                    v9 = const 1
+                    => @bb3
+                }
+                bb3 v11 -> v11 {
+                    iret
                 }
             "#,
         );
@@ -721,31 +696,28 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @1
-            Functions:
-                fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @4  (outputs: 0)
-            Basic Blocks:
-                @0 $7 {
-                    $8 = const 0x0
-                    => $8 ? @1 : @2
-                }
-                @1 -> $9 {
-                    $9 = const 0x1
-                    => @3
-                }
-                @2 -> $11 {
-                    $10 = const 0x2
-                    $11 = add $7 $10
-                    => @3
-                }
-                @3 $12 -> $12 {
-                    iret
-                }
-                @4 {
-                    $5 = const 0x0
-                    $6 = icall @0 $5
+            fn init:
+                bb4 {
+                    v5 = const 0
+                    v6 = icall @f0 v5
                     stop
+                }
+            fn f0:
+                bb0 v7 {
+                    v8 = const 0
+                    => v8 ? @bb1 : @bb2
+                }
+                bb2 -> v11 {
+                    v10 = const 2
+                    v11 = add v7 v10
+                    => @bb3
+                }
+                bb1 -> v9 {
+                    v9 = const 1
+                    => @bb3
+                }
+                bb3 v12 -> v12 {
+                    iret
                 }
             "#,
         );
@@ -781,34 +753,31 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @1
-            Functions:
-                fn @0 -> entry @4  (outputs: 1)
-                fn @1 -> entry @3  (outputs: 0)
-            Basic Blocks:
-                @0 $16 $18 $19 {
-                    => $16 ? @1 : @2
-                }
-                @1 -> $23 $21 $22 {
-                    $17 = const 0x1
-                    $20 = add $18 $19
-                    $21 = copy $19
-                    $22 = copy $20
-                    $23 = sub $16 $17
-                    => @0
-                }
-                @2 -> $16 {
-                    iret
-                }
-                @3 {
-                    $9 = const 0x0
-                    $10 = const 0x1
-                    $11 = const 0xa
-                    $12 = icall @0 $9 $10 $11
+            fn init:
+                bb3 {
+                    v9 = const 0
+                    v10 = const 1
+                    v11 = const 10
+                    v12 = icall @f0 v9 v10 v11
                     stop
                 }
-                @4 $13 $14 $15 -> $15 $13 $14 {
-                    => @0
+            fn f0:
+                bb4 v13 v14 v15 -> v15 v13 v14 {
+                    => @bb0
+                }
+                bb0 v16 v18 v19 {
+                    => v16 ? @bb1 : @bb2
+                }
+                bb2 -> v16 {
+                    iret
+                }
+                bb1 -> v23 v21 v22 {
+                    v17 = const 1
+                    v20 = add v18 v19
+                    v21 = copy v19
+                    v22 = copy v20
+                    v23 = sub v16 v17
+                    => @bb0
                 }
             "#,
         );
@@ -848,45 +817,41 @@ mod tests {
                 }
             "#,
             r#"
-            Init: @0
-            Functions:
-                fn @0 -> entry @0  (outputs: 0)
-            Basic Blocks:
-                @0 {
-                    $1 = const 0x0
-                    => $1 ? @1 : @2
+            fn init:
+                bb0 {
+                    v1 = const 0
+                    => v1 ? @bb1 : @bb2
                 }
-                @1 -> $2 {
-                    $2 = const 0x1
-                    => @3
+                bb2 -> v1 {
+                    => @bb3
                 }
-                @2 -> $1 {
-                    => @3
+                bb1 -> v2 {
+                    v2 = const 1
+                    => @bb3
                 }
-                @3 $3 {
-                    => $3 ? @4 : @7
+                bb3 v3 {
+                    => v3 ? @bb4 : @bb7
                 }
-                @4 {
-                    switch $3 {
-                        0x34 => @8,
-                        0x35 => @6,
-                        else => @9
-                    }
+                bb7 {
+                    => @bb5
                 }
-                @5 {
+                bb4 {
+                    switch v3 {
+                        0x34 => @bb8
+                        0x35 => @bb6
+                }
+                }
+                bb5 {
                     stop
                 }
-                @6 {
+                bb8 {
+                    => @bb5
+                }
+                bb6 {
                     invalid
                 }
-                @7 {
-                    => @5
-                }
-                @8 {
-                    => @5
-                }
-                @9 {
-                    => @5
+                bb9 {
+                    => @bb5
                 }
             "#,
         );
