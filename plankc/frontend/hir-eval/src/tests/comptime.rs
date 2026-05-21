@@ -728,26 +728,26 @@ fn test_comptime_params_monomorphize_uniquely_at_runtime() {
         r#"
 
         ==== Functions ====
-        @fn0(%0: struct#0@main.plk:2:5) -> u256 {
-            %1 : struct#0@main.plk:2:5 = %0
+        @fn0(%0: Gen(u256)) -> u256 {
+            %1 : Gen(u256) = %0
             %2 : u256 = %1.1
             ret %2
         }
 
-        @fn1(%0: struct#56@main.plk:2:5) -> u256 {
-            %1 : struct#56@main.plk:2:5 = %0
+        @fn1(%0: Gen(bool)) -> u256 {
+            %1 : Gen(bool) = %0
             %2 : u256 = %1.1
             ret %2
         }
 
         ; init
         @fn2() -> never {
-            %0 : struct#0@main.plk:2:5 = struct#0 {
+            %0 : Gen(u256) = struct#0 {
                 0,
                 34,
             }
             %1 : u256 = call @fn0(%0)
-            %2 : struct#56@main.plk:2:5 = struct#56 {
+            %2 : Gen(bool) = struct#64 {
                 false,
                 33,
             }
@@ -868,14 +868,14 @@ fn test_any_type_params_monomorphize_uniquely_at_runtime() {
         r#"
 
         ==== Functions ====
-        @fn0(%0: struct#0@main.plk:2:5) -> u256 {
-            %1 : struct#0@main.plk:2:5 = %0
+        @fn0(%0: Gen(u256)) -> u256 {
+            %1 : Gen(u256) = %0
             %2 : u256 = %1.0
             ret %2
         }
 
-        @fn1(%0: struct#56@main.plk:2:5) -> bool {
-            %1 : struct#56@main.plk:2:5 = %0
+        @fn1(%0: Gen(bool)) -> bool {
+            %1 : Gen(bool) = %0
             %2 : bool = %1.0
             ret %2
         }
@@ -892,12 +892,12 @@ fn test_any_type_params_monomorphize_uniquely_at_runtime() {
 
         ; init
         @fn4() -> never {
-            %0 : struct#0@main.plk:2:5 = struct#0 {
+            %0 : Gen(u256) = struct#0 {
                 0,
                 34,
             }
             %1 : u256 = call @fn0(%0)
-            %2 : struct#56@main.plk:2:5 = struct#56 {
+            %2 : Gen(bool) = struct#64 {
                 false,
                 33,
             }
