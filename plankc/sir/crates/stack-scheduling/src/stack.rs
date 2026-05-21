@@ -1,7 +1,7 @@
-use std::cell::Cell;
-
 use crate::op_graph_builder::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
-use sir_data::{Idx, OperationIdx, StaticAllocId};
+use plank_core::Idx;
+use sir_data::{OperationIdx, StaticAllocId};
+use std::cell::Cell;
 
 const MAX_STACK_LENGTH: usize = 1024;
 

@@ -1,9 +1,9 @@
-use sir_data::{
-    BasicBlock, BasicBlockId, Control, DataId, DenseIndexSet, EthIRProgram, FunctionId, Idx,
-    IndexVec, LargeConstId, LocalId, LocalIdx, Operation, OperationIdx, StaticAllocId, index_vec,
-};
-
 use crate::{AnalysesStore, UseKind};
+use plank_core::{DenseIndexSet, Idx, IndexVec, index_vec};
+use sir_data::{
+    BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, LargeConstId, LocalId,
+    LocalIdx, Operation, OperationIdx, StaticAllocId,
+};
 
 /// Identifies which IR construct a tracked span belongs to, used in span overlap diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -531,8 +531,9 @@ fn validate_spans<I: Idx>(
 mod tests {
     use super::*;
     use alloy_primitives::U256;
+    use plank_core::Span;
     use sir_data::{
-        Branch, Span,
+        Branch,
         builder::EthIRBuilder,
         operation::{
             InlineOperands, InternalCallData, SetDataOffsetData, SetLargeConstData,

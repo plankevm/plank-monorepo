@@ -1,6 +1,6 @@
 use crate::{AnalysesStore, Pass, analyses::Predecessors};
-use plank_core::IncIterable;
-use sir_data::{BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, LocalIdx, Span, Switch};
+use plank_core::{IncIterable, Span};
+use sir_data::{BasicBlock, BasicBlockId, Branch, Control, EthIRProgram, LocalIdx, Switch};
 
 #[derive(Default)]
 pub struct CriticalEdgeSplitting;

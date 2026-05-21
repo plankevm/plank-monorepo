@@ -1,5 +1,6 @@
 use crate::analyses::{AnalysesMask, DefUse, UseKind};
-use sir_data::{EthIRProgram, Idx, IndexVec, LocalId, Operation, OperationIdx};
+use plank_core::{Idx, IndexVec};
+use sir_data::{EthIRProgram, LocalId, Operation, OperationIdx};
 
 use crate::{AnalysesStore, Pass};
 

@@ -2,10 +2,9 @@ use crate::analyses::{
     AnalysesStore, DefUse, Interval, IntervalEnd, IntervalStart, LocalLiveness, UseKind,
     cache::Analysis,
 };
-use plank_core::DenseIndexMap;
+use plank_core::{DenseIndexMap, IndexVec, newtype_index};
 use sir_data::{
-    BasicBlockId, Control, EthIRProgram, IndexVec, LocalId, Operation, OperationIdx, StaticAllocId,
-    newtype_index,
+    BasicBlockId, Control, EthIRProgram, LocalId, Operation, OperationIdx, StaticAllocId,
 };
 
 newtype_index! {

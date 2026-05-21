@@ -1,4 +1,5 @@
-use sir_data::{BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
+use plank_core::{IndexVec, index_vec};
+use sir_data::{BlockView, ControlView, StaticAllocId};
 use std::cell::Cell;
 
 use crate::{

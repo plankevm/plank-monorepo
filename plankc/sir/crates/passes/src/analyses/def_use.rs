@@ -1,5 +1,6 @@
 use crate::analyses::{AnalysesStore, cache::Analysis};
-use sir_data::{BasicBlockId, ControlView, EthIRProgram, Idx, IndexVec, LocalId, OperationIdx};
+use plank_core::{Idx, IndexVec};
+use sir_data::{BasicBlockId, ControlView, EthIRProgram, LocalId, OperationIdx};
 
 #[derive(Clone)]
 pub struct UseLocation {

@@ -1,6 +1,6 @@
 use hashbrown::HashSet;
-use plank_core::DenseIndexMap;
-use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, newtype_index};
+use plank_core::{DenseIndexMap, newtype_index};
+use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId};
 use sir_passes::{
     AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, analyses::Unreachable,
 };

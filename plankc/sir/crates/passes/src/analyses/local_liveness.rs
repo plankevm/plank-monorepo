@@ -1,10 +1,8 @@
 use hashbrown::{HashMap, HashSet};
 
 use crate::analyses::{AnalysesStore, Predecessors, ReversePostOrder, cache::Analysis};
-use plank_core::Idx;
-use sir_data::{
-    BasicBlockId, BlockView, ControlView, EthIRProgram, IndexVec, LocalId, OperationIdx,
-};
+use plank_core::{Idx, IndexVec};
+use sir_data::{BasicBlockId, BlockView, ControlView, EthIRProgram, LocalId, OperationIdx};
 use std::cmp::{Ord, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

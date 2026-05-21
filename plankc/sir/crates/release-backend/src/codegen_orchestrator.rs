@@ -3,8 +3,9 @@ use crate::{
     mark_map::{IndexableMarkSpan, MarkMap},
 };
 use hashbrown::HashSet;
+use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{Assembler, MarkId, MarkReference};
-use sir_data::{BasicBlockId, DataId, DenseIndexSet, EthIRProgram, FunctionId, Operation, Span};
+use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Operation};
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
 

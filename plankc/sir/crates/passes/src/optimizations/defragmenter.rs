@@ -1,10 +1,6 @@
 use hashbrown::{HashMap, hash_map::Entry};
-use plank_core::span::IncIterable;
-use sir_data::{
-    BasicBlock, BasicBlockId, BlockView, Branch, Cases, Control, ControlView, DataId, EthIRProgram,
-    Function, FunctionId, Idx, LargeConstId, LocalId, LocalIdx, Operation, OperationIdx, Span,
-    StaticAllocId, Switch, operation::OpVisitorMut,
-};
+use plank_core::{Idx, Span, span::IncIterable};
+use sir_data::{operation::OpVisitorMut, *};
 
 use crate::{AnalysesStore, Pass, analyses::Reachability};
 

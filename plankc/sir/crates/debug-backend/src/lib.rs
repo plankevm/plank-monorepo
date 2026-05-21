@@ -1,6 +1,6 @@
-use plank_core::{DenseIndexSet, Idx, IncIterable};
+use plank_core::{DenseIndexSet, Idx, IncIterable, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, LocalId, Span};
+use sir_data::{BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, LocalId};
 
 use crate::static_memory_layout::StaticMemoryLayout;
 

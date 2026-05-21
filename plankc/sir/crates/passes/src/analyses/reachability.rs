@@ -1,5 +1,6 @@
 use crate::analyses::{AnalysesStore, cache::Analysis};
-use sir_data::{BasicBlockId, DenseIndexSet, EthIRProgram};
+use plank_core::DenseIndexSet;
+use sir_data::{BasicBlockId, EthIRProgram};
 
 #[derive(Debug, Clone, Default)]
 pub struct Reachability {

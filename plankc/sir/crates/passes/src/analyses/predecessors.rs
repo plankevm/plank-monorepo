@@ -1,5 +1,6 @@
 use crate::analyses::{AnalysesStore, cache::Analysis};
-use sir_data::{BasicBlockId, EthIRProgram, IndexVec};
+use plank_core::IndexVec;
+use sir_data::{BasicBlockId, EthIRProgram};
 
 #[derive(Default)]
 pub struct Predecessors {

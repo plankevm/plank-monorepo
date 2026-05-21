@@ -1,6 +1,5 @@
-use sir_data::{Idx, IndexVec, Span, newtype_index};
-
 use crate::op_graph_builder::{OpNodeId, ValueNodeId};
+use plank_core::{Idx, IndexVec, Span, newtype_index};
 
 newtype_index! {
     struct ValueArenaIdx;

@@ -1,8 +1,6 @@
 use hashbrown::{HashMap, HashSet};
-use sir_data::{
-    BasicBlockId, ControlView, DenseIndexSet, EthIRProgram, FunctionId, Idx, Operation,
-    StaticAllocId,
-};
+use plank_core::{DenseIndexSet, Idx};
+use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId};
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 
 use crate::{DynFreePointer, EvmMemAddr, Layout};

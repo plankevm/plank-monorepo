@@ -1,7 +1,7 @@
+use super::op_visitor::{OpVisitor, OpVisitorMut};
 use crate::{EthIRProgram, builder::EthIRBuilder, index::*};
 use alloy_primitives::{U256, ruint::FromUintError};
-
-use super::op_visitor::{OpVisitor, OpVisitorMut};
+use plank_core::Idx;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpExtraData {

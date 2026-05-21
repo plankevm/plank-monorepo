@@ -1,5 +1,5 @@
-use plank_core::{DenseIndexMap, list_of_lists::ListOfLists};
-use sir_data::{BasicBlockId, EthIRProgram, newtype_index};
+use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
+use sir_data::{BasicBlockId, EthIRProgram};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};

@@ -3,7 +3,7 @@ use crate::{
     *,
 };
 use alloy_primitives::U256;
-use plank_core::{must_use::MustUseStrict, span::IncIterable};
+use plank_core::{Idx, IndexVec, must_use::MustUseStrict, span::IncIterable};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {

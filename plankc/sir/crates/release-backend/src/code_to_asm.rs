@@ -1,10 +1,9 @@
 use crate::mark_map::{IndexableMarkSpan, MarkMap};
 use alloy_primitives::U256;
-use plank_core::IncIterable;
+use plank_core::{DenseIndexSet, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
-    BasicBlockId, ControlView, DataId, DenseIndexSet, EthIRProgram, FunctionId, Operation,
-    OperationIdx,
+    BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, Operation, OperationIdx,
     operation::{IRMemoryIOByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};

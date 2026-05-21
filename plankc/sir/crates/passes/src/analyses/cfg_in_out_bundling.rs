@@ -1,5 +1,5 @@
-use plank_core::{DenseIndexMap, index, newtype_index, span::IncIterable};
-use sir_data::{BasicBlockId, EthIRProgram, Idx};
+use plank_core::{DenseIndexMap, Idx, index, newtype_index, span::IncIterable};
+use sir_data::{BasicBlockId, EthIRProgram};
 use smallvec::SmallVec;
 
 use crate::AnalysesStore;

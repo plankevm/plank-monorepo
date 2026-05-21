@@ -16,9 +16,9 @@
 
 use std::marker::PhantomData;
 
-use plank_core::{IncIterable, Span};
+use plank_core::{Idx, IncIterable, Span};
 use sir_assembler::MarkId;
-use sir_data::{DataId, EthIRProgram, Idx};
+use sir_data::{DataId, EthIRProgram};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IndexableMarkSpan<I: Idx> {

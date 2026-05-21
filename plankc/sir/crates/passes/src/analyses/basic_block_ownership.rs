@@ -1,5 +1,6 @@
 use crate::analyses::{AnalysesStore, cache::Analysis};
-use sir_data::{BasicBlockId, EthIRProgram, FunctionId, IndexVec};
+use plank_core::IndexVec;
+use sir_data::{BasicBlockId, EthIRProgram, FunctionId};
 
 #[derive(Debug, Clone, Default)]
 pub struct BasicBlockOwnershipAndReachability {

@@ -1,7 +1,6 @@
-use crate::{EthIRProgram, index::*};
-use plank_core::span::Span;
-
 use super::op_data::*;
+use crate::{EthIRProgram, index::*};
+use plank_core::{Idx, IndexVec, span::Span};
 
 pub(crate) trait VoidOpData {
     fn get_visited<'d, O, V: OpVisitor<'d, O>>(&'d self, visitor: &mut V) -> O;

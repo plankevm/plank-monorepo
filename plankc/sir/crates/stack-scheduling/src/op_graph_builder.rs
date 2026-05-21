@@ -3,12 +3,9 @@ use crate::{
     layouts::{Layout, LayoutMember},
     op_model::is_flippable,
 };
-
 use hashbrown::HashMap;
-use sir_data::{
-    BlockView, ControlView, EthIRProgram, Idx, IndexVec, Operation, OperationIdx, Span,
-    newtype_index,
-};
+use plank_core::{Idx, IndexVec, Span, newtype_index};
+use sir_data::{BlockView, ControlView, EthIRProgram, Operation, OperationIdx};
 
 newtype_index! {
     pub struct OpNodeId;

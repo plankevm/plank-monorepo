@@ -1,6 +1,6 @@
 use hashbrown::HashSet;
-use plank_core::{DenseIndexMap, LoopLimit};
-use sir_data::{BasicBlockId, EthIRProgram, FunctionView, IndexVec, index_vec};
+use plank_core::{DenseIndexMap, IndexVec, LoopLimit, index_vec};
+use sir_data::{BasicBlockId, EthIRProgram, FunctionView};
 
 use crate::analyses::{AnalysesStore, Predecessors, cache::Analysis};
 

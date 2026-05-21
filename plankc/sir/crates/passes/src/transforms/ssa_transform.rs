@@ -1,7 +1,7 @@
 use crate::{AnalysesStore, Pass, Predecessors, run_pass, transforms::CriticalEdgeSplitting};
 use hashbrown::{HashMap, HashSet};
-use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span};
-use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, LocalId, index_vec};
+use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span, index_vec};
+use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, LocalId};
 use smallvec::SmallVec;
 
 // to-SSA is usually a one-off operation so need to try and cache state.

@@ -5,7 +5,7 @@ pub mod view;
 
 pub use crate::{index::*, operation::Operation, view::*};
 use alloy_primitives::U256;
-use plank_core::list_of_lists::ListOfLists;
+use plank_core::{Idx, IndexVec, RelSlice, Span, list_of_lists::ListOfLists};
 use std::{cell::Cell, collections::HashSet, fmt};
 
 /// Implemented in a data oriented way. Instead of each basic block and function holding its own

@@ -1,9 +1,9 @@
-use std::fmt::Write;
-
+use plank_core::Idx;
 use plank_test_utils::dedent_preserve_blank_lines;
-use sir_data::{BlockView, ControlView, EthIRProgram, Idx, Operation, OperationIdx};
+use sir_data::{BlockView, ControlView, EthIRProgram, Operation, OperationIdx};
 use sir_parser::EmitConfig;
 use sir_passes::AnalysesStore;
+use std::fmt::Write;
 
 use super::{
     layouts::{Layout, LayoutMember},

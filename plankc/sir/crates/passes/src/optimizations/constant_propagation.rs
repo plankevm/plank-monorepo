@@ -2,6 +2,7 @@ use crate::analyses::{AnalysesMask, DefUse, UseKind};
 use alloy_primitives::U256;
 
 use crate::{AnalysesStore, Pass};
+use plank_core::{DenseIndexSet, Idx, IndexVec};
 use sir_data::{operation::*, *};
 use std::cmp::{Ordering, PartialOrd};
 
