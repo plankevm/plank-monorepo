@@ -331,6 +331,31 @@ fn test_diagnostic_renders_struct_name() {
 }
 
 #[test]
+fn test_diagnostic_renders_generic_struct_name() {
+    assert_diagnostics(
+        r#"
+        const Box = fn (comptime T: type) type {
+            struct T { value: T }
+        };
+
+        init {
+            let x: Box(u256) = Box(bool) { value: true };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:5:24
+          |
+        5 |     let x: Box(u256) = Box(bool) { value: true };
+          |            ---------   ^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Box(u256)`, got `Box(bool)`
+          |            |
+          |            `Box(u256)` expected because of this
+        "#],
+    );
+}
+
+#[test]
 fn test_type_annotation_not_comptime() {
     assert_diagnostics(
         "
