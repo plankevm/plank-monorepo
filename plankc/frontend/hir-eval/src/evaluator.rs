@@ -4,7 +4,9 @@ use plank_core::{
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
-use plank_values::{DefOrigin, Field, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner};
+use plank_values::{
+    DefOrigin, Field, Type, TypeId, TypeInterner, TypeName, Value, ValueId, ValueInterner,
+};
 
 use crate::{
     diagnostics::DiagCtx,
@@ -178,7 +180,7 @@ impl<'a> Evaluator<'a> {
             return;
         };
         if r#struct.name.get().is_none() {
-            r#struct.name.set(Some(name));
+            r#struct.name.set(Some(TypeName::Plain(name)));
         }
     }
 

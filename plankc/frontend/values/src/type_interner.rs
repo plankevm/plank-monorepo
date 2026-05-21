@@ -1,4 +1,5 @@
-use plank_core::chunked_arena::ChunkedArena;
+use alloy_primitives::U256;
+use plank_core::{chunked_arena::ChunkedArena, list_of_lists::ListOfLists, newtype_index};
 use std::{
     cell::{Cell, UnsafeCell},
     fmt,
@@ -11,6 +12,24 @@ use plank_session::{Session, SourceSpan, SrcLoc, StrId};
 
 use crate::ValueId;
 
+newtype_index! {
+    pub struct TypeNameArgsId;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeNameArg {
+    Void,
+    Bool(bool),
+    U256(U256),
+    Type(TypeId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeName {
+    Plain(StrId),
+    Parameterized { name: StrId, args: TypeNameArgsId },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Field {
     pub name: StrId,
@@ -21,7 +40,7 @@ pub struct Field {
 struct StructHeader {
     def_loc: SrcLoc,
     type_index: ValueId,
-    name: Cell<Option<StrId>>,
+    name: Cell<Option<TypeName>>,
     total_fields: u32,
 }
 
@@ -37,7 +56,7 @@ const MIN_STRUCT_FIELD_ALIGN: usize = {
 pub struct StructView<'a> {
     pub def_loc: SrcLoc,
     pub type_index: ValueId,
-    pub name: &'a Cell<Option<StrId>>,
+    pub name: &'a Cell<Option<TypeName>>,
     pub fields: &'a [Field],
 }
 
@@ -105,6 +124,7 @@ pub struct TypeInterner {
     dedup: UnsafeCell<HashTable<StructRef>>,
     arena: ChunkedArena<MIN_STRUCT_FIELD_ALIGN>,
     hasher: DefaultHashBuilder,
+    type_name_args: UnsafeCell<ListOfLists<TypeNameArgsId, TypeNameArg>>,
 }
 
 impl Default for TypeInterner {
@@ -224,6 +244,7 @@ impl TypeInterner {
             arena: ChunkedArena::new(),
             dedup: UnsafeCell::new(HashTable::new()),
             hasher: DefaultHashBuilder::default(),
+            type_name_args: UnsafeCell::new(ListOfLists::new()),
         }
     }
 
@@ -281,6 +302,10 @@ impl TypeInterner {
         }
     }
 
+    pub fn type_name_args(&self, args: TypeNameArgsId) -> &[TypeNameArg] {
+        unsafe { &(&*self.type_name_args.get())[args] }
+    }
+
     pub fn fmt_struct(
         &self,
         f: &mut impl fmt::Write,
@@ -289,11 +314,38 @@ impl TypeInterner {
     ) -> fmt::Result {
         let view = self.lookup_struct(r#struct);
         if let Some(name) = view.name.get() {
-            return f.write_str(session.lookup_name(name));
+            return match name {
+                TypeName::Plain(str_id) => f.write_str(session.lookup_name(str_id)),
+                TypeName::Parameterized { name, args } => {
+                    f.write_str(session.lookup_name(name))?;
+                    f.write_str("(")?;
+                    let mut sep = "";
+                    for arg in self.type_name_args(args) {
+                        f.write_str(sep)?;
+                        sep = ", ";
+                        self.fmt_type_name_arg(f, *arg, session)?;
+                    }
+                    f.write_str(")")
+                }
+            };
         }
         let (line, col) = session.offset_to_line_col(view.def_loc.source, view.def_loc.span.start);
         let source = &session.get_source(view.def_loc.source);
         write!(f, "struct#{}@{}:{line}:{col}", r#struct.0, source.path.to_str().unwrap())
+    }
+
+    pub fn fmt_type_name_arg(
+        &self,
+        f: &mut impl fmt::Write,
+        arg: TypeNameArg,
+        session: &Session,
+    ) -> fmt::Result {
+        match arg {
+            TypeNameArg::Void => f.write_str("{}"),
+            TypeNameArg::Bool(value) => write!(f, "{value}"),
+            TypeNameArg::U256(value) => write!(f, "{value}"),
+            TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
+        }
     }
 
     pub fn format<'a>(&'a self, sess: &'a Session, ty: TypeId) -> FmtType<'a> {
