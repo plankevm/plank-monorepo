@@ -1,8 +1,18 @@
 use crate::op_graph_builder::{OpNodeId, ValueNodeId};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
+use sir_data::OperationIdx;
+
+mod builder;
 
 newtype_index! {
     struct ValueArenaIdx;
+}
+
+#[derive(Debug)]
+pub enum OpNodeKind {
+    Flippable(OperationIdx),
+    RetDestPush(OperationIdx),
+    Normal(OperationIdx),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -14,19 +24,21 @@ struct StoredOpView {
 pub type BitmapWord = u8;
 
 #[derive(Debug)]
-pub struct OpGraphView {
+pub struct OpGraph {
     total_ops: u32,
     total_values: u32,
 
     inputs_end: ValueNodeId,
     end_stack_fifo_end: ValueArenaIdx,
 
-    /// Holds `end_stack_fifo ++ [(op_inputs, op_outputs)]`
+    /// Holds `end_stack_fifo ++ [(op_input*, op_output*)]`
     values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
     operations: IndexVec<OpNodeId, StoredOpView>,
 
-    /// Holds `[op_predecessors] ++ [value_consumers]`
+    /// Holds `op_predecessors ++ value_consumers`
     bit_sets_arena: Vec<BitmapWord>,
+
+    op_kind: IndexVec<OpNodeId, OpNodeKind>,
 }
 
 #[derive(Debug)]
@@ -45,7 +57,10 @@ impl<'a> From<&'a mut [BitmapWord]> for &'a mut OpSet {
     }
 }
 
-impl OpGraphView {
+impl OpGraph {
+    pub fn total_ops(&self) -> u32 {
+        self.total_ops
+    }
     pub fn input_values_fifo(&self) -> Span<ValueNodeId> {
         Span::new(ValueNodeId::ZERO, self.inputs_end)
     }

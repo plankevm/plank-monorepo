@@ -474,6 +474,20 @@ impl<I: Idx, T, A: Allocator> std::ops::IndexMut<std::ops::Range<I>> for IndexVe
     }
 }
 
+impl<I: Idx, T, A: Allocator> std::ops::Index<std::ops::RangeFrom<I>> for IndexVec<I, T, A> {
+    type Output = [T];
+
+    fn index(&self, range: std::ops::RangeFrom<I>) -> &Self::Output {
+        &self.raw[range.start.idx()..]
+    }
+}
+
+impl<I: Idx, T, A: Allocator> std::ops::IndexMut<std::ops::RangeFrom<I>> for IndexVec<I, T, A> {
+    fn index_mut(&mut self, range: std::ops::RangeFrom<I>) -> &mut Self::Output {
+        &mut self.raw[range.start.idx()..]
+    }
+}
+
 /// Creates an `IndexVec` containing the given elements.
 ///
 /// `index_vec!` allows `IndexVec`s to be defined with the same syntax as the standard `vec![]`
