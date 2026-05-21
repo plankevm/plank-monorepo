@@ -1,8 +1,8 @@
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
-use plank_values::{DefOrigin, TypeId, Value};
+use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
+use plank_values::{DefOrigin, Type, TypeId, TypeNameArg, Value};
 
 mod cache;
 
@@ -37,6 +37,7 @@ struct Call<'a> {
     caller_bindings: &'a DenseIndexMap<hir::LocalId, Local>,
     caller_mir_types: &'a mut IndexVec<mir::LocalId, TypeId>,
     span: SourceSpan,
+    type_name: Option<StrId>,
 
     closure: ValueId,
     func: hir::FnDef,
@@ -61,6 +62,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &'s [hir::LocalId],
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
+        type_name: Option<StrId>,
         capture_buf_offset: usize,
         validated: ArgParamComptimenessMatch,
     ) -> (Scope<'s, 'ctx>, Call<'s>, &'s mut ComptimeQuota, &'s mut u32) {
@@ -146,6 +148,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             caller_bindings,
             caller_mir_types,
             span: call_span,
+            type_name,
             closure,
             func: fn_def,
             args,
@@ -238,6 +241,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 for &capture in captures {
                     this.eval.captures_buf.push(capture);
                 }
+                let type_name = match callee_origin {
+                    DefOrigin::Const(id) => Some(this.eval.hir.consts[id].name),
+                    DefOrigin::Local(_) => None,
+                };
 
                 let args = &this.hir.call_args[args_id];
                 let arg_spans = this
@@ -250,6 +257,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     args,
                     arg_spans,
                     call_span,
+                    type_name,
                     capture_buf_offset,
                     values_buf_offset,
                 );
@@ -289,6 +297,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
+        type_name: Option<StrId>,
         capture_buf_offset: usize,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
@@ -315,6 +324,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 args,
                 arg_spans,
                 call_span,
+                type_name,
                 capture_buf_offset,
                 validated,
             );
@@ -540,6 +550,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             cached.max_eval_branch_quota_seen,
                         ) =>
                     {
+                        if let (Some(type_name), ComptimeCallOutcome::Value(value)) =
+                            (call.type_name, cached.outcome)
+                        {
+                            self.try_name_anonymous_call_result_type(
+                                type_name,
+                                call,
+                                value,
+                                values_buf_offset,
+                            );
+                        }
                         self.max_eval_branch_quota_seen =
                             self.max_eval_branch_quota_seen.max(cached.max_eval_branch_quota_seen);
                         return Ok(Ok(cached));
@@ -625,6 +645,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
             Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
         };
+        if let (Some(type_name), Ok(Ok(value))) = (call.type_name, eval_res) {
+            self.try_name_anonymous_call_result_type(type_name, call, value, values_buf_offset);
+        }
         let outcome = match eval_res {
             Ok(Ok(value)) => ComptimeCallOutcome::Value(value),
             Err(Poisoned) => {
@@ -651,6 +674,63 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         cache_state.set(EvaluatedFnState::Done(Ok(result)));
         Ok(Ok(result))
+    }
+
+    fn try_name_anonymous_call_result_type(
+        &mut self,
+        name: StrId,
+        call: &Call<'_>,
+        value: ValueId,
+        values_buf_offset: usize,
+    ) {
+        let Value::Type(ty) = self.values.lookup(value) else {
+            return;
+        };
+        let Type::Struct(r#struct) = self.types.lookup(ty) else {
+            return;
+        };
+        if r#struct.name.get().is_some() {
+            return;
+        }
+        let Ok(body_span) = self.hir.block_spans[call.func.body] else {
+            return;
+        };
+        if r#struct.def_loc.source != call.func.source
+            || !body_span.range().contains(&r#struct.def_loc.span.start)
+        {
+            return;
+        }
+
+        let args_offset = self.eval.type_name_args_buf.len();
+        let args_end = self.eval.maybe_values_buf.len();
+        let args_collected = (values_buf_offset..args_end).all(|idx| {
+            let Ok(value) = self.eval.maybe_values_buf[idx] else {
+                return false;
+            };
+            let Some(arg) = self.try_value_as_type_name_arg(value) else {
+                return false;
+            };
+            self.eval.type_name_args_buf.push(arg);
+            true
+        });
+        if args_collected {
+            self.types.try_name_struct_parameterized(
+                ty,
+                name,
+                &self.eval.type_name_args_buf[args_offset..],
+            );
+        }
+        self.eval.type_name_args_buf.truncate(args_offset);
+    }
+
+    fn try_value_as_type_name_arg(&self, value: ValueId) -> Option<TypeNameArg> {
+        Some(match self.values.lookup(value) {
+            Value::Void => TypeNameArg::Void,
+            Value::Bool(value) => TypeNameArg::Bool(value),
+            Value::BigNum(value) => TypeNameArg::BigNum(value),
+            Value::Type(ty) => TypeNameArg::Type(ty),
+            Value::Closure { .. } | Value::StructVal { .. } => return None,
+        })
     }
 
     pub fn eval_param(

@@ -20,7 +20,7 @@ newtype_index! {
 pub enum TypeNameArg {
     Void,
     Bool(bool),
-    U256(U256),
+    BigNum(U256),
     Type(TypeId),
 }
 
@@ -306,6 +306,17 @@ impl TypeInterner {
         unsafe { &(&*self.type_name_args.get())[args] }
     }
 
+    pub fn try_name_struct_parameterized(&self, ty: TypeId, name: StrId, args: &[TypeNameArg]) {
+        let Type::Struct(r#struct) = self.lookup(ty) else {
+            return;
+        };
+        if r#struct.name.get().is_some() {
+            return;
+        }
+        let args = unsafe { (*self.type_name_args.get()).push_copy_slice(args) };
+        r#struct.name.set(Some(TypeName::Parameterized { name, args }));
+    }
+
     pub fn fmt_struct(
         &self,
         f: &mut impl fmt::Write,
@@ -343,7 +354,7 @@ impl TypeInterner {
         match arg {
             TypeNameArg::Void => f.write_str("{}"),
             TypeNameArg::Bool(value) => write!(f, "{value}"),
-            TypeNameArg::U256(value) => write!(f, "{value}"),
+            TypeNameArg::BigNum(value) => write!(f, "{value}"),
             TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
         }
     }

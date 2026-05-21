@@ -356,6 +356,53 @@ fn test_diagnostic_renders_generic_struct_name() {
 }
 
 #[test]
+fn test_identity_type_function_does_not_rename_struct() {
+    assert_diagnostics(
+        r#"
+        const id = fn (comptime T: type) type { T };
+        init {
+            let T = struct { a: u256 };
+            let x: id(T) = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:4:20
+          |
+        4 |     let x: id(T) = 42;
+          |            -----   ^^ expected `struct#0@main.plk:3:13`, got `u256`
+          |            |
+          |            `struct#0@main.plk:3:13` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_identity_type_function_preserves_named_struct() {
+    assert_diagnostics(
+        r#"
+        const id = fn (comptime T: type) type { T };
+        const Pair = struct { a: u256 };
+
+        init {
+            let x: id(Pair) = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:4:23
+          |
+        4 |     let x: id(Pair) = 42;
+          |            --------   ^^ expected `Pair`, got `u256`
+          |            |
+          |            `Pair` expected because of this
+        "#],
+    );
+}
+
+#[test]
 fn test_type_annotation_not_comptime() {
     assert_diagnostics(
         "
