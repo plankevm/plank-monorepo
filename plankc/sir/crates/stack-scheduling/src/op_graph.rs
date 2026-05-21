@@ -1,199 +1,131 @@
-use crate::{
-    LayoutsTracker,
-    layouts::{Layout, LayoutMember},
-    op_model::is_flippable,
-};
-use hashbrown::HashMap;
-use sir_data::{
-    BlockView, ControlView, EthIRProgram, Idx, IndexVec, Operation, OperationIdx, Span,
-    newtype_index,
-};
+use sir_data::{Idx, IndexVec, Span, newtype_index};
+
+use crate::op_graph_builder::{OpNodeId, ValueNodeId};
 
 newtype_index! {
-    pub struct OpNodeId;
-    pub struct ValueNodeId;
+    struct ValueArenaIdx;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StoredOpView {
+    inputs_output_start: ValueArenaIdx,
+    inputs: u32,
+}
+
+pub type BitmapWord = u8;
+
+#[derive(Debug)]
+pub struct OpGraphView {
+    total_ops: u32,
+    total_values: u32,
+
+    inputs_end: ValueNodeId,
+    end_stack_fifo_end: ValueArenaIdx,
+
+    /// Holds `end_stack_fifo ++ [(op_inputs, op_outputs)]`
+    values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
+    operations: IndexVec<OpNodeId, StoredOpView>,
+
+    /// Holds `[op_predecessors] ++ [value_consumers]`
+    bit_sets_arena: Vec<BitmapWord>,
 }
 
 #[derive(Debug)]
-pub enum OpNodeKind {
-    Flippable(OperationIdx),
-    RetDestPush(OperationIdx),
-    Normal(OperationIdx),
-}
+#[repr(transparent)]
+pub struct OpSet([BitmapWord]);
 
-#[derive(Debug)]
-pub struct OpNode {
-    pub consumes_fifo: Vec<ValueNodeId>,
-    pub produces_fifo: Vec<ValueNodeId>,
-    pub kind: OpNodeKind,
-    /// The set of nodes that need to be executed *after* this node, regardless of data
-    /// dependencies
-    pub happens_before: Vec<OpNodeId>,
-}
-
-#[derive(Debug)]
-pub struct ValueNode {
-    pub source: Option<OpNodeId>,
-    // TODO: Are duplicates ok?
-    pub used_by: Vec<OpNodeId>,
-}
-
-impl ValueNode {
-    fn input() -> Self {
-        Self { source: None, used_by: Vec::new() }
+impl<'a> From<&'a [BitmapWord]> for &'a OpSet {
+    fn from(value: &'a [BitmapWord]) -> Self {
+        unsafe { &*(value as *const [BitmapWord] as *const Self) }
     }
+}
 
-    fn output(source: OpNodeId) -> Self {
-        Self { source: Some(source), used_by: Vec::with_capacity(2) }
+impl<'a> From<&'a mut [BitmapWord]> for &'a mut OpSet {
+    fn from(value: &'a mut [BitmapWord]) -> Self {
+        unsafe { &mut *(value as *mut [BitmapWord] as *mut Self) }
     }
 }
 
-#[derive(Debug)]
-pub struct OpGraph {
-    pub operations: IndexVec<OpNodeId, OpNode>,
-    pub values: IndexVec<ValueNodeId, ValueNode>,
-    pub inputs_end: ValueNodeId,
-    pub end_stack_fifo: Vec<ValueNodeId>,
-}
-
-impl OpGraph {
+impl OpGraphView {
     pub fn input_values_fifo(&self) -> Span<ValueNodeId> {
         Span::new(ValueNodeId::ZERO, self.inputs_end)
     }
 
-    pub fn is_input(&self, id: ValueNodeId) -> bool {
-        id < self.inputs_end
+    pub fn output_values_fifo(&self) -> &[ValueNodeId] {
+        &self.values_arena[Span::new(ValueArenaIdx::ZERO, self.end_stack_fifo_end)]
+    }
+
+    pub fn uses_remaining(&self, completed: &OpSet, value: ValueNodeId) -> u32 {
+        let consumers = self.get_consumers(value);
+        let total_uses = consumers.count_members();
+        let already_used = consumers.intersect_count(completed);
+        total_uses - already_used
+    }
+
+    pub fn get_predecessors(&self, id: OpNodeId) -> &OpSet {
+        let words_per_op = self.total_ops.div_ceil(BitmapWord::BITS);
+        let start_offset = id.const_get() * words_per_op;
+        (&self.bit_sets_arena[start_offset as usize..][..words_per_op as usize]).into()
+    }
+
+    pub fn get_consumers(&self, id: ValueNodeId) -> &OpSet {
+        let words_per_op_or_value = self.total_ops.div_ceil(BitmapWord::BITS);
+        let value_words_start = self.total_ops * words_per_op_or_value;
+
+        let start_offset = value_words_start + id.const_get() * words_per_op_or_value;
+
+        (&self.bit_sets_arena[start_offset as usize..][..words_per_op_or_value as usize]).into()
+    }
+
+    pub fn get_op(&self, id: OpNodeId) -> OpView<'_> {
+        let op = self.operations[id];
+        let op_values_end = match self.operations.get(id + 1) {
+            Some(stored_next) => stored_next.inputs_output_start,
+            None => self.values_arena.len_idx(),
+        };
+        let op_values = &self.values_arena[Span::new(op.inputs_output_start, op_values_end)];
+
+        OpView {
+            inputs_fifo: &op_values[..op.inputs as usize],
+            outputs_fifo: &op_values[op.inputs as usize..],
+            predecessors: self.get_predecessors(id),
+        }
     }
 }
 
-pub fn build_graph_simple<'ir>(
-    program: &'ir EthIRProgram,
-    block: BlockView<'ir>,
-    layouts: &LayoutsTracker<'ir>,
-    input_layout: &Layout,
-    output_layout: &Layout,
-) -> OpGraph {
-    let mut operations =
-        IndexVec::<OpNodeId, OpNode>::with_capacity(block.operations().size_hint().0);
-    let mut values = IndexVec::<ValueNodeId, ValueNode>::new();
+pub struct OpView<'g> {
+    pub inputs_fifo: &'g [ValueNodeId],
+    pub outputs_fifo: &'g [ValueNodeId],
+    pub predecessors: &'g OpSet,
+}
 
-    let mut local_to_value = HashMap::new();
-    let mut ret_dest_value = None;
-
-    let inputs = block.inputs();
-
-    for &member in input_layout.members_fifo() {
-        let vid = values.push(ValueNode::input());
-        match member {
-            LayoutMember::ReturnDest => ret_dest_value.replace(vid),
-            LayoutMember::InputOutput(position) => {
-                local_to_value.insert(inputs[position as usize], vid)
-            }
-            LayoutMember::Local(local) => local_to_value.insert(local, vid),
-        };
+impl OpSet {
+    pub fn contains(&self, op: OpNodeId) -> bool {
+        let i = op.const_get();
+        let word_idx = i / BitmapWord::BITS;
+        let word_shift = i % BitmapWord::BITS;
+        self.0[word_idx as usize] & (1 << word_shift) != 0
     }
-    let inputs_end = values.len_idx();
 
-    let mut last_op = None;
+    pub fn count_members(&self) -> u32 {
+        self.0.iter().copied().map(BitmapWord::count_ones).sum()
+    }
 
-    let block_outputs = block.outputs();
-    let mut end_stack_fifo = Vec::with_capacity(block_outputs.len() + 2);
+    pub fn intersect_count(&self, other: &Self) -> u32 {
+        self.0.iter().zip(other.0.iter()).map(|(&x, &y)| (x & y).count_ones()).sum()
+    }
 
-    for op in block.operations() {
-        let op_node = operations.push(OpNode {
-            consumes_fifo: Vec::new(),
-            produces_fifo: Vec::new(),
-            kind: if is_flippable(op.op().kind()) {
-                OpNodeKind::Flippable(op.id())
-            } else {
-                OpNodeKind::Normal(op.id())
-            },
-            happens_before: Vec::with_capacity(1),
-        });
-
-        if let Some(last_op) = last_op.replace(op_node) {
-            operations[last_op].happens_before.push(op_node);
-        }
-
-        operations[op_node].consumes_fifo = if let Operation::InternalCall(icall) = op.op() {
-            let call_inputs = icall.get_inputs(program);
-            let callee = program.function(icall.function);
-            let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
-            callee_entry_layout
-                .members_fifo()
-                .iter()
-                .map(|&member| match member {
-                    LayoutMember::InputOutput(i) => {
-                        let value = local_to_value[&call_inputs[i as usize]];
-                        values[value].used_by.push(op_node);
-                        value
-                    }
-                    LayoutMember::ReturnDest => {
-                        let return_destination_push = operations.push(OpNode {
-                            consumes_fifo: vec![],
-                            produces_fifo: Vec::with_capacity(1),
-                            kind: OpNodeKind::RetDestPush(op.id()),
-                            happens_before: vec![],
-                        });
-                        let return_destination = values.push(ValueNode {
-                            source: Some(return_destination_push),
-                            used_by: vec![op_node],
-                        });
-                        operations[return_destination_push].produces_fifo.push(return_destination);
-                        return_destination
-                    }
-                    LayoutMember::Local(_) => {
-                        unreachable!(
-                            "internal function entry should not have non-block-input members"
-                        )
-                    }
-                })
-                .collect()
-        } else {
-            op.inputs()
-                .iter()
-                .map(|input| {
-                    let value = local_to_value[input];
-                    values[value].used_by.push(op_node);
-                    value
-                })
-                .collect()
-        };
-
-        operations[op_node].produces_fifo = op
-            .outputs()
+    pub fn is_super(&self, other: &Self) -> bool {
+        self.0
             .iter()
-            .map(|&output| {
-                let value = values.push(ValueNode::output(op_node));
-                let prev = local_to_value.insert(output, value);
-                assert!(prev.is_none());
-                value
-            })
-            .collect();
+            .zip(other.0.iter())
+            .all(|(&super_limb, &sub_limb)| super_limb & sub_limb == sub_limb)
     }
 
-    'handle_control: {
-        let value = match block.control() {
-            ControlView::LastOpTerminates => {
-                // do nothing, already handled
-                break 'handle_control;
-            }
-            ControlView::ContinuesTo(_) => {
-                // doesn't have any external value
-                break 'handle_control;
-            }
-            ControlView::InternalReturn => ret_dest_value.expect("no return dest for iret"),
-            ControlView::Switch(switch) => local_to_value[&switch.condition()],
-            ControlView::Branches { condition, .. } => local_to_value[&condition],
-        };
-        end_stack_fifo.push(value);
+    pub fn flip(&mut self, op: OpNodeId) {
+        let i = op.const_get();
+        let word_idx = i / BitmapWord::BITS;
+        let word_shift = i % BitmapWord::BITS;
+        self.0[word_idx as usize] ^= 1 << word_shift;
     }
-
-    end_stack_fifo.extend(output_layout.members_fifo().iter().map(|&member| match member {
-        LayoutMember::ReturnDest => ret_dest_value.expect("no return dest despite in output"),
-        LayoutMember::InputOutput(position) => local_to_value[&block_outputs[position as usize]],
-        LayoutMember::Local(local) => local_to_value[&local],
-    }));
-
-    OpGraph { operations, values, end_stack_fifo, inputs_end }
 }

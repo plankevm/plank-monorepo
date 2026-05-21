@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
+use crate::op_graph_builder::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
 use sir_data::{Idx, OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;

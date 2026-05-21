@@ -3,16 +3,18 @@ use sir_data::{BasicBlockId, EthIRProgram, newtype_index};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
-use op_graph::build_graph_simple;
+use op_graph_builder::build_graph_simple;
 pub use stack::ScheduleConfig;
+mod op_graph;
 
 use crate::{scheduler::dumb_schedule, stack::StackOps};
 
 mod layouts;
-mod op_graph;
+mod op_graph_builder;
 mod op_model;
 mod scheduler;
 pub mod stack;
+mod state;
 
 newtype_index! {
     pub struct StackOpIdx;

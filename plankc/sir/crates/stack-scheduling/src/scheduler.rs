@@ -2,7 +2,7 @@ use sir_data::{BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
 use std::cell::Cell;
 
 use crate::{
-    op_graph::*,
+    op_graph_builder::*,
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
 

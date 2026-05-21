@@ -7,7 +7,7 @@ use sir_passes::AnalysesStore;
 
 use super::{
     layouts::{Layout, LayoutMember},
-    op_graph::{OpGraph, build_graph_simple},
+    op_graph_builder::{OpGraph, build_graph_simple},
     stack::{ScheduleConfig, StackOps},
 };
 
@@ -146,7 +146,7 @@ fn fmt_value(
     graph: &OpGraph,
     input_layout: &Layout,
     block: BlockView<'_>,
-    value: super::op_graph::ValueNodeId,
+    value: super::op_graph_builder::ValueNodeId,
 ) {
     if graph.is_input(value) {
         fmt_layout_member(out, input_layout.members_fifo()[value.idx()], block);
@@ -160,9 +160,9 @@ fn fmt_value(
         .position(|&output| output == value)
         .expect("value should be in producing op outputs");
     let op_idx = match graph.operations[source].kind {
-        super::op_graph::OpNodeKind::Flippable(op_idx)
-        | super::op_graph::OpNodeKind::Normal(op_idx) => op_idx,
-        super::op_graph::OpNodeKind::RetDestPush(_) => {
+        super::op_graph_builder::OpNodeKind::Flippable(op_idx)
+        | super::op_graph_builder::OpNodeKind::Normal(op_idx) => op_idx,
+        super::op_graph_builder::OpNodeKind::RetDestPush(_) => {
             panic!("return destination push should not produce local outputs")
         }
     };
