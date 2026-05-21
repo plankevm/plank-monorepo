@@ -302,10 +302,6 @@ impl TypeInterner {
         }
     }
 
-    pub fn type_name_args(&self, args: TypeNameArgsId) -> &[TypeNameArg] {
-        unsafe { &(&*self.type_name_args.get())[args] }
-    }
-
     pub fn try_name_struct_parameterized(&self, ty: TypeId, name: StrId, args: &[TypeNameArg]) {
         let Type::Struct(r#struct) = self.lookup(ty) else {
             return;
@@ -330,12 +326,7 @@ impl TypeInterner {
                 TypeName::Parameterized { name, args } => {
                     f.write_str(session.lookup_name(name))?;
                     f.write_str("(")?;
-                    let mut sep = "";
-                    for arg in self.type_name_args(args) {
-                        f.write_str(sep)?;
-                        sep = ", ";
-                        self.fmt_type_name_arg(f, *arg, session)?;
-                    }
+                    self.fmt_type_name_args(f, args, session)?;
                     f.write_str(")")
                 }
             };
@@ -345,18 +336,25 @@ impl TypeInterner {
         write!(f, "struct#{}@{}:{line}:{col}", r#struct.0, source.path.to_str().unwrap())
     }
 
-    pub fn fmt_type_name_arg(
+    fn fmt_type_name_args(
         &self,
         f: &mut impl fmt::Write,
-        arg: TypeNameArg,
+        args: TypeNameArgsId,
         session: &Session,
     ) -> fmt::Result {
-        match arg {
-            TypeNameArg::Void => f.write_str("{}"),
-            TypeNameArg::Bool(value) => write!(f, "{value}"),
-            TypeNameArg::BigNum(value) => write!(f, "{value}"),
-            TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
+        let args = unsafe { &(&*self.type_name_args.get())[args] };
+        let mut sep = "";
+        for &arg in args {
+            f.write_str(sep)?;
+            sep = ", ";
+            match arg {
+                TypeNameArg::Void => f.write_str("{}")?,
+                TypeNameArg::Bool(value) => write!(f, "{value}")?,
+                TypeNameArg::BigNum(value) => write!(f, "{value}")?,
+                TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty))?,
+            }
         }
+        Ok(())
     }
 
     pub fn format<'a>(&'a self, sess: &'a Session, ty: TypeId) -> FmtType<'a> {

@@ -356,6 +356,58 @@ fn test_diagnostic_renders_generic_struct_name() {
 }
 
 #[test]
+fn test_const_alias_preserves_generic_struct_name() {
+    assert_diagnostics(
+        r#"
+        const Box = fn (comptime T: type) type {
+            struct T { value: T }
+        };
+        const Alias = Box(u256);
+
+        init {
+            let x: Alias = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:6:20
+          |
+        6 |     let x: Alias = 42;
+          |            -----   ^^ expected `Box(u256)`, got `u256`
+          |            |
+          |            `Box(u256)` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_parameterized_name_for_deduped_struct_uses_first_specialization() {
+    assert_diagnostics(
+        r#"
+        const Phantom = fn (comptime T: type) type {
+            struct { value: u256 }
+        };
+
+        init {
+            let a: Phantom(u256) = Phantom(u256) { value: 1 };
+            let b: Phantom(bool) = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:6:28
+          |
+        6 |     let b: Phantom(bool) = 42;
+          |            -------------   ^^ expected `Phantom(u256)`, got `u256`
+          |            |
+          |            `Phantom(u256)` expected because of this
+        "#],
+    );
+}
+
+#[test]
 fn test_identity_type_function_does_not_rename_struct() {
     assert_diagnostics(
         r#"
