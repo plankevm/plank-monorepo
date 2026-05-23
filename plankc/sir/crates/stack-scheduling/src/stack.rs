@@ -1,4 +1,4 @@
-use crate::op_graph_builder::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
+use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
 use plank_core::Idx;
 use sir_data::{OperationIdx, StaticAllocId};
 use std::cell::Cell;
@@ -162,28 +162,28 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
 
     #[track_caller]
     pub fn op(&mut self, graph: &OpGraph, op_id: OpNodeId) {
-        let op = &graph.operations[op_id];
+        let op = graph.get_op(op_id);
         let (stack_op, flippable) = match op.kind {
             OpNodeKind::Flippable(op_idx) => (StackOps::Op(op_idx), true),
             OpNodeKind::Normal(op_idx) => (StackOps::Op(op_idx), false),
             OpNodeKind::RetDestPush(op_idx) => (StackOps::CallRetPush(op_idx), false),
         };
         let mut flipping = false;
-        for (i, &target) in (0usize..).zip(&op.consumes_fifo) {
+        for (i, &target) in (0usize..).zip(op.inputs_fifo) {
             let actual = self.inner.pop().expect("missing input");
 
-            let correct = if flippable && i == 0 && actual == op.consumes_fifo[1] {
+            let correct = if flippable && i == 0 && actual == op.inputs_fifo[1] {
                 flipping = true;
                 true
             } else if flippable && flipping && i == 1 {
-                actual == op.consumes_fifo[0]
+                actual == op.inputs_fifo[0]
             } else {
                 target == actual
             };
             assert!(correct, "incorrect op schedule");
         }
         (self.ops_sink)(stack_op);
-        for &output in graph.operations[op_id].produces_fifo.iter().rev() {
+        for &output in op.outputs_fifo.iter().rev() {
             self.inner.push(output);
         }
     }

@@ -3,41 +3,33 @@ use sir_data::{BlockView, ControlView, StaticAllocId};
 use std::cell::Cell;
 
 use crate::{
-    op_graph_builder::*,
+    op_graph::{OpGraph, OpNodeId, ValueNodeId},
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
 
 fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
-    let mut in_degrees: IndexVec<OpNodeId, u32> = index_vec![0; graph.operations.len()];
-    for (id, op) in graph.operations.enumerate_idx() {
-        in_degrees[id] +=
-            op.consumes_fifo.iter().filter(|&&value| !graph.is_input(value)).count() as u32;
-        for &succ in &op.happens_before {
-            in_degrees[succ] += 1;
-        }
+    let mut in_degrees: IndexVec<OpNodeId, u32> = index_vec![0; graph.total_ops() as usize];
+    for id in graph.op_ids() {
+        in_degrees[id] = graph.get_predecessors(id).count_members();
     }
 
-    let mut topo_sort = Vec::with_capacity(graph.operations.len());
+    let mut topo_sort = Vec::with_capacity(graph.total_ops() as usize);
     let mut queue = Vec::with_capacity(128);
 
-    for (id, &in_degree) in in_degrees.enumerate_idx() {
-        if in_degree == 0 {
+    for id in graph.op_ids() {
+        if in_degrees[id] == 0 {
             queue.push(id);
         }
     }
 
     while let Some(id) = queue.pop() {
         topo_sort.push(id);
-        let next = &graph.operations[id];
-        for &succ in next
-            .produces_fifo
-            .iter()
-            .flat_map(|&output| &graph.values[output].used_by)
-            .chain(&next.happens_before)
-        {
-            in_degrees[succ] -= 1;
-            if in_degrees[succ] == 0 {
-                queue.push(succ);
+        for succ in graph.op_ids() {
+            if graph.get_predecessors(succ).contains(id) {
+                in_degrees[succ] -= 1;
+                if in_degrees[succ] == 0 {
+                    queue.push(succ);
+                }
             }
         }
     }
@@ -51,12 +43,13 @@ fn schedule_op<Sink: FnMut(StackOps)>(
     stack: &mut TrackedStack<'_, Sink>,
     graph: &OpGraph,
     op: OpNodeId,
+    in_the_way_buf: &mut Vec<ValueNodeId>,
 ) {
     let max_dup_depth = u16::from(config.max_dup_depth);
 
-    let mut in_the_way_buf = Vec::new();
+    let op_view = graph.get_op(op);
 
-    for &input in graph.operations[op].consumes_fifo.iter().rev() {
+    for &input in op_view.inputs_fifo.iter().rev() {
         let depth = stack.stack().find_first(input).expect("input missing");
         if depth <= max_dup_depth {
             stack.dup(depth as u8);
@@ -111,8 +104,8 @@ fn shuffle_to_output<Sink: FnMut(StackOps)>(
     stack: &mut TrackedStack<'_, Sink>,
     graph: &OpGraph,
 ) {
-    let target_stack = graph.end_stack_fifo.as_slice();
-    let target_counts = count_occurences(target_stack, graph.values.len());
+    let target_stack = graph.output_values_fifo();
+    let target_counts = count_occurences(target_stack, graph.total_values() as usize);
 
     for _ in 0..stack.len() {
         let top = stack.top().expect("shouldn't pop more than one per loop");
@@ -144,8 +137,9 @@ pub fn dumb_schedule(
     let mut stack = TrackedStack::new_from_evm(next_alloc_id, ops_sink, stack, 8);
 
     let schedule = get_operation_topological_sort(graph);
+    let mut in_the_way_buf = Vec::new();
     for op in schedule {
-        schedule_op(config, &mut stack, graph, op);
+        schedule_op(config, &mut stack, graph, op, &mut in_the_way_buf);
     }
 
     if !matches!(block.control(), ControlView::LastOpTerminates) {

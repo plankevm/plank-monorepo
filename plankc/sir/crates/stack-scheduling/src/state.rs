@@ -1,7 +1,4 @@
-use crate::{
-    op_graph::{BitmapWord, OpGraph, OpSet},
-    op_graph_builder::ValueNodeId,
-};
+use crate::op_graph::{BitsetWord, OpGraph, OpSet, ValueNodeId};
 use plank_core::{IndexVec, newtype_index};
 use sir_data::StaticAllocId;
 
@@ -23,7 +20,7 @@ pub struct StoredScheduleState {
 
 #[derive(Debug)]
 struct ScheduleStateArena {
-    complete_bitsets_arena: Vec<BitmapWord>,
+    complete_bitsets_arena: Vec<BitsetWord>,
     /// Holds `[(spilled_value*, stack_value*)]`
     values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
     spilled_arena: IndexVec<SpillAllocIdArenaIdx, StaticAllocId>,
@@ -39,7 +36,7 @@ impl ScheduleStateArena {
 
 struct ScheduledState<'a> {
     cumulative_gas_cost: u32,
-    complete: &'a OpSet,
+    complete: OpSet<'a>,
     stack: &'a [ValueNodeId],
     spilled_values: &'a [ValueNodeId],
     spilled_allocs: &'a [StaticAllocId],
@@ -47,7 +44,7 @@ struct ScheduledState<'a> {
 
 impl ScheduleStateArena {
     fn get_state(&self, graph: &OpGraph, state: StoredScheduleState) -> ScheduledState<'_> {
-        let words_per_complete = graph.total_ops().div_ceil(BitmapWord::BITS);
+        let words_per_complete = graph.total_ops().div_ceil(BitsetWord::BITS);
         let complete_start = state.complete_bitset_idx * words_per_complete;
         let complete = (&self.complete_bitsets_arena[complete_start as usize..]
             [..words_per_complete as usize])

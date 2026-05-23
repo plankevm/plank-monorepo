@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 use super::{
     layouts::{Layout, LayoutMember},
-    op_graph_builder::{OpGraph, build_graph_simple},
+    op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ScheduleConfig, StackOps},
 };
 
@@ -110,13 +110,14 @@ fn fmt_end_stack_layout(
     let terminator_inputs = terminator_input_count(block);
 
     out.push('[');
-    for (idx, &value) in graph.end_stack_fifo.iter().enumerate() {
+    let end_stack_fifo = graph.output_values_fifo();
+    for (idx, &value) in end_stack_fifo.iter().enumerate() {
         if terminator_inputs != 0 && idx == terminator_inputs {
             if idx != 0 {
                 out.push(' ');
             }
             out.push('|');
-            if idx != graph.end_stack_fifo.len() {
+            if idx != end_stack_fifo.len() {
                 out.push(' ');
             }
         } else if idx != 0 {
@@ -124,7 +125,7 @@ fn fmt_end_stack_layout(
         }
         fmt_value(out, program, graph, input_layout, block, value);
     }
-    if terminator_inputs == graph.end_stack_fifo.len() && terminator_inputs != 0 {
+    if terminator_inputs == end_stack_fifo.len() && terminator_inputs != 0 {
         out.push_str(" | ");
     }
     out.push(']');
@@ -146,23 +147,28 @@ fn fmt_value(
     graph: &OpGraph,
     input_layout: &Layout,
     block: BlockView<'_>,
-    value: super::op_graph_builder::ValueNodeId,
+    value: ValueNodeId,
 ) {
     if graph.is_input(value) {
         fmt_layout_member(out, input_layout.members_fifo()[value.idx()], block);
         return;
     }
 
-    let source = graph.values[value].source.expect("non-input value should have source");
-    let output_position = graph.operations[source]
-        .produces_fifo
-        .iter()
-        .position(|&output| output == value)
-        .expect("value should be in producing op outputs");
-    let op_idx = match graph.operations[source].kind {
-        super::op_graph_builder::OpNodeKind::Flippable(op_idx)
-        | super::op_graph_builder::OpNodeKind::Normal(op_idx) => op_idx,
-        super::op_graph_builder::OpNodeKind::RetDestPush(_) => {
+    let (source, output_position) = graph
+        .op_ids()
+        .find_map(|op_id| {
+            graph
+                .get_op(op_id)
+                .outputs_fifo
+                .iter()
+                .position(|&output| output == value)
+                .map(|output_position| (op_id, output_position))
+        })
+        .expect("non-input value should have source");
+    let op_idx = match graph.get_op(source).kind {
+        super::op_graph::OpNodeKind::Flippable(op_idx)
+        | super::op_graph::OpNodeKind::Normal(op_idx) => op_idx,
+        super::op_graph::OpNodeKind::RetDestPush(_) => {
             panic!("return destination push should not produce local outputs")
         }
     };

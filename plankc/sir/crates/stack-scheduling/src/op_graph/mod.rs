@@ -1,14 +1,19 @@
-use crate::op_graph_builder::{OpNodeId, ValueNodeId};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
 use sir_data::OperationIdx;
 
+mod build_simple;
 mod builder;
 
+pub use build_simple::build_graph_simple;
+pub use builder::OpGraphBuilder;
+
 newtype_index! {
-    struct ValueArenaIdx;
+    pub struct OpNodeId;
+    pub struct ValueNodeId;
+    pub struct ValueArenaIdx;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum OpNodeKind {
     Flippable(OperationIdx),
     RetDestPush(OperationIdx),
@@ -17,11 +22,12 @@ pub enum OpNodeKind {
 
 #[derive(Debug, Clone, Copy)]
 struct StoredOpView {
-    inputs_output_start: ValueArenaIdx,
-    inputs: u32,
+    inputs_outputs_start: ValueArenaIdx,
+    input_count: u32,
+    kind: OpNodeKind,
 }
 
-pub type BitmapWord = u8;
+pub type BitsetWord = u8;
 
 #[derive(Debug)]
 pub struct OpGraph {
@@ -29,31 +35,35 @@ pub struct OpGraph {
     total_values: u32,
 
     inputs_end: ValueNodeId,
-    end_stack_fifo_end: ValueArenaIdx,
+    end_stack_fifo_start: ValueArenaIdx,
 
-    /// Holds `end_stack_fifo ++ [(op_input*, op_output*)]`
+    /// Holds `[(op_input*, op_output*)] ++ end_stack_fifo`
     values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
     operations: IndexVec<OpNodeId, StoredOpView>,
 
-    /// Holds `op_predecessors ++ value_consumers`
-    bit_sets_arena: Vec<BitmapWord>,
+    /// Holds ` op_predecessors ++ value_consumers`
+    bit_sets_arena: Vec<BitsetWord>,
+}
 
-    op_kind: IndexVec<OpNodeId, OpNodeKind>,
+#[derive(Debug, Clone, Copy)]
+pub struct OpSet<'a> {
+    words: &'a [BitsetWord],
 }
 
 #[derive(Debug)]
-#[repr(transparent)]
-pub struct OpSet([BitmapWord]);
+pub struct OpSetMut<'a> {
+    words: &'a mut [BitsetWord],
+}
 
-impl<'a> From<&'a [BitmapWord]> for &'a OpSet {
-    fn from(value: &'a [BitmapWord]) -> Self {
-        unsafe { &*(value as *const [BitmapWord] as *const Self) }
+impl<'a> From<&'a [BitsetWord]> for OpSet<'a> {
+    fn from(words: &'a [BitsetWord]) -> Self {
+        Self { words }
     }
 }
 
-impl<'a> From<&'a mut [BitmapWord]> for &'a mut OpSet {
-    fn from(value: &'a mut [BitmapWord]) -> Self {
-        unsafe { &mut *(value as *mut [BitmapWord] as *mut Self) }
+impl<'a> From<&'a mut [BitsetWord]> for OpSetMut<'a> {
+    fn from(words: &'a mut [BitsetWord]) -> Self {
+        Self { words }
     }
 }
 
@@ -61,48 +71,60 @@ impl OpGraph {
     pub fn total_ops(&self) -> u32 {
         self.total_ops
     }
+
+    pub fn total_values(&self) -> u32 {
+        self.total_values
+    }
+
+    pub fn op_ids(&self) -> impl Iterator<Item = OpNodeId> + '_ {
+        self.operations.iter_idx()
+    }
+
     pub fn input_values_fifo(&self) -> Span<ValueNodeId> {
         Span::new(ValueNodeId::ZERO, self.inputs_end)
     }
 
-    pub fn output_values_fifo(&self) -> &[ValueNodeId] {
-        &self.values_arena[Span::new(ValueArenaIdx::ZERO, self.end_stack_fifo_end)]
+    pub fn is_input(&self, id: ValueNodeId) -> bool {
+        id < self.inputs_end
     }
 
-    pub fn uses_remaining(&self, completed: &OpSet, value: ValueNodeId) -> u32 {
+    pub fn output_values_fifo(&self) -> &[ValueNodeId] {
+        &self.values_arena[self.end_stack_fifo_start..]
+    }
+
+    pub fn uses_remaining(&self, completed: &OpSet<'_>, value: ValueNodeId) -> u32 {
         let consumers = self.get_consumers(value);
         let total_uses = consumers.count_members();
         let already_used = consumers.intersect_count(completed);
         total_uses - already_used
     }
 
-    pub fn get_predecessors(&self, id: OpNodeId) -> &OpSet {
-        let words_per_op = self.total_ops.div_ceil(BitmapWord::BITS);
-        let start_offset = id.const_get() * words_per_op;
-        (&self.bit_sets_arena[start_offset as usize..][..words_per_op as usize]).into()
+    fn get_bit_set(&self, bit_set_idx: usize) -> OpSet<'_> {
+        let words_per_set = self.total_ops.div_ceil(BitsetWord::BITS) as usize;
+        OpSet { words: &self.bit_sets_arena[words_per_set * bit_set_idx..][..words_per_set] }
     }
 
-    pub fn get_consumers(&self, id: ValueNodeId) -> &OpSet {
-        let words_per_op_or_value = self.total_ops.div_ceil(BitmapWord::BITS);
-        let value_words_start = self.total_ops * words_per_op_or_value;
+    pub fn get_predecessors(&self, id: OpNodeId) -> OpSet<'_> {
+        self.get_bit_set(id.idx())
+    }
 
-        let start_offset = value_words_start + id.const_get() * words_per_op_or_value;
-
-        (&self.bit_sets_arena[start_offset as usize..][..words_per_op_or_value as usize]).into()
+    pub fn get_consumers(&self, id: ValueNodeId) -> OpSet<'_> {
+        self.get_bit_set(self.total_ops as usize + id.idx())
     }
 
     pub fn get_op(&self, id: OpNodeId) -> OpView<'_> {
         let op = self.operations[id];
         let op_values_end = match self.operations.get(id + 1) {
-            Some(stored_next) => stored_next.inputs_output_start,
-            None => self.values_arena.len_idx(),
+            Some(stored_next) => stored_next.inputs_outputs_start,
+            None => self.end_stack_fifo_start,
         };
-        let op_values = &self.values_arena[Span::new(op.inputs_output_start, op_values_end)];
+        let op_values = &self.values_arena[Span::new(op.inputs_outputs_start, op_values_end)];
 
         OpView {
-            inputs_fifo: &op_values[..op.inputs as usize],
-            outputs_fifo: &op_values[op.inputs as usize..],
+            inputs_fifo: &op_values[..op.input_count as usize],
+            outputs_fifo: &op_values[op.input_count as usize..],
             predecessors: self.get_predecessors(id),
+            kind: op.kind,
         }
     }
 }
@@ -110,36 +132,47 @@ impl OpGraph {
 pub struct OpView<'g> {
     pub inputs_fifo: &'g [ValueNodeId],
     pub outputs_fifo: &'g [ValueNodeId],
-    pub predecessors: &'g OpSet,
+    pub predecessors: OpSet<'g>,
+    pub kind: OpNodeKind,
 }
 
-impl OpSet {
-    pub fn contains(&self, op: OpNodeId) -> bool {
-        let i = op.const_get();
-        let word_idx = i / BitmapWord::BITS;
-        let word_shift = i % BitmapWord::BITS;
-        self.0[word_idx as usize] & (1 << word_shift) != 0
-    }
-
+impl OpSet<'_> {
     pub fn count_members(&self) -> u32 {
-        self.0.iter().copied().map(BitmapWord::count_ones).sum()
+        self.words.iter().copied().map(BitsetWord::count_ones).sum()
     }
 
     pub fn intersect_count(&self, other: &Self) -> u32 {
-        self.0.iter().zip(other.0.iter()).map(|(&x, &y)| (x & y).count_ones()).sum()
+        self.words.iter().zip(other.words.iter()).map(|(&x, &y)| (x & y).count_ones()).sum()
     }
 
     pub fn is_super(&self, other: &Self) -> bool {
-        self.0
+        self.words
             .iter()
-            .zip(other.0.iter())
+            .zip(other.words.iter())
             .all(|(&super_limb, &sub_limb)| super_limb & sub_limb == sub_limb)
+    }
+
+    pub fn contains(&self, op: OpNodeId) -> bool {
+        let i = op.const_get();
+        let word_idx = i / BitsetWord::BITS;
+        let word_shift = i % BitsetWord::BITS;
+        self.words[word_idx as usize] & (1 << word_shift) != 0
+    }
+}
+
+impl OpSetMut<'_> {
+    pub fn as_set(&self) -> OpSet<'_> {
+        OpSet { words: self.words }
+    }
+
+    pub fn contains(&self, op: OpNodeId) -> bool {
+        self.as_set().contains(op)
     }
 
     pub fn flip(&mut self, op: OpNodeId) {
         let i = op.const_get();
-        let word_idx = i / BitmapWord::BITS;
-        let word_shift = i % BitmapWord::BITS;
-        self.0[word_idx as usize] ^= 1 << word_shift;
+        let word_idx = i / BitsetWord::BITS;
+        let word_shift = i % BitsetWord::BITS;
+        self.words[word_idx as usize] ^= 1 << word_shift;
     }
 }
