@@ -32,7 +32,7 @@ pub fn build_graph_simple<'ir>(
         };
     }
 
-    let inputs_end = graph.values_end();
+    let mut graph = graph.end_inputs_begin_ops();
 
     let mut previous_in_chain = None;
     for op in block.operations() {
@@ -95,7 +95,7 @@ pub fn build_graph_simple<'ir>(
         }
     }
 
-    let end_stack_fifo_start = graph.values_arena_end();
+    let mut graph = graph.end_ops_begin_end_stack();
 
     'handle_control: {
         let value = match block.control() {
@@ -126,5 +126,5 @@ pub fn build_graph_simple<'ir>(
         graph.push_end_stack_value(value);
     }
 
-    graph.finish(inputs_end, end_stack_fifo_start)
+    graph.finish()
 }

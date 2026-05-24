@@ -6,7 +6,6 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 use op_graph::build_graph_simple;
 pub use stack::ScheduleConfig;
 pub mod op_graph;
-mod op_graph_builder;
 
 use crate::{scheduler::dumb_schedule, stack::StackOps};
 

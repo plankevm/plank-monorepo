@@ -18,10 +18,19 @@ fn copy_bitset(dst: &mut [BitsetWord], src: &[BitsetWord]) {
     dst[..src.len()].copy_from_slice(src);
 }
 
+pub struct AddingGraphInputs;
+pub struct AddingGraphOps {
+    inputs_end: ValueNodeId,
+}
+pub struct AddingGraphEndStack {
+    inputs_end: ValueNodeId,
+    end_stack_fifo_start: ValueArenaIdx,
+}
+
 pub struct AddingInputs;
 pub struct AddingOutputs;
 
-pub struct OpGraphBuilder {
+struct OpGraphStorage {
     op_predecessors: IndexVec<OpNodeId, Vec<BitsetWord>>,
     operations: IndexVec<OpNodeId, StoredOpView>,
     values: IndexVec<ValueNodeId, (Option<OpNodeId>, Vec<BitsetWord>)>,
@@ -29,15 +38,20 @@ pub struct OpGraphBuilder {
     estimated_ops: usize,
 }
 
+pub struct OpGraphBuilder<Phase> {
+    storage: OpGraphStorage,
+    phase: Phase,
+}
+
 #[must_use]
 pub struct OpBuilder<'g, Phase> {
-    graph: &'g mut OpGraphBuilder,
+    graph: &'g mut OpGraphStorage,
     op: OpNodeId,
     _phase: PhantomData<Phase>,
 }
 
-impl OpGraphBuilder {
-    pub fn with_capacity(estimated_ops: usize, estimated_values: usize) -> Self {
+impl OpGraphStorage {
+    fn with_capacity(estimated_ops: usize, estimated_values: usize) -> Self {
         Self {
             op_predecessors: IndexVec::with_capacity(estimated_ops),
             operations: IndexVec::with_capacity(estimated_ops),
@@ -51,23 +65,7 @@ impl OpGraphBuilder {
         self.operations.len().max(self.estimated_ops).div_ceil(BitsetWord::BITS as usize)
     }
 
-    pub fn push_input_value(&mut self) -> ValueNodeId {
-        self.values.push((None, Vec::with_capacity(self.estimated_words())))
-    }
-
-    pub fn values_end(&self) -> ValueNodeId {
-        self.values.len_idx()
-    }
-
-    pub fn values_arena_end(&self) -> ValueArenaIdx {
-        self.values_arena.len_idx()
-    }
-
-    pub fn push_end_stack_value(&mut self, value: ValueNodeId) {
-        self.values_arena.push(value);
-    }
-
-    pub fn begin_op(&mut self, kind: OpNodeKind) -> OpBuilder<'_, AddingInputs> {
+    fn begin_op(&mut self, kind: OpNodeKind) -> OpBuilder<'_, AddingInputs> {
         let inputs_outputs_start = self.values_arena.len_idx();
         let op = self.operations.push(StoredOpView { inputs_outputs_start, input_count: 0, kind });
         let estimated_words = self.estimated_words();
@@ -76,7 +74,7 @@ impl OpGraphBuilder {
         OpBuilder { graph: self, op, _phase: PhantomData }
     }
 
-    pub fn finish(self, inputs_end: ValueNodeId, end_stack_fifo_start: ValueArenaIdx) -> OpGraph {
+    fn finish(self, inputs_end: ValueNodeId, end_stack_fifo_start: ValueArenaIdx) -> OpGraph {
         assert_eq!(self.operations.len_idx(), self.op_predecessors.len_idx());
 
         let total_ops = self.operations.len();
@@ -107,6 +105,48 @@ impl OpGraphBuilder {
 
             bit_sets_arena,
         }
+    }
+}
+
+impl OpGraphBuilder<AddingGraphInputs> {
+    pub fn with_capacity(estimated_ops: usize, estimated_values: usize) -> Self {
+        Self {
+            storage: OpGraphStorage::with_capacity(estimated_ops, estimated_values),
+            phase: AddingGraphInputs,
+        }
+    }
+
+    pub fn push_input_value(&mut self) -> ValueNodeId {
+        self.storage.values.push((None, Vec::with_capacity(self.storage.estimated_words())))
+    }
+
+    pub fn end_inputs_begin_ops(self) -> OpGraphBuilder<AddingGraphOps> {
+        let inputs_end = self.storage.values.len_idx();
+        OpGraphBuilder { storage: self.storage, phase: AddingGraphOps { inputs_end } }
+    }
+}
+
+impl OpGraphBuilder<AddingGraphOps> {
+    pub fn begin_op(&mut self, kind: OpNodeKind) -> OpBuilder<'_, AddingInputs> {
+        self.storage.begin_op(kind)
+    }
+
+    pub fn end_ops_begin_end_stack(self) -> OpGraphBuilder<AddingGraphEndStack> {
+        let end_stack_fifo_start = self.storage.values_arena.len_idx();
+        OpGraphBuilder {
+            storage: self.storage,
+            phase: AddingGraphEndStack { inputs_end: self.phase.inputs_end, end_stack_fifo_start },
+        }
+    }
+}
+
+impl OpGraphBuilder<AddingGraphEndStack> {
+    pub fn push_end_stack_value(&mut self, value: ValueNodeId) {
+        self.storage.values_arena.push(value);
+    }
+
+    pub fn finish(self) -> OpGraph {
+        self.storage.finish(self.phase.inputs_end, self.phase.end_stack_fifo_start)
     }
 }
 
