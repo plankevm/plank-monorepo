@@ -425,7 +425,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         });
         if let Err(Poisoned) = validity {
-            return Err(Poisoned);
+            return if preamble.return_type == Ok(TypeId::NEVER) {
+                Ok(Err(Diverge::END))
+            } else {
+                Err(Poisoned)
+            };
         }
 
         let expr = mir::Expr::Call { callee: lowered, args: mir_args };

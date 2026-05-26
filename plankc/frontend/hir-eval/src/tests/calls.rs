@@ -767,6 +767,37 @@ fn test_comptime_diverge_prevents_cascade() {
 }
 
 #[test]
+fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
+    assert_diagnostics(
+        r#"
+        const sink = fn(x: u256) never { @evm_stop(); };
+        const f = fn() never {
+            let c = @evm_calldataload(0);
+            let v = if @evm_iszero(c) {
+                1
+            } else {
+                false
+            };
+            sink(v);
+        };
+        init {
+            f();
+        }
+        "#,
+        &[r#"
+        error: `if` and `else` have incompatible types
+         --> main.plk:7:9
+          |
+        5 |         1
+          |         - `u256` expected because of this
+        6 |     } else {
+        7 |         false
+          |         ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
 fn test_runtime_comptime_only_arg() {
     assert_lowers_to(
         r#"
