@@ -86,6 +86,7 @@ macro_rules! newtype_index {
                 unsafe { self.0.get().unchecked_sub(1) }
             }
 
+            #[allow(dead_code)]
             $vis fn cast_from_slice(slice: &[::core::num::NonZero<u32>]) -> &[Self] {
                 // Safety: $name defined as `repr(transparent)`.
                 unsafe {

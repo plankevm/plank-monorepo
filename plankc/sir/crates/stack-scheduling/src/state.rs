@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId};
 use plank_core::{Idx, IndexVec, newtype_index};
 use sir_data::StaticAllocId;
