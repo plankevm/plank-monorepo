@@ -377,6 +377,74 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
+    fn eval_repeated_block_inline(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
+        let result = self.eval_block_inline(block);
+        self.clean_block_locals(block);
+        result
+    }
+
+    fn eval_repeated_while_condition(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+    ) -> Result<bool, Diverge> {
+        let result = match self.eval_block_inline(condition_block) {
+            Ok(()) => self.expect_comptime_bool_condition(condition),
+            Err(err) => Err(err),
+        };
+        self.clean_block_locals(condition_block);
+        result
+    }
+
+    fn clean_block_locals(&mut self, block: hir::BlockId) {
+        for &instr in &self.hir.block_instrs[block] {
+            match instr.kind {
+                InstructionKind::Set { local, .. }
+                | InstructionKind::SetMut { local, .. }
+                | InstructionKind::BranchSet { local, .. } => {
+                    self.bindings.remove(local);
+                }
+                InstructionKind::Param { .. }
+                | InstructionKind::Assign { .. }
+                | InstructionKind::Eval(_)
+                | InstructionKind::Return(_) => {}
+                InstructionKind::If { then_block, else_block, .. } => {
+                    self.clean_block_locals(then_block);
+                    self.clean_block_locals(else_block);
+                }
+                InstructionKind::While { condition_block, body, .. } => {
+                    self.clean_block_locals(condition_block);
+                    self.clean_block_locals(body);
+                }
+                InstructionKind::ComptimeBlock { body } => self.clean_block_locals(body),
+            }
+        }
+    }
+
+    fn expect_comptime_bool_condition(&mut self, condition: hir::LocalId) -> Result<bool, Diverge> {
+        let binding = self.bindings[condition];
+        let state = match binding.state {
+            Ok(state) => state,
+            Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
+        };
+        match state {
+            LocalState::Comptime(ValueId::TRUE) => Ok(true),
+            LocalState::Comptime(ValueId::FALSE) => Ok(false),
+            LocalState::Comptime(value) => {
+                self.diag_ctx.emit_type_mismatch_simple(
+                    TypeId::BOOL,
+                    self.values.type_of_value(value),
+                    self.loc(binding.use_span),
+                );
+                Err(Diverge::ControlFlowPoisoned)
+            }
+            LocalState::Runtime(_) => {
+                self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
+                Err(Diverge::ControlFlowPoisoned)
+            }
+        }
+    }
+
     fn eval_assign(&mut self, target: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let local = self.bindings[target];
@@ -525,12 +593,45 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         body: hir::BlockId,
     ) -> Result<(), Diverge> {
         if self.is_comptime() {
-            if let Ok(span) = self.hir.block_spans[condition_block] {
-                self.diag_ctx.emit_not_yet_implemented("comptime while", self.loc(span));
-            }
-            return Err(Diverge::ControlFlowPoisoned);
+            self.eval_comptime_while(condition_block, condition, body)
+        } else {
+            self.eval_runtime_while(condition_block, condition, body)
         }
+    }
 
+    fn eval_comptime_while(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+        body: hir::BlockId,
+    ) -> Result<(), Diverge> {
+        loop {
+            let condition_value = self.eval_repeated_while_condition(condition_block, condition)?;
+
+            if !condition_value {
+                return Ok(());
+            }
+
+            if !self.eval.comptime_quota.spend_branch() {
+                if let Ok(span) = self.hir.block_spans[condition_block] {
+                    self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
+                        self.loc(span),
+                        self.eval.comptime_quota.limit(),
+                    );
+                }
+                return Err(Diverge::ComptimeQuotaExhausted);
+            }
+
+            self.eval_repeated_block_inline(body)?;
+        }
+    }
+
+    fn eval_runtime_while(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+        body: hir::BlockId,
+    ) -> Result<(), Diverge> {
         let (condition_block, mir_condition_local) = self.with_instructions(|this| {
             this.eval_block_inline(condition_block)?;
             let binding = this.bindings[condition];

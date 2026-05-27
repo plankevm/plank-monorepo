@@ -17,7 +17,7 @@ pub(crate) enum State<T> {
     Done(T),
 }
 
-const DEFAULT_COMPTIME_BRANCH_QUOTA: u32 = 1000;
+pub(crate) const DEFAULT_COMPTIME_BRANCH_QUOTA: u32 = 1000;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ComptimeQuota {
