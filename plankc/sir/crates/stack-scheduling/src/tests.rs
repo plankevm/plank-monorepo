@@ -11,6 +11,7 @@ use super::{
     stack::{ScheduleConfig, StackOps},
 };
 
+#[track_caller]
 fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
     let source = dedent_preserve_blank_lines(source);
     let program = sir_parser::parse_or_panic(&source, EmitConfig::init_only());
@@ -490,13 +491,13 @@ fn simple_icall() {
             => [return_dest | $0]
             (iret)
         @1 []
-            call_ret_push #2
             caller
             const 0x0
+            call_ret_push #2
+            dup 2
             dup 1
-            dup 3
             icall #2
-            dup 1
+            dup 2
             dup 1
             sstore
             stop

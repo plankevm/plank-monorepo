@@ -1,41 +1,13 @@
-use plank_core::{IndexVec, index_vec};
+use plank_core::IndexVec;
 use sir_data::{BlockView, ControlView, StaticAllocId};
+use smallvec::SmallVec;
 use std::cell::Cell;
 
 use crate::{
-    op_graph::{OpGraph, OpNodeId, ValueNodeId},
+    op_graph::{BitsetWord, OpGraph, OpNodeId, OpSetMut, ValueNodeId},
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
+    state::collect_next_completable_into,
 };
-
-fn get_operation_topological_sort(graph: &OpGraph) -> Vec<OpNodeId> {
-    let mut in_degrees: IndexVec<OpNodeId, u32> = index_vec![0; graph.total_ops() as usize];
-    for id in graph.op_ids() {
-        in_degrees[id] = graph.get_predecessors(id).count_members();
-    }
-
-    let mut topo_sort = Vec::with_capacity(graph.total_ops() as usize);
-    let mut queue = Vec::with_capacity(128);
-
-    for id in graph.op_ids() {
-        if in_degrees[id] == 0 {
-            queue.push(id);
-        }
-    }
-
-    while let Some(id) = queue.pop() {
-        topo_sort.push(id);
-        for succ in graph.op_ids() {
-            if graph.get_predecessors(succ).contains(id) {
-                in_degrees[succ] -= 1;
-                if in_degrees[succ] == 0 {
-                    queue.push(succ);
-                }
-            }
-        }
-    }
-
-    topo_sort
-}
 
 // dumb intra-instruction scheduler that always dups its inputs.
 fn schedule_op<Sink: FnMut(StackOps)>(
@@ -122,6 +94,8 @@ fn shuffle_to_output<Sink: FnMut(StackOps)>(
     }
 }
 
+const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
+
 pub fn dumb_schedule(
     ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
@@ -129,17 +103,32 @@ pub fn dumb_schedule(
     config: ScheduleConfig,
     graph: &OpGraph,
 ) {
-    let mut stack = EvmStack::new();
-    for input in graph.input_values_fifo().iter().rev() {
-        stack.push(input);
-    }
+    let mut in_the_way_buf = Vec::with_capacity(4);
 
-    let mut stack = TrackedStack::new_from_evm(next_alloc_id, ops_sink, stack, 8);
+    let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
+    completable_backing.resize(graph.words_per_set() as usize, 0);
+    let mut completable = OpSetMut::new(&mut completable_backing, graph.total_ops());
 
-    let schedule = get_operation_topological_sort(graph);
-    let mut in_the_way_buf = Vec::new();
-    for op in schedule {
+    let mut complete_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
+    complete_backing.resize(graph.words_per_set() as usize, 0);
+    let mut complete = OpSetMut::new(&mut complete_backing, graph.total_ops());
+
+    let mut stack = {
+        let mut inner = EvmStack::new();
+        for input in graph.input_values_fifo().iter().rev() {
+            inner.push(input);
+        }
+        TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
+    };
+
+    'schedule: loop {
+        completable.clear();
+        collect_next_completable_into(graph, complete.as_ref(), &mut completable);
+        let Some(op) = completable.iter().next() else {
+            break 'schedule;
+        };
         schedule_op(config, &mut stack, graph, op, &mut in_the_way_buf);
+        complete.add(op);
     }
 
     if !matches!(block.control(), ControlView::LastOpTerminates) {

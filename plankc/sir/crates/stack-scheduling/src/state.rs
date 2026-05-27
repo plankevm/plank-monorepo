@@ -1,68 +1,125 @@
-use crate::op_graph::{BitsetWord, OpGraph, OpSet, ValueNodeId};
-use plank_core::{IndexVec, newtype_index};
+use crate::op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId};
+use plank_core::{Idx, IndexVec, newtype_index};
 use sir_data::StaticAllocId;
+use std::num::NonZero;
 
 newtype_index! {
-    struct ValueArenaIdx;
-    struct SpillAllocIdArenaIdx;
+    struct ArenaIdx;
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct StoredScheduleState {
+pub struct StateHandle {
     cumulative_gas_cost: u32,
     complete_bitset_idx: u32,
 
-    values_start: ValueArenaIdx,
-    stack_depth: u16,
+    ids_start: ArenaIdx,
     total_spilled: u32,
-    spill_alloc_start: SpillAllocIdArenaIdx,
+    stack_depth: u16,
 }
 
 #[derive(Debug)]
-struct ScheduleStateArena {
+pub(crate) struct ScheduleStateArena<'g> {
     complete_bitsets_arena: Vec<BitsetWord>,
-    /// Holds `[(spilled_value*, stack_value*)]`
-    values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
-    spilled_arena: IndexVec<SpillAllocIdArenaIdx, StaticAllocId>,
+    /// Holds `[(spilled_values*, spilled_allocs*, stack_value*)]`
+    ids_arena: IndexVec<ArenaIdx, NonZero<u32>>,
+    graph: &'g OpGraph,
 }
 
-impl ScheduleStateArena {
-    fn clear(&mut self) {
-        self.complete_bitsets_arena.clear();
-        self.values_arena.clear();
-        self.spilled_arena.clear();
+pub(crate) struct StateView<'a> {
+    pub cumulative_gas_cost: u32,
+    pub complete: OpSet<'a>,
+    pub stack: &'a [ValueNodeId],
+    pub spilled_values: &'a [ValueNodeId],
+    pub spilled_allocs: &'a [StaticAllocId],
+    pub graph: &'a OpGraph,
+}
+
+impl<'g> ScheduleStateArena<'g> {
+    pub fn graph(&self) -> &'g OpGraph {
+        self.graph
     }
-}
 
-struct ScheduledState<'a> {
-    cumulative_gas_cost: u32,
-    complete: OpSet<'a>,
-    stack: &'a [ValueNodeId],
-    spilled_values: &'a [ValueNodeId],
-    spilled_allocs: &'a [StaticAllocId],
-}
+    pub fn new(graph: &'g OpGraph) -> Self {
+        Self { complete_bitsets_arena: Vec::new(), ids_arena: IndexVec::new(), graph }
+    }
 
-impl ScheduleStateArena {
-    fn get_state(&self, graph: &OpGraph, state: StoredScheduleState) -> ScheduledState<'_> {
-        let words_per_complete = graph.total_ops().div_ceil(BitsetWord::BITS);
-        let complete_start = state.complete_bitset_idx * words_per_complete;
-        let complete = (&self.complete_bitsets_arena[complete_start as usize..]
-            [..words_per_complete as usize])
-            .into();
+    pub fn total_bitsets(&self) -> usize {
+        self.complete_bitsets_arena
+            .len()
+            .checked_div(self.graph.words_per_set() as usize)
+            .unwrap_or(0)
+    }
 
-        let stack_start = state.values_start + state.total_spilled;
-        let stack = &self.values_arena[stack_start..][..state.stack_depth as usize];
+    pub fn alloc_initial(&mut self) -> StateHandle {
+        let complete_bitset_idx = self.total_bitsets().try_into().expect("overflow");
+        self.complete_bitsets_arena
+            .extend(std::iter::repeat_n(0, self.graph.words_per_set() as usize));
 
-        let total_spilled = state.total_spilled as usize;
-        let spilled_values = &self.values_arena[state.values_start..][..total_spilled];
-        let spilled_allocs = &self.spilled_arena[state.spill_alloc_start..][..total_spilled];
+        let ids_start = self.ids_arena.len_idx();
+        let input_values = self.graph.input_values_fifo();
+        self.ids_arena.extend(input_values.iter().map(|value| value.to_raw()));
 
-        ScheduledState {
+        StateHandle {
+            cumulative_gas_cost: 0,
+            complete_bitset_idx,
+            ids_start,
+            total_spilled: 0,
+            stack_depth: input_values.len().try_into().expect("overflow"),
+        }
+    }
+
+    pub fn reset(&mut self, graph: &'g OpGraph) {
+        self.complete_bitsets_arena.clear();
+        self.ids_arena.clear();
+        self.graph = graph;
+    }
+
+    pub fn get_state(&self, state: StateHandle) -> StateView<'_> {
+        let set_size = self.graph.words_per_set() as usize;
+        let complete_start = state.complete_bitset_idx as usize * set_size;
+        let complete = OpSet::new(
+            &self.complete_bitsets_arena[complete_start..][..set_size],
+            self.graph.total_ops(),
+        );
+
+        let mut arena_offset = state.ids_start;
+        let spilled_values = ValueNodeId::cast_from_slice({
+            let raw_slice = &self.ids_arena[arena_offset..][..state.total_spilled as usize];
+            arena_offset += state.total_spilled;
+            raw_slice
+        });
+        let spilled_allocs = StaticAllocId::cast_from_slice({
+            let raw_slice = &self.ids_arena[arena_offset..][..state.total_spilled as usize];
+            arena_offset += state.total_spilled;
+            raw_slice
+        });
+        let stack = ValueNodeId::cast_from_slice({
+            let raw_slice = &self.ids_arena[arena_offset..][..state.stack_depth as usize];
+            arena_offset += state.stack_depth.into();
+            raw_slice
+        });
+
+        StateView {
             cumulative_gas_cost: state.cumulative_gas_cost,
             complete,
             stack,
             spilled_values,
             spilled_allocs,
+            graph: self.graph,
+        }
+    }
+}
+
+impl StateView<'_> {
+    pub fn is_last_use(&self, value: ValueNodeId) -> bool {
+        self.graph.uses_remaining(&self.complete, value) == 1
+    }
+}
+
+pub fn collect_next_completable_into(graph: &OpGraph, complete: OpSet<'_>, out: &mut OpSetMut<'_>) {
+    for op in graph.op_ids() {
+        if !complete.contains(op) && complete.is_super(&graph.get_predecessors(op)) {
+            out.add(op);
         }
     }
 }

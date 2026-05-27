@@ -85,6 +85,13 @@ macro_rules! newtype_index {
                 // Safety: `NonZero<u32>` guarantees `.get()` yields a value that's at least 1.
                 unsafe { self.0.get().unchecked_sub(1) }
             }
+
+            $vis fn cast_from_slice(slice: &[::core::num::NonZero<u32>]) -> &[Self] {
+                // Safety: $name defined as `repr(transparent)`.
+                unsafe {
+                    std::slice::from_raw_parts(slice.as_ptr().cast::<Self>(), slice.len())
+                }
+            }
         }
 
         impl $crate::Idx for $name {

@@ -3125,6 +3125,7 @@ dependencies = [
  "sir-data",
  "sir-parser",
  "sir-passes",
+ "smallvec",
 ]
 
 [[package]]

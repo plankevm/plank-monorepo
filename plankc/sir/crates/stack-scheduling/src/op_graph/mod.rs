@@ -48,23 +48,13 @@ pub struct OpGraph {
 #[derive(Debug, Clone, Copy)]
 pub struct OpSet<'a> {
     words: &'a [BitsetWord],
+    total_ops: u32,
 }
 
 #[derive(Debug)]
 pub struct OpSetMut<'a> {
     words: &'a mut [BitsetWord],
-}
-
-impl<'a> From<&'a [BitsetWord]> for OpSet<'a> {
-    fn from(words: &'a [BitsetWord]) -> Self {
-        Self { words }
-    }
-}
-
-impl<'a> From<&'a mut [BitsetWord]> for OpSetMut<'a> {
-    fn from(words: &'a mut [BitsetWord]) -> Self {
-        Self { words }
-    }
+    total_ops: u32,
 }
 
 impl OpGraph {
@@ -99,9 +89,14 @@ impl OpGraph {
         total_uses - already_used
     }
 
+    pub const fn words_per_set(&self) -> u32 {
+        self.total_ops.div_ceil(BitsetWord::BITS)
+    }
+
     fn get_bit_set(&self, bit_set_idx: usize) -> OpSet<'_> {
-        let words_per_set = self.total_ops.div_ceil(BitsetWord::BITS) as usize;
-        OpSet { words: &self.bit_sets_arena[words_per_set * bit_set_idx..][..words_per_set] }
+        let words_per_set = self.words_per_set() as usize;
+        let words = &self.bit_sets_arena[words_per_set * bit_set_idx..][..words_per_set];
+        OpSet { words, total_ops: self.total_ops }
     }
 
     pub fn get_predecessors(&self, id: OpNodeId) -> OpSet<'_> {
@@ -129,14 +124,19 @@ impl OpGraph {
     }
 }
 
-pub struct OpView<'g> {
-    pub inputs_fifo: &'g [ValueNodeId],
-    pub outputs_fifo: &'g [ValueNodeId],
-    pub predecessors: OpSet<'g>,
+pub struct OpView<'a> {
+    pub inputs_fifo: &'a [ValueNodeId],
+    pub outputs_fifo: &'a [ValueNodeId],
+    pub predecessors: OpSet<'a>,
     pub kind: OpNodeKind,
 }
 
-impl OpSet<'_> {
+impl<'a> OpSet<'a> {
+    pub fn new(words: &'a [BitsetWord], total_ops: u32) -> Self {
+        assert_eq!(words.len(), total_ops.div_ceil(BitsetWord::BITS) as usize);
+        Self { words, total_ops }
+    }
+
     pub fn count_members(&self) -> u32 {
         self.words.iter().copied().map(BitsetWord::count_ones).sum()
     }
@@ -158,21 +158,39 @@ impl OpSet<'_> {
         let word_shift = i % BitsetWord::BITS;
         self.words[word_idx as usize] & (1 << word_shift) != 0
     }
+
+    pub fn iter(self) -> impl Iterator<Item = OpNodeId> + 'a {
+        (0..self.total_ops).map(OpNodeId::new).filter(move |&op| self.contains(op))
+    }
 }
 
-impl OpSetMut<'_> {
-    pub fn as_set(&self) -> OpSet<'_> {
-        OpSet { words: self.words }
+impl<'a> OpSetMut<'a> {
+    pub fn new(words: &'a mut [BitsetWord], total_ops: u32) -> Self {
+        assert_eq!(words.len(), total_ops.div_ceil(BitsetWord::BITS) as usize);
+        Self { words, total_ops }
+    }
+
+    pub fn as_ref<'s>(&'s self) -> OpSet<'s> {
+        OpSet { words: &*self.words, total_ops: self.total_ops }
     }
 
     pub fn contains(&self, op: OpNodeId) -> bool {
-        self.as_set().contains(op)
+        self.as_ref().contains(op)
     }
 
-    pub fn flip(&mut self, op: OpNodeId) {
+    pub fn clear(&mut self) {
+        self.words.fill(0);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = OpNodeId> + '_ {
+        self.as_ref().iter()
+    }
+
+    pub fn add(&mut self, op: OpNodeId) {
+        assert!(op.get() < self.total_ops);
         let i = op.const_get();
         let word_idx = i / BitsetWord::BITS;
         let word_shift = i % BitsetWord::BITS;
-        self.words[word_idx as usize] ^= 1 << word_shift;
+        self.words[word_idx as usize] |= 1 << word_shift;
     }
 }
