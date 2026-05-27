@@ -10,7 +10,7 @@ use crate::{
 };
 
 // dumb intra-instruction scheduler that always dups its inputs.
-fn schedule_op<Sink: FnMut(StackOps)>(
+fn dumb_schedule_op<Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
     stack: &mut TrackedStack<'_, Sink>,
     graph: &OpGraph,
@@ -127,7 +127,7 @@ pub fn dumb_schedule(
         let Some(op) = completable.iter().next() else {
             break 'schedule;
         };
-        schedule_op(config, &mut stack, graph, op, &mut in_the_way_buf);
+        dumb_schedule_op(config, &mut stack, graph, op, &mut in_the_way_buf);
         complete.add(op);
     }
 
