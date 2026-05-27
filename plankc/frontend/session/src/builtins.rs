@@ -344,6 +344,7 @@ define_builtins! {
         IS_STRUCT "@is_struct" => IsStruct;
         FIELD_COUNT "@field_count" => FieldCount;
         IN_COMPTIME "@in_comptime" => InComptime;
+        SET_EVAL_BRANCH_QUOTA "@set_eval_branch_quota" => SetEvalBranchQuota;
     }
 
     comptime_dynamic_builtins {

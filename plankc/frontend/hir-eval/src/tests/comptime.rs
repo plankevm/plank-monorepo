@@ -1539,3 +1539,80 @@ fn test_uninit_memptr_in_comptime() {
         "#],
     );
 }
+
+#[test]
+fn test_set_eval_branch_quota_outside_comptime() {
+    assert_diagnostics(
+        r#"
+        init {
+            @set_eval_branch_quota(1000);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: eval branch quota can only be set at comptime
+         --> main.plk:2:5
+          |
+        2 |     @set_eval_branch_quota(1000);
+          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only valid during comptime evaluation
+        "#],
+    );
+}
+
+#[test]
+fn test_set_eval_branch_quota_runtime_arg() {
+    assert_diagnostics(
+        r#"
+        init {
+            let n = @evm_calldataload(0);
+            let x = comptime { @set_eval_branch_quota(n); 1 };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: attempting to evaluate runtime expression in comptime context
+         --> main.plk:3:47
+          |
+        3 |     let x = comptime { @set_eval_branch_quota(n); 1 };
+          |                                               ^ runtime expression
+        "#],
+    );
+}
+
+#[test]
+fn test_set_eval_branch_quota_wrong_arg_type() {
+    assert_diagnostics(
+        r#"
+        const x = comptime { @set_eval_branch_quota(true); 1 };
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: no valid match for builtin signature
+         --> main.plk:1:22
+          |
+        1 | const x = comptime { @set_eval_branch_quota(true); 1 };
+          |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@set_eval_branch_quota` cannot be called with (bool)
+          |
+          = note: `@set_eval_branch_quota` accepts (u256)
+        "#],
+    );
+}
+
+#[test]
+fn test_set_eval_branch_quota_too_large() {
+    assert_diagnostics(
+        r#"
+        const x = comptime { @set_eval_branch_quota(4294967296); 1 };
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: eval branch quota is too large
+         --> main.plk:1:45
+          |
+        1 | const x = comptime { @set_eval_branch_quota(4294967296); 1 };
+          |                                             ^^^^^^^^^^ quota must fit in u32
+          |
+          = note: maximum supported quota is 4294967295
+        "#],
+    );
+}

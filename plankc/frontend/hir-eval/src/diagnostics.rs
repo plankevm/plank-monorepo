@@ -264,6 +264,19 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_set_eval_branch_quota_outside_comptime(&mut self, loc: SrcLoc) {
+        Diagnostic::error("eval branch quota can only be set at comptime")
+            .primary(loc.source, loc.span, "only valid during comptime evaluation")
+            .emit(self);
+    }
+
+    pub fn emit_eval_branch_quota_too_large(&mut self, loc: SrcLoc) {
+        Diagnostic::error("eval branch quota is too large")
+            .primary(loc.source, loc.span, "quota must fit in u32")
+            .note(format!("maximum supported quota is {}", u32::MAX))
+            .emit(self);
+    }
+
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
         Diagnostic::error("entry point must end with explicit terminator")
             .primary(loc.source, loc.span, "execution may reach end of entry point")

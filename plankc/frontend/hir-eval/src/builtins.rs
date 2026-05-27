@@ -197,6 +197,40 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
+            Builtin::SetEvalBranchQuota => {
+                if !self.is_comptime() {
+                    self.diag_ctx.emit_set_eval_branch_quota_outside_comptime(expr_loc);
+                    return Err(Poisoned);
+                }
+
+                let &[quota_arg] = args else { unreachable!("arg count checked") };
+                let binding = self.bindings[quota_arg];
+                let (state, arg_use_span, arg_origin) = binding.poisoned()?;
+                let LocalState::Comptime(quota_value) = state else {
+                    self.diag_ctx.emit_runtime_ref_in_comptime(
+                        self.loc(expr_span),
+                        self.origin_loc(arg_origin),
+                    );
+                    return Err(Poisoned);
+                };
+                let requested_quota = match self.values.lookup(quota_value) {
+                    Value::BigNum(requested_quota) => requested_quota,
+                    other => {
+                        self.diag_ctx.emit_no_matching_builtin_signature(
+                            builtin,
+                            &[other.get_type()],
+                            expr_loc,
+                        );
+                        return Err(Poisoned);
+                    }
+                };
+                let Ok(requested_quota) = u32::try_from(requested_quota) else {
+                    self.diag_ctx.emit_eval_branch_quota_too_large(self.loc(arg_use_span));
+                    return Err(Poisoned);
+                };
+                self.eval.comptime_quota.raise_limit(requested_quota);
+                Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
+            }
             _ => unreachable!("not a comptime builtin: {builtin}"),
         }
     }

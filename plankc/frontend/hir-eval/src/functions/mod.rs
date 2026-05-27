@@ -158,7 +158,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let fn_def = self.hir.fns[fn_def_id];
         match self.eval_comptime(fn_def.type_preamble) {
             Ok(()) => {}
-            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => return Err(Poisoned),
+            Err(
+                Diverge::ControlFlowPoisoned
+                | Diverge::ComptimeQuotaExhausted
+                | Diverge::BlockEnd(_),
+            ) => return Err(Poisoned),
         }
         let return_type = self.expect_type(fn_def.return_type);
         let ret_type_loc = self.origin_loc(self.bindings[fn_def.return_type].origin);
@@ -382,7 +386,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     match body_eval_res {
                         Ok(()) => unreachable!("lowerer should guarantee return in function body"),
                         Err(Diverge::BlockEnd(_)) => {}
-                        Err(Diverge::ControlFlowPoisoned) => return Err(Poisoned),
+                        Err(Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted) => {
+                            return Err(Poisoned);
+                        }
                     }
                     let return_type = preamble.return_type?;
                     let fn_id1 = fn_scope.eval.mir_fn_locals.push_copy_slice(&fn_scope.mir_types);
@@ -524,6 +530,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let eval_res = match self.eval_comptime(call.func.body) {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
+            Err(Diverge::ComptimeQuotaExhausted) => Err(Poisoned),
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
             Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
         };

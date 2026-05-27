@@ -17,6 +17,56 @@ pub(crate) enum State<T> {
     Done(T),
 }
 
+const DEFAULT_COMPTIME_BRANCH_QUOTA: u32 = 1000;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ComptimeQuota {
+    limit: u32,
+    spent: u32,
+    depth: u32,
+}
+
+impl Default for ComptimeQuota {
+    fn default() -> Self {
+        Self { limit: DEFAULT_COMPTIME_BRANCH_QUOTA, spent: 0, depth: 0 }
+    }
+}
+
+impl ComptimeQuota {
+    fn reset_budget(&mut self) {
+        self.limit = DEFAULT_COMPTIME_BRANCH_QUOTA;
+        self.spent = 0;
+    }
+
+    pub(crate) fn enter_unit(&mut self) {
+        if self.depth == 0 {
+            self.reset_budget();
+        }
+        self.depth = self.depth.checked_add(1).expect("comptime quota depth overflow");
+    }
+
+    pub(crate) fn exit_unit(&mut self) {
+        self.depth = self.depth.checked_sub(1).expect("comptime quota depth underflow");
+    }
+
+    pub(crate) fn raise_limit(&mut self, limit: u32) {
+        self.limit = self.limit.max(limit);
+    }
+
+    pub(crate) fn spend_branch(&mut self) -> bool {
+        debug_assert!(self.spent <= self.limit, "comptime quota overspent");
+        if self.spent == self.limit {
+            return false;
+        }
+        self.spent += 1;
+        true
+    }
+
+    pub(crate) fn limit(&self) -> u32 {
+        self.limit
+    }
+}
+
 newtype_index! {
     pub(crate) struct CallArgSpansIdx;
 }
@@ -38,6 +88,7 @@ pub(crate) struct Evaluator<'a> {
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
     pub operator_table: OperatorTable,
+    pub(crate) comptime_quota: ComptimeQuota,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -72,6 +123,7 @@ impl<'a> Evaluator<'a> {
             call_arg_spans: ListOfLists::new(),
 
             operator_table: OperatorTable::new(),
+            comptime_quota: ComptimeQuota::default(),
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
@@ -108,7 +160,11 @@ impl<'a> Evaluator<'a> {
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
         match scope.eval_comptime(const_def.body) {
-            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
+            Err(
+                Diverge::ControlFlowPoisoned
+                | Diverge::ComptimeQuotaExhausted
+                | Diverge::BlockEnd(_),
+            ) => {
                 self.evaluated_consts[const_id] = State::Done(Err(Poisoned));
                 return Err(Poisoned);
             }

@@ -42,6 +42,7 @@ pub(crate) enum EvalValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Diverge {
     ControlFlowPoisoned,
+    ComptimeQuotaExhausted,
     BlockEnd(Option<ValueId>),
 }
 
@@ -98,15 +99,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_entry_point_missing_terminator(self.loc(span));
                 }
             }
-            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {}
+            Err(
+                Diverge::ControlFlowPoisoned
+                | Diverge::ComptimeQuotaExhausted
+                | Diverge::BlockEnd(_),
+            ) => {}
         }
         mir_block
     }
 
     pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
+        self.eval.comptime_quota.enter_unit();
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
         let res = self.eval_block_inline(block);
         self.comptime = parent_comptime;
+        self.eval.comptime_quota.exit_unit();
         res
     }
 
@@ -480,6 +487,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     // was poisoned and bubble up
                     (Err(Diverge::ControlFlowPoisoned), _)
                     | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
+                    (Err(Diverge::ComptimeQuotaExhausted), _)
+                    | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
+                        Err(Diverge::ComptimeQuotaExhausted)
+                    }
                     (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
                         Err(Diverge::BlockEnd(None))
                     }
@@ -558,6 +569,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         match body_res {
             Err(Diverge::ControlFlowPoisoned) => {
                 return Err(Diverge::ControlFlowPoisoned);
+            }
+            Err(Diverge::ComptimeQuotaExhausted) => {
+                return Err(Diverge::ComptimeQuotaExhausted);
             }
             Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }
