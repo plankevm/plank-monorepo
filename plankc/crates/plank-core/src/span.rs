@@ -43,18 +43,7 @@ impl<T: Eq> Span<T> {
 impl<I: Idx> Span<I> {
     pub const EMPTY: Self = Span::new(I::ZERO, I::ZERO);
 
-    pub const fn dummy() -> Self {
-        Self { start: I::MAX, end: I::ZERO }
-    }
-
-    pub fn is_dummy(self) -> bool {
-        self == Self::dummy()
-    }
-
     pub fn len(&self) -> u32 {
-        if self.is_dummy() {
-            return 0;
-        }
         self.end - self.start
     }
 }

@@ -86,9 +86,6 @@ impl<'a> Parser<'a> {
 
     fn assert_complete(&mut self) {
         assert!(self.eof());
-        for (i, node) in self.nodes.enumerate_idx() {
-            assert!(!node.tokens.is_dummy(), "node #{} has dummy token span", i.get());
-        }
     }
 
     fn current_token(&mut self) -> Token {
