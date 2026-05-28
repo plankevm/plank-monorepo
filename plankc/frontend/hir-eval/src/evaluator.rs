@@ -59,6 +59,15 @@ impl ComptimeQuota {
         self.depth = self.depth.checked_add(1).expect("comptime quota depth overflow");
     }
 
+    pub(crate) fn enter_unit_if_inactive(&mut self) -> bool {
+        if self.depth == 0 {
+            self.enter_unit();
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn exit_unit(&mut self) {
         self.depth = self.depth.checked_sub(1).expect("comptime quota depth underflow");
     }
@@ -192,6 +201,19 @@ impl<'a> Evaluator<'a> {
     }
 
     pub fn evaluate_const(
+        &mut self,
+        const_id: ConstId,
+        diag_ctx: &mut DiagCtx<'a>,
+    ) -> Result<MaybePoisoned<ValueId>, Diverge> {
+        let entered_quota_unit = self.comptime_quota.enter_unit_if_inactive();
+        let res = self.evaluate_const_in_quota_unit(const_id, diag_ctx);
+        if entered_quota_unit {
+            self.comptime_quota.exit_unit();
+        }
+        res
+    }
+
+    fn evaluate_const_in_quota_unit(
         &mut self,
         const_id: ConstId,
         diag_ctx: &mut DiagCtx<'a>,

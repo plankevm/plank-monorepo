@@ -460,6 +460,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble: PreambleResult,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let entered_quota_unit = self.eval.comptime_quota.enter_unit_if_inactive();
+        let res = self.fold_comptime_call_in_quota_unit(call, preamble, values_buf_offset);
+        if entered_quota_unit {
+            self.eval.comptime_quota.exit_unit();
+        }
+        res
+    }
+
+    fn fold_comptime_call_in_quota_unit(
+        &mut self,
+        call: &Call<'_>,
+        preamble: PreambleResult,
+        values_buf_offset: usize,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         preamble.return_type?;
 
         if !self.eval.comptime_quota.spend_branch() {
