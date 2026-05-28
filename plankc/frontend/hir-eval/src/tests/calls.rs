@@ -990,18 +990,15 @@ fn test_cached_comptime_function_calls_replay_body_quota() {
 
 #[test]
 fn test_cached_comptime_function_replay_miss_reevaluates_quota_raise() {
-    let pre_spent = DEFAULT_COMPTIME_BRANCH_QUOTA - 10;
-    let loop_branches = 20;
-    let raised_quota = DEFAULT_COMPTIME_BRANCH_QUOTA + loop_branches;
+    let pre_spent = DEFAULT_COMPTIME_BRANCH_QUOTA - 1;
+    let post_spent = 10;
+    let raised_quota = DEFAULT_COMPTIME_BRANCH_QUOTA + post_spent;
+    let expected_value = pre_spent + post_spent;
     let source = format!(
         r#"
         const f = fn() u256 {{
             @set_eval_branch_quota({raised_quota});
-            let mut i = 0;
-            while @evm_lt(i, {loop_branches}) {{
-                i = @evm_add(i, 1);
-            }}
-            i
+            20
         }};
 
         const PreSpent = comptime {{
@@ -1015,27 +1012,27 @@ fn test_cached_comptime_function_replay_miss_reevaluates_quota_raise() {
         init {{
             let mut warm: u256 = comptime {{ f() }};
             let mut x: u256 = comptime {{
-                PreSpent;
-                f()
+                let mut i = PreSpent;
+                let y = f();
+                while @evm_lt(i, {expected_value}) {{
+                    i = @evm_add(i, 1);
+                }}
+                y
             }};
             @evm_stop();
         }}
         "#,
     );
-    assert_lowers_to(
-        source.as_str(),
-        &format!(
-            r#"
+    let expected = r#"
         ==== Functions ====
         ; init
-        @fn0() -> never {{
-            %0 : u256 = {loop_branches}
-            %1 : u256 = {loop_branches}
+        @fn0() -> never {
+            %0 : u256 = 20
+            %1 : u256 = 20
             %2 : never = @evm_stop()
-        }}
-            "#,
-        ),
-    );
+        }
+        "#;
+    assert_lowers_to(source.as_str(), expected);
 }
 
 #[test]

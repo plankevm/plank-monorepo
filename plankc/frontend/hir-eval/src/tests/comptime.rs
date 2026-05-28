@@ -1706,19 +1706,17 @@ fn test_set_eval_branch_quota_raises_comptime_while_budget() {
         }}
         "#,
     );
-    assert_lowers_to(
-        source.as_str(),
-        &format!(
-            r#"
+    let expected = format!(
+        r#"
         ==== Functions ====
         ; init
         @fn0() -> never {{
             %0 : u256 = {quota}
             %1 : never = @evm_stop()
         }}
-            "#,
-        ),
+        "#,
     );
+    assert_lowers_to(source.as_str(), &expected);
 }
 
 #[test]
@@ -1741,19 +1739,17 @@ fn test_nested_comptime_block_uses_shared_branch_quota() {
         }}
         "#,
     );
-    assert_lowers_to(
-        source.as_str(),
-        &format!(
-            r#"
+    let expected = format!(
+        r#"
         ==== Functions ====
         ; init
         @fn0() -> never {{
             %0 : u256 = {quota}
             %1 : never = @evm_stop()
         }}
-            "#,
-        ),
+        "#,
     );
+    assert_lowers_to(source.as_str(), &expected);
 }
 
 #[test]
@@ -1857,10 +1853,8 @@ fn test_cached_const_replays_eval_branch_quota_raise() {
         }}
         "#,
     );
-    assert_lowers_to(
-        source.as_str(),
-        &format!(
-            r#"
+    let expected = format!(
+        r#"
         ==== Functions ====
         ; init
         @fn0() -> never {{
@@ -1868,9 +1862,9 @@ fn test_cached_const_replays_eval_branch_quota_raise() {
             %1 : u256 = {expected_value}
             %2 : never = @evm_stop()
         }}
-            "#,
-        ),
+        "#,
     );
+    assert_lowers_to(source.as_str(), &expected);
 }
 
 #[test]
@@ -1987,15 +1981,8 @@ fn test_referenced_const_quota_exhaustion_emits_once() {
 #[test]
 fn test_unused_const_comptime_while_branch_quota_exhausted() {
     let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
-    assert_diagnostics(
+    let expected = format!(
         r#"
-        const Bad = comptime {
-            while true {}
-        };
-        init { @evm_stop(); }
-        "#,
-        &[&format!(
-            r#"
         error: comptime branch quota exhausted
          --> main.plk:2:11
           |
@@ -2004,7 +1991,15 @@ fn test_unused_const_comptime_while_branch_quota_exhausted() {
           |
           = note: current eval branch quota is {quota}
         "#,
-        )],
+    );
+    assert_diagnostics(
+        r#"
+        const Bad = comptime {
+            while true {}
+        };
+        init { @evm_stop(); }
+        "#,
+        &[expected.as_str()],
     );
 }
 
