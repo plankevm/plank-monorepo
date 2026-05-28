@@ -1,4 +1,5 @@
 use super::*;
+use crate::evaluator::DEFAULT_COMPTIME_BRANCH_QUOTA;
 
 #[test]
 fn test_preamble_error_per_call_site() {
@@ -904,4 +905,158 @@ fn test_comptime_ret_forces_arg_comptime() {
         }
         "#,
     );
+}
+
+#[test]
+fn test_cached_comptime_function_calls_consume_call_entry_quota() {
+    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
+    let calls = "        f();\n".repeat((quota + 1) as usize);
+    let source = format!(
+        r#"const f = fn() u256 {{ 1 }};
+
+init {{
+    let mut x: u256 = comptime {{
+{calls}        0
+    }};
+    @evm_stop();
+}}
+"#,
+    );
+    let exhausted_line = quota + 4;
+    let expected = format!(
+        r#"
+        error: comptime branch quota exhausted
+            --> main.plk:{exhausted_line}:9
+             |
+        {exhausted_line} |         f();
+             |         ^^^ evaluating this call exceeded the comptime branch quota
+             |
+             = note: current eval branch quota is {quota}
+        "#,
+    );
+    assert_diagnostics(source.as_str(), &[expected.as_str()]);
+}
+
+#[test]
+fn test_cached_comptime_function_calls_replay_body_quota() {
+    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
+    let calls = "        f();\n".repeat((quota / 3 + 1) as usize);
+    let source = format!(
+        r#"const f = fn() u256 {{
+    let mut i = 0;
+    while @evm_lt(i, 2) {{
+        i = @evm_add(i, 1);
+    }}
+    i
+}};
+
+init {{
+    let mut x: u256 = comptime {{
+{calls}        0
+    }};
+    @evm_stop();
+}}
+"#,
+    );
+    let expected = format!(
+        r#"
+        error: comptime branch quota exhausted
+         --> main.plk:3:11
+          |
+        3 |     while @evm_lt(i, 2) {{
+          |           ^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+          |
+          = note: current eval branch quota is {quota}
+        "#,
+    );
+    assert_diagnostics(source.as_str(), &[expected.as_str()]);
+}
+
+#[test]
+fn test_cached_comptime_function_replay_miss_reevaluates_quota_raise() {
+    let pre_spent = DEFAULT_COMPTIME_BRANCH_QUOTA - 10;
+    let loop_branches = 20;
+    let raised_quota = DEFAULT_COMPTIME_BRANCH_QUOTA + loop_branches;
+    assert_lowers_to(
+        TestProject::root(
+            format!(
+                r#"
+            const f = fn() u256 {{
+                @set_eval_branch_quota({raised_quota});
+                let mut i = 0;
+                while @evm_lt(i, {loop_branches}) {{
+                    i = @evm_add(i, 1);
+                }}
+                i
+            }};
+
+            const PreSpent = comptime {{
+                let mut j = 0;
+                while @evm_lt(j, {pre_spent}) {{
+                    j = @evm_add(j, 1);
+                }}
+                j
+            }};
+
+            init {{
+                let mut warm: u256 = comptime {{ f() }};
+                let mut x: u256 = comptime {{
+                    PreSpent;
+                    f()
+                }};
+                @evm_stop();
+            }}
+            "#,
+            )
+            .as_str(),
+        ),
+        &format!(
+            r#"
+            ==== Functions ====
+            ; init
+            @fn0() -> never {{
+                %0 : u256 = {loop_branches}
+                %1 : u256 = {loop_branches}
+                %2 : never = @evm_stop()
+            }}
+            "#,
+        ),
+    );
+}
+
+#[test]
+fn test_comptime_function_preamble_quota_exhaustion_propagates() {
+    let loop_bound = DEFAULT_COMPTIME_BRANCH_QUOTA + 1;
+    let source = format!(
+        r#"const f = fn() comptime {{
+    let mut i = 0;
+    while @evm_lt(i, {loop_bound}) {{
+        i = @evm_add(i, 1);
+    }}
+    u256
+}} {{ 0 }};
+
+init {{
+    let mut x: u256 = comptime {{ f() }};
+    @evm_stop();
+}}
+"#,
+    );
+    let expected = format!(
+        r#"
+        error: comptime branch quota exhausted
+         --> main.plk:3:11
+          |
+        3 |     while @evm_lt(i, {loop_bound}) {{
+          |           ^^^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+          |
+          = note: current eval branch quota is {DEFAULT_COMPTIME_BRANCH_QUOTA}
+        note: called here
+         --> main.plk:9:34
+          |
+        9 |     let mut x: u256 = comptime {{ f() }};
+          |                                  ^^^
+        "#,
+    );
+    assert_diagnostics(source.as_str(), &[expected.as_str()]);
 }

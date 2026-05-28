@@ -17,6 +17,13 @@ newtype_index! {
 pub(crate) type Param = MaybePoisoned<ValueId>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum EvaluatedFnState {
+    Empty,
+    InProgress,
+    Done(MaybePoisoned<CachedComptimeValue>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct FunctionKey<'a> {
     pub closure: ValueId,
     pub params: &'a [Param],
@@ -104,13 +111,13 @@ impl LoweredFunctionsCache {
 }
 
 struct EvaluatedHeader {
-    result: Cell<State<MaybePoisoned<CachedComptimeValue>>>,
+    result: Cell<EvaluatedFnState>,
     closure: ValueId,
     params: u32,
 }
 
 pub(crate) struct EvaluatedFn<'a> {
-    pub result: &'a Cell<State<MaybePoisoned<CachedComptimeValue>>>,
+    pub result: &'a Cell<EvaluatedFnState>,
     pub closure: ValueId,
     pub params: &'a [Param],
 }
@@ -146,7 +153,7 @@ impl EvaluatedFunctionCache {
     pub fn lookup<'s, 'k>(
         &'s self,
         key: FunctionKey<'k>,
-    ) -> Result<&'s Cell<State<MaybePoisoned<CachedComptimeValue>>>, EvaluatedFn<'s>> {
+    ) -> Result<&'s Cell<EvaluatedFnState>, EvaluatedFn<'s>> {
         use std::hash::BuildHasher;
         let hash = self.hasher.hash_one(key);
         let dedup = unsafe { &mut *self.dedup.get() };
@@ -168,7 +175,7 @@ impl EvaluatedFunctionCache {
                 let header = new_eval_ptr as *mut EvaluatedHeader;
                 let params = key.params.len() as u32;
                 header.write(EvaluatedHeader {
-                    result: Cell::new(State::InProgress),
+                    result: Cell::new(EvaluatedFnState::Empty),
                     closure: key.closure,
                     params,
                 });

@@ -86,7 +86,7 @@ impl ComptimeQuota {
         self.limit
     }
 
-    fn replay_cached(&mut self, cached: CachedComptimeValue) -> bool {
+    pub(crate) fn replay_cached(&mut self, cached: CachedComptimeValue) -> bool {
         if self.spent.checked_add(cached.branches_consumed).is_none_or(|spent| spent > self.limit) {
             return false;
         }

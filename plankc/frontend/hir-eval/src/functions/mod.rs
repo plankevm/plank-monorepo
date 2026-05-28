@@ -154,21 +154,25 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         (fn_scope, caller_bindings)
     }
 
-    fn eval_preamble(&mut self, fn_def_id: hir::FnDefId) -> MaybePoisoned<PreambleResult> {
+    fn eval_preamble(
+        &mut self,
+        fn_def_id: hir::FnDefId,
+    ) -> Result<MaybePoisoned<PreambleResult>, Diverge> {
         let fn_def = self.hir.fns[fn_def_id];
         match self.eval_comptime(fn_def.type_preamble) {
             Ok(()) => {}
-            Err(
-                Diverge::ControlFlowPoisoned
-                | Diverge::ComptimeQuotaExhausted
-                | Diverge::BlockEnd(_),
-            ) => return Err(Poisoned),
+            Err(Diverge::ComptimeQuotaExhausted) => {
+                return Err(Diverge::ComptimeQuotaExhausted);
+            }
+            Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
+                return Ok(Err(Poisoned));
+            }
         }
         let return_type = self.expect_type(fn_def.return_type);
         let ret_type_loc = self.origin_loc(self.bindings[fn_def.return_type].origin);
         self.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_loc };
         let is_comptime_only = return_type.is_ok_and(|ty| self.types.is_comptime_only(ty));
-        Ok(PreambleResult { return_type, is_comptime_only })
+        Ok(Ok(PreambleResult { return_type, is_comptime_only }))
     }
 
     pub(crate) fn eval_fn_def(&mut self, id: hir::FnDefId) -> MaybePoisoned<EvalValue> {
@@ -323,7 +327,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let restore = fn_scope.diag_ctx.set_preamble_call_site(call.loc());
             let preamble = fn_scope.eval_preamble(fn_def_id);
             fn_scope.diag_ctx.restore_preamble_call_site(restore);
-            preamble?
+            match preamble {
+                Ok(preamble) => preamble?,
+                Err(diverge) => return Ok(Err(diverge)),
+            }
         };
 
         let mut runtime_param_count = 0;
@@ -453,31 +460,49 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble: PreambleResult,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let function =
-            FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
         preamble.return_type?;
 
-        let new_fn_eval_cache_entry = match self.eval.evaluated_fns_cache.lookup(function) {
-            Err(new_entry) => new_entry,
+        if !self.eval.comptime_quota.spend_branch() {
+            self.diag_ctx.emit_comptime_call_branch_quota_exhausted(
+                call.loc(),
+                self.eval.comptime_quota.limit(),
+            );
+            return Ok(Err(Diverge::ComptimeQuotaExhausted));
+        }
+
+        let function =
+            FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
+        let mut existing_cached_value = None;
+        let cache_state = match self.eval.evaluated_fns_cache.lookup(function) {
+            Err(new_entry) => new_entry.result,
             Ok(state) => match state.get() {
-                State::InProgress => {
+                EvaluatedFnState::Empty => state,
+                EvaluatedFnState::InProgress => {
                     self.diag_ctx.emit_infinite_comptime_recursion(call.loc());
-                    state.set(State::Done(Err(Poisoned)));
+                    state.set(EvaluatedFnState::Done(Err(Poisoned)));
                     return Err(Poisoned);
                 }
-                State::Done(value) => {
-                    return match value {
-                        Ok(cached) => Ok(Ok(EvalValue::Comptime(cached.value))),
-                        // Cache collapses `Diverge` into Err(Poisoned);
-                        // reconstruct the diverge when the return type was never.
-                        Err(Poisoned) => preamble.suppress_poison_iff_diverging_return_type(),
-                    };
+                EvaluatedFnState::Done(value) => {
+                    match value {
+                        Ok(cached) if self.eval.comptime_quota.replay_cached(cached) => {
+                            return Ok(Ok(EvalValue::Comptime(cached.value)));
+                        }
+                        Ok(cached) => {
+                            existing_cached_value = Some(cached);
+                            state
+                        }
+                        Err(Poisoned) => {
+                            // Cache collapses `Diverge` into Err(Poisoned);
+                            // reconstruct the diverge when the return type was never.
+                            return preamble.suppress_poison_iff_diverging_return_type();
+                        }
+                    }
                 }
             },
         };
 
         // Pessimistically set result incase we short-circuit before evaluating the body.
-        new_fn_eval_cache_entry.result.set(State::Done(Err(Poisoned)));
+        cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
 
         let mut poisoned = false;
         for (&param, &arg) in call.params.iter().zip(call.args) {
@@ -525,20 +550,31 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         // Undo pessimistic result poison (allows recursion detection).
-        new_fn_eval_cache_entry.result.set(State::InProgress);
+        cache_state.set(EvaluatedFnState::InProgress);
 
         self.eval.comptime_quota.begin_recording();
         let eval_res = match self.eval_comptime(call.func.body) {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
             Err(Diverge::ComptimeQuotaExhausted) => {
-                todo!("propagate comptime quota exhaustion through function cache")
+                self.eval.comptime_quota.discard_recording();
+                cache_state.set(match existing_cached_value {
+                    Some(cached) => EvaluatedFnState::Done(Ok(cached)),
+                    None => EvaluatedFnState::Empty,
+                });
+                return Ok(Err(Diverge::ComptimeQuotaExhausted));
             }
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
             Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
         };
-        new_fn_eval_cache_entry.result.set(State::Done(match eval_res {
+        cache_state.set(EvaluatedFnState::Done(match eval_res {
             Ok(Ok(value)) => {
+                if let Some(cached) = existing_cached_value {
+                    debug_assert_eq!(
+                        cached.value, value,
+                        "re-evaluated function produced different cached value"
+                    );
+                }
                 let record = self.eval.comptime_quota.finish_recording();
                 Ok(CachedComptimeValue {
                     value,
@@ -548,6 +584,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Err(Poisoned) | Ok(Err(_)) => {
                 self.eval.comptime_quota.discard_recording();
+                debug_assert!(
+                    existing_cached_value.is_none(),
+                    "cached function re-evaluation should not poison or diverge"
+                );
                 Err(Poisoned)
             }
         }));

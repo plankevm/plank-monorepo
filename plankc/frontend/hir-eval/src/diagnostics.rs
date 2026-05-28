@@ -288,6 +288,17 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_comptime_call_branch_quota_exhausted(&mut self, loc: SrcLoc, limit: u32) {
+        Diagnostic::error("comptime branch quota exhausted")
+            .primary(
+                loc.source,
+                loc.span,
+                "evaluating this call exceeded the comptime branch quota",
+            )
+            .note(format!("current eval branch quota is {limit}"))
+            .emit(self);
+    }
+
     pub fn emit_entry_point_missing_terminator(&mut self, loc: SrcLoc) {
         Diagnostic::error("entry point must end with explicit terminator")
             .primary(loc.source, loc.span, "execution may reach end of entry point")
