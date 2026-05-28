@@ -1,3 +1,4 @@
+// TODO: Actually use in new scheduler
 #![allow(unused)]
 
 use crate::op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId};
