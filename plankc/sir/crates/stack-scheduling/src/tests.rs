@@ -577,3 +577,31 @@ fn unreachable() {
         "#,
     );
 }
+
+#[test]
+fn repeated_input() {
+    assert_lowers_to(
+        ScheduleConfig::default(),
+        r#"
+        fn init:
+            entry {
+                x = const 3
+                y = const 2
+                z = addmod x y x
+                stop
+            }
+        "#,
+        r#"
+        @0 []
+            const 0x3
+            const 0x2
+            dup 1
+            dup 1
+            dup 1
+            addmod
+            stop
+            => []
+            (stop)
+        "#,
+    );
+}
