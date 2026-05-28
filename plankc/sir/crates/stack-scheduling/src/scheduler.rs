@@ -1,21 +1,11 @@
-use plank_core::{LoopLimit, list_of_lists::ListOfListsPusher};
-use sir_data::{BasicBlockId, BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
-use std::{cell::Cell, collections::VecDeque, marker::PhantomData};
+use plank_core::LoopLimit;
+use sir_data::{BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
+use std::{cell::Cell, collections::VecDeque};
 
 use crate::{
     op_graph::*,
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
-
-pub trait Scheduler {
-    fn schedule<Sink: FnMut(StackOps)>(
-        ops_sink: Sink,
-        block: BlockView<'_>,
-        next_alloc_id: &Cell<StaticAllocId>,
-        config: ScheduleConfig,
-        graph: &OpGraph,
-    );
-}
 
 pub fn dumb_schedule<Sink: FnMut(StackOps)>(
     shuffle_to_output: fn(ScheduleConfig, &mut TrackedStack<'_, Sink>, &OpGraph),
@@ -371,7 +361,8 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             let mut target_pos_from_top = None;
             for (i, value) in self.target_stack[1..].iter().enumerate() {
                 if value == top {
-                    // TODO: need to check that this value is not already in the correct position on the stack already
+                    // TODO: need to check that this value is not already in the correct position on
+                    // the stack already
                     target_pos_from_top = Some(i);
                 }
             }

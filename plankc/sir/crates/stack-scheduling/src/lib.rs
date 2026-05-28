@@ -11,6 +11,7 @@ use crate::{
     stack::StackOps,
 };
 
+mod greedy;
 mod layouts;
 mod op_graph;
 mod op_model;
