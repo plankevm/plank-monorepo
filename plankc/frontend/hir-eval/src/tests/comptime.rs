@@ -1952,6 +1952,39 @@ fn test_final_const_sweep_rechecks_cached_const_with_default_quota() {
 }
 
 #[test]
+fn test_referenced_const_quota_exhaustion_emits_once() {
+    let loop_bound = DEFAULT_COMPTIME_BRANCH_QUOTA + 1;
+    let source = format!(
+        r#"
+        const C = comptime {{
+            let mut i = 0;
+            while @evm_lt(i, {loop_bound}) {{
+                i = @evm_add(i, 1);
+            }}
+            i
+        }};
+
+        init {{
+            let mut x: u256 = C;
+            @evm_stop();
+        }}
+        "#,
+    );
+    let expected = format!(
+        r#"
+        error: comptime branch quota exhausted
+         --> main.plk:3:11
+          |
+        3 |     while @evm_lt(i, {loop_bound}) {{
+          |           ^^^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+          |
+          = note: current eval branch quota is {DEFAULT_COMPTIME_BRANCH_QUOTA}
+        "#,
+    );
+    assert_diagnostics(source.as_str(), &[expected.as_str()]);
+}
+
+#[test]
 fn test_unused_const_comptime_while_branch_quota_exhausted() {
     let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
     assert_diagnostics(
