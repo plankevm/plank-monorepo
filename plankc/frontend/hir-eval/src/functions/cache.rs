@@ -8,7 +8,7 @@ use plank_hir::ValueId;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned};
 
-use crate::evaluator::State;
+use crate::evaluator::{CachedComptimeValue, State};
 
 newtype_index! {
     pub(crate) struct LoweredFnIdx;
@@ -104,13 +104,13 @@ impl LoweredFunctionsCache {
 }
 
 struct EvaluatedHeader {
-    result: Cell<State<MaybePoisoned<ValueId>>>,
+    result: Cell<State<MaybePoisoned<CachedComptimeValue>>>,
     closure: ValueId,
     params: u32,
 }
 
 pub(crate) struct EvaluatedFn<'a> {
-    pub result: &'a Cell<State<MaybePoisoned<ValueId>>>,
+    pub result: &'a Cell<State<MaybePoisoned<CachedComptimeValue>>>,
     pub closure: ValueId,
     pub params: &'a [Param],
 }
@@ -146,7 +146,7 @@ impl EvaluatedFunctionCache {
     pub fn lookup<'s, 'k>(
         &'s self,
         key: FunctionKey<'k>,
-    ) -> Result<&'s Cell<State<MaybePoisoned<ValueId>>>, EvaluatedFn<'s>> {
+    ) -> Result<&'s Cell<State<MaybePoisoned<CachedComptimeValue>>>, EvaluatedFn<'s>> {
         use std::hash::BuildHasher;
         let hash = self.hasher.hash_one(key);
         let dedup = unsafe { &mut *self.dedup.get() };

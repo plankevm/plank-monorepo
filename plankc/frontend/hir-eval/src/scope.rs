@@ -725,7 +725,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }),
             ExprKind::LogicalNot { input } => self.eval_logical_not(input),
             ExprKind::ConstRef(const_id) => {
-                self.eval.evaluate_const(const_id, self.diag_ctx).map(EvalValue::Comptime)
+                self.eval.evaluate_const(const_id, self.diag_ctx)?.map(EvalValue::Comptime)
             }
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)

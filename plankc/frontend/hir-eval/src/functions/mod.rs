@@ -10,7 +10,7 @@ use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
-    evaluator::{CallArgSpansIdx, State},
+    evaluator::{CachedComptimeValue, CallArgSpansIdx, State},
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -467,7 +467,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 State::Done(value) => {
                     return match value {
-                        Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
+                        Ok(cached) => Ok(Ok(EvalValue::Comptime(cached.value))),
                         // Cache collapses `Diverge` into Err(Poisoned);
                         // reconstruct the diverge when the return type was never.
                         Err(Poisoned) => preamble.suppress_poison_iff_diverging_return_type(),
@@ -527,16 +527,29 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Undo pessimistic result poison (allows recursion detection).
         new_fn_eval_cache_entry.result.set(State::InProgress);
 
+        self.eval.comptime_quota.begin_recording();
         let eval_res = match self.eval_comptime(call.func.body) {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
-            Err(Diverge::ComptimeQuotaExhausted) => Err(Poisoned),
+            Err(Diverge::ComptimeQuotaExhausted) => {
+                todo!("propagate comptime quota exhaustion through function cache")
+            }
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
             Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
         };
         new_fn_eval_cache_entry.result.set(State::Done(match eval_res {
-            Ok(Ok(value)) => Ok(value),
-            Err(Poisoned) | Ok(Err(_)) => Err(Poisoned),
+            Ok(Ok(value)) => {
+                let record = self.eval.comptime_quota.finish_recording();
+                Ok(CachedComptimeValue {
+                    value,
+                    branches_consumed: record.branches_consumed,
+                    max_eval_branch_quota: record.max_eval_branch_quota,
+                })
+            }
+            Err(Poisoned) | Ok(Err(_)) => {
+                self.eval.comptime_quota.discard_recording();
+                Err(Poisoned)
+            }
         }));
         eval_res.map(|value_or_diverge| value_or_diverge.map(EvalValue::Comptime))
     }
