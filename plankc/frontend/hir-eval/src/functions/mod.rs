@@ -2,7 +2,7 @@ use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
-use plank_values::{DefOrigin, Type, TypeId, TypeNameArg, Value};
+use plank_values::{DefOrigin, Type, TypeId, TypeInterner, TypeNameArg, Value, ValueInterner};
 
 mod cache;
 
@@ -703,34 +703,64 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let args_offset = self.eval.type_name_args_buf.len();
         let args_end = self.eval.maybe_values_buf.len();
-        let args_collected = (values_buf_offset..args_end).all(|idx| {
+        for idx in values_buf_offset..args_end {
             let Ok(value) = self.eval.maybe_values_buf[idx] else {
-                return false;
+                self.eval.type_name_args_buf.truncate(args_offset);
+                return;
             };
-            let Some(arg) = self.try_value_as_type_name_arg(value) else {
-                return false;
-            };
-            self.eval.type_name_args_buf.push(arg);
-            true
-        });
-        if args_collected {
-            self.types.try_name_struct_parameterized(
-                ty,
-                name,
-                &self.eval.type_name_args_buf[args_offset..],
+            let arg = Self::build_type_name_arg(
+                self.eval.values,
+                self.eval.types,
+                &mut self.eval.values_buf,
+                &mut self.eval.type_name_args_buf,
+                value,
             );
+            self.eval.type_name_args_buf.push(arg);
         }
+        self.types.try_name_struct_parameterized(
+            ty,
+            name,
+            &self.eval.type_name_args_buf[args_offset..],
+        );
         self.eval.type_name_args_buf.truncate(args_offset);
     }
 
-    fn try_value_as_type_name_arg(&self, value: ValueId) -> Option<TypeNameArg> {
-        Some(match self.values.lookup(value) {
+    fn build_type_name_arg(
+        values: &ValueInterner,
+        types: &TypeInterner,
+        values_buf: &mut Vec<ValueId>,
+        type_name_args_buf: &mut Vec<TypeNameArg>,
+        value: ValueId,
+    ) -> TypeNameArg {
+        match values.lookup(value) {
             Value::Void => TypeNameArg::Void,
             Value::Bool(value) => TypeNameArg::Bool(value),
             Value::BigNum(value) => TypeNameArg::BigNum(value),
             Value::Type(ty) => TypeNameArg::Type(ty),
-            Value::Closure { .. } | Value::StructVal { .. } => return None,
-        })
+            Value::Closure { .. } => TypeNameArg::Closure(value),
+            Value::StructVal { ty, fields } => {
+                let values_offset = values_buf.len();
+                values_buf.extend_from_slice(fields);
+                let values_end = values_buf.len();
+
+                let args_offset = type_name_args_buf.len();
+                for idx in values_offset..values_end {
+                    let arg = Self::build_type_name_arg(
+                        values,
+                        types,
+                        values_buf,
+                        type_name_args_buf,
+                        values_buf[idx],
+                    );
+                    type_name_args_buf.push(arg);
+                }
+                let fields = types.intern_type_name_args(&type_name_args_buf[args_offset..]);
+                type_name_args_buf.truncate(args_offset);
+                values_buf.truncate(values_offset);
+
+                TypeNameArg::Struct { ty, fields }
+            }
+        }
     }
 
     pub fn eval_param(

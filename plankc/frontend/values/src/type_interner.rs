@@ -22,6 +22,8 @@ pub enum TypeNameArg {
     Bool(bool),
     BigNum(U256),
     Type(TypeId),
+    Struct { ty: TypeId, fields: TypeNameArgsId },
+    Closure(ValueId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -309,8 +311,12 @@ impl TypeInterner {
         if r#struct.name.get().is_some() {
             return;
         }
-        let args = unsafe { (*self.type_name_args.get()).push_copy_slice(args) };
+        let args = self.intern_type_name_args(args);
         r#struct.name.set(Some(TypeName::Parameterized { name, args }));
+    }
+
+    pub fn intern_type_name_args(&self, args: &[TypeNameArg]) -> TypeNameArgsId {
+        unsafe { (*self.type_name_args.get()).push_copy_slice(args) }
     }
 
     pub fn fmt_struct(
@@ -347,14 +353,41 @@ impl TypeInterner {
         for &arg in args {
             f.write_str(sep)?;
             sep = ", ";
-            match arg {
-                TypeNameArg::Void => f.write_str("{}")?,
-                TypeNameArg::Bool(value) => write!(f, "{value}")?,
-                TypeNameArg::BigNum(value) => write!(f, "{value}")?,
-                TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty))?,
-            }
+            self.fmt_type_name_arg(f, arg, session)?;
         }
         Ok(())
+    }
+
+    fn fmt_type_name_arg(
+        &self,
+        f: &mut impl fmt::Write,
+        arg: TypeNameArg,
+        session: &Session,
+    ) -> fmt::Result {
+        match arg {
+            TypeNameArg::Void => f.write_str("{}"),
+            TypeNameArg::Bool(value) => write!(f, "{value}"),
+            TypeNameArg::BigNum(value) => write!(f, "{value}"),
+            TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
+            TypeNameArg::Closure(value) => write!(f, "<closure#{value}>",),
+            TypeNameArg::Struct { ty, fields } => {
+                write!(f, "{} {{", self.format(session, ty))?;
+                let Type::Struct(r#struct) = self.lookup(ty) else {
+                    unreachable!("invariant: type name struct argument has non-struct type")
+                };
+                let args = unsafe { &(&*self.type_name_args.get())[fields] };
+                assert_eq!(r#struct.fields.len(), args.len());
+                let mut sep = " ";
+                for (&field, &arg) in r#struct.fields.iter().zip(args) {
+                    f.write_str(sep)?;
+                    sep = ", ";
+                    f.write_str(session.lookup_name(field.name))?;
+                    f.write_str(": ")?;
+                    self.fmt_type_name_arg(f, arg, session)?;
+                }
+                if args.is_empty() { f.write_str("}") } else { f.write_str(" }") }
+            }
+        }
     }
 
     pub fn format<'a>(&'a self, sess: &'a Session, ty: TypeId) -> FmtType<'a> {

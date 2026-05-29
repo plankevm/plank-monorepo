@@ -356,6 +356,85 @@ fn test_diagnostic_renders_generic_struct_name() {
 }
 
 #[test]
+fn test_diagnostic_does_not_render_struct_value_type_name_arg() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct {
+            lhs: u256,
+            rhs: u256,
+        };
+
+        const Bob = fn (comptime P: Pair) type {
+            return struct P {
+                wow: bool,
+            };
+        };
+
+        init {
+            let x: Bob(Pair { lhs: 0, rhs: 1 }) = Bob(Pair { lhs: 21, rhs: 67 }) {
+                wow: false,
+            };
+
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+          --> main.plk:11:43
+           |
+        11 |       let x: Bob(Pair { lhs: 0, rhs: 1 }) = Bob(Pair { lhs: 21, rhs: 67 }) {
+           |  ____________----------------------------___^
+           | |            |
+           | |            `Bob(Pair { lhs: 0, rhs: 1 })` expected because of this
+        12 | |         wow: false,
+        13 | |     };
+           | |_____^ expected `Bob(Pair { lhs: 0, rhs: 1 })`, got `Bob(Pair { lhs: 21, rhs: 67 })`
+        "#],
+    );
+}
+
+#[test]
+fn test_diagnostic_renders_closure_type_name_arg() {
+    assert_diagnostics(
+        r#"
+        const WithClosure = struct {
+            n: u256,
+            f: function,
+        };
+
+        const first = fn () void {};
+        const second = fn () void {};
+
+        const Bob = fn (comptime P: WithClosure) type {
+            return struct P {
+                wow: bool,
+            };
+        };
+
+        init {
+            let x: Bob(WithClosure { n: 0, f: first }) = Bob(WithClosure { n: 1, f: second }) {
+                wow: false,
+            };
+
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+          --> main.plk:13:50
+           |
+        13 |       let x: Bob(WithClosure { n: 0, f: first }) = Bob(WithClosure { n: 1, f: second }) {
+           |  ____________-----------------------------------___^
+           | |            |
+           | |            `Bob(WithClosure { n: 0, f: <closure#15> })` expected because of this
+        14 | |         wow: false,
+        15 | |     };
+           | |_____^ expected `Bob(WithClosure { n: 0, f: <closure#15> })`, got `Bob(WithClosure { n: 1, f: <closure#12> })`
+        "#],
+    );
+}
+
+#[test]
 fn test_const_alias_preserves_generic_struct_name() {
     assert_diagnostics(
         r#"
