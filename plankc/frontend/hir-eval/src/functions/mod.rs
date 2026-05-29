@@ -460,9 +460,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble: PreambleResult,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let entered_quota_unit = self.eval.comptime_quota.enter_unit_if_inactive();
+        let entered_new_comptime_unit = self.eval.comptime_quota.enter_unit_if_inactive();
         let res = self.fold_comptime_call_in_quota_unit(call, preamble, values_buf_offset);
-        if entered_quota_unit {
+        if entered_new_comptime_unit {
             self.eval.comptime_quota.exit_unit();
         }
         res
@@ -498,7 +498,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 EvaluatedFnState::Done(value) => {
                     match value {
-                        Ok(cached) if self.eval.comptime_quota.replay_cached(cached) => {
+                        Ok(cached)
+                            if self.eval.comptime_quota.replay_record(cached.quota_record) =>
+                        {
                             return Ok(Ok(EvalValue::Comptime(cached.value)));
                         }
                         Ok(cached) => {
@@ -583,18 +585,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         cache_state.set(EvaluatedFnState::Done(match eval_res {
             Ok(Ok(value)) => {
-                if let Some(cached) = existing_cached_value {
-                    debug_assert_eq!(
-                        cached.value, value,
-                        "re-evaluated function produced different cached value"
-                    );
-                }
+                debug_assert!(
+                    existing_cached_value.is_none_or(|cached| cached.value == value),
+                    "re-evaluated function produced different cached value"
+                );
                 let record = self.eval.comptime_quota.finish_recording();
-                Ok(CachedComptimeValue {
-                    value,
-                    branches_consumed: record.branches_consumed,
-                    max_eval_branch_quota: record.max_eval_branch_quota,
-                })
+                Ok(CachedComptimeValue { value, quota_record: record })
             }
             Err(Poisoned) | Ok(Err(_)) => {
                 self.eval.comptime_quota.discard_recording();

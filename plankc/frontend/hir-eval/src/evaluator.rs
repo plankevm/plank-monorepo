@@ -27,11 +27,10 @@ pub(crate) enum ConstState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct CachedComptimeValue {
     pub value: ValueId,
-    pub branches_consumed: u32,
-    pub max_eval_branch_quota: u32,
+    pub quota_record: ComptimeQuotaRecord,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) struct ComptimeQuotaRecord {
     pub branches_consumed: u32,
     pub max_eval_branch_quota: u32,
@@ -102,16 +101,17 @@ impl ComptimeQuota {
         self.limit
     }
 
-    pub(crate) fn replay_cached(&mut self, cached: CachedComptimeValue) -> bool {
-        if self.spent.checked_add(cached.branches_consumed).is_none_or(|spent| spent > self.limit) {
+    pub(crate) fn replay_record(&mut self, replayed: ComptimeQuotaRecord) -> bool {
+        if self.spent.checked_add(replayed.branches_consumed).is_none_or(|spent| spent > self.limit)
+        {
             return false;
         }
-        self.spent += cached.branches_consumed;
+        self.spent += replayed.branches_consumed;
 
         if let Some(record) = self.records.last_mut() {
-            record.branches_consumed += cached.branches_consumed;
+            record.branches_consumed += replayed.branches_consumed;
         }
-        self.raise_limit(cached.max_eval_branch_quota);
+        self.raise_limit(replayed.max_eval_branch_quota);
         true
     }
 
@@ -212,9 +212,9 @@ impl<'a> Evaluator<'a> {
         const_id: ConstId,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> Result<MaybePoisoned<ValueId>, Diverge> {
-        let entered_quota_unit = self.comptime_quota.enter_unit_if_inactive();
+        let entered_new_comptime_unit = self.comptime_quota.enter_unit_if_inactive();
         let res = self.evaluate_const_in_quota_unit(const_id, diag_ctx);
-        if entered_quota_unit {
+        if entered_new_comptime_unit {
             self.comptime_quota.exit_unit();
         }
         res
@@ -230,7 +230,9 @@ impl<'a> Evaluator<'a> {
         let mut retry_quota_exhausted = false;
         if let Some(state) = self.evaluated_consts.get(const_id) {
             match state {
-                ConstState::Done(Ok(cached)) if self.comptime_quota.replay_cached(*cached) => {
+                ConstState::Done(Ok(cached))
+                    if self.comptime_quota.replay_record(cached.quota_record) =>
+                {
                     return Ok(Ok(cached.value));
                 }
                 ConstState::Done(Ok(cached)) => existing_cached_value = Some(*cached),
@@ -288,11 +290,7 @@ impl<'a> Evaluator<'a> {
         let cached_value = match value {
             Ok(value) => {
                 let record = scope.eval.comptime_quota.finish_recording();
-                Ok(CachedComptimeValue {
-                    value,
-                    branches_consumed: record.branches_consumed,
-                    max_eval_branch_quota: record.max_eval_branch_quota,
-                })
+                Ok(CachedComptimeValue { value, quota_record: record })
             }
             Err(Poisoned) => {
                 scope.eval.comptime_quota.discard_recording();

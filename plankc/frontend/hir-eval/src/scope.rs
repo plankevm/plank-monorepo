@@ -383,19 +383,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         result
     }
 
-    fn eval_repeated_while_condition(
-        &mut self,
-        condition_block: hir::BlockId,
-        condition: hir::LocalId,
-    ) -> Result<bool, Diverge> {
-        let result = match self.eval_block_inline(condition_block) {
-            Ok(()) => self.expect_comptime_bool_condition(condition),
-            Err(err) => Err(err),
-        };
-        self.clean_block_locals(condition_block);
-        result
-    }
-
     fn clean_block_locals(&mut self, block: hir::BlockId) {
         for &instr in &self.hir.block_instrs[block] {
             match instr.kind {
@@ -419,6 +406,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 InstructionKind::ComptimeBlock { body } => self.clean_block_locals(body),
             }
         }
+    }
+
+    fn eval_repeated_while_condition(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+    ) -> Result<bool, Diverge> {
+        let result = match self.eval_block_inline(condition_block) {
+            Ok(()) => self.expect_comptime_bool_condition(condition),
+            Err(err) => Err(err),
+        };
+        self.clean_block_locals(condition_block);
+        result
     }
 
     fn expect_comptime_bool_condition(&mut self, condition: hir::LocalId) -> Result<bool, Diverge> {
@@ -599,33 +599,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn eval_comptime_while(
-        &mut self,
-        condition_block: hir::BlockId,
-        condition: hir::LocalId,
-        body: hir::BlockId,
-    ) -> Result<(), Diverge> {
-        loop {
-            let condition_value = self.eval_repeated_while_condition(condition_block, condition)?;
-
-            if !condition_value {
-                return Ok(());
-            }
-
-            if !self.eval.comptime_quota.spend_branch() {
-                if let Ok(span) = self.hir.block_spans[condition_block] {
-                    self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
-                        self.loc(span),
-                        self.eval.comptime_quota.limit(),
-                    );
-                }
-                return Err(Diverge::ComptimeQuotaExhausted);
-            }
-
-            self.eval_repeated_block_inline(body)?;
-        }
-    }
-
     fn eval_runtime_while(
         &mut self,
         condition_block: hir::BlockId,
@@ -679,6 +652,33 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.emit(mir::Instruction::While { condition_block, condition, body });
 
         Ok(())
+    }
+
+    fn eval_comptime_while(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+        body: hir::BlockId,
+    ) -> Result<(), Diverge> {
+        loop {
+            let condition_value = self.eval_repeated_while_condition(condition_block, condition)?;
+
+            if !condition_value {
+                return Ok(());
+            }
+
+            if !self.eval.comptime_quota.spend_branch() {
+                if let Ok(span) = self.hir.block_spans[condition_block] {
+                    self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
+                        self.loc(span),
+                        self.eval.comptime_quota.limit(),
+                    );
+                }
+                return Err(Diverge::ComptimeQuotaExhausted);
+            }
+
+            self.eval_repeated_block_inline(body)?;
+        }
     }
 
     pub fn loc(&self, span: SourceSpan) -> SrcLoc {

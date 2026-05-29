@@ -1621,17 +1621,18 @@ fn test_set_eval_branch_quota_too_large() {
 #[test]
 fn test_comptime_while_evaluates_loop() {
     assert_lowers_to(
-        r#"
+        std_project(
+            r#"
         init {
             let mut x: u256 = comptime {
                 let mut i = 0;
-                while @evm_lt(i, 3) {
-                    if @evm_eq(i, 1) {
+                while i < 3 {
+                    if i == 1 {
                         let step = 1;
-                        i = @evm_add(i, step);
+                        i = i + step;
                     } else {
                         let step = 1;
-                        i = @evm_add(i, step);
+                        i = i + step;
                     }
                 }
                 i
@@ -1639,6 +1640,7 @@ fn test_comptime_while_evaluates_loop() {
             @evm_stop();
         }
         "#,
+        ),
         r#"
         ==== Functions ====
         ; init
@@ -1653,30 +1655,32 @@ fn test_comptime_while_evaluates_loop() {
 #[test]
 fn test_comptime_nested_while_and_if_evaluates_loop() {
     assert_lowers_to(
-        r#"
+        std_project(
+            r#"
         init {
             let mut x: u256 = comptime {
                 let mut outer = 0;
                 let mut total = 0;
-                while @evm_lt(outer, 3) {
+                while outer < 3 {
                     let mut inner = 0;
-                    while @evm_lt(inner, 2) {
-                        if @evm_eq(inner, 0) {
-                            let add = @evm_add(outer, 1);
-                            total = @evm_add(total, add);
+                    while inner < 2 {
+                        if inner == 0 {
+                            let add = outer + 1;
+                            total = total + add;
                         } else {
-                            let add = @evm_add(outer, 2);
-                            total = @evm_add(total, add);
+                            let add = outer + 2;
+                            total = total + add;
                         }
-                        inner = @evm_add(inner, 1);
+                        inner = inner + 1;
                     }
-                    outer = @evm_add(outer, 1);
+                    outer = outer + 1;
                 }
                 total
             };
             @evm_stop();
         }
         "#,
+        ),
         r#"
         ==== Functions ====
         ; init
@@ -1690,219 +1694,171 @@ fn test_comptime_nested_while_and_if_evaluates_loop() {
 
 #[test]
 fn test_set_eval_branch_quota_raises_comptime_while_budget() {
-    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA + 1;
-    let source = format!(
-        r#"
-        init {{
-            let mut x: u256 = comptime {{
-                @set_eval_branch_quota({quota});
-                let mut i = 0;
-                while @evm_lt(i, {quota}) {{
-                    i = @evm_add(i, 1);
-                }}
-                i
-            }};
-            @evm_stop();
-        }}
-        "#,
-    );
-    let expected = format!(
-        r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {{
-            %0 : u256 = {quota}
-            %1 : never = @evm_stop()
-        }}
-        "#,
-    );
-    assert_lowers_to(source.as_str(), &expected);
-}
-
-#[test]
-fn test_nested_comptime_block_uses_shared_branch_quota() {
-    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA + 1;
-    let source = format!(
-        r#"
-        init {{
-            let mut x: u256 = comptime {{
-                @set_eval_branch_quota({quota});
-                comptime {{
-                    let mut j = 0;
-                    while @evm_lt(j, {quota}) {{
-                        j = @evm_add(j, 1);
-                    }}
-                    j
-                }}
-            }};
-            @evm_stop();
-        }}
-        "#,
-    );
-    let expected = format!(
-        r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {{
-            %0 : u256 = {quota}
-            %1 : never = @evm_stop()
-        }}
-        "#,
-    );
-    assert_lowers_to(source.as_str(), &expected);
-}
-
-#[test]
-fn test_nested_comptime_block_exhausts_shared_branch_quota() {
-    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
-    let source = format!(
-        r#"
-        const x = comptime {{
-            let mut i = 0;
-            while @evm_lt(i, {quota}) {{
-                i = @evm_add(i, 1);
-            }}
-            comptime {{
-                let mut j = 0;
-                while @evm_iszero(j) {{
-                    j = 1;
-                }}
-                j
-            }}
-        }};
-        init {{ @evm_stop(); }}
-        "#,
-    );
-    let expected = format!(
-        r#"
-        error: comptime branch quota exhausted
-         --> main.plk:8:15
-          |
-        8 |         while @evm_iszero(j) {{
-          |               ^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is {quota}
-        "#,
-    );
-    assert_diagnostics(source.as_str(), &[expected.as_str()]);
-}
-
-#[test]
-fn test_cached_const_consumes_quota_on_each_reference() {
-    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
-    let source = format!(
-        r#"
-        const Cached = comptime {{
-            let mut i = 0;
-            while @evm_lt(i, {quota}) {{
-                i = @evm_add(i, 1);
-            }}
-            i
-        }};
-
-        const x = comptime {{
-            Cached;
-            Cached
-        }};
-
-        init {{ @evm_stop(); }}
-        "#,
-    );
-    let expected = format!(
-        r#"
-        error: comptime branch quota exhausted
-         --> main.plk:3:11
-          |
-        3 |     while @evm_lt(i, {quota}) {{
-          |           ^^^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is {quota}
-        "#,
-    );
-    assert_diagnostics(source.as_str(), &[expected.as_str()]);
-}
-
-#[test]
-fn test_cached_const_replays_eval_branch_quota_raise() {
-    let initial_branches = DEFAULT_COMPTIME_BRANCH_QUOTA / 2;
-    let replay_branches = DEFAULT_COMPTIME_BRANCH_QUOTA;
-    let raised_quota = initial_branches + replay_branches;
-    let expected_value = initial_branches + replay_branches;
-    let source = format!(
-        r#"
-        const F = comptime {{
-            let mut i = 0;
-            while @evm_lt(i, {initial_branches}) {{
-                i = @evm_add(i, 1);
-            }}
-            @set_eval_branch_quota({raised_quota});
-            i
-        }};
-
-        init {{
-            let mut warm: u256 = comptime {{ F }};
-            let mut x: u256 = comptime {{
-                let start = F;
-                let mut i = 0;
-                while @evm_lt(i, {replay_branches}) {{
-                    i = @evm_add(i, 1);
-                }}
-                @evm_add(start, i)
-            }};
-            @evm_stop();
-        }}
-        "#,
-    );
-    let expected = format!(
-        r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {{
-            %0 : u256 = {initial_branches}
-            %1 : u256 = {expected_value}
-            %2 : never = @evm_stop()
-        }}
-        "#,
-    );
-    assert_lowers_to(source.as_str(), &expected);
-}
-
-#[test]
-fn test_cached_const_replay_outside_comptime_uses_fresh_quota_unit() {
-    let cached_branches = DEFAULT_COMPTIME_BRANCH_QUOTA - 100;
-    let stale_spent_branches = 100;
-    let source = format!(
-        r#"
-        const C = comptime {{
-            let mut i = 0;
-            while @evm_lt(i, {cached_branches}) {{
-                i = @evm_add(i, 1);
-            }}
-            i
-        }};
-
-        init {{
-            let mut warm: u256 = comptime {{
-                C;
-                let mut i = 0;
-                while @evm_lt(i, {stale_spent_branches}) {{
-                    i = @evm_add(i, 1);
-                }}
-                i
-            }};
-            let mut x: u256 = C;
-            @evm_stop();
-        }}
-        "#,
-    );
+    assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
     assert_lowers_to(
-        source.as_str(),
+        std_project(
+            r#"
+        init {
+            let mut x: u256 = comptime {
+                @set_eval_branch_quota(1001);
+                let mut i = 0;
+                while i < 1001 {
+                    i = i + 1;
+                }
+                i
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
         r#"
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : u256 = 100
-            %1 : u256 = 900
+            %0 : u256 = 1001
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_comptime_block_uses_shared_branch_quota() {
+    assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
+    assert_lowers_to(
+        std_project(
+            r#"
+        init {
+            let mut x: u256 = comptime {
+                @set_eval_branch_quota(1001);
+                comptime {
+                    let mut j = 0;
+                    while j < 1001 {
+                        j = j + 1;
+                    }
+                    j
+                }
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 1001
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_comptime_block_exhausts_shared_branch_quota() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const x = comptime {
+            let mut i = 0;
+            while i < 1000 {
+                i = i + 1;
+            }
+            comptime {
+                let mut j = 0;
+                while j == 0 {
+                    j = 1;
+                }
+                j
+            }
+        };
+        init { @evm_stop(); }
+        "#,
+        ),
+        &[r#"
+        error: comptime branch quota exhausted
+         --> main.plk:8:15
+          |
+        8 |         while j == 0 {
+          |               ^^^^^^^ evaluating this loop exceeded the comptime branch quota
+          |
+          = note: current eval branch quota is 1000
+        "#],
+    );
+}
+
+#[test]
+fn test_cached_const_consumes_quota_on_each_reference() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const Cached = comptime {
+            let mut i = 0;
+            while i < 1000 {
+                i = i + 1;
+            }
+            i
+        };
+
+        const x = comptime {
+            Cached;
+            Cached
+        };
+
+        init { @evm_stop(); }
+        "#,
+        ),
+        &[r#"
+        error: comptime branch quota exhausted
+         --> main.plk:3:11
+          |
+        3 |     while i < 1000 {
+          |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+          |
+          = note: current eval branch quota is 1000
+        "#],
+    );
+}
+
+#[test]
+fn test_cached_const_replays_eval_branch_quota_raise() {
+    assert_eq!(500, DEFAULT_COMPTIME_BRANCH_QUOTA / 2);
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_eq!(1500, (DEFAULT_COMPTIME_BRANCH_QUOTA / 2) + DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_lowers_to(
+        std_project(
+            r#"
+        const F = comptime {
+            let mut i = 0;
+            while i < 500 {
+                i = i + 1;
+            }
+            @set_eval_branch_quota(1500);
+            i
+        };
+
+        init {
+            let mut warm: u256 = comptime { F };
+            let mut x: u256 = comptime {
+                let start = F;
+                let mut i = 0;
+                while i < 1000 {
+                    i = i + 1;
+                }
+                start + i
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 500
+            %1 : u256 = 1500
             %2 : never = @evm_stop()
         }
         "#,
@@ -1910,88 +1866,117 @@ fn test_cached_const_replay_outside_comptime_uses_fresh_quota_unit() {
 }
 
 #[test]
-fn test_final_const_sweep_rechecks_cached_const_with_default_quota() {
-    let raised_quota = DEFAULT_COMPTIME_BRANCH_QUOTA + 1;
-    let source = format!(
-        r#"
-        const C = comptime {{
+fn test_runtime_const_ref_replays_cached_const_in_fresh_quota_unit() {
+    assert_eq!(999, DEFAULT_COMPTIME_BRANCH_QUOTA - 1);
+    assert_lowers_to(
+        std_project(
+            r#"
+        const C = comptime {
             let mut i = 0;
-            while @evm_lt(i, {raised_quota}) {{
-                i = @evm_add(i, 1);
-            }}
+            while i < 1 {
+                i = i + 1;
+            }
             i
-        }};
+        };
 
-        init {{
-            let mut warm: u256 = comptime {{
-                @set_eval_branch_quota({raised_quota});
-                C
-            }};
+        init {
+            let mut warm: u256 = comptime {
+                C;
+                let mut i = 0;
+                while i < 999 {
+                    i = i + 1;
+                }
+                i
+            };
+            let mut x: u256 = C;
             @evm_stop();
-        }}
+        }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 999
+            %1 : u256 = 1
+            %2 : never = @evm_stop()
+        }
         "#,
     );
-    let expected = format!(
-        r#"
+}
+
+#[test]
+fn test_cached_const_rechecked_after_entrypoints_with_default_quota() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const C = comptime {
+            let mut i = 0;
+            while i < 1001 {
+                i = i + 1;
+            }
+            i
+        };
+
+        init {
+            let mut warm: u256 = comptime {
+                @set_eval_branch_quota(1001);
+                C
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
         error: comptime branch quota exhausted
          --> main.plk:3:11
           |
-        3 |     while @evm_lt(i, {raised_quota}) {{
-          |           ^^^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+        3 |     while i < 1001 {
+          |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
-          = note: current eval branch quota is {DEFAULT_COMPTIME_BRANCH_QUOTA}
-        "#,
+          = note: current eval branch quota is 1000
+        "#],
     );
-    assert_diagnostics(source.as_str(), &[expected.as_str()]);
 }
 
 #[test]
 fn test_referenced_const_quota_exhaustion_emits_once() {
-    let loop_bound = DEFAULT_COMPTIME_BRANCH_QUOTA + 1;
-    let source = format!(
-        r#"
-        const C = comptime {{
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const C = comptime {
             let mut i = 0;
-            while @evm_lt(i, {loop_bound}) {{
-                i = @evm_add(i, 1);
-            }}
+            while i < 1001 {
+                i = i + 1;
+            }
             i
-        }};
+        };
 
-        init {{
+        init {
             let mut x: u256 = C;
             @evm_stop();
-        }}
+        }
         "#,
-    );
-    let expected = format!(
-        r#"
+        ),
+        &[r#"
         error: comptime branch quota exhausted
          --> main.plk:3:11
           |
-        3 |     while @evm_lt(i, {loop_bound}) {{
-          |           ^^^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+        3 |     while i < 1001 {
+          |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
-          = note: current eval branch quota is {DEFAULT_COMPTIME_BRANCH_QUOTA}
-        "#,
+          = note: current eval branch quota is 1000
+        "#],
     );
-    assert_diagnostics(source.as_str(), &[expected.as_str()]);
 }
 
 #[test]
 fn test_unused_const_comptime_while_branch_quota_exhausted() {
-    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
-    let expected = format!(
-        r#"
-        error: comptime branch quota exhausted
-         --> main.plk:2:11
-          |
-        2 |     while true {{}}
-          |           ^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is {quota}
-        "#,
-    );
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
     assert_diagnostics(
         r#"
         const Bad = comptime {
@@ -1999,36 +1984,14 @@ fn test_unused_const_comptime_while_branch_quota_exhausted() {
         };
         init { @evm_stop(); }
         "#,
-        &[expected.as_str()],
-    );
-}
-
-#[test]
-fn test_comptime_while_branch_quota_exhausted() {
-    let quota = DEFAULT_COMPTIME_BRANCH_QUOTA;
-    let loop_bound = quota + 1;
-    let source = format!(
-        r#"
-        const x = comptime {{
-            let mut i = 0;
-            while @evm_lt(i, {loop_bound}) {{
-                i = @evm_add(i, 1);
-            }}
-            i
-        }};
-        init {{ @evm_stop(); }}
-        "#,
-    );
-    let expected = format!(
-        r#"
+        &[r#"
         error: comptime branch quota exhausted
-         --> main.plk:3:11
+         --> main.plk:2:11
           |
-        3 |     while @evm_lt(i, {loop_bound}) {{
-          |           ^^^^^^^^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+        2 |     while true {}
+          |           ^^^^ evaluating this loop exceeded the comptime branch quota
           |
-          = note: current eval branch quota is {quota}
-        "#,
+          = note: current eval branch quota is 1000
+        "#],
     );
-    assert_diagnostics(source.as_str(), &[expected.as_str()]);
 }
