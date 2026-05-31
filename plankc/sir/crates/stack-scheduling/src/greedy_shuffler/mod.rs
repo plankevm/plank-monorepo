@@ -7,6 +7,9 @@ use plank_core::LoopLimit;
 
 mod indices;
 
+#[cfg(test)]
+mod tests;
+
 pub struct GreedyShuffler<'a, 'ir, Sink: FnMut(StackOps)> {
     correct_up_to: Height,
     current: &'a mut TrackedStack<'ir, Sink>,
@@ -29,7 +32,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             max_dup_depth: Depth::new(config.max_dup_depth.into()),
         };
 
+        println!("hey");
+
         this.update_correct_up_to_height();
+
+        println!("this.correct_up_to: {:?}", this.correct_up_to);
+
         this.shrink_current_stack(this.max_swap_depth + 1);
         this.grow();
     }

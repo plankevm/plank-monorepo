@@ -129,6 +129,15 @@ pub struct ScheduleConfig {
 impl ScheduleConfig {
     pub const PRE_AMSTERDAM: Self =
         Self { max_swap_depth: 16, max_dup_depth: 15, max_exchange_range: 16, exchange_cost: 9 };
+
+    pub fn max_swap_no_exchange(max_swap_depth: u8) -> Self {
+        Self {
+            max_swap_depth,
+            max_dup_depth: max_swap_depth.checked_sub(1).expect("dup depth underflow"),
+            max_exchange_range: max_swap_depth,
+            exchange_cost: 9,
+        }
+    }
 }
 
 impl Default for ScheduleConfig {
