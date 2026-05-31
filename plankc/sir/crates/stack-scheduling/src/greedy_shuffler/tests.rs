@@ -4,7 +4,7 @@ use crate::{
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
 use sir_data::{Idx, StaticAllocId};
-use std::cell::Cell;
+use std::{cell::Cell, collections::HashSet};
 
 fn assert_shuffle(
     config: ScheduleConfig,
@@ -19,6 +19,10 @@ fn assert_shuffle(
     }
 
     let target = target_stack.as_ref().iter().map(|v| ValueNodeId::new(*v)).collect::<Vec<_>>();
+
+    let inputs = evm_stack.fifo().iter().copied().collect::<HashSet<_>>();
+    let outputs = target.iter().copied().collect::<HashSet<_>>();
+    assert!(inputs.is_superset(&outputs), "impossible start/target configuration");
 
     let next_alloc_id = Cell::new(StaticAllocId::ZERO);
     let mut ops = Vec::new();
@@ -61,5 +65,89 @@ fn pops_unneeded() {
         [1, 2, 3],
         [2, 3, 1],
         [Pop],
+    );
+}
+
+#[test]
+fn swaps_top_to_correct_position() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [1, 9, 3, 4],
+        [3, 1, 4, 3],
+        [1, 3, 4],
+        [Swap(1), Pop],
+    );
+}
+
+#[test]
+fn pops_extra_top_value() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [1, 1, 2, 3],
+        [1, 2, 3, 2],
+        [1, 2, 3],
+        [Pop],
+    );
+}
+
+#[test]
+fn swaps_and_pops_extra_value() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [2, 1, 1, 3],
+        [2, 1, 3, 2],
+        [1, 2, 3],
+        [Swap(2), Pop],
+    );
+}
+
+#[test]
+fn pops_duplicate_top_value() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [1, 1, 2, 4],
+        [1, 1, 4, 2],
+        [1, 2, 4],
+        [Pop],
+    );
+}
+
+#[test]
+fn spills_when_no_shrink_step_applies() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [1, 2, 3, 4],
+        [1, 2, 4, 3],
+        [2, 3, 4],
+        [Store(StaticAllocId::new(0))],
+    );
+}
+
+#[test]
+fn repeatedly_pops_extra_top_values() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [1, 1, 1, 2, 3],
+        [1, 2, 3, 2, 3],
+        [1, 2, 3],
+        [Pop, Pop],
+    );
+}
+
+#[test]
+fn repeatedly_swaps_and_pops_extra_values() {
+    use StackOps::*;
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(2),
+        [2, 1, 1, 3, 3],
+        [2, 1, 3, 2, 2],
+        [2, 1, 3],
+        [Swap(2), Pop, Swap(2), Pop],
     );
 }
