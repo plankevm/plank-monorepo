@@ -11,12 +11,13 @@ use crate::{
     stack::StackOps,
 };
 
-mod greedy;
+mod greedy_shuffler;
 mod layouts;
 mod op_graph;
 mod op_model;
 mod scheduler;
 pub mod stack;
+mod stack_indices;
 
 newtype_index! {
     pub struct StackOpIdx;

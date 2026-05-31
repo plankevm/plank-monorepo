@@ -2,12 +2,19 @@ use crate::Idx;
 
 pub trait IncIterable: Eq + Ord {
     fn get_and_inc(&mut self) -> Self;
+    fn get_and_dec(&mut self) -> Self;
 }
 
 impl IncIterable for u32 {
     fn get_and_inc(&mut self) -> Self {
         let x = *self;
         *self += 1;
+        x
+    }
+
+    fn get_and_dec(&mut self) -> Self {
+        let x = *self;
+        *self -= 1;
         x
     }
 }
@@ -31,6 +38,15 @@ impl<T> Span<T> {
 
     pub fn range(self) -> std::ops::Range<T> {
         self.start..self.end
+    }
+}
+
+impl<T: IncIterable> IntoIterator for Span<T> {
+    type Item = T;
+    type IntoIter = IncIterator<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
@@ -123,15 +139,12 @@ impl<T: IncIterable> Iterator for IncIterator<T> {
     }
 }
 
-impl<T: IncIterable + Copy + std::ops::Sub<u32, Output = T>> DoubleEndedIterator
-    for IncIterator<T>
-{
+impl<T: IncIterable> DoubleEndedIterator for IncIterator<T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         if self.start >= self.end {
             return None;
         }
-        self.end = self.end - 1;
-        Some(self.end)
+        Some(self.end.get_and_dec())
     }
 }
 
