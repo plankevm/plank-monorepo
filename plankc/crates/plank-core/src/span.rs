@@ -2,7 +2,7 @@ use crate::Idx;
 
 pub trait IncIterable: Eq + Ord {
     fn get_and_inc(&mut self) -> Self;
-    fn get_and_dec(&mut self) -> Self;
+    fn dec_and_get(&mut self) -> Self;
 }
 
 impl IncIterable for u32 {
@@ -12,10 +12,9 @@ impl IncIterable for u32 {
         x
     }
 
-    fn get_and_dec(&mut self) -> Self {
-        let x = *self;
+    fn dec_and_get(&mut self) -> Self {
         *self -= 1;
-        x
+        *self
     }
 }
 
@@ -144,7 +143,7 @@ impl<T: IncIterable> DoubleEndedIterator for IncIterator<T> {
         if self.start >= self.end {
             return None;
         }
-        Some(self.end.get_and_dec())
+        Some(self.end.dec_and_get())
     }
 }
 
@@ -171,5 +170,28 @@ impl<T: Copy> SpanLike for std::ops::Range<T> {
     }
     fn end(&self) -> T {
         self.end
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inc_iterator_reverse_matches_forward_reversed() {
+        let span = Span::new(2, 8);
+        let mut expected = span.iter().collect::<Vec<_>>();
+        expected.reverse();
+
+        assert_eq!(span.iter().rev().collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn empty_inc_iterator_reverse_matches_forward_reversed() {
+        let span = Span::new(2, 2);
+        let mut expected = span.iter().collect::<Vec<_>>();
+        expected.reverse();
+
+        assert_eq!(span.iter().rev().collect::<Vec<_>>(), expected);
     }
 }

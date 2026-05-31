@@ -56,10 +56,9 @@ impl<Stack: Ord + Copy> IncIterable for Depth<Stack> {
         gotten
     }
 
-    fn get_and_dec(&mut self) -> Self {
-        let gotten = *self;
+    fn dec_and_get(&mut self) -> Self {
         *self = Depth::new(self.0 - 1);
-        gotten
+        *self
     }
 }
 

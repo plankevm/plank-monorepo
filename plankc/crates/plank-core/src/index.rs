@@ -1,4 +1,4 @@
-use crate::{Span, span::IncIterable};
+use crate::{span::IncIterable, Span};
 use std::{
     convert::TryFrom,
     fmt::Debug,
@@ -187,10 +187,9 @@ impl<I: Idx> IncIterable for I {
     }
 
     #[inline(always)]
-    fn get_and_dec(&mut self) -> Self {
-        let current = *self;
+    fn dec_and_get(&mut self) -> Self {
         *self = *self - 1;
-        current
+        *self
     }
 }
 
