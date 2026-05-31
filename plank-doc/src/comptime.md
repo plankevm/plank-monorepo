@@ -44,6 +44,10 @@ const max = fn(comptime T: type, a: T, b: T) T {
 
 At `comptime`, everything is a value, including struct types. This lets you define and use functions that perform introspection on them, such as inspecting the number and types of fields.
 
+The reflection builtins `@field_count`, `@field_type`, `@get_field`, and `@set_field` operate on both structs and tuples, so you can inspect or update a tuple's elements the same way you would a struct's fields.
+
+Two predicates let you tell them apart: `@is_struct` returns `true` only for structs and `false` for tuples, while `@is_tuple` returns `true` for tuples.
+
 This enables code generation at compile time, eliminating boilerplate and allowing functions to adapt to the exact structure they operate on.
 
 For example, this is how ABI encoding is handled through the standard library:
