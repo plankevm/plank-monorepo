@@ -70,28 +70,6 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn error_init_outside_entry(&self, span: TokenSpan) {
-        self.error_outside_entry("init", span);
-    }
-
-    pub(crate) fn error_run_outside_entry(&self, span: TokenSpan) {
-        self.error_outside_entry("run", span);
-    }
-
-    fn error_outside_entry(&self, kind: &str, span: TokenSpan) {
-        Diagnostic::error(format!("`{kind}` not allowed here"))
-            .primary(
-                self.source_id,
-                self.lexed.tokens_src_span(span),
-                format!("only the entry file may contain `{kind}`"),
-            )
-            .claim(
-                Claim::new(Level::Note, "entry file")
-                    .element(Element::Origin { path: SourceId::ROOT }),
-            )
-            .emit(*self.session.borrow_mut());
-    }
-
     pub(crate) fn error_shadowing_primitive_type(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);
@@ -196,10 +174,17 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn error_missing_init_block(&self) {
+    pub(crate) fn error_missing_entry_init_block(&self) {
         Diagnostic::error("missing init block")
             .element(Element::Origin { path: SourceId::ROOT })
             .note("the entry file must contain an init block")
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_run_without_init_block(&self, source_id: SourceId) {
+        Diagnostic::error("run block without init block")
+            .element(Element::Origin { path: source_id })
+            .note("a file with a run block must contain an init block")
             .emit(*self.session.borrow_mut());
     }
 

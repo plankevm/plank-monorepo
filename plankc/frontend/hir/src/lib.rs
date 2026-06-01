@@ -15,6 +15,7 @@ pub use plank_values::{ConstId, FnDefId, ValueId};
 newtype_index! {
     pub struct LocalId;
     pub struct BlockId;
+    pub struct EntryPointId;
     pub struct StructDefId;
     pub struct CallArgsId;
     pub struct FieldsId;
@@ -197,11 +198,18 @@ impl ConstDef {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct EntryPoint {
+    pub source_id: SourceId,
+    pub body: BlockId,
+}
+
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub entry_source: SourceId,
-    pub init: BlockId,
-    pub run: Option<BlockId>,
+    pub init: EntryPointId,
+    pub run: Option<EntryPointId>,
+    pub entry_points: IndexVec<EntryPointId, EntryPoint>,
 
     pub block_instrs: ListOfLists<BlockId, Instruction>,
     pub block_spans: IndexVec<BlockId, MaybePoisoned<SourceSpan>>,

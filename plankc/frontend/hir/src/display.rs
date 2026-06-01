@@ -343,11 +343,11 @@ impl Display for DisplayHir<'_> {
         }
 
         writeln!(f, "\n==== Init ====")?;
-        self.fmt_block(f, self.hir.init, 0)?;
+        self.fmt_block(f, self.hir.entry_points[self.hir.init].body, 0)?;
 
-        if let Some(run_block) = self.hir.run {
+        if let Some(run) = self.hir.run {
             writeln!(f, "\n==== Run ====")?;
-            self.fmt_block(f, run_block, 0)?;
+            self.fmt_block(f, self.hir.entry_points[run].body, 0)?;
         }
 
         Ok(())

@@ -170,6 +170,97 @@ fn test_run_missing_termination() {
 }
 
 #[test]
+fn test_imported_init_missing_termination() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+            import m::other::*;
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "other",
+            r#"
+            init {
+                let x = 5;
+            }
+            "#,
+        )
+        .add_module("m", ""),
+        &[r#"
+        error: entry point must end with explicit terminator
+         --> other.plk:1:1
+          |
+        1 | / init {
+        2 | |     let x = 5;
+        3 | | }
+          | |_^ execution may reach end of entry point
+          |
+          = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
+        "#],
+    );
+}
+
+#[test]
+fn test_imported_run_type_error() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+            import m::other::*;
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "other",
+            r#"
+            init { @evm_stop(); }
+            run {
+                let x: bool = 0;
+                @evm_stop();
+            }
+            "#,
+        )
+        .add_module("m", ""),
+        &[r#"
+        error: mismatched types
+         --> other.plk:3:19
+          |
+        3 |     let x: bool = 0;
+          |            ----   ^ expected `bool`, got `u256`
+          |            |
+          |            `bool` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_imported_run_not_selected_as_artifact_run() {
+    let (mir, _values, session) = try_lower(
+        TestProject::root(
+            r#"
+            import m::other::*;
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "other",
+            r#"
+            init { @evm_stop(); }
+            run { @evm_stop(); }
+            "#,
+        )
+        .add_module("m", ""),
+    );
+
+    assert!(
+        session.diagnostics().is_empty(),
+        "expected no diagnostics, got: {:#?}",
+        session.diagnostics()
+    );
+    assert!(mir.run.is_none());
+}
+
+#[test]
 fn test_never_fn_missing_termination() {
     assert_diagnostics(
         "

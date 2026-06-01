@@ -184,24 +184,24 @@ impl<'a> Evaluator<'a> {
 
     pub fn lower_entrypoint(
         &mut self,
-        block: hir::BlockId,
+        entry_point: hir::EntryPoint,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> mir::FnId {
-        let eval_branch_quota_start_loc = match self.hir.block_spans[block] {
-            Ok(span) => SrcLoc::new(self.hir.entry_source, span),
-            Err(Poisoned) => SrcLoc::new(self.hir.entry_source, ZERO_SPAN),
+        let eval_branch_quota_start_loc = match self.hir.block_spans[entry_point.body] {
+            Ok(span) => SrcLoc::new(entry_point.source_id, span),
+            Err(Poisoned) => SrcLoc::new(entry_point.source_id, ZERO_SPAN),
         };
         let mut scope = Scope::new(
             self,
             diag_ctx,
-            self.hir.entry_source,
+            entry_point.source_id,
             false,
             ComptimeQuota::default(),
             eval_branch_quota_start_loc,
             EvalContext::Other,
         );
 
-        let body = scope.eval_entry_point_body(block);
+        let body = scope.eval_entry_point_body(entry_point.body);
 
         let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.mir_types);
         let fn_id2 =

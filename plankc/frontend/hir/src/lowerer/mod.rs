@@ -765,6 +765,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
     let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
 
     let mut builder = HirBuilder::new();
+    let mut entry_points = IndexVec::new();
     let mut init = None;
     let mut run = None;
 
@@ -798,6 +799,8 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         lowerer.build_file_scope(&source_consts, &project.imports, &consts);
 
         let file = source.cst.as_file();
+        let mut source_init = None;
+        let mut source_run = None;
         for def in file.iter_defs() {
             lowerer.reset_scope();
             match def {
@@ -814,22 +817,22 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                 }
                 TopLevelDef::Init(init_def) => {
                     let span = init_def.node().span();
-                    if source_id != SourceId::ROOT {
-                        lowerer.error_init_outside_entry(span);
-                    } else if let Some((_, prev_span)) = init {
+                    if let Some((_, prev_span)) = source_init {
                         lowerer.error_multiple_init_blocks(span, prev_span);
                     } else {
-                        init = Some((lowerer.lower_body_to_block(init_def.body()), span));
+                        let body = lowerer.lower_body_to_block(init_def.body());
+                        let id = entry_points.push(EntryPoint { source_id, body });
+                        source_init = Some((id, span));
                     }
                 }
                 TopLevelDef::Run(run_def) => {
                     let span = run_def.node().span();
-                    if source_id != SourceId::ROOT {
-                        lowerer.error_run_outside_entry(span);
-                    } else if let Some((_, prev_span)) = run {
+                    if let Some((_, prev_span)) = source_run {
                         lowerer.error_multiple_run_blocks(span, prev_span);
                     } else {
-                        run = Some((lowerer.lower_body_to_block(run_def.body()), span));
+                        let body = lowerer.lower_body_to_block(run_def.body());
+                        let id = entry_points.push(EntryPoint { source_id, body });
+                        source_run = Some((id, span));
                     }
                 }
                 TopLevelDef::Import(_) => {}
@@ -837,15 +840,24 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                 TopLevelDef::Error { .. } => {}
             }
         }
+
+        if source_run.is_some() && source_init.is_none() {
+            lowerer.error_run_without_init_block(source_id);
+        }
+
+        if source_id == SourceId::ROOT {
+            init = source_init;
+            run = source_run;
+        }
     }
 
     let init = match init {
         Some((id, _)) => id,
         None => {
-            lowerer.error_missing_init_block();
+            lowerer.error_missing_entry_init_block();
             let block_id = builder.block_instrs.push_iter(std::iter::empty());
             builder.block_spans.push(Err(Poisoned));
-            block_id
+            entry_points.push(EntryPoint { source_id: SourceId::ROOT, body: block_id })
         }
     };
 
@@ -853,6 +865,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         entry_source: SourceId::ROOT,
         init,
         run: run.map(|(id, _)| id),
+        entry_points,
 
         block_instrs: builder.block_instrs,
         block_spans: builder.block_spans,

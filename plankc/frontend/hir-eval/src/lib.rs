@@ -42,8 +42,18 @@ pub fn evaluate(
         None => OperatorTable::new(),
     };
 
-    let init = evaluator.lower_entrypoint(hir.init, &mut diag_ctx);
-    let run = hir.run.map(|run| evaluator.lower_entrypoint(run, &mut diag_ctx));
+    let mut init = None;
+    let mut run = None;
+    for (entry_id, &entry_point) in hir.entry_points.enumerate_idx() {
+        let fn_id = evaluator.lower_entrypoint(entry_point, &mut diag_ctx);
+        if entry_id == hir.init {
+            init = Some(fn_id);
+        }
+        if Some(entry_id) == hir.run {
+            run = Some(fn_id);
+        }
+    }
+    let init = init.expect("HIR init entry point must exist in entry_points");
 
     for const_id in hir.consts.iter_idx() {
         let _ = evaluator.evaluate_const(const_id, &mut diag_ctx);

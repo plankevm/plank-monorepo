@@ -498,7 +498,7 @@ fn test_duplicate_const_def() {
 }
 
 #[test]
-fn test_init_and_run_outside_entry() {
+fn test_imported_init_and_run_allowed() {
     let project = TestProject::root(
         r#"
         import m::other::*;
@@ -514,24 +514,55 @@ fn test_init_and_run_outside_entry() {
     )
     .add_module("m", "");
     let rendered = render_project_diagnostics(project);
+    pretty_assertions::assert_str_eq!(rendered.trim(), "");
+}
+
+#[test]
+fn test_imported_run_without_init() {
+    let project = TestProject::root(
+        r#"
+        import m::other::*;
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        run {}
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: `init` not allowed here
-         --> other.plk:1:1
-          |
-        1 | init {}
-          | ^^^^^^^ only the entry file may contain `init`
-          |
-        note: entry file
+        error: run block without init block
+         --> other.plk
+          = note: a file with a run block must contain an init block
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_imported_init_does_not_satisfy_entry_init() {
+    let project = TestProject::root(
+        r#"
+        import m::other::*;
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        init {}
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: missing init block
          --> main.plk
-        error: `run` not allowed here
-         --> other.plk:2:1
-          |
-        2 | run {}
-          | ^^^^^^ only the entry file may contain `run`
-          |
-        note: entry file
-         --> main.plk
+          = note: the entry file must contain an init block
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -748,6 +779,26 @@ fn test_missing_init_block() {
     );
     let expected = dedent_preserve_blank_lines(
         r#"
+        error: missing init block
+         --> main.plk
+          = note: the entry file must contain an init block
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_root_run_without_init() {
+    let rendered = render_diagnostics(
+        r#"
+        run {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: run block without init block
+         --> main.plk
+          = note: a file with a run block must contain an init block
         error: missing init block
          --> main.plk
           = note: the entry file must contain an init block
