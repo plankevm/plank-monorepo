@@ -16,7 +16,7 @@ mod operators;
 mod scope;
 mod structs;
 
-pub(crate) use evaluator::{ConstState, Evaluator};
+pub(crate) use evaluator::Evaluator;
 
 use crate::{functions::EvaluatedFunctionCache, operators::OperatorTable};
 
@@ -45,9 +45,6 @@ pub fn evaluate(
     let run = hir.run.map(|run| evaluator.lower_entrypoint(run, &mut diag_ctx));
 
     for const_id in hir.consts.iter_idx() {
-        if matches!(evaluator.evaluated_consts.get(const_id), Some(ConstState::QuotaExhausted)) {
-            continue;
-        }
         let _ = evaluator.evaluate_const(const_id, &mut diag_ctx);
     }
 

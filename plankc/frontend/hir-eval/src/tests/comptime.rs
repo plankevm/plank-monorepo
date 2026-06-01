@@ -1789,9 +1789,9 @@ fn test_nested_comptime_block_exhausts_shared_branch_quota() {
 }
 
 #[test]
-fn test_cached_const_consumes_quota_on_each_reference() {
+fn test_cached_const_references_do_not_consume_quota() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
-    assert_diagnostics(
+    assert_lowers_to(
         std_project(
             r#"
         const Cached = comptime {
@@ -1807,18 +1807,20 @@ fn test_cached_const_consumes_quota_on_each_reference() {
             Cached
         };
 
-        init { @evm_stop(); }
+        init {
+            let mut y: u256 = x;
+            @evm_stop();
+        }
         "#,
         ),
-        &[r#"
-        error: comptime branch quota exhausted
-         --> main.plk:3:11
-          |
-        3 |     while i < 1000 {
-          |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is 1000
-        "#],
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 1000
+            %1 : never = @evm_stop()
+        }
+        "#,
     );
 }
 
@@ -1906,7 +1908,7 @@ fn test_runtime_const_ref_replays_cached_const_in_fresh_quota_unit() {
 }
 
 #[test]
-fn test_cached_const_rechecked_after_entrypoints_with_default_quota() {
+fn test_const_uses_own_default_quota_not_caller_quota() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
     assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
     assert_diagnostics(

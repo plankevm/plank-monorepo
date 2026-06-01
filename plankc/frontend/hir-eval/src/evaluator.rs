@@ -20,8 +20,23 @@ pub(crate) enum State<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ConstState {
     InProgress,
+    Done(ConstEvalResult),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ConstEvalResult {
+    Value(ValueId),
+    Poisoned,
     QuotaExhausted,
-    Done(MaybePoisoned<CachedComptimeValue>),
+}
+
+impl ConstEvalResult {
+    fn value(self) -> MaybePoisoned<ValueId> {
+        match self {
+            ConstEvalResult::Value(value) => Ok(value),
+            ConstEvalResult::Poisoned | ConstEvalResult::QuotaExhausted => Err(Poisoned),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -211,7 +226,7 @@ impl<'a> Evaluator<'a> {
         &mut self,
         const_id: ConstId,
         diag_ctx: &mut DiagCtx<'a>,
-    ) -> Result<MaybePoisoned<ValueId>, Diverge> {
+    ) -> MaybePoisoned<ValueId> {
         let entered_new_comptime_unit = self.comptime_quota.enter_unit_if_inactive();
         let res = self.evaluate_const_in_quota_unit(const_id, diag_ctx);
         if entered_new_comptime_unit {
@@ -224,29 +239,17 @@ impl<'a> Evaluator<'a> {
         &mut self,
         const_id: ConstId,
         diag_ctx: &mut DiagCtx<'a>,
-    ) -> Result<MaybePoisoned<ValueId>, Diverge> {
+    ) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
-        let mut existing_cached_value = None;
-        let mut retry_quota_exhausted = false;
         if let Some(state) = self.evaluated_consts.get(const_id) {
             match state {
-                ConstState::Done(Ok(cached))
-                    if self.comptime_quota.replay_record(cached.quota_record) =>
-                {
-                    return Ok(Ok(cached.value));
-                }
-                ConstState::Done(Ok(cached)) => existing_cached_value = Some(*cached),
-                ConstState::Done(Err(Poisoned)) => return Ok(Err(Poisoned)),
-                ConstState::QuotaExhausted => retry_quota_exhausted = true,
+                ConstState::Done(result) => return result.value(),
                 ConstState::InProgress => {
                     diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
-                    self.evaluated_consts[const_id] = ConstState::Done(Err(Poisoned));
-                    return Ok(Err(Poisoned));
+                    self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::Poisoned);
+                    return Err(Poisoned);
                 }
             }
-        }
-        if existing_cached_value.is_some() || retry_quota_exhausted {
-            self.evaluated_consts.remove(const_id);
         }
 
         self.evaluated_consts.insert_no_prev(const_id, ConstState::InProgress);
@@ -256,20 +259,13 @@ impl<'a> Evaluator<'a> {
         match scope.eval_comptime(const_def.body) {
             Err(Diverge::ComptimeQuotaExhausted) => {
                 scope.eval.comptime_quota.discard_recording();
-                match existing_cached_value {
-                    Some(cached) => {
-                        self.evaluated_consts[const_id] = ConstState::Done(Ok(cached));
-                    }
-                    None => {
-                        self.evaluated_consts[const_id] = ConstState::QuotaExhausted;
-                    }
-                }
-                return Err(Diverge::ComptimeQuotaExhausted);
+                self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::QuotaExhausted);
+                return Err(Poisoned);
             }
             Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
                 scope.eval.comptime_quota.discard_recording();
-                self.evaluated_consts[const_id] = ConstState::Done(Err(Poisoned));
-                return Ok(Err(Poisoned));
+                self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::Poisoned);
+                return Err(Poisoned);
             }
             Ok(_) => {}
         }
@@ -280,37 +276,30 @@ impl<'a> Evaluator<'a> {
                 unreachable!("local in comptime set to runtime instead of poisoned")
             }
         });
-        if let Some(cached) = existing_cached_value {
-            let value = value.expect("cached const re-evaluation should not poison");
-            debug_assert_eq!(
-                cached.value, value,
-                "re-evaluated const produced different cached value"
-            );
-        }
-        let cached_value = match value {
+        let const_result = match value {
             Ok(value) => {
-                let record = scope.eval.comptime_quota.finish_recording();
-                Ok(CachedComptimeValue { value, quota_record: record })
+                let _record = scope.eval.comptime_quota.finish_recording();
+                ConstEvalResult::Value(value)
             }
             Err(Poisoned) => {
                 scope.eval.comptime_quota.discard_recording();
-                Err(Poisoned)
+                ConstEvalResult::Poisoned
             }
         };
         match self.evaluated_consts.get_mut(const_id) {
-            Some(ConstState::Done(Err(Poisoned))) => {
-                // Already poisoned, don't update
-            }
+            Some(ConstState::Done(ConstEvalResult::Poisoned)) => {}
             Some(state @ ConstState::InProgress) => {
-                *state = ConstState::Done(cached_value);
+                *state = ConstState::Done(const_result);
                 self.try_name_type(const_def.name, value);
             }
-            None | Some(ConstState::QuotaExhausted | ConstState::Done(Ok(_))) => {
-                unreachable!("invariant: unset / set to value while evaluating")
+            None
+            | Some(ConstState::Done(ConstEvalResult::Value(_) | ConstEvalResult::QuotaExhausted)) =>
+            {
+                unreachable!("invariant: const state changed while evaluating")
             }
         }
 
-        Ok(value)
+        value
     }
 
     fn try_name_type(&mut self, name: StrId, value: MaybePoisoned<ValueId>) {

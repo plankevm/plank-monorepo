@@ -78,7 +78,7 @@ fn resolve_std_fn<'a>(
         return None;
     };
 
-    let Ok(Ok(value_id)) = evaluator.evaluate_const(const_id, diag_ctx) else {
+    let Ok(value_id) = evaluator.evaluate_const(const_id, diag_ctx) else {
         return None;
     };
     if !matches!(evaluator.values.lookup(value_id), Value::Closure { .. }) {
