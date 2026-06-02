@@ -10,7 +10,8 @@ use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
-    evaluator::{CachedComptimeValue, CallArgSpansIdx, State},
+    evaluator::{CallArgSpansIdx, State},
+    quota::CachedComptimeValue,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -86,6 +87,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             false,
             EvalContext::FunctionPreamble { arg_spans, call_source },
         );
+        fn_scope.comptime_quota = self.comptime_quota.clone();
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
@@ -372,7 +374,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         if call.caller_comptime || preamble.is_comptime_only {
-            return fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
+            let (result, comptime_quota) = {
+                let result = fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
+                (result, fn_scope.comptime_quota)
+            };
+            self.comptime_quota = comptime_quota;
+            return result;
         }
 
         // --- Runtime path ---
@@ -460,27 +467,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble: PreambleResult,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let entered_new_comptime_unit = self.eval.comptime_quota.enter_unit_if_inactive();
-        let res = self.fold_comptime_call_in_quota_unit(call, preamble, values_buf_offset);
-        if entered_new_comptime_unit {
-            self.eval.comptime_quota.exit_unit();
-        }
-        res
-    }
-
-    fn fold_comptime_call_in_quota_unit(
-        &mut self,
-        call: &Call<'_>,
-        preamble: PreambleResult,
-        values_buf_offset: usize,
-    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         preamble.return_type?;
 
-        if !self.eval.comptime_quota.spend_branch() {
-            self.diag_ctx.emit_comptime_call_branch_quota_exhausted(
-                call.loc(),
-                self.eval.comptime_quota.limit(),
-            );
+        if !self.comptime_quota.spend_branch() {
+            self.diag_ctx
+                .emit_comptime_call_branch_quota_exhausted(call.loc(), self.comptime_quota.limit());
             return Ok(Err(Diverge::ComptimeQuotaExhausted));
         }
 
@@ -496,24 +487,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     state.set(EvaluatedFnState::Done(Err(Poisoned)));
                     return Err(Poisoned);
                 }
-                EvaluatedFnState::Done(value) => {
-                    match value {
-                        Ok(cached)
-                            if self.eval.comptime_quota.replay_record(cached.quota_record) =>
-                        {
-                            return Ok(Ok(EvalValue::Comptime(cached.value)));
-                        }
-                        Ok(cached) => {
-                            existing_cached_value = Some(cached);
-                            state
-                        }
-                        Err(Poisoned) => {
-                            // Cache collapses `Diverge` into Err(Poisoned);
-                            // reconstruct the diverge when the return type was never.
-                            return preamble.suppress_poison_iff_diverging_return_type();
-                        }
+                EvaluatedFnState::Done(value) => match value {
+                    Ok(cached) if self.comptime_quota.replay_record(cached.quota_record) => {
+                        return Ok(Ok(EvalValue::Comptime(cached.value)));
                     }
-                }
+                    Ok(cached) => {
+                        existing_cached_value = Some(cached);
+                        state
+                    }
+                    Err(Poisoned) => {
+                        // Cache collapses `Diverge` into Err(Poisoned);
+                        // reconstruct the diverge when the return type was never.
+                        return preamble.suppress_poison_iff_diverging_return_type();
+                    }
+                },
             },
         };
 
@@ -568,12 +555,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Undo pessimistic result poison (allows recursion detection).
         cache_state.set(EvaluatedFnState::InProgress);
 
-        self.eval.comptime_quota.begin_recording();
+        self.comptime_quota.begin_recording();
         let eval_res = match self.eval_comptime(call.func.body) {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
             Err(Diverge::ComptimeQuotaExhausted) => {
-                self.eval.comptime_quota.discard_recording();
+                self.comptime_quota.discard_recording();
                 cache_state.set(match existing_cached_value {
                     Some(cached) => EvaluatedFnState::Done(Ok(cached)),
                     None => EvaluatedFnState::Empty,
@@ -589,11 +576,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     existing_cached_value.is_none_or(|cached| cached.value == value),
                     "re-evaluated function produced different cached value"
                 );
-                let record = self.eval.comptime_quota.finish_recording();
+                let record = self.comptime_quota.finish_recording();
                 Ok(CachedComptimeValue { value, quota_record: record })
             }
             Err(Poisoned) | Ok(Err(_)) => {
-                self.eval.comptime_quota.discard_recording();
+                self.comptime_quota.discard_recording();
                 debug_assert!(
                     existing_cached_value.is_none(),
                     "cached function re-evaluation should not poison or diverge"

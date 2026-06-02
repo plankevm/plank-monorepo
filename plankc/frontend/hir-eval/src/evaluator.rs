@@ -39,116 +39,6 @@ impl ConstEvalResult {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct CachedComptimeValue {
-    pub value: ValueId,
-    pub quota_record: ComptimeQuotaRecord,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(crate) struct ComptimeQuotaRecord {
-    pub branches_consumed: u32,
-    pub max_eval_branch_quota: u32,
-}
-
-pub(crate) const DEFAULT_COMPTIME_BRANCH_QUOTA: u32 = 1000;
-
-#[derive(Debug, Clone)]
-pub(crate) struct ComptimeQuota {
-    limit: u32,
-    spent: u32,
-    depth: u32,
-    records: Vec<ComptimeQuotaRecord>,
-}
-
-impl Default for ComptimeQuota {
-    fn default() -> Self {
-        Self { limit: DEFAULT_COMPTIME_BRANCH_QUOTA, spent: 0, depth: 0, records: Vec::new() }
-    }
-}
-
-impl ComptimeQuota {
-    fn reset_budget(&mut self) {
-        self.limit = DEFAULT_COMPTIME_BRANCH_QUOTA;
-        self.spent = 0;
-    }
-
-    pub(crate) fn enter_unit(&mut self) {
-        if self.depth == 0 {
-            self.reset_budget();
-        }
-        self.depth = self.depth.checked_add(1).expect("comptime quota depth overflow");
-    }
-
-    pub(crate) fn enter_unit_if_inactive(&mut self) -> bool {
-        if self.depth == 0 {
-            self.enter_unit();
-            true
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn exit_unit(&mut self) {
-        self.depth = self.depth.checked_sub(1).expect("comptime quota depth underflow");
-    }
-
-    pub(crate) fn raise_limit(&mut self, limit: u32) {
-        self.limit = self.limit.max(limit);
-        if let Some(record) = self.records.last_mut() {
-            record.max_eval_branch_quota = record.max_eval_branch_quota.max(limit);
-        }
-    }
-
-    pub(crate) fn spend_branch(&mut self) -> bool {
-        debug_assert!(self.spent <= self.limit, "comptime quota overspent");
-        if self.spent == self.limit {
-            return false;
-        }
-        self.spent += 1;
-        if let Some(record) = self.records.last_mut() {
-            record.branches_consumed += 1;
-        }
-        true
-    }
-
-    pub(crate) fn limit(&self) -> u32 {
-        self.limit
-    }
-
-    pub(crate) fn replay_record(&mut self, replayed: ComptimeQuotaRecord) -> bool {
-        if self.spent.checked_add(replayed.branches_consumed).is_none_or(|spent| spent > self.limit)
-        {
-            return false;
-        }
-        self.spent += replayed.branches_consumed;
-
-        if let Some(record) = self.records.last_mut() {
-            record.branches_consumed += replayed.branches_consumed;
-        }
-        self.raise_limit(replayed.max_eval_branch_quota);
-        true
-    }
-
-    pub(crate) fn begin_recording(&mut self) {
-        self.records.push(ComptimeQuotaRecord::default());
-    }
-
-    pub(crate) fn finish_recording(&mut self) -> ComptimeQuotaRecord {
-        let record = self.records.pop().expect("comptime quota recording stack underflow");
-        if let Some(parent) = self.records.last_mut() {
-            parent.branches_consumed += record.branches_consumed;
-            parent.max_eval_branch_quota =
-                parent.max_eval_branch_quota.max(record.max_eval_branch_quota);
-        }
-        record
-    }
-
-    pub(crate) fn discard_recording(&mut self) {
-        self.records.pop().expect("comptime quota recording stack underflow");
-    }
-}
-
 newtype_index! {
     pub(crate) struct CallArgSpansIdx;
 }
@@ -170,7 +60,6 @@ pub(crate) struct Evaluator<'a> {
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
     pub operator_table: OperatorTable,
-    pub(crate) comptime_quota: ComptimeQuota,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -205,7 +94,6 @@ impl<'a> Evaluator<'a> {
             call_arg_spans: ListOfLists::new(),
 
             operator_table: OperatorTable::new(),
-            comptime_quota: ComptimeQuota::default(),
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
@@ -227,43 +115,26 @@ impl<'a> Evaluator<'a> {
         const_id: ConstId,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> MaybePoisoned<ValueId> {
-        let entered_new_comptime_unit = self.comptime_quota.enter_unit_if_inactive();
-        let res = self.evaluate_const_in_quota_unit(const_id, diag_ctx);
-        if entered_new_comptime_unit {
-            self.comptime_quota.exit_unit();
-        }
-        res
-    }
-
-    fn evaluate_const_in_quota_unit(
-        &mut self,
-        const_id: ConstId,
-        diag_ctx: &mut DiagCtx<'a>,
-    ) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
-        if let Some(state) = self.evaluated_consts.get(const_id) {
-            match state {
-                ConstState::Done(result) => return result.value(),
-                ConstState::InProgress => {
-                    diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
-                    self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::Poisoned);
-                    return Err(Poisoned);
-                }
+        match self.evaluated_consts.get_mut(const_id) {
+            Some(ConstState::Done(result)) => return result.value(),
+            Some(state @ ConstState::InProgress) => {
+                diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
+                *state = ConstState::Done(ConstEvalResult::Poisoned);
+                return Err(Poisoned);
             }
+            None => {}
         }
 
         self.evaluated_consts.insert_no_prev(const_id, ConstState::InProgress);
-        self.comptime_quota.begin_recording();
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
         match scope.eval_comptime(const_def.body) {
             Err(Diverge::ComptimeQuotaExhausted) => {
-                scope.eval.comptime_quota.discard_recording();
                 self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::QuotaExhausted);
                 return Err(Poisoned);
             }
             Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
-                scope.eval.comptime_quota.discard_recording();
                 self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::Poisoned);
                 return Err(Poisoned);
             }
@@ -277,15 +148,10 @@ impl<'a> Evaluator<'a> {
             }
         });
         let const_result = match value {
-            Ok(value) => {
-                let _record = scope.eval.comptime_quota.finish_recording();
-                ConstEvalResult::Value(value)
-            }
-            Err(Poisoned) => {
-                scope.eval.comptime_quota.discard_recording();
-                ConstEvalResult::Poisoned
-            }
+            Ok(value) => ConstEvalResult::Value(value),
+            Err(Poisoned) => ConstEvalResult::Poisoned,
         };
+
         match self.evaluated_consts.get_mut(const_id) {
             Some(ConstState::Done(ConstEvalResult::Poisoned)) => {}
             Some(state @ ConstState::InProgress) => {

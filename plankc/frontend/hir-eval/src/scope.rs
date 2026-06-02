@@ -2,6 +2,7 @@ use crate::{
     Evaluator,
     diagnostics::{BindingLoc, DiagCtx},
     evaluator::CallArgSpansIdx,
+    quota::ComptimeQuota,
 };
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
@@ -64,6 +65,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub ctx: EvalContext,
     pub comptime: bool,
     pub conditional: bool,
+    pub comptime_quota: ComptimeQuota,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
     pub mir_types: IndexVec<mir::LocalId, TypeId>,
@@ -85,6 +87,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ctx,
             comptime,
             conditional: false,
+            comptime_quota: ComptimeQuota::default(),
 
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
@@ -109,11 +112,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
-        self.eval.comptime_quota.enter_unit();
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
         let res = self.eval_block_inline(block);
         self.comptime = parent_comptime;
-        self.eval.comptime_quota.exit_unit();
         res
     }
 
@@ -667,11 +668,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(());
             }
 
-            if !self.eval.comptime_quota.spend_branch() {
+            if !self.comptime_quota.spend_branch() {
                 if let Ok(span) = self.hir.block_spans[condition_block] {
                     self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
                         self.loc(span),
-                        self.eval.comptime_quota.limit(),
+                        self.comptime_quota.limit(),
                     );
                 }
                 return Err(Diverge::ComptimeQuotaExhausted);

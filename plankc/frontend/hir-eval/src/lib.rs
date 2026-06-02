@@ -13,6 +13,7 @@ mod diagnostics;
 mod evaluator;
 mod functions;
 mod operators;
+mod quota;
 mod scope;
 mod structs;
 

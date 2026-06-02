@@ -228,7 +228,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_eval_branch_quota_too_large(self.loc(arg_use_span));
                     return Err(Poisoned);
                 };
-                self.eval.comptime_quota.raise_limit(requested_quota);
+                self.comptime_quota.raise_limit(requested_quota);
                 Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
             }
             _ => unreachable!("not a comptime builtin: {builtin}"),

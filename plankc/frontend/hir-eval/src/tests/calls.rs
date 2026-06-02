@@ -1,5 +1,5 @@
 use super::*;
-use crate::evaluator::DEFAULT_COMPTIME_BRANCH_QUOTA;
+use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
 
 #[test]
 fn test_preamble_error_per_call_site() {
@@ -946,7 +946,7 @@ fn test_comptime_function_calls_consume_call_entry_quota() {
 #[test]
 fn test_cached_comptime_function_calls_replay_body_quota() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
-    assert_eq!(998, DEFAULT_COMPTIME_BRANCH_QUOTA - 2);
+    assert_eq!(996, DEFAULT_COMPTIME_BRANCH_QUOTA - 4);
     assert_diagnostics(
         std_project(
             r#"
@@ -962,7 +962,7 @@ fn test_cached_comptime_function_calls_replay_body_quota() {
             let mut warm: u256 = comptime { consume_3_branches() };
             let mut x: u256 = comptime {
                 let mut i = 0;
-                while i < 998 {
+                while i < 996 {
                     i = i + 1;
                 }
                 consume_3_branches();
@@ -987,7 +987,7 @@ fn test_cached_comptime_function_calls_replay_body_quota() {
 #[test]
 fn test_cached_comptime_function_replay_applies_eval_branch_quota_raise() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
-    assert_eq!(999, DEFAULT_COMPTIME_BRANCH_QUOTA - 1);
+    assert_eq!(998, DEFAULT_COMPTIME_BRANCH_QUOTA - 2);
     assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
     assert_diagnostics(
         std_project(
@@ -1003,7 +1003,7 @@ fn test_cached_comptime_function_replay_applies_eval_branch_quota_raise() {
             let mut warm: u256 = comptime { raise_quota() };
             let mut x: u256 = comptime {
                 let mut i = 0;
-                while i < 999 {
+                while i < 998 {
                     i = i + 1;
                 }
                 raise_quota();

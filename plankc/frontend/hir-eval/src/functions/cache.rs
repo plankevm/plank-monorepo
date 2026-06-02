@@ -8,7 +8,7 @@ use plank_hir::ValueId;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned};
 
-use crate::evaluator::{CachedComptimeValue, State};
+use crate::{evaluator::State, quota::CachedComptimeValue};
 
 newtype_index! {
     pub(crate) struct LoweredFnIdx;
