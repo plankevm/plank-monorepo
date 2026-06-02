@@ -24,6 +24,14 @@ struct PreambleResult {
     is_comptime_only: bool,
 }
 
+impl PreambleResult {
+    /// Helper to get outcome of a poisoned call
+    /// Diverges in case of a never-returning function to prevent error cascades
+    fn propagate_call_poison(&self) -> MaybePoisoned<Diverge> {
+        if self.return_type == Ok(TypeId::NEVER) { Ok(Diverge::END) } else { Err(Poisoned) }
+    }
+}
+
 struct Call<'a> {
     source: SourceId,
     caller_comptime: bool,
@@ -391,13 +399,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let lowered = match lowered {
             Ok(lowered) => lowered,
-            Err(Poisoned) => {
-                return if preamble.return_type == Ok(TypeId::NEVER) {
-                    Ok(Err(Diverge::END))
-                } else {
-                    Err(Poisoned)
-                };
-            }
+            Err(Poisoned) => return preamble.propagate_call_poison().map(Err),
         };
 
         let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
@@ -425,11 +427,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         });
         if let Err(Poisoned) = validity {
-            return if preamble.return_type == Ok(TypeId::NEVER) {
-                Ok(Err(Diverge::END))
-            } else {
-                Err(Poisoned)
-            };
+            return preamble.propagate_call_poison().map(Err);
         }
 
         let expr = mir::Expr::Call { callee: lowered, args: mir_args };
@@ -464,15 +462,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 State::Done(value) => {
                     return match value {
                         Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
-                        Err(Poisoned) => {
-                            // Cache collapses `Diverge` into Err(Poisoned);
-                            // reconstruct the diverge when the return type was never.
-                            if preamble.return_type == Ok(TypeId::NEVER) {
-                                Ok(Err(Diverge::END))
-                            } else {
-                                Err(Poisoned)
-                            }
-                        }
+                        // Cache collapses `Diverge` into `Err(Poisoned)`.
+                        Err(Poisoned) => preamble.propagate_call_poison().map(Err),
                     };
                 }
             },
