@@ -28,7 +28,7 @@ fn assert_shuffle(
     let mut ops = Vec::new();
 
     let mut stack = TrackedStack::new_from_evm(&next_alloc_id, |op| ops.push(op), evm_stack, 8);
-    GreedyShuffler::run(&mut stack, &target, config);
+    GreedyShuffler::run(config, &mut stack, &target);
 
     assert_eq!(stack.stack().fifo(), target, "end != target");
 
@@ -163,4 +163,14 @@ fn needs_unspill() {
         [1, 6, 3, 4, 5, 6],
         [Swap(1), Pop, store(0), store(1), Dup(2), load(1), Swap(1), load(0)],
     );
+}
+
+#[test]
+fn current_is_already_correct_prefix() {
+    assert_shuffle(ScheduleConfig::max_swap_no_exchange(2), [1, 0], [0], [Pop]);
+}
+
+#[test]
+fn correct_after_swap_but_trash_top() {
+    assert_shuffle(ScheduleConfig::default(), [1, 3, 2], [1, 2], [Swap(1), Pop]);
 }

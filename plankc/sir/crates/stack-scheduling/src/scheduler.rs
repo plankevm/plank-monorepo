@@ -1,6 +1,5 @@
-use plank_core::LoopLimit;
 use sir_data::{BlockView, ControlView, IndexVec, StaticAllocId, index_vec};
-use std::{cell::Cell, collections::VecDeque};
+use std::cell::Cell;
 
 use crate::{
     op_graph::*,

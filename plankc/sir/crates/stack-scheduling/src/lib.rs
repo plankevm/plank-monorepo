@@ -1,15 +1,10 @@
+use crate::{scheduler::dumb_schedule, stack::StackOps};
+use layouts::{LayoutsTracker, build_basic_block_layout_sets};
+use op_graph::build_graph_simple;
 use plank_core::{DenseIndexMap, list_of_lists::ListOfLists};
 use sir_data::{BasicBlockId, EthIRProgram, newtype_index};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
-
-use layouts::{LayoutsTracker, build_basic_block_layout_sets};
-use op_graph::build_graph_simple;
 pub use stack::ScheduleConfig;
-
-use crate::{
-    scheduler::{dumb_schedule, dumb_shuffle_to_output},
-    stack::StackOps,
-};
 
 mod greedy_shuffler;
 mod layouts;
@@ -66,7 +61,7 @@ pub fn schedule<'ir>(
         let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
         let ops_idx = ops.push_with(|mut pusher| {
             dumb_schedule(
-                dumb_shuffle_to_output,
+                greedy_shuffler::shuffle,
                 |op| pusher.push(op),
                 block,
                 &program.next_static_alloc_id,

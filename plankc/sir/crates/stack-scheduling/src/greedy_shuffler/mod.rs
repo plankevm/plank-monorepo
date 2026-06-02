@@ -20,11 +20,19 @@ pub struct GreedyShuffler<'a, 'ir, Sink: FnMut(StackOps)> {
 
 const TOP_IDX: Depth<CurrentStack> = Depth::new(0);
 
+pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
+    config: ScheduleConfig,
+    current: &'a mut TrackedStack<'ir, Sink>,
+    graph: &'a OpGraph,
+) {
+    GreedyShuffler::run(config, current, graph.end_stack_fifo.as_slice());
+}
+
 impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     pub fn run(
+        config: ScheduleConfig,
         current: &'a mut TrackedStack<'ir, Sink>,
         target: &'a [ValueNodeId],
-        config: ScheduleConfig,
     ) {
         let mut this = Self {
             complete_at_bottom: 0,
@@ -37,6 +45,13 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         this.update_correct();
         this.shrink();
         this.grow();
+        this.cleanup_unneeded_top();
+    }
+
+    fn cleanup_unneeded_top(&mut self) {
+        while self.current.len().to_usize() > self.target.len() {
+            self.current.pop();
+        }
     }
 
     #[track_caller]
@@ -57,27 +72,13 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     #[track_caller]
-    fn from_target(&self, depth: Depth<TargetStack>) -> FromBottom {
-        FromBottom(self.target.len() - depth.0 - 1)
-    }
-
-    #[track_caller]
     fn from_current(&self, depth: Depth<CurrentStack>) -> FromBottom {
         FromBottom(self.current.fifo().len() - depth.0 - 1)
     }
 
     #[track_caller]
-    fn to_target(&self, depth: FromBottom) -> Depth<TargetStack> {
-        Depth::new(self.target.len() - depth.0 - 1)
-    }
-
-    #[track_caller]
     fn to_current(&self, depth: FromBottom) -> Depth<CurrentStack> {
         Depth::new(self.current.fifo().len() - depth.0 - 1)
-    }
-
-    fn target_len(&self) -> Depth<TargetStack> {
-        Depth::new(self.target.len().into())
     }
 
     fn current_len(&self) -> Depth<CurrentStack> {
@@ -142,10 +143,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn grow(&mut self) {
-        let mut limit = LoopLimit::max(20);
+        let mut limit = LoopLimit::max(100_000);
         while self.complete_at_bottom < self.target.len() {
             limit.tick();
-            let stepped = self.current.len().to_usize() > self.complete_at_bottom
+            let current_contains_incomplete =
+                self.current.len().to_usize() > self.complete_at_bottom;
+            let stepped = current_contains_incomplete
                 && (self.pop_unneeded()
                     || self.swap_to_correct_position()
                     || self.exchange_via_top()
@@ -159,7 +162,6 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             }
             self.update_correct();
         }
-        assert_eq!(self.current.fifo(), self.target);
     }
 
     fn is_unneeded(&self, value: ValueNodeId) -> bool {
