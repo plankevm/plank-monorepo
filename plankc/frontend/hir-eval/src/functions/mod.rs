@@ -373,16 +373,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         if call.caller_comptime || preamble.is_comptime_only {
-            let (call_result, comptime_quota, max_eval_branch_quota_seen) = {
-                let call_result = fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
-                (call_result, fn_scope.comptime_quota, fn_scope.max_eval_branch_quota_seen)
-            };
+            let call_result = fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
+            let Scope { comptime_quota, max_eval_branch_quota_seen, .. } = fn_scope;
             self.comptime_quota = comptime_quota;
             self.max_eval_branch_quota_seen =
                 self.max_eval_branch_quota_seen.max(max_eval_branch_quota_seen);
-            return call_result.map(|value_or_diverge| {
-                value_or_diverge.map(|ComptimeCallResult { value, .. }| EvalValue::Comptime(value))
-            });
+            return match call_result {
+                Ok(Ok(ComptimeCallResult { value, .. })) => Ok(Ok(EvalValue::Comptime(value))),
+                Ok(Err(diverged)) => Ok(Err(diverged)),
+                Err(Poisoned) => Err(Poisoned),
+            };
         }
 
         // --- Runtime path ---
@@ -519,12 +519,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         // Pessimistically set result incase we short-circuit before evaluating the body.
         cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
-        let restore_cache_state = |existing_cached_value| {
-            cache_state.set(match existing_cached_value {
-                Some(cached) => EvaluatedFnState::Done(Ok(cached)),
-                None => EvaluatedFnState::Empty,
-            });
-        };
 
         let mut poisoned = false;
         for (&param, &arg) in call.params.iter().zip(call.args) {
@@ -579,7 +573,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
             Err(Diverge::ComptimeQuotaExhausted) => {
-                restore_cache_state(existing_cached_value);
+                cache_state.set(match existing_cached_value {
+                    Some(cached) => EvaluatedFnState::Done(Ok(cached)),
+                    // Since this was the first attempt at evaluation and it failed due to quota
+                    // exhaustion we set the empty state to ensure the call can be retried.
+                    None => EvaluatedFnState::Empty,
+                });
                 return Ok(Err(Diverge::ComptimeQuotaExhausted));
             }
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
@@ -587,7 +586,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         match eval_res {
             Ok(Ok(value)) => {
-                debug_assert!(
+                assert!(
                     existing_cached_value.is_none_or(|cached| cached.value == value),
                     "re-evaluated function produced different cached value"
                 );
