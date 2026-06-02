@@ -132,35 +132,3 @@ impl OpScheduler for DumbOpScheduler {
         stack.op(graph, op);
     }
 }
-
-fn count_occurences(values: &[ValueNodeId], total_values: usize) -> IndexVec<ValueNodeId, u16> {
-    let mut counts = IndexVec::new();
-    counts.resize(total_values, 0);
-    for &value in values {
-        counts[value] += 1;
-    }
-    counts
-}
-
-pub fn dumb_shuffle_to_output<Sink: FnMut(StackOps)>(
-    _config: ScheduleConfig,
-    stack: &mut TrackedStack<'_, Sink>,
-    graph: &OpGraph,
-) {
-    let target_stack = graph.end_stack_fifo.as_slice();
-    let target_counts = count_occurences(target_stack, graph.values.len());
-
-    for _ in 0..stack.len() {
-        let top = stack.top().expect("shouldn't pop more than one per loop");
-        if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
-            stack.pop();
-        } else {
-            stack.spill_top();
-        }
-    }
-
-    for &target in target_stack.iter().rev() {
-        let slot = stack.get_spilled(target).expect("missing value in spilled");
-        stack.load(slot);
-    }
-}
