@@ -1,12 +1,6 @@
 use super::*;
 use plank_test_utils::TestProject;
 
-const STD_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../std");
-
-fn std_project(source: &str) -> TestProject {
-    TestProject::root(source).with_stdlib_dir(STD_DIR)
-}
-
 #[test]
 fn test_binary_op_not_supported_without_std() {
     assert_diagnostics(

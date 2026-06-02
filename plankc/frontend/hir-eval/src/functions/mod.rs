@@ -25,10 +25,10 @@ struct PreambleResult {
 }
 
 impl PreambleResult {
-    /// Helper to get outcome of a poisoned call
-    /// Diverges in case of a never-returning function to prevent error cascades
-    fn propagate_call_poison(&self) -> MaybePoisoned<Diverge> {
-        if self.return_type == Ok(TypeId::NEVER) { Ok(Diverge::END) } else { Err(Poisoned) }
+    fn suppress_poison_iff_diverging_return_type(
+        &self,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        if self.return_type == Ok(TypeId::NEVER) { Ok(Err(Diverge::END)) } else { Err(Poisoned) }
     }
 }
 
@@ -399,7 +399,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let lowered = match lowered {
             Ok(lowered) => lowered,
-            Err(Poisoned) => return preamble.propagate_call_poison().map(Err),
+            Err(Poisoned) => return preamble.suppress_poison_iff_diverging_return_type(),
         };
 
         let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
@@ -427,7 +427,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         });
         if let Err(Poisoned) = validity {
-            return preamble.propagate_call_poison().map(Err);
+            return preamble.suppress_poison_iff_diverging_return_type();
         }
 
         let expr = mir::Expr::Call { callee: lowered, args: mir_args };
@@ -462,8 +462,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 State::Done(value) => {
                     return match value {
                         Ok(value) => Ok(Ok(EvalValue::Comptime(value))),
-                        // Cache collapses `Diverge` into `Err(Poisoned)`.
-                        Err(Poisoned) => preamble.propagate_call_poison().map(Err),
+                        // Cache collapses `Diverge` into Err(Poisoned);
+                        // reconstruct the diverge when the return type was never.
+                        Err(Poisoned) => preamble.suppress_poison_iff_diverging_return_type(),
                     };
                 }
             },

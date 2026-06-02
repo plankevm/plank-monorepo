@@ -769,11 +769,12 @@ fn test_comptime_diverge_prevents_cascade() {
 #[test]
 fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
     assert_diagnostics(
-        r#"
+        std_project(
+            r#"
         const sink = fn(x: u256) never { @evm_stop(); };
         const f = fn() never {
             let c = @evm_calldataload(0);
-            let v = if @evm_iszero(c) {
+            let v = if c == 0 {
                 1
             } else {
                 false
@@ -784,6 +785,7 @@ fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
             f();
         }
         "#,
+        ),
         &[r#"
         error: `if` and `else` have incompatible types
          --> main.plk:7:9
@@ -800,11 +802,12 @@ fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
 #[test]
 fn test_if_arm_mismatch_into_non_never_call_preserves_poison() {
     assert_diagnostics(
-        r#"
+        std_project(
+            r#"
         const sink = fn(x: u256) u256 { x };
         const f = fn() void {
             let c = @evm_calldataload(0);
-            let v = if @evm_iszero(c) {
+            let v = if c == 0 {
                 1
             } else {
                 false
@@ -817,6 +820,7 @@ fn test_if_arm_mismatch_into_non_never_call_preserves_poison() {
             @evm_stop();
         }
         "#,
+        ),
         &[
             r#"
             error: `if` and `else` have incompatible types

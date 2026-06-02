@@ -11,6 +11,12 @@ use plank_session::Session;
 use plank_test_utils::{TestProject, dedent_preserve_blank_lines};
 use plank_values::ValueInterner;
 
+const STD_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../std");
+
+fn std_project(source: &str) -> TestProject {
+    TestProject::root(source).with_stdlib_dir(STD_DIR)
+}
+
 fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
     let project = project.into();
     let mut session = Session::new();
