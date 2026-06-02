@@ -25,9 +25,7 @@ struct PreambleResult {
 }
 
 impl PreambleResult {
-    fn suppress_poison_iff_diverging_return_type(
-        &self,
-    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+    fn suppress_poison_iff_diverging_return_type<T>(&self) -> MaybePoisoned<Result<T, Diverge>> {
         if self.return_type == Ok(TypeId::NEVER) { Ok(Err(Diverge::END)) } else { Err(Poisoned) }
     }
 }
