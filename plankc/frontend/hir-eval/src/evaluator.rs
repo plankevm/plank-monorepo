@@ -18,12 +18,6 @@ pub(crate) enum State<T> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ConstState {
-    InProgress,
-    Done(ConstEvalResult),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ConstEvalResult {
     Value(ValueId),
     Poisoned,
@@ -50,7 +44,7 @@ pub(crate) struct Evaluator<'a> {
     pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
     pub types: &'a TypeInterner,
 
-    pub evaluated_consts: DenseIndexMap<ConstId, ConstState>,
+    pub evaluated_consts: DenseIndexMap<ConstId, State<ConstEvalResult>>,
     pub values: &'a mut ValueInterner,
     pub hir: &'a Hir,
 
@@ -117,25 +111,25 @@ impl<'a> Evaluator<'a> {
     ) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
         match self.evaluated_consts.get_mut(const_id) {
-            Some(ConstState::Done(result)) => return result.value(),
-            Some(state @ ConstState::InProgress) => {
+            Some(State::Done(result)) => return result.value(),
+            Some(state @ State::InProgress) => {
                 diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
-                *state = ConstState::Done(ConstEvalResult::Poisoned);
+                *state = State::Done(ConstEvalResult::Poisoned);
                 return Err(Poisoned);
             }
             None => {}
         }
 
-        self.evaluated_consts.insert_no_prev(const_id, ConstState::InProgress);
+        self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
         let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
         match scope.eval_comptime(const_def.body) {
             Err(Diverge::ComptimeQuotaExhausted) => {
-                self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::QuotaExhausted);
+                self.evaluated_consts[const_id] = State::Done(ConstEvalResult::QuotaExhausted);
                 return Err(Poisoned);
             }
             Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
-                self.evaluated_consts[const_id] = ConstState::Done(ConstEvalResult::Poisoned);
+                self.evaluated_consts[const_id] = State::Done(ConstEvalResult::Poisoned);
                 return Err(Poisoned);
             }
             Ok(_) => {}
@@ -153,14 +147,13 @@ impl<'a> Evaluator<'a> {
         };
 
         match self.evaluated_consts.get_mut(const_id) {
-            Some(ConstState::Done(ConstEvalResult::Poisoned)) => {}
-            Some(state @ ConstState::InProgress) => {
-                *state = ConstState::Done(const_result);
+            Some(State::Done(ConstEvalResult::Poisoned)) => {}
+            Some(state @ State::InProgress) => {
+                *state = State::Done(const_result);
                 self.try_name_type(const_def.name, value);
             }
             None
-            | Some(ConstState::Done(ConstEvalResult::Value(_) | ConstEvalResult::QuotaExhausted)) =>
-            {
+            | Some(State::Done(ConstEvalResult::Value(_) | ConstEvalResult::QuotaExhausted)) => {
                 unreachable!("invariant: const state changed while evaluating")
             }
         }
