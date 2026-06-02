@@ -66,6 +66,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub comptime: bool,
     pub conditional: bool,
     pub comptime_quota: ComptimeQuota,
+    pub max_eval_branch_quota_seen: u32,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
     pub mir_types: IndexVec<mir::LocalId, TypeId>,
@@ -88,6 +89,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             comptime,
             conditional: false,
             comptime_quota: ComptimeQuota::default(),
+            max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
 
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),

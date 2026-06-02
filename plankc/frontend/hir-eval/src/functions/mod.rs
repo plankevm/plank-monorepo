@@ -11,7 +11,6 @@ pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
     evaluator::{CallArgSpansIdx, State},
-    quota::CachedComptimeValue,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -374,12 +373,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         if call.caller_comptime || preamble.is_comptime_only {
-            let (result, comptime_quota) = {
-                let result = fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
-                (result, fn_scope.comptime_quota)
+            let (call_result, comptime_quota, max_eval_branch_quota_seen) = {
+                let call_result = fn_scope.fold_comptime_call(&call, preamble, values_buf_offset);
+                (call_result, fn_scope.comptime_quota, fn_scope.max_eval_branch_quota_seen)
             };
             self.comptime_quota = comptime_quota;
-            return result;
+            self.max_eval_branch_quota_seen =
+                self.max_eval_branch_quota_seen.max(max_eval_branch_quota_seen);
+            return call_result.map(|value_or_diverge| {
+                value_or_diverge.map(|ComptimeCallResult { value, .. }| EvalValue::Comptime(value))
+            });
         }
 
         // --- Runtime path ---
@@ -466,7 +469,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         call: &Call<'_>,
         preamble: PreambleResult,
         values_buf_offset: usize,
-    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+    ) -> MaybePoisoned<Result<ComptimeCallResult, Diverge>> {
         preamble.return_type?;
 
         if !self.comptime_quota.spend_branch() {
@@ -488,8 +491,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Poisoned);
                 }
                 EvaluatedFnState::Done(value) => match value {
-                    Ok(cached) if self.comptime_quota.replay_record(cached.quota_record) => {
-                        return Ok(Ok(EvalValue::Comptime(cached.value)));
+                    Ok(cached)
+                        if self.comptime_quota.replay_cached_call(
+                            cached.branches_consumed,
+                            cached.max_eval_branch_quota_seen,
+                        ) =>
+                    {
+                        self.max_eval_branch_quota_seen =
+                            self.max_eval_branch_quota_seen.max(cached.max_eval_branch_quota_seen);
+                        return Ok(Ok(cached));
                     }
                     Ok(cached) => {
                         existing_cached_value = Some(cached);
@@ -506,6 +516,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         // Pessimistically set result incase we short-circuit before evaluating the body.
         cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
+        let restore_cache_state = |existing_cached_value| {
+            cache_state.set(match existing_cached_value {
+                Some(cached) => EvaluatedFnState::Done(Ok(cached)),
+                None => EvaluatedFnState::Empty,
+            });
+        };
 
         let mut poisoned = false;
         for (&param, &arg) in call.params.iter().zip(call.args) {
@@ -555,40 +571,53 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Undo pessimistic result poison (allows recursion detection).
         cache_state.set(EvaluatedFnState::InProgress);
 
-        self.comptime_quota.begin_recording();
+        let spent_before_body = self.comptime_quota.spent();
         let eval_res = match self.eval_comptime(call.func.body) {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) => Err(Poisoned),
             Err(Diverge::ComptimeQuotaExhausted) => {
-                self.comptime_quota.discard_recording();
-                cache_state.set(match existing_cached_value {
-                    Some(cached) => EvaluatedFnState::Done(Ok(cached)),
-                    None => EvaluatedFnState::Empty,
-                });
+                restore_cache_state(existing_cached_value);
                 return Ok(Err(Diverge::ComptimeQuotaExhausted));
             }
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
             Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
         };
-        cache_state.set(EvaluatedFnState::Done(match eval_res {
+        match eval_res {
             Ok(Ok(value)) => {
                 debug_assert!(
                     existing_cached_value.is_none_or(|cached| cached.value == value),
                     "re-evaluated function produced different cached value"
                 );
-                let record = self.comptime_quota.finish_recording();
-                Ok(CachedComptimeValue { value, quota_record: record })
+                let branches_consumed = self
+                    .comptime_quota
+                    .spent()
+                    .checked_sub(spent_before_body)
+                    .expect("comptime quota spent should not decrease during call evaluation");
+                let result = ComptimeCallResult {
+                    value,
+                    branches_consumed,
+                    max_eval_branch_quota_seen: self.max_eval_branch_quota_seen,
+                };
+                cache_state.set(EvaluatedFnState::Done(Ok(result)));
+                Ok(Ok(result))
             }
-            Err(Poisoned) | Ok(Err(_)) => {
-                self.comptime_quota.discard_recording();
+            Err(Poisoned) => {
                 debug_assert!(
                     existing_cached_value.is_none(),
                     "cached function re-evaluation should not poison or diverge"
                 );
+                cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
                 Err(Poisoned)
             }
-        }));
-        eval_res.map(|value_or_diverge| value_or_diverge.map(EvalValue::Comptime))
+            Ok(Err(diverge)) => {
+                debug_assert!(
+                    existing_cached_value.is_none(),
+                    "cached function re-evaluation should not poison or diverge"
+                );
+                cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
+                Ok(Err(diverge))
+            }
+        }
     }
 
     pub fn eval_param(

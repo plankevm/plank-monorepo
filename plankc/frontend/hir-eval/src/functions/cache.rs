@@ -8,7 +8,7 @@ use plank_hir::ValueId;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned};
 
-use crate::{evaluator::State, quota::CachedComptimeValue};
+use crate::evaluator::State;
 
 newtype_index! {
     pub(crate) struct LoweredFnIdx;
@@ -17,10 +17,17 @@ newtype_index! {
 pub(crate) type Param = MaybePoisoned<ValueId>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ComptimeCallResult {
+    pub value: ValueId,
+    pub branches_consumed: u32,
+    pub max_eval_branch_quota_seen: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EvaluatedFnState {
     Empty,
     InProgress,
-    Done(MaybePoisoned<CachedComptimeValue>),
+    Done(MaybePoisoned<ComptimeCallResult>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
