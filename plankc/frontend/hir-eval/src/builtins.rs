@@ -198,8 +198,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
             Builtin::SetEvalBranchQuota => {
-                if !self.is_comptime() {
-                    self.diag_ctx.emit_set_eval_branch_quota_outside_comptime(expr_loc);
+                if !self.is_comptime() && self.conditional {
+                    self.diag_ctx.emit_set_eval_branch_quota_in_conditional_runtime(expr_loc);
                     return Err(Poisoned);
                 }
 

@@ -1542,21 +1542,35 @@ fn test_uninit_memptr_in_comptime() {
 }
 
 #[test]
-fn test_set_eval_branch_quota_outside_comptime() {
+fn test_set_eval_branch_quota_in_conditional_runtime() {
     assert_diagnostics(
         r#"
         init {
-            @set_eval_branch_quota(1000);
+            let condition = @evm_eq(@evm_calldataload(0), 0);
+            if condition {
+                @set_eval_branch_quota(1000);
+            } else {
+                @set_eval_branch_quota(2000);
+            }
             @evm_stop();
         }
         "#,
-        &[r#"
-        error: eval branch quota can only be set at comptime
-         --> main.plk:2:5
+        &[
+            r#"
+        error: eval branch quota cannot be set in conditional runtime control flow
+         --> main.plk:4:9
           |
-        2 |     @set_eval_branch_quota(1000);
-          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only valid during comptime evaluation
-        "#],
+        4 |         @set_eval_branch_quota(1000);
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conditional runtime quota change
+        "#,
+            r#"
+        error: eval branch quota cannot be set in conditional runtime control flow
+         --> main.plk:6:9
+          |
+        6 |         @set_eval_branch_quota(2000);
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conditional runtime quota change
+        "#,
+        ],
     );
 }
 

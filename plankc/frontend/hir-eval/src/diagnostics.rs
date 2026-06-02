@@ -264,9 +264,9 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_set_eval_branch_quota_outside_comptime(&mut self, loc: SrcLoc) {
-        Diagnostic::error("eval branch quota can only be set at comptime")
-            .primary(loc.source, loc.span, "only valid during comptime evaluation")
+    pub fn emit_set_eval_branch_quota_in_conditional_runtime(&mut self, loc: SrcLoc) {
+        Diagnostic::error("eval branch quota cannot be set in conditional runtime control flow")
+            .primary(loc.source, loc.span, "conditional runtime quota change")
             .emit(self);
     }
 
