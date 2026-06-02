@@ -127,10 +127,9 @@ pub struct ScheduleConfig {
 }
 
 impl ScheduleConfig {
-    pub const PRE_AMSTERDAM: Self =
-        Self { max_swap_depth: 16, max_dup_depth: 15, max_exchange_range: 16, exchange_cost: 9 };
+    pub const PRE_AMSTERDAM: Self = Self::max_swap_no_exchange(16);
 
-    pub fn max_swap_no_exchange(max_swap_depth: u8) -> Self {
+    pub const fn max_swap_no_exchange(max_swap_depth: u8) -> Self {
         Self {
             max_swap_depth,
             max_dup_depth: max_swap_depth.checked_sub(1).expect("dup depth underflow"),
@@ -163,10 +162,25 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
         Self { next_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
     }
 
+    pub fn print_stack(&self) {
+        print!("[");
+        for (i, &x) in self.fifo().iter().enumerate() {
+            if i > 0 {
+                print!(", ");
+            }
+            print!("{x}");
+        }
+        println!("]");
+    }
+
+    fn emit(&mut self, op: StackOps) {
+        (self.ops_sink)(op);
+    }
+
     #[track_caller]
     pub fn pop(&mut self) {
         self.inner.pop().expect("nothing to pop");
-        (self.ops_sink)(StackOps::Pop);
+        self.emit(StackOps::Pop);
     }
 
     #[track_caller]
@@ -191,7 +205,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
             };
             assert!(correct, "incorrect op schedule");
         }
-        (self.ops_sink)(stack_op);
+        self.emit(stack_op);
         for &output in graph.operations[op_id].produces_fifo.iter().rev() {
             self.inner.push(output);
         }
@@ -199,12 +213,14 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
 
     pub fn dup(&mut self, depth: u8) {
         self.inner.duplicate(depth.into());
-        (self.ops_sink)(StackOps::Dup(depth));
+        self.emit(StackOps::Dup(depth));
     }
 
+    #[track_caller]
     pub fn swap(&mut self, depth: u8) {
+        assert!(depth > 0);
         self.inner.swap_with_top(depth.into());
-        (self.ops_sink)(StackOps::Swap(depth));
+        self.emit(StackOps::Swap(depth));
     }
 
     pub fn get_spilled(&self, target: ValueNodeId) -> Option<StaticAllocId> {
@@ -216,7 +232,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
         let target = self.inner.pop().expect("nothing to pop");
         let new_alloc_id = self.next_alloc_id.get();
         self.next_alloc_id.set(new_alloc_id + 1);
-        (self.ops_sink)(StackOps::Store(new_alloc_id));
+        self.emit(StackOps::Store(new_alloc_id));
         self.spilled.push((target, new_alloc_id));
         new_alloc_id
     }
@@ -225,7 +241,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
     pub fn unspill(&mut self, target: ValueNodeId) {
         let alloc = self.get_spilled(target).expect("nothing spilled at alloc");
         self.inner.push(target);
-        (self.ops_sink)(StackOps::Load(alloc));
+        self.emit(StackOps::Load(alloc));
     }
 
     #[track_caller]
@@ -236,7 +252,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
             .find(|&&(_, alloc)| alloc == target)
             .expect("nothing spilled at alloc");
         self.inner.push(value);
-        (self.ops_sink)(StackOps::Load(target));
+        self.emit(StackOps::Load(target));
     }
 
     pub fn stack(&self) -> &EvmStack {
