@@ -1575,6 +1575,29 @@ fn test_set_eval_branch_quota_in_conditional_runtime() {
 }
 
 #[test]
+fn test_set_eval_branch_quota_in_runtime_while() {
+    assert_diagnostics(
+        r#"
+        init {
+            let mut i = @evm_calldataload(0);
+            while i == 0 {
+                @set_eval_branch_quota(1000);
+                i = 1;
+            }
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: eval branch quota cannot be set in conditional runtime control flow
+         --> main.plk:4:9
+          |
+        4 |         @set_eval_branch_quota(1000);
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conditional runtime quota change
+        "#],
+    );
+}
+
+#[test]
 fn test_set_eval_branch_quota_runtime_arg() {
     assert_diagnostics(
         r#"
