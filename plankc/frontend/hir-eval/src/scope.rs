@@ -66,6 +66,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub comptime: bool,
     pub conditional: bool,
     pub comptime_quota: ComptimeQuota,
+    pub eval_branch_quota_start_loc: SrcLoc,
     pub max_eval_branch_quota_seen: u32,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
@@ -78,6 +79,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         diag_ctx: &'a mut DiagCtx<'ctx>,
         source: SourceId,
         comptime: bool,
+        eval_branch_quota_start_loc: SrcLoc,
         ctx: EvalContext,
     ) -> Self {
         Self {
@@ -89,6 +91,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             comptime,
             conditional: false,
             comptime_quota: ComptimeQuota::default(),
+            eval_branch_quota_start_loc,
             max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
 
             bindings: DenseIndexMap::new(),
@@ -114,8 +117,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
+        let start = match self.hir.block_spans[block] {
+            Ok(span) => self.loc(span),
+            Err(Poisoned) => self.eval_branch_quota_start_loc,
+        };
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
+        let parent_eval_branch_quota_start_loc =
+            std::mem::replace(&mut self.eval_branch_quota_start_loc, start);
         let res = self.eval_block_inline(block);
+        self.eval_branch_quota_start_loc = parent_eval_branch_quota_start_loc;
         self.comptime = parent_comptime;
         res
     }
@@ -675,6 +685,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
                         self.loc(span),
                         self.comptime_quota.limit(),
+                        self.eval_branch_quota_start_loc,
                     );
                 }
                 return Err(Diverge::ComptimeQuotaExhausted);

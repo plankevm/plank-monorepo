@@ -939,6 +939,18 @@ fn test_comptime_function_calls_consume_call_entry_quota() {
            |         ^^^^ evaluating this call exceeded the comptime branch quota
            |
            = note: current eval branch quota is 2000
+        note: comptime evaluation began here
+          --> main.plk:3:23
+           |
+         3 |       let mut x: u256 = comptime {
+           |  _______________________^
+         4 | |         @set_eval_branch_quota(2000);
+         5 | |         let mut i = 0;
+         6 | |         while i < 1000 {
+        ...  |
+        11 | |         0
+        12 | |     };
+           | |_____^
         "#],
     );
 }
@@ -980,6 +992,18 @@ fn test_cached_comptime_function_calls_replay_body_quota() {
           |           ^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:38
+          |
+        1 |   const consume_3_branches = fn() u256 {
+          |  ______________________________________^
+        2 | |     let mut i = 0;
+        3 | |     while i < 2 {
+        4 | |         i = i + 1;
+        5 | |     }
+        6 | |     i
+        7 | | };
+          | |_^
         "#],
     );
 }
@@ -1023,6 +1047,18 @@ fn test_cached_comptime_function_replay_applies_eval_branch_quota_raise() {
            |         ^^^^^^^^^^^ evaluating this call exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1001
+        note: comptime evaluation began here
+          --> main.plk:8:23
+           |
+         8 |       let mut x: u256 = comptime {
+           |  _______________________^
+         9 | |         let mut i = 0;
+        10 | |         while i < 998 {
+        11 | |             i = i + 1;
+        ...  |
+        16 | |         i
+        17 | |     };
+           | |_____^
         "#],
     );
 }
@@ -1056,6 +1092,18 @@ fn test_comptime_function_preamble_quota_exhaustion_reports_call_site() {
           |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:16
+          |
+        1 |   const f = fn() comptime {
+          |  ________________^
+        2 | |     let mut i = 0;
+        3 | |     while i < 1001 {
+        4 | |         i = i + 1;
+        5 | |     }
+        6 | |     u256
+        7 | | } { 0 };
+          | |_^
         note: called here
          --> main.plk:9:34
           |
@@ -1093,6 +1141,62 @@ fn test_runtime_context_comptime_call_entry_counts_before_body_quota() {
           |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:21
+          |
+        1 |   const f = fn() type {
+          |  _____________________^
+        2 | |     let mut i = 0;
+        3 | |     while i < 1000 {
+        4 | |         i = i + 1;
+        5 | |     }
+        6 | |     u256
+        7 | | };
+          | |_^
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_forced_comptime_call_entry_after_comptime_quota_reports_eval_start() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const f = fn() type { u256 };
+
+        init {
+            let mut warm: u256 = comptime {
+                let mut i = 0;
+                while i < 1000 {
+                    i = i + 1;
+                }
+                i
+            };
+            let mut x: f() = 0;
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
+        error: comptime branch quota exhausted
+          --> main.plk:10:16
+           |
+        10 |     let mut x: f() = 0;
+           |                ^^^ evaluating this call exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:2:1
+           |
+         2 | / init {
+         3 | |     let mut warm: u256 = comptime {
+         4 | |         let mut i = 0;
+         5 | |         while i < 1000 {
+        ...  |
+        11 | |     @evm_stop();
+        12 | | }
+           | |_^
         "#],
     );
 }

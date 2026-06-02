@@ -1,7 +1,7 @@
 use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, StrId};
+use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
 use plank_values::{DefOrigin, Field, Type, TypeId, TypeInterner, Value, ValueId, ValueInterner};
 
 use crate::{
@@ -122,7 +122,14 @@ impl<'a> Evaluator<'a> {
 
         self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
 
-        let mut scope = Scope::new(self, diag_ctx, const_def.source_id, true, EvalContext::Other);
+        let mut scope = Scope::new(
+            self,
+            diag_ctx,
+            const_def.source_id,
+            true,
+            const_def.loc(),
+            EvalContext::Other,
+        );
         match scope.eval_comptime(const_def.body) {
             Err(Diverge::ComptimeQuotaExhausted) => {
                 self.evaluated_consts[const_id] = State::Done(ConstEvalResult::QuotaExhausted);
@@ -178,8 +185,18 @@ impl<'a> Evaluator<'a> {
         block: hir::BlockId,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> mir::FnId {
-        let mut scope =
-            Scope::new(self, diag_ctx, self.hir.entry_source, false, EvalContext::Other);
+        let eval_branch_quota_start_loc = match self.hir.block_spans[block] {
+            Ok(span) => SrcLoc::new(self.hir.entry_source, span),
+            Err(Poisoned) => SrcLoc::new(self.hir.entry_source, ZERO_SPAN),
+        };
+        let mut scope = Scope::new(
+            self,
+            diag_ctx,
+            self.hir.entry_source,
+            false,
+            eval_branch_quota_start_loc,
+            EvalContext::Other,
+        );
 
         let body = scope.eval_entry_point_body(block);
 

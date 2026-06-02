@@ -74,6 +74,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
         let is_comptime = self.is_comptime();
+        let eval_branch_quota_start_loc = self.eval_branch_quota_start_loc;
         let caller_bindings = &mut self.bindings;
         let caller_mir_types = &mut self.mir_types;
 
@@ -84,6 +85,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.diag_ctx,
             fn_def.source,
             false,
+            eval_branch_quota_start_loc,
             EvalContext::FunctionPreamble { arg_spans, call_source },
         );
         fn_scope.comptime_quota = self.comptime_quota.clone();
@@ -473,8 +475,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble.return_type?;
 
         if !self.comptime_quota.spend_branch() {
-            self.diag_ctx
-                .emit_comptime_call_branch_quota_exhausted(call.loc(), self.comptime_quota.limit());
+            self.diag_ctx.emit_comptime_call_branch_quota_exhausted(
+                call.loc(),
+                self.comptime_quota.limit(),
+                self.eval_branch_quota_start_loc,
+            );
             return Ok(Err(Diverge::ComptimeQuotaExhausted));
         }
 

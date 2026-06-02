@@ -1696,12 +1696,23 @@ fn test_nested_comptime_block_shares_caller_quota() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-         --> main.plk:8:15
-          |
-        8 |         while j == 0 {
-          |               ^^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is 1000
+          --> main.plk:8:15
+           |
+         8 |         while j == 0 {
+           |               ^^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:6:5
+           |
+         6 | /     comptime {
+         7 | |         let mut j = 0;
+         8 | |         while j == 0 {
+         9 | |             j = 1;
+        10 | |         }
+        11 | |         j
+        12 | |     }
+           | |_____^
         "#],
     );
 }
@@ -1780,6 +1791,18 @@ fn test_cached_const_does_not_increase_caller_quota() {
            |               ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:11:23
+           |
+        11 |       let mut x: u256 = comptime {
+           |  _______________________^
+        12 | |         let start = F;
+        13 | |         let mut i = 0;
+        14 | |         while i < 2000 {
+        ...  |
+        17 | |         start + i
+        18 | |     };
+           | |_____^
         "#],
     );
 }
@@ -1816,6 +1839,18 @@ fn test_const_eval_uses_fresh_quota() {
           |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:11
+          |
+        1 |   const C = comptime {
+          |  ___________^
+        2 | |     let mut i = 0;
+        3 | |     while i < 1001 {
+        4 | |         i = i + 1;
+        5 | |     }
+        6 | |     i
+        7 | | };
+          | |_^
         "#],
     );
 }
@@ -1849,6 +1884,18 @@ fn test_referenced_const_quota_exhaustion_emits_once() {
           |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
           |
           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:11
+          |
+        1 |   const C = comptime {
+          |  ___________^
+        2 | |     let mut i = 0;
+        3 | |     while i < 1001 {
+        4 | |         i = i + 1;
+        5 | |     }
+        6 | |     i
+        7 | | };
+          | |_^
         "#],
     );
 }
@@ -1871,6 +1918,14 @@ fn test_unused_const_comptime_while_branch_quota_exhausted() {
           |           ^^^^ evaluating this loop exceeded the comptime branch quota
           |
           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:13
+          |
+        1 |   const Bad = comptime {
+          |  _____________^
+        2 | |     while true {}
+        3 | | };
+          | |_^
         "#],
     );
 }
