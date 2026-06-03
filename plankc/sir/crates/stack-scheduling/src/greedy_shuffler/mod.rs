@@ -28,7 +28,7 @@ pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
     GreedyShuffler::run(config, current, graph.output_values_fifo());
 }
 
-const LIMIT: u32 = 1000;
+const LIMIT: u32 = 100_000;
 
 impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     pub fn run(
