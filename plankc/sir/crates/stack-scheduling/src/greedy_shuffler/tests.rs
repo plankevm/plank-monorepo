@@ -230,6 +230,16 @@ fn unspill_horizon_before_dup_top2() {
     );
 }
 
+#[test]
+fn intricate_spill_dup_swap() {
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(3),
+        [10, 17, 2],
+        [10, 2, 2, 10, 17, 17],
+        [Dup(1), Swap(3), Dup(1), Dup(1), Swap(1)],
+    );
+}
+
 fn shuffle_case() -> impl Strategy<Value = (ScheduleConfig, Vec<u32>, Vec<u32>)> {
     (1u8..=6, prop::collection::vec(0u32..30, 0..=20)).prop_flat_map(|(max_swap, start)| {
         let values = start.clone();
