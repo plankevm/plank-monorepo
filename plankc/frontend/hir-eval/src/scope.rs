@@ -266,10 +266,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings.insert_no_prev(
-            local,
-            Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
-        );
+        self.bindings
+            .insert(local, Local { state, use_span: expr.span, origin: self.expr_origin(expr) });
         Ok(())
     }
 
@@ -302,7 +300,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
 
-        self.bindings.insert_no_prev(
+        self.bindings.insert(
             local,
             Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
         );
@@ -333,7 +331,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 });
-                self.bindings.insert_no_prev(
+                self.bindings.insert(
                     local,
                     Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
                 );
@@ -383,48 +381,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    fn eval_repeated_block_inline(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
-        let result = self.eval_block_inline(block);
-        self.clean_block_locals(block);
-        result
-    }
-
-    fn clean_block_locals(&mut self, block: hir::BlockId) {
-        for &instr in &self.hir.block_instrs[block] {
-            match instr.kind {
-                InstructionKind::Set { local, .. }
-                | InstructionKind::SetMut { local, .. }
-                | InstructionKind::BranchSet { local, .. } => {
-                    self.bindings.remove(local);
-                }
-                InstructionKind::Param { .. }
-                | InstructionKind::Assign { .. }
-                | InstructionKind::Eval(_)
-                | InstructionKind::Return(_) => {}
-                InstructionKind::If { then_block, else_block, .. } => {
-                    self.clean_block_locals(then_block);
-                    self.clean_block_locals(else_block);
-                }
-                InstructionKind::While { condition_block, body, .. } => {
-                    self.clean_block_locals(condition_block);
-                    self.clean_block_locals(body);
-                }
-                InstructionKind::ComptimeBlock { body } => self.clean_block_locals(body),
-            }
-        }
-    }
-
-    fn eval_repeated_while_condition(
+    fn eval_comptime_while_condition(
         &mut self,
         condition_block: hir::BlockId,
         condition: hir::LocalId,
     ) -> Result<bool, Diverge> {
-        let result = match self.eval_block_inline(condition_block) {
+        match self.eval_block_inline(condition_block) {
             Ok(()) => self.expect_comptime_bool_condition(condition),
             Err(err) => Err(err),
-        };
-        self.clean_block_locals(condition_block);
-        result
+        }
     }
 
     fn expect_comptime_bool_condition(&mut self, condition: hir::LocalId) -> Result<bool, Diverge> {
@@ -671,7 +636,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Comptime quota is the user-facing loop bound here; a separate LoopLimit would either be
         // redundant with that quota or silently cap explicitly raised quotas.
         loop {
-            let condition_value = self.eval_repeated_while_condition(condition_block, condition)?;
+            let condition_value = self.eval_comptime_while_condition(condition_block, condition)?;
 
             if !condition_value {
                 return Ok(());
@@ -688,7 +653,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Err(Diverge::ComptimeQuotaExhausted);
             }
 
-            self.eval_repeated_block_inline(body)?;
+            self.eval_block_inline(body)?;
         }
     }
 
