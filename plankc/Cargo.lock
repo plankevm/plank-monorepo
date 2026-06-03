@@ -3118,6 +3118,7 @@ dependencies = [
 name = "sir-stack-scheduling"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "hashbrown 0.16.1",
  "plank-core",
  "plank-test-utils",
