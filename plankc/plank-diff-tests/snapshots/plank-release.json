@@ -1,10 +1,10 @@
 {
-  "erc20.approve": "47734",
-  "erc20.balanceOf": "3689",
-  "erc20.deploy": "1267958",
-  "erc20.deployed_size": "5090",
-  "erc20.initcode_size": "5673",
-  "erc20.permit": "77593",
-  "erc20.transfer": "36163",
-  "erc20.transferFrom": "56656"
+  "erc20.approve": "46579",
+  "erc20.balanceOf": "2757",
+  "erc20.deploy": "907345",
+  "erc20.deployed_size": "3433",
+  "erc20.initcode_size": "3907",
+  "erc20.permit": "75707",
+  "erc20.transfer": "34919",
+  "erc20.transferFrom": "55116"
 }

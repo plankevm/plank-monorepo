@@ -15,6 +15,7 @@ smallvec.workspace = true
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
 sir-parser.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

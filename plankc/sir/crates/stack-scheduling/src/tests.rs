@@ -344,31 +344,15 @@ fn lowers_calldata_sum_loop() {
             const 0x0
             const 0x20
             const 0x0
-            store :0
-            store :1
-            store :2
-            store :3
+            swap 4
             pop
-            load :0
-            load :1
-            load :2
-            load :3
+            swap 2
             => [$1, $2, $3, $4]
             (jmp @1)
         @1 [$5, $6, $7, $8]
             dup 0
             dup 2
             lt
-            store :4
-            store :5
-            store :6
-            store :7
-            store :8
-            load :8
-            load :7
-            load :6
-            load :5
-            load :4
             => [$9 | $5, $6, $7, $8]
             (br @2 @3)
         @2 [$10, $11, $12, $13]
@@ -385,20 +369,15 @@ fn lowers_calldata_sum_loop() {
             dup 0
             dup 8
             add
-            store :9
-            pop
-            store :10
-            pop
-            store :11
-            pop
-            store :12
+            swap 8
             pop
             pop
+            swap 5
             pop
-            load :11
-            load :9
-            load :10
-            load :12
+            pop
+            swap 5
+            pop
+            pop
             => [$10, $17, $19, $15]
             (jmp @1)
         @3 [$20, $21, $22, $23]
@@ -443,13 +422,9 @@ fn lowers_branch_layouts() {
             const 0x0
             const 0x7
             pop
-            store :0
-            load :0
             => [$0]
             (jmp @1)
         @1 [$2]
-            store :1
-            load :1
             => [$2 | ]
             (br @2 @3)
         @2 []
@@ -484,10 +459,6 @@ fn simple_icall() {
         "#,
         r#"
         @0 [return_dest, $0]
-            store :0
-            store :1
-            load :1
-            load :0
             => [return_dest | $0]
             (iret)
         @1 []

@@ -9,6 +9,7 @@ pub mod op_graph;
 
 use crate::{scheduler::dumb_schedule, stack::StackOps};
 
+mod greedy_shuffler;
 mod layouts;
 mod op_model;
 mod scheduler;

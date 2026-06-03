@@ -13,13 +13,14 @@ debug-assertions = true
 
 [profile.profiling]
 inherits = "release"
-
 # Keep optimized code, but retain enough debug info for useful stacks.
 debug = true
 strip = false
-
 # Makes sampling stack traces much more reliable.
 incremental = false
+
+[profile.test.package.proptest]
+opt-level = 3
 
 [workspace.dependencies]
 # Core
@@ -64,6 +65,7 @@ clap = { version = "4.5", features = ["derive"] }
 anstream = "1"
 
 # Testing
+proptest = "1.11.0"
 pretty_assertions = "1.4.1"
 annotate-snippets = "0.12"
 tempfile = "3"

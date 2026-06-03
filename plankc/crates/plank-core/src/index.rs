@@ -193,6 +193,12 @@ impl<I: Idx> IncIterable for I {
         *self += 1;
         current
     }
+
+    #[inline(always)]
+    fn dec_and_get(&mut self) -> Self {
+        *self = *self - 1;
+        *self
+    }
 }
 
 pub fn iter_until<I: Idx>(i: I) -> impl Iterator<Item = I> {

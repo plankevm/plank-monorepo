@@ -1,13 +1,12 @@
-use plank_core::IndexVec;
-use sir_data::{BlockView, ControlView, StaticAllocId};
-use smallvec::SmallVec;
-use std::cell::Cell;
-
 use crate::{
+    greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpSetMut, ValueNodeId},
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
     state::collect_next_completable_into,
 };
+use sir_data::{BlockView, ControlView, StaticAllocId};
+use smallvec::SmallVec;
+use std::cell::Cell;
 
 // dumb intra-instruction scheduler that always dups its inputs.
 fn dumb_schedule_op<Sink: FnMut(StackOps)>(
@@ -62,38 +61,6 @@ fn dumb_schedule_op<Sink: FnMut(StackOps)>(
     stack.op(graph, op);
 }
 
-fn count_occurences(values: &[ValueNodeId], total_values: usize) -> IndexVec<ValueNodeId, u16> {
-    let mut counts = IndexVec::new();
-    counts.resize(total_values, 0);
-    for &value in values {
-        counts[value] += 1;
-    }
-    counts
-}
-
-fn shuffle_to_output<Sink: FnMut(StackOps)>(
-    _config: ScheduleConfig,
-    stack: &mut TrackedStack<'_, Sink>,
-    graph: &OpGraph,
-) {
-    let target_stack = graph.output_values_fifo();
-    let target_counts = count_occurences(target_stack, graph.total_values() as usize);
-
-    for _ in 0..stack.len() {
-        let top = stack.top().expect("shouldn't pop more than one per loop");
-        if target_counts[top] == 0 || stack.get_spilled(top).is_some() {
-            stack.pop();
-        } else {
-            stack.spill_top();
-        }
-    }
-
-    for &target in target_stack.iter().rev() {
-        let slot = stack.get_spilled(target).expect("missing value in spilled");
-        stack.load(slot);
-    }
-}
-
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 
 pub fn dumb_schedule(
@@ -132,6 +99,6 @@ pub fn dumb_schedule(
     }
 
     if !matches!(block.control(), ControlView::LastOpTerminates) {
-        shuffle_to_output(config, &mut stack, graph);
+        greedy_shuffler::shuffle(config, &mut stack, graph);
     }
 }
