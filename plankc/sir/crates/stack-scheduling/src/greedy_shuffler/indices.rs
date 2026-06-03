@@ -46,45 +46,45 @@ pub(crate) enum TargetStack {}
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct Depth<Stack>(pub usize, PhantomData<Stack>);
+pub(crate) struct FromTop<Stack>(pub usize, PhantomData<Stack>);
 
-impl<Stack> Add<usize> for Depth<Stack> {
+impl<Stack> Add<usize> for FromTop<Stack> {
     type Output = Self;
 
     fn add(self, rhs: usize) -> Self::Output {
-        Depth::new(self.0 + rhs)
+        FromTop::new(self.0 + rhs)
     }
 }
 
-impl<Stack> Sub<usize> for Depth<Stack> {
+impl<Stack> Sub<usize> for FromTop<Stack> {
     type Output = Self;
 
     fn sub(self, rhs: usize) -> Self::Output {
-        Depth::new(self.0 - rhs)
+        FromTop::new(self.0 - rhs)
     }
 }
 
-impl<Stack> SubAssign<usize> for Depth<Stack> {
+impl<Stack> SubAssign<usize> for FromTop<Stack> {
     fn sub_assign(&mut self, rhs: usize) {
         self.0 -= rhs;
     }
 }
 
-impl<Stack> Depth<Stack> {
+impl<Stack> FromTop<Stack> {
     pub const fn new(i: usize) -> Self {
         Self(i, PhantomData)
     }
 }
 
-impl<Stack: Ord + Copy> IncIterable for Depth<Stack> {
+impl<Stack: Ord + Copy> IncIterable for FromTop<Stack> {
     fn get_and_inc(&mut self) -> Self {
         let gotten = *self;
-        *self = Depth::new(self.0 + 1);
+        *self = FromTop::new(self.0 + 1);
         gotten
     }
 
     fn dec_and_get(&mut self) -> Self {
-        *self = Depth::new(self.0 - 1);
+        *self = FromTop::new(self.0 - 1);
         *self
     }
 }
@@ -96,22 +96,22 @@ mod sealed {
 }
 
 impl sealed::ToDepthSealed for FromBottom {}
-impl<Stack> sealed::ToDepthSealed for Depth<Stack> {}
+impl<Stack> sealed::ToDepthSealed for FromTop<Stack> {}
 
 pub(crate) trait ToDepth<Stack>: sealed::ToDepthSealed {
-    fn to_depth(&self, stack: &[ValueNodeId]) -> Depth<Stack>;
+    fn to_depth(&self, stack: &[ValueNodeId]) -> FromTop<Stack>;
 }
 
-impl<Stack: Copy> ToDepth<Stack> for Depth<Stack> {
-    fn to_depth(&self, _stack: &[ValueNodeId]) -> Depth<Stack> {
+impl<Stack: Copy> ToDepth<Stack> for FromTop<Stack> {
+    fn to_depth(&self, _stack: &[ValueNodeId]) -> FromTop<Stack> {
         *self
     }
 }
 
 impl<Stack> ToDepth<Stack> for FromBottom {
     #[track_caller]
-    fn to_depth(&self, stack: &[ValueNodeId]) -> Depth<Stack> {
-        Depth::new(stack.len() - self.0 - 1)
+    fn to_depth(&self, stack: &[ValueNodeId]) -> FromTop<Stack> {
+        FromTop::new(stack.len() - self.0 - 1)
     }
 }
 

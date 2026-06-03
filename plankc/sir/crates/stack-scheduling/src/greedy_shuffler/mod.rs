@@ -14,11 +14,11 @@ pub struct GreedyShuffler<'a, 'ir, Sink: FnMut(StackOps)> {
     complete_at_bottom: usize,
     current: &'a mut TrackedStack<'ir, Sink>,
     target: &'a [ValueNodeId],
-    max_swap_depth: Depth<CurrentStack>,
-    max_dup_depth: Depth<CurrentStack>,
+    max_swap_depth: FromTop<CurrentStack>,
+    max_dup_depth: FromTop<CurrentStack>,
 }
 
-const TOP_IDX: Depth<CurrentStack> = Depth::new(0);
+const TOP_IDX: FromTop<CurrentStack> = FromTop::new(0);
 
 pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
@@ -40,8 +40,8 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             complete_at_bottom: 0,
             current,
             target,
-            max_swap_depth: Depth::new(config.max_swap_depth.into()),
-            max_dup_depth: Depth::new(config.max_dup_depth.into()),
+            max_swap_depth: FromTop::new(config.max_swap_depth.into()),
+            max_dup_depth: FromTop::new(config.max_dup_depth.into()),
         };
 
         this.update_correct();
@@ -57,37 +57,37 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     #[track_caller]
-    fn swap(&mut self, depth: Depth<CurrentStack>) {
-        if depth == Depth::new(0) {
+    fn swap(&mut self, i: FromTop<CurrentStack>) {
+        if i == FromTop::new(0) {
             return;
         }
-        assert!(depth <= self.max_swap_depth, "invalid swap depth");
-        self.current.swap(depth.0.try_into().expect("overflow despite assert"));
+        assert!(i <= self.max_swap_depth, "invalid swap depth");
+        self.current.swap(i.0.try_into().expect("overflow despite assert"));
     }
 
     #[track_caller]
-    fn dup(&mut self, depth: Depth<CurrentStack>) {
-        assert!(depth <= self.max_dup_depth, "invalid dup depth");
-        self.current.dup(depth.0.try_into().expect("overflow despite assert"));
+    fn dup(&mut self, i: FromTop<CurrentStack>) {
+        assert!(i <= self.max_dup_depth, "invalid dup depth");
+        self.current.dup(i.0.try_into().expect("overflow despite assert"));
     }
 
     #[track_caller]
-    fn target_to(&self, depth: Depth<TargetStack>) -> FromBottom {
-        FromBottom(self.target.len() - depth.0 - 1)
+    fn target_to(&self, i: FromTop<TargetStack>) -> FromBottom {
+        FromBottom(self.target.len() - i.0 - 1)
     }
 
     #[track_caller]
-    fn current_to(&self, depth: Depth<CurrentStack>) -> FromBottom {
-        FromBottom(self.current.fifo().len() - depth.0 - 1)
+    fn current_to(&self, i: FromTop<CurrentStack>) -> FromBottom {
+        FromBottom(self.current.fifo().len() - i.0 - 1)
     }
 
     #[track_caller]
-    fn to_current(&self, depth: FromBottom) -> Depth<CurrentStack> {
-        Depth::new(self.current.fifo().len() - depth.0 - 1)
+    fn to_current(&self, i: FromBottom) -> FromTop<CurrentStack> {
+        FromTop::new(self.current.fifo().len() - i.0 - 1)
     }
 
-    fn current_len(&self) -> Depth<CurrentStack> {
-        Depth::new(self.current.len().into())
+    fn current_len(&self) -> FromTop<CurrentStack> {
+        FromTop::new(self.current.len().into())
     }
 
     #[track_caller]
@@ -184,7 +184,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn pop_unneeded(&mut self) -> bool {
-        let top = self.current(Depth::new(0));
+        let top = self.current(FromTop::new(0));
         if self.is_unneeded(top) {
             self.current.pop();
             true
@@ -198,12 +198,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         &'s self,
         mut inclusive: FromBottom,
     ) -> impl Iterator<Item = (ValueNodeId, ValueNodeId, FromBottom)> + 's {
-        let current = if self.current.is_empty() || self.current_to(Depth::new(0)) < inclusive {
+        let current = if self.current.is_empty() || self.current_to(FromTop::new(0)) < inclusive {
             &[]
         } else {
             self.current(..=inclusive)
         };
-        let target = if self.target.is_empty() || self.target_to(Depth::new(0)) < inclusive {
+        let target = if self.target.is_empty() || self.target_to(FromTop::new(0)) < inclusive {
             &[]
         } else {
             self.target(..=inclusive)
@@ -254,7 +254,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn pop_extra(&mut self) -> bool {
-        let top = self.current(Depth::new(0));
+        let top = self.current(FromTop::new(0));
         if self.is_extra(top) {
             self.current.pop();
             true
@@ -303,7 +303,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn pop_duplicate(&mut self) -> bool {
-        let top = self.current(Depth::new(0));
+        let top = self.current(FromTop::new(0));
         if self.is_duplicate(top) {
             self.current.pop();
             true
@@ -407,7 +407,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
 
             let mut available_copies = 0;
             let mut dup_idx = None;
-            for i in Span::new(Depth::new(0), self.to_current(search_depth) + 1).iter() {
+            for i in Span::new(FromTop::new(0), self.to_current(search_depth) + 1).iter() {
                 if self.current(i) == target {
                     available_copies += 1;
                     dup_idx = dup_idx.or(Some(i));
