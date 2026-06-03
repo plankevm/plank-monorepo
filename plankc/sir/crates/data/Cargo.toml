@@ -14,3 +14,7 @@ thiserror.workspace = true
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
 sir-assembler.workspace = true
+bitflags.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

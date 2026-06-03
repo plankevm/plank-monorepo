@@ -3053,9 +3053,11 @@ name = "sir-data"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "bitflags",
  "plank-core",
  "plank-test-utils",
  "pretty_assertions",
+ "proptest",
  "sir-assembler",
  "thiserror",
 ]
@@ -3118,7 +3120,6 @@ dependencies = [
 name = "sir-stack-scheduling"
 version = "0.1.0"
 dependencies = [
- "bitflags",
  "hashbrown 0.16.1",
  "plank-core",
  "plank-test-utils",
