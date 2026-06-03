@@ -282,16 +282,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn is_duplicate(&self, value: ValueNodeId) -> bool {
-        let mut current_count = 0;
-        for &v in self.current(..=FromBottom(self.complete_at_bottom)) {
-            if v == value {
-                current_count += 1;
-                if current_count >= 2 {
-                    return true;
-                }
-            }
-        }
-        false
+        let current_count = self
+            .current(..=FromBottom(self.complete_at_bottom))
+            .iter()
+            .filter(|&&v| v == value)
+            .count();
+        current_count >= 2
     }
 
     fn pop_duplicate(&mut self) -> bool {
