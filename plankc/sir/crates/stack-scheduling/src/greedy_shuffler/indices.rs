@@ -7,7 +7,6 @@ use plank_core::IncIterable;
 
 use crate::op_graph::ValueNodeId;
 
-/// Index from the bottom.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct FromBottom(pub usize);
@@ -90,6 +89,8 @@ impl<Stack: Ord + Copy> IncIterable for Depth<Stack> {
     }
 }
 
+/// Resolves `StackIndex` trait conflict for `RangeTo<I>` and others as without a sealed trait you
+/// could technically derive conflicting implementations by also implementing `ToDepth` for RangeTo
 mod sealed {
     pub trait ToDepthSealed {}
 }

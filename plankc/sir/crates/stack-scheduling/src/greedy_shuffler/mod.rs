@@ -61,16 +61,14 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         if depth == Depth::new(0) {
             return;
         }
-        let depth =
-            (depth <= self.max_swap_depth).then_some(depth).and_then(|d| d.0.try_into().ok());
-        self.current.swap(depth.expect("invalid depth"));
+        assert!(depth <= self.max_swap_depth, "invalid swap depth");
+        self.current.swap(depth.0.try_into().expect("overflow despite assert"));
     }
 
     #[track_caller]
     fn dup(&mut self, depth: Depth<CurrentStack>) {
-        let depth =
-            (depth <= self.max_dup_depth).then_some(depth).and_then(|d| d.0.try_into().ok());
-        self.current.dup(depth.expect("invalid depth"));
+        assert!(depth <= self.max_dup_depth, "invalid dup depth");
+        self.current.dup(depth.0.try_into().expect("overflow despite assert"));
     }
 
     #[track_caller]
