@@ -54,6 +54,13 @@ fn comptime_args(
     })
 }
 
+fn comptime_call_result_to_eval_result(result: ComptimeCallResult) -> Result<EvalValue, Diverge> {
+    match result.outcome {
+        ComptimeCallOutcome::Value(value) => Ok(EvalValue::Comptime(value)),
+        ComptimeCallOutcome::DivergedEnd => Err(Diverge::END),
+    }
+}
+
 impl Call<'_> {
     fn loc(&self) -> SrcLoc {
         SrcLoc::new(self.source, self.span)
@@ -379,7 +386,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.max_eval_branch_quota_seen =
                 self.max_eval_branch_quota_seen.max(max_eval_branch_quota_seen);
             return match call_result {
-                Ok(Ok(ComptimeCallResult { value, .. })) => Ok(Ok(EvalValue::Comptime(value))),
+                Ok(Ok(result)) => Ok(comptime_call_result_to_eval_result(result)),
                 Ok(Err(diverged)) => Ok(Err(diverged)),
                 Err(Poisoned) => Err(Poisoned),
             };
@@ -509,8 +516,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         state
                     }
                     Err(Poisoned) => {
-                        // Cache collapses `Diverge` into Err(Poisoned);
-                        // reconstruct the diverge when the return type was never.
                         return preamble.suppress_poison_iff_diverging_return_type();
                     }
                 },
@@ -584,42 +589,31 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Err(Diverge::BlockEnd(None)) => Ok(Err(Diverge::END)),
             Err(Diverge::BlockEnd(Some(ret_value))) => Ok(Ok(ret_value)),
         };
-        match eval_res {
-            Ok(Ok(value)) => {
-                assert!(
-                    existing_cached_value.is_none_or(|cached| cached.value == value),
-                    "re-evaluated function produced different cached value"
-                );
-                let branches_consumed = self
-                    .comptime_quota
-                    .spent()
-                    .checked_sub(spent_before_body)
-                    .expect("comptime quota spent should not decrease during call evaluation");
-                let result = ComptimeCallResult {
-                    value,
-                    branches_consumed,
-                    max_eval_branch_quota_seen: self.max_eval_branch_quota_seen,
-                };
-                cache_state.set(EvaluatedFnState::Done(Ok(result)));
-                Ok(Ok(result))
-            }
+        let outcome = match eval_res {
+            Ok(Ok(value)) => ComptimeCallOutcome::Value(value),
             Err(Poisoned) => {
-                debug_assert!(
+                assert!(
                     existing_cached_value.is_none(),
-                    "cached function re-evaluation should not poison or diverge"
+                    "cached function re-evaluation should not poison"
                 );
                 cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
-                Err(Poisoned)
+                return Err(Poisoned);
             }
             Ok(Err(diverge)) => {
-                debug_assert!(
-                    existing_cached_value.is_none(),
-                    "cached function re-evaluation should not poison or diverge"
-                );
-                cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
-                Ok(Err(diverge))
+                assert_eq!(diverge, Diverge::END, "only end divergence is cacheable");
+                ComptimeCallOutcome::DivergedEnd
             }
-        }
+        };
+        assert!(
+            existing_cached_value.is_none_or(|cached| cached.outcome == outcome),
+            "re-evaluated function produced different cached outcome"
+        );
+        let result = outcome.into_call_result(
+            self.comptime_quota.spent() - spent_before_body,
+            self.max_eval_branch_quota_seen,
+        );
+        cache_state.set(EvaluatedFnState::Done(Ok(result)));
+        Ok(Ok(result))
     }
 
     pub fn eval_param(

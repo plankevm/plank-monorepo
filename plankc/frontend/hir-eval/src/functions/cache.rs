@@ -17,8 +17,24 @@ newtype_index! {
 pub(crate) type Param = MaybePoisoned<ValueId>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum ComptimeCallOutcome {
+    Value(ValueId),
+    DivergedEnd,
+}
+
+impl ComptimeCallOutcome {
+    pub fn into_call_result(
+        self,
+        branches_consumed: u32,
+        max_eval_branch_quota_seen: u32,
+    ) -> ComptimeCallResult {
+        ComptimeCallResult { outcome: self, branches_consumed, max_eval_branch_quota_seen }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ComptimeCallResult {
-    pub value: ValueId,
+    pub outcome: ComptimeCallOutcome,
     pub branches_consumed: u32,
     pub max_eval_branch_quota_seen: u32,
 }
