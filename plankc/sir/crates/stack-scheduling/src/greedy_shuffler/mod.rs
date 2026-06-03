@@ -18,8 +18,6 @@ pub struct GreedyShuffler<'a, 'ir, Sink: FnMut(StackOps)> {
     max_dup_depth: FromTop<CurrentStack>,
 }
 
-const TOP_IDX: FromTop<CurrentStack> = FromTop::new(0);
-
 pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
     current: &'a mut TrackedStack<'ir, Sink>,
@@ -219,7 +217,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             return false;
         }
 
-        let top = self.current(TOP_IDX);
+        let top = self.current(FromTop::new(0));
 
         let max_search_depth = self
             .max_swap_depth
