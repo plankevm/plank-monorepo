@@ -1,4 +1,4 @@
-use crate::{span::IncIterable, Span};
+use crate::{Span, span::IncIterable};
 use std::{
     convert::TryFrom,
     fmt::Debug,

@@ -74,12 +74,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     #[track_caller]
-    fn from_target(&self, depth: Depth<TargetStack>) -> FromBottom {
+    fn target_to(&self, depth: Depth<TargetStack>) -> FromBottom {
         FromBottom(self.target.len() - depth.0 - 1)
     }
 
     #[track_caller]
-    fn from_current(&self, depth: Depth<CurrentStack>) -> FromBottom {
+    fn current_to(&self, depth: Depth<CurrentStack>) -> FromBottom {
         FromBottom(self.current.fifo().len() - depth.0 - 1)
     }
 
@@ -200,12 +200,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         &'s self,
         mut inclusive: FromBottom,
     ) -> impl Iterator<Item = (ValueNodeId, ValueNodeId, FromBottom)> + 's {
-        let current = if self.current.is_empty() || self.from_current(Depth::new(0)) < inclusive {
+        let current = if self.current.is_empty() || self.current_to(Depth::new(0)) < inclusive {
             &[]
         } else {
             self.current(..=inclusive)
         };
-        let target = if self.target.is_empty() || self.from_target(Depth::new(0)) < inclusive {
+        let target = if self.target.is_empty() || self.target_to(Depth::new(0)) < inclusive {
             &[]
         } else {
             self.target(..=inclusive)
@@ -229,7 +229,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             .min(self.current_len() - 1);
 
         let swap_idx = self
-            .iter_pairwise(self.from_current(max_search_depth))
+            .iter_pairwise(self.current_to(max_search_depth))
             .find_map(|(current, target, i)| (current != top && target == top).then_some(i));
 
         if let Some(idx) = swap_idx {
@@ -274,7 +274,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             .max_swap_depth
             .min(self.to_current(FromBottom(self.complete_at_bottom)))
             .min(self.current_len() - 1);
-        let mut idx = self.from_current(max_search_depth);
+        let mut idx = self.current_to(max_search_depth);
 
         let swap_idx = self
             .current(..=idx)
@@ -319,7 +319,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             return false;
         }
 
-        let max_swap_depth = self.from_current(
+        let max_swap_depth = self.current_to(
             self.max_swap_depth
                 .min(self.to_current(FromBottom(self.complete_at_bottom)))
                 .min(self.current_len() - 1),
@@ -357,7 +357,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             return true;
         }
 
-        let horizon_idx = self.from_current(self.max_swap_depth);
+        let horizon_idx = self.current_to(self.max_swap_depth);
         let value = self.target(horizon_idx);
         let current = self.current(horizon_idx);
 
@@ -378,20 +378,18 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn unspill_unavailable_horizon(&mut self) -> bool {
-        if self.current_len() <= self.max_swap_depth - 1 {
+        if self.current_len() < self.max_swap_depth {
             // We could push at least 2 values and the horizon would still remain accessible
             // via swaps.
             return false;
         }
 
-        let horizon_idx = self.from_current(self.max_swap_depth - 1);
+        let horizon_idx = self.current_to(self.max_swap_depth - 1);
         let target = self.target(horizon_idx);
         let current = self.current(horizon_idx);
-        if target != current {
-            if !self.current(..self.max_swap_depth).contains(&target) {
-                self.current.unspill(target);
-                return true;
-            }
+        if target != current && !self.current(..self.max_swap_depth).contains(&target) {
+            self.current.unspill(target);
+            return true;
         }
 
         false
@@ -404,7 +402,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
 
         let max_dup_depth = self.max_dup_depth.min(self.current_len() - 1);
 
-        let search_depth = self.from_current(max_dup_depth);
+        let search_depth = self.current_to(max_dup_depth);
         let dup_idx = self.iter_pairwise(search_depth).find_map(|(_current, target, _i)| {
             let required_copies =
                 self.target(..=search_depth).iter().filter(|&&v| v == target).count();
