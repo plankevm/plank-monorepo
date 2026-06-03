@@ -44,7 +44,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             max_dup_depth: FromTop::new(config.max_dup_depth.into()),
         };
 
-        this.update_correct();
+        this.update_complete_at_bottom();
         this.shrink();
         this.grow();
         this.cleanup_unneeded_top();
@@ -100,7 +100,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         index.index(self.current.fifo())
     }
 
-    fn update_correct(&mut self) {
+    fn update_complete_at_bottom(&mut self) {
         let mut newly_complete = 0;
         // If `0` complete we want all values including the bottom most (`..=FromBottom(0)`), if
         // `1` is complete we want to skip the bottom most value, giving us the range
@@ -143,7 +143,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             if !stepped {
                 self.current.spill_top();
             }
-            self.update_correct();
+            self.update_complete_at_bottom();
         }
     }
 
@@ -172,7 +172,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
                     self.current.spill_top();
                 }
             }
-            self.update_correct();
+            self.update_complete_at_bottom();
         }
     }
 
