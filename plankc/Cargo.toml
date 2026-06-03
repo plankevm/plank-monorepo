@@ -11,13 +11,14 @@ license = "MIT"
 inherits = "release"
 debug-assertions = true
 
+[profile.test.package.proptest]
+opt-level = 3
+
 [profile.profiling]
 inherits = "release"
-
 # Keep optimized code, but retain enough debug info for useful stacks.
 debug = true
 strip = false
-
 # Makes sampling stack traces much more reliable.
 incremental = false
 
@@ -64,6 +65,7 @@ clap = { version = "4.5", features = ["derive"] }
 anstream = "1"
 
 # Testing
+proptest = "1.11.0"
 pretty_assertions = "1.4.1"
 annotate-snippets = "0.12"
 tempfile = "3"

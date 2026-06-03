@@ -28,6 +28,8 @@ pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
     GreedyShuffler::run(config, current, graph.end_stack_fifo.as_slice());
 }
 
+const LIMIT: u32 = 1000;
+
 impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     pub fn run(
         config: ScheduleConfig,
@@ -72,6 +74,11 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     #[track_caller]
+    fn from_target(&self, depth: Depth<TargetStack>) -> FromBottom {
+        FromBottom(self.target.len() - depth.0 - 1)
+    }
+
+    #[track_caller]
     fn from_current(&self, depth: Depth<CurrentStack>) -> FromBottom {
         FromBottom(self.current.fifo().len() - depth.0 - 1)
     }
@@ -96,6 +103,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn update_correct(&mut self) {
+        if self.complete_at_bottom >= self.current.len().to_usize()
+            || self.complete_at_bottom >= self.target.len()
+        {
+            return;
+        }
+
         let mut newly_complete = 0;
         // If `0` complete we want all values including the bottom most (`..=FromBottom(0)`), if
         // `1` is complete we want to skip the bottom most value, giving us the range
@@ -122,7 +135,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn shrink(&mut self) {
-        let mut limit = LoopLimit::max(100_000);
+        let mut limit = LoopLimit::max(LIMIT);
 
         let can_access_length = self.max_swap_depth + 1;
         while {
@@ -143,7 +156,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn grow(&mut self) {
-        let mut limit = LoopLimit::max(100_000);
+        let mut limit = LoopLimit::max(LIMIT);
         while self.complete_at_bottom < self.target.len() {
             limit.tick();
             let current_contains_incomplete =
@@ -155,7 +168,11 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
                     || self.pop_extra());
             if !stepped {
                 if self.can_push() {
-                    assert!(self.dup_needed() || self.unspill_needed());
+                    assert!(
+                        self.unspill_unavailable_horizon()
+                            || self.dup_needed()
+                            || self.unspill_needed()
+                    );
                 } else {
                     self.current.spill_top();
                 }
@@ -165,6 +182,9 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn is_unneeded(&self, value: ValueNodeId) -> bool {
+        if self.target.is_empty() {
+            return true;
+        }
         !self.target(..=FromBottom(self.complete_at_bottom)).contains(&value)
     }
 
@@ -191,13 +211,24 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn swap_to_correct_position(&mut self) -> bool {
+        if self.current.len().to_usize() <= self.complete_at_bottom {
+            return false;
+        }
+
         let top = self.current(TOP_IDX);
 
-        let max_search_depth =
-            self.max_swap_depth.min(self.to_current(FromBottom(self.complete_at_bottom)));
+        let max_search_depth = self
+            .max_swap_depth
+            .min(self.to_current(FromBottom(self.complete_at_bottom)))
+            .min(self.current_len() - 1);
+        let max_search_depth = self.from_current(max_search_depth);
+
+        if self.target.is_empty() || self.from_target(Depth::new(0)) < max_search_depth {
+            return false;
+        }
 
         let swap_idx = 'swap_idx: {
-            for (current, target, i) in self.iter_bottom_up(self.from_current(max_search_depth)) {
+            for (current, target, i) in self.iter_bottom_up(max_search_depth) {
                 if self.to_current(i) == TOP_IDX {
                     break 'swap_idx None;
                 }
@@ -242,24 +273,24 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn swap_and_pop_extra(&mut self) -> bool {
-        let max_search_depth =
-            self.max_swap_depth.min(self.to_current(FromBottom(self.complete_at_bottom)));
+        if self.current.is_empty() {
+            return false;
+        }
 
-        let swap_idx = 'swap_idx: {
-            for (current, _target, i) in self.iter_bottom_up(self.from_current(max_search_depth)) {
-                if self.to_current(i) == TOP_IDX {
-                    break;
-                }
+        let max_search_depth = self
+            .max_swap_depth
+            .min(self.to_current(FromBottom(self.complete_at_bottom)))
+            .min(self.current_len() - 1);
+        let mut idx = self.from_current(max_search_depth);
 
-                if self.is_extra(current) {
-                    break 'swap_idx Some(self.to_current(i));
-                }
-            }
-            None
-        };
+        let swap_idx = self
+            .current(..=idx)
+            .iter()
+            .rev()
+            .find_map(|&value| self.is_extra(value).then_some(idx.get_and_inc()));
 
         if let Some(swap_idx) = swap_idx {
-            self.swap(swap_idx);
+            self.swap(self.to_current(swap_idx));
             self.current.pop();
             return true;
         }
@@ -327,10 +358,6 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
             return true;
         }
 
-        assert!(
-            self.current.len().to_usize() <= self.complete_at_bottom
-                || self.to_current(FromBottom(self.complete_at_bottom)) <= self.max_swap_depth
-        );
         let horizon_idx = self.from_current(self.max_swap_depth);
         let value = self.target(horizon_idx);
         let current = self.current(horizon_idx);
@@ -349,6 +376,26 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         }
 
         true
+    }
+
+    fn unspill_unavailable_horizon(&mut self) -> bool {
+        if self.current_len() <= self.max_swap_depth - 1 {
+            // We could push at least 2 values and the horizon would still remain accessible
+            // via swaps.
+            return false;
+        }
+
+        let horizon_idx = self.from_current(self.max_swap_depth - 1);
+        let target = self.target(horizon_idx);
+        let current = self.current(horizon_idx);
+        if target != current {
+            if !self.current(..self.max_swap_depth).contains(&target) {
+                self.current.unspill(target);
+                return true;
+            }
+        }
+
+        false
     }
 
     fn dup_needed(&mut self) -> bool {

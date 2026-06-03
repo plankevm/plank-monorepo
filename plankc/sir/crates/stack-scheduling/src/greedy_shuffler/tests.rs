@@ -4,15 +4,15 @@ use crate::{
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
 use StackOps::{Dup, Pop, Swap};
+use proptest::prelude::*;
 use sir_data::{Idx, StaticAllocId};
 use std::{cell::Cell, collections::HashSet};
 
-fn assert_shuffle(
+fn assert_shuffle_exists(
     config: ScheduleConfig,
     start_stack: impl AsRef<[u32]>,
     target_stack: impl AsRef<[u32]>,
-    expected_ops: impl AsRef<[StackOps]>,
-) {
+) -> Vec<StackOps> {
     let mut evm_stack = EvmStack::new();
     for &v in start_stack.as_ref().iter().rev() {
         evm_stack.push(ValueNodeId::new(v));
@@ -36,6 +36,16 @@ fn assert_shuffle(
         assert!(op.is_valid(config));
     }
 
+    ops
+}
+
+fn assert_shuffle(
+    config: ScheduleConfig,
+    start_stack: impl AsRef<[u32]>,
+    target_stack: impl AsRef<[u32]>,
+    expected_ops: impl AsRef<[StackOps]>,
+) {
+    let ops = assert_shuffle_exists(config, start_stack, target_stack);
     assert_eq!(ops, expected_ops.as_ref());
 }
 
@@ -173,4 +183,65 @@ fn current_is_already_correct_prefix() {
 #[test]
 fn correct_after_swap_but_trash_top() {
     assert_shuffle(ScheduleConfig::default(), [1, 3, 2], [1, 2], [Swap(1), Pop]);
+}
+
+#[test]
+fn empty_to_empty() {
+    assert_shuffle(ScheduleConfig::default(), [], [], []);
+}
+
+#[test]
+fn pop_once() {
+    assert_shuffle(ScheduleConfig::max_swap_no_exchange(1), [1], [], [Pop]);
+}
+
+#[test]
+fn pop_thrice() {
+    assert_shuffle(ScheduleConfig::max_swap_no_exchange(1), [0, 0, 0], [], [Pop, Pop, Pop]);
+}
+
+#[test]
+fn pop_lower2() {
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(1),
+        [0, 1, 2],
+        [0],
+        [Swap(1), Pop, Swap(1), Pop],
+    );
+}
+
+#[test]
+fn unspill_horizon_before_dup_top1() {
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(1),
+        [0, 1],
+        [1, 1, 0, 1],
+        [store(0), Dup(0), load(0), Swap(1), Dup(0)],
+    );
+}
+
+#[test]
+fn unspill_horizon_before_dup_top2() {
+    assert_shuffle(
+        ScheduleConfig::max_swap_no_exchange(1),
+        [0, 1],
+        [0, 0, 1, 1, 0],
+        [Swap(1), store(0), Dup(0), load(0), Swap(1), load(0), Swap(1), Dup(0)],
+    );
+}
+
+fn shuffle_case() -> impl Strategy<Value = (ScheduleConfig, Vec<u32>, Vec<u32>)> {
+    (1u8..=6, prop::collection::vec(0u32..30, 0..=20)).prop_flat_map(|(max_swap, start)| {
+        let values = start.clone();
+        let target = prop::collection::vec(prop::sample::select(values), 0..=20);
+
+        (Just(ScheduleConfig::max_swap_no_exchange(max_swap)), Just(start), target)
+    })
+}
+
+proptest! {
+    #[test]
+    fn successfully_shuffles((config, start, target) in shuffle_case()) {
+        assert_shuffle_exists(config, start, target);
+    }
 }
