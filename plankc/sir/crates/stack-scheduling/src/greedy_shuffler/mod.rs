@@ -237,18 +237,12 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     }
 
     fn is_extra(&self, value: ValueNodeId) -> bool {
-        let maybe_incorrect_inclusive = FromBottom(self.complete_at_bottom);
-        let mut target_count =
-            self.target(..=maybe_incorrect_inclusive).iter().filter(|&&v| v == value).count();
-        for &v in self.current(..=maybe_incorrect_inclusive) {
-            if v == value {
-                if target_count == 0 {
-                    return true;
-                }
-                target_count -= 1;
-            }
-        }
-        false
+        let first_incorrect_from_bottom = FromBottom(self.complete_at_bottom);
+        let target_count =
+            self.target(..=first_incorrect_from_bottom).iter().filter(|&&v| v == value).count();
+        let current_count =
+            self.current(..=first_incorrect_from_bottom).iter().filter(|&&v| v == value).count();
+        current_count > target_count
     }
 
     fn pop_extra(&mut self) -> bool {
