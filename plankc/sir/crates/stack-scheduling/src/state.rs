@@ -1,7 +1,7 @@
 // TODO: Actually use in new scheduler
 #![allow(unused)]
 
-use crate::op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId};
+use crate::op_graph::{BitsetWord, OpGraph, OpNodeId, OpSet, OpSetMut, ValueNodeId};
 use plank_core::{Idx, IndexVec, newtype_index};
 use sir_data::StaticAllocId;
 use std::num::NonZero;
@@ -113,10 +113,8 @@ impl<'g> ScheduleStateArena<'g> {
     }
 }
 
-impl StateView<'_> {
-    pub fn is_last_use(&self, value: ValueNodeId) -> bool {
-        self.graph.uses_remaining(&self.complete, value) == 1
-    }
+pub fn is_last_use(graph: &OpGraph, complete: OpSet<'_>, value: ValueNodeId) -> bool {
+    graph.uses_remaining(&complete, value) == 1
 }
 
 pub fn collect_next_completable_into(graph: &OpGraph, complete: OpSet<'_>, out: &mut OpSetMut<'_>) {
