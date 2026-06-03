@@ -241,7 +241,7 @@ fn intricate_spill_dup_swap() {
 }
 
 fn shuffle_case() -> impl Strategy<Value = (ScheduleConfig, Vec<u32>, Vec<u32>)> {
-    (1u8..=6, prop::collection::vec(0u32..30, 0..=20)).prop_flat_map(|(max_swap, start)| {
+    (1u8..=6, prop::collection::vec(0u32..30, 1..=20)).prop_flat_map(|(max_swap, start)| {
         let values = start.clone();
         let target = prop::collection::vec(prop::sample::select(values), 0..=20);
 

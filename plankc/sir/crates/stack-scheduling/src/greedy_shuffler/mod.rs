@@ -3,7 +3,7 @@ use crate::{
     stack::{ScheduleConfig, StackOps, TrackedStack},
 };
 use indices::*;
-use plank_core::{IncIterable, LoopLimit, span::ToUsize};
+use plank_core::{IncIterable, LoopLimit, Span, span::ToUsize};
 
 mod indices;
 
