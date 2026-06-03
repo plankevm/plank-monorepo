@@ -149,9 +149,8 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
         let mut limit = LoopLimit::max(LIMIT);
         while self.complete_at_bottom < self.target.len() {
             limit.tick();
-            let current_contains_incomplete =
-                self.current.len().to_usize() > self.complete_at_bottom;
-            let stepped = if current_contains_incomplete {
+            let current_incomplete = self.current.len().to_usize() > self.complete_at_bottom;
+            let stepped = if current_incomplete {
                 self.pop_unneeded()
                     || self.swap_to_correct_position()
                     || self.exchange_via_top()
