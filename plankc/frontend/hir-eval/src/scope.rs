@@ -117,15 +117,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
-        let start = match self.hir.block_spans[block] {
-            Ok(span) => self.loc(span),
-            Err(Poisoned) => self.eval_branch_quota_start_loc,
-        };
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
-        let parent_eval_branch_quota_start_loc =
-            std::mem::replace(&mut self.eval_branch_quota_start_loc, start);
         let res = self.eval_block_inline(block);
-        self.eval_branch_quota_start_loc = parent_eval_branch_quota_start_loc;
         self.comptime = parent_comptime;
         res
     }
@@ -675,6 +668,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         condition: hir::LocalId,
         body: hir::BlockId,
     ) -> Result<(), Diverge> {
+        // Comptime quota is the user-facing loop bound here; a separate LoopLimit would either be
+        // redundant with that quota or silently cap explicitly raised quotas.
         loop {
             let condition_value = self.eval_repeated_while_condition(condition_block, condition)?;
 

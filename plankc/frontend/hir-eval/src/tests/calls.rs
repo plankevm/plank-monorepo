@@ -327,6 +327,32 @@ fn test_const_poisoned_never_crashes() {
 }
 
 #[test]
+fn test_non_never_comptime_function_preserves_nested_never_divergence() {
+    assert_diagnostics(
+        r#"
+        const stop = fn() never {
+            @evm_stop();
+        };
+        const f = fn() u256 {
+            stop();
+        };
+        init {
+            comptime { f(); }
+            let y: bool = 0;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: builtin not supported at compile time
+         --> main.plk:2:5
+          |
+        2 |     @evm_stop();
+          |     ^^^^^^^^^^^ `@evm_stop` cannot be evaluated at compile time
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_call_arg_count_mismatch() {
     assert_diagnostics(
         r#"
@@ -768,6 +794,45 @@ fn test_comptime_diverge_prevents_cascade() {
 }
 
 #[test]
+fn test_cached_non_never_poison_does_not_diverge() {
+    assert_diagnostics(
+        r#"
+        const bad = fn() u256 { return @uninit(never); };
+
+        const warm = bad();
+
+        init {
+            comptime {
+                bad();
+                let after: u256 = false;
+            }
+            @evm_stop();
+        }
+        "#,
+        &[
+            r#"
+            error: cannot create uninitialized value
+             --> main.plk:1:32
+              |
+            1 | const bad = fn() u256 { return @uninit(never); };
+              |                                ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
+              |
+              = help: @uninit only supports u256, bool, void, type, memptr and struct types
+            "#,
+            r#"
+            error: mismatched types
+             --> main.plk:6:27
+              |
+            6 |         let after: u256 = false;
+              |                    ----   ^^^^^ expected `u256`, got `bool`
+              |                    |
+              |                    `u256` expected because of this
+            "#,
+        ],
+    );
+}
+
+#[test]
 fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
     assert_diagnostics(
         std_project(
@@ -940,17 +1005,16 @@ fn test_comptime_function_calls_consume_call_entry_quota() {
            |
            = note: current eval branch quota is 2000
         note: comptime evaluation began here
-          --> main.plk:3:23
+          --> main.plk:2:1
            |
-         3 |       let mut x: u256 = comptime {
-           |  _______________________^
+         2 | / init {
+         3 | |     let mut x: u256 = comptime {
          4 | |         @set_eval_branch_quota(2000);
          5 | |         let mut i = 0;
-         6 | |         while i < 1000 {
         ...  |
-        11 | |         0
-        12 | |     };
-           | |_____^
+        13 | |     @evm_stop();
+        14 | | }
+           | |_^
         "#],
     );
 }
@@ -986,24 +1050,265 @@ fn test_cached_comptime_function_calls_replay_body_quota() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-         --> main.plk:3:11
-          |
-        3 |     while i < 2 {
-          |           ^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is 1000
+          --> main.plk:3:11
+           |
+         3 |     while i < 2 {
+           |           ^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
         note: comptime evaluation began here
-         --> main.plk:1:38
+          --> main.plk:8:1
+           |
+         8 | / init {
+         9 | |     let mut warm: u256 = comptime { consume_3_branches() };
+        10 | |     let mut x: u256 = comptime {
+        11 | |         let mut i = 0;
+        ...  |
+        18 | |     @evm_stop();
+        19 | | }
+           | |_^
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_function_body_comptime_quota_counts_in_caller() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const spend_500 = fn() void {
+            comptime {
+                let mut i = 0;
+                while i < 500 {
+                    i = i + 1;
+                }
+            }
+        };
+
+        init {
+            spend_500();
+            let mut x: u256 = comptime {
+                let mut i = 0;
+                while i < 1000 {
+                    i = i + 1;
+                }
+                i
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
+        error: comptime branch quota exhausted
+          --> main.plk:13:15
+           |
+        13 |         while i < 1000 {
+           |               ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:9:1
+           |
+         9 | / init {
+        10 | |     spend_500();
+        11 | |     let mut x: u256 = comptime {
+        12 | |         let mut i = 0;
+        ...  |
+        18 | |     @evm_stop();
+        19 | | }
+           | |_^
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_lowering_quota_exhaustion_is_retryable() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    let (mir, big_nums, session) = try_lower(std_project(
+        r#"
+        const f = fn() void {
+            comptime {
+                let mut i = 0;
+                while i < 1001 {
+                    i = i + 1;
+                }
+            }
+            @evm_sstore(0, 0);
+        };
+
+        init {
+            f();
+        }
+
+        run {
+            @set_eval_branch_quota(3000);
+            f();
+            @evm_stop();
+        }
+        "#,
+    ));
+    plank_test_utils::assert_diagnostics(
+        session.diagnostics(),
+        &session,
+        &[r#"
+        error: comptime branch quota exhausted
+          --> main.plk:4:15
+           |
+         4 |         while i < 1001 {
+           |               ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:10:1
+           |
+        10 | / init {
+        11 | |     f();
+        12 | | }
+           | |_^
+        "#],
+    );
+    let actual = format!("{}", DisplayMir::new(&mir, &big_nums, &session));
+    assert!(actual.contains("@evm_sstore"), "{actual}");
+}
+
+#[test]
+fn test_runtime_lowering_recursion_poison_is_not_marked_retryable() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    let (_mir, _big_nums, session) = try_lower(std_project(
+        r#"
+        const f = fn() void {
+            f();
+            comptime {
+                let mut i = 0;
+                while i < 1001 {
+                    i = i + 1;
+                }
+            }
+        };
+
+        init {
+            f();
+            @evm_stop();
+        }
+        "#,
+    ));
+    plank_test_utils::assert_diagnostics(
+        session.diagnostics(),
+        &session,
+        &[r#"
+        error: runtime recursion not supported
+         --> main.plk:2:5
           |
-        1 |   const consume_3_branches = fn() u256 {
-          |  ______________________________________^
-        2 | |     let mut i = 0;
-        3 | |     while i < 2 {
-        4 | |         i = i + 1;
-        5 | |     }
-        6 | |     i
-        7 | | };
-          | |_^
+        2 |     f();
+          |     ^^^ runtime call that recurses
+          |
+          = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_recursion_preamble_quota_counts_in_caller() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const f = fn() comptime {
+            let mut i = 0;
+            while i < 500 {
+                i = i + 1;
+            }
+            void
+        } {
+            f();
+        };
+
+        const identity = fn(x: u256) u256 { x };
+
+        init {
+            f();
+            let mut x: u256 = comptime {
+                identity(0)
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[
+            r#"
+        error: runtime recursion not supported
+         --> main.plk:8:5
+          |
+        8 |     f();
+          |     ^^^ runtime call that recurses
+          |
+          = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
+        "#,
+            r#"
+        error: comptime branch quota exhausted
+          --> main.plk:14:9
+           |
+        14 |         identity(0)
+           |         ^^^^^^^^^^^ evaluating this call exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:11:1
+           |
+        11 | / init {
+        12 | |     f();
+        13 | |     let mut x: u256 = comptime {
+        14 | |         identity(0)
+        15 | |     };
+        16 | |     @evm_stop();
+        17 | | }
+           | |_^
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_mutual_runtime_recursion_preamble_quota_raise_counts_in_caller() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const a = fn() void {
+            b();
+        };
+
+        const b = fn() comptime {
+            @set_eval_branch_quota(1200);
+            void
+        } {
+            a();
+        };
+
+        const identity = fn(x: u256) u256 { x };
+
+        init {
+            a();
+            let mut x: u256 = comptime {
+                let mut i = 0;
+                while i < 1100 {
+                    i = i + 1;
+                }
+                identity(0)
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
+        error: runtime recursion not supported
+         --> main.plk:8:5
+          |
+        8 |     a();
+          |     ^^^ runtime call that recurses
+          |
+          = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
         "#],
     );
 }
@@ -1048,17 +1353,16 @@ fn test_cached_comptime_function_replay_applies_eval_branch_quota_raise() {
            |
            = note: current eval branch quota is 1001
         note: comptime evaluation began here
-          --> main.plk:8:23
+          --> main.plk:6:1
            |
-         8 |       let mut x: u256 = comptime {
-           |  _______________________^
+         6 | / init {
+         7 | |     let mut warm: u256 = comptime { raise_quota() };
+         8 | |     let mut x: u256 = comptime {
          9 | |         let mut i = 0;
-        10 | |         while i < 998 {
-        11 | |             i = i + 1;
         ...  |
-        16 | |         i
-        17 | |     };
-           | |_____^
+        18 | |     @evm_stop();
+        19 | | }
+           | |_^
         "#],
     );
 }
@@ -1086,29 +1390,25 @@ fn test_comptime_function_preamble_quota_exhaustion_reports_call_site() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-         --> main.plk:3:11
-          |
-        3 |     while i < 1001 {
-          |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is 1000
+          --> main.plk:3:11
+           |
+         3 |     while i < 1001 {
+           |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
         note: comptime evaluation began here
-         --> main.plk:1:16
-          |
-        1 |   const f = fn() comptime {
-          |  ________________^
-        2 | |     let mut i = 0;
-        3 | |     while i < 1001 {
-        4 | |         i = i + 1;
-        5 | |     }
-        6 | |     u256
-        7 | | } { 0 };
-          | |_^
+          --> main.plk:8:1
+           |
+         8 | / init {
+         9 | |     let mut x: u256 = comptime { f() };
+        10 | |     @evm_stop();
+        11 | | }
+           | |_^
         note: called here
-         --> main.plk:9:34
-          |
-        9 |     let mut x: u256 = comptime { f() };
-          |                                  ^^^
+          --> main.plk:9:34
+           |
+         9 |     let mut x: u256 = comptime { f() };
+           |                                  ^^^
         "#],
     );
 }
@@ -1135,24 +1435,20 @@ fn test_runtime_context_comptime_call_entry_counts_before_body_quota() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-         --> main.plk:3:11
-          |
-        3 |     while i < 1000 {
-          |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
-          |
-          = note: current eval branch quota is 1000
+          --> main.plk:3:11
+           |
+         3 |     while i < 1000 {
+           |           ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
         note: comptime evaluation began here
-         --> main.plk:1:21
-          |
-        1 |   const f = fn() type {
-          |  _____________________^
-        2 | |     let mut i = 0;
-        3 | |     while i < 1000 {
-        4 | |         i = i + 1;
-        5 | |     }
-        6 | |     u256
-        7 | | };
-          | |_^
+          --> main.plk:8:1
+           |
+         8 | / init {
+         9 | |     let mut x: f() = 0;
+        10 | |     @evm_stop();
+        11 | | }
+           | |_^
         "#],
     );
 }
