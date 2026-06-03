@@ -205,6 +205,8 @@ pub enum Token {
     Run,
     #[token("struct")]
     Struct,
+    #[token("tuple")]
+    Tuple,
     #[token("return")]
     Return,
     #[token("comptime")]
@@ -357,6 +359,7 @@ impl Token {
             Token::Init => "init",
             Token::Run => "run",
             Token::Struct => "struct",
+            Token::Tuple => "tuple",
             Token::Return => "return",
             Token::Comptime => "comptime",
             Token::Inline => "inline",
@@ -440,6 +443,7 @@ impl Token {
             Token::Init => "`init`",
             Token::Run => "`run`",
             Token::Struct => "`struct`",
+            Token::Tuple => "`tuple`",
             Token::Return => "`return`",
             Token::Comptime => "`comptime`",
             Token::Inline => "`inline`",
@@ -636,6 +640,7 @@ mod tests {
         assert_eq!(lex_all("init"), vec![(Token::Init, 0..4, "init")]);
         assert_eq!(lex_all("run"), vec![(Token::Run, 0..3, "run")]);
         assert_eq!(lex_all("struct"), vec![(Token::Struct, 0..6, "struct")]);
+        assert_eq!(lex_all("tuple"), vec![(Token::Tuple, 0..5, "tuple")]);
         assert_eq!(lex_all("return"), vec![(Token::Return, 0..6, "return")]);
         assert_eq!(lex_all("comptime"), vec![(Token::Comptime, 0..8, "comptime")]);
         assert_eq!(lex_all("inline"), vec![(Token::Inline, 0..6, "inline")]);

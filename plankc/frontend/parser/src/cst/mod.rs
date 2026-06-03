@@ -92,6 +92,8 @@ pub enum NodeKind {
     MemberExpr,
     StructDef,
     StructLit,
+    TupleType,
+    TupleLit,
 
     // Conditional
     If,
@@ -150,6 +152,8 @@ impl std::fmt::Debug for NodeKind {
             Self::MemberExpr => write!(f, "MemberExpr"),
             Self::StructDef => write!(f, "StructDef"),
             Self::StructLit => write!(f, "StructLit"),
+            Self::TupleType => write!(f, "TupleType"),
+            Self::TupleLit => write!(f, "TupleLit"),
             Self::If => write!(f, "If"),
             Self::ElseIfBranchList => write!(f, "ElseIfBranchList"),
             Self::ElseIfBranch => write!(f, "ElseIfBranch"),
@@ -185,6 +189,8 @@ impl NodeKind {
             | Self::FnDef
             | Self::StructDef
             | Self::StructLit
+            | Self::TupleType
+            | Self::TupleLit
             | Self::BoolLiteral(_)
             | Self::NumLiteral { .. }
             | Self::StringLiteral { .. }

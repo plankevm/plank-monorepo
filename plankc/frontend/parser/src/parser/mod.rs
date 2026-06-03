@@ -510,11 +510,30 @@ impl<'a> Parser<'a> {
 
         if self.eat(Token::LeftRound) {
             // TODO: Track recursion to emit nice error instead of stack overflow.
-            let mut paren_expr = self.alloc_node_from(start, NodeKind::ParenExpr);
+            if self.check(Token::RightRound) {
+                let tuple = self.alloc_node_from(start, NodeKind::TupleLit);
+                self.expect(Token::RightRound);
+                return Some(self.close_node(tuple));
+            }
+
+            let mut expr_or_tuple = self.alloc_node_from(start, NodeKind::ParenExpr);
+
             let inner_expr = self.parse_expr(ParseExprMode::AllowAll);
-            self.push_child(&mut paren_expr, inner_expr);
+            self.push_child(&mut expr_or_tuple, inner_expr);
+
+            if self.eat(Token::Comma) {
+                self.update_kind(expr_or_tuple, NodeKind::TupleLit);
+                while !self.check(Token::RightRound) {
+                    let element = self.parse_expr(ParseExprMode::AllowAll);
+                    self.push_child(&mut expr_or_tuple, element);
+                    if !self.eat(Token::Comma) {
+                        break;
+                    }
+                }
+            }
+
             self.expect(Token::RightRound);
-            return Some(self.close_node(paren_expr));
+            return Some(self.close_node(expr_or_tuple));
         }
 
         if self.eat(Token::Comptime) {
@@ -527,6 +546,10 @@ impl<'a> Parser<'a> {
 
         if self.eat(Token::Struct) {
             return Some(self.parse_struct_def(start));
+        }
+
+        if self.eat(Token::Tuple) {
+            return Some(self.parse_tuple_type(start));
         }
 
         if self.check(Token::LeftCurly) {
@@ -625,6 +648,20 @@ impl<'a> Parser<'a> {
         });
 
         self.close_node(struct_def)
+    }
+
+    fn parse_tuple_type(&mut self, start: TokenIdx) -> NodeIdx {
+        let mut tuple_type = self.alloc_node_from(start, NodeKind::TupleType);
+
+        self.parse_delimited(Token::LeftCurly, Token::RightCurly, Token::Comma, |parser| {
+            let Some(element_type) = parser.try_parse_expr(ParseExprMode::AllowAll) else {
+                return false;
+            };
+            parser.push_child(&mut tuple_type, element_type);
+            true
+        });
+
+        self.close_node(tuple_type)
     }
 
     fn parse_expr(&mut self, mode: ParseExprMode) -> NodeIdx {

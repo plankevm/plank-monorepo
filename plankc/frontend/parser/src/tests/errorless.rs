@@ -1937,6 +1937,153 @@ fn test_struct_lit_trailing_comma() {
 }
 
 // =============================================================================
+// Tuple Types & Literals
+// =============================================================================
+
+#[test]
+fn test_tuple_type_zero_elements() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const T = tuple {};
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "T"
+                " "
+                "="
+                " "
+                TupleType
+                    "tuple"
+                    " "
+                    "{"
+                    "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_tuple_type_trailing_comma() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const T = tuple { u256, bool, };
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "T"
+                " "
+                "="
+                " "
+                TupleType
+                    "tuple"
+                    " "
+                    "{"
+                    " "
+                    Identifier
+                        "u256"
+                    ","
+                    " "
+                    Identifier
+                        "bool"
+                    ","
+                    " "
+                    "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_tuple_lit_zero_elements() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const v = ();
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "v"
+                " "
+                "="
+                " "
+                TupleLit
+                    "("
+                    ")"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_tuple_lit_singleton() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const v = (x,);
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "v"
+                " "
+                "="
+                " "
+                TupleLit
+                    "("
+                    Identifier
+                        "x"
+                    ","
+                    ")"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_tuple_lit_trailing_comma() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const v = (x, y,);
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "v"
+                " "
+                "="
+                " "
+                TupleLit
+                    "("
+                    Identifier
+                        "x"
+                    ","
+                    " "
+                    Identifier
+                        "y"
+                    ","
+                    ")"
+                ";"
+        "#,
+    );
+}
+
+// =============================================================================
 // Blocks
 // =============================================================================
 

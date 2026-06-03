@@ -12,6 +12,8 @@ pub enum Expr<'cst> {
     Member(MemberExpr<'cst>),
     StructDef(StructDef<'cst>),
     StructLit(StructLit<'cst>),
+    TupleType(TupleType<'cst>),
+    TupleLit(TupleLit<'cst>),
     If(IfExpr<'cst>),
     FnDef(FnDef<'cst>),
     Block(BlockExpr<'cst>),
@@ -58,6 +60,8 @@ impl<'cst> Expr<'cst> {
                 },
                 NodeKind::StructDef => Expr::StructDef(StructDef { view }),
                 NodeKind::StructLit => Expr::StructLit(StructLit { view }),
+                NodeKind::TupleType => Expr::TupleType(TupleType { view }),
+                NodeKind::TupleLit => Expr::TupleLit(TupleLit { view }),
                 NodeKind::If => match view.child(1) {
                     Some(body_node) => Expr::If(IfExpr { body_node, view }),
                     None => Expr::Error { span },
@@ -92,6 +96,8 @@ impl<'cst> Expr<'cst> {
             | Expr::Member(MemberExpr { view, .. })
             | Expr::StructDef(StructDef { view, .. })
             | Expr::StructLit(StructLit { view, .. })
+            | Expr::TupleType(TupleType { view })
+            | Expr::TupleLit(TupleLit { view })
             | Expr::If(IfExpr { view, .. })
             | Expr::FnDef(FnDef { view, .. })
             | Expr::Block(BlockExpr { view, .. })
@@ -299,6 +305,38 @@ impl<'cst> FieldAssign<'cst> {
 
     pub fn name_span(&self) -> TokenSpan {
         self.name_span
+    }
+
+    pub fn node(&self) -> NodeView<'cst> {
+        self.view
+    }
+}
+
+/// Tuple type: `tuple { Type1, ... }` or `tuple {}`
+#[derive(Debug, Clone, Copy)]
+pub struct TupleType<'cst> {
+    view: NodeView<'cst>,
+}
+
+impl<'cst> TupleType<'cst> {
+    pub fn elements(&self) -> impl Iterator<Item = Expr<'cst>> {
+        self.view.children().map(Expr::new_unwrap)
+    }
+
+    pub fn node(&self) -> NodeView<'cst> {
+        self.view
+    }
+}
+
+/// Tuple literal: `(element1, ...)` or `()`
+#[derive(Debug, Clone, Copy)]
+pub struct TupleLit<'cst> {
+    view: NodeView<'cst>,
+}
+
+impl<'cst> TupleLit<'cst> {
+    pub fn elements(&self) -> impl Iterator<Item = Expr<'cst>> {
+        self.view.children().map(Expr::new_unwrap)
     }
 
     pub fn node(&self) -> NodeView<'cst> {
