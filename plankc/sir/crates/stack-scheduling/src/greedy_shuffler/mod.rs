@@ -193,21 +193,27 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
     #[track_caller]
     fn iter_pairwise<'s>(
         &'s self,
-        mut inclusive: FromBottom,
+        mut bottom_up_start: FromBottom,
     ) -> impl Iterator<Item = (ValueNodeId, ValueNodeId, FromBottom)> + 's {
-        let current = if self.current.is_empty() || self.current_to(FromTop::new(0)) < inclusive {
+        let current = if self.current.is_empty() || {
+            let highest_from_bottom = self.current_to(FromTop::new(0));
+            highest_from_bottom < bottom_up_start
+        } {
             &[]
         } else {
-            self.current(..=inclusive)
+            self.current(..=bottom_up_start)
         };
-        let target = if self.target.is_empty() || self.target_to(FromTop::new(0)) < inclusive {
+        let target = if self.target.is_empty() || {
+            let highest_from_bottom = self.target_to(FromTop::new(0));
+            highest_from_bottom < bottom_up_start
+        } {
             &[]
         } else {
-            self.target(..=inclusive)
+            self.target(..=bottom_up_start)
         };
 
         current.iter().rev().zip(target.iter().rev()).map(move |(&current_value, &target_value)| {
-            (current_value, target_value, inclusive.get_and_inc())
+            (current_value, target_value, bottom_up_start.get_and_inc())
         })
     }
 
