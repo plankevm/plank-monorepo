@@ -19,6 +19,7 @@ newtype_index! {
     pub struct StructDefId;
     pub struct CallArgsId;
     pub struct FieldsId;
+    pub struct ElementsId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,6 +61,12 @@ pub enum ExprKind {
         fields: FieldsId,
     },
     StructDef(StructDefId),
+    TupleType {
+        elements: ElementsId,
+    },
+    TupleLit {
+        elements: ElementsId,
+    },
 
     /// Bool-specific logical NOT (`!x`). Not in `operators::UnaryOp` because it is not
     /// overridable — it is hardcoded to only work on `bool`.
@@ -218,6 +225,7 @@ pub struct Hir {
     pub call_args: ListOfLists<CallArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
+    pub elements: ListOfLists<ElementsId, LocalId>,
 
     pub fns: IndexVec<FnDefId, FnDef>,
     pub fn_params: ListOfLists<FnDefId, ParamInfo>,

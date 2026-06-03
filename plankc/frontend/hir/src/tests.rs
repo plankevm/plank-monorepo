@@ -392,6 +392,33 @@ fn test_fn_struct_return() {
 }
 
 #[test]
+fn test_tuple_type_and_literal() {
+    assert_lowers_to(
+        r#"
+        const Pair = tuple { u256, bool };
+
+        init {
+            let pair: Pair = (2, true);
+        }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("Pair") result=LocalId(0) {
+            %1 = type:u256
+            %2 = type:bool
+            %0 = tuple {%1, %2,}
+        }
+
+        ==== Init ====
+        %0 = 2
+        %1 = true
+        %3 = $0
+        %2 : %3 = (%0, %1,)
+        "#,
+    );
+}
+
+#[test]
 fn test_assign_to_mutable_let() {
     assert_lowers_to(
         r#"

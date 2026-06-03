@@ -34,6 +34,7 @@ struct HirBuilder {
     call_args: ListOfLists<CallArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
     struct_defs: IndexVec<StructDefId, StructDef>,
+    elements: ListOfLists<ElementsId, LocalId>,
 
     fns: IndexVec<FnDefId, FnDef>,
     fn_params: ListOfLists<FnDefId, ParamInfo>,
@@ -51,6 +52,7 @@ impl HirBuilder {
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
             struct_defs: IndexVec::new(),
+            elements: ListOfLists::new(),
         }
     }
 }
@@ -211,6 +213,19 @@ impl BlockLowerer<'_> {
             self.locals_buf.push(local);
         }
         self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..))
+    }
+
+    // TODO: this is almost identical to lower_call_args. worth extracting a helper?
+    fn lower_tuple_elements<'a>(
+        &mut self,
+        elements: impl Iterator<Item = ast::Expr<'a>>,
+    ) -> ElementsId {
+        let buf_start = self.locals_buf.len();
+        for element in elements {
+            let local = self.lower_expr_to_local(element);
+            self.locals_buf.push(local);
+        }
+        self.builder.elements.push_iter(self.locals_buf.drain(buf_start..))
     }
 
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
@@ -435,6 +450,14 @@ impl BlockLowerer<'_> {
                     fields,
                 });
                 ExprKind::StructDef(struct_def_id)
+            }
+            ast::Expr::TupleType(tuple_type) => {
+                let elements = self.lower_tuple_elements(tuple_type.elements());
+                ExprKind::TupleType { elements }
+            }
+            ast::Expr::TupleLit(tuple_lit) => {
+                let elements = self.lower_tuple_elements(tuple_lit.elements());
+                ExprKind::TupleLit { elements }
             }
             ast::Expr::FnDef(fn_def) => ExprKind::FnDef(self.lower_fn_def(fn_def)),
             ast::Expr::If(if_expr) => {
@@ -880,6 +903,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         call_args: builder.call_args,
         fields: builder.fields,
         struct_defs: builder.struct_defs,
+        elements: builder.elements,
 
         fns: builder.fns,
         fn_params: builder.fn_params,
