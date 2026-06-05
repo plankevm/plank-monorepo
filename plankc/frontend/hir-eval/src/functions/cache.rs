@@ -20,16 +20,6 @@ pub(crate) enum ComptimeCallOutcome {
     DivergedEnd,
 }
 
-impl ComptimeCallOutcome {
-    pub fn into_call_result(
-        self,
-        branches_consumed: u32,
-        max_eval_branch_quota_seen: u32,
-    ) -> ComptimeCallResult {
-        ComptimeCallResult { outcome: self, branches_consumed, max_eval_branch_quota_seen }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ComptimeCallResult {
     pub outcome: ComptimeCallOutcome,

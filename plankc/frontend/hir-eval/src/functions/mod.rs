@@ -665,10 +665,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             existing_cached_value.is_none_or(|cached| cached.outcome == outcome),
             "re-evaluated function produced different cached outcome"
         );
-        let result = outcome.into_call_result(
-            self.comptime_quota.spent() - spent_before_body,
-            self.max_eval_branch_quota_seen,
-        );
+        let result = ComptimeCallResult {
+            outcome,
+            branches_consumed: self.comptime_quota.spent() - spent_before_body,
+            max_eval_branch_quota_seen: self.max_eval_branch_quota_seen,
+        };
         cache_state.set(EvaluatedFnState::Done(Ok(result)));
         Ok(Ok(result))
     }
