@@ -8,6 +8,7 @@ use crate::{
     diagnostics::DiagCtx,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
+    quota::ComptimeQuota,
     scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
@@ -127,6 +128,7 @@ impl<'a> Evaluator<'a> {
             diag_ctx,
             const_def.source_id,
             true,
+            ComptimeQuota::default(),
             const_def.loc(),
             EvalContext::Other,
         );
@@ -194,6 +196,7 @@ impl<'a> Evaluator<'a> {
             diag_ctx,
             self.hir.entry_source,
             false,
+            ComptimeQuota::default(),
             eval_branch_quota_start_loc,
             EvalContext::Other,
         );

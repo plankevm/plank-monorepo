@@ -60,13 +60,6 @@ fn comptime_args(
     })
 }
 
-fn comptime_call_result_to_eval_result(result: ComptimeCallResult) -> Result<EvalValue, Diverge> {
-    match result.outcome {
-        ComptimeCallOutcome::Value(value) => Ok(EvalValue::Comptime(value)),
-        ComptimeCallOutcome::DivergedEnd => Err(Diverge::END),
-    }
-}
-
 impl Call<'_> {
     fn loc(&self) -> SrcLoc {
         SrcLoc::new(self.source, self.span)
@@ -96,10 +89,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.diag_ctx,
             fn_def.source,
             false,
+            self.comptime_quota,
             eval_branch_quota_start_loc,
             EvalContext::FunctionPreamble { arg_spans, call_source },
         );
-        fn_scope.comptime_quota = self.comptime_quota.clone();
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
@@ -448,7 +441,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if call.caller_comptime || preamble.is_comptime_only {
             let call_result = self.fold_comptime_call(call, preamble, values_buf_offset);
             return FunctionScopeOutcome::Return(match call_result {
-                Ok(Ok(result)) => Ok(comptime_call_result_to_eval_result(result)),
+                Ok(Ok(result)) => match result.outcome {
+                    ComptimeCallOutcome::Value(value) => Ok(Ok(EvalValue::Comptime(value))),
+                    ComptimeCallOutcome::DivergedEnd => Ok(Err(Diverge::END)),
+                },
                 Ok(Err(diverged)) => Ok(Err(diverged)),
                 Err(Poisoned) => Err(Poisoned),
             });

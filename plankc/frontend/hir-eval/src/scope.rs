@@ -82,6 +82,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         diag_ctx: &'a mut DiagCtx<'ctx>,
         source: SourceId,
         comptime: bool,
+        comptime_quota: ComptimeQuota,
         eval_branch_quota_start_loc: SrcLoc,
         ctx: EvalContext,
     ) -> Self {
@@ -93,7 +94,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ctx,
             comptime,
             conditional: false,
-            comptime_quota: ComptimeQuota::default(),
+            comptime_quota,
             eval_branch_quota_start_loc,
             max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
 

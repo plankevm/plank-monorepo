@@ -1,6 +1,6 @@
 pub(crate) const DEFAULT_COMPTIME_BRANCH_QUOTA: u32 = 1000;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct ComptimeQuota {
     limit: u32,
     spent: u32,
