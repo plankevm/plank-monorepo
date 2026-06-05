@@ -1542,62 +1542,6 @@ fn test_uninit_memptr_in_comptime() {
 }
 
 #[test]
-fn test_set_eval_branch_quota_in_conditional_runtime() {
-    assert_diagnostics(
-        r#"
-        init {
-            let condition = @evm_eq(@evm_calldataload(0), 0);
-            if condition {
-                @set_eval_branch_quota(1000);
-            } else {
-                @set_eval_branch_quota(2000);
-            }
-            @evm_stop();
-        }
-        "#,
-        &[
-            r#"
-        error: eval branch quota cannot be set in conditional runtime control flow
-         --> main.plk:4:9
-          |
-        4 |         @set_eval_branch_quota(1000);
-          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conditional runtime quota change
-        "#,
-            r#"
-        error: eval branch quota cannot be set in conditional runtime control flow
-         --> main.plk:6:9
-          |
-        6 |         @set_eval_branch_quota(2000);
-          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conditional runtime quota change
-        "#,
-        ],
-    );
-}
-
-#[test]
-fn test_set_eval_branch_quota_in_runtime_while() {
-    assert_diagnostics(
-        r#"
-        init {
-            let mut i = @evm_calldataload(0);
-            while i == 0 {
-                @set_eval_branch_quota(1000);
-                i = 1;
-            }
-            @evm_stop();
-        }
-        "#,
-        &[r#"
-        error: eval branch quota cannot be set in conditional runtime control flow
-         --> main.plk:4:9
-          |
-        4 |         @set_eval_branch_quota(1000);
-          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conditional runtime quota change
-        "#],
-    );
-}
-
-#[test]
 fn test_set_eval_branch_quota_runtime_arg() {
     assert_diagnostics(
         r#"
@@ -1945,5 +1889,41 @@ fn test_unused_const_comptime_while_branch_quota_exhausted() {
         3 | | };
           | |__^
         "#],
+    );
+}
+
+#[test]
+fn scoped_set_eval_in_branch() {
+    assert_lowers_to(
+        r#"
+        init {
+            let mut cond = false;
+            if cond {
+                @set_eval_branch_quota(3);
+                comptime {
+                    let x = 3;
+                }
+            } else {
+
+            }
+
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = %0
+            if %1 {
+                %2 : void = void_unit
+            } else {
+                %2 : void = void_unit
+            }
+            %3 : void = %2
+            %4 : never = @evm_stop()
+        }
+        "#,
     );
 }

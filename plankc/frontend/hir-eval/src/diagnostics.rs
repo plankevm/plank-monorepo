@@ -264,12 +264,6 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_set_eval_branch_quota_in_conditional_runtime(&mut self, loc: SrcLoc) {
-        Diagnostic::error("eval branch quota cannot be set in conditional runtime control flow")
-            .primary(loc.source, loc.span, "conditional runtime quota change")
-            .emit(self);
-    }
-
     pub fn emit_eval_branch_quota_too_large(&mut self, loc: SrcLoc) {
         Diagnostic::error("eval branch quota is too large")
             .primary(loc.source, loc.span, "quota must fit in u32")

@@ -198,11 +198,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
             Builtin::SetEvalBranchQuota => {
-                if !self.is_comptime() && self.conditional {
-                    self.diag_ctx.emit_set_eval_branch_quota_in_conditional_runtime(expr_loc);
-                    return Err(Poisoned);
-                }
-
                 let &[quota_arg] = args else { unreachable!("arg count checked") };
                 let binding = self.bindings[quota_arg];
                 let (state, arg_use_span, arg_origin) = binding.poisoned()?;
