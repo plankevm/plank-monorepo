@@ -570,43 +570,41 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         condition: hir::LocalId,
         body: hir::BlockId,
     ) -> Result<(), Diverge> {
-        let (condition_block, mir_condition_local) = self.with_conditional(true, |this| {
-            this.with_instructions(|this| {
-                this.eval_block_inline(condition_block)?;
-                let binding = this.bindings[condition];
-                let state = match binding.state {
-                    Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
-                    Ok(state) => state,
-                };
-                let state_ty = this.state_type(state);
-                if !state_ty.is_assignable_to(TypeId::BOOL) {
-                    this.diag_ctx.emit_type_mismatch_simple(
-                        TypeId::BOOL,
-                        state_ty,
-                        this.loc(binding.use_span),
-                    );
-                    return Err(Diverge::ControlFlowPoisoned);
-                }
-                match state {
-                    LocalState::Runtime(local) => Ok(local),
-                    LocalState::Comptime(value) => {
-                        if this.is_comptime_only(value) {
-                            this.diag_ctx
-                                .emit_comptime_only_value_at_runtime(this.loc(binding.use_span));
-                            return Err(Diverge::ControlFlowPoisoned);
-                        }
-                        let condition = this.mir_types.push(this.values.type_of_value(value));
-                        this.emit(mir::Instruction::Set {
-                            target: condition,
-                            expr: mir::Expr::Const(value),
-                        });
-                        Ok(condition)
+        let (condition_block, mir_condition_local) = self.with_instructions(|this| {
+            this.eval_block_inline(condition_block)?;
+            let binding = this.bindings[condition];
+            let state = match binding.state {
+                Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
+                Ok(state) => state,
+            };
+            let state_ty = this.state_type(state);
+            if !state_ty.is_assignable_to(TypeId::BOOL) {
+                this.diag_ctx.emit_type_mismatch_simple(
+                    TypeId::BOOL,
+                    state_ty,
+                    this.loc(binding.use_span),
+                );
+                return Err(Diverge::ControlFlowPoisoned);
+            }
+            match state {
+                LocalState::Runtime(local) => Ok(local),
+                LocalState::Comptime(value) => {
+                    if this.is_comptime_only(value) {
+                        this.diag_ctx
+                            .emit_comptime_only_value_at_runtime(this.loc(binding.use_span));
+                        return Err(Diverge::ControlFlowPoisoned);
                     }
+                    let condition = this.mir_types.push(this.values.type_of_value(value));
+                    this.emit(mir::Instruction::Set {
+                        target: condition,
+                        expr: mir::Expr::Const(value),
+                    });
+                    Ok(condition)
                 }
-            })
+            }
         });
         let condition = mir_condition_local?;
-        let (body, body_res) = self.with_conditional(true, |this| this.eval_block_to_mir(body));
+        let (body, body_res) = self.eval_block_to_mir(body);
         match body_res {
             Err(Diverge::ControlFlowPoisoned) => {
                 return Err(Diverge::ControlFlowPoisoned);
