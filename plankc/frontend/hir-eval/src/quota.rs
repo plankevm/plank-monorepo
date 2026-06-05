@@ -18,7 +18,7 @@ impl ComptimeQuota {
     }
 
     pub(crate) fn spend_branch(&mut self) -> bool {
-        assert!(self.spent <= self.limit, "comptime quota overspent elsewher");
+        assert!(self.spent <= self.limit, "comptime quota overspent elsewhere");
         if self.spent == self.limit {
             return false;
         }

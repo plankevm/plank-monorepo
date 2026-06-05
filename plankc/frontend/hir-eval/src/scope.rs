@@ -386,10 +386,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         condition_block: hir::BlockId,
         condition: hir::LocalId,
     ) -> Result<bool, Diverge> {
-        match self.eval_block_inline(condition_block) {
-            Ok(()) => self.expect_comptime_bool_condition(condition),
-            Err(err) => Err(err),
-        }
+        self.eval_block_inline(condition_block)?;
+        self.expect_comptime_bool_condition(condition)
     }
 
     fn expect_comptime_bool_condition(&mut self, condition: hir::LocalId) -> Result<bool, Diverge> {

@@ -283,20 +283,7 @@ impl DiagCtx<'_> {
         limit: u32,
         eval_branch_quota_start_loc: SrcLoc,
     ) {
-        Diagnostic::error("comptime branch quota exhausted")
-            .primary(
-                loc.source,
-                loc.span,
-                "evaluating this loop exceeded the comptime branch quota",
-            )
-            .note(format!("current eval branch quota is {limit}"))
-            .claim(
-                Claim::new(Level::Note, "comptime evaluation began here").element(
-                    Annotations::new(eval_branch_quota_start_loc.source)
-                        .no_label(eval_branch_quota_start_loc.span, AnnotationKind::Primary),
-                ),
-            )
-            .emit(self);
+        self.emit_comptime_quota_exhausted(loc, limit, eval_branch_quota_start_loc, "loop")
     }
 
     pub fn emit_comptime_call_branch_quota_exhausted(
@@ -305,11 +292,21 @@ impl DiagCtx<'_> {
         limit: u32,
         eval_branch_quota_start_loc: SrcLoc,
     ) {
+        self.emit_comptime_quota_exhausted(loc, limit, eval_branch_quota_start_loc, "call")
+    }
+
+    fn emit_comptime_quota_exhausted(
+        &mut self,
+        loc: SrcLoc,
+        limit: u32,
+        eval_branch_quota_start_loc: SrcLoc,
+        reason: &'static str,
+    ) {
         Diagnostic::error("comptime branch quota exhausted")
             .primary(
                 loc.source,
                 loc.span,
-                "evaluating this call exceeded the comptime branch quota",
+                format!("evaluating this {reason} exceeded the comptime branch quota"),
             )
             .note(format!("current eval branch quota is {limit}"))
             .claim(
