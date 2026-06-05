@@ -606,11 +606,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let condition = mir_condition_local?;
         let (body, body_res) = self.eval_block_to_mir(body);
         match body_res {
-            Err(Diverge::ControlFlowPoisoned) => {
-                return Err(Diverge::ControlFlowPoisoned);
-            }
-            Err(Diverge::ComptimeQuotaExhausted) => {
-                return Err(Diverge::ComptimeQuotaExhausted);
+            Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
+                return Err(err);
             }
             Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }
