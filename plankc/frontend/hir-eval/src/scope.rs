@@ -381,15 +381,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    fn eval_comptime_while_condition(
-        &mut self,
-        condition_block: hir::BlockId,
-        condition: hir::LocalId,
-    ) -> Result<bool, Diverge> {
-        self.eval_block_inline(condition_block)?;
-        self.expect_comptime_bool_condition(condition)
-    }
-
     fn expect_comptime_bool_condition(&mut self, condition: hir::LocalId) -> Result<bool, Diverge> {
         let binding = self.bindings[condition];
         let state = match binding.state {
@@ -634,7 +625,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // Comptime quota is the user-facing loop bound here; a separate LoopLimit would either be
         // redundant with that quota or silently cap explicitly raised quotas.
         loop {
-            let condition_value = self.eval_comptime_while_condition(condition_block, condition)?;
+            self.eval_block_inline(condition_block)?;
+            let condition_value = self.expect_comptime_bool_condition(condition)?;
 
             if !condition_value {
                 return Ok(());
