@@ -12,18 +12,20 @@ impl Default for ComptimeQuota {
     }
 }
 
+pub(crate) struct QuotaExhaustedError;
+
 impl ComptimeQuota {
     pub(crate) fn raise_limit(&mut self, limit: u32) {
         self.limit = self.limit.max(limit);
     }
 
-    pub(crate) fn spend_branch(&mut self) -> bool {
+    pub(crate) fn spend_branch(&mut self) -> Result<(), QuotaExhaustedError> {
         assert!(self.spent <= self.limit, "comptime quota overspent elsewhere");
         if self.spent == self.limit {
-            return false;
+            return Err(QuotaExhaustedError);
         }
         self.spent += 1;
-        true
+        Ok(())
     }
 
     pub(crate) fn limit(&self) -> u32 {

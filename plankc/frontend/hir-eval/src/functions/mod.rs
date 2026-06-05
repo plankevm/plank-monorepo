@@ -11,6 +11,7 @@ pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
     evaluator::CallArgSpansIdx,
+    quota::QuotaExhaustedError,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -532,7 +533,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<ComptimeCallResult, Diverge>> {
         preamble.return_type?;
 
-        if !self.comptime_quota.spend_branch() {
+        if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
             self.diag_ctx.emit_comptime_call_branch_quota_exhausted(
                 call.loc(),
                 self.comptime_quota.limit(),

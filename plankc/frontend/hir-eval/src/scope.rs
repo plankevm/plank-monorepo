@@ -2,7 +2,7 @@ use crate::{
     Evaluator,
     diagnostics::{BindingLoc, DiagCtx},
     evaluator::CallArgSpansIdx,
-    quota::ComptimeQuota,
+    quota::{ComptimeQuota, QuotaExhaustedError},
 };
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
@@ -42,8 +42,11 @@ pub(crate) enum EvalValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Diverge {
+    /// Signals that a dependency of control flow itself was poisoned and we can no longer
+    /// clearly know what needs to be evaluated or not.
     ControlFlowPoisoned,
     ComptimeQuotaExhausted,
+    /// Signals a block ended normally, optionally with a comptime-known return value.
     BlockEnd(Option<ValueId>),
 }
 
@@ -512,7 +515,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 match (then_res, else_res) {
                     // Control flow was poisoned in either branch so we have to assume everything
-                    // was poisoned and bubble up
+                    // was poisoned and bubble up. Furthermore if control flow was poisoned there
+                    // is no point retrying evaluation if one of the branches failed from
+                    // insufficient quota.
                     (Err(Diverge::ControlFlowPoisoned), _)
                     | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
                     (Err(Diverge::ComptimeQuotaExhausted), _)
@@ -627,19 +632,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         loop {
             self.eval_block_inline(condition_block)?;
             let condition_value = self.expect_comptime_bool_condition(condition)?;
-
             if !condition_value {
                 return Ok(());
             }
 
-            if !self.comptime_quota.spend_branch() {
-                if let Ok(span) = self.hir.block_spans[condition_block] {
-                    self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
-                        self.loc(span),
-                        self.comptime_quota.limit(),
-                        self.eval_branch_quota_start_loc,
-                    );
-                }
+            if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
+                let span =
+                    self.hir.block_spans[condition_block].expect("condition block wihtout span");
+                self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
+                    self.loc(span),
+                    self.comptime_quota.limit(),
+                    self.eval_branch_quota_start_loc,
+                );
                 return Err(Diverge::ComptimeQuotaExhausted);
             }
 
