@@ -1,4 +1,6 @@
-use plank_core::{DenseIndexMap, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{
+    DenseIndexMap, IndexVec, dense_index_map::Entry, list_of_lists::ListOfLists, newtype_index,
+};
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
@@ -111,17 +113,15 @@ impl<'a> Evaluator<'a> {
         diag_ctx: &mut DiagCtx<'a>,
     ) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
-        match self.evaluated_consts.get_mut(const_id) {
-            Some(State::Done(result)) => return result.value(),
-            Some(state @ State::InProgress) => {
+        match self.evaluated_consts.entry(const_id) {
+            Entry::Occupied(State::Done(result)) => return result.value(),
+            Entry::Occupied(state @ State::InProgress) => {
                 diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
                 *state = State::Done(ConstEvalResult::Poisoned);
                 return Err(Poisoned);
             }
-            None => {}
-        }
-
-        self.evaluated_consts.insert_no_prev(const_id, State::InProgress);
+            Entry::Vacant(vacant) => vacant.insert(State::InProgress),
+        };
 
         let mut scope = Scope::new(
             self,
