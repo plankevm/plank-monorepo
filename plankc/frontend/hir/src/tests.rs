@@ -725,9 +725,6 @@ fn test_root_run_without_init() {
     );
     let expected = dedent_preserve_blank_lines(
         r#"
-        error: run block without init block
-         --> main.plk
-          = note: a file with a run block must contain an init block
         error: missing init block
          --> main.plk
           = note: the entry file must contain an init block

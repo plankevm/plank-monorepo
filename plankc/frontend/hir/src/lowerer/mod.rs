@@ -819,9 +819,10 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                     let span = init_def.node().span();
                     if let Some((_, prev_span)) = source_init {
                         lowerer.error_multiple_init_blocks(span, prev_span);
-                    } else {
-                        let body = lowerer.lower_body_to_block(init_def.body());
-                        let id = entry_points.push(EntryPoint { source_id, body });
+                    }
+                    let body = lowerer.lower_body_to_block(init_def.body());
+                    let id = entry_points.push(EntryPoint { source_id, body });
+                    if source_init.is_none() {
                         source_init = Some((id, span));
                     }
                 }
@@ -829,9 +830,10 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                     let span = run_def.node().span();
                     if let Some((_, prev_span)) = source_run {
                         lowerer.error_multiple_run_blocks(span, prev_span);
-                    } else {
-                        let body = lowerer.lower_body_to_block(run_def.body());
-                        let id = entry_points.push(EntryPoint { source_id, body });
+                    }
+                    let body = lowerer.lower_body_to_block(run_def.body());
+                    let id = entry_points.push(EntryPoint { source_id, body });
+                    if source_run.is_none() {
                         source_run = Some((id, span));
                     }
                 }
@@ -841,13 +843,11 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
             }
         }
 
-        if source_run.is_some() && source_init.is_none() {
-            lowerer.error_run_without_init_block(source_id);
-        }
-
         if source_id == SourceId::ROOT {
             init = source_init;
             run = source_run;
+        } else if let (Some((_, run_span)), None) = (source_run, source_init) {
+            lowerer.error_run_without_init_block(run_span);
         }
     }
 

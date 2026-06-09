@@ -181,9 +181,14 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn error_run_without_init_block(&self, source_id: SourceId) {
+    pub(crate) fn error_run_without_init_block(&self, run_span: TokenSpan) {
+        let source_span = self.lexed.tokens_src_span(run_span);
         Diagnostic::error("run block without init block")
-            .element(Element::Origin { path: source_id })
+            .primary(
+                self.source_id,
+                source_span,
+                "run block requires an init block in the same file",
+            )
             .note("a file with a run block must contain an init block")
             .emit(*self.session.borrow_mut());
     }

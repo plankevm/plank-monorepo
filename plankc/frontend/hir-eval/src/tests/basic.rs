@@ -260,7 +260,13 @@ fn test_imported_run_missing_init_and_termination() {
         &[
             r#"
         error: run block without init block
-         --> other.plk
+         --> other.plk:1:1
+          |
+        1 | / run {
+        2 | |     let x = 5;
+        3 | | }
+          | |_^ run block requires an init block in the same file
+          |
           = note: a file with a run block must contain an init block
         "#,
             r#"
@@ -273,6 +279,79 @@ fn test_imported_run_missing_init_and_termination() {
           | |_^ execution may reach end of entry point
           |
           = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_duplicate_init_body_analyzed() {
+    assert_diagnostics(
+        "
+        init { @evm_stop(); }
+        init {
+            let x: bool = 0;
+            @evm_stop();
+        }
+        ",
+        &[
+            r#"
+        error: multiple init blocks
+         --> main.plk:2:1
+          |
+        1 |   init { @evm_stop(); }
+          |   --------------------- previous init block
+        2 | / init {
+        3 | |     let x: bool = 0;
+        4 | |     @evm_stop();
+        5 | | }
+          | |_^ duplicate init block
+        "#,
+            r#"
+        error: mismatched types
+         --> main.plk:3:19
+          |
+        3 |     let x: bool = 0;
+          |            ----   ^ expected `bool`, got `u256`
+          |            |
+          |            `bool` expected because of this
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_duplicate_run_body_analyzed() {
+    assert_diagnostics(
+        "
+        init { @evm_stop(); }
+        run { @evm_stop(); }
+        run {
+            let x: bool = 0;
+            @evm_stop();
+        }
+        ",
+        &[
+            r#"
+        error: multiple run blocks
+         --> main.plk:3:1
+          |
+        2 |   run { @evm_stop(); }
+          |   -------------------- previous run block
+        3 | / run {
+        4 | |     let x: bool = 0;
+        5 | |     @evm_stop();
+        6 | | }
+          | |_^ duplicate run block
+        "#,
+            r#"
+        error: mismatched types
+         --> main.plk:4:19
+          |
+        4 |     let x: bool = 0;
+          |            ----   ^ expected `bool`, got `u256`
+          |            |
+          |            `bool` expected because of this
         "#,
         ],
     );
