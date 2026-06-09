@@ -53,6 +53,7 @@ impl Call<'_> {
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
+    #[allow(clippy::too_many_arguments)]
     fn prepare_new_fn_scope_for_preamble_eval<'s>(
         &'s mut self,
         closure: ValueId,
