@@ -1,4 +1,4 @@
-use plank_core::DenseIndexMap;
+use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
@@ -11,7 +11,7 @@ pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
     evaluator::CallArgSpansIdx,
-    quota::QuotaExhaustedError,
+    quota::{ComptimeQuota, QuotaExhaustedError},
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
 
@@ -35,6 +35,7 @@ struct Call<'a> {
     source: SourceId,
     caller_comptime: bool,
     caller_bindings: &'a DenseIndexMap<hir::LocalId, Local>,
+    caller_mir_types: &'a mut IndexVec<mir::LocalId, TypeId>,
     span: SourceSpan,
 
     closure: ValueId,
@@ -45,21 +46,6 @@ struct Call<'a> {
     validated: ArgParamComptimenessMatch,
 }
 
-enum FunctionScopeOutcome {
-    Return(MaybePoisoned<Result<EvalValue, Diverge>>),
-    RuntimeCall { lowered: mir::FnId, preamble: PreambleResult },
-}
-
-fn comptime_args(
-    is_comptime: bool,
-    params: &[hir::ParamInfo],
-    args: &[hir::LocalId],
-) -> impl Iterator<Item = (hir::ParamInfo, hir::LocalId)> {
-    params.iter().zip(args).filter_map(move |(&param, &arg)| {
-        (param.is_comptime || is_comptime).then_some((param, arg))
-    })
-}
-
 impl Call<'_> {
     fn loc(&self) -> SrcLoc {
         SrcLoc::new(self.source, self.span)
@@ -67,29 +53,33 @@ impl Call<'_> {
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
-    fn create_fn_scope<'s>(
+    fn prepare_new_fn_scope_for_preamble_eval<'s>(
         &'s mut self,
+        closure: ValueId,
         fn_def_id: hir::FnDefId,
-        args: &[hir::LocalId],
+        args: &'s [hir::LocalId],
         arg_spans: CallArgSpansIdx,
+        call_span: SourceSpan,
         capture_buf_offset: usize,
         validated: ArgParamComptimenessMatch,
-    ) -> (Scope<'s, 'ctx>, &'s DenseIndexMap<hir::LocalId, Local>) {
+    ) -> (Scope<'s, 'ctx>, Call<'s>, &'s mut ComptimeQuota, &'s mut u32) {
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
-        let is_comptime = self.is_comptime();
+        let caller_comptime = self.is_comptime();
         let eval_branch_quota_start_loc = self.eval_branch_quota_start_loc;
+        let call_source = self.source;
+        let comptime_quota = self.comptime_quota;
         let caller_bindings = &mut self.bindings;
         let caller_mir_types = &mut self.mir_types;
-
-        let call_source = self.source;
+        let parent_comptime_quota = &mut self.comptime_quota;
+        let parent_max_eval_branch_quota_seen = &mut self.max_eval_branch_quota_seen;
 
         let mut fn_scope = Scope::new(
             self.eval,
             self.diag_ctx,
             fn_def.source,
             false,
-            self.comptime_quota,
+            comptime_quota,
             eval_branch_quota_start_loc,
             EvalContext::FunctionPreamble { arg_spans, call_source },
         );
@@ -120,37 +110,28 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             };
 
-            let state = if param.is_comptime {
-                let LocalState::Comptime(value) = state else {
-                    let ArgParamComptimenessMatch = validated;
-                    unreachable!("invariant: already validated");
-                };
-                Ok(LocalState::Comptime(value))
-            } else if is_comptime {
-                match state {
-                    LocalState::Runtime(_) => {
+            let state = 'state: {
+                if param.is_comptime || caller_comptime {
+                    let LocalState::Comptime(value) = state else {
                         let ArgParamComptimenessMatch = validated;
-                        Err(Poisoned)
-                    }
-                    LocalState::Comptime(value) => Ok(LocalState::Comptime(value)),
-                }
-            } else {
-                'state: {
-                    let ty = match state {
-                        LocalState::Runtime(outer_mir) => caller_mir_types[outer_mir],
-                        LocalState::Comptime(value) => {
-                            let ty = fn_scope.eval.values.type_of_value(value);
-                            // If value is comptime-only, even for a runtime call we treat it as a
-                            // comptime argument.
-                            if fn_scope.eval.types.is_comptime_only(ty) {
-                                break 'state Ok(LocalState::Comptime(value));
-                            }
-                            ty
-                        }
+                        unreachable!("invariant: already validated");
                     };
-                    let inner_mir = fn_scope.mir_types.push(ty);
-                    Ok(LocalState::Runtime(inner_mir))
+                    break 'state Ok(LocalState::Comptime(value));
                 }
+                let ty = match state {
+                    LocalState::Runtime(outer_mir) => caller_mir_types[outer_mir],
+                    LocalState::Comptime(value) => {
+                        let ty = fn_scope.eval.values.type_of_value(value);
+                        // If value is comptime-only, even for a runtime call we treat it as a
+                        // comptime argument.
+                        if fn_scope.eval.types.is_comptime_only(ty) {
+                            break 'state Ok(LocalState::Comptime(value));
+                        }
+                        ty
+                    }
+                };
+                let inner_mir = fn_scope.mir_types.push(ty);
+                Ok(LocalState::Runtime(inner_mir))
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
@@ -158,7 +139,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
         }
 
-        (fn_scope, caller_bindings)
+        let call = Call {
+            source: call_source,
+            caller_comptime,
+            caller_bindings,
+            caller_mir_types,
+            span: call_span,
+            closure,
+            func: fn_def,
+            args,
+            params,
+            validated,
+        };
+
+        (fn_scope, call, parent_comptime_quota, parent_max_eval_branch_quota_seen)
     }
 
     fn eval_preamble(
@@ -272,9 +266,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
     ) -> MaybePoisoned<ArgParamComptimenessMatch> {
         let mut comptime_args_poisoned = false;
-        for (param, arg) in comptime_args(self.is_comptime(), params, args) {
+        for (param, &arg) in params.iter().zip(args) {
             let arg = self.bindings[arg];
-            if let Ok(LocalState::Runtime(_)) = arg.state {
+            if (param.is_comptime || self.is_comptime())
+                && let Ok(LocalState::Runtime(_)) = arg.state
+            {
                 self.diag_ctx
                     .emit_comptime_param_got_runtime(self.loc(arg.use_span), func.loc(param.span));
                 comptime_args_poisoned = true;
@@ -311,92 +307,40 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let validated = self.validate_args_param_comptimeness_match(func, params, args)?;
 
-        let (mut fn_scope, call) = {
-            let caller_comptime = self.is_comptime();
-            let call_source = self.source;
-            let (fn_scope, caller_bindings) =
-                self.create_fn_scope(fn_def_id, args, arg_spans, capture_buf_offset, validated);
-            let call = Call {
-                source: call_source,
-                caller_comptime,
-                caller_bindings,
-                span: call_span,
+        let (mut scope, call, parent_comptime_quota, parent_max_eval_branch_quota_seen) = self
+            .prepare_new_fn_scope_for_preamble_eval(
                 closure,
-                func,
+                fn_def_id,
                 args,
-                params,
+                arg_spans,
+                call_span,
+                capture_buf_offset,
                 validated,
-            };
-            (fn_scope, call)
-        };
+            );
+        let result = scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc);
 
-        let callee_scope_outcome =
-            fn_scope.eval_callee_scope(fn_def_id, &call, values_buf_offset, call_loc);
+        *parent_comptime_quota = scope.comptime_quota;
+        *parent_max_eval_branch_quota_seen =
+            (*parent_max_eval_branch_quota_seen).max(scope.max_eval_branch_quota_seen);
 
-        let Scope { comptime_quota, max_eval_branch_quota_seen, .. } = fn_scope;
-        self.comptime_quota = comptime_quota;
-        self.max_eval_branch_quota_seen =
-            self.max_eval_branch_quota_seen.max(max_eval_branch_quota_seen);
-
-        let (lowered, preamble) = match callee_scope_outcome {
-            FunctionScopeOutcome::Return(result) => return result,
-            FunctionScopeOutcome::RuntimeCall { lowered, preamble } => (lowered, preamble),
-        };
-
-        let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
-            for (&param, &arg) in params.iter().zip(args) {
-                let state = self.bindings[arg].state?;
-                let local = match state {
-                    LocalState::Runtime(local) => local,
-                    LocalState::Comptime(value) => {
-                        if param.is_comptime {
-                            continue;
-                        }
-                        let ty = self.eval.values.type_of_value(value);
-                        if self.eval.types.is_comptime_only(ty) {
-                            continue;
-                        }
-                        let target = self.mir_types.push(ty);
-                        self.eval
-                            .instr_stack_buf
-                            .push(mir::Instruction::Set { target, expr: mir::Expr::Const(value) });
-                        target
-                    }
-                };
-                pusher.push(local);
-            }
-            Ok(())
-        });
-        if let Err(Poisoned) = validity {
-            return preamble.suppress_poison_iff_diverging_return_type();
-        }
-
-        let expr = mir::Expr::Call { callee: lowered, args: mir_args };
-        let result_type = self.eval.mir_fns[lowered].return_type;
-        if result_type == TypeId::NEVER {
-            let target = self.mir_types.push(result_type);
-            self.eval.instr_stack_buf.push(mir::Instruction::Set { target, expr });
-            return Ok(Err(Diverge::END));
-        }
-
-        Ok(Ok(EvalValue::Runtime { expr, result_type }))
+        result
     }
 
     fn eval_callee_scope(
         &mut self,
         fn_def_id: hir::FnDefId,
-        call: &Call<'_>,
+        mut call: Call<'_>,
         values_buf_offset: usize,
         call_loc: SrcLoc,
-    ) -> FunctionScopeOutcome {
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let preamble = {
             let restore = self.diag_ctx.set_preamble_call_site(call.loc());
             let preamble = self.eval_preamble(fn_def_id);
             self.diag_ctx.restore_preamble_call_site(restore);
             match preamble {
                 Ok(Ok(preamble)) => preamble,
-                Ok(Err(Poisoned)) => return FunctionScopeOutcome::Return(Err(Poisoned)),
-                Err(diverge) => return FunctionScopeOutcome::Return(Ok(Err(diverge))),
+                Ok(Err(Poisoned)) => return Err(Poisoned),
+                Err(diverge) => return Ok(Err(diverge)),
             }
         };
 
@@ -409,9 +353,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Poisoned) => Some(Err(Poisoned)),
                 Ok(LocalState::Runtime(_)) => {
                     runtime_param_count += 1;
-                    // `create_fn_scope` optimistically makes params runtime in runtime contexts,
-                    // if we find out we need to evaluate as comptime we need to make sure all
-                    // arguments are added to the key.
+                    // `create_fn_scope_frame` optimistically makes params runtime in runtime
+                    // contexts, if we find out we need to evaluate as comptime
+                    // we need to make sure all arguments are added to the key.
                     match call.caller_bindings[arg].state {
                         Ok(LocalState::Comptime(value)) if preamble.is_comptime_only => {
                             Some(Ok(value))
@@ -439,18 +383,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         if call.caller_comptime || preamble.is_comptime_only {
-            let call_result = self.fold_comptime_call(call, preamble, values_buf_offset);
-            return FunctionScopeOutcome::Return(match call_result {
+            let call_result = self.fold_comptime_call(&call, preamble, values_buf_offset);
+            return match call_result {
                 Ok(Ok(result)) => match result.outcome {
                     ComptimeCallOutcome::Value(value) => Ok(Ok(EvalValue::Comptime(value))),
                     ComptimeCallOutcome::DivergedEnd => Ok(Err(Diverge::END)),
                 },
                 Ok(Err(diverged)) => Ok(Err(diverged)),
                 Err(Poisoned) => Err(Poisoned),
-            });
+            };
         }
 
-        // Non-comptime params are already bound as Runtime in `create_fn_scope`.
+        // Non-comptime params are already bound as Runtime in `create_fn_scope_frame`.
         let function =
             FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
 
@@ -459,7 +403,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state @ LoweredFnState::InProgress) => {
                 self.diag_ctx.emit_runtime_call_with_recursion(call_loc);
                 *state = LoweredFnState::Done(Err(Poisoned));
-                return FunctionScopeOutcome::Return(Ok(Err(Diverge::ControlFlowPoisoned)));
+                return Ok(Err(Diverge::ControlFlowPoisoned));
             }
             Ok(LoweredFnState::Empty) => unreachable!("empty lowered entry should be retried"),
             Err(new_entry_id) => {
@@ -491,9 +435,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     Ok(Err(Diverge::ComptimeQuotaExhausted)) => {
                         self.eval.lowered_fns_cache.mark_retryable(new_entry_id);
-                        return FunctionScopeOutcome::Return(Ok(Err(
-                            Diverge::ComptimeQuotaExhausted,
-                        )));
+                        return Ok(Err(Diverge::ComptimeQuotaExhausted));
                     }
                     Ok(Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_))) => {
                         unreachable!(
@@ -509,13 +451,56 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let lowered = match lowered {
             Ok(lowered) => lowered,
             Err(Poisoned) => {
-                return FunctionScopeOutcome::Return(
-                    preamble.suppress_poison_iff_diverging_return_type(),
-                );
+                return preamble.suppress_poison_iff_diverging_return_type();
             }
         };
 
-        FunctionScopeOutcome::RuntimeCall { lowered, preamble }
+        self.lower_runtime_call_at_site(&mut call, lowered, preamble)
+    }
+
+    fn lower_runtime_call_at_site(
+        &mut self,
+        call: &mut Call<'_>,
+        lowered: mir::FnId,
+        preamble: PreambleResult,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
+            for (&param, &arg) in call.params.iter().zip(call.args) {
+                let state = call.caller_bindings[arg].state?;
+                let local = match state {
+                    LocalState::Runtime(local) => local,
+                    LocalState::Comptime(value) => {
+                        if param.is_comptime {
+                            continue;
+                        }
+                        let ty = self.eval.values.type_of_value(value);
+                        if self.eval.types.is_comptime_only(ty) {
+                            continue;
+                        }
+                        let target = call.caller_mir_types.push(ty);
+                        self.eval
+                            .instr_stack_buf
+                            .push(mir::Instruction::Set { target, expr: mir::Expr::Const(value) });
+                        target
+                    }
+                };
+                pusher.push(local);
+            }
+            Ok(())
+        });
+        if let Err(Poisoned) = validity {
+            return preamble.suppress_poison_iff_diverging_return_type();
+        }
+
+        let expr = mir::Expr::Call { callee: lowered, args: mir_args };
+        let result_type = self.eval.mir_fns[lowered].return_type;
+        if result_type == TypeId::NEVER {
+            let target = call.caller_mir_types.push(result_type);
+            self.eval.instr_stack_buf.push(mir::Instruction::Set { target, expr });
+            return Ok(Err(Diverge::END));
+        }
+
+        Ok(Ok(EvalValue::Runtime { expr, result_type }))
     }
 
     fn fold_comptime_call(
@@ -606,7 +591,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 LocalState::Comptime(value) => {
                     // If the calling context was runtime we need to un-materialize any comptime
-                    // values it turned into runtime in `create_fn_scope`.
+                    // values it turned into runtime in `create_fn_scope_frame`.
                     if let Ok(state) = self.bindings[param.value].state.as_mut() {
                         *state = LocalState::Comptime(value);
                     }
