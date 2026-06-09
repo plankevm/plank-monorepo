@@ -36,11 +36,13 @@ pub fn highlight_span(out: &mut impl std::fmt::Write, source: &str, span: Span, 
     }
 }
 
+#[track_caller]
 pub fn parse_or_panic<'a>(source: &str, config: EmitConfig<'a>) -> EthIRProgram {
     let (program, _) = parse_or_panic_with_sources(source, config);
     program
 }
 
+#[track_caller]
 pub fn parse_or_panic_with_sources<'a>(
     source: &str,
     config: EmitConfig<'a>,
@@ -52,11 +54,13 @@ pub fn parse_or_panic_with_sources<'a>(
     (program, sources)
 }
 
+#[track_caller]
 pub fn parse_without_legalization<'a>(source: &str, config: EmitConfig<'a>) -> EthIRProgram {
     let (program, _) = parse_without_legalization_with_sources(source, config);
     program
 }
 
+#[track_caller]
 pub fn parse_without_legalization_with_sources<'a>(
     source: &str,
     config: EmitConfig<'a>,
@@ -71,13 +75,16 @@ pub fn parse_without_legalization_with_sources<'a>(
         panic!("{}\n{:?}", out, err);
     });
 
-    emit::emit_ir_with_sources(&arena, &ast, config).unwrap_or_else(|err| {
-        let mut out = BString::with_capacity_in(400, &arena);
-        for span in err.spans.iter() {
-            highlight_span(&mut out, source, span.clone(), 0);
+    match emit::emit_ir_with_sources(&arena, &ast, config) {
+        Ok(res) => res,
+        Err(err) => {
+            let mut out = BString::with_capacity_in(400, &arena);
+            for span in err.spans.iter() {
+                highlight_span(&mut out, source, span.clone(), 0);
+            }
+            panic!("{}{}", out, err.reason);
         }
-        panic!("{}{}", out, err.reason);
-    })
+    }
 }
 
 #[cfg(test)]
