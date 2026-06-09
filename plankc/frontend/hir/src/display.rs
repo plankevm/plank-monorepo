@@ -97,7 +97,9 @@ impl<'a> DisplayHir<'a> {
                         self.session.lookup_bytes_slice(bytes.contents, bytes.start, bytes.end);
                     write_bytes_literal(f, bytes)
                 }
-                other @ (Value::Closure { .. } | Value::StructVal { .. }) => {
+                other @ (Value::Closure { .. }
+                | Value::StructVal { .. }
+                | Value::TupleVal { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")
                 }
             },
