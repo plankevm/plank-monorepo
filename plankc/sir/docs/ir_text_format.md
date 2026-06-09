@@ -53,6 +53,8 @@ param            = ident        // local variable reference
                  | number       // immediate value
 ```
 
+Numeric params used as value operands are shorthand for a fresh local defined by an immediately preceding minimal constant operation. For example, `x = add 3 y` is emitted as if a synthetic `<fresh> = const 3` operation appeared before `x = add <fresh> y`. Each numeric occurrence gets its own synthetic const operation.
+
 ### Control Flow
 
 ```ebnf

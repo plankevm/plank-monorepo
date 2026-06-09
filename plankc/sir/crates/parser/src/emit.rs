@@ -9,7 +9,7 @@ use sir_data::{
     BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, LocalId, OpaqueSourceId,
     Operation,
     builder::{BuildError, EthIRBuilder},
-    operation::{OpBuildError, OpExtraData},
+    operation::{OpBuildError, OpExtraData, OperationKind},
 };
 use smallvec::SmallVec;
 use std::collections::{HashMap, hash_map::Entry};
@@ -98,6 +98,20 @@ macro_rules! format_in {
             write!(&mut output, $($arg)*).expect("Arena string write failed");
             output
         }
+    }
+}
+
+fn param_supplies_extra(kind: OperationKind, param: &ParamExpr<'_, '_>) -> bool {
+    match param {
+        ParamExpr::FuncRef(_) | ParamExpr::DataRef(_) => true,
+        ParamExpr::Num(_) => matches!(
+            kind,
+            OperationKind::SetSmallConst
+                | OperationKind::SetLargeConst
+                | OperationKind::StaticAllocZeroed
+                | OperationKind::StaticAllocAnyBytes
+        ),
+        ParamExpr::NameRef(_) => false,
     }
 }
 
@@ -326,17 +340,30 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
 
                     locals_buffer.clear();
                     for param in stmt.params.iter() {
-                        let ParamExpr::NameRef(name) = param else { continue };
-                        let id =
-                            local_name_to_id.get(name.inner).ok_or_else(|| SirAstSemaError {
-                                spans: arena.alloc([name.span()]),
-                                reason: format_in!(
-                                    arena,
-                                    "Local {:?} not defined in function",
-                                    name.inner
-                                ),
-                            })?;
-                        locals_buffer.push(id.inner);
+                        let id = match param {
+                            ParamExpr::NameRef(name) => {
+                                let Some(spanned) = local_name_to_id.get(name.inner) else {
+                                    return Err(SirAstSemaError {
+                                        spans: arena.alloc([name.span()]),
+                                        reason: format_in!(
+                                            arena,
+                                            "Local {:?} not defined in function",
+                                            name.inner
+                                        ),
+                                    });
+                                };
+                                spanned.inner
+                            }
+                            ParamExpr::Num(num) if !param_supplies_extra(kind, param) => {
+                                let local = bb_builder.new_local();
+                                bb_builder.add_set_const_op(local, num.inner);
+                                local
+                            }
+                            ParamExpr::FuncRef(_) | ParamExpr::DataRef(_) | ParamExpr::Num(_) => {
+                                continue;
+                            }
+                        };
+                        locals_buffer.push(id);
                     }
                     let ins_end_outs_start = locals_buffer.len();
                     for output in stmt.assigns.iter() {
@@ -380,10 +407,10 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                                         ),
                                     }),
                             ),
-                            ParamExpr::Num(num) => {
+                            ParamExpr::Num(num) if param_supplies_extra(kind, param) => {
                                 Some(Ok(Spanned::new(OpExtraData::Num(num.inner), num.span())))
                             }
-                            ParamExpr::NameRef(_) => None,
+                            ParamExpr::NameRef(_) | ParamExpr::Num(_) => None,
                         }),
                     );
                     let extra = extras.next().transpose()?.map_or(OpExtraData::Empty, |e| e.inner);

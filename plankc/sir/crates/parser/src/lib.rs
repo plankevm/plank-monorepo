@@ -275,6 +275,110 @@ Basic Blocks:
     }
 
     #[test]
+    fn test_numeric_value_params_emit_synthetic_consts() {
+        let input = r#"
+            fn init:
+                entry {
+                    y = const 7
+                    x = add 3 y
+                    z = add 1 2
+                    ptr = sallocany 32
+                    mstore256 ptr 0
+                    return 0 32
+                }
+        "#;
+
+        let expected = r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x7
+                $4 = const 0x3
+                $1 = add $4 $0
+                $5 = const 0x1
+                $6 = const 0x2
+                $2 = add $5 $6
+                $3 = sallocany 32 #0
+                $7 = const 0x0
+                mstore256 $3 $7
+                $8 = const 0x0
+                $9 = const 0x20
+                return $8 $9
+            }
+        "#;
+
+        assert_parse_format(input, expected, EmitConfig::init_only());
+    }
+
+    #[test]
+    fn test_large_numeric_value_param_emits_large_const() {
+        let input = r#"
+            fn init:
+                entry {
+                    base = const 1
+                    result = add 0x100000000 base
+                    stop
+                }
+        "#;
+
+        let expected = r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x1
+                $2 = large_const 0x100000000
+                $1 = add $2 $0
+                stop
+            }
+        "#;
+
+        assert_parse_format(input, expected, EmitConfig::init_only());
+    }
+
+    #[test]
+    fn test_icall_numeric_value_param_preserves_function_extra() {
+        let input = r#"
+            fn init:
+                entry {
+                    result = icall @helper 3
+                    stop
+                }
+            fn helper:
+                entry x -> y {
+                    y = copy x
+                    iret
+                }
+        "#;
+
+        let expected = r#"
+        Init: @1
+        Functions:
+            fn @0 -> entry @0  (outputs: 1)
+            fn @1 -> entry @1  (outputs: 0)
+
+        Basic Blocks:
+            @0 $0 -> $1 {
+                $1 = copy $0
+                iret
+            }
+
+            @1 {
+                $3 = const 0x3
+                $2 = icall @0 $3
+                stop
+            }
+        "#;
+
+        assert_parse_format(input, expected, EmitConfig::init_only());
+    }
+
+    #[test]
     fn test_all_operation_kinds_snapshot() {
         let input = r#"
             fn init:
