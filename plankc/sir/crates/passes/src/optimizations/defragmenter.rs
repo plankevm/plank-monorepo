@@ -93,15 +93,17 @@ impl<'a> Rewriter<'a> {
             self.emit_block(bb);
         }
         let new_entry = self.state.block_map[&old_entry_id];
-        self.dst.functions[new_id] = Function::new(new_entry, old_func.num_outputs());
+        self.dst.functions[new_id] =
+            Function::new(new_entry, old_func.num_outputs(), old_func.source());
     }
 
     fn reserve_function_id(&mut self, old_id: FunctionId) -> (FunctionId, bool) {
         match self.state.function_map.entry(old_id) {
             Entry::Occupied(entry) => (*entry.get(), false),
             Entry::Vacant(entry) => {
+                let old_func = self.src.function(old_id);
                 let placeholder =
-                    Function::new(BasicBlockId::ZERO, self.src.function(old_id).num_outputs());
+                    Function::new(BasicBlockId::ZERO, old_func.num_outputs(), old_func.source());
                 let new_id = self.dst.functions.push(placeholder);
                 entry.insert(new_id);
                 (new_id, true)
@@ -496,6 +498,69 @@ mod tests {
             "#,
         );
         assert_eq!(Legalizer::default().run(&ir, &store), Ok(()));
+    }
+
+    #[test]
+    fn test_preserves_function_sources() {
+        let input = r#"
+            fn init:
+                entry {
+                    value = const 1
+                    result = icall @helper value
+                    sstore value result
+                    stop
+                }
+
+            fn helper:
+                entry value -> result {
+                    result = add value value
+                    iret
+                }
+
+            fn dead:
+                entry {
+                    stop
+                }
+        "#;
+
+        let mut ir = parse_or_panic(input, EmitConfig::init_only());
+        let helper = ir
+            .operations
+            .iter()
+            .find_map(|op| match op {
+                Operation::InternalCall(icall) => Some(icall.function),
+                _ => None,
+            })
+            .expect("test IR should contain helper call");
+        let dead = ir
+            .functions
+            .iter_idx()
+            .find(|&func| func != ir.init_entry && func != helper)
+            .expect("test IR should contain dead function");
+
+        let mut sources = OpaqueSourceId::ZERO;
+        let init_source = sources.get_and_inc();
+        let helper_source = sources.get_and_inc();
+        let dead_source = sources.get_and_inc();
+        ir.functions[ir.init_entry].source = Some(init_source);
+        ir.functions[helper].source = Some(helper_source);
+        ir.functions[dead].source = Some(dead_source);
+
+        let store = AnalysesStore::default();
+        run_pass(&mut Defragmenter::default(), &mut ir, &store);
+
+        let remapped_helper = ir
+            .operations
+            .iter()
+            .find_map(|op| match op {
+                Operation::InternalCall(icall) => Some(icall.function),
+                _ => None,
+            })
+            .expect("defragmented IR should contain helper call");
+
+        assert_eq!(ir.functions[ir.init_entry].source(), Some(init_source));
+        assert_eq!(ir.functions[remapped_helper].source(), Some(helper_source));
+        assert!(ir.functions.iter().all(|func| func.source() != Some(dead_source)));
     }
 
     #[test]

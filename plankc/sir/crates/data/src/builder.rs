@@ -201,6 +201,14 @@ impl<'ir> FunctionBuilder<'ir> {
     }
 
     pub fn finish(self, entry_bb_id: BasicBlockId) -> FunctionId {
+        self.finish_with_source(entry_bb_id, None)
+    }
+
+    pub fn finish_with_source(
+        self,
+        entry_bb_id: BasicBlockId,
+        source: Option<OpaqueSourceId>,
+    ) -> FunctionId {
         let end_bb = self.ir_builder.basic_blocks.next_idx();
         let basic_blocks = self.first_bb..end_bb;
         assert!(
@@ -213,7 +221,11 @@ impl<'ir> FunctionBuilder<'ir> {
             self.ir_builder.placehodler_control_blocks
         );
 
-        self.ir_builder.functions.push(Function { entry_bb_id, outputs: self.outputs.unwrap_or(0) })
+        self.ir_builder.functions.push(Function::new(
+            entry_bb_id,
+            self.outputs.unwrap_or(0),
+            source,
+        ))
     }
 }
 

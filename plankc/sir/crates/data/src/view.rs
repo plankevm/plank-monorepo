@@ -1,6 +1,6 @@
 use crate::{
     BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    Operation, OperationIdx, OutgoingConnectionsIter,
+    OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter,
 };
 use std::fmt;
 
@@ -203,6 +203,10 @@ impl<'ir> FunctionView<'ir> {
 
     pub fn entry(&self) -> BlockView<'ir> {
         BlockView { id: self.ir.functions[self.id].entry(), ir: self.ir }
+    }
+
+    pub fn source(&self) -> Option<OpaqueSourceId> {
+        self.ir.functions[self.id].source()
     }
 
     pub fn num_inputs(&self) -> u32 {

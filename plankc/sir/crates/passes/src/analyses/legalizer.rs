@@ -1265,7 +1265,7 @@ mod tests {
 
         let mut program = builder.build(func_a_id, None);
 
-        let func_b_id = program.functions.push(sir_data::Function::new(bb_shared_id, 0));
+        let func_b_id = program.functions.push(sir_data::Function::new(bb_shared_id, 0, None));
 
         assert_eq!(
             Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
