@@ -370,7 +370,7 @@ mod tests {
         run_pass,
     };
     use sir_data::assert_ir_display;
-    use sir_parser::{EmitConfig, parse_or_panic};
+    use sir_parser::{EmitConfig, parse_or_panic, parse_or_panic_with_sources};
 
     #[test]
     fn test_sccp_unused_elim_and_defragment() {
@@ -523,49 +523,15 @@ mod tests {
                 }
         "#;
 
-        let mut ir = parse_or_panic(input, EmitConfig::init_only());
-        let helper = ir
-            .operations
-            .iter()
-            .find_map(|op| match op {
-                Operation::InternalCall(icall) => Some(icall.function),
-                _ => None,
-            })
-            .expect("test IR should contain helper call");
-        let dead = ir
-            .functions
-            .iter_idx()
-            .find(|&func| func != ir.init_entry && func != helper)
-            .expect("test IR should contain dead function");
-
-        let mut sources = OpaqueSourceId::ZERO;
-        let init_source = sources.get_and_inc();
-        let helper_source = sources.get_and_inc();
-        let dead_source = sources.get_and_inc();
-
-        fn set_source(func: &mut Function, source: OpaqueSourceId) {
-            *func = Function::new(func.entry(), func.get_outputs(), Some(source));
-        }
-
-        set_source(&mut ir.functions[ir.init_entry], init_source);
-        set_source(&mut ir.functions[helper], helper_source);
-        set_source(&mut ir.functions[dead], dead_source);
+        let (mut ir, sources) = parse_or_panic_with_sources(input, EmitConfig::init_only());
+        assert!(sources.function_by_name(&ir, "dead").is_some());
 
         let store = AnalysesStore::default();
         run_pass(&mut Defragmenter::default(), &mut ir, &store);
 
-        let remapped_helper = ir
-            .operations
-            .iter()
-            .find_map(|op| match op {
-                Operation::InternalCall(icall) => Some(icall.function),
-                _ => None,
-            })
-            .expect("defragmented IR should contain helper call");
-
-        assert_eq!(ir.functions[ir.init_entry].source(), Some(init_source));
-        assert_eq!(ir.functions[remapped_helper].source(), Some(helper_source));
-        assert!(ir.functions.iter().all(|func| func.source() != Some(dead_source)));
+        assert_eq!(sources.function_by_name(&ir, "init"), Some(ir.init_entry));
+        assert!(sources.function_by_name(&ir, "helper").is_some());
+        assert_eq!(sources.function_by_name(&ir, "dead"), None);
     }
 
     #[test]

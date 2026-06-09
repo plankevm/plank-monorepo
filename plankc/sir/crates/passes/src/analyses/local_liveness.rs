@@ -238,7 +238,7 @@ impl LocalLiveness {
 mod tests {
     use super::*;
     use crate::analyses::AnalysesStore;
-    use sir_parser::{EmitConfig, parse_or_panic};
+    use sir_parser::{EmitConfig, parse_or_panic, parse_or_panic_with_sources};
 
     fn assert_has_interval(
         liveness: &LocalLiveness,
@@ -549,17 +549,9 @@ mod tests {
         assert_eq!(actual, expected, "live-at-entry mismatch for @{bb}");
     }
 
-    fn internal_function_entry(ir: &EthIRProgram) -> BasicBlockId {
-        ir.functions_iter()
-            .find(|func| func.id() != ir.init_entry)
-            .expect("test should have an internal function")
-            .entry()
-            .id()
-    }
-
     #[test]
     fn iret_direct_input_output_liveness() {
-        let ir = parse_or_panic(
+        let (ir, sources) = parse_or_panic_with_sources(
             r#"
             fn init:
                 entry {
@@ -579,7 +571,7 @@ mod tests {
         let store = AnalysesStore::default();
         let liveness = store.local_liveness(&ir);
 
-        let bb = internal_function_entry(&ir);
+        let bb = ir.function(sources.function_by_name(&ir, "ident").unwrap()).entry().id();
         let x = ir.block(bb).inputs()[0];
 
         assert_live_at_entry_eq(&liveness, bb, &[x]);
@@ -588,7 +580,7 @@ mod tests {
 
     #[test]
     fn iret_computed_output_liveness() {
-        let ir = parse_or_panic(
+        let (ir, sources) = parse_or_panic_with_sources(
             r#"
             fn init:
                 entry {
@@ -609,7 +601,7 @@ mod tests {
         let store = AnalysesStore::default();
         let liveness = store.local_liveness(&ir);
 
-        let bb = internal_function_entry(&ir);
+        let bb = ir.function(sources.function_by_name(&ir, "add_one").unwrap()).entry().id();
         let inputs = ir.block(bb).inputs();
         let sum = first_output(&ir, bb, 0);
 
@@ -639,7 +631,7 @@ mod tests {
 
     #[test]
     fn iret_multi_output_forwarding_liveness() {
-        let ir = parse_or_panic(
+        let (ir, sources) = parse_or_panic_with_sources(
             r#"
             fn init:
                 entry {
@@ -659,7 +651,7 @@ mod tests {
         let store = AnalysesStore::default();
         let liveness = store.local_liveness(&ir);
 
-        let bb = internal_function_entry(&ir);
+        let bb = ir.function(sources.function_by_name(&ir, "swap").unwrap()).entry().id();
         let inputs = ir.block(bb).inputs();
 
         assert_live_at_entry_eq(&liveness, bb, inputs);
@@ -681,7 +673,7 @@ mod tests {
 
     #[test]
     fn iret_output_liveness_propagates_through_cfg() {
-        let ir = parse_or_panic(
+        let (ir, sources) = parse_or_panic_with_sources(
             r#"
             fn init:
                 entry {
@@ -704,7 +696,7 @@ mod tests {
         let store = AnalysesStore::default();
         let liveness = store.local_liveness(&ir);
 
-        let entry = internal_function_entry(&ir);
+        let entry = ir.function(sources.function_by_name(&ir, "via_block").unwrap()).entry().id();
         let ret = match ir.block(entry).control() {
             ControlView::ContinuesTo(ret) => ret,
             _ => panic!("expected entry to continue to return block"),

@@ -3079,6 +3079,7 @@ dependencies = [
  "bumpalo",
  "chumsky",
  "logos",
+ "plank-core",
  "sir-data",
  "sir-passes",
  "smallvec",

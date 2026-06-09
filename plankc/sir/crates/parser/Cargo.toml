@@ -12,6 +12,7 @@ logos.workspace = true
 chumsky.workspace = true
 sir-data.workspace = true
 sir-passes.workspace = true
+plank-core.workspace = true
 bumpalo.workspace = true
 alloy-primitives.workspace = true
 smallvec.workspace = true

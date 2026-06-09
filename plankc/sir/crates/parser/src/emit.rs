@@ -4,8 +4,10 @@ use bumpalo::{
     Bump,
     collections::{String as BString, Vec as BVec},
 };
+use plank_core::IndexVec;
 use sir_data::{
-    BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, LocalId, Operation,
+    BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, LocalId, OpaqueSourceId,
+    Operation,
     builder::{BuildError, EthIRBuilder},
     operation::{OpBuildError, OpExtraData},
 };
@@ -21,6 +23,36 @@ type BBox<'arena, T> = &'arena mut T;
 pub struct SirAstSemaError<'arena> {
     pub spans: BBox<'arena, [Span]>,
     pub reason: BString<'arena>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FunctionSourceMap {
+    sources: IndexVec<OpaqueSourceId, String>,
+}
+
+impl FunctionSourceMap {
+    fn with_capacity(capacity: usize) -> Self {
+        Self { sources: IndexVec::with_capacity(capacity) }
+    }
+
+    fn push(&mut self, source: String) -> OpaqueSourceId {
+        self.sources.push(source)
+    }
+
+    pub fn get(&self, source: OpaqueSourceId) -> Option<&str> {
+        self.sources.get(source).map(String::as_str)
+    }
+
+    pub fn function_name(&self, ir: &EthIRProgram, function: FunctionId) -> Option<&str> {
+        let source = ir.functions.get(function)?.source()?;
+        self.get(source)
+    }
+
+    pub fn function_by_name(&self, ir: &EthIRProgram, name: &str) -> Option<FunctionId> {
+        ir.functions_iter()
+            .find(|func| self.function_name(ir, func.id()) == Some(name))
+            .map(|func| func.id())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,7 +159,18 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
     ast: &'ast Ast<'arena, 'src>,
     config: EmitConfig<'_>,
 ) -> Result<EthIRProgram, SirAstSemaError<'arena>> {
+    let (program, _) = emit_ir_with_sources(arena, ast, config)?;
+    Ok(program)
+}
+
+/// Emits IR from
+pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
+    arena: &'arena Bump,
+    ast: &'ast Ast<'arena, 'src>,
+    config: EmitConfig<'_>,
+) -> Result<(EthIRProgram, FunctionSourceMap), SirAstSemaError<'arena>> {
     let mut ir_builder = EthIRBuilder::new();
+    let mut sources = FunctionSourceMap::with_capacity(ast.functions.len());
 
     let mut data_names: HashMap<&'src str, Spanned<DataId>> =
         HashMap::with_capacity(ast.data_segments.len());
@@ -568,7 +611,9 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
             })?;
         }
 
-        let func_id = func_builder.finish(entry_bb_id.expect("function didn't have at least 1 bb"));
+        let source = Some(sources.push(func.name.inner.to_owned()));
+        let func_id = func_builder
+            .finish_with_source(entry_bb_id.expect("function didn't have at least 1 bb"), source);
         func_ids.insert(func.name.inner, func_id);
     }
 
@@ -627,5 +672,5 @@ pub fn emit_ir<'ast, 'arena: 'ast, 'src: 'arena>(
         None
     };
 
-    Ok(ir_builder.build(init_entry, main_entry))
+    Ok((ir_builder.build(init_entry, main_entry), sources))
 }

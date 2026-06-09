@@ -37,14 +37,30 @@ pub fn highlight_span(out: &mut impl std::fmt::Write, source: &str, span: Span, 
 }
 
 pub fn parse_or_panic<'a>(source: &str, config: EmitConfig<'a>) -> EthIRProgram {
-    let program = parse_without_legalization(source, config);
-    sir_passes::Legalizer::default()
-        .run(&program, &sir_passes::AnalysesStore::default())
-        .unwrap_or_else(|e| panic!("{e}"));
+    let (program, _) = parse_or_panic_with_sources(source, config);
     program
 }
 
+pub fn parse_or_panic_with_sources<'a>(
+    source: &str,
+    config: EmitConfig<'a>,
+) -> (EthIRProgram, FunctionSourceMap) {
+    let (program, sources) = parse_without_legalization_with_sources(source, config);
+    sir_passes::Legalizer::default()
+        .run(&program, &sir_passes::AnalysesStore::default())
+        .unwrap_or_else(|e| panic!("{e}"));
+    (program, sources)
+}
+
 pub fn parse_without_legalization<'a>(source: &str, config: EmitConfig<'a>) -> EthIRProgram {
+    let (program, _) = parse_without_legalization_with_sources(source, config);
+    program
+}
+
+pub fn parse_without_legalization_with_sources<'a>(
+    source: &str,
+    config: EmitConfig<'a>,
+) -> (EthIRProgram, FunctionSourceMap) {
     use bumpalo::{Bump, collections::String as BString};
 
     let arena = Bump::with_capacity(8_192);
@@ -55,7 +71,7 @@ pub fn parse_without_legalization<'a>(source: &str, config: EmitConfig<'a>) -> E
         panic!("{}\n{:?}", out, err);
     });
 
-    emit::emit_ir(&arena, &ast, config).unwrap_or_else(|err| {
+    emit::emit_ir_with_sources(&arena, &ast, config).unwrap_or_else(|err| {
         let mut out = BString::with_capacity_in(400, &arena);
         for span in err.spans.iter() {
             highlight_span(&mut out, source, span.clone(), 0);
@@ -73,6 +89,31 @@ mod tests {
     fn assert_parse_format<'a>(input: &str, expected: &str, config: EmitConfig<'a>) {
         let ir = parse_or_panic(input, config);
         assert_ir_display(&ir, expected);
+    }
+
+    #[test]
+    fn test_parse_with_sources_returns_function_names() {
+        let source = r#"
+            fn init:
+                entry {
+                    value = const 1
+                    result = icall @helper value
+                    sstore value result
+                    stop
+                }
+
+            fn helper:
+                entry value -> result {
+                    result = add value value
+                    iret
+                }
+        "#;
+
+        let (ir, sources) = parse_or_panic_with_sources(source, EmitConfig::init_only());
+        let helper = sources.function_by_name(&ir, "helper").unwrap();
+
+        assert_eq!(sources.function_name(&ir, ir.init_entry), Some("init"));
+        assert_eq!(sources.function_name(&ir, helper), Some("helper"));
     }
 
     fn parse_to_result(source: &str, config: EmitConfig) -> Result<EthIRProgram, String> {
