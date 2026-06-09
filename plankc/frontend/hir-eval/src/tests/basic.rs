@@ -202,6 +202,83 @@ fn test_imported_init_missing_termination() {
 }
 
 #[test]
+fn test_imported_init_missing_termination_without_entry_init() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+            import m::other::*;
+            "#,
+        )
+        .add_file(
+            "other",
+            r#"
+            init {
+                let x = 5;
+            }
+            "#,
+        )
+        .add_module("m", ""),
+        &[
+            r#"
+        error: missing init block
+         --> main.plk
+          = note: the entry file must contain an init block
+        "#,
+            r#"
+        error: entry point must end with explicit terminator
+         --> other.plk:1:1
+          |
+        1 | / init {
+        2 | |     let x = 5;
+        3 | | }
+          | |_^ execution may reach end of entry point
+          |
+          = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_imported_run_missing_init_and_termination() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+            import m::other::*;
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "other",
+            r#"
+            run {
+                let x = 5;
+            }
+            "#,
+        )
+        .add_module("m", ""),
+        &[
+            r#"
+        error: run block without init block
+         --> other.plk
+          = note: a file with a run block must contain an init block
+        "#,
+            r#"
+        error: entry point must end with explicit terminator
+         --> other.plk:1:1
+          |
+        1 | / run {
+        2 | |     let x = 5;
+        3 | | }
+          | |_^ execution may reach end of entry point
+          |
+          = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_imported_run_type_error() {
     assert_project_diagnostics(
         TestProject::root(
