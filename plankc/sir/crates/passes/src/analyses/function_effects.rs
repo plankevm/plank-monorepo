@@ -51,13 +51,13 @@ impl FunctionEffectsAnalysis<'_> {
             BlockState::NotVisited => {
                 let effect = self.aggregate_bb_effect(entry_bb).simplify();
                 self.effects[fn_id] = effect;
-                return effect;
+                effect
             }
             BlockState::Processing => unreachable!("unexpected block state"),
             // Recursive functions are not allowed so if we're referencing a function and its
             // entry basic block was already processed then we know we've completed the
             // analysis of that function.
-            BlockState::Done => return self.effects[fn_id],
+            BlockState::Done => self.effects[fn_id],
         }
     }
 

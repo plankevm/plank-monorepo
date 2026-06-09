@@ -3103,6 +3103,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sir-passes-tests"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "sir-data",
+ "sir-parser",
+ "sir-passes",
+]
+
+[[package]]
 name = "sir-release-backend"
 version = "0.1.0"
 dependencies = [

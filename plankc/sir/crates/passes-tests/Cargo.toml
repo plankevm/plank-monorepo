@@ -1,0 +1,16 @@
+[package]
+name = "sir-passes-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+sir-data.workspace = true
+sir-passes.workspace = true
+sir-parser.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true
