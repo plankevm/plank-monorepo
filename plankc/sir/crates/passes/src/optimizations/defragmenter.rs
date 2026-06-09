@@ -542,9 +542,14 @@ mod tests {
         let init_source = sources.get_and_inc();
         let helper_source = sources.get_and_inc();
         let dead_source = sources.get_and_inc();
-        ir.functions[ir.init_entry].source = Some(init_source);
-        ir.functions[helper].source = Some(helper_source);
-        ir.functions[dead].source = Some(dead_source);
+
+        fn set_source(func: &mut Function, source: OpaqueSourceId) {
+            *func = Function::new(func.entry(), func.get_outputs(), Some(source));
+        }
+
+        set_source(&mut ir.functions[ir.init_entry], init_source);
+        set_source(&mut ir.functions[helper], helper_source);
+        set_source(&mut ir.functions[dead], dead_source);
 
         let store = AnalysesStore::default();
         run_pass(&mut Defragmenter::default(), &mut ir, &store);

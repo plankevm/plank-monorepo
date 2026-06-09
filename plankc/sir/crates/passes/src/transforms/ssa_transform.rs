@@ -1,7 +1,7 @@
 use crate::{AnalysesStore, Pass, Predecessors, run_pass, transforms::CriticalEdgeSplitting};
 use hashbrown::{HashMap, HashSet};
 use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span, index_vec};
-use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, LocalId};
+use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, Function, LocalId};
 use smallvec::SmallVec;
 
 // to-SSA is usually a one-off operation so need to try and cache state.
@@ -172,7 +172,11 @@ impl Pass for PreSSAFunctionEntryRegularizer {
                     control: Control::ContinuesTo(entry),
                 });
                 program.basic_blocks[entry].inputs = Span::EMPTY;
-                program.functions[func_id].entry_bb_id = new_entry;
+                program.functions[func_id] = Function::new(
+                    new_entry,
+                    program.functions[func_id].get_outputs(),
+                    program.functions[func_id].source(),
+                );
             }
         }
     }
