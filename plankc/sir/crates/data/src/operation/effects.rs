@@ -1,3 +1,5 @@
+use crate::{FunctionId, Operation};
+
 use super::OperationKind;
 
 bitflags::bitflags! {
@@ -15,7 +17,8 @@ bitflags::bitflags! {
         const TRANSIENT_READ   = 1 <<  8;
         const TRANSIENT_WRITE  = 1 <<  9;
         const LOGS             = 1 << 10;
-        const TERMINATION      = 1 << 11;
+        const TERMINATE        = 1 << 11;
+        const REVERT           = 1 << 12;
 
         const EXTCALL = Effect::ACCOUNTS_WRITE.bits()
             | Effect::PERSISTENT_WRITE.bits()
@@ -50,8 +53,14 @@ impl Effect {
         self
     }
 
-    pub fn of(op: OperationKind) -> Option<Effect> {
+    pub fn of(op: Operation) -> Result<Effect, FunctionId> {
+        let op = match op {
+            Operation::InternalCall(icall) => return Err(icall.function),
+            op => op.kind(),
+        };
+
         let e = match op {
+            OperationKind::InternalCall => unreachable!("icall checked above"),
             OperationKind::Add
             | OperationKind::Mul
             | OperationKind::Sub
@@ -94,7 +103,11 @@ impl Effect {
             OperationKind::ExtCodeSize => Effect::ACCOUNTS_READ,
             OperationKind::ExtCodeCopy => Effect::ACCOUNTS_READ | Effect::MEMORY_WRITE,
             OperationKind::ReturnDataSize => Effect::RETURNDATA_READ,
-            OperationKind::ReturnDataCopy => Effect::RETURNDATA_READ | Effect::MEMORY_WRITE,
+            // `returndatacopy` reverts for out of bound returndata copies so it may also
+            // `Effect::REVERT`
+            OperationKind::ReturnDataCopy => {
+                Effect::RETURNDATA_READ | Effect::MEMORY_WRITE | Effect::REVERT
+            }
             OperationKind::ExtCodeHash => Effect::ACCOUNTS_READ,
 
             // Want `gas` to remain ordered relative to storage reads and operations such as
@@ -137,11 +150,14 @@ impl Effect {
                     | Effect::RETURNDATA_WRITE
             }
 
-            OperationKind::Return
-            | OperationKind::Stop
-            | OperationKind::Revert
-            | OperationKind::Invalid
-            | OperationKind::SelfDestruct => Effect::TERMINATION,
+            OperationKind::Return | OperationKind::Stop | OperationKind::SelfDestruct => {
+                Effect::TERMINATE
+            }
+
+            // Unlike `RETURN`, `STOP` and `SELFDESTRUCT` these opcodes rollback any effects and
+            // can therefore technically be reordered
+            OperationKind::Revert => Effect::MEMORY_READ | Effect::REVERT,
+            OperationKind::Invalid => Effect::REVERT,
 
             OperationKind::DynamicAllocZeroed
             | OperationKind::DynamicAllocAnyBytes
@@ -153,8 +169,6 @@ impl Effect {
             OperationKind::MemoryLoad => Effect::MEMORY_READ,
             OperationKind::MemoryStore => Effect::MEMORY_WRITE,
 
-            OperationKind::InternalCall => return None,
-
             OperationKind::SetCopy
             | OperationKind::SetSmallConst
             | OperationKind::SetLargeConst
@@ -164,7 +178,8 @@ impl Effect {
             | OperationKind::InitEndOffset
             | OperationKind::RuntimeLength => Effect::PURE,
         };
-        Some(e)
+
+        Ok(e)
     }
 }
 
@@ -203,6 +218,6 @@ mod tests {
     #[test]
     fn is_simple() {
         assert!(!(Effect::MEMORY_WRITE | Effect::MEMORY_READ | Effect::LOGS).is_simple());
-        assert!((Effect::MEMORY_WRITE | Effect::TERMINATION | Effect::PERSISTENT_READ).is_simple());
+        assert!((Effect::MEMORY_WRITE | Effect::TERMINATE | Effect::PERSISTENT_READ).is_simple());
     }
 }

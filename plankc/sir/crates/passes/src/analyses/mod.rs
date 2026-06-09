@@ -4,6 +4,7 @@ mod cache;
 mod cfg_in_out_bundling;
 mod def_use;
 mod dominators;
+mod function_effects;
 mod legalizer;
 mod local_liveness;
 mod predecessors;

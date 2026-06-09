@@ -1,4 +1,4 @@
-use crate::analyses::*;
+use crate::analyses::{function_effects::FunctionEffects, *};
 use sir_data::EthIRProgram;
 use std::cell::{Ref, RefCell, RefMut};
 
@@ -102,6 +102,7 @@ define_analyses! {
     LocalLiveness => local_liveness: LocalLiveness,
     Reachability => reachability: Reachability,
     ReversePostOrder => reverse_post_order: ReversePostOrder,
+    FunctionEffects => function_effects: FunctionEffects,
 }
 
 impl AnalysesStore {
