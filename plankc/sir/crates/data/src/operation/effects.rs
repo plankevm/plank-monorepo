@@ -16,9 +16,9 @@ bitflags::bitflags! {
         const PERSISTENT_WRITE = 1 <<  7;
         const TRANSIENT_READ   = 1 <<  8;
         const TRANSIENT_WRITE  = 1 <<  9;
-        const LOGS             = 1 << 10;
+        const REVERT           = 1 << 10;
         const TERMINATE        = 1 << 11;
-        const REVERT           = 1 << 12;
+        const LOGS             = 1 << 12;
 
         const EXTCALL = Effect::ACCOUNTS_WRITE.bits()
             | Effect::PERSISTENT_WRITE.bits()
@@ -26,19 +26,21 @@ bitflags::bitflags! {
             | Effect::LOGS.bits()
             | Effect::RETURNDATA_WRITE.bits();
 
-        const READS =
+        const MINOR =
             Effect::MEMORY_READ.bits() |
             Effect::RETURNDATA_READ.bits() |
             Effect::ACCOUNTS_READ.bits() |
             Effect::PERSISTENT_READ.bits() |
-            Effect::TRANSIENT_READ.bits();
+            Effect::TRANSIENT_READ.bits() |
+            Effect::REVERT.bits();
 
-        const WRITES =
+        const MAJOR =
             Effect::MEMORY_WRITE.bits() |
             Effect::RETURNDATA_WRITE.bits() |
             Effect::ACCOUNTS_WRITE.bits() |
             Effect::PERSISTENT_WRITE.bits() |
-            Effect::TRANSIENT_WRITE.bits();
+            Effect::TRANSIENT_WRITE.bits() |
+            Effect::TERMINATE.bits();
     }
 }
 
@@ -48,7 +50,7 @@ impl Effect {
     }
 
     pub fn simplify(mut self) -> Effect {
-        let reads_and_writes = (self & Effect::READS) & Effect::from_bits_retain(self.bits() >> 1);
+        let reads_and_writes = (self & Effect::MINOR) & Effect::from_bits_retain(self.bits() >> 1);
         self.remove(reads_and_writes);
         self
     }
@@ -193,15 +195,16 @@ mod tests {
     }
 
     fn naive_simplify(mut effect: Effect) -> Effect {
-        for (read, write) in [
+        for (minor, major) in [
             (Effect::MEMORY_READ, Effect::MEMORY_WRITE),
             (Effect::RETURNDATA_READ, Effect::RETURNDATA_WRITE),
             (Effect::ACCOUNTS_READ, Effect::ACCOUNTS_WRITE),
             (Effect::PERSISTENT_READ, Effect::PERSISTENT_WRITE),
             (Effect::TRANSIENT_READ, Effect::TRANSIENT_WRITE),
+            (Effect::REVERT, Effect::TERMINATE),
         ] {
-            if effect.contains(read | write) {
-                effect.remove(read);
+            if effect.contains(minor | major) {
+                effect.remove(minor);
             }
         }
 
