@@ -472,8 +472,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn emit_uninit_runtime_local(&mut self, ty: TypeId) -> mir::LocalId {
-        match ty.as_primitive() {
-            Ok(PrimitiveType::U256) => {
+        match self.eval.types.lookup(ty) {
+            Type::Primitive(PrimitiveType::U256) => {
                 let target = self.mir_types.push(TypeId::U256);
                 self.emit(mir::Instruction::Set {
                     target,
@@ -481,12 +481,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 target
             }
-            Ok(PrimitiveType::Bool) => {
+            Type::Primitive(PrimitiveType::Bool) => {
                 let target = self.mir_types.push(TypeId::BOOL);
                 self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::FALSE) });
                 target
             }
-            Ok(PrimitiveType::MemoryPointer) => {
+            Type::Primitive(PrimitiveType::MemoryPointer) => {
                 let size_local = self.mir_types.push(TypeId::U256);
                 self.emit(mir::Instruction::Set {
                     target: size_local,
@@ -503,12 +503,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 target
             }
-            Ok(PrimitiveType::Void) => {
+            Type::Primitive(PrimitiveType::Void) => {
                 let target = self.mir_types.push(TypeId::VOID);
                 self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::VOID) });
                 target
             }
-            Ok(
+            Type::Primitive(
                 PrimitiveType::Type
                 | PrimitiveType::Function
                 | PrimitiveType::CBytes
@@ -516,23 +516,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ) => {
                 unreachable!("comptime-only/never types do not produce runtime locals")
             }
-            Err(struct_ref) => {
+            Type::Struct(view) => {
                 let fields = self.with_locals_buf(|this, offset| {
-                    let view = this.eval.types.lookup_struct(struct_ref);
                     for field in view.fields {
                         let local = this.emit_uninit_runtime_local(field.ty);
                         this.locals_buf.push(local);
                     }
                     this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[offset..])
                 });
-                let struct_ty = TypeId::from_struct(struct_ref);
-                let target = self.mir_types.push(struct_ty);
+                let target = self.mir_types.push(ty);
                 self.emit(mir::Instruction::Set {
                     target,
-                    expr: mir::Expr::StructLit { ty: struct_ty, fields },
+                    expr: mir::Expr::StructLit { ty, fields },
                 });
                 target
             }
+            Type::Tuple(view) => todo!("runtime uninit tuple"),
         }
     }
 
@@ -721,8 +720,8 @@ fn validate_uninit_type(
     expr: SrcLoc,
     field_loc: Option<SrcLoc>,
 ) -> bool {
-    match ty.as_primitive() {
-        Ok(
+    match types.lookup(ty) {
+        Type::Primitive(
             PrimitiveType::U256
             | PrimitiveType::Bool
             | PrimitiveType::MemoryPointer
@@ -730,7 +729,7 @@ fn validate_uninit_type(
             | PrimitiveType::Type
             | PrimitiveType::CBytes,
         ) => false,
-        Ok(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
+        Type::Primitive(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
             // `field_loc` is set when recursing into struct fields
             if let Some(field_loc) = field_loc {
                 diag_ctx.emit_invalid_uninit_struct_field(invalid, expr, field_loc);
@@ -739,8 +738,7 @@ fn validate_uninit_type(
             }
             true
         }
-        Err(struct_ref) => {
-            let view = types.lookup_struct(struct_ref);
+        Type::Struct(view) => {
             let mut has_invalid_uninit = false;
             for field in view.fields {
                 let field_loc = SrcLoc::new(view.def_loc.source, field.def_span);
@@ -749,17 +747,22 @@ fn validate_uninit_type(
             }
             has_invalid_uninit
         }
+        Type::Tuple(view) => {
+            let mut has_invalid_uninit = false;
+            for &element in view.elements {
+                has_invalid_uninit |= validate_uninit_type(element, types, diag_ctx, loc, None);
+            }
+            has_invalid_uninit
+        }
     }
 }
 
 fn contains_memptr(ty: TypeId, types: &TypeInterner) -> bool {
-    match ty.as_primitive() {
-        Ok(PrimitiveType::MemoryPointer) => true,
-        Ok(_) => false,
-        Err(struct_ref) => {
-            let view = types.lookup_struct(struct_ref);
-            view.fields.iter().any(|field| contains_memptr(field.ty, types))
-        }
+    match types.lookup(ty) {
+        Type::Primitive(PrimitiveType::MemoryPointer) => true,
+        Type::Primitive(_) => false,
+        Type::Struct(view) => view.fields.iter().any(|field| contains_memptr(field.ty, types)),
+        Type::Tuple(view) => view.elements.iter().any(|&element| contains_memptr(element, types)),
     }
 }
 
@@ -769,23 +772,34 @@ fn build_uninit_comptime(
     values: &mut ValueInterner,
     buf: &mut Vec<ValueId>,
 ) -> ValueId {
-    match ty.as_primitive() {
-        Ok(PrimitiveType::U256) => ValueId::ZERO_NUM,
-        Ok(PrimitiveType::Bool) => ValueId::FALSE,
-        Ok(PrimitiveType::Void) => ValueId::VOID,
-        Ok(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
+    match types.lookup(ty) {
+        Type::Primitive(PrimitiveType::U256) => ValueId::ZERO_NUM,
+        Type::Primitive(PrimitiveType::Bool) => ValueId::FALSE,
+        Type::Primitive(PrimitiveType::Void) => ValueId::VOID,
+        Type::Primitive(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
         Ok(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
-        Ok(PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never) => {
-            unreachable!("memptr/function/never cannot appear in comptime uninit struct")
+        Type::Primitive(
+            PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never,
+        ) => {
+            unreachable!("memptr/function/never cannot appear in comptime uninit compound")
         }
-        Err(struct_ref) => {
+        Type::Struct(view) => {
             let buf_offset = buf.len();
-            let view = types.lookup_struct(struct_ref);
             for field in view.fields {
                 let vid = build_uninit_comptime(field.ty, types, values, buf);
                 buf.push(vid);
             }
             let result = values.intern(Value::StructVal { ty, fields: &buf[buf_offset..] });
+            buf.truncate(buf_offset);
+            result
+        }
+        Type::Tuple(view) => {
+            let buf_offset = buf.len();
+            for &element in view.elements {
+                let vid = build_uninit_comptime(element, types, values, buf);
+                buf.push(vid);
+            }
+            let result = values.intern(Value::TupleVal { ty, elements: &buf[buf_offset..] });
             buf.truncate(buf_offset);
             result
         }

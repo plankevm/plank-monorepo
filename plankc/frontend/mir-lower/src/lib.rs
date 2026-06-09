@@ -82,6 +82,7 @@ impl LowerCtx<'_> {
             Type::Struct(r#struct) => {
                 r#struct.fields.iter().map(|&field| self.size_in_locals(field.ty)).sum()
             }
+            Type::Tuple(tuple) => tuple.elements.iter().map(|&ty| self.size_in_locals(ty)).sum(),
         }
     }
 }
@@ -196,6 +197,7 @@ fn lower_basic_block(
                             fields,
                         )
                     }
+                    Value::TupleVal { ty, elements } => todo!(),
                     Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                         unreachable!("comptime-only value in MIR")
                     }

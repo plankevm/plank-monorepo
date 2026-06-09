@@ -61,6 +61,18 @@ impl<'a> DisplayMir<'a> {
                 }
                 write!(f, "{pad}}}")
             }
+            Value::TupleVal { ty, elements } => {
+                write!(f, "tuple#{} (", ty.get())?;
+                if !elements.is_empty() {
+                    writeln!(f)?;
+                }
+                for &element in elements {
+                    write!(f, "{pad}{PAD}")?;
+                    self.fmt_value(f, element, indent + 1)?;
+                    writeln!(f, ",")?;
+                }
+                write!(f, "{pad})")
+            }
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 unreachable!("comptime-only value in MIR")
             }
