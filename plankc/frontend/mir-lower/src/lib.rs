@@ -182,7 +182,8 @@ fn lower_basic_block(
                         current_bb.add_set_const_op(sets, x);
                     }
 
-                    Value::StructVal { fields, ty } => {
+                    Value::StructVal { ty, fields: children }
+                    | Value::TupleVal { ty, elements: children } => {
                         let size = ctx.size_in_locals(ty);
                         ctx.locals_map.ensure_many(
                             target,
@@ -190,14 +191,13 @@ fn lower_basic_block(
                             size as usize,
                         );
                         let mut locals = ctx.locals_map.get(target).iter().copied();
-                        materialize_constant_struct_literal(
+                        materialize_constant_compound_literal(
                             values,
                             &mut current_bb,
                             &mut locals,
-                            fields,
+                            children,
                         )
                     }
-                    Value::TupleVal { ty, elements } => todo!(),
                     Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                         unreachable!("comptime-only value in MIR")
                     }
@@ -404,7 +404,7 @@ fn lower_basic_block(
     CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: true }
 }
 
-fn materialize_constant_struct_literal(
+fn materialize_constant_compound_literal(
     values: &ValueInterner,
     bb: &mut BasicBlockBuilder<'_, '_>,
     targets: &mut impl Iterator<Item = sir::LocalId>,
@@ -425,8 +425,9 @@ fn materialize_constant_struct_literal(
                 let sets = targets.next().expect("target count, size mismatch");
                 bb.add_set_const_op(sets, x);
             }
-            Value::StructVal { ty: _, fields } => {
-                materialize_constant_struct_literal(values, bb, targets, fields);
+            Value::StructVal { ty: _, fields: children }
+            | Value::TupleVal { ty: _, elements: children } => {
+                materialize_constant_compound_literal(values, bb, targets, children);
             }
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 unreachable!("MIR: comptime-only value")

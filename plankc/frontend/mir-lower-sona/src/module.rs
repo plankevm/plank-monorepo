@@ -134,6 +134,22 @@ fn declare_runtime_shape(
                 ))
             }
         }
+        PlankType::Tuple(tuple_view) => {
+            let element_shapes = tuple_view
+                .elements
+                .iter()
+                .map(|&element| declare_runtime_shape(shapes, mir, builder, element))
+                .collect::<Vec<_>>();
+            if element_shapes.iter().all(Option::is_none) {
+                None
+            } else {
+                let element_tys = element_shapes
+                    .iter()
+                    .map(|s| s.unwrap_or(SonaType::Unit))
+                    .collect::<Vec<_>>();
+                Some(builder.declare_struct_type(&format!("tuple_{}", ty.get()), &element_tys, false))
+            }
+        }
     };
     shapes.insert(ty, shape);
     shape

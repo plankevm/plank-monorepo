@@ -338,21 +338,23 @@ impl<'a> FunctionLowerer<'a> {
     fn build_aggregate(
         &mut self,
         ty: TypeId,
-        field_count: usize,
-        mut get_field: impl FnMut(&mut Self, usize) -> Option<SonaValueId>,
+        element_count: usize,
+        mut get_element: impl FnMut(&mut Self, usize) -> Option<SonaValueId>,
     ) -> Option<SonaValueId> {
-        let PlankType::Struct(struct_) = self.mir.types.lookup(ty) else {
-            panic!("struct aggregate on non-struct");
+        let expected_count = match self.mir.types.lookup(ty) {
+            PlankType::Struct(struct_) => struct_.fields.len(),
+            PlankType::Tuple(tuple) => tuple.elements.len(),
+            PlankType::Primitive(_) => panic!("aggregate on primitive"),
         };
-        assert_eq!(struct_.fields.len(), field_count);
+        assert_eq!(expected_count, element_count);
         let struct_ty = self.shape(ty)?;
         let mut aggregate = self.fb.make_undef_value(struct_ty);
-        for i in 0..field_count {
-            if let Some(field_value) = get_field(self, i) {
-                let i = u32::try_from(i).expect("struct field index must fit in u32");
+        for i in 0..element_count {
+            if let Some(element_value) = get_element(self, i) {
+                let i = u32::try_from(i).expect("aggregate element index must fit in u32");
                 let idx = self.imm_256(i);
                 aggregate = self.fb.insert_inst(
-                    InsertValue::new_unchecked(self.is, aggregate, idx, field_value),
+                    InsertValue::new_unchecked(self.is, aggregate, idx, element_value),
                     struct_ty,
                 );
             }
@@ -382,8 +384,12 @@ impl<'a> FunctionLowerer<'a> {
                     self.fb.make_imm_value(Immediate::from_i256(I256::from(value), SonaType::I256)),
                 )
             }
-            Value::StructVal { ty, fields } => self
-                .build_aggregate(ty, fields.len(), |this, i| this.materialize_constant(fields[i])),
+            Value::StructVal { ty, fields: children }
+            | Value::TupleVal { ty, elements: children } => self.build_aggregate(
+                ty,
+                children.len(),
+                |this, i| this.materialize_constant(children[i]),
+            ),
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 panic!("comptime-only value in MIR")
             }
