@@ -208,9 +208,10 @@ impl<'a> FunctionLowerer<'a> {
                     return BlockExit::Terminated;
                 }
             }
-            Expr::StructLit { ty, fields } => {
-                let value = self.build_aggregate(ty, self.mir.args[fields].len(), |this, i| {
-                    this.read_local(this.mir.args[fields][i])
+            Expr::StructLit { ty, fields: children }
+            | Expr::TupleLit { ty, elements: children } => {
+                let value = self.build_aggregate(ty, self.mir.args[children].len(), |this, i| {
+                    this.read_local(this.mir.args[children][i])
                 });
                 self.write_local(target, value);
             }
@@ -385,11 +386,11 @@ impl<'a> FunctionLowerer<'a> {
                 )
             }
             Value::StructVal { ty, fields: children }
-            | Value::TupleVal { ty, elements: children } => self.build_aggregate(
-                ty,
-                children.len(),
-                |this, i| this.materialize_constant(children[i]),
-            ),
+            | Value::TupleVal { ty, elements: children } => {
+                self.build_aggregate(ty, children.len(), |this, i| {
+                    this.materialize_constant(children[i])
+                })
+            }
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 panic!("comptime-only value in MIR")
             }

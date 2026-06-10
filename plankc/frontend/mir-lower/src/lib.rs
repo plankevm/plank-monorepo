@@ -276,8 +276,9 @@ fn lower_basic_block(
                         };
                     }
                 }
-                Expr::StructLit { ty, fields } => {
-                    lower_struct_literal(ctx, &mut current_bb, target, ty, fields);
+                Expr::StructLit { ty, fields: children }
+                | Expr::TupleLit { ty, elements: children } => {
+                    lower_compound_literal(ctx, &mut current_bb, target, ty, children);
                 }
                 Expr::FieldAccess { object, field_index } => {
                     lower_field_access(ctx, &mut current_bb, target, mir_func, object, field_index);
@@ -436,19 +437,19 @@ fn materialize_constant_compound_literal(
     }
 }
 
-fn lower_struct_literal(
+fn lower_compound_literal(
     ctx: &mut LowerCtx<'_>,
     bb: &mut BasicBlockBuilder<'_, '_>,
     target: mir::LocalId,
-    struct_type: TypeId,
-    fields: mir::ArgsId,
+    compound_type: TypeId,
+    children: mir::ArgsId,
 ) {
-    let size = ctx.size_in_locals(struct_type);
+    let size = ctx.size_in_locals(compound_type);
     if size == 0 {
         return;
     }
     ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);
-    for (src, dst) in ctx.mir.args[fields]
+    for (src, dst) in ctx.mir.args[children]
         .iter()
         .flat_map(|src_local| ctx.locals_map.get(*src_local))
         .zip(ctx.locals_map.get(target))

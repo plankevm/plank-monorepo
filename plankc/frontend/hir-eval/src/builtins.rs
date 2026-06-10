@@ -531,7 +531,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 target
             }
-            Type::Tuple(view) => todo!("runtime uninit tuple"),
+            Type::Tuple(view) => {
+                let elements = self.with_locals_buf(|this, offset| {
+                    for &element in view.elements {
+                        let local = this.emit_uninit_runtime_local(element);
+                        this.locals_buf.push(local);
+                    }
+                    this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[offset..])
+                });
+                let target = self.mir_types.push(ty);
+                self.emit(mir::Instruction::Set {
+                    target,
+                    expr: mir::Expr::TupleLit { ty, elements },
+                });
+                target
+            }
         }
     }
 

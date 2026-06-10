@@ -417,6 +417,23 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_mixed_comptime_runtime_tuple(
+        &mut self,
+        source: SourceId,
+        tuple_lit_span: SourceSpan,
+        comptime_only_element: SourceSpan,
+        runtime_element: SourceSpan,
+    ) {
+        Diagnostic::error("mixing comptime and runtime data in tuple")
+            .element(
+                Annotations::new(source)
+                    .primary(tuple_lit_span, "mixed tuple literal")
+                    .secondary(comptime_only_element, "tuple element is comptime-only")
+                    .secondary(runtime_element, "tuple element not comptime-known"),
+            )
+            .emit(self);
+    }
+
     pub fn emit_set_field_on_comptime_only_struct(
         &mut self,
         values: &ValueInterner,
@@ -840,15 +857,29 @@ impl DiagCtx<'_> {
         .emit(self);
     }
 
-    pub fn emit_never_as_struct_field(&mut self, field_def: SrcLoc, name: StrId) {
-        let name = self.session.lookup_name(name);
-        Diagnostic::error(format!("`{}` not valid struct field type", builtin_names::NEVER))
+    fn emit_never_as_compound_member(
+        &mut self,
+        loc: SrcLoc,
+        type_context: &str,
+        value_label: impl std::fmt::Display,
+    ) {
+        Diagnostic::error(format!("`{}` not valid {type_context}", builtin_names::NEVER))
             .primary(
-                field_def.source,
-                field_def.span,
-                format!("type of `{name}` evaluated to `{}`", builtin_names::NEVER),
+                loc.source,
+                loc.span,
+                format!("type of {value_label} evaluated to `{}`", builtin_names::NEVER),
             )
             .emit(self);
+    }
+
+    pub fn emit_never_as_struct_field(&mut self, field_def: SrcLoc, name: StrId) {
+        let name = self.session.lookup_name(name);
+        let label = format!("`{name}`");
+        self.emit_never_as_compound_member(field_def, "struct field type", label);
+    }
+
+    pub fn emit_never_as_tuple_element(&mut self, element: SrcLoc) {
+        self.emit_never_as_compound_member(element, "tuple element type", "tuple element");
     }
 
     pub fn emit_operator_not_supported(

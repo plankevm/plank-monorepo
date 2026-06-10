@@ -122,6 +122,22 @@ impl<'a> DisplayMir<'a> {
                 }
                 Ok(())
             }
+            Expr::TupleLit { ty, elements } => {
+                self.fmt_type(f, ty)?;
+                write!(f, " (")?;
+                let args = &self.mir.args[elements];
+                for (i, &local) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " ")?;
+                    self.fmt_local(f, local)?;
+                }
+                if !args.is_empty() {
+                    write!(f, " ")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 
