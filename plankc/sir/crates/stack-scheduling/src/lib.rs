@@ -3,11 +3,10 @@ use sir_data::{BasicBlockId, EthIRProgram};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
-use op_graph::build_graph_simple;
 pub use stack::ScheduleConfig;
 pub mod op_graph;
 
-use crate::{scheduler::dumb_schedule, stack::StackOps};
+use crate::{op_graph::build_graph_effectful, scheduler::dumb_schedule, stack::StackOps};
 
 mod greedy_shuffler;
 mod layouts;
@@ -60,7 +59,8 @@ pub fn schedule<'ir>(
             continue;
         };
 
-        let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
+        let graph =
+            build_graph_effectful(program, block, &layouts, input_layout, output_layout, analyses);
         let ops_idx = ops.push_with(|mut pusher| {
             dumb_schedule(
                 |op| pusher.push(op),

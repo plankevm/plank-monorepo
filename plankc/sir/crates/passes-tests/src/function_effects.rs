@@ -263,6 +263,12 @@ fn switch() {
         r#"
         fn init:
             init {
+                icall @inner
+                stop
+            }
+
+        fn inner:
+            entry {
                 v = callvalue
                 switch v {
                     0 => @a
@@ -270,19 +276,27 @@ fn switch() {
                     default => @c
                 }
             }
-
             a {
-                ptr = sallocany 0
-                log0 ptr 0
-
+                log0 0 0
+                iret
+            }
+            b {
+                x = mload256 34
+                iret
+            }
+            c {
+                sstore 3 67
+                iret
             }
 
         "#,
         EmitConfig::init_only(),
         [
-            ("init", Effect::TERMINATE | Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
-            ("a", Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
-            ("b", Effect::ACCOUNTS_READ),
+            (
+                "init",
+                Effect::MEMORY_READ | Effect::PERSISTENT_WRITE | Effect::TERMINATE | Effect::LOGS,
+            ),
+            ("inner", Effect::MEMORY_READ | Effect::PERSISTENT_WRITE | Effect::LOGS),
         ],
     );
 }
