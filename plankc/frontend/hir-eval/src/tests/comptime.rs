@@ -1139,9 +1139,11 @@ fn test_comptime_is_struct() {
         const Pair = struct { a: u256, b: bool };
         const yes = @is_struct(Pair);
         const no = @is_struct(u256);
+        const tuple_no = @is_struct(tuple { u256, bool });
         init {
             let mut x: bool = yes;
             let mut y: bool = no;
+            let mut z: bool = tuple_no;
             @evm_stop();
         }
         "#,
@@ -1151,7 +1153,8 @@ fn test_comptime_is_struct() {
         @fn0() -> never {
             %0 : bool = true
             %1 : bool = false
-            %2 : never = @evm_stop()
+            %2 : bool = false
+            %3 : never = @evm_stop()
         }
         "#,
     );
@@ -1659,8 +1662,33 @@ fn test_uninit_invalid_type() {
         1 | const x = @uninit(never);
           |           ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+          = help: @uninit only supports u256, bool, void, type, memptr, structs and tuples
         "#],
+    );
+}
+
+#[test]
+fn test_uninit_tuple() {
+    assert_lowers_to(
+        r#"
+        const t = @uninit(tuple { u256, bool });
+
+        init {
+            let mut x = t;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : tuple {u256, bool} = tuple#0 (
+                0,
+                false,
+            )
+            %1 : never = @evm_stop()
+        }
+        "#,
     );
 }
 
@@ -1704,7 +1732,32 @@ fn test_uninit_struct_with_function_field() {
         1 | const Bad = struct { a: u256, b: function };
           |                               ----------- type 'function' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+          = help: @uninit only supports u256, bool, void, type, memptr, structs and tuples
+        "#],
+    );
+}
+
+#[test]
+fn test_uninit_struct_with_invalid_tuple_field() {
+    assert_diagnostics(
+        r#"
+        const Bad = struct { a: u256, b: tuple { function } };
+        const x = @uninit(Bad);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: struct contains field that cannot be uninitialized
+         --> main.plk:2:11
+          |
+        2 | const x = @uninit(Bad);
+          |           ^^^^^^^^^^^^ cannot use @uninit on this struct
+          |
+         ::: main.plk:1:31
+          |
+        1 | const Bad = struct { a: u256, b: tuple { function } };
+          |                               --------------------- type 'function' cannot be uninitialized
+          |
+          = help: @uninit only supports u256, bool, void, type, memptr, structs and tuples
         "#],
     );
 }

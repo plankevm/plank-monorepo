@@ -4,6 +4,7 @@ mod comptime;
 mod logical_ops;
 mod operators;
 mod structs;
+mod tuples;
 mod types;
 
 use plank_mir::{Mir, display::DisplayMir};

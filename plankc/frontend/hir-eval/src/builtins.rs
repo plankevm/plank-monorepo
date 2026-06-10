@@ -187,7 +187,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::IsStruct => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_struct = !ty.is_primitive();
+                let is_struct = matches!(self.eval.types.lookup(ty), Type::Struct(_));
                 Ok(Ok(EvalValue::Comptime(is_struct.into())))
             }
             Builtin::FieldCount => {
@@ -764,7 +764,8 @@ fn validate_uninit_type(
         Type::Tuple(view) => {
             let mut has_invalid_uninit = false;
             for &element in view.elements {
-                has_invalid_uninit |= validate_uninit_type(element, types, diag_ctx, loc, None);
+                has_invalid_uninit |=
+                    validate_uninit_type(element, types, diag_ctx, loc, field_loc);
             }
             has_invalid_uninit
         }

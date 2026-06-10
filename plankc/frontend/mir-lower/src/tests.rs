@@ -413,6 +413,86 @@ fn test_struct_lit() {
 }
 
 #[test]
+fn test_tuple_lit() {
+    assert_lowers_to(
+        r#"
+        init {
+            let mut t = (3, false);
+            t = (2, true);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x3
+                $1 = const 0x0
+                $0 = const 0x2
+                $1 = const 0x1
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_runtime_tuple_lit() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x = @evm_calldataload(0);
+            let mut t = (x, false);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = copy $1
+                $3 = const 0x0
+                $4 = copy $2
+                $5 = copy $3
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_tuple_lit_with_void_element() {
+    assert_lowers_to(
+        r#"
+        init {
+            let mut t = (3, {}, false);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x3
+                $1 = const 0x0
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_struct_field_access() {
     assert_lowers_to(
         r#"

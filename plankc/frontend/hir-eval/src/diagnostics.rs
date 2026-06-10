@@ -814,9 +814,7 @@ impl DiagCtx<'_> {
 
     fn uninit_help() -> String {
         use builtin_names::*;
-        format!(
-            "{UNINIT} only supports {U256}, {BOOL}, {VOID}, {TYPE}, {CBYTES}, {MEMORY_POINTER} and struct types",
-        )
+        format!("{UNINIT} only supports types that do not contain {NEVER} or {FUNCTION}",)
     }
 
     pub fn emit_invalid_uninit_type(&mut self, ty: PrimitiveType, loc: SrcLoc) {
