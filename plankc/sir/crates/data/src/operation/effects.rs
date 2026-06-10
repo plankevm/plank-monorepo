@@ -18,7 +18,9 @@ bitflags::bitflags! {
         const TRANSIENT_WRITE  = 1 <<  9;
         const REVERT           = 1 << 10;
         const TERMINATE        = 1 << 11;
-        const LOGS             = 1 << 12;
+        const ALLOC_ADVANCE    = 1 << 12;
+        const ALLOC_USE_FREE   = 1 << 13;
+        const LOGS             = 1 << 14;
 
         const EXTCALL = Effect::ACCOUNTS_WRITE.bits()
             | Effect::PERSISTENT_WRITE.bits()
@@ -32,7 +34,8 @@ bitflags::bitflags! {
             Effect::ACCOUNTS_READ.bits() |
             Effect::PERSISTENT_READ.bits() |
             Effect::TRANSIENT_READ.bits() |
-            Effect::REVERT.bits();
+            Effect::REVERT.bits() |
+            Effect::ALLOC_ADVANCE.bits();
 
         const MAJOR =
             Effect::MEMORY_WRITE.bits() |
@@ -40,7 +43,8 @@ bitflags::bitflags! {
             Effect::ACCOUNTS_WRITE.bits() |
             Effect::PERSISTENT_WRITE.bits() |
             Effect::TRANSIENT_WRITE.bits() |
-            Effect::TERMINATE.bits();
+            Effect::TERMINATE.bits() |
+            Effect::ALLOC_USE_FREE.bits();
     }
 }
 
@@ -114,7 +118,7 @@ impl Effect {
 
             // Want `gas` to remain ordered relative to storage reads and operations such as
             // `excodesize` that might want to be observed due to "cold"/"warm" account costs.
-            OperationKind::Gas => Effect::ACCOUNTS_WRITE | Effect::PERSISTENT_WRITE,
+            OperationKind::Gas => Effect::ACCOUNTS_WRITE | Effect::PERSISTENT_WRITE | Effect::LOGS,
 
             OperationKind::BlockHash => Effect::PURE,
             OperationKind::Coinbase => Effect::PURE,
@@ -137,7 +141,7 @@ impl Effect {
             | OperationKind::Log1
             | OperationKind::Log2
             | OperationKind::Log3
-            | OperationKind::Log4 => Effect::MEMORY_WRITE | Effect::LOGS,
+            | OperationKind::Log4 => Effect::MEMORY_READ | Effect::LOGS,
 
             OperationKind::Create => Effect::EXTCALL | Effect::MEMORY_READ,
             OperationKind::Create2 => Effect::EXTCALL | Effect::MEMORY_READ,
@@ -152,20 +156,19 @@ impl Effect {
                     | Effect::RETURNDATA_WRITE
             }
 
-            OperationKind::Return | OperationKind::Stop | OperationKind::SelfDestruct => {
-                Effect::TERMINATE
-            }
+            OperationKind::Return => Effect::TERMINATE | Effect::MEMORY_READ,
+            OperationKind::Stop | OperationKind::SelfDestruct => Effect::TERMINATE,
 
             // Unlike `RETURN`, `STOP` and `SELFDESTRUCT` these opcodes rollback any effects and
             // can therefore technically be reordered
             OperationKind::Revert => Effect::MEMORY_READ | Effect::REVERT,
             OperationKind::Invalid => Effect::REVERT,
 
-            OperationKind::DynamicAllocZeroed
-            | OperationKind::DynamicAllocAnyBytes
-            | OperationKind::AcquireFreePointer
-            | OperationKind::StaticAllocZeroed
-            | OperationKind::StaticAllocAnyBytes => Effect::PURE,
+            OperationKind::AcquireFreePointer => Effect::ALLOC_USE_FREE,
+            OperationKind::DynamicAllocZeroed | OperationKind::DynamicAllocAnyBytes => {
+                Effect::ALLOC_ADVANCE
+            }
+            OperationKind::StaticAllocZeroed | OperationKind::StaticAllocAnyBytes => Effect::PURE,
 
             OperationKind::MemoryCopy => Effect::MEMORY_WRITE,
             OperationKind::MemoryLoad => Effect::MEMORY_READ,
@@ -202,6 +205,7 @@ mod tests {
             (Effect::PERSISTENT_READ, Effect::PERSISTENT_WRITE),
             (Effect::TRANSIENT_READ, Effect::TRANSIENT_WRITE),
             (Effect::REVERT, Effect::TERMINATE),
+            (Effect::ALLOC_ADVANCE, Effect::ALLOC_USE_FREE),
         ] {
             if effect.contains(minor | major) {
                 effect.remove(minor);

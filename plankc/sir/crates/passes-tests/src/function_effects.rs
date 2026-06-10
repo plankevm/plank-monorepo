@@ -3,6 +3,7 @@ use sir_data::operation::effects::Effect;
 use sir_parser::{EmitConfig, parse_or_panic_with_sources};
 use sir_passes::AnalysesStore;
 
+#[track_caller]
 fn assert_function_effects(
     source: &str,
     config: EmitConfig<'_>,
@@ -13,9 +14,9 @@ fn assert_function_effects(
     let effects = store.function_effects(&program);
 
     for &(name, expected) in expected.as_ref() {
-        let fn_id = sources
-            .function_by_name(&program, name)
-            .unwrap_or_else(|| panic!("function {name:?} not found"));
+        let Some(fn_id) = sources.function_by_name(&program, name) else {
+            panic!("function {name:?} not found");
+        };
 
         assert_eq!(effects.effect_of(fn_id), expected, "effect mismatch for function {name:?}",);
     }
@@ -27,8 +28,7 @@ fn simple() {
         r#"
         fn init:
             entry {
-                y = const 0
-                x = add y y
+                x = add 0 0
                 icall @pure
                 stop
             }
@@ -49,16 +49,14 @@ fn composed_effects() {
         r#"
         fn init:
             entry {
-                y = const 0
-                sstore y y
+                sstore 0 0
                 icall @simple
                 stop
             }
 
         fn simple:
             simple_entry {
-                c0 = const 0
-                y = mload256 c0
+                y = mload256 0
                 iret
             }
         "#,
@@ -86,7 +84,7 @@ fn infinite_loop() {
             }
         "#,
         EmitConfig::init_only(),
-        [("icall", Effect::TERMINATE), ("infinity", Effect::REVERT)],
+        [("init", Effect::TERMINATE), ("infinity", Effect::REVERT)],
     );
 }
 
@@ -106,14 +104,12 @@ fn diamond() {
                 => cv ? @a : @b
             }
             a {
-                c32 = const 32
-                ptr = mallocany c32
-                b = mstore256
+                ptr = sallocany 32
+                mstore256 ptr 34
                 => @end
             }
             b {
-                c0 = const 0
-                sstore c0 c0
+                sstore 0 0
                 => @end
             }
             end {
@@ -121,7 +117,10 @@ fn diamond() {
             }
         "#,
         EmitConfig::init_only(),
-        [("init", Effect::TERMINATE), ("diamond", Effect::MEMORY_WRITE | Effect::PERSISTENT_WRITE)],
+        [
+            ("init", Effect::TERMINATE | Effect::MEMORY_WRITE | Effect::PERSISTENT_WRITE),
+            ("diamond", Effect::MEMORY_WRITE | Effect::PERSISTENT_WRITE),
+        ],
     );
 }
 
@@ -131,11 +130,159 @@ fn simplifies() {
         r#"
         fn init:
             init {
+                ptr = mallocany 32
+                mstore256 ptr 3333
+                x = mload256 ptr
+                stop
+            }
+
+        fn main:
+            main {
+                x = sload 0
+                y = add x 1
+                sstore 0 y
+                => x ? @end : @rev
+            }
+            end {
+                stop
+            }
+            rev {
+                invalid
+            }
+        "#,
+        EmitConfig::default(),
+        [
+            ("init", Effect::TERMINATE | Effect::MEMORY_WRITE | Effect::ALLOC_ADVANCE),
+            ("main", Effect::TERMINATE | Effect::PERSISTENT_WRITE),
+        ],
+    );
+}
+
+#[test]
+fn conservatively_assumes_loop_reverts() {
+    assert_function_effects(
+        r#"
+
+        fn init:
+            init {
+                icall @write_range
+                stop
+            }
+
+        fn write_range:
+            start -> i {
+                i = const 0
+                => @body
+            }
+            body ii -> iii {
+                sstore ii ii
+                iii = add ii 1
+                repeat = lt iii 10
+                => repeat ? @body : @exit
+            }
+            exit _i {
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+        [
+            ("init", Effect::TERMINATE | Effect::PERSISTENT_WRITE),
+            ("write_range", Effect::REVERT | Effect::PERSISTENT_WRITE),
+        ],
+    );
+}
+
+#[test]
+fn deep_calls() {
+    assert_function_effects(
+        r#"
+        fn init:
+            init {
+                icall @a
+                stop
+            }
+
+        fn a:
+            a {
+                sstore 0 0
+                icall @b
+                iret
+            }
+
+        fn b:
+            b {
+                x = selfbalance
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+        [
+            ("init", Effect::TERMINATE | Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
+            ("a", Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
+            ("b", Effect::ACCOUNTS_READ),
+        ],
+    );
+}
+
+#[test]
+fn multiple_calls() {
+    assert_function_effects(
+        r#"
+        fn init:
+            init {
+                icall @b
+                icall @a
+                stop
+            }
+
+        fn a:
+            a {
+                sstore 0 0
+                icall @b
+                iret
+            }
+
+        fn b:
+            b {
+                x = selfbalance
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+        [
+            ("init", Effect::TERMINATE | Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
+            ("a", Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
+            ("b", Effect::ACCOUNTS_READ),
+        ],
+    );
+}
+
+#[test]
+fn switch() {
+    assert_function_effects(
+        r#"
+        fn init:
+            init {
+                v = callvalue
+                switch v {
+                    0 => @a
+                    1 => @b
+                    default => @c
+                }
+            }
+
+            a {
+                ptr = sallocany 0
+                log0 ptr 0
 
             }
 
         "#,
-        EmitConfig::default(),
-        [],
+        EmitConfig::init_only(),
+        [
+            ("init", Effect::TERMINATE | Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
+            ("a", Effect::PERSISTENT_WRITE | Effect::ACCOUNTS_READ),
+            ("b", Effect::ACCOUNTS_READ),
+        ],
     );
 }
