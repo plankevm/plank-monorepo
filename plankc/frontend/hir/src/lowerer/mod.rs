@@ -847,7 +847,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
             init = source_init;
             run = source_run;
         } else if let (Some((_, run_span)), None) = (source_run, source_init) {
-            lowerer.error_run_without_init_block(run_span);
+            lowerer.error_imported_run_without_init_block(run_span);
         }
     }
 
@@ -862,7 +862,6 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
     };
 
     Hir {
-        entry_source: SourceId::ROOT,
         init,
         run: run.map(|(id, _)| id),
         entry_points,

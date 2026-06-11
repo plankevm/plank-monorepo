@@ -206,7 +206,6 @@ pub struct EntryPoint {
 
 #[derive(Debug, Clone)]
 pub struct Hir {
-    pub entry_source: SourceId,
     pub init: EntryPointId,
     pub run: Option<EntryPointId>,
     pub entry_points: IndexVec<EntryPointId, EntryPoint>,

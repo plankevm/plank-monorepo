@@ -174,6 +174,8 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
+    /// The entry file unconditionally requires an `init` block (it *is* the
+    /// deployment entry point), regardless of whether it has a `run` block.
     pub(crate) fn error_missing_entry_init_block(&self) {
         Diagnostic::error("missing init block")
             .element(Element::Origin { path: SourceId::ROOT })
@@ -181,7 +183,11 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn error_run_without_init_block(&self, run_span: TokenSpan) {
+    /// Imported files don't need an `init` block — unless they contain a `run`
+    /// block, which signals the file is meant to be usable as an entry file
+    /// itself. Unlike the entry file, the error points at the `run` block
+    /// because it is what creates the requirement.
+    pub(crate) fn error_imported_run_without_init_block(&self, run_span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(run_span);
         Diagnostic::error("run block without init block")
             .primary(
