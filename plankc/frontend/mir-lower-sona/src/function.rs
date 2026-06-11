@@ -1,4 +1,4 @@
-use crate::module::{RuntimeShapes, SectionContext, runtime_shape};
+use crate::module::{DataGlobals, RuntimeShapes, SectionContext, runtime_shape};
 use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::RuntimeBuiltin;
@@ -88,14 +88,19 @@ pub(crate) struct FunctionLowerer<'a> {
     is: &'static EvmInstSet,
     context: LoweringContext<'a>,
     local_vars: DenseIndexMap<mir::LocalId, Option<(Variable, SonaType)>>,
+    data_globals: &'a DataGlobals,
 }
 
 impl<'a> FunctionLowerer<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         builder: &ModuleBuilder,
         is: &'static EvmInstSet,
         mir: &'a Mir,
         values: &'a ValueInterner,
+        funcs: &'a DenseIndexMap<mir::FnId, FuncRef>,
+        runtime_shapes: &'a RuntimeShapes,
+        data_globals: &'a DataGlobals,
         fn_id: mir::FnId,
         context: LoweringContext<'a>,
     ) -> Self {
@@ -110,6 +115,7 @@ impl<'a> FunctionLowerer<'a> {
             is,
             context,
             local_vars: DenseIndexMap::with_capacity(mir.fn_locals[fn_id].len()),
+            data_globals,
         }
     }
 
@@ -213,6 +219,16 @@ impl<'a> FunctionLowerer<'a> {
             Expr::FieldAccess { object, field_index } => {
                 let value = self.read_field(object, field_index);
                 self.write_local(target, value);
+            }
+            Expr::DataOffset { contents, start } => {
+                let gv = self.data_globals[&contents];
+                let symbol = SymbolRef::Global(gv);
+                let mut value = self.i256_inst(SymAddr::new(self.is, symbol));
+                if start != 0 {
+                    let start = self.imm_256(start);
+                    value = self.i256_inst(Add::new(self.is, value, start));
+                }
+                self.write_local(target, Some(value));
             }
         }
         BlockExit::Loose
@@ -370,7 +386,9 @@ impl<'a> FunctionLowerer<'a> {
             }
             Value::StructVal { ty, fields } => self
                 .build_aggregate(ty, fields.len(), |this, i| this.materialize_constant(fields[i])),
-            Value::Type(_) | Value::Closure { .. } => panic!("comptime-only value in MIR"),
+            Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
+                panic!("comptime-only value in MIR")
+            }
         }
     }
 

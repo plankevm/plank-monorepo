@@ -2,7 +2,7 @@ use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{BytesId, Session};
+use plank_session::BytesId;
 use std::hash::BuildHasher;
 
 newtype_index! {
@@ -105,7 +105,7 @@ impl ValueInterner {
         assert_eq!(new_interner.intern_num(U256::ZERO), ValueId::ZERO_NUM);
         assert_eq!(new_interner.intern_num(U256::ONE), ValueId::ONE_NUM);
         assert_eq!(
-            new_interner.intern_bytes(Session::EMPTY_STRING.into(), 0, 0),
+            new_interner.intern_bytes(plank_session::EMPTY_BYTES, 0, 0),
             ValueId::BYTES_EMPTY
         );
         new_interner
@@ -216,6 +216,24 @@ mod tests {
         let mut interner = ValueInterner::new();
         let v = interner.intern(Value::BigNum(uint!(67_U256)));
         assert_eq!(interner.lookup(v), Value::BigNum(uint!(67_U256)));
+    }
+
+    #[test]
+    fn intern_bytes_by_identity() {
+        let mut session = plank_session::Session::new();
+        let mut interner = ValueInterner::new();
+        let hello = session.intern_bytes(b"hello");
+        let xelx = session.intern_bytes(b"xelx");
+
+        let slice = interner.intern_bytes(hello, 1, 3);
+        assert_eq!(interner.intern_bytes(hello, 1, 3), slice);
+        assert_ne!(interner.intern_bytes(hello, 1, 4), slice);
+        assert_ne!(interner.intern_bytes(hello, 0, 3), slice);
+
+        // "hello"[1..3] and "xelx"[1..3] are both `el`: identical by value but
+        // distinct by origin, so they must stay distinct values.
+        assert_eq!(session.lookup_bytes_slice(hello, 1, 3), session.lookup_bytes_slice(xelx, 1, 3));
+        assert_ne!(interner.intern_bytes(xelx, 1, 3), slice);
     }
 
     #[test]

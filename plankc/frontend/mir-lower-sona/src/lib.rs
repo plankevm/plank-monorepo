@@ -5,6 +5,7 @@ mod module;
 mod tests;
 
 use plank_mir::Mir;
+use plank_session::Session;
 use plank_values::ValueInterner;
 use sonatina_codegen::EvmCompile;
 pub use sonatina_codegen::OptLevel;
@@ -24,8 +25,13 @@ pub enum LowerError {
     ObjectCompile(String),
 }
 
-pub fn lower(isa: &Evm, mir: &Mir, values: &ValueInterner) -> Result<Module, LowerError> {
-    module::lower(isa, mir, values)
+pub fn lower(
+    isa: &Evm,
+    mir: &Mir,
+    values: &ValueInterner,
+    session: &Session,
+) -> Result<Module, LowerError> {
+    module::lower(isa, mir, values, session)
 }
 
 fn default_isa() -> Evm {
@@ -39,10 +45,11 @@ fn default_isa() -> Evm {
 pub fn emit_ir(
     mir: &Mir,
     values: &ValueInterner,
+    session: &Session,
     opt_level: OptLevel,
 ) -> Result<String, LowerError> {
     let isa = default_isa();
-    let module = lower(&isa, mir, values)?;
+    let module = lower(&isa, mir, values, session)?;
     let mut compile = EvmCompile::new(module).with_opt_level(opt_level);
     Ok(ModuleWriter::new(compile.optimize()).dump_string())
 }
@@ -50,10 +57,11 @@ pub fn emit_ir(
 pub fn emit_bytecode(
     mir: &Mir,
     values: &ValueInterner,
+    session: &Session,
     opt_level: OptLevel,
 ) -> Result<Vec<u8>, LowerError> {
     let isa = default_isa();
-    let module = lower(&isa, mir, values)?;
+    let module = lower(&isa, mir, values, session)?;
     let artifact = EvmCompile::new(module)
         .with_opt_level(opt_level)
         .compile()

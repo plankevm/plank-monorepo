@@ -56,11 +56,19 @@ struct_def = "struct" expr? "{" comma_separated{IDENT ":" expr}? "}"
 struct_lit = expr "{" comma_separated{IDENT ":" expr}? "}"
 
 # Literals
-literal = bool_literal | hex_literal | bin_literal | dec_literal
+literal = bool_literal | hex_literal | bin_literal | dec_literal | bytes_literal
 bool_literal = "true" | "false"
 hex_literal = /-?0x[0-9A-Fa-f][0-9A-Fa-f_]*/
 bin_literal = /-?0b[01][01_]*/
 dec_literal = /-?[0-9][0-9_]*/
+
+# Adjacent string/hex-string segments are concatenated into a single value:
+# `"abc" "123" hex"01ab"` is one literal equal to `"abc123\x01\xab"`. This lets
+# multi-line strings be split into segments and re-indented freely.
+bytes_literal = (string_literal | hex_string_literal)+
+string_literal = /"([^"\\\n\r]|escape)*"/
+escape = "\n" | "\r" | "\t" | "\0" | "\\" | "\"" | /\\x[0-9A-Fa-f]{2}/
+hex_string_literal = /hex"([0-9A-Fa-f]{2})*"/
 
 # Helpers
 comma_separated{p} = (p ("," p)* ","?)

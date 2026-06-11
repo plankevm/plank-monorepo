@@ -314,7 +314,7 @@ fn test_comptime_cbytes_literals() {
         const different = "hello" != "world";
         const empty = "" == "";
         const empty_different = "" != "x";
-        const escaped = "\q" == "\\q";
+        const escaped = "\x5cq" == "\\q";
         const hex_equal = "abc" == hex"616263";
         const hex_different = "abc" != hex"616264";
         const arbitrary_bytes = hex"00ff" == hex"00ff";
@@ -1722,6 +1722,122 @@ fn test_uninit_memptr_in_comptime() {
           |
         1 | const x = @uninit(memptr);
           |           ^^^^^^^^^^^^^^^ memptr requires runtime allocation
+        "#],
+    );
+}
+
+#[test]
+fn test_merged_cbytes_literals() {
+    assert_lowers_to(
+        r#"
+        const merged = "abc" "123" hex"01ab" == "abc123\x01\xab";
+        init {
+            let mut a: bool = merged;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_bytes_len_builtin() {
+    assert_lowers_to(
+        r#"
+        const len_plain = @bytes_len("hello");
+        const len_empty = @bytes_len("");
+        const len_escaped = @bytes_len("a\x00b\n");
+        const len_merged = @bytes_len("abc" "123" hex"01ab");
+        init {
+            let mut a: u256 = len_plain;
+            let mut b: u256 = len_empty;
+            let mut c: u256 = len_escaped;
+            let mut d: u256 = len_merged;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 5
+            %1 : u256 = 0
+            %2 : u256 = 4
+            %3 : u256 = 8
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_keccak256_builtin() {
+    assert_lowers_to(
+        r#"
+        const abc_hash_matches = @comptime_keccak256("abc")
+            == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45;
+        const empty_hash_matches = @comptime_keccak256("")
+            == 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
+        init {
+            let mut a: bool = abc_hash_matches;
+            let mut b: bool = empty_hash_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_data_offset_runtime() {
+    assert_lowers_to(
+        r#"
+        init {
+            let offset = @data_offset("hi" hex"00ff");
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = data_offset(hex"686900ff")
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_data_offset_in_comptime() {
+    assert_diagnostics(
+        r#"
+        const offset = @data_offset("hello");
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: builtin not supported at compile time
+         --> main.plk:1:16
+          |
+        1 | const offset = @data_offset("hello");
+          |                ^^^^^^^^^^^^^^^^^^^^^ `@data_offset` produces a runtime-only value and cannot be evaluated at compile time
         "#],
     );
 }

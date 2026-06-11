@@ -123,7 +123,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         show_sir_last: bool,
         is_sir_debug_backend: bool,
     ) -> Result<Vec<u8>, String> {
-        let mut program = plank_mir_lower::lower(mir, &self.values);
+        let mut program = plank_mir_lower::lower(mir, &self.values, &self.session);
         if show_sir_in {
             print_backend_ir("SIR IN", disp_needs_separators, &program);
         }
@@ -163,6 +163,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
                 plank_mir_lower_sona::emit_ir(
                     mir,
                     &self.values,
+                    &self.session,
                     plank_mir_lower_sona::OptLevel::O0,
                 )
                 .map_err(|err| err.to_string())?,
@@ -172,11 +173,11 @@ impl<'a, F: SourceFs> Driver<'a, F> {
             print_backend_ir(
                 "SONA IR OPT",
                 disp_needs_separators,
-                plank_mir_lower_sona::emit_ir(mir, &self.values, opt_level)
+                plank_mir_lower_sona::emit_ir(mir, &self.values, &self.session, opt_level)
                     .map_err(|err| err.to_string())?,
             );
         }
-        plank_mir_lower_sona::emit_bytecode(mir, &self.values, opt_level)
+        plank_mir_lower_sona::emit_bytecode(mir, &self.values, &self.session, opt_level)
             .map_err(|err| err.to_string())
     }
 }

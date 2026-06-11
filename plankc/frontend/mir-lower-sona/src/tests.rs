@@ -10,7 +10,7 @@ fn lower_ir(source: &str) -> String {
     let hir = plank_hir::lower(&project, &mut values, &mut session);
     let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session);
     assert!(!session.has_errors());
-    crate::emit_ir(&mir, &values, OptLevel::O0).unwrap()
+    crate::emit_ir(&mir, &values, &session, OptLevel::O0).unwrap()
 }
 
 fn lower_bytecode(source: &str) -> Vec<u8> {
@@ -20,7 +20,7 @@ fn lower_bytecode(source: &str) -> Vec<u8> {
     let hir = plank_hir::lower(&project, &mut values, &mut session);
     let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session);
     assert!(!session.has_errors());
-    crate::emit_bytecode(&mir, &values, OptLevel::O0).unwrap()
+    crate::emit_bytecode(&mir, &values, &session, OptLevel::O0).unwrap()
 }
 
 #[track_caller]
@@ -580,4 +580,43 @@ fn emits_bytecode_for_simple_program() {
     );
 
     assert!(!bytecode.is_empty());
+}
+
+#[test]
+fn lowers_data_offset_to_const_global() {
+    let ir = lower_ir(
+        r#"
+        init {
+            let first = @data_offset("hello");
+            let second = @data_offset("hello");
+            let other = @data_offset(hex"00ff");
+            @evm_stop();
+        }
+        "#,
+    );
+
+    assert_contains(&ir, "sym_addr $cbytes_0");
+    assert_contains(&ir, "sym_addr $cbytes_1");
+    assert_contains(&ir, "$cbytes_0 =");
+    assert_contains(&ir, "$cbytes_1 =");
+    assert!(!ir.contains("$cbytes_2"), "identical literals must share one global\n\n{ir}");
+}
+
+#[test]
+fn emits_bytecode_for_data_offset() {
+    let bytecode = lower_bytecode(
+        r#"
+        init {
+            let ptr = @malloc_uninit(32);
+            @evm_codecopy(ptr, @data_offset("hello"), @bytes_len("hello"));
+            @evm_return(ptr, 32);
+        }
+        "#,
+    );
+
+    let hello = b"hello";
+    assert!(
+        bytecode.windows(hello.len()).any(|w| w == hello),
+        "expected data bytes embedded in code: {bytecode:02x?}"
+    );
 }

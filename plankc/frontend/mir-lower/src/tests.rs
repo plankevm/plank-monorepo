@@ -9,7 +9,7 @@ fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
     let mut values = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut values, &mut session);
     let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session);
-    let sir = crate::lower(&mir, &values);
+    let sir = crate::lower(&mir, &values, &session);
     (sir, session)
 }
 
@@ -745,6 +745,63 @@ fn test_uninit_primitives() {
                 $6 = copy $5
                 stop
             }
+        "#,
+    );
+}
+
+#[test]
+fn test_data_offset_lowers_to_data_segment() {
+    assert_lowers_to(
+        r#"
+        init {
+            let offset = @data_offset("hello");
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = data_offset .0
+                stop
+            }
+
+
+        data .0 0x68656c6c6f
+        "#,
+    );
+}
+
+#[test]
+fn test_data_offset_dedups_identical_literals() {
+    assert_lowers_to(
+        r#"
+        init {
+            let first = @data_offset("hello");
+            let second = @data_offset("hello");
+            let other = @data_offset(hex"00ff");
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = data_offset .0
+                $1 = data_offset .0
+                $2 = data_offset .1
+                stop
+            }
+
+
+        data .0 0x68656c6c6f
+        data .1 0x00ff
         "#,
     );
 }

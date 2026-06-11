@@ -4,7 +4,7 @@ use plank_core::{
     Idx, IndexVec, Span, const_print::const_assert_mem_size, list_of_lists::ListOfLists,
     newtype_index,
 };
-use plank_session::RuntimeBuiltin;
+use plank_session::{BytesId, RuntimeBuiltin};
 use plank_values::{TypeId, TypeInterner, ValueId};
 
 newtype_index! {
@@ -18,10 +18,29 @@ newtype_index! {
 pub enum Expr {
     LocalRef(LocalId),
     Const(ValueId),
-    Call { callee: FnId, args: ArgsId },
-    RuntimeBuiltinCall { builtin: RuntimeBuiltin, args: ArgsId },
-    FieldAccess { object: LocalId, field_index: u32 },
-    StructLit { ty: TypeId, fields: ArgsId },
+    Call {
+        callee: FnId,
+        args: ArgsId,
+    },
+    RuntimeBuiltinCall {
+        builtin: RuntimeBuiltin,
+        args: ArgsId,
+    },
+    FieldAccess {
+        object: LocalId,
+        field_index: u32,
+    },
+    StructLit {
+        ty: TypeId,
+        fields: ArgsId,
+    },
+    /// Code offset (valid for `codecopy`) of the slice starting at `start`
+    /// within the interned bytes `contents`, only known after codegen. The
+    /// entire parent `contents` is lowered as one data segment.
+    DataOffset {
+        contents: BytesId,
+        start: u32,
+    },
 }
 
 const _EXPR_SIZE: () = const_assert_mem_size::<Expr>(12);

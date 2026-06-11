@@ -239,6 +239,35 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
+            Builtin::BytesLen => {
+                let &[bytes] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let len = U256::from(bytes.end - bytes.start);
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(len))))
+            }
+            Builtin::ComptimeKeccak256 => {
+                let &[bytes] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let slice = self.diag_ctx.session.lookup_bytes_slice(
+                    bytes.contents,
+                    bytes.start,
+                    bytes.end,
+                );
+                let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+            }
+            Builtin::DataOffset => {
+                let &[bytes] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                if self.is_comptime() {
+                    self.diag_ctx.emit_data_offset_in_comptime(expr_loc);
+                    return Err(Poisoned);
+                }
+                Ok(Ok(EvalValue::Runtime {
+                    expr: mir::Expr::DataOffset { contents: bytes.contents, start: bytes.start },
+                    result_type: TypeId::U256,
+                }))
+            }
             _ => unreachable!("not a comptime builtin: {builtin}"),
         }
     }

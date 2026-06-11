@@ -106,24 +106,65 @@ fn test_lexer_error_malformed_hex_string() {
         r#"
             const x = hex"0fg";
         "#,
-        &[
-            r#"
-            error: malformed hex string literal
+        &[r#"
+            error: invalid digit in hex string literal
+             --> test.plk:1:17
+              |
+            1 | const x = hex"0fg";
+              |                 ^ `g` is not a hex digit (0-9, a-f, A-F)
+            "#],
+    );
+}
+
+#[test]
+fn test_string_unrecognized_escape() {
+    assert_parser_errors(
+        r#"
+            const x = "bad \q escape";
+        "#,
+        &[r#"
+            error: unrecognized escape sequence
+             --> test.plk:1:16
+              |
+            1 | const x = "bad \q escape";
+              |                ^^ `\q` is not a recognized escape sequence
+              |
+              = help: valid escapes are `\n`, `\r`, `\t`, `\0`, `\\`, `\"` and `\xHH`
+            "#],
+    );
+}
+
+#[test]
+fn test_string_invalid_hex_escape() {
+    assert_parser_errors(
+        r#"
+            const x = "short \x1";
+        "#,
+        &[r#"
+            error: invalid hex escape
+             --> test.plk:1:18
+              |
+            1 | const x = "short \x1";
+              |                  ^^^ `\x` must be followed by exactly two hex digits, e.g. `\x7f`
+            "#],
+    );
+}
+
+#[test]
+fn test_hex_string_odd_digit_count() {
+    assert_parser_errors(
+        r#"
+            const x = hex"012";
+        "#,
+        &[r#"
+            error: odd number of digits in hex string literal
              --> test.plk:1:11
               |
-            1 | const x = hex"0fg";
-              |           ^^^^^^^^ not a valid hex string literal
+            1 | const x = hex"012";
+              |           ^^^^^^^^ expected an even number of hex digits
               |
-              = help: hex string literals must contain an even number of hex digits
-            "#,
-            r#"
-            error: unexpected `;`
-             --> test.plk:1:19
-              |
-            1 | const x = hex"0fg";
-              |                   ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
-            "#,
-        ],
+              = help: hex string literals encode whole bytes, so two hex digits are needed per byte
+            "#],
     );
 }
 

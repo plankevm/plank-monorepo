@@ -355,7 +355,7 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plank_session::{SourceId, SrcLoc, StrId, ZERO_SPAN};
+    use plank_session::{SourceId, SrcLoc, ZERO_SPAN, builtins};
 
     fn dummy_src_loc(id: u32) -> SrcLoc {
         SrcLoc::new(SourceId::new(id), ZERO_SPAN)
@@ -376,13 +376,13 @@ mod tests {
     #[test]
     fn struct_intern_deduplication() {
         let interner = TypeInterner::new();
-        let fields = [Field { name: StrId::new(0), ty: TypeId::U256, def_span: ZERO_SPAN }];
+        let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
 
         let a = interner.intern_struct(dummy_struct_info(&fields));
         let b = interner.intern_struct(dummy_struct_info(&fields));
         assert_eq!(a, b);
 
-        let different = [Field { name: StrId::new(1), ty: TypeId::BOOL, def_span: ZERO_SPAN }];
+        let different = [Field { name: builtins::BOOL, ty: TypeId::BOOL, def_span: ZERO_SPAN }];
         let c = interner.intern_struct(dummy_struct_info(&different));
         assert_ne!(a, c);
     }
@@ -390,7 +390,7 @@ mod tests {
     #[test]
     fn struct_refs_are_aligned() {
         let interner = TypeInterner::new();
-        let f = Field { name: StrId::new(0), ty: TypeId::U256, def_span: ZERO_SPAN };
+        let f = Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN };
 
         let a = interner.intern_struct(dummy_struct_info(&[f]));
         let b = interner.intern_struct(dummy_struct_info(&[f, f]));
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn struct_different_src_loc_interns_separately() {
         let interner = TypeInterner::new();
-        let fields = [Field { name: StrId::new(0), ty: TypeId::U256, def_span: ZERO_SPAN }];
+        let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
 
         let a_info =
             StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields: &fields };
@@ -421,17 +421,18 @@ mod tests {
     fn is_comptime_only_nested_struct() {
         let interner = TypeInterner::new();
 
-        let inner_fields = [Field { name: StrId::new(0), ty: TypeId::TYPE, def_span: ZERO_SPAN }];
+        let inner_fields = [Field { name: builtins::U256, ty: TypeId::TYPE, def_span: ZERO_SPAN }];
         let inner = interner.intern_struct(dummy_struct_info(&inner_fields));
         let inner_ty = TypeId::from_struct(inner);
         assert!(interner.is_comptime_only(inner_ty));
 
-        let outer_fields = [Field { name: StrId::new(1), ty: inner_ty, def_span: ZERO_SPAN }];
+        let outer_fields = [Field { name: builtins::BOOL, ty: inner_ty, def_span: ZERO_SPAN }];
         let outer = interner.intern_struct(dummy_struct_info(&outer_fields));
         let outer_ty = TypeId::from_struct(outer);
         assert!(interner.is_comptime_only(outer_ty));
 
-        let runtime_fields = [Field { name: StrId::new(2), ty: TypeId::U256, def_span: ZERO_SPAN }];
+        let runtime_fields =
+            [Field { name: builtins::CBYTES, ty: TypeId::U256, def_span: ZERO_SPAN }];
         let runtime = interner.intern_struct(dummy_struct_info(&runtime_fields));
         assert!(!interner.is_comptime_only(TypeId::from_struct(runtime)));
     }

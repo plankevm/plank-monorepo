@@ -2,12 +2,14 @@ use crate::{
     CONTRACT_OBJECT, INIT_SECTION, LowerError, RUNTIME_SECTION, builder_error,
     function::{FunctionLowerer, LoweringContext},
 };
-use plank_core::{DenseIndexMap, DenseIndexSet, Idx};
-use plank_mir::Mir;
+use plank_core::{DenseIndexMap, Idx};
+use plank_mir::{Expr, Instruction, Mir};
+use plank_session::{BytesId, Session};
 use plank_values::{PrimitiveType, Type as PlankType, TypeId, ValueInterner};
 use sonatina_ir::{
-    Linkage, Module, Signature, Type as SonaType,
+    GlobalVariableRef, Linkage, Module, Signature, Type as SonaType,
     builder::{ModuleBuilder, ObjectBuilder},
+    global_variable::{GlobalVariableData, GvInitializer},
     isa::{Isa, evm::Evm},
     module::{FuncRef, ModuleCtx},
 };
@@ -25,6 +27,8 @@ struct SectionReachability {
     init: DenseIndexSet<plank_mir::FnId>,
     runtime: DenseIndexSet<plank_mir::FnId>,
 }
+
+pub(crate) type DataGlobals = HashMap<BytesId, GlobalVariableRef>;
 
 pub(crate) fn runtime_shape(shapes: &RuntimeShapes, ty: TypeId) -> Option<SonaType> {
     *shapes.get(&ty).expect("type was not declared before lowering")
@@ -44,7 +48,7 @@ fn declare_runtime_shape(
             PrimitiveType::Void | PrimitiveType::Never => None,
             PrimitiveType::Bool => Some(SonaType::I1),
             PrimitiveType::U256 | PrimitiveType::MemoryPointer => Some(SonaType::I256),
-            PrimitiveType::Function | PrimitiveType::Type => {
+            PrimitiveType::Function | PrimitiveType::Type | PrimitiveType::CBytes => {
                 panic!("comptime-only type in MIR: {primitive:?}")
             }
         },
@@ -71,123 +75,46 @@ fn declare_runtime_shape(
     shape
 }
 
-impl SectionReachability {
-    fn new(mir: &Mir) -> Self {
-        let mut init = DenseIndexSet::with_capacity_in_bits(mir.fns.len());
-        collect_reachable_fns(mir, mir.init, &mut init);
-
-        let mut runtime = DenseIndexSet::with_capacity_in_bits(mir.fns.len());
-        if let Some(run) = mir.run {
-            collect_reachable_fns(mir, run, &mut runtime);
-        }
-
-        Self { init, runtime }
-    }
-}
-
-fn collect_reachable_fns(
-    mir: &Mir,
-    root: plank_mir::FnId,
-    reachable: &mut DenseIndexSet<plank_mir::FnId>,
-) {
-    let mut fn_worklist = Vec::with_capacity(mir.fns.len());
-    let mut block_seen = DenseIndexSet::with_capacity_in_bits(mir.blocks.len());
-    if reachable.add(root) {
-        fn_worklist.push(root);
-    }
-
-    while let Some(fn_id) = fn_worklist.pop() {
-        block_seen.clear();
-        collect_block_callees(
-            mir,
-            mir.fns[fn_id].body,
-            &mut block_seen,
-            reachable,
-            &mut fn_worklist,
-        );
-    }
-}
-
-fn collect_block_callees(
-    mir: &Mir,
-    block: plank_mir::BlockId,
-    block_seen: &mut DenseIndexSet<plank_mir::BlockId>,
-    reachable: &mut DenseIndexSet<plank_mir::FnId>,
-    fn_worklist: &mut Vec<plank_mir::FnId>,
-) {
-    if !block_seen.add(block) {
-        return;
-    }
-
-    for &instr in &mir.blocks[block] {
-        match instr {
-            plank_mir::Instruction::Set { expr: plank_mir::Expr::Call { callee, .. }, .. } => {
-                if reachable.add(callee) {
-                    fn_worklist.push(callee);
-                }
-            }
-            plank_mir::Instruction::Set { .. } | plank_mir::Instruction::Return(_) => {}
-            plank_mir::Instruction::If { then_block, else_block, .. } => {
-                collect_block_callees(mir, then_block, block_seen, reachable, fn_worklist);
-                collect_block_callees(mir, else_block, block_seen, reachable, fn_worklist);
-            }
-            plank_mir::Instruction::While { condition_block, body, .. } => {
-                collect_block_callees(mir, condition_block, block_seen, reachable, fn_worklist);
-                collect_block_callees(mir, body, block_seen, reachable, fn_worklist);
-            }
+/// Declares one constant global per unique interned bytes value referenced by
+/// a `DataOffset` expression. Codegen places each global's bytes in the data
+/// section of the code, making its symbol address valid for `codecopy`.
+fn declare_data_globals(builder: &ModuleBuilder, mir: &Mir, session: &Session) -> DataGlobals {
+    let mut globals = DataGlobals::new();
+    for block in mir.blocks.iter() {
+        for instr in block {
+            let Instruction::Set { expr: Expr::DataOffset { contents, .. }, .. } = *instr else {
+                continue;
+            };
+            let next_idx = globals.len();
+            globals.entry(contents).or_insert_with(|| {
+                let bytes = session.lookup_bytes(contents);
+                let ty = builder.declare_array_type(SonaType::I8, bytes.len());
+                let initializer = GvInitializer::make_array(
+                    bytes.iter().map(|&byte| GvInitializer::make_imm(byte)).collect(),
+                );
+                builder.declare_gv(GlobalVariableData::constant(
+                    format!("cbytes_{next_idx}"),
+                    ty,
+                    Linkage::Private,
+                    initializer,
+                ))
+            });
         }
     }
+    globals
 }
 
-fn declare_function(
-    builder: &ModuleBuilder,
+pub(crate) fn lower(
+    isa: &Evm,
     mir: &Mir,
-    runtime_shapes: &RuntimeShapes,
-    reachability: &SectionReachability,
-    fn_id: plank_mir::FnId,
-    context: SectionContext,
-) -> Result<FuncRef, LowerError> {
-    let def = mir.fns[fn_id];
-    let mut args = Vec::new();
-    for param in def.iter_params() {
-        args.extend(runtime_shape(runtime_shapes, mir.fn_locals[fn_id][param.idx()]));
-    }
-    let returns: Vec<_> = runtime_shape(runtime_shapes, def.return_type).into_iter().collect();
-    let name = function_name(mir, reachability, fn_id, context);
-    let linkage = if fn_id == mir.init || Some(fn_id) == mir.run {
-        Linkage::Public
-    } else {
-        Linkage::Private
-    };
-
-    builder.declare_function(Signature::new(&name, linkage, &args, &returns)).map_err(builder_error)
-}
-
-fn function_name(
-    mir: &Mir,
-    reachability: &SectionReachability,
-    fn_id: plank_mir::FnId,
-    context: SectionContext,
-) -> String {
-    if fn_id == mir.init {
-        return "init".to_string();
-    }
-    if Some(fn_id) == mir.run {
-        return "run".to_string();
-    }
-    if context == SectionContext::Runtime && reachability.init.contains(fn_id) {
-        return format!("fn_{}_runtime", fn_id.idx());
-    }
-    format!("fn_{}", fn_id.idx())
-}
-
-pub(crate) fn lower(isa: &Evm, mir: &Mir, values: &ValueInterner) -> Result<Module, LowerError> {
+    values: &ValueInterner,
+    session: &Session,
+) -> Result<Module, LowerError> {
     let is = isa.inst_set();
     let mut builder = ModuleBuilder::new(ModuleCtx::new(isa));
     let mut runtime_shapes = RuntimeShapes::new();
-    let reachability = SectionReachability::new(mir);
-    let mut init_funcs = DenseIndexMap::with_capacity(mir.fns.len());
-    let mut runtime_funcs = DenseIndexMap::with_capacity(mir.fns.len());
+    let mut funcs = DenseIndexMap::with_capacity(mir.fns.len());
+    let data_globals = declare_data_globals(&builder, mir, session);
 
     // Declare runtime shapes before function signatures so aggregate type refs exist.
     for fn_id in mir.fns.iter_idx() {
@@ -223,36 +150,17 @@ pub(crate) fn lower(isa: &Evm, mir: &Mir, values: &ValueInterner) -> Result<Modu
     }
 
     for fn_id in mir.fns.iter_idx() {
-        if init_funcs.contains(fn_id) {
-            FunctionLowerer::new(
-                &builder,
-                is,
-                mir,
-                values,
-                fn_id,
-                LoweringContext {
-                    funcs: &init_funcs,
-                    runtime_shapes: &runtime_shapes,
-                    section_context: SectionContext::Init,
-                },
-            )
-            .lower();
-        }
-        if runtime_funcs.contains(fn_id) {
-            FunctionLowerer::new(
-                &builder,
-                is,
-                mir,
-                values,
-                fn_id,
-                LoweringContext {
-                    funcs: &runtime_funcs,
-                    runtime_shapes: &runtime_shapes,
-                    section_context: SectionContext::Runtime,
-                },
-            )
-            .lower();
-        }
+        FunctionLowerer::new(
+            &builder,
+            is,
+            mir,
+            values,
+            &funcs,
+            &runtime_shapes,
+            &data_globals,
+            fn_id,
+        )
+        .lower();
     }
 
     // Build the EVM object last so init can embed the completed runtime section.

@@ -1,4 +1,5 @@
 mod errors;
+mod strings;
 mod token_items;
 
 use crate::{
@@ -55,6 +56,8 @@ pub(crate) struct Parser<'a> {
     pub(crate) source_id: SourceId,
     pub(crate) last_src_span: SourceSpan,
     pub(crate) last_unexpected: Option<TokenIdx>,
+    /// Reusable buffer for decoding & merging string literal segments.
+    string_buf: Vec<u8>,
 }
 
 const LEN_TO_NODE_CAPACITY: usize = 4;
@@ -81,6 +84,7 @@ impl<'a> Parser<'a> {
             source_id,
             last_src_span: Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO),
             last_unexpected: None,
+            string_buf: Vec::new(),
         }
     }
 
@@ -314,18 +318,51 @@ impl<'a> Parser<'a> {
         Some(NodeKind::NumLiteral { id })
     }
 
-    fn try_parse_string_literal(&mut self) -> Option<NodeKind> {
+    /// Parses a string literal, merging any directly following string/hex
+    /// string tokens into a single value: `"ab" "c" hex"01"` == `"abc\x01"`.
+    fn try_parse_string_literal(&mut self) -> Option<NodeIdx> {
         self.skip_trivia();
-        let token_idx = self.tokens.current();
         if !matches!(self.current_token(), Token::LooseStringLiteral | Token::LooseHexStringLiteral)
         {
             return None;
         }
-        self.advance();
+        let start = self.tokens.current();
+        let source = self.source;
+        let mut buf = std::mem::take(&mut self.string_buf);
+        buf.clear();
 
-        let value = self.tokens.bytes_literal_value(token_idx, self.source);
-        let value = self.session.intern_bytes(&value);
-        Some(NodeKind::StringLiteral { value })
+        let mut end;
+        loop {
+            let ti = self.tokens.current();
+            let token = self.current_token();
+            let src = &source[self.tokens.token_src_span(ti).usize_range()];
+            match token {
+                Token::LooseStringLiteral => strings::decode_string_segment(src, &mut buf, |e| {
+                    self.emit_string_segment_error(ti, e)
+                }),
+                Token::LooseHexStringLiteral => strings::decode_hex_segment(src, &mut buf, |e| {
+                    self.emit_string_segment_error(ti, e)
+                }),
+                other => unreachable!("expected string literal, got {other:?}"),
+            }
+            self.advance();
+            end = self.tokens.current();
+
+            self.skip_trivia();
+            if !matches!(
+                self.current_token(),
+                Token::LooseStringLiteral | Token::LooseHexStringLiteral
+            ) {
+                break;
+            }
+        }
+
+        let value = self.session.intern_bytes(&buf);
+        self.string_buf = buf;
+        let node = self.alloc_node_from(start, NodeKind::StringLiteral { value });
+        // Exclude the trivia skipped while looking for another string segment.
+        self.nodes[node.idx].tokens.end = end;
+        Some(node.idx)
     }
 
     // ======================== EXPRESSION PARSING (PRATT) ========================
@@ -499,8 +536,8 @@ impl<'a> Parser<'a> {
             return Some(self.alloc_last_token_as_node(kind));
         }
 
-        if let Some(kind) = self.try_parse_string_literal() {
-            return Some(self.alloc_last_token_as_node(kind));
+        if let Some(string_lit) = self.try_parse_string_literal() {
+            return Some(string_lit);
         }
 
         if let Some(identifier) = self.try_parse_ident() {

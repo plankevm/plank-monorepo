@@ -24,14 +24,6 @@ impl<'a> TokenItems<'a> {
         self.lexed.token_src_span(ti)
     }
 
-    pub(crate) fn bytes_literal_value<'b>(
-        &'b self,
-        ti: TokenIdx,
-        source: &'b str,
-    ) -> std::borrow::Cow<'b, [u8]> {
-        self.lexed.bytes_literal_value(ti, source)
-    }
-
     pub(crate) fn get_prev(&self) -> Option<(Token, SourceSpan)> {
         (self.current > TokenIdx::ZERO).then(|| self.lexed.get(self.current - 1))
     }

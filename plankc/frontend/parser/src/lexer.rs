@@ -1,7 +1,6 @@
 use logos::{Lexer as LogosLexer, Logos};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
 use plank_session::{SourceByteOffset, SourceSpan};
-use std::borrow::Cow;
 
 type CharsPeekable<'a> = std::iter::Peekable<std::str::CharIndices<'a>>;
 
@@ -94,88 +93,14 @@ fn lex_loose_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Tok
                     }
                     return Ok(());
                 }
-                '0'..='9' | 'A'..='F' | 'a'..='f' => {}
                 '\n' | '\r' => malformed = true,
-                _ => malformed = true,
+                _ => {}
             }
         }
         Err(Token::UnclosedStringError)
     }
 
     inner_do_lex(lexer, inner)
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        _ => None,
-    }
-}
-
-fn decode_string_literal(src: &str) -> Option<Vec<u8>> {
-    let inner = &src[1..src.len() - 1];
-    if !inner.contains('\\') {
-        return None;
-    }
-
-    let mut decoded = Vec::with_capacity(inner.len());
-    let mut pos = 0;
-    while pos < inner.len() {
-        let rest = &inner[pos..];
-        let Some(escape) = rest.find('\\') else {
-            decoded.extend_from_slice(rest.as_bytes());
-            break;
-        };
-        decoded.extend_from_slice(&rest.as_bytes()[..escape]);
-        pos += escape + 1;
-
-        let Some(escaped) = inner[pos..].chars().next() else {
-            decoded.push(b'\\');
-            break;
-        };
-        if escaped == 'x' {
-            let bytes = inner.as_bytes();
-            if let Some((&hi, rest)) = bytes.get(pos + 1).zip(bytes.get(pos + 2..))
-                && let Some(&lo) = rest.first()
-                && let Some(hi) = hex_value(hi)
-                && let Some(lo) = hex_value(lo)
-            {
-                decoded.push(hi << 4 | lo);
-                pos += 3;
-                continue;
-            }
-        }
-
-        match escaped {
-            'n' => decoded.push(b'\n'),
-            'r' => decoded.push(b'\r'),
-            't' => decoded.push(b'\t'),
-            '\\' => decoded.push(b'\\'),
-            '"' => decoded.push(b'"'),
-            other => {
-                decoded.push(b'\\');
-                let mut buf = [0; 4];
-                decoded.extend_from_slice(other.encode_utf8(&mut buf).as_bytes());
-            }
-        }
-        pos += escaped.len_utf8();
-    }
-    Some(decoded)
-}
-
-fn decode_hex_string_literal(src: &str) -> Vec<u8> {
-    let inner = &src[4..src.len() - 1];
-    inner
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|chunk| {
-            let hi = hex_value(chunk[0]).expect("hex string literal validated by lexer");
-            let lo = hex_value(chunk[1]).expect("hex string literal validated by lexer");
-            hi << 4 | lo
-        })
-        .collect()
 }
 #[derive(Logos, Debug, Clone, PartialEq, Eq, Copy, Default)]
 #[cfg_attr(test, derive(enum_iterator::Sequence))]
@@ -567,22 +492,13 @@ impl Lexed {
     pub fn lex(source: &str) -> Self {
         let mut tokens = IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
         let mut source_ends = IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
-        let mut bytes_literals =
-            IndexVec::with_capacity(source.len().div_ceil(LEN_TO_TOKEN_CAPACITY));
         let mut last_end = SourceByteOffset::ZERO;
 
         let mut lexer = Lexer::new(source);
         loop {
             let (tok, span) = lexer.next_with_eof();
-            let token_source = &source[span.usize_range()];
-            let bytes_literal = match tok {
-                Token::LooseStringLiteral => decode_string_literal(token_source),
-                Token::LooseHexStringLiteral => Some(decode_hex_string_literal(token_source)),
-                _ => None,
-            };
             tokens.push(tok);
             source_ends.push(span.end);
-            bytes_literals.push(bytes_literal);
             debug_assert!(last_end == span.start);
             last_end = span.end;
             if tok == Token::Eof {
@@ -590,7 +506,7 @@ impl Lexed {
             }
         }
 
-        Self { tokens, source_ends, bytes_literals }
+        Self { tokens, source_ends }
     }
 
     fn token_src_start(&self, token: TokenIdx) -> SourceByteOffset {
@@ -611,17 +527,6 @@ impl Lexed {
 
     pub fn get(&self, index: TokenIdx) -> (Token, Span<SourceByteOffset>) {
         (self.tokens[index], self.token_src_span(index))
-    }
-
-    pub fn bytes_literal_value<'a>(&'a self, index: TokenIdx, source: &'a str) -> Cow<'a, [u8]> {
-        if let Some(value) = &self.bytes_literals[index] {
-            return Cow::Borrowed(value);
-        }
-
-        assert_eq!(self.tokens[index], Token::LooseStringLiteral);
-        let span = self.token_src_span(index);
-        let src = &source[span.usize_range()];
-        Cow::Borrowed(&src.as_bytes()[1..src.len() - 1])
     }
 
     pub fn len(&self) -> TokenIdx {
@@ -802,25 +707,12 @@ mod tests {
     }
 
     #[test]
-    fn test_string_literal_values() {
-        let source = r#""hello" "" "quote: \" slash: \\" "line\n" "nul\x00" hex"00ff""#;
-        let lexed = Lexed::lex(source);
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(0), source), "hello".as_bytes());
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(2), source), "".as_bytes());
-        assert_eq!(
-            lexed.bytes_literal_value(TokenIdx::new(4), source),
-            r#"quote: " slash: \"#.as_bytes()
-        );
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(6), source), "line\n".as_bytes());
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(8), source), b"nul\0".as_slice());
-        assert_eq!(lexed.bytes_literal_value(TokenIdx::new(10), source), [0x00, 0xff].as_slice());
-    }
-
-    #[test]
-    fn test_malformed_hex_string_literals() {
+    fn test_invalid_hex_digits_lex_loosely() {
+        // Content validation happens in the parser; the lexer only cares about
+        // termination.
         assert_eq!(
             lex_all(r#"hex"01aFzz""#),
-            vec![(Token::MalformedStringError, 0..11, r#"hex"01aFzz""#)]
+            vec![(Token::LooseHexStringLiteral, 0..11, r#"hex"01aFzz""#)]
         );
     }
 

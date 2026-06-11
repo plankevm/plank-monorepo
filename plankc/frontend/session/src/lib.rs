@@ -1,17 +1,18 @@
 pub mod builtins;
 pub mod diagnostic;
+mod interner;
 pub mod poison;
 
 pub use builtins::{Builtin, RuntimeBuiltin};
 pub use diagnostic::*;
+pub use interner::{BytesId, EMPTY_BYTES, StrId};
 pub use poison::{MaybePoisoned, Poisoned};
 
-use plank_core::{Idx, IndexVec, Span, intern::BytesInterner, newtype_index};
+use interner::Interner;
+use plank_core::{Idx, IndexVec, Span, newtype_index};
 use std::path::PathBuf;
 
 newtype_index! {
-    pub struct StrId;
-    pub struct BytesId;
     pub struct SourceId;
     pub struct SourceByteOffset;
 }
@@ -30,26 +31,16 @@ pub struct Source {
 }
 
 pub struct Session {
-    bytes_interner: BytesInterner<BytesId>,
+    interner: Interner,
     source_map: IndexVec<SourceId, Source>,
     total_errors: u32,
     diagnostics: Vec<Diagnostic>,
 }
 
-impl From<StrId> for BytesId {
-    fn from(value: StrId) -> Self {
-        BytesId::from_raw(value.to_raw())
-    }
-}
-
 impl Session {
-    pub const EMPTY_STRING: StrId = StrId::new(0);
-
     pub fn new() -> Self {
-        let mut bytes_interner = BytesInterner::new();
-        assert_eq!(bytes_interner.intern(b""), BytesId::from(Self::EMPTY_STRING));
         let mut this = Self {
-            bytes_interner,
+            interner: Interner::new(),
             source_map: IndexVec::new(),
             total_errors: 0,
             diagnostics: Vec::new(),
@@ -63,13 +54,13 @@ impl Session {
     }
 
     pub fn intern(&mut self, name: &str) -> StrId {
-        let bytes_id = self.bytes_interner.intern(name.as_bytes());
-        StrId::from_raw(bytes_id.to_raw())
+        self.interner.intern_str(name)
     }
 
     pub fn lookup_name(&self, name: StrId) -> &str {
-        let as_bytes_id = BytesId::from_raw(name.to_raw());
-        unsafe { core::str::from_utf8_unchecked(&self.bytes_interner[as_bytes_id]) }
+        // Safety: a session owns exactly one interner; every `StrId` handled
+        // by a session originates from it.
+        unsafe { self.interner.lookup_str(name) }
     }
 
     pub fn lookup_name_spanned(&self, name: StrId, start: SourceByteOffset) -> (&str, SourceSpan) {
@@ -78,11 +69,11 @@ impl Session {
     }
 
     pub fn intern_bytes(&mut self, bytes: &[u8]) -> BytesId {
-        self.bytes_interner.intern(bytes)
+        self.interner.intern_bytes(bytes)
     }
 
     pub fn lookup_bytes(&self, bytes: BytesId) -> &[u8] {
-        &self.bytes_interner[bytes]
+        self.interner.lookup_bytes(bytes)
     }
 
     pub fn lookup_bytes_slice(&self, bytes: BytesId, start: u32, end: u32) -> &[u8] {

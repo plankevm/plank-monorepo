@@ -47,11 +47,11 @@ macro_rules! define_builtins {
             $($cd_variant,)*
         }
 
-        $(pub const $pt_const: StrId = StrId::new(BuiltinStrIdx::$pt_type as u32);)*
-        $(pub const $rf_const: StrId = StrId::new(BuiltinStrIdx::$rf_variant as u32);)*
-        $(pub const $ro_const: StrId = StrId::new(BuiltinStrIdx::$ro_variant as u32);)*
-        $(pub const $ct_const: StrId = StrId::new(BuiltinStrIdx::$ct_variant as u32);)*
-        $(pub const $cd_const: StrId = StrId::new(BuiltinStrIdx::$cd_variant as u32);)*
+        $(pub const $pt_const: StrId = StrId::from_builtin_index(BuiltinStrIdx::$pt_type as u32);)*
+        $(pub const $rf_const: StrId = StrId::from_builtin_index(BuiltinStrIdx::$rf_variant as u32);)*
+        $(pub const $ro_const: StrId = StrId::from_builtin_index(BuiltinStrIdx::$ro_variant as u32);)*
+        $(pub const $ct_const: StrId = StrId::from_builtin_index(BuiltinStrIdx::$ct_variant as u32);)*
+        $(pub const $cd_const: StrId = StrId::from_builtin_index(BuiltinStrIdx::$cd_variant as u32);)*
 
         pub fn inject_builtins(interner: &mut Session) {
             $(assert_eq!(interner.intern(builtin_names::$pt_const), $pt_const);)*
@@ -348,6 +348,11 @@ define_builtins! {
         IN_COMPTIME "@in_comptime" => InComptime;
         SET_EVAL_BRANCH_QUOTA "@set_eval_branch_quota" => SetEvalBranchQuota;
         COMPILE_ERROR "@compile_error" => CompileError;
+
+        // Comptime Bytes
+        BYTES_LEN "@bytes_len" => BytesLen;
+        COMPTIME_KECCAK256 "@comptime_keccak256" => ComptimeKeccak256;
+        DATA_OFFSET "@data_offset" => DataOffset;
     }
 
     comptime_dynamic_builtins {

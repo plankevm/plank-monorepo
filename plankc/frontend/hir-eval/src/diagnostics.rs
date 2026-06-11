@@ -482,6 +482,16 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_data_offset_in_comptime(&mut self, loc: SrcLoc) {
+        Diagnostic::error("builtin not supported at compile time")
+            .primary(
+                loc.source,
+                loc.span,
+                "`@data_offset` produces a runtime-only value and cannot be evaluated at compile time",
+            )
+            .emit(self);
+    }
+
     pub fn emit_struct_lit_unexpected_field(
         &mut self,
         struct_ty: TypeId,
