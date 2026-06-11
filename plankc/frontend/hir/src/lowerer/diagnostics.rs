@@ -195,7 +195,7 @@ impl BlockLowerer<'_> {
                 source_span,
                 "run block requires an init block in the same file",
             )
-            .note("a file with a run block must contain an init block")
+            .note("if you did not intend this file to be an independently compilable contract remove the `run` block")
             .emit(*self.session.borrow_mut());
     }
 

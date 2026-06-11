@@ -267,7 +267,7 @@ fn test_imported_run_missing_init_and_termination() {
         3 | | }
           | |_^ run block requires an init block in the same file
           |
-          = note: a file with a run block must contain an init block
+          = note: if you did not intend this file to be an independently compilable contract remove the `run` block
         "#,
             r#"
         error: entry point must end with explicit terminator
