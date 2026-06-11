@@ -449,7 +449,8 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plank_session::{SourceId, SrcLoc, ZERO_SPAN, builtins};
+    use plank_session::{Session, Source, SourceId, SrcLoc, StrId, ZERO_SPAN, builtins};
+    use std::path::PathBuf;
 
     fn dummy_src_loc(id: u32) -> SrcLoc {
         SrcLoc::new(SourceId::new(id), ZERO_SPAN)
@@ -509,6 +510,32 @@ mod tests {
         let a = interner.intern_struct(a_info);
         let b = interner.intern_struct(b_info);
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn self_referential_type_name_formats_without_overflow() {
+        let interner = TypeInterner::new();
+        let mut session = Session::new();
+        let source = session
+            .register_source(Source { path: PathBuf::from("main.plk"), content: String::new() });
+        let name = session.intern("Phantom");
+
+        let fields = [Field { name: StrId::new(0), ty: TypeId::U256, def_span: ZERO_SPAN }];
+        let info = StructInfo {
+            type_index: ValueId::VOID,
+            def_loc: SrcLoc::new(source, ZERO_SPAN),
+            fields: &fields,
+        };
+        let ty = TypeId::from_struct(interner.intern_struct(info));
+
+        // Struct deduplication allows a type function's result to be one of its own
+        // arguments (e.g. `Phantom(S)` returning a struct that dedups to `S`), so the
+        // name's argument list can reference the named type itself. Formatting must
+        // terminate regardless.
+        interner.try_name_struct_parameterized(ty, name, &[TypeNameArg::Type(ty)]);
+
+        let rendered = format!("{}", interner.format(&session, ty));
+        assert!(!rendered.is_empty());
     }
 
     #[test]
