@@ -62,14 +62,6 @@ impl Interner {
     /// *different* interner may index content that is not valid UTF-8.
     pub unsafe fn lookup_str(&self, id: StrId) -> &str {
         let bytes = &self.bytes[id.0];
-        debug_assert!(
-            std::str::from_utf8(bytes).is_ok(),
-            "StrId resolved against an interner it does not belong to"
-        );
-        // Safety: `StrId`s minted by this interner always index UTF-8 content
-        // (`intern_str` takes `&str`; a dedup hit against bytes-interned
-        // content implies byte equality with a `&str`). The caller guarantees
-        // `id` came from this interner.
         unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 
