@@ -765,7 +765,9 @@ fn test_data_offset_lowers_to_data_segment() {
 
         Basic Blocks:
             @0 {
-                $0 = data_offset .0
+                $1 = data_offset .0
+                $2 = const 0x0
+                $0 = add $1 $2
                 stop
             }
 
@@ -793,15 +795,49 @@ fn test_data_offset_dedups_identical_literals() {
 
         Basic Blocks:
             @0 {
-                $0 = data_offset .0
                 $1 = data_offset .0
-                $2 = data_offset .1
+                $2 = const 0x0
+                $0 = add $1 $2
+                $4 = data_offset .0
+                $5 = const 0x0
+                $3 = add $4 $5
+                $7 = data_offset .1
+                $8 = const 0x0
+                $6 = add $7 $8
                 stop
             }
 
 
         data .0 0x68656c6c6f
         data .1 0x00ff
+        "#,
+    );
+}
+
+#[test]
+fn test_data_offset_of_bytes_slice_adds_start_offset() {
+    assert_lowers_to(
+        r#"
+        init {
+            let offset = @data_offset(@bytes_slice("hello" hex"00ff", 2, 6));
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $1 = data_offset .0
+                $2 = const 0x2
+                $0 = add $1 $2
+                stop
+            }
+
+
+        data .0 0x68656c6c6f00ff
         "#,
     );
 }
