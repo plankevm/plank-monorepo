@@ -440,18 +440,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty_local] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-        let requires_runtime = validate_uninit_type(
-            self.eval.types,
-            self.diag_ctx,
-            self.is_comptime(),
-            ty,
-            self.loc(expr_span),
-            None,
-        )?;
+        if validate_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
+            return Err(Poisoned);
+        }
 
         // Types that require runtime allocation (memptr, structs containing memptr)
         // produce MIR directly.
-        if requires_runtime || !self.is_comptime() {
+        if contains_memptr(ty, self.eval.types) {
+            if self.is_comptime() {
+                self.diag_ctx.emit_uninit_memptr_in_comptime(self.loc(expr_span));
+                return Err(Poisoned);
+            }
             return Ok(Ok(self.emit_uninit_runtime(ty)));
         }
 
@@ -702,28 +701,21 @@ pub(crate) fn fold_runtime_builtin(
 }
 
 fn validate_uninit_type(
+    ty: TypeId,
     types: &TypeInterner,
     diag_ctx: &mut DiagCtx<'_>,
-    is_comptime: bool,
-    ty: TypeId,
     expr: SrcLoc,
     field_loc: Option<SrcLoc>,
-) -> MaybePoisoned<bool> {
+) -> bool {
     match ty.as_primitive() {
-        Ok(PrimitiveType::MemoryPointer) => {
-            if is_comptime {
-                diag_ctx.emit_uninit_memptr_in_comptime(expr);
-                return Err(Poisoned);
-            }
-            Ok(true)
-        }
         Ok(
             PrimitiveType::U256
             | PrimitiveType::Bool
+            | PrimitiveType::MemoryPointer
             | PrimitiveType::Void
             | PrimitiveType::Type
             | PrimitiveType::CBytes,
-        ) => Ok(false),
+        ) => false,
         Ok(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
             // `field_loc` is set when recursing into struct fields
             if let Some(field_loc) = field_loc {
@@ -731,23 +723,28 @@ fn validate_uninit_type(
             } else {
                 diag_ctx.emit_invalid_uninit_type(invalid, expr);
             }
-            Err(Poisoned)
+            true
         }
         Err(struct_ref) => {
             let view = types.lookup_struct(struct_ref);
-            let mut requires_runtime = false;
+            let mut has_invalid_uninit = false;
             for field in view.fields {
                 let field_loc = SrcLoc::new(view.def_loc.source, field.def_span);
-                requires_runtime |= validate_uninit_type(
-                    types,
-                    diag_ctx,
-                    is_comptime,
-                    field.ty,
-                    expr,
-                    Some(field_loc),
-                )?;
+                has_invalid_uninit |=
+                    validate_uninit_type(field.ty, types, diag_ctx, expr, Some(field_loc));
             }
-            Ok(requires_runtime)
+            has_invalid_uninit
+        }
+    }
+}
+
+fn contains_memptr(ty: TypeId, types: &TypeInterner) -> bool {
+    match ty.as_primitive() {
+        Ok(PrimitiveType::MemoryPointer) => true,
+        Ok(_) => false,
+        Err(struct_ref) => {
+            let view = types.lookup_struct(struct_ref);
+            view.fields.iter().any(|field| contains_memptr(field.ty, types))
         }
     }
 }

@@ -817,7 +817,7 @@ fn test_cached_non_never_poison_does_not_diverge() {
             1 | const bad = fn() u256 { return @uninit(never); };
               |                                ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
               |
-              = help: @uninit only supports u256, bool, void, type, memptr and struct types
+              = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
             "#,
             r#"
             error: mismatched types

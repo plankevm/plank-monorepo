@@ -723,7 +723,7 @@ impl DiagCtx<'_> {
     fn uninit_help() -> String {
         use builtin_names::*;
         format!(
-            "{UNINIT} only supports {U256}, {BOOL}, {VOID}, {TYPE}, {MEMORY_POINTER} and struct types",
+            "{UNINIT} only supports {U256}, {BOOL}, {VOID}, {TYPE}, {CBYTES}, {MEMORY_POINTER} and struct types",
         )
     }
 

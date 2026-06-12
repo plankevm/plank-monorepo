@@ -1659,7 +1659,7 @@ fn test_uninit_invalid_type() {
         1 | const x = @uninit(never);
           |           ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, memptr and struct types
+          = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
         "#],
     );
 }
@@ -1704,7 +1704,7 @@ fn test_uninit_struct_with_function_field() {
         1 | const Bad = struct { a: u256, b: function };
           |                               ----------- type 'function' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, memptr and struct types
+          = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
         "#],
     );
 }
@@ -1723,6 +1723,130 @@ fn test_uninit_memptr_in_comptime() {
         1 | const x = @uninit(memptr);
           |           ^^^^^^^^^^^^^^^ memptr requires runtime allocation
         "#],
+    );
+}
+
+#[test]
+fn test_uninit_type_direct_runtime_scope_is_comptime_value() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x = @uninit(type);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_uninit_cbytes_direct_runtime_scope_is_comptime_value() {
+    assert_lowers_to(
+        r#"
+        init {
+            let x = @uninit(cbytes);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_uninit_struct_with_comptime_only_field_direct_runtime_scope_is_comptime_value() {
+    assert_lowers_to(
+        r#"
+        const Wrapper = struct { t: type, n: u256 };
+        init {
+            let x = @uninit(Wrapper);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_uninit_struct_with_memptr_and_invalid_field_reports_invalid_field() {
+    assert_diagnostics(
+        r#"
+        const Bad = struct { ptr: memptr, f: function };
+        const x = @uninit(Bad);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: struct contains field that cannot be uninitialized
+         --> main.plk:2:11
+          |
+        2 | const x = @uninit(Bad);
+          |           ^^^^^^^^^^^^ cannot use @uninit on this struct
+          |
+         ::: main.plk:1:35
+          |
+        1 | const Bad = struct { ptr: memptr, f: function };
+          |                                   ----------- type 'function' cannot be uninitialized
+          |
+          = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+        "#],
+    );
+}
+
+#[test]
+fn test_uninit_struct_reports_all_invalid_fields() {
+    assert_diagnostics(
+        r#"
+        const Bad = struct { f: function, g: function };
+        const x = @uninit(Bad);
+        init { @evm_stop(); }
+        "#,
+        &[
+            r#"
+            error: struct contains field that cannot be uninitialized
+             --> main.plk:2:11
+              |
+            2 | const x = @uninit(Bad);
+              |           ^^^^^^^^^^^^ cannot use @uninit on this struct
+              |
+             ::: main.plk:1:22
+              |
+            1 | const Bad = struct { f: function, g: function };
+              |                      ----------- type 'function' cannot be uninitialized
+              |
+              = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+            "#,
+            r#"
+            error: struct contains field that cannot be uninitialized
+             --> main.plk:2:11
+              |
+            2 | const x = @uninit(Bad);
+              |           ^^^^^^^^^^^^ cannot use @uninit on this struct
+              |
+             ::: main.plk:1:35
+              |
+            1 | const Bad = struct { f: function, g: function };
+              |                                   ----------- type 'function' cannot be uninitialized
+              |
+              = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+            "#,
+        ],
     );
 }
 
