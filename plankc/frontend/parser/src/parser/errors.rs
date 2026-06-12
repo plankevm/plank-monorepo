@@ -68,7 +68,7 @@ impl<'a> Parser<'a> {
                 span,
                 "missing closing `\"`",
             ),
-            ErrorToken::MalformedString => Diagnostic::error("malformed string literal")
+            ErrorToken::MultilineString => Diagnostic::error("malformed string literal")
                 .primary(self.source_id, span, "string literals cannot span multiple lines")
                 .help("split the literal into adjacent segments: `\"line one\\n\" \"line two\"`"),
         };

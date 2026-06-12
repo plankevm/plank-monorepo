@@ -60,19 +60,19 @@ fn lex_number_literal<const RADIX: u32>(lexer: &mut LogosLexer<Token>) -> Result
 
 fn lex_loose_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     fn inner<'a>(chars: &mut CharsPeekable<'a>) -> Result<(), Token> {
-        let mut malformed = false;
+        let mut multiline = false;
         while let Some((_, c)) = chars.next() {
             match c {
                 '"' => {
-                    if malformed {
-                        return Err(Token::MalformedStringError);
+                    if multiline {
+                        return Err(Token::MultilineStringError);
                     }
                     return Ok(());
                 }
                 '\\' => {
                     chars.next();
                 }
-                '\n' | '\r' => malformed = true,
+                '\n' | '\r' => multiline = true,
                 _ => {}
             }
         }
@@ -89,7 +89,7 @@ fn lex_loose_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Tok
             match c {
                 '"' => {
                     if malformed {
-                        return Err(Token::MalformedStringError);
+                        return Err(Token::MultilineStringError);
                     }
                     return Ok(());
                 }
@@ -268,7 +268,7 @@ pub enum Token {
     #[default]
     InvalidCharError,
     MalformedIdentError,
-    MalformedStringError,
+    MultilineStringError,
     UnclosedBlockCommentError,
     UnclosedStringError,
 
@@ -279,7 +279,7 @@ pub enum Token {
 pub enum ErrorToken {
     InvalidChar,
     MalformedIdent,
-    MalformedString,
+    MultilineString,
     UnclosedBlockComment,
     UnclosedString,
     AtWithoutIdent,
@@ -301,7 +301,7 @@ impl Token {
         match self {
             Token::InvalidCharError => Some(ErrorToken::InvalidChar),
             Token::MalformedIdentError => Some(ErrorToken::MalformedIdent),
-            Token::MalformedStringError => Some(ErrorToken::MalformedString),
+            Token::MultilineStringError => Some(ErrorToken::MultilineString),
             Token::UnclosedBlockCommentError => Some(ErrorToken::UnclosedBlockComment),
             Token::UnclosedStringError => Some(ErrorToken::UnclosedString),
             Token::AtWithoutIdentError => Some(ErrorToken::AtWithoutIdent),
@@ -383,7 +383,7 @@ impl Token {
             | Token::BlockComment
             | Token::InvalidCharError
             | Token::MalformedIdentError
-            | Token::MalformedStringError
+            | Token::MultilineStringError
             | Token::UnclosedBlockCommentError
             | Token::UnclosedStringError
             | Token::AtWithoutIdentError
@@ -465,7 +465,7 @@ impl Token {
             Token::BlockComment => "block comment",
             Token::InvalidCharError => "invalid character",
             Token::MalformedIdentError => "malformed identifier",
-            Token::MalformedStringError => "malformed string literal",
+            Token::MultilineStringError => "malformed string literal",
             Token::UnclosedBlockCommentError => "unclosed block comment",
             Token::UnclosedStringError => "unclosed string literal",
             Token::AtWithoutIdentError => "invalid builtin name",
@@ -742,7 +742,7 @@ continued""#,
         assert_eq!(
             results,
             vec![(
-                Token::MalformedStringError,
+                Token::MultilineStringError,
                 0..16,
                 r#""line
 continued""#
