@@ -106,13 +106,24 @@ fn test_lexer_error_malformed_hex_string() {
         r#"
             const x = hex"0fg";
         "#,
-        &[r#"
+        &[
+            r#"
             error: invalid digit in hex string literal
              --> test.plk:1:17
               |
             1 | const x = hex"0fg";
               |                 ^ `g` is not a hex digit (0-9, a-f, A-F)
-            "#],
+            "#,
+            r#"
+            error: odd number of digits in hex string literal
+             --> test.plk:1:11
+              |
+            1 | const x = hex"0fg";
+              |           ^^^^^^^^ expected an even number of hex digits
+              |
+              = help: hex string literals encode whole bytes, so two hex digits are needed per byte
+            "#,
+        ],
     );
 }
 

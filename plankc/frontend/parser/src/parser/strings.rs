@@ -79,7 +79,7 @@ impl Parser<'_> {
                     let d1 = chars.next().and_then(|(_, d)| hex_value(d));
                     let d2 = chars.next().and_then(|(_, d)| hex_value(d));
                     let (Some(hi), Some(lo)) = (d1, d2) else {
-                        let end = chars.next().map_or(src.len(), |(end, _)| end);
+                        let end = chars.peek().map_or(src.len(), |&(end, _)| end);
                         self.emit_invalid_hex_escape(Span::new(
                             src_start + start as u32,
                             src_start + end as u32,
@@ -91,7 +91,7 @@ impl Parser<'_> {
                 other => {
                     let span = Span::new(
                         src_start + start as u32,
-                        src_start + chars.next().map_or(src.len(), |(end, _)| end) as u32,
+                        src_start + chars.peek().map_or(src.len(), |&(end, _)| end) as u32,
                     );
                     self.emit_unrecognized_escape(span, other);
                     continue;
@@ -107,7 +107,7 @@ impl Parser<'_> {
     fn decode_hex_token(&mut self, ti: TokenIdx) {
         let token_span = self.tokens.token_src_span(ti);
         let src = &self.source[token_span.usize_range()];
-        let src = src.strip_prefix("hex\"").expect(concat!("missing opening `hex\"`"));
+        let src = src.strip_prefix("hex\"").expect("missing opening `hex\"`");
         let src = src.strip_suffix('"').expect("missing closing `\"`");
         let src_start = token_span.start + 4;
 
@@ -135,10 +135,13 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{cst::NodeKind, tests::parse_single_source};
+    use crate::{
+        cst::NodeKind,
+        tests::{assert_session_errors, parse_single_source},
+    };
     use plank_session::Session;
 
-    fn decode(literal: &str) -> (Vec<u8>, usize) {
+    fn assert_decodes_to(literal: &str, expected_value: &[u8], expected_errors: &[&str]) {
         let source = format!("const x = {literal};");
         let mut session = Session::new();
         let cst = parse_single_source(&source, &mut session);
@@ -150,37 +153,96 @@ mod tests {
                 _ => None,
             })
             .expect("source contains a string literal");
-        (session.lookup_bytes(value).to_vec(), session.diagnostics().len())
+        assert_eq!(
+            session.lookup_bytes(value),
+            expected_value,
+            "decoded value mismatch for `{literal}`"
+        );
+        assert_session_errors(&session, expected_errors);
     }
 
     #[test]
     fn plain_and_escaped_strings() {
-        assert_eq!(decode(r#""hello""#), (b"hello".to_vec(), 0));
-        assert_eq!(decode(r#""""#), (b"".to_vec(), 0));
-        assert_eq!(decode(r#""a\n\r\t\0\\\"b\x7fc""#), (b"a\n\r\t\0\\\"b\x7fc".to_vec(), 0));
+        assert_decodes_to(r#""hello""#, b"hello", &[]);
+        assert_decodes_to(r#""""#, b"", &[]);
+        assert_decodes_to(r#""a\n\r\t\0\\\"b\x7fc""#, b"a\n\r\t\0\\\"b\x7fc", &[]);
     }
 
     #[test]
     fn unrecognized_escape_recovery() {
-        assert_eq!(decode(r#""a\qb""#), (b"ab".to_vec(), 1));
+        assert_decodes_to(
+            r#""a\qb""#,
+            b"ab",
+            &[r#"
+            error: unrecognized escape sequence
+             --> test.plk:1:13
+              |
+            1 | const x = "a\qb";
+              |             ^^ `\q` is not a recognized escape sequence
+              |
+              = help: valid escapes are `\n`, `\r`, `\t`, `\0`, `\\`, `\"` and `\xHH`
+            "#],
+        );
     }
 
     #[test]
     fn invalid_hex_escape_recovery() {
-        assert_eq!(decode(r#""\xZG""#), (b"ZG".to_vec(), 1));
-        assert_eq!(decode(r#""\x1""#), (b"1".to_vec(), 1));
+        assert_decodes_to(
+            r#""\xZG""#,
+            b"",
+            &[r#"
+            error: invalid hex escape
+             --> test.plk:1:12
+              |
+            1 | const x = "\xZG";
+              |            ^^^^ `\x` must be followed by exactly two hex digits, e.g. `\x7f`
+            "#],
+        );
+        assert_decodes_to(
+            r#""\x1""#,
+            b"",
+            &[r#"
+            error: invalid hex escape
+             --> test.plk:1:12
+              |
+            1 | const x = "\x1";
+              |            ^^^ `\x` must be followed by exactly two hex digits, e.g. `\x7f`
+            "#],
+        );
     }
 
     #[test]
     fn hex_segments() {
-        assert_eq!(decode(r#"hex"01aF""#), (vec![0x01, 0xaf], 0));
-        assert_eq!(decode(r#"hex"""#), (vec![], 0));
-        assert_eq!(decode(r#"hex"01z2""#), (vec![0x01, 2], 1));
-        assert_eq!(decode(r#"hex"012""#), (vec![0x01], 1));
+        assert_decodes_to(r#"hex"01aF""#, &[0x01, 0xaf], &[]);
+        assert_decodes_to(r#"hex"""#, &[], &[]);
+        assert_decodes_to(
+            r#"hex"01z2""#,
+            &[0x01, 0x02],
+            &[r#"
+            error: invalid digit in hex string literal
+             --> test.plk:1:17
+              |
+            1 | const x = hex"01z2";
+              |                 ^ `z` is not a hex digit (0-9, a-f, A-F)
+            "#],
+        );
+        assert_decodes_to(
+            r#"hex"012""#,
+            &[0x01],
+            &[r#"
+            error: odd number of digits in hex string literal
+             --> test.plk:1:11
+              |
+            1 | const x = hex"012";
+              |           ^^^^^^^^ expected an even number of hex digits
+              |
+              = help: hex string literals encode whole bytes, so two hex digits are needed per byte
+            "#],
+        );
     }
 
     #[test]
     fn merged_segments() {
-        assert_eq!(decode(r#""abc" "123" hex"01ab""#), (b"abc123\x01\xab".to_vec(), 0));
+        assert_decodes_to(r#""abc" "123" hex"01ab""#, b"abc123\x01\xab", &[]);
     }
 }
