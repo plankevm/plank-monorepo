@@ -635,4 +635,3 @@ fn emits_bytecode_for_data_offset() {
         "expected data bytes embedded in code: {bytecode:02x?}"
     );
 }
-

@@ -1,11 +1,12 @@
 use plank_core::Span;
 use plank_session::{
-    AnnotationKind, Annotations, ClaimBuilder, DiagEmitter, Diagnostic, SourceSpan,
+    AnnotationKind, Annotations, ClaimBuilder, DiagEmitter, Diagnostic, SourceByteOffset,
+    SourceSpan,
 };
 
 use crate::lexer::{ErrorToken, Token, TokenIdx};
 
-use super::{Parser, strings};
+use super::Parser;
 
 impl<'a> Parser<'a> {
     pub(crate) fn emit_lexer_error(&mut self, error: ErrorToken, ti: TokenIdx) {
@@ -75,62 +76,44 @@ impl<'a> Parser<'a> {
         diag.emit(self.session);
     }
 
-    pub(crate) fn emit_string_segment_error(
-        &mut self,
-        ti: TokenIdx,
-        error: strings::StringSegmentError,
-    ) {
-        use strings::StringSegmentError;
-
-        let token_span = self.tokens.token_src_span(ti);
-        let sub_span = |offset: u32, len: u32| {
-            Span::new(token_span.start + offset, token_span.start + offset + len)
-        };
-        let span_char = |span: SourceSpan, skip: usize| {
-            self.source[span.usize_range()][skip..]
-                .chars()
-                .next()
-                .expect("span produced by the decoder covers a character")
-                .escape_default()
-        };
-
-        let diag = match error {
-            StringSegmentError::UnrecognizedEscape { offset, len } => {
-                let span = sub_span(offset, len);
-                Diagnostic::error("unrecognized escape sequence")
-                    .primary(
-                        self.source_id,
-                        span,
-                        format!("`\\{}` is not a recognized escape sequence", span_char(span, 1)),
-                    )
-                    .help(
-                        "valid escapes are `\\n`, `\\r`, `\\t`, `\\0`, `\\\\`, `\\\"` and `\\xHH`",
-                    )
-            }
-            StringSegmentError::InvalidHexEscape { offset, len } => {
-                let span = sub_span(offset, len);
-                Diagnostic::error("invalid hex escape").primary(
-                    self.source_id,
-                    span,
-                    "`\\x` must be followed by exactly two hex digits, e.g. `\\x7f`",
-                )
-            }
-            StringSegmentError::NonHexDigit { offset, len } => {
-                let span = sub_span(offset, len);
-                Diagnostic::error("invalid digit in hex string literal").primary(
-                    self.source_id,
-                    span,
-                    format!("`{}` is not a hex digit (0-9, a-f, A-F)", span_char(span, 0)),
-                )
-            }
-            StringSegmentError::OddHexDigitCount => Diagnostic::error(
-                "odd number of digits in hex string literal",
+    pub(crate) fn emit_unrecognized_escape(&mut self, span: SourceSpan, invalid: char) {
+        Diagnostic::error("unrecognized escape sequence")
+            .primary(
+                self.source_id,
+                span,
+                format!("`\\{invalid}` is not a recognized escape sequence"),
             )
-            .primary(self.source_id, token_span, "expected an even number of hex digits")
-            .help("hex string literals encode whole bytes, so two hex digits are needed per byte"),
-        };
+            .help(r#"valid escapes are `\n`, `\r`, `\t`, `\0`, `\\`, `\"` and `\xHH`"#)
+            .emit(self.session);
+    }
 
-        diag.emit(self.session);
+    pub(crate) fn emit_invalid_hex_escape(&mut self, span: SourceSpan) {
+        Diagnostic::error("invalid hex escape")
+            .primary(
+                self.source_id,
+                span,
+                r"`\x` must be followed by exactly two hex digits, e.g. `\x7f`",
+            )
+            .emit(self.session);
+    }
+
+    pub(crate) fn emit_non_hex_digit(&mut self, offset: SourceByteOffset, invalid: char) {
+        let span = Span::new(offset, offset + invalid.len_utf8() as u32);
+        Diagnostic::error("invalid digit in hex string literal")
+            .primary(
+                self.source_id,
+                span,
+                format!("`{}` is not a hex digit (0-9, a-f, A-F)", invalid.escape_default()),
+            )
+            .emit(self.session);
+    }
+
+    pub(crate) fn emit_odd_hex_digit_count(&mut self, ti: TokenIdx) {
+        let span = self.tokens.token_src_span(ti);
+        Diagnostic::error("odd number of digits in hex string literal")
+            .primary(self.source_id, span, "expected an even number of hex digits")
+            .help("hex string literals encode whole bytes, so two hex digits are needed per byte")
+            .emit(self.session);
     }
 
     pub(crate) fn emit_unexpected_token(&mut self, found: Token, span: SourceSpan) {

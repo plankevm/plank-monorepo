@@ -116,7 +116,7 @@ macro_rules! newtype_index {
             #[inline]
             fn add(self, rhs: u32) -> Self::Output {
                 use $crate::Idx;
-                Self::new(self.get().wrapping_add(rhs))
+                Self::new(self.get() + rhs)
             }
         }
 
@@ -143,7 +143,7 @@ macro_rules! newtype_index {
             #[inline]
             fn sub(self, rhs: u32) -> Self::Output {
                 use $crate::Idx;
-                Self::new(self.get().wrapping_sub(rhs))
+                Self::new(self.get() - rhs)
             }
         }
 

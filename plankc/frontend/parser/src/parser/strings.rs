@@ -1,184 +1,186 @@
 //! Validating decoders for string literal segments.
 //!
 //! The lexer scans string literals loosely (only caring about termination);
-//! these decoders perform full content validation when the parser consumes a
-//! string token, reporting precise sub-token errors via callback.
+//! the parser performs full content validation when it consumes a string
+//! token, reporting precise sub-token errors as it decodes.
 
-use allocator_api2::vec::Vec;
+use plank_core::Span;
 
-/// Content error inside a single string/hex-string token. Offsets and lengths
-/// are in bytes, relative to the token start.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StringSegmentError {
-    UnrecognizedEscape { offset: u32, len: u32 },
-    InvalidHexEscape { offset: u32, len: u32 },
-    NonHexDigit { offset: u32, len: u32 },
-    OddHexDigitCount,
-}
+use crate::{
+    cst::{NodeIdx, NodeKind},
+    lexer::{Token, TokenIdx},
+    parser::Parser,
+};
 
-fn hex_value(byte: u8) -> Option<u8> {
+fn hex_value(byte: char) -> Option<u8> {
     match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
+        '0'..='9' => Some(byte as u8 - b'0'),
+        'A'..='F' => Some(byte as u8 - b'A' + 10),
+        'a'..='f' => Some(byte as u8 - b'a' + 10),
         _ => None,
     }
 }
 
-/// Decodes the contents of a `"..."` token (including the quotes) into `out`,
-/// resolving the escapes `\n`, `\r`, `\t`, `\0`, `\\`, `\"` and `\xHH`.
-pub(crate) fn decode_string_segment(
-    src: &str,
-    out: &mut Vec<u8>,
-    mut on_err: impl FnMut(StringSegmentError),
-) {
-    const QUOTE_LEN: usize = 1;
-    let inner = &src[QUOTE_LEN..src.len() - 1];
-    let bytes = inner.as_bytes();
+impl Parser<'_> {
+    /// Parses a string literal, merging any directly following string/hex
+    /// string tokens into a single value: `"ab" "c" hex"01"` == `"abc\x01"`.
+    pub(crate) fn try_parse_string_literal(&mut self) -> Option<NodeIdx> {
+        self.skip_trivia();
+        self.string_buf.clear();
 
-    let mut pos = 0;
-    while pos < bytes.len() {
-        let rest = &inner[pos..];
-        let Some(escape) = rest.find('\\') else {
-            out.extend_from_slice(rest.as_bytes());
-            break;
-        };
-        out.extend_from_slice(&rest.as_bytes()[..escape]);
-        pos += escape;
-        let escape_offset = (QUOTE_LEN + pos) as u32;
-        pos += 1;
-
-        let escaped = inner[pos..]
-            .chars()
-            .next()
-            .expect("lexer guarantees a character follows every backslash");
-        pos += escaped.len_utf8();
-        match escaped {
-            'n' => out.push(b'\n'),
-            'r' => out.push(b'\r'),
-            't' => out.push(b'\t'),
-            '0' => out.push(b'\0'),
-            '\\' => out.push(b'\\'),
-            '"' => out.push(b'"'),
-            'x' => {
-                let digits = bytes
-                    .get(pos)
-                    .copied()
-                    .and_then(hex_value)
-                    .zip(bytes.get(pos + 1).copied().and_then(hex_value));
-                match digits {
-                    Some((hi, lo)) => {
-                        out.push(hi << 4 | lo);
-                        pos += 2;
-                    }
-                    None => on_err(StringSegmentError::InvalidHexEscape {
-                        offset: escape_offset,
-                        len: 2 + inner[pos..].chars().take(2).map(char::len_utf8).sum::<usize>()
-                            as u32,
-                    }),
-                }
+        let start = self.tokens.current();
+        let mut end = None;
+        let end = loop {
+            let ti = self.tokens.current();
+            match self.current_token() {
+                Token::LooseStringLiteral => self.decode_string_token(ti),
+                Token::LooseHexStringLiteral => self.decode_hex_token(ti),
+                _ => break end?,
             }
-            other => on_err(StringSegmentError::UnrecognizedEscape {
-                offset: escape_offset,
-                len: 1 + other.len_utf8() as u32,
-            }),
-        }
-    }
-}
-
-/// Decodes the contents of a `hex"..."` token (including prefix and quotes)
-/// into `out`, validating that it contains an even number of hex digits and
-/// nothing else.
-pub(crate) fn decode_hex_segment(
-    src: &str,
-    out: &mut Vec<u8>,
-    mut on_err: impl FnMut(StringSegmentError),
-) {
-    const PREFIX_LEN: usize = 4;
-    let inner = &src[PREFIX_LEN..src.len() - 1];
-
-    let mut pending_hi: Option<u8> = None;
-    for (i, c) in inner.char_indices() {
-        let digit = u8::try_from(c).ok().and_then(hex_value);
-        let Some(digit) = digit else {
-            on_err(StringSegmentError::NonHexDigit {
-                offset: (PREFIX_LEN + i) as u32,
-                len: c.len_utf8() as u32,
-            });
-            continue;
+            self.advance();
+            end = Some(self.tokens.current());
+            self.skip_trivia();
         };
-        match pending_hi.take() {
-            None => pending_hi = Some(digit),
-            Some(hi) => out.push(hi << 4 | digit),
+
+        let value = self.session.intern_bytes(&self.string_buf);
+        let node = self.alloc_node_from(start, NodeKind::StringLiteral { value });
+        Some(self.close_node_at(node, end))
+    }
+
+    /// Decodes the contents of a `"..."` token (including the quotes) into the
+    /// string buffer, resolving the escapes `\n`, `\r`, `\t`, `\0`, `\\`, `\"`
+    /// and `\xHH`.
+    fn decode_string_token(&mut self, ti: TokenIdx) {
+        let token_span = self.tokens.token_src_span(ti);
+        let src = &self.source[token_span.usize_range()];
+        let src = src.strip_prefix('"').expect("missing opening `\"`");
+        let src = src.strip_suffix('"').expect("missing closing `\"`");
+        let src_start = token_span.start + 1;
+
+        let mut chars = src.char_indices().peekable();
+
+        while let Some((start, c)) = chars.next() {
+            let '\\' = c else {
+                let mut buf = [0u8; 4];
+                let encoded = c.encode_utf8(&mut buf);
+                self.string_buf.extend_from_slice(encoded.as_bytes());
+                continue;
+            };
+            let (_, nc) = chars.next().expect("lexer guarantees backslash not end");
+            let byte = match nc {
+                'n' => b'\n',
+                'r' => b'\r',
+                't' => b'\t',
+                '0' => b'\0',
+                '\\' => b'\\',
+                '"' => b'"',
+                'x' => {
+                    // Assume next two chars were intended as escapes (even if first is invalid).
+                    let d1 = chars.next().and_then(|(_, d)| hex_value(d));
+                    let d2 = chars.next().and_then(|(_, d)| hex_value(d));
+                    let (Some(hi), Some(lo)) = (d1, d2) else {
+                        let end = chars.next().map_or(src.len(), |(end, _)| end);
+                        self.emit_invalid_hex_escape(Span::new(
+                            src_start + start as u32,
+                            src_start + end as u32,
+                        ));
+                        continue;
+                    };
+                    (hi << 4) | lo
+                }
+                other => {
+                    let span = Span::new(
+                        src_start + start as u32,
+                        src_start + chars.next().map_or(src.len(), |(end, _)| end) as u32,
+                    );
+                    self.emit_unrecognized_escape(span, other);
+                    continue;
+                }
+            };
+            self.string_buf.push(byte);
         }
     }
-    if pending_hi.is_some() {
-        on_err(StringSegmentError::OddHexDigitCount);
+
+    /// Decodes the contents of a `hex"..."` token (including prefix and
+    /// quotes) into the string buffer, validating that it contains an even
+    /// number of hex digits and nothing else.
+    fn decode_hex_token(&mut self, ti: TokenIdx) {
+        let token_span = self.tokens.token_src_span(ti);
+        let src = &self.source[token_span.usize_range()];
+        let src = src.strip_prefix("hex\"").expect(concat!("missing opening `hex\"`"));
+        let src = src.strip_suffix('"').expect("missing closing `\"`");
+        let src_start = token_span.start + 4;
+
+        let mut chars = src.char_indices().peekable();
+        let mut supress_further_non_hex_errors = false;
+        while let Some((c2_offset, c1)) = chars.next() {
+            let hi = hex_value(c1);
+            if hi.is_none() && !supress_further_non_hex_errors {
+                supress_further_non_hex_errors = true;
+                self.emit_non_hex_digit(src_start + c2_offset as u32, c1);
+            }
+            let Some((c2_offset, c2)) = chars.next() else {
+                self.emit_odd_hex_digit_count(ti);
+                break;
+            };
+            let lo = hex_value(c2);
+            if lo.is_none() && !supress_further_non_hex_errors {
+                supress_further_non_hex_errors = true;
+                self.emit_non_hex_digit(src_start + c2_offset as u32, c2);
+            }
+            self.string_buf.push((hi.unwrap_or(0) << 4) | lo.unwrap_or(0))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{cst::NodeKind, tests::parse_single_source};
+    use plank_session::Session;
 
-    fn decode_str(src: &str) -> (std::vec::Vec<u8>, std::vec::Vec<StringSegmentError>) {
-        let mut out = Vec::new();
-        let mut errors = std::vec::Vec::new();
-        decode_string_segment(src, &mut out, |e| errors.push(e));
-        (out.to_vec(), errors)
-    }
-
-    fn decode_hex(src: &str) -> (std::vec::Vec<u8>, std::vec::Vec<StringSegmentError>) {
-        let mut out = Vec::new();
-        let mut errors = std::vec::Vec::new();
-        decode_hex_segment(src, &mut out, |e| errors.push(e));
-        (out.to_vec(), errors)
+    fn decode(literal: &str) -> (Vec<u8>, usize) {
+        let source = format!("const x = {literal};");
+        let mut session = Session::new();
+        let cst = parse_single_source(&source, &mut session);
+        let value = cst
+            .nodes
+            .iter()
+            .find_map(|node| match node.kind {
+                NodeKind::StringLiteral { value } => Some(value),
+                _ => None,
+            })
+            .expect("source contains a string literal");
+        (session.lookup_bytes(value).to_vec(), session.diagnostics().len())
     }
 
     #[test]
     fn plain_and_escaped_strings() {
-        assert_eq!(decode_str(r#""hello""#), (b"hello".to_vec(), vec![]));
-        assert_eq!(decode_str(r#""""#), (b"".to_vec(), vec![]));
-        let (value, errors) = decode_str(r#""a\n\r\t\0\\\"b\x7fc""#);
-        assert_eq!(value, b"a\n\r\t\0\\\"b\x7fc");
-        assert!(errors.is_empty());
+        assert_eq!(decode(r#""hello""#), (b"hello".to_vec(), 0));
+        assert_eq!(decode(r#""""#), (b"".to_vec(), 0));
+        assert_eq!(decode(r#""a\n\r\t\0\\\"b\x7fc""#), (b"a\n\r\t\0\\\"b\x7fc".to_vec(), 0));
     }
 
     #[test]
-    fn unrecognized_escape() {
-        let (value, errors) = decode_str(r#""a\qb""#);
-        assert_eq!(value, b"ab");
-        assert!(matches!(
-            errors.as_slice(),
-            [StringSegmentError::UnrecognizedEscape { offset: 2, len: 2 }]
-        ));
+    fn unrecognized_escape_recovery() {
+        assert_eq!(decode(r#""a\qb""#), (b"ab".to_vec(), 1));
     }
 
     #[test]
-    fn invalid_hex_escape() {
-        let (_, errors) = decode_str(r#""\xZG""#);
-        assert!(matches!(errors.as_slice(), [StringSegmentError::InvalidHexEscape { .. }]));
-
-        let (_, errors) = decode_str(r#""\x1""#);
-        assert!(matches!(errors.as_slice(), [StringSegmentError::InvalidHexEscape { .. }]));
+    fn invalid_hex_escape_recovery() {
+        assert_eq!(decode(r#""\xZG""#), (b"ZG".to_vec(), 1));
+        assert_eq!(decode(r#""\x1""#), (b"1".to_vec(), 1));
     }
 
     #[test]
     fn hex_segments() {
-        assert_eq!(decode_hex(r#"hex"01aF""#), (vec![0x01, 0xaf], vec![]));
-        assert_eq!(decode_hex(r#"hex"""#), (vec![], vec![]));
+        assert_eq!(decode(r#"hex"01aF""#), (vec![0x01, 0xaf], 0));
+        assert_eq!(decode(r#"hex"""#), (vec![], 0));
+        assert_eq!(decode(r#"hex"01z2""#), (vec![0x01, 2], 1));
+        assert_eq!(decode(r#"hex"012""#), (vec![0x01], 1));
+    }
 
-        let (value, errors) = decode_hex(r#"hex"01z2""#);
-        assert_eq!(value, vec![0x01]);
-        assert!(matches!(
-            errors.as_slice(),
-            [
-                StringSegmentError::NonHexDigit { offset: 6, len: 1 },
-                StringSegmentError::OddHexDigitCount
-            ]
-        ));
-
-        let (_, errors) = decode_hex(r#"hex"012""#);
-        assert!(matches!(errors.as_slice(), [StringSegmentError::OddHexDigitCount]));
+    #[test]
+    fn merged_segments() {
+        assert_eq!(decode(r#""abc" "123" hex"01ab""#), (b"abc123\x01\xab".to_vec(), 0));
     }
 }

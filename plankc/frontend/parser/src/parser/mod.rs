@@ -262,7 +262,11 @@ impl<'a> Parser<'a> {
     }
 
     fn close_node(&mut self, node: UnfinishedNode) -> NodeIdx {
-        self.nodes[node.idx].tokens.end = self.tokens.current();
+        self.close_node_at(node, self.tokens.current())
+    }
+
+    fn close_node_at(&mut self, node: UnfinishedNode, end: TokenIdx) -> NodeIdx {
+        self.nodes[node.idx].tokens.end = end;
         node.idx
     }
 
@@ -316,53 +320,6 @@ impl<'a> Parser<'a> {
 
         let id = parse_fn(digits, &mut self.num_lit_limbs);
         Some(NodeKind::NumLiteral { id })
-    }
-
-    /// Parses a string literal, merging any directly following string/hex
-    /// string tokens into a single value: `"ab" "c" hex"01"` == `"abc\x01"`.
-    fn try_parse_string_literal(&mut self) -> Option<NodeIdx> {
-        self.skip_trivia();
-        if !matches!(self.current_token(), Token::LooseStringLiteral | Token::LooseHexStringLiteral)
-        {
-            return None;
-        }
-        let start = self.tokens.current();
-        let source = self.source;
-        let mut buf = std::mem::take(&mut self.string_buf);
-        buf.clear();
-
-        let mut end;
-        loop {
-            let ti = self.tokens.current();
-            let token = self.current_token();
-            let src = &source[self.tokens.token_src_span(ti).usize_range()];
-            match token {
-                Token::LooseStringLiteral => strings::decode_string_segment(src, &mut buf, |e| {
-                    self.emit_string_segment_error(ti, e)
-                }),
-                Token::LooseHexStringLiteral => strings::decode_hex_segment(src, &mut buf, |e| {
-                    self.emit_string_segment_error(ti, e)
-                }),
-                other => unreachable!("expected string literal, got {other:?}"),
-            }
-            self.advance();
-            end = self.tokens.current();
-
-            self.skip_trivia();
-            if !matches!(
-                self.current_token(),
-                Token::LooseStringLiteral | Token::LooseHexStringLiteral
-            ) {
-                break;
-            }
-        }
-
-        let value = self.session.intern_bytes(&buf);
-        self.string_buf = buf;
-        let node = self.alloc_node_from(start, NodeKind::StringLiteral { value });
-        // Exclude the trivia skipped while looking for another string segment.
-        self.nodes[node.idx].tokens.end = end;
-        Some(node.idx)
     }
 
     // ======================== EXPRESSION PARSING (PRATT) ========================
