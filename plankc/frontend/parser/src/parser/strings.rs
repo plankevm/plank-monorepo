@@ -60,12 +60,12 @@ impl Parser<'_> {
         let mut chars = src.char_indices().peekable();
 
         while let Some((start, c)) = chars.next() {
-            let '\\' = c else {
+            if c != '\\' {
                 let mut buf = [0u8; 4];
                 let encoded = c.encode_utf8(&mut buf);
                 self.string_buf.extend_from_slice(encoded.as_bytes());
                 continue;
-            };
+            }
             let (_, nc) = chars.next().expect("lexer guarantees backslash not end");
             let byte = match nc {
                 'n' => b'\n',
