@@ -56,7 +56,6 @@ pub(crate) struct Parser<'a> {
     pub(crate) source_id: SourceId,
     pub(crate) last_src_span: SourceSpan,
     pub(crate) last_unexpected: Option<TokenIdx>,
-    /// Reusable buffer for decoding & merging string literal segments.
     string_buf: Vec<u8>,
 }
 
