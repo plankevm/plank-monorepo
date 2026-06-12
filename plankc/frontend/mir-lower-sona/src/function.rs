@@ -98,8 +98,6 @@ impl<'a> FunctionLowerer<'a> {
         is: &'static EvmInstSet,
         mir: &'a Mir,
         values: &'a ValueInterner,
-        funcs: &'a DenseIndexMap<mir::FnId, FuncRef>,
-        runtime_shapes: &'a RuntimeShapes,
         data_globals: &'a DataGlobals,
         fn_id: mir::FnId,
         context: LoweringContext<'a>,
