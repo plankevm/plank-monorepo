@@ -603,6 +603,21 @@ fn lowers_data_offset_to_const_global() {
 }
 
 #[test]
+fn lowers_sliced_data_offset_to_sym_addr_plus_start() {
+    let ir = lower_ir(
+        r#"
+        init {
+            let offset = @data_offset(@bytes_slice("hello" hex"00ff", 2, 6));
+            @evm_stop();
+        }
+        "#,
+    );
+
+    assert_contains(&ir, "sym_addr $cbytes_0");
+    assert_contains(&ir, "add v0 2.i256");
+}
+
+#[test]
 fn emits_bytecode_for_data_offset() {
     let bytecode = lower_bytecode(
         r#"
@@ -620,3 +635,4 @@ fn emits_bytecode_for_data_offset() {
         "expected data bytes embedded in code: {bytecode:02x?}"
     );
 }
+

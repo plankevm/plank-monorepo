@@ -1778,7 +1778,134 @@ fn test_bytes_len_builtin() {
 }
 
 #[test]
+fn test_bytes_slice_builtin() {
+    assert_lowers_to(
+        r#"
+        const basic = @bytes_slice("hello", 1, 3) == "el";
+        const len_of_slice = @bytes_len(@bytes_slice("hello", 1, 4));
+        const nested = @bytes_slice(@bytes_slice("hello", 1, 4), 1, 2) == "l";
+        const full = @bytes_slice("hello", 0, 5) == "hello";
+        const empty = @bytes_slice("hello", 2, 2) == "";
+        init {
+            let mut a: bool = basic;
+            let mut b: u256 = len_of_slice;
+            let mut c: bool = nested;
+            let mut d: bool = full;
+            let mut e: bool = empty;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : u256 = 3
+            %2 : bool = true
+            %3 : bool = true
+            %4 : bool = true
+            %5 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_bytes_slice_start_after_end() {
+    assert_diagnostics(
+        r#"
+        const bad = @bytes_slice("hello", 3, 1);
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: bytes slice out of bounds
+         --> main.plk:1:13
+          |
+        1 | const bad = @bytes_slice("hello", 3, 1);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 3..1 of bytes with length 5
+          |
+          = note: requires `start <= end` and `end <= @bytes_len(bytes)`
+        "#],
+    );
+}
+
+#[test]
+fn test_bytes_slice_end_past_len() {
+    assert_diagnostics(
+        r#"
+        const bad = @bytes_slice("hello", 2, 6);
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: bytes slice out of bounds
+         --> main.plk:1:13
+          |
+        1 | const bad = @bytes_slice("hello", 2, 6);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 2..6 of bytes with length 5
+          |
+          = note: requires `start <= end` and `end <= @bytes_len(bytes)`
+        "#],
+    );
+}
+
+#[test]
+fn test_bytes_slice_runtime_bound() {
+    assert_diagnostics(
+        r#"
+        init {
+            let n = @evm_calldataload(0);
+            let s = @bytes_slice("hello", n, 3);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: expected comptime argument
+         --> main.plk:3:13
+          |
+        3 |     let s = @bytes_slice("hello", n, 3);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@bytes_slice` requires slice start to be known at comptime
+        "#],
+    );
+}
+
+#[test]
+fn test_data_offset_of_bytes_slice() {
+    assert_lowers_to(
+        r#"
+        init {
+            let offset = @data_offset(@bytes_slice("hello" hex"00ff", 2, 6));
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = data_offset(hex"68656c6c6f00ff") + 2
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_keccak256_builtin() {
+    assert_eq!(
+        alloy_primitives::keccak256(b"abc"),
+        alloy_primitives::b256!(
+            "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45"
+        ),
+    );
+    assert_eq!(
+        alloy_primitives::keccak256(b""),
+        alloy_primitives::b256!(
+            "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        ),
+    );
     assert_lowers_to(
         r#"
         const abc_hash_matches = @comptime_keccak256("abc")
@@ -1798,6 +1925,34 @@ fn test_comptime_keccak256_builtin() {
             %0 : bool = true
             %1 : bool = true
             %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_keccak256_of_bytes_slice() {
+    assert_eq!(
+        alloy_primitives::keccak256(b"ell"),
+        alloy_primitives::b256!(
+            "0x0dd666b403ddf2d5833ea7c8306cfc8d62ee1052f2da09d8c290aac4d3085b43"
+        ),
+    );
+    assert_lowers_to(
+        r#"
+        const ell_hash_matches = @comptime_keccak256(@bytes_slice("hello", 1, 4))
+            == 0x0dd666b403ddf2d5833ea7c8306cfc8d62ee1052f2da09d8c290aac4d3085b43;
+        init {
+            let mut a: bool = ell_hash_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
         }
         "#,
     );

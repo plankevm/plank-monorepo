@@ -351,6 +351,7 @@ define_builtins! {
 
         // Comptime Bytes
         BYTES_LEN "@bytes_len" => BytesLen;
+        BYTES_SLICE "@bytes_slice" => BytesSlice;
         COMPTIME_KECCAK256 "@comptime_keccak256" => ComptimeKeccak256;
         DATA_OFFSET "@data_offset" => DataOffset;
     }

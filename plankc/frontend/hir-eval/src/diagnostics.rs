@@ -634,6 +634,23 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_bytes_slice_out_of_bounds(
+        &mut self,
+        start: U256,
+        end: U256,
+        len: u32,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("bytes slice out of bounds")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("requested range {start}..{end} of bytes with length {len}"),
+            )
+            .note("requires `start <= end` and `end <= @bytes_len(bytes)`")
+            .emit(self);
+    }
+
     pub fn emit_expected_comptime_arg(&mut self, builtin: Builtin, arg_name: &str, loc: SrcLoc) {
         Diagnostic::error("expected comptime argument")
             .primary(

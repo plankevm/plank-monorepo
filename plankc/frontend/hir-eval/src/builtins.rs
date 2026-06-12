@@ -245,6 +245,24 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let len = U256::from(bytes.end - bytes.start);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(len))))
             }
+            Builtin::BytesSlice => {
+                let &[bytes, start, end] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let start = self.expect_comptime_u256(start, builtin, "slice start", expr_span)?;
+                let end = self.expect_comptime_u256(end, builtin, "slice end", expr_span)?;
+                let len = bytes.end - bytes.start;
+                if start > end || end > U256::from(len) {
+                    self.diag_ctx.emit_bytes_slice_out_of_bounds(start, end, len, expr_loc);
+                    return Err(Poisoned);
+                }
+                let start = u32::try_from(start).expect("start <= end <= len which fits u32");
+                let end = u32::try_from(end).expect("end <= len which fits u32");
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(
+                    bytes.contents,
+                    bytes.start + start,
+                    bytes.start + end,
+                ))))
+            }
             Builtin::ComptimeKeccak256 => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
@@ -524,7 +542,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<(StructView<'a>, Field, u32)> {
         let r#struct = self.expect_struct_type(ty, builtin, expr_span)?;
-        let index = self.expect_comptime_field_index(index_arg, builtin, expr_span)?;
+        let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
         let field_and_index = u32::try_from(index).ok().and_then(|index| {
             let &field = r#struct.fields.get(index as usize)?;
             Some((field, index))
@@ -575,16 +593,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Err(Poisoned)
     }
 
-    fn expect_comptime_field_index(
+    fn expect_comptime_u256(
         &mut self,
         arg_local: hir::LocalId,
         builtin: Builtin,
+        arg_name: &str,
         span: SourceSpan,
     ) -> MaybePoisoned<U256> {
         let arg_binding = self.bindings[arg_local];
         let state = arg_binding.state?;
         let LocalState::Comptime(vid) = state else {
-            self.diag_ctx.emit_expected_comptime_arg(builtin, "field index", self.loc(span));
+            self.diag_ctx.emit_expected_comptime_arg(builtin, arg_name, self.loc(span));
             return Err(Poisoned);
         };
         let Value::BigNum(n) = self.values.lookup(vid) else {

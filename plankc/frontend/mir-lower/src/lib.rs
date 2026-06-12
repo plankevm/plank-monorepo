@@ -287,27 +287,20 @@ fn lower_basic_block(
                     });
                     let sets =
                         ctx.locals_map.get_or_create_single(target, || current_bb.new_local());
-                    if start == 0 {
-                        current_bb.add_operation(Operation::SetDataOffset(SetDataOffsetData {
-                            sets,
-                            segment_id,
-                        }));
-                    } else {
-                        let base = current_bb.new_local();
-                        let offset = current_bb.new_local();
-                        current_bb.add_operation(Operation::SetDataOffset(SetDataOffsetData {
-                            sets: base,
-                            segment_id,
-                        }));
-                        current_bb.add_operation(Operation::SetSmallConst(SetSmallConstData {
-                            sets: offset,
-                            value: start,
-                        }));
-                        current_bb.add_operation(Operation::Add(InlineOperands {
-                            ins: [base, offset],
-                            outs: [sets],
-                        }));
-                    }
+                    let base = current_bb.new_local();
+                    let offset = current_bb.new_local();
+                    current_bb.add_operation(Operation::SetDataOffset(SetDataOffsetData {
+                        sets: base,
+                        segment_id,
+                    }));
+                    current_bb.add_operation(Operation::SetSmallConst(SetSmallConstData {
+                        sets: offset,
+                        value: start,
+                    }));
+                    current_bb.add_operation(Operation::Add(InlineOperands {
+                        ins: [base, offset],
+                        outs: [sets],
+                    }));
                 }
             },
             Instruction::Return(local) => {
