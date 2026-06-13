@@ -37,7 +37,6 @@ const unsafe_mem_write = fn (ptr: memptr, offset: u256, value: $T) u256 {
             0
         )
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        0
+        @compile_error("unsupported type for unsafe_mem_write")
     }
 };

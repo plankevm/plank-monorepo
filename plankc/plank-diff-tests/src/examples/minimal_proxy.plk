@@ -41,8 +41,7 @@ const deploy_clone = fn (salt: $SaltT) never {
     } else if SaltT == u256 {
         @evm_create2(0, buf +% (32 - 20), 55, salt)
     } else {
-        // Jank compile-time error.
-        let _unsupported_clone_type_error: u256 = true;
+        @compile_error("unsupported clone salt type")
     };
     @mstore32(buf, address);
     @evm_log1(buf, 32, CLONE_CREATED_TOPIC);

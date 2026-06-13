@@ -18,7 +18,6 @@ const sizeof = fn (comptime T: type) u256 {
             0
         )
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        0
+        @compile_error("unsupported type for sizeof")
     }
 };

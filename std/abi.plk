@@ -48,8 +48,7 @@ const abi_encoded_size = fn (value: $T) u256 {
         );
         result.total_size
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        0
+        @compile_error("unsupported type for ABI encoding")
     }
 };
 

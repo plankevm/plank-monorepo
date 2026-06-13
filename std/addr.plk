@@ -7,7 +7,7 @@ const addr = struct { raw: u256 };
 const addr_from_u256 = fn (raw: u256) addr {
     if raw >= (1 << 160) {
         if @in_comptime() {
-            let _raw_cannot_fit_addr: void = true;
+            @compile_error("address value exceeds 160 bits");
         } else {
             @evm_revert(@malloc_uninit(0), 0);
         }

@@ -61,7 +61,7 @@ const addr_eq = fn (a: addr, b: addr) bool {
 const allowance_slot = fn (owner: addr, spender: addr) u256 {
     comptime {
         if ALLOWANCE_SLOT_BASE > 0xff {
-            let _allowance_slot_larger_than_one_byte: void = true;
+            @compile_error("allowance slot base must fit in one byte");
         }
     }
     let buf = @malloc_uninit(64);
@@ -85,7 +85,7 @@ const emit_approval = fn (owner: addr, spender: addr, amount: u256) void {
 
 const revert_4byte = fn (comptime selector: u256) never {
     if selector >= (1 << 32) {
-        let _invalid_selector: void = true;
+        @compile_error("error selector must fit in four bytes");
     }
     let buf = @malloc_uninit(32);
     @mstore32(buf, selector);

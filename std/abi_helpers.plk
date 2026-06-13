@@ -26,8 +26,7 @@ const is_abi_dynamic = fn (comptime T: type) bool {
             false
         )
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        false
+        @compile_error("unsupported type for ABI encoding")
     }
 };
 
@@ -53,8 +52,7 @@ const abi_head_size = fn (comptime T: type) u256 {
             0
         )
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        0
+        @compile_error("unsupported type for ABI encoding")
     }
 };
 
@@ -136,8 +134,7 @@ const unsafe_abi_encode_to = fn (buf: memptr, offset: u256, value: $T) u256 {
         );
         result.tail_offset - offset
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        0
+        @compile_error("unsupported type for ABI encoding")
     }
 };
 
@@ -208,8 +205,7 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: memptr, offset: u256) 
         );
         result.decoded_value
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        void 
+        @compile_error("unsupported type for ABI decoding")
     }
 };
 
@@ -276,7 +272,6 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
         );
         result.fits
     } else {
-        let _sizeof_unsupported_type: u256 = true;
-        false 
+        @compile_error("unsupported type for ABI decoding")
     }
 };
