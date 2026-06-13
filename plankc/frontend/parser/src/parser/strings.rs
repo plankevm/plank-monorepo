@@ -12,7 +12,7 @@ use crate::{
     parser::Parser,
 };
 
-fn hex_value(byte: char) -> Option<u8> {
+fn parse_nibble(byte: char) -> Option<u8> {
     match byte {
         '0'..='9' => Some(byte as u8 - b'0'),
         'A'..='F' => Some(byte as u8 - b'A' + 10),
@@ -30,17 +30,18 @@ impl Parser<'_> {
 
         let start = self.tokens.current();
         let mut end = None;
-        let end = loop {
+        loop {
             let ti = self.tokens.current();
             match self.current_token() {
                 Token::LooseStringLiteral => self.decode_string_token(ti),
                 Token::LooseHexStringLiteral => self.decode_hex_token(ti),
-                _ => break end?,
+                _ => break,
             }
             self.advance();
             end = Some(self.tokens.current());
             self.skip_trivia();
-        };
+        }
+        let end = end?;
 
         let value = self.session.intern_bytes(&self.string_buf);
         let node = self.alloc_node_from(start, NodeKind::StringLiteral { value });
@@ -66,8 +67,8 @@ impl Parser<'_> {
                 self.string_buf.extend_from_slice(encoded.as_bytes());
                 continue;
             }
-            let (_, nc) = chars.next().expect("lexer guarantees backslash not end");
-            let byte = match nc {
+            let (_, c) = chars.next().expect("lexer guarantees backslash not end");
+            let byte = match c {
                 'n' => b'\n',
                 'r' => b'\r',
                 't' => b'\t',
@@ -75,10 +76,9 @@ impl Parser<'_> {
                 '\\' => b'\\',
                 '"' => b'"',
                 'x' => {
-                    // Assume next two chars were intended as escapes (even if first is invalid).
-                    let d1 = chars.next().and_then(|(_, d)| hex_value(d));
-                    let d2 = chars.next().and_then(|(_, d)| hex_value(d));
-                    let (Some(hi), Some(lo)) = (d1, d2) else {
+                    let d1 = chars.next().and_then(|(_, d)| parse_nibble(d));
+                    let d2 = chars.next().and_then(|(_, d)| parse_nibble(d));
+                    let (Some(msb), Some(lsb)) = (d1, d2) else {
                         let end = chars.peek().map_or(src.len(), |&(end, _)| end);
                         self.emit_invalid_hex_escape(Span::new(
                             src_start + start as u32,
@@ -86,7 +86,7 @@ impl Parser<'_> {
                         ));
                         continue;
                     };
-                    (hi << 4) | lo
+                    (msb << 4) | lsb
                 }
                 other => {
                     let span = Span::new(
@@ -112,23 +112,23 @@ impl Parser<'_> {
         let src_start = token_span.start + 4;
 
         let mut chars = src.char_indices().peekable();
-        let mut supress_further_non_hex_errors = false;
-        while let Some((c2_offset, c1)) = chars.next() {
-            let hi = hex_value(c1);
-            if hi.is_none() && !supress_further_non_hex_errors {
-                supress_further_non_hex_errors = true;
-                self.emit_non_hex_digit(src_start + c2_offset as u32, c1);
+        let mut already_emitted_hex_error = false;
+        while let Some((c1_offset, c1)) = chars.next() {
+            let msb = parse_nibble(c1);
+            if msb.is_none() && !already_emitted_hex_error {
+                already_emitted_hex_error = true;
+                self.emit_non_hex_digit(src_start + c1_offset as u32, c1);
             }
             let Some((c2_offset, c2)) = chars.next() else {
                 self.emit_odd_hex_digit_count(ti);
                 break;
             };
-            let lo = hex_value(c2);
-            if lo.is_none() && !supress_further_non_hex_errors {
-                supress_further_non_hex_errors = true;
+            let lsb = parse_nibble(c2);
+            if lsb.is_none() && !already_emitted_hex_error {
+                already_emitted_hex_error = true;
                 self.emit_non_hex_digit(src_start + c2_offset as u32, c2);
             }
-            self.string_buf.push((hi.unwrap_or(0) << 4) | lo.unwrap_or(0))
+            self.string_buf.push((msb.unwrap_or(0) << 4) | lsb.unwrap_or(0));
         }
     }
 }

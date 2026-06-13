@@ -60,19 +60,14 @@ fn lex_number_literal<const RADIX: u32>(lexer: &mut LogosLexer<Token>) -> Result
 
 fn lex_loose_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Token> {
     fn inner<'a>(chars: &mut CharsPeekable<'a>) -> Result<(), Token> {
-        let mut multiline = false;
+        let mut malformed = false;
         while let Some((_, c)) = chars.next() {
             match c {
-                '"' => {
-                    if multiline {
-                        return Err(Token::MultilineStringError);
-                    }
-                    return Ok(());
-                }
+                '"' => return if malformed { Err(Token::MultilineStringError) } else { Ok(()) },
                 '\\' => {
                     chars.next();
                 }
-                '\n' | '\r' => multiline = true,
+                '\n' | '\r' => malformed = true,
                 _ => {}
             }
         }
@@ -87,12 +82,7 @@ fn lex_loose_hex_string_literal(lexer: &mut LogosLexer<Token>) -> Result<(), Tok
         let mut malformed = false;
         for (_, c) in chars {
             match c {
-                '"' => {
-                    if malformed {
-                        return Err(Token::MultilineStringError);
-                    }
-                    return Ok(());
-                }
+                '"' => return if malformed { Err(Token::MultilineStringError) } else { Ok(()) },
                 '\n' | '\r' => malformed = true,
                 _ => {}
             }
