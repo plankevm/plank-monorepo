@@ -1,6 +1,6 @@
 use crate::{cst::display::DisplayCST, lexer::Lexed, parser::parse};
 use plank_session::{Session, Source};
-use plank_test_utils::{dedent, dedent_preserve_indent};
+use plank_test_utils::dedent_preserve_indent;
 
 mod errorless;
 mod resiliency;
@@ -27,7 +27,7 @@ pub(crate) fn assert_session_errors(session: &Session, expected_errors: &[&str])
 }
 
 pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
-    let source = dedent(source);
+    let source = dedent_preserve_indent(source);
     let mut session = Session::new();
     let _cst = parse_single_source(&source, &mut session);
     assert_session_errors(&session, expected_errors);

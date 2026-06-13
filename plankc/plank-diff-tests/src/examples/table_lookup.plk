@@ -40,10 +40,10 @@ const ZERO_HASHES =
 
 const HASH_LENGTH = 32;
 const TOTAL_HASHES = {
-    if @bytes_len(ZERO_HASHES) % HASH_LENGTH != 0 {
+    if ZERO_HASHES.length % HASH_LENGTH != 0 {
         @compile_error("`ZERO_HASHES` length not multiple of `HASH_LENGTH`");
     }
-    @bytes_len(ZERO_HASHES) </ HASH_LENGTH
+    ZERO_HASHES.length </ HASH_LENGTH
 };
 
 init {

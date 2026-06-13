@@ -26,19 +26,21 @@ impl Parser<'_> {
     /// string tokens into a single value: `"ab" "c" hex"01"` == `"abc\x01"`.
     pub(crate) fn try_parse_string_literal(&mut self) -> Option<NodeIdx> {
         self.skip_trivia();
+
         self.string_buf.clear();
 
-        let start = self.tokens.current();
+        let start = self.current_token_index();
         let mut end = None;
         loop {
-            let ti = self.tokens.current();
+            let ti = self.current_token_index();
             match self.current_token() {
                 Token::LooseStringLiteral => self.decode_string_token(ti),
                 Token::LooseHexStringLiteral => self.decode_hex_token(ti),
+                Token::MultilineStringError | Token::UnclosedStringError => {}
                 _ => break,
             }
             self.advance();
-            end = Some(self.tokens.current());
+            end = Some(self.current_token_index());
             self.skip_trivia();
         }
         let end = end?;

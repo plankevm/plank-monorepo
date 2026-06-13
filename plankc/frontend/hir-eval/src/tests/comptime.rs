@@ -2131,7 +2131,7 @@ fn test_data_offset_in_comptime() {
         }
         "#,
         &[r#"
-        error: builtin not supported at compile time
+        error: builtin `@data_offset` not supported at compile time
          --> main.plk:1:16
           |
         1 | const offset = @data_offset("hello");

@@ -1,8 +1,5 @@
-use plank_core::Span;
-use plank_session::{
-    AnnotationKind, Annotations, ClaimBuilder, DiagEmitter, Diagnostic, SourceByteOffset,
-    SourceSpan,
-};
+use plank_core::{Idx, Span};
+use plank_session::{SourceByteOffset, SourceSpan, diagnostic::*};
 
 use crate::lexer::{ErrorToken, Token, TokenIdx};
 
@@ -12,6 +9,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn emit_lexer_error(&mut self, error: ErrorToken, ti: TokenIdx) {
         let span = self.tokens.token_src_span(ti);
         let snippet = &self.source[span.usize_range()];
+        let snippet_start = span.start.idx();
 
         let diag = match error {
             ErrorToken::InvalidChar => Diagnostic::error("invalid character").primary(
@@ -63,14 +61,84 @@ impl<'a> Parser<'a> {
                 }
                 diag
             }
-            ErrorToken::UnclosedString => Diagnostic::error("unclosed string literal").primary(
+            ErrorToken::UnclosedString => Diagnostic::error("unclosed string segment").primary(
                 self.source_id,
                 span,
                 "missing closing `\"`",
             ),
-            ErrorToken::MultilineString => Diagnostic::error("malformed string literal")
-                .primary(self.source_id, span, "string literals cannot span multiple lines")
-                .help("split the literal into adjacent segments: `\"line one\\n\" \"line two\"`"),
+            ErrorToken::MultilineString => {
+                let line_start = self.source.as_bytes()[..snippet_start]
+                    .iter()
+                    .rposition(|&chr| chr == b'\n')
+                    .map_or(0, |newline_pos| newline_pos + 1);
+                let indent_end = (line_start..snippet_start)
+                    .zip(&self.source.as_bytes()[line_start..snippet_start])
+                    .find_map(|(i, chr)| (!chr.is_ascii_whitespace()).then_some(i))
+                    .unwrap_or(snippet_start);
+
+                let mut suggestion =
+                    String::with_capacity(snippet.len() + (indent_end - line_start) * 10);
+
+                enum FormatState {
+                    Open,
+                    Closed,
+                }
+
+                let base_indent = &self.source[line_start..indent_end];
+                let indent_plus_one = if indent_end == snippet_start {
+                    // Snippet is first thing on line, suggestion indent simply has to match,
+                    // first thing is a simple `"`
+                    suggestion.push('"');
+                    false
+                } else {
+                    // Snippet is part of longer line, format suggestion such that all
+                    // segments are on their own lines, indented by parent line + 1.
+                    suggestion.push('\n');
+                    suggestion.push_str(base_indent);
+                    suggestion.push_str("    ");
+                    suggestion.push('"');
+                    true
+                };
+
+                let snippet = snippet.strip_prefix('"').expect("missing opening `\"`");
+                let snippet = snippet.strip_suffix('"').expect("missing opening `\"`");
+                let mut state = FormatState::Open;
+                println!("base_indent: {:?}", base_indent);
+                for c in snippet.chars() {
+                    if matches!(state, FormatState::Closed) {
+                        suggestion.push('\n');
+                        suggestion.push_str(base_indent);
+                        if indent_plus_one {
+                            suggestion.push_str("    ");
+                        }
+                        suggestion.push('"');
+                        state = FormatState::Open;
+                    }
+                    if c == '\n' {
+                        suggestion.push_str(r#"\n""#);
+                        state = FormatState::Closed;
+                    } else {
+                        suggestion.push(c);
+                    }
+                }
+
+                if matches!(state, FormatState::Open) {
+                    suggestion.push('"');
+                }
+
+                println!("span: {:?}", span);
+
+                Diagnostic::error("malformed string segment")
+                    .primary(
+                        self.source_id,
+                        span,
+                        r"newlines may not be added directly, only with `\n`",
+                    )
+                    .claim(
+                        Claim::new(Level::Help, "multiline strings can be created using segments")
+                            .element(Patches::lone(self.source_id, span, suggestion)),
+                    )
+            }
         };
 
         diag.emit(self.session);

@@ -83,7 +83,7 @@ fn test_lexer_error_unclosed_string() {
         "#,
         &[
             r#"
-            error: unclosed string literal
+            error: unclosed string segment
              --> test.plk:1:11
               |
             1 | const x = "unterminated
@@ -94,7 +94,7 @@ fn test_lexer_error_unclosed_string() {
              --> test.plk:1:24
               |
             1 | const x = "unterminated
-              |                        ^ unexpected EOF, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `{`, `if`
+              |                        ^ unexpected EOF, expected `;`
             "#,
         ],
     );
@@ -180,6 +180,62 @@ fn test_hex_string_odd_digit_count() {
 }
 
 #[test]
+fn multiline_string_suggestion() {
+    assert_parser_errors(
+        r#"
+        const S = "wow this is nice
+        another line \x34
+        asdfsdf asdfaf";
+
+        "#,
+        &[r#"
+        error: malformed string segment
+         --> test.plk:1:11
+          |
+        1 |   const S = "wow this is nice
+          |  ___________^
+        2 | | another line \x34
+        3 | | asdfsdf asdfaf";
+          | |_______________^ newlines may not be added directly, only with `\n`
+          |
+        help: multiline strings can be created using segments
+          |
+        1 ~ const S = 
+        2 +     "wow this is nice\n"
+        3 +     "another line \x34\n"
+        4 ~     "asdfsdf asdfaf";
+          |
+        "#],
+    );
+
+    assert_parser_errors(
+        r#"
+        const S = "line1 abcdef
+            gabagooooo \x34
+        ";
+
+        "#,
+        &[r#"
+        error: malformed string segment
+         --> test.plk:1:11
+          |
+        1 |   const S = "line1 abcdef
+          |  ___________^
+        2 | |     gabagooooo \x34
+        3 | | ";
+          | |_^ newlines may not be added directly, only with `\n`
+          |
+        help: multiline strings can be created using segments
+          |
+        1 ~ const S = 
+        2 +     "line1 abcdef\n"
+        3 ~     "    gabagooooo \x34\n";
+          |
+        "#],
+    );
+}
+
+#[test]
 fn test_lexer_error_unclosed_block_comment() {
     assert_parser_errors(
         r#"
@@ -207,8 +263,8 @@ fn test_lexer_error_nested_unclosed_block_comment() {
              --> test.plk:1:1
               |
             1 | / /* no end /* wait but I closed ?
-            2 | | */
-              | |__^ missing closing `*/`
+            2 | |  */
+              | |___^ missing closing `*/`
               |
               = help: plank supports nested block comments so each `/*` needs its own `*/`
         "#],

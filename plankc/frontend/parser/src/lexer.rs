@@ -283,8 +283,16 @@ impl std::fmt::Display for Token {
 
 impl Token {
     pub const fn is_trivia(&self) -> bool {
-        matches!(self, Token::Whitespace | Token::LineComment | Token::BlockComment)
-            || self.lex_error().is_some()
+        matches!(
+            self,
+            Token::Whitespace
+                | Token::LineComment
+                | Token::BlockComment
+                | Token::InvalidCharError
+                | Token::MalformedIdentError
+                | Token::UnclosedBlockCommentError
+                | Token::AtWithoutIdentError
+        )
     }
 
     pub const fn lex_error(&self) -> Option<ErrorToken> {

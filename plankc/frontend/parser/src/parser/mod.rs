@@ -95,10 +95,14 @@ impl<'a> Parser<'a> {
         self.tokens.peek().0
     }
 
+    fn current_token_index(&self) -> TokenIdx {
+        self.tokens.current()
+    }
+
     fn advance(&mut self) {
         self.expected.clear();
 
-        let ti = self.tokens.current();
+        let ti = self.current_token_index();
         let (token, src_span) = self.tokens.next();
         self.last_src_span = src_span;
         if let Some(error) = token.lex_error()
@@ -142,7 +146,7 @@ impl<'a> Parser<'a> {
             return;
         }
         let (found, span) = self.tokens.peek();
-        self.last_unexpected = Some(self.tokens.current());
+        self.last_unexpected = Some(self.current_token_index());
         self.expected.dedup();
         self.emit_unexpected_token(found, span);
         self.expected.clear();
@@ -202,7 +206,7 @@ impl<'a> Parser<'a> {
     }
 
     fn at_last_unexpected(&self) -> bool {
-        self.last_unexpected.is_some_and(|ti| ti == self.tokens.current())
+        self.last_unexpected.is_some_and(|ti| ti == self.current_token_index())
     }
 
     fn expect_check_recovery(&mut self, expected: Token, recovery_tokens: &[Token]) -> bool {
@@ -219,7 +223,7 @@ impl<'a> Parser<'a> {
         {
             self.expected.dedup();
             self.emit_missing_token(expected, prev_span);
-            self.last_unexpected = Some(self.tokens.current());
+            self.last_unexpected = Some(self.current_token_index());
             self.expected.clear();
         } else {
             self.emit_unexpected();
@@ -247,13 +251,13 @@ impl<'a> Parser<'a> {
 
     fn skip_trivia_start(&mut self) -> TokenIdx {
         self.skip_trivia();
-        self.tokens.current()
+        self.current_token_index()
     }
 
     fn alloc_node(&mut self, kind: NodeKind) -> UnfinishedNode {
         let idx = self.nodes.push(Node {
             kind,
-            tokens: Span::new(self.tokens.current(), self.tokens.current()),
+            tokens: Span::new(self.current_token_index(), self.current_token_index()),
             next_sibling: None,
             first_child: None,
         });
@@ -261,7 +265,7 @@ impl<'a> Parser<'a> {
     }
 
     fn close_node(&mut self, node: UnfinishedNode) -> NodeIdx {
-        self.close_node_at(node, self.tokens.current())
+        self.close_node_at(node, self.current_token_index())
     }
 
     fn close_node_at(&mut self, node: UnfinishedNode, end: TokenIdx) -> NodeIdx {
@@ -294,14 +298,14 @@ impl<'a> Parser<'a> {
     }
 
     fn alloc_last_token_as_node(&mut self, kind: NodeKind) -> NodeIdx {
-        let node = self.alloc_node_from(self.tokens.current() - 1, kind);
+        let node = self.alloc_node_from(self.current_token_index() - 1, kind);
         self.close_node(node)
     }
 
     fn try_parse_num_literal(&mut self) -> Option<NodeKind> {
         type ParseFn = fn(&str, &mut ListOfLists<NumLitId, u32>) -> NumLitId;
 
-        let token_idx = self.tokens.current();
+        let token_idx = self.current_token_index();
         let (token, _) = self.tokens.peek();
 
         let (prefix_len, parse_fn): (usize, ParseFn) = match token {
@@ -390,7 +394,7 @@ impl<'a> Parser<'a> {
 
     fn try_parse_ident(&mut self) -> Option<NodeIdx> {
         if self.eat(Token::Identifier) {
-            let ident = self.intern(self.tokens.current() - 1);
+            let ident = self.intern(self.current_token_index() - 1);
             return Some(self.alloc_last_token_as_node(NodeKind::Identifier { ident }));
         }
         None
@@ -398,7 +402,7 @@ impl<'a> Parser<'a> {
 
     fn try_parse_builtin_name(&mut self) -> Option<NodeIdx> {
         if self.eat(Token::BuiltinName) {
-            let ident = self.intern(self.tokens.current() - 1);
+            let ident = self.intern(self.current_token_index() - 1);
             return Some(self.alloc_last_token_as_node(NodeKind::BuiltinName { ident }));
         }
         None
@@ -415,7 +419,7 @@ impl<'a> Parser<'a> {
                 let (_, span) = self.tokens.peek();
                 self.expected.dedup();
                 self.emit_builtin_name_used_as_ident(span);
-                self.last_unexpected = Some(self.tokens.current());
+                self.last_unexpected = Some(self.current_token_index());
                 self.expected.clear();
             }
             self.advance();
@@ -429,7 +433,7 @@ impl<'a> Parser<'a> {
     // ========================== EXPRESSION PARSING ==========================
 
     fn try_parse_conditional(&mut self) -> Option<NodeIdx> {
-        let condition_chain_start = self.tokens.current();
+        let condition_chain_start = self.current_token_index();
         if !self.eat(Token::If) {
             return None;
         }
@@ -438,7 +442,7 @@ impl<'a> Parser<'a> {
 
         let if_condition = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
         self.push_child(&mut conditional, if_condition);
-        let if_body = self.parse_block(self.tokens.current(), NodeKind::Block);
+        let if_body = self.parse_block(self.current_token_index(), NodeKind::Block);
         self.push_child(&mut conditional, if_body);
 
         let mut else_ifs = self.alloc_node(NodeKind::ElseIfBranchList);
@@ -446,11 +450,11 @@ impl<'a> Parser<'a> {
         let mut r#else = None;
         while self.check(Token::Else) {
             // More robust way to get token offset at the `Else` token than `eat; current-1`.
-            let branch_start = self.tokens.current();
+            let branch_start = self.current_token_index();
             assert!(self.expect(Token::Else));
 
             if !self.eat(Token::If) {
-                let else_body = self.parse_block(self.tokens.current(), NodeKind::Block);
+                let else_body = self.parse_block(self.current_token_index(), NodeKind::Block);
                 r#else = Some(else_body);
 
                 break;
@@ -460,7 +464,7 @@ impl<'a> Parser<'a> {
 
             let else_condition = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
             self.push_child(&mut else_if, else_condition);
-            let branch_body = self.parse_block(self.tokens.current(), NodeKind::Block);
+            let branch_body = self.parse_block(self.current_token_index(), NodeKind::Block);
             self.push_child(&mut else_if, branch_body);
 
             let else_if = self.close_node(else_if);
@@ -479,7 +483,7 @@ impl<'a> Parser<'a> {
     }
 
     fn try_parse_standalone_expr(&mut self) -> Option<NodeIdx> {
-        let start = self.tokens.current();
+        let start = self.current_token_index();
 
         if self.eat(Token::True) {
             return Some(self.alloc_last_token_as_node(NodeKind::BoolLiteral(true)));
@@ -526,7 +530,7 @@ impl<'a> Parser<'a> {
         }
 
         if self.check(Token::LeftCurly) {
-            return Some(self.parse_block(self.tokens.current(), NodeKind::Block));
+            return Some(self.parse_block(self.current_token_index(), NodeKind::Block));
         }
 
         if let Some(conditional) = self.try_parse_conditional() {
@@ -586,7 +590,7 @@ impl<'a> Parser<'a> {
         let return_type = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
         self.push_child(&mut function, return_type);
 
-        let body = self.parse_block(self.tokens.current(), NodeKind::Block);
+        let body = self.parse_block(self.current_token_index(), NodeKind::Block);
         self.push_child(&mut function, body);
 
         self.close_node(function)
@@ -768,14 +772,14 @@ impl<'a> Parser<'a> {
         let condition = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
         self.push_child(&mut while_stmt, condition);
 
-        let body = self.parse_block(self.tokens.current(), NodeKind::Block);
+        let body = self.parse_block(self.current_token_index(), NodeKind::Block);
         self.push_child(&mut while_stmt, body);
 
         Some(self.close_node(while_stmt))
     }
 
     fn try_parse_stmt(&mut self) -> Option<StmtResult> {
-        let stmt_start = self.tokens.current();
+        let stmt_start = self.current_token_index();
         let expected_checkpoint = self.expected.len();
 
         self.skip_trivia();
@@ -912,7 +916,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_decl(&mut self) -> NodeIdx {
-        let start = self.tokens.current();
+        let start = self.current_token_index();
         if self.eat(Token::Init) {
             self.parse_block(start, NodeKind::InitBlock)
         } else if self.eat(Token::Run) {
