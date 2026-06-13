@@ -42,6 +42,7 @@ macro_rules! define_builtins {
 
         #[doc(hidden)]
         #[repr(u32)]
+        #[allow(clippy::upper_case_acronyms)]
         enum BuiltinStrIdx {
             _EmptyString,
             $($pt_type,)*
