@@ -623,7 +623,7 @@ fn emits_bytecode_for_data_offset() {
         r#"
         init {
             let ptr = @malloc_uninit(32);
-            @evm_codecopy(ptr, @data_offset("hello"), @bytes_len("hello"));
+            @evm_codecopy(ptr, @data_offset("hello"), "hello".length);
             @evm_return(ptr, 32);
         }
         "#,

@@ -9,7 +9,7 @@ newtype_index! {
 /// Index of an interned string.
 ///
 /// Sealed: outside this module it can only be obtained from
-/// [`Interner::intern_str`] (or the builtin name consts, which are validated
+/// [`Interner::intern_str`] (or the built-in known name consts, which are validated
 /// against the interner on session construction). This guarantees the indexed
 /// content is valid UTF-8 as long as the id is resolved against the interner
 /// that minted it.
@@ -29,7 +29,7 @@ pub const EMPTY_BYTES: BytesId = BytesId(InternIdx::new(0));
 impl StrId {
     /// Mints a `StrId` without interning anything.
     ///
-    /// Only sound for the builtin name table: `inject_builtins` asserts that
+    /// Only sound for the built-in known name table: `inject_builtins` asserts that
     /// every const produced this way matches the id the session's interner
     /// actually assigns to the corresponding name.
     pub(crate) const fn from_builtin_index(raw: u32) -> Self {

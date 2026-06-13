@@ -1,7 +1,8 @@
 use crate::scope::{EvalValue, LocalState, Scope};
+use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId};
+use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
 use plank_values::{Field, StructInfo, StructView, Type, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
@@ -73,11 +74,27 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
         let state = self.bindings[object].state?;
-        let struct_ty = self.state_type(state);
-        let Type::Struct(struct_type_info) = self.types.lookup(struct_ty) else {
+        let object_ty = self.state_type(state);
+
+        if object_ty == TypeId::CBYTES {
+            if member != builtins::LENGTH {
+                self.diag_ctx.emit_cbytes_unknown_attribute(member, self.loc(expr_span));
+                return Err(Poisoned);
+            }
+            let LocalState::Comptime(vid) = state else {
+                unreachable!("invariant: cbytes is comptime-only")
+            };
+            let Value::Bytes(bytes) = self.values.lookup(vid) else {
+                unreachable!("invariant: `state_type` != type of value")
+            };
+            let len = U256::from(bytes.end - bytes.start);
+            return Ok(EvalValue::Comptime(self.eval.values.intern_num(len)));
+        }
+
+        let Type::Struct(struct_type_info) = self.types.lookup(object_ty) else {
             let binding = self.bindings[object];
             self.diag_ctx.emit_member_on_non_struct(
-                struct_ty,
+                object_ty,
                 self.binding_loc(binding.use_span, binding.origin),
             );
             return Err(Poisoned);
@@ -86,7 +103,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let Some((field_index, &field)) =
             (0u32..).zip(struct_type_info.fields).find(|&(_i, &field)| field.name == member)
         else {
-            self.diag_ctx.emit_struct_unknown_field_access(struct_ty, self.loc(expr_span), member);
+            self.diag_ctx.emit_struct_unknown_field_access(object_ty, self.loc(expr_span), member);
             return Err(Poisoned);
         };
 

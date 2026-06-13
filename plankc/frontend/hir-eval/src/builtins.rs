@@ -239,12 +239,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
-            Builtin::BytesLen => {
-                let &[bytes] = args else { unreachable!("arg count checked") };
-                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
-                let len = U256::from(bytes.end - bytes.start);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(len))))
-            }
             Builtin::BytesSlice => {
                 let &[bytes, start, end] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;

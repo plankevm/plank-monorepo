@@ -1872,13 +1872,13 @@ fn test_merged_cbytes_literals() {
 }
 
 #[test]
-fn test_bytes_len_builtin() {
+fn test_cbytes_dot_length_attribute() {
     assert_lowers_to(
         r#"
-        const len_plain = @bytes_len("hello");
-        const len_empty = @bytes_len("");
-        const len_escaped = @bytes_len("a\x00b\n");
-        const len_merged = @bytes_len("abc" "123" hex"01ab");
+        const len_plain = "hello".length;
+        const len_empty = "".length;
+        const len_escaped = "a\x00b\n".length;
+        const len_merged = ("abc" "123" hex"01ab").length;
         init {
             let mut a: u256 = len_plain;
             let mut b: u256 = len_empty;
@@ -1902,11 +1902,30 @@ fn test_bytes_len_builtin() {
 }
 
 #[test]
+fn test_cbytes_unknown_attribute() {
+    assert_diagnostics(
+        r#"
+        const bad = "hello".foo;
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: unknown cbytes attribute
+         --> main.plk:1:13
+          |
+        1 | const bad = "hello".foo;
+          |             ^^^^^^^^^^^ `cbytes` has no attribute `foo`
+          |
+          = help: available attribute: `.length`
+        "#],
+    );
+}
+
+#[test]
 fn test_bytes_slice_builtin() {
     assert_lowers_to(
         r#"
         const basic = @bytes_slice("hello", 1, 3) == "el";
-        const len_of_slice = @bytes_len(@bytes_slice("hello", 1, 4));
+        const len_of_slice = @bytes_slice("hello", 1, 4).length;
         const nested = @bytes_slice(@bytes_slice("hello", 1, 4), 1, 2) == "l";
         const full = @bytes_slice("hello", 0, 5) == "hello";
         const empty = @bytes_slice("hello", 2, 2) == "";
@@ -1950,7 +1969,7 @@ fn test_bytes_slice_start_after_end() {
         1 | const bad = @bytes_slice("hello", 3, 1);
           |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 3..1 of bytes with length 5
           |
-          = note: requires `start <= end` and `end <= @bytes_len(bytes)`
+          = note: requires `start <= end` and `end <= bytes.length`
         "#],
     );
 }
@@ -1971,7 +1990,7 @@ fn test_bytes_slice_end_past_len() {
         1 | const bad = @bytes_slice("hello", 2, 6);
           |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 2..6 of bytes with length 5
           |
-          = note: requires `start <= end` and `end <= @bytes_len(bytes)`
+          = note: requires `start <= end` and `end <= bytes.length`
         "#],
     );
 }

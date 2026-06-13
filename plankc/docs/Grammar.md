@@ -24,6 +24,7 @@ unary = unary_op expr
 paren = "(" expr ")"
 fn_call = expr "(" comma_separated{expr}? ")"
 member = expr "." IDENT
+# Built-in attributes: cbytes.length
 
 binary_op = "or" | "and"
           | "==" | "!=" | "<" | ">" | "<=" | ">="

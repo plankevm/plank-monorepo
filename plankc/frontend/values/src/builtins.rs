@@ -215,7 +215,6 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::InComptime => &[sig!([=> BOOL])],
         B::SetEvalBranchQuota => &[sig!([U256 => VOID])],
         B::CompileError => &[sig!([CBYTES => NEVER])],
-        B::BytesLen => &[sig!([CBYTES => U256])],
         B::BytesSlice => &[sig!([CBYTES, U256, U256 => CBYTES])],
         B::ComptimeKeccak256 => &[sig!([CBYTES => U256])],
         B::DataOffset => &[sig!([CBYTES => U256])],

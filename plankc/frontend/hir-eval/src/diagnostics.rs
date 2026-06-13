@@ -175,6 +175,17 @@ impl DiagCtx<'_> {
         diag.emit(self);
     }
 
+    pub fn emit_cbytes_unknown_attribute(&mut self, member: StrId, loc: SrcLoc) {
+        Diagnostic::error("unknown cbytes attribute")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`cbytes` has no attribute `{}`", self.session.lookup_name(member)),
+            )
+            .help(format!("available attribute: `.{}`", builtin_names::LENGTH))
+            .emit(self);
+    }
+
     pub fn emit_not_callable(&mut self, ty: TypeId, loc: BindingLoc) {
         let primary_label = format!("`{}` is not callable", self.types.format(self.session, ty));
         let diag = Diagnostic::error("expected function");
@@ -647,7 +658,7 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!("requested range {start}..{end} of bytes with length {len}"),
             )
-            .note("requires `start <= end` and `end <= @bytes_len(bytes)`")
+            .note("requires `start <= end` and `end <= bytes.length`")
             .emit(self);
     }
 
