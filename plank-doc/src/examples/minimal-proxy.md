@@ -57,17 +57,20 @@ const clone_deterministic = fn () never {
 
 Because `SaltT` is comptime, the compiler specializes each branch and removes runtime checks, allowing shared logic to be written without any runtime branching cost.
 
-In theory, `deploy_clone` could be called with any salt type, e.g. a `bool`. However, this does not make sense in the context of the proxy. To restrict usages, any type other than `void` and `u256` triggers a compile-time error via the `else` branch:
+In theory, `deploy_clone` could be called with any salt type, e.g. a `bool`. To
+prevent this we need to enforce the intended usage, we can do this by checking
+the type and emitting an error on unknown branches.
 
 ```plank
 const deploy_clone = fn (salt: $SaltT) never {
+    // ...
     let address = if SaltT == void {
         @evm_create(0, buf +% (32 - 20), 55)
     } else if SaltT == u256 {
         @evm_create2(0, buf +% (32 - 20), 55, salt)
     } else {
-        // compile-time error.
-        let _unsupported_clone_type_error: u256 = true;
+        @compile_error("unsupported clone salt type")
     };
+    // ...
 };
 ```
