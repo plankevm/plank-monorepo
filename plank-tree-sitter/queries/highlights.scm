@@ -59,7 +59,7 @@
   ; Bytecode Introspection
   "@runtime_start_offset" "@init_end_offset" "@runtime_length"
   ; Comptime Type Reflection
-  "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field"
+  "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field" "@uninit"
   ; Comptime Diagnostics
   "@compile_error" "@in_comptime" "@set_eval_branch_quota"
   ; Bytes
@@ -138,6 +138,7 @@
 (bin_literal) @number
 (dec_literal) @number
 (string_literal) @string
+(quoted_string_literal) @string
 (hex_string_literal) @string
 
 ; Operators

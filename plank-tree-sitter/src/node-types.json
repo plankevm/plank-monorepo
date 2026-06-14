@@ -44,10 +44,6 @@
           "named": true
         },
         {
-          "type": "hex_string_literal",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
@@ -124,10 +120,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -311,10 +303,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -395,10 +383,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -470,10 +454,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -595,10 +575,6 @@
           "named": true
         },
         {
-          "type": "hex_string_literal",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
@@ -685,10 +661,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -782,10 +754,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -866,10 +834,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -941,10 +905,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -1048,10 +1008,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -1129,10 +1085,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -1314,10 +1266,6 @@
           "named": true
         },
         {
-          "type": "hex_string_literal",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
@@ -1394,10 +1342,6 @@
         },
         {
           "type": "hex_literal",
-          "named": true
-        },
-        {
-          "type": "hex_string_literal",
           "named": true
         },
         {
@@ -1506,10 +1450,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -1594,10 +1534,6 @@
           "named": true
         },
         {
-          "type": "hex_string_literal",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
@@ -1631,6 +1567,11 @@
         }
       ]
     }
+  },
+  {
+    "type": "quoted_string_literal",
+    "named": true,
+    "fields": {}
   },
   {
     "type": "return",
@@ -1674,10 +1615,6 @@
         },
         {
           "type": "hex_literal",
-          "named": true
-        },
-        {
-          "type": "hex_string_literal",
           "named": true
         },
         {
@@ -1761,7 +1698,21 @@
   {
     "type": "string_literal",
     "named": true,
-    "fields": {}
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "hex_string_literal",
+          "named": true
+        },
+        {
+          "type": "quoted_string_literal",
+          "named": true
+        }
+      ]
+    }
   },
   {
     "type": "struct_def",
@@ -1815,10 +1766,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -1909,10 +1856,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {
@@ -2049,10 +1992,6 @@
             "named": true
           },
           {
-            "type": "hex_string_literal",
-            "named": true
-          },
-          {
             "type": "identifier",
             "named": true
           },
@@ -2140,10 +2079,6 @@
           },
           {
             "type": "hex_literal",
-            "named": true
-          },
-          {
-            "type": "hex_string_literal",
             "named": true
           },
           {

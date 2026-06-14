@@ -1593,10 +1593,6 @@
         {
           "type": "SYMBOL",
           "name": "string_literal"
-        },
-        {
-          "type": "SYMBOL",
-          "name": "hex_string_literal"
         }
       ]
     },
@@ -1615,28 +1611,46 @@
     },
     "hex_literal": {
       "type": "PATTERN",
-      "value": "-?0x[0-9A-Fa-f][0-9A-Fa-f_]*"
+      "value": "0x[0-9A-Fa-f][0-9A-Fa-f_]*"
     },
     "bin_literal": {
       "type": "PATTERN",
-      "value": "-?0b[01][01_]*"
+      "value": "0b[01][01_]*"
     },
     "dec_literal": {
       "type": "PATTERN",
-      "value": "-?[0-9][0-9_]*"
-    },
-    "hex_string_literal": {
-      "type": "TOKEN",
-      "content": {
-        "type": "PREC",
-        "value": 1,
-        "content": {
-          "type": "PATTERN",
-          "value": "hex\"[0-9A-Fa-f]*\""
-        }
-      }
+      "value": "[0-9][0-9_]*"
     },
     "string_literal": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "_string_literal_segment"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_string_literal_segment"
+          }
+        }
+      ]
+    },
+    "_string_literal_segment": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "quoted_string_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "hex_string_literal"
+        }
+      ]
+    },
+    "quoted_string_literal": {
       "type": "SEQ",
       "members": [
         {
@@ -1648,6 +1662,17 @@
           "name": "_string_literal_end"
         }
       ]
+    },
+    "hex_string_literal": {
+      "type": "TOKEN",
+      "content": {
+        "type": "PREC",
+        "value": 1,
+        "content": {
+          "type": "PATTERN",
+          "value": "hex\"[0-9A-Fa-f]*\""
+        }
+      }
     },
     "block_comment": {
       "type": "SEQ",

@@ -89,13 +89,14 @@ static void scan_block_comment_content(TSLexer *lexer) {
                     state = Slash;
                 }
                 break;
+            default:
+                state = Continuing;
         }
 
         lexer->advance(lexer, false);
     }
 
     // Still accept result even if we ended via EOF as it's useful while typing.
-
     lexer->result_symbol = BLOCK_COMMENT_CONTENT;
     return;
 

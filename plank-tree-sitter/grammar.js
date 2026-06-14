@@ -165,14 +165,18 @@ module.exports = grammar({
       $.bin_literal,
       $.dec_literal,
       $.string_literal,
-      $.hex_string_literal,
     ),
     bool_literal: (_) => choice("true", "false"),
-    hex_literal: (_) => /-?0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
-    bin_literal: (_) => /-?0b[01][01_]*/,
-    dec_literal: (_) => /-?[0-9][0-9_]*/,
+    hex_literal: (_) => /0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
+    bin_literal: (_) => /0b[01][01_]*/,
+    dec_literal: (_) => /[0-9][0-9_]*/,
+    string_literal: ($) => seq(
+      $._string_literal_segment,
+      repeat($._string_literal_segment),
+    ),
+    _string_literal_segment: ($) => choice($.quoted_string_literal, $.hex_string_literal),
+    quoted_string_literal : ($) => seq('"', $._string_literal_end),
     hex_string_literal: (_) => token(prec(1, /hex"[0-9A-Fa-f]*"/)),
-    string_literal : ($) => seq('"', $._string_literal_end),
 
     // Helpers
     block_comment: ($) => seq('/*', $._block_comment_content, '*/'),

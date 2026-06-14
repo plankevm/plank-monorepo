@@ -531,15 +531,73 @@ init {
 (source_file
   (const_def
     (identifier)
-    (string_literal))
+    (string_literal
+      (quoted_string_literal)))
   (const_def
     (identifier)
-    (string_literal))
+    (string_literal
+      (quoted_string_literal)))
   (const_def
     (identifier)
-    (hex_string_literal))
+    (string_literal
+      (hex_string_literal)))
   (init
     (block
       (fn_call
         (identifier)
         (identifier)))))
+
+================================================================================
+Negative Literals Parse As Unary Expressions
+================================================================================
+
+const x = -42;
+const y = -0x2a;
+const z = -0b101;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (unary_expr
+      (dec_literal)))
+  (const_def
+    (identifier)
+    (unary_expr
+      (hex_literal)))
+  (const_def
+    (identifier)
+    (unary_expr
+      (bin_literal))))
+
+================================================================================
+Merged String Segments
+================================================================================
+
+const chunks = "ab" "cd" hex"00ff";
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (string_literal
+      (quoted_string_literal)
+      (quoted_string_literal)
+      (hex_string_literal))))
+
+================================================================================
+Block Comment Does Not Close On Separated Star Slash
+================================================================================
+
+/* *x/ still comment */
+const x = 1;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block_comment)
+  (const_def
+    (identifier)
+    (dec_literal)))
