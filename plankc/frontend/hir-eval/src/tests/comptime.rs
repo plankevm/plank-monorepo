@@ -1921,14 +1921,14 @@ fn test_cbytes_unknown_attribute() {
 }
 
 #[test]
-fn test_bytes_slice_builtin() {
+fn test_slice_cbytes_builtin() {
     assert_lowers_to(
         r#"
-        const basic = @bytes_slice("hello", 1, 3) == "el";
-        const len_of_slice = @bytes_slice("hello", 1, 4).length;
-        const nested = @bytes_slice(@bytes_slice("hello", 1, 4), 1, 2) == "l";
-        const full = @bytes_slice("hello", 0, 5) == "hello";
-        const empty = @bytes_slice("hello", 2, 2) == "";
+        const basic = @slice_cbytes("hello", 1, 3) == "el";
+        const len_of_slice = @slice_cbytes("hello", 1, 4).length;
+        const nested = @slice_cbytes(@slice_cbytes("hello", 1, 4), 1, 2) == "l";
+        const full = @slice_cbytes("hello", 0, 5) == "hello";
+        const empty = @slice_cbytes("hello", 2, 2) == "";
         init {
             let mut a: bool = basic;
             let mut b: u256 = len_of_slice;
@@ -1954,10 +1954,10 @@ fn test_bytes_slice_builtin() {
 }
 
 #[test]
-fn test_bytes_slice_start_after_end() {
+fn test_slice_cbytes_start_after_end() {
     assert_diagnostics(
         r#"
-        const bad = @bytes_slice("hello", 3, 1);
+        const bad = @slice_cbytes("hello", 3, 1);
         init {
             @evm_stop();
         }
@@ -1966,8 +1966,8 @@ fn test_bytes_slice_start_after_end() {
         error: bytes slice out of bounds
          --> main.plk:1:13
           |
-        1 | const bad = @bytes_slice("hello", 3, 1);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 3..1 of bytes with length 5
+        1 | const bad = @slice_cbytes("hello", 3, 1);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 3..1 of bytes with length 5
           |
           = note: requires `start <= end` and `end <= bytes.length`
         "#],
@@ -1975,10 +1975,10 @@ fn test_bytes_slice_start_after_end() {
 }
 
 #[test]
-fn test_bytes_slice_end_past_len() {
+fn test_slice_cbytes_end_past_len() {
     assert_diagnostics(
         r#"
-        const bad = @bytes_slice("hello", 2, 6);
+        const bad = @slice_cbytes("hello", 2, 6);
         init {
             @evm_stop();
         }
@@ -1987,8 +1987,8 @@ fn test_bytes_slice_end_past_len() {
         error: bytes slice out of bounds
          --> main.plk:1:13
           |
-        1 | const bad = @bytes_slice("hello", 2, 6);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 2..6 of bytes with length 5
+        1 | const bad = @slice_cbytes("hello", 2, 6);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requested range 2..6 of bytes with length 5
           |
           = note: requires `start <= end` and `end <= bytes.length`
         "#],
@@ -1996,12 +1996,12 @@ fn test_bytes_slice_end_past_len() {
 }
 
 #[test]
-fn test_bytes_slice_runtime_bound() {
+fn test_slice_cbytes_runtime_bound() {
     assert_diagnostics(
         r#"
         init {
             let n = @evm_calldataload(0);
-            let s = @bytes_slice("hello", n, 3);
+            let s = @slice_cbytes("hello", n, 3);
             @evm_stop();
         }
         "#,
@@ -2009,18 +2009,18 @@ fn test_bytes_slice_runtime_bound() {
         error: expected comptime argument
          --> main.plk:3:13
           |
-        3 |     let s = @bytes_slice("hello", n, 3);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@bytes_slice` requires slice start to be known at comptime
+        3 |     let s = @slice_cbytes("hello", n, 3);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@slice_cbytes` requires slice start to be known at comptime
         "#],
     );
 }
 
 #[test]
-fn test_data_offset_of_bytes_slice() {
+fn test_data_offset_of_slice_cbytes() {
     assert_lowers_to(
         r#"
         init {
-            let offset = @data_offset(@bytes_slice("hello" hex"00ff", 2, 6));
+            let offset = @data_offset(@slice_cbytes("hello" hex"00ff", 2, 6));
             @evm_stop();
         }
         "#,
@@ -2036,7 +2036,7 @@ fn test_data_offset_of_bytes_slice() {
 }
 
 #[test]
-fn test_comptime_keccak256_builtin() {
+fn test_keccak256_cbytes_builtin() {
     assert_eq!(
         alloy_primitives::keccak256(b"abc"),
         alloy_primitives::b256!(
@@ -2051,9 +2051,9 @@ fn test_comptime_keccak256_builtin() {
     );
     assert_lowers_to(
         r#"
-        const abc_hash_matches = @comptime_keccak256("abc")
+        const abc_hash_matches = @keccak256_cbytes("abc")
             == 0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45;
-        const empty_hash_matches = @comptime_keccak256("")
+        const empty_hash_matches = @keccak256_cbytes("")
             == 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470;
         init {
             let mut a: bool = abc_hash_matches;
@@ -2074,7 +2074,7 @@ fn test_comptime_keccak256_builtin() {
 }
 
 #[test]
-fn test_comptime_keccak256_of_bytes_slice() {
+fn test_keccak256_cbytes_of_slice() {
     assert_eq!(
         alloy_primitives::keccak256(b"ell"),
         alloy_primitives::b256!(
@@ -2083,7 +2083,7 @@ fn test_comptime_keccak256_of_bytes_slice() {
     );
     assert_lowers_to(
         r#"
-        const ell_hash_matches = @comptime_keccak256(@bytes_slice("hello", 1, 4))
+        const ell_hash_matches = @keccak256_cbytes(@slice_cbytes("hello", 1, 4))
             == 0x0dd666b403ddf2d5833ea7c8306cfc8d62ee1052f2da09d8c290aac4d3085b43;
         init {
             let mut a: bool = ell_hash_matches;

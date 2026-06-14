@@ -358,8 +358,8 @@ define_builtins! {
         COMPILE_ERROR "@compile_error" => CompileError;
 
         // Comptime Bytes
-        BYTES_SLICE "@bytes_slice" => BytesSlice;
-        COMPTIME_KECCAK256 "@comptime_keccak256" => ComptimeKeccak256;
+        SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
+        KECCAK256_CBYTES "@keccak256_cbytes" => Keccak256CBytes;
         DATA_OFFSET "@data_offset" => DataOffset;
     }
 

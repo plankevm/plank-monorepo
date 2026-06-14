@@ -15,7 +15,20 @@ fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
 
 #[track_caller]
 fn assert_lowers_to(source: &str, expected: &str) {
-    let (program, _session) = try_lower(source);
+    let (program, session) = try_lower(source);
+    if session.has_errors() {
+        let rendered = session
+            .diagnostics()
+            .iter()
+            .map(|d| d.render_plain(&session))
+            .collect::<Vec<_>>()
+            .join("\n----\n");
+        panic!(
+            "###### Lowering Failed With Diagnostics ({}) ######\n\n{}",
+            session.diagnostics().len(),
+            rendered
+        );
+    }
     let actual = sir_data::display_program(&program);
     let expected = plank_test_utils::dedent_preserve_blank_lines(expected);
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
@@ -813,11 +826,11 @@ fn test_data_offset_dedups_identical_literals() {
 }
 
 #[test]
-fn test_data_offset_of_bytes_slice_adds_start_offset() {
+fn test_data_offset_of_slice_cbytes_adds_start_offset() {
     assert_lowers_to(
         r#"
         init {
-            let offset = @data_offset(@bytes_slice("hello" hex"00ff", 2, 6));
+            let offset = @data_offset(@slice_cbytes("hello" hex"00ff", 2, 6));
             @evm_stop();
         }
         "#,

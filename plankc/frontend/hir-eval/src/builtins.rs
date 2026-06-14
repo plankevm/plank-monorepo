@@ -239,7 +239,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
-            Builtin::BytesSlice => {
+            Builtin::SliceCBytes => {
                 let &[bytes, start, end] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let start = self.expect_comptime_u256(start, builtin, "slice start", expr_span)?;
@@ -257,7 +257,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     bytes.start + end,
                 ))))
             }
-            Builtin::ComptimeKeccak256 => {
+            Builtin::Keccak256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let slice = self.diag_ctx.session.lookup_bytes_slice(

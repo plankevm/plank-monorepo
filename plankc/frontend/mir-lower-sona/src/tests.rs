@@ -607,7 +607,7 @@ fn lowers_sliced_data_offset_to_sym_addr_plus_start() {
     let ir = lower_ir(
         r#"
         init {
-            let offset = @data_offset(@bytes_slice("hello" hex"00ff", 2, 6));
+            let offset = @data_offset(@slice_cbytes("hello" hex"00ff", 2, 6));
             @evm_stop();
         }
         "#,
