@@ -61,7 +61,10 @@
   ; Comptime Type Reflection
   "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field"
   ; Comptime Diagnostics
-  "@compile_error"))
+  "@compile_error" "@in_comptime" "@set_eval_branch_quota"
+  ; Bytes
+  "@keccak256_cbytes" "@slice_cbytes" "@data_offset"
+  ))
 
 ; Function calls
 
