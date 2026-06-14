@@ -1,3 +1,6 @@
+import std::error::*;
+import std::fixedbytes::bytes32;
+
 const memory = struct {};
 const code = struct {};
 const calldata = struct {};
@@ -44,7 +47,7 @@ const runtime_embed_cbytes = fn (comptime cb: cbytes, comptime region: type) byt
     @compile_error("unrecognized region type");
 };
 
-const copy_to_memory = fn (data: $T) bytes(memory) {
+const copy_if_not_already_memory = fn (data: $T) bytes(memory) {
     if T == cbytes {
         return runtime_embed_cbytes(data, memory);
     }
@@ -65,10 +68,55 @@ const copy_to_memory = fn (data: $T) bytes(memory) {
         };
     }
     if T == bytes(memory) {
-        @compile_error(
-            "`copy_to_memory` with target `memory` ambiguous, do you want the same value or a"
-            " fresh copy?"
-        );
+        return data;
     }
     @compile_error("unexpected data type");
+};
+
+const slice_bytes = fn (data: $T, start: u256, end: u256) T {
+    if T == cbytes {
+        return @slice_cbytes(data, start, end);
+    }
+
+    if T == bytes(calldata) or T == bytes(code) or T == bytes(memory) {
+        require((start <= end) & (end <= data.length));
+        return T {
+            ptr: data.ptr +% start,
+            length: end -% start
+        };
+    }
+
+    @compile_error("unexpected data type");
+};
+
+const keccak256 = fn (data: $T) bytes32 {
+    let raw_hash = if T == cbytes {
+        @keccak256_cbytes(data)
+    } else if T == bytes(memory) {
+        @evm_keccak256(data.ptr, data.length)
+    } else if T == bytes(calldata) {
+        let ptr = @malloc_uninit(data.length);
+        @evm_calldatacopy(ptr, data.ptr, data.length);
+        @evm_keccak256(ptr, data.length)
+    } else if T == bytes(code) {
+        let ptr = @malloc_uninit(data.length);
+        @evm_codecopy(ptr, data.ptr, data.length);
+        @evm_keccak256(ptr, data.length)
+    } else {
+        @compile_error("keccak256: unsupported type");
+    };
+    bytes32 { raw: raw_hash }
+};
+
+const bytes_eq = fn (b1: $T1, b2: $T2) bool {
+    if T1 == cbytes and T2 == cbytes {
+        return b1 == b2;
+    }
+    if T1 == cbytes {
+        return comptime { keccak256(b1).raw } == keccak256(b2).raw;
+    }
+    if T2 == cbytes {
+        return keccak256(b1).raw == comptime { keccak256(b2).raw };
+    }
+    @compile_error("unsupported type pair");
 };

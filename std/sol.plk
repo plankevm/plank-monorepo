@@ -1,8 +1,9 @@
 // Based on https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require
+import std::abi::compute_selector;
 
 const SolPanicCode = struct { code: u256 };
 
-const PANIC_SELECTOR = 0x4e487b71;
+const PANIC_SELECTOR = compute_selector("Panic(uint256)");
 
 const ASSERT_FALSE = SolPanicCode { code: 0x01 };
 const ARITH_OVERFLOW_UNDERFLOW = SolPanicCode { code: 0x11 };
