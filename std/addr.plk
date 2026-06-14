@@ -24,7 +24,7 @@ const tx_origin = fn () addr {
 };
 
 const raw_create = fn (value: u256, code: membytes) Option(addr) {
-    let account = @evm_create(value, code.ptr, code.len);
+    let account = @evm_create(value, code.ptr, code.length);
     if account == 0 {
         return None(addr);
     }
@@ -32,7 +32,7 @@ const raw_create = fn (value: u256, code: membytes) Option(addr) {
 };
 
 const raw_create2 = fn (value: u256, code: membytes, salt: bytes32) Option(addr) {
-    let account = @evm_create2(value, code.ptr, code.len, salt.raw);
+    let account = @evm_create2(value, code.ptr, code.length, salt.raw);
     if account == 0 {
         return None(addr);
     }

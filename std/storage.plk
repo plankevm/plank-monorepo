@@ -19,10 +19,10 @@ const map_slot_hash = fn (key: u256, base_slot: u256) u256 {
 // Stores a membytes value into storage at `slot`.
 // Length is stored at `slot`, data chunks at keccak256(slot), keccak256(slot)+1, ...
 const sstore_bytes = fn (slot: u256, data: membytes) void {
-    @evm_sstore(slot, data.len);
+    @evm_sstore(slot, data.length);
     let base_slot = slot_hash(slot);
     let mut i = 0;
-    while i * 32 < data.len {
+    while i * 32 < data.length {
         let chunk_slot = base_slot + i;
         let chunk = @mload32(data.ptr +% 32 * i);
         @evm_sstore(chunk_slot, chunk);

@@ -1,6 +1,6 @@
 import std::storage::{sstore_bytes, sload_bytes};
 import std::membytes::{membytes, membytes_from_ptr};
-import std::abi::{abi_encode};
+import std::abi::abi_encode;
 import std::constructor::return_runtime;
 
 const STORE_SELECTOR = 0xb374012b;
@@ -39,5 +39,5 @@ const store = fn () never {
 const load = fn () never {
     let data = sload_bytes(DATA_SLOT);
     let encoded = abi_encode(BytesResult { data: data });
-    @evm_return(encoded.ptr, encoded.len);
+    @evm_return(encoded.ptr, encoded.length);
 };

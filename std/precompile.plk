@@ -10,14 +10,14 @@ const IDENTITY_ADDR = addr_from_u256(0x04);
 const MODEXP_ADDR = addr_from_u256(0x05);
 
 const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(addr) {
-    let len = 128;
-    let buf = @malloc_uninit(len);
+    let length = 128;
+    let buf = @malloc_uninit(length);
     @mstore32(buf +% 0, hash);
     @mstore32(buf +% 32, v);
     @mstore32(buf +% 64, r);
     @mstore32(buf +% 96, s);
 
-    let success = @evm_staticcall(@evm_gas(), ECRECOVER_ADDR.raw, buf, len, buf, 32);
+    let success = @evm_staticcall(@evm_gas(), ECRECOVER_ADDR.raw, buf, length, buf, 32);
     if success {
         Some(addr { raw: @mload32(buf) })
     } else {
@@ -26,39 +26,39 @@ const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(addr) {
 };
 
 const sha256 = fn (data: membytes) u256 {
-    let len = 32;
-    let buf = @malloc_uninit(len);
+    let length = 32;
+    let buf = @malloc_uninit(length);
 
-    let success = @evm_staticcall(@evm_gas(), SHA256_ADDR.raw, data.ptr, data.len, buf, len);
+    let success = @evm_staticcall(@evm_gas(), SHA256_ADDR.raw, data.ptr, data.length, buf, length);
     require(success);
 
     @mload32(buf)
 };
 
 const ripemd160 = fn (data: membytes) u256 {
-    let len = 32;
-    let buf = @malloc_uninit(len);
+    let length = 32;
+    let buf = @malloc_uninit(length);
 
-    let success = @evm_staticcall(@evm_gas(), RIPEMD160_ADDR.raw, data.ptr, data.len, buf, len);
+    let success = @evm_staticcall(@evm_gas(), RIPEMD160_ADDR.raw, data.ptr, data.length, buf, length);
     require(success);
 
     @mload32(buf)
 };
 
 const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
-    let len = 96 + base.len + exp.len + mod.len;
-    let buf = @malloc_uninit(len);
+    let length = 96 + base.length + exp.length + mod.length;
+    let buf = @malloc_uninit(length);
 
-    @mstore32(buf +% 0, base.len);
-    @mstore32(buf +% 32, exp.len);
-    @mstore32(buf +% 64, mod.len);
+    @mstore32(buf +% 0, base.length);
+    @mstore32(buf +% 32, exp.length);
+    @mstore32(buf +% 64, mod.length);
 
-    @mcopy(buf +% 96, base.ptr, base.len);
-    @mcopy(buf +% 96 +% base.len, exp.ptr, exp.len);
-    @mcopy(buf +% 96 +% base.len +% exp.len, mod.ptr, mod.len);
+    @mcopy(buf +% 96, base.ptr, base.length);
+    @mcopy(buf +% 96 +% base.length, exp.ptr, exp.length);
+    @mcopy(buf +% 96 +% base.length +% exp.length, mod.ptr, mod.length);
 
-    let success = @evm_staticcall(@evm_gas(), MODEXP_ADDR.raw, buf, len, buf, mod.len);
+    let success = @evm_staticcall(@evm_gas(), MODEXP_ADDR.raw, buf, length, buf, mod.length);
     require(success);
 
-    membytes_from_ptr(buf, mod.len)
+    membytes_from_ptr(buf, mod.length)
 };

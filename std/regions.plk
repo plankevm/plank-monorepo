@@ -1,0 +1,74 @@
+const memory = struct {};
+const code = struct {};
+const calldata = struct {};
+
+const is_region = fn (comptime region: type) bool {
+    region == memory or region == code or region == calldata
+};
+
+const region_ptr_type = fn (comptime region: type) type {
+    if region == memory {
+        return memptr;
+    }
+    if region == code or region == calldata {
+        return u256;
+    }
+    @compile_error("unrecognized region");
+};
+
+const bytes = fn (comptime region: type) type {
+    return struct region {
+        ptr: region_ptr_type(region),
+        length: u256,
+    };
+};
+
+const runtime_embed_cbytes = fn (comptime cb: cbytes, comptime region: type) bytes(region) {
+    if region == code {
+        return bytes(region) {
+            ptr: @data_offset(cb),
+            length: cb.length
+        };
+    }
+    if region == memory {
+        let ptr = @malloc_uninit(cb.length);
+        @evm_codecopy(ptr, @data_offset(cb), cb.length);
+        return bytes(region) {
+            ptr: ptr,
+            length: cb.length,
+        };
+    }
+    if region == calldata {
+        @compile_error("cannot convert `cbytes` to a `bytes(calldata)`, calldata is read only");
+    }
+    @compile_error("unrecognized region type");
+};
+
+const copy_to_memory = fn (data: $T) bytes(memory) {
+    if T == cbytes {
+        return runtime_embed_cbytes(data, memory);
+    }
+    if T == bytes(calldata) {
+        let ptr = @malloc_uninit(data.length);
+        @evm_calldatacopy(ptr, data.ptr, data.length);
+        return bytes(memory) {
+            ptr: ptr,
+            length: data.length,
+        };
+    }
+    if T == bytes(code) {
+        let ptr = @malloc_uninit(data.length);
+        @evm_codecopy(ptr, data.ptr, data.length);
+        return bytes(memory) {
+            ptr: ptr,
+            length: data.length
+        };
+    }
+    if T == bytes(memory) {
+        @compile_error(
+            "`copy_to_memory` with target `memory` ambiguous, do you want the same value or a"
+            " fresh copy?"
+        );
+    }
+    @compile_error("unexpected data type");
+};

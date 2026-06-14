@@ -2,27 +2,25 @@ import std::mem::{unsafe_mem_write_u256, unsafe_mem_read_u256, unsafe_mem_write_
 import std::option::{Option, Some, None};
 import std::type::sizeof;
 import std::utils::fold;
+import std::regions::*;
 
 // Invariant: membytes owns the memory region: [ptr, ptr + len).
-const membytes = struct {
-    ptr: memptr,
-    len: u256
-};
+const membytes = bytes(memory);
 
 // Allocates a new zero-initialized buffer of `len` bytes.
 const membytes_new = fn (len: u256) membytes {
-    membytes { ptr: @malloc_zeroed(len), len: len }
+    membytes { ptr: @malloc_zeroed(len), length: len }
 };
 
 // Wraps an existing pointer and length into a membytes.
 // Caller must ensure the region [ptr, ptr + len) is valid.
 const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
-    membytes { ptr: ptr, len: len }
+    membytes { ptr: ptr, length: len }
 };
 
 // Writes a u256 at `offset`. Returns None if out of bounds.
 const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
-    if offset + 32 > buf.len {
+    if offset + 32 > buf.length {
         return None(u256);
     }
     Some(unsafe_mem_write_u256(buf.ptr, offset, value))
@@ -30,7 +28,7 @@ const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option
 
 // Reads a u256 from `offset`. Returns None if out of bounds.
 const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
-    if offset + 32 > buf.len {
+    if offset + 32 > buf.length {
         return None(u256);
     }
     Some(unsafe_mem_read_u256(buf.ptr, offset))
@@ -38,7 +36,7 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
 
 // Writes a value of any type T at `offset`. Returns None if out of bounds.
 const membytes_write = fn (buf: membytes, offset: u256, value: $T) Option(u256) {
-    if offset + sizeof(T) > buf.len {
+    if offset + sizeof(T) > buf.length {
         return None(u256);
     }
     Some(unsafe_mem_write(buf.ptr, offset, value))

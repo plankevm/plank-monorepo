@@ -10,5 +10,5 @@ init {
     let input = membytes_from_ptr(ptr, size);
     let decoded = abi_decode(Pair, input);
     let encoded = abi_encode(decoded);
-    @evm_return(encoded.ptr, encoded.len);
+    @evm_return(encoded.ptr, encoded.length);
 }

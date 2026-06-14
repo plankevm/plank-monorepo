@@ -27,7 +27,7 @@ const abi_encoded_size = fn (value: $T) u256 {
     } else if T == bool {
         32
     } else if T == membytes {
-        32 + ceil32(value.len)
+        32 + ceil32(value.length)
     } else if @is_struct(T) {
         // Start from the head size; non-dynamic fields are already accounted for.
         let initial = AbiSizeAccumulator(T) {
@@ -62,7 +62,7 @@ const unsafe_abi_encode = fn (ptr: memptr, value: $T) u256 {
 // or None if the buffer is too small to hold the encoding.
 const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
     let size = abi_encoded_size(value);
-    if size > buf.len {
+    if size > buf.length {
         return None(u256);
     }
     Some(unsafe_abi_encode_to(buf.ptr, 0, value))
@@ -78,7 +78,7 @@ const abi_encode = fn (value: $T) membytes {
 
 // Decodes a value of type T from raw memory. Caller must ensure
 // the region contains valid ABI-encoded data.
-const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, len: u256) T {
+const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, length: u256) T {
     unsafe_abi_decode_from(T, ptr, 0)
 };
 

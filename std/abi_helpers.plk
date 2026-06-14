@@ -89,10 +89,10 @@ const unsafe_abi_encode_to = fn (buf: memptr, offset: u256, value: $T) u256 {
         unsafe_mem_write_u256(buf, offset, if value { 1 } else { 0 });
         32
     } else if T == membytes {
-        unsafe_mem_write_u256(buf, offset, value.len);
-        unsafe_mem_write_bytes(buf, offset + 32, value.ptr, value.len);
-        // padding after value.len is left uninitialized; consumers only read len bytes
-        32 + ceil32(value.len)
+        unsafe_mem_write_u256(buf, offset, value.length);
+        unsafe_mem_write_bytes(buf, offset + 32, value.ptr, value.length);
+        // padding after value.length is left uninitialized; consumers only read length bytes
+        32 + ceil32(value.length)
     } else if @is_struct(T) {
         let initial = AbiEncodeAccumulator(T) {
             buf: buf,
@@ -166,8 +166,8 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: memptr, offset: u256) 
     } else if T == bool {
         unsafe_mem_read_u256(buf, offset) != 0
     } else if T == membytes {
-        let len = unsafe_mem_read_u256(buf, offset);
-        membytes_from_ptr(buf +% offset +% 32, len)
+        let length = unsafe_mem_read_u256(buf, offset);
+        membytes_from_ptr(buf +% offset +% 32, length)
     } else if @is_struct(T) {
         let initial = AbiDecodeAccumulator(T) {
             buf: buf,
@@ -230,16 +230,16 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
     if T == void {
         true
     } else if T == u256 {
-        buf.len >= offset + 32
+        buf.length >= offset + 32
     } else if T == bool {
-        buf.len >= offset + 32
+        buf.length >= offset + 32
     } else if T == membytes {
         let len_opt = membytes_read_u256(buf, offset);
         if !len_opt.is_some { return false; }
-        let len = len_opt.inner;
-        buf.len >= offset + 32 + ceil32(len)
+        let length = len_opt.inner;
+        buf.length >= offset + 32 + ceil32(length)
     } else if @is_struct(T) {
-        if offset + abi_head_size(T) > buf.len {
+        if offset + abi_head_size(T) > buf.length {
             return false;
         } 
         let initial = AbiBufFitsAccumulator {

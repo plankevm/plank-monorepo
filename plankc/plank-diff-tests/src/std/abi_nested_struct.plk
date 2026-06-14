@@ -13,8 +13,8 @@ init {
     let decoded = abi_decode(Level2, buf);
     let esize = abi_encoded_size(decoded);
     let encoded = abi_encode(decoded);
-    let out_ptr = @malloc_zeroed(@evm_add(32, encoded.len));
+    let out_ptr = @malloc_zeroed(@evm_add(32, encoded.length));
     @mstore32(out_ptr, esize);
-    @mcopy(@evm_add(out_ptr, 32), encoded.ptr, encoded.len);
-    @evm_return(out_ptr, @evm_add(32, encoded.len));
+    @mcopy(@evm_add(out_ptr, 32), encoded.ptr, encoded.length);
+    @evm_return(out_ptr, @evm_add(32, encoded.length));
 }

@@ -12,7 +12,7 @@ const bytes32_from_u256 = fn (value: u256) bytes32 {
 // Reads a bytes32 from `offset`. Returns None if out of bounds or on overflow.
 const membytes_read_bytes32 = fn (buf: membytes, offset: u256) Option(bytes32) {
     let end_offset = offset +% 32;
-    if (end_offset < offset) | (end_offset > buf.len) {
+    if (end_offset < offset) | (end_offset > buf.length) {
         return None(bytes32);
     }
     let raw = unsafe_mem_read_u256(buf.ptr, offset);

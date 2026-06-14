@@ -73,13 +73,13 @@ const call_modexp = fn () never {
 
     let result = modexp(base, exp, mod);
     let out = abi_encode(BytesResult { data: result });
-    @evm_return(out.ptr, out.len);
+    @evm_return(out.ptr, out.length);
 };
 
 const bytes_from_offset = fn (offset: u256) membytes {
-    let len = @evm_calldataload(offset);
-    let out = membytes_new(len);
-    @evm_calldatacopy(out.ptr, offset +% 32, len);
+    let length = @evm_calldataload(offset);
+    let out = membytes_new(length);
+    @evm_calldatacopy(out.ptr, offset +% 32, length);
 
     out
 };
