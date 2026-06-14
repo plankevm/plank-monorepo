@@ -53,6 +53,7 @@ pub enum Element {
     Origin {
         path: SourceId,
     },
+    Padding,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +136,15 @@ impl From<Patches> for Element {
     }
 }
 
+impl From<Padding> for Element {
+    fn from(_value: Padding) -> Self {
+        Element::Padding
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Padding;
+
 #[derive(Debug, Clone)]
 pub struct Claim {
     pub level: Level,
@@ -180,6 +190,10 @@ pub trait ClaimBuilder: Sized {
 
     fn info(self, message: impl Into<String>) -> Self {
         self.element(Element::Message { level: Some(Level::Info), text: message.into() })
+    }
+
+    fn pad(self) -> Self {
+        self.element(Element::Padding)
     }
 }
 
@@ -314,6 +328,7 @@ impl Diagnostic {
                     let path = src.path.to_str().expect("source path is not valid UTF-8");
                     group = group.element(snip::Origin::path(path));
                 }
+                Element::Padding => group = group.element(snip::Padding),
             }
         }
 

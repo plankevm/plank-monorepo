@@ -1,6 +1,6 @@
 use crate::{cst::display::DisplayCST, lexer::Lexed, parser::parse};
 use plank_session::{Session, Source};
-use plank_test_utils::dedent_preserve_indent;
+use plank_test_utils::{assert_diagnostics, dedent_preserve_indent};
 
 mod errorless;
 mod resiliency;
@@ -15,22 +15,11 @@ pub(crate) fn parse_single_source(
     parse(session, &lexed, source, source_id)
 }
 
-pub(crate) fn assert_session_errors(session: &Session, expected_errors: &[&str]) {
-    let actual: Vec<String> =
-        session.diagnostics().iter().map(|d| d.render_plain(session).trim().to_string()).collect();
-
-    let expected: Vec<String> = expected_errors.iter().map(|s| dedent_preserve_indent(s)).collect();
-
-    let actual_joined = actual.join("\n\n---\n\n");
-    let expected_joined = expected.join("\n\n---\n\n");
-    pretty_assertions::assert_str_eq!(actual_joined, expected_joined);
-}
-
 pub fn assert_parser_errors(source: &str, expected_errors: &[&str]) {
     let source = dedent_preserve_indent(source);
     let mut session = Session::new();
     let _cst = parse_single_source(&source, &mut session);
-    assert_session_errors(&session, expected_errors);
+    assert_diagnostics(session.diagnostics(), &session, expected_errors);
 }
 
 pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {

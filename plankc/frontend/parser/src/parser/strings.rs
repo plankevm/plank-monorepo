@@ -63,10 +63,17 @@ impl Parser<'_> {
         let mut chars = src.char_indices().peekable();
 
         while let Some((start, c)) = chars.next() {
+            if !c.is_ascii() {
+                while chars.next_if(|&(_, c)| !c.is_ascii()).is_some() {}
+                let end = chars.peek().map_or(src.len(), |&(end, _)| end);
+                self.emit_unicode_disallowed_in_string(Span::new(
+                    src_start + start as u32,
+                    src_start + end as u32,
+                ));
+                continue;
+            }
             if c != '\\' {
-                let mut buf = [0u8; 4];
-                let encoded = c.encode_utf8(&mut buf);
-                self.string_buf.extend_from_slice(encoded.as_bytes());
+                self.string_buf.push(c as u8);
                 continue;
             }
             let (_, c) = chars.next().expect("lexer guarantees backslash not end");
@@ -137,11 +144,9 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        cst::NodeKind,
-        tests::{assert_session_errors, parse_single_source},
-    };
+    use crate::{cst::NodeKind, tests::parse_single_source};
     use plank_session::Session;
+    use plank_test_utils::assert_diagnostics;
 
     fn assert_decodes_to(literal: &str, expected_value: &[u8], expected_errors: &[&str]) {
         let source = format!("const x = {literal};");
@@ -160,7 +165,7 @@ mod tests {
             expected_value,
             "decoded value mismatch for `{literal}`"
         );
-        assert_session_errors(&session, expected_errors);
+        assert_diagnostics(session.diagnostics(), &session, expected_errors);
     }
 
     #[test]

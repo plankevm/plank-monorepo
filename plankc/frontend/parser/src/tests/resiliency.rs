@@ -236,6 +236,39 @@ fn multiline_string_suggestion() {
 }
 
 #[test]
+fn unicode_in_string() {
+    assert_parser_errors(
+        r#"
+        const PROVERB = "pretty cool huh? LLMs can do chinese: 你在人生中最中国的时刻遇见了我, anyways.";
+
+        const BAKED_GOOD = "Gebäck";
+        "#,
+        &[
+            r#"
+        error: non-ASCII characters in string segment
+         --> test.plk:1:56
+          |
+        1 - const PROVERB = "pretty cool huh? LLMs can do chinese: 你在人生中最中国的时刻遇见了我, anyways.";
+        1 + const PROVERB = "pretty cool huh? LLMs can do chinese: " hex"e4bda0e59ca8e4babae7949fe4b8ade69c80e4b8ade59bbde79a84e697b6e588bbe98187e8a781e4ba86e68891" ", anyways.";
+          |
+          = help: to add unicode characters embed the UTF-8 encoded bytes
+          = info: unicode characters are disallowed for auditability because they can introduce homoglyphs/confusables or bidirectional text-flow controls
+        "#,
+            r#"
+        error: non-ASCII characters in string segment
+         --> test.plk:2:24
+          |
+        2 - const BAKED_GOOD = "Gebäck";
+        2 + const BAKED_GOOD = "Geb" hex"c3a4" "ck";
+          |
+          = help: to add unicode characters embed the UTF-8 encoded bytes
+          = info: unicode characters are disallowed for auditability because they can introduce homoglyphs/confusables or bidirectional text-flow controls
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_lexer_error_unclosed_block_comment() {
     assert_parser_errors(
         r#"

@@ -103,7 +103,6 @@ impl<'a> Parser<'a> {
                 let snippet = snippet.strip_prefix('"').expect("missing opening `\"`");
                 let snippet = snippet.strip_suffix('"').expect("missing opening `\"`");
                 let mut state = FormatState::Open;
-                println!("base_indent: {:?}", base_indent);
                 for c in snippet.chars() {
                     if matches!(state, FormatState::Closed) {
                         suggestion.push('\n');
@@ -126,8 +125,6 @@ impl<'a> Parser<'a> {
                     suggestion.push('"');
                 }
 
-                println!("span: {:?}", span);
-
                 Diagnostic::error("malformed string segment")
                     .primary(
                         self.source_id,
@@ -142,6 +139,29 @@ impl<'a> Parser<'a> {
         };
 
         diag.emit(self.session);
+    }
+
+    pub(crate) fn emit_unicode_disallowed_in_string(&mut self, span: SourceSpan) {
+        use std::fmt::Write;
+
+        let snippet = &self.source[span.usize_range()];
+        // 2 hex chars per byte + `" hex"` + `" "`
+        let mut escaped = String::with_capacity(snippet.len() * 2 + 9);
+
+        write!(escaped, "\" hex\"").unwrap();
+        for &byte in snippet.as_bytes() {
+            write!(escaped, "{:02x}", byte).unwrap();
+        }
+        write!(escaped, "\" \"").unwrap();
+
+        Diagnostic::error("non-ASCII characters in string segment")
+            .element(Patches::lone(self.source_id, span, escaped))
+            .help("to add unicode characters embed the UTF-8 encoded bytes")
+            .info(concat!(
+                "unicode characters are disallowed for auditability because they can introduce",
+                " homoglyphs/confusables or bidirectional text-flow controls"
+            ))
+            .emit(self.session);
     }
 
     pub(crate) fn emit_unrecognized_escape(&mut self, span: SourceSpan, invalid: char) {
