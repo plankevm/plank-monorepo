@@ -1,0 +1,132 @@
+import std::abi::compute_selector;
+import std::constructor::return_runtime;
+import std::error::require;
+import std::regions::*;
+
+const TEST_BYTES = hex"00010203040506070809aabbccddeeff";
+const TEST_BYTES_HASH = keccak256(TEST_BYTES).raw;
+
+const comptime_assert = fn (comptime condition: bool, comptime message: cbytes) void {
+    if !condition {
+        @compile_error(message);
+    }
+};
+
+init {
+    comptime {
+        comptime_assert(is_region(memory), "memory must be a region");
+        comptime_assert(is_region(code), "code must be a region");
+        comptime_assert(is_region(calldata), "calldata must be a region");
+        comptime_assert(!is_region(struct {}), "anonymous struct must not be a region");
+        comptime_assert(region_ptr_type(memory) == memptr, "memory regions must use memptr pointers");
+        comptime_assert(region_ptr_type(code) == u256, "code regions must use u256 pointers");
+        comptime_assert(region_ptr_type(calldata) == u256, "calldata regions must use u256 pointers");
+        comptime_assert(@field_count(bytes(memory)) == 2, "bytes(memory) must have two fields");
+        comptime_assert(@field_type(bytes(memory), 0) == memptr, "bytes(memory).ptr must be memptr");
+        comptime_assert(@field_type(bytes(code), 0) == u256, "bytes(code).ptr must be u256");
+        comptime_assert(@field_type(bytes(calldata), 0) == u256, "bytes(calldata).ptr must be u256");
+        comptime_assert(@field_type(bytes(memory), 1) == u256, "bytes(region).length must be u256");
+        comptime_assert(slice_bytes(TEST_BYTES, 1, 4) == hex"010203", "cbytes slicing failed");
+        comptime_assert(bytes_eq(TEST_BYTES, TEST_BYTES), "cbytes equality failed");
+    }
+
+    let mem_data = runtime_embed_cbytes(TEST_BYTES, memory);
+    require(mem_data.length == TEST_BYTES.length);
+    require(@mload1(mem_data.ptr) == 0x00);
+    require(@mload1(mem_data.ptr +% 1) == 0x01);
+    require(@mload1(mem_data.ptr +% 15) == 0xff);
+    require(keccak256(mem_data).raw == TEST_BYTES_HASH);
+    require(bytes_eq(TEST_BYTES, mem_data));
+
+    let same_mem_data = copy_if_not_already_memory(mem_data);
+    require(same_mem_data.ptr == mem_data.ptr);
+    require(same_mem_data.length == mem_data.length);
+
+    let mem_slice = slice_bytes(mem_data, 2, 5);
+    require(mem_slice.length == 3);
+    require(@mload1(mem_slice.ptr) == 0x02);
+    require(@mload1(mem_slice.ptr +% 2) == 0x04);
+
+    let code_data = runtime_embed_cbytes(TEST_BYTES, code);
+    require(code_data.length == TEST_BYTES.length);
+    require(keccak256(code_data).raw == TEST_BYTES_HASH);
+    require(bytes_eq(TEST_BYTES, code_data));
+
+    let code_copy = copy_if_not_already_memory(code_data);
+    require(code_copy.length == TEST_BYTES.length);
+    require(@mload1(code_copy.ptr) == 0x00);
+    require(@mload1(code_copy.ptr +% 15) == 0xff);
+
+    let code_slice = slice_bytes(code_data, 10, 14);
+    let code_slice_copy = copy_if_not_already_memory(code_slice);
+    require(code_slice_copy.length == 4);
+    require(@mload1(code_slice_copy.ptr) == 0xaa);
+    require(@mload1(code_slice_copy.ptr +% 3) == 0xdd);
+
+    return_runtime();
+}
+
+const public = fn (comptime signature: cbytes, comptime func: function) void {
+    let selector = @evm_calldataload(0) >> 224;
+    let target_selector = comptime { compute_selector(signature) };
+    if selector == target_selector {
+        func();
+    }
+};
+
+const calldata_bytes_arg = fn (comptime arg: u256) bytes(calldata) {
+    let offset = @evm_calldataload(4 + arg * 32) +% 4;
+    bytes(calldata) {
+        ptr: offset +% 32,
+        length: @evm_calldataload(offset)
+    }
+};
+
+const return_word = fn (word: u256) never {
+    let out = @malloc_uninit(32);
+    @mstore32(out, word);
+    @evm_return(out, 32);
+};
+
+run {
+    public("hashCalldata(bytes)", fn () never {
+        let data = calldata_bytes_arg(0);
+        return_word(keccak256(data).raw);
+    });
+
+    public("copyCalldata(bytes)", fn () never {
+        let data = copy_if_not_already_memory(calldata_bytes_arg(0));
+        @evm_return(data.ptr, data.length);
+    });
+
+    public("sliceCalldata(bytes,uint256,uint256)", fn () never {
+        let data = calldata_bytes_arg(0);
+        let start = @evm_calldataload(36);
+        let end = @evm_calldataload(68);
+
+        let slice = slice_bytes(data, start, end);
+        let out = copy_if_not_already_memory(slice);
+        @evm_return(out.ptr, out.length);
+    });
+
+    public("hashCodeLiteral()", fn () never {
+        return_word(TEST_BYTES_HASH);
+    });
+
+    public("copyCodeLiteral()", fn () never {
+        let data = runtime_embed_cbytes(TEST_BYTES, code);
+        let out = copy_if_not_already_memory(data);
+        @evm_return(out.ptr, out.length);
+    });
+
+    public("sliceCodeLiteral(uint256,uint256)", fn () never {
+        let start = @evm_calldataload(4);
+        let end = @evm_calldataload(36);
+        let data = runtime_embed_cbytes(TEST_BYTES, code);
+        let slice = slice_bytes(data, start, end);
+        let out = copy_if_not_already_memory(slice);
+        @evm_return(out.ptr, out.length);
+    });
+
+    @evm_revert(@malloc_uninit(0), 0);
+}
