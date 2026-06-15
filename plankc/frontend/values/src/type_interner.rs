@@ -317,6 +317,8 @@ impl TypeInterner {
     }
 
     pub fn intern_type_name_args(&self, args: &[TypeNameArg]) -> TypeNameArgsId {
+        // SAFETY: We only create this mutable reference for the duration of this call. Callers must
+        // not intern type-name args while formatting is holding slices borrowed from this list.
         unsafe { (*self.type_name_args.get()).push_copy_slice(args) }
     }
 
@@ -349,6 +351,8 @@ impl TypeInterner {
         args: TypeNameArgsId,
         session: &Session,
     ) -> fmt::Result {
+        // SAFETY: Formatting only reads type-name args and must not call code that can mutate
+        // `type_name_args`; otherwise this borrowed slice could be invalidated by reallocation.
         let args = unsafe { &(&*self.type_name_args.get())[args] };
         let mut sep = "";
         for &arg in args {
@@ -380,6 +384,9 @@ impl TypeInterner {
                 let Type::Struct(r#struct) = self.lookup(ty) else {
                     unreachable!("invariant: type name struct argument has non-struct type")
                 };
+                // SAFETY: Formatting only reads type-name args and must not call code that can
+                // mutate `type_name_args`; otherwise this borrowed slice could be invalidated by
+                // reallocation.
                 let args = unsafe { &(&*self.type_name_args.get())[fields] };
                 assert_eq!(r#struct.fields.len(), args.len());
                 let mut sep = " ";
@@ -454,7 +461,7 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plank_session::{Session, Source, SourceId, SrcLoc, StrId, ZERO_SPAN, builtins};
+    use plank_session::{Session, Source, SourceId, SrcLoc, ZERO_SPAN, builtins};
     use std::path::PathBuf;
 
     fn dummy_src_loc(id: u32) -> SrcLoc {
@@ -524,8 +531,9 @@ mod tests {
         let source = session
             .register_source(Source { path: PathBuf::from("main.plk"), content: String::new() });
         let name = session.intern("Phantom");
+        let field_name = session.intern("value");
 
-        let fields = [Field { name: StrId::new(0), ty: TypeId::U256, def_span: ZERO_SPAN }];
+        let fields = [Field { name: field_name, ty: TypeId::U256, def_span: ZERO_SPAN }];
         let info = StructInfo {
             type_index: ValueId::VOID,
             def_loc: SrcLoc::new(source, ZERO_SPAN),
