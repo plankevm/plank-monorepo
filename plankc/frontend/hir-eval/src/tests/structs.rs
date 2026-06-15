@@ -52,9 +52,9 @@ fn test_invalid_field_access() {
         "#,
         &[r#"
         error: unknown field
-         --> main.plk:4:19
+         --> main.plk:5:19
           |
-        4 |     let y: u256 = x.hey;
+        5 |     let y: u256 = x.hey;
           |                   ^^^^^ `Pair` has no field `hey`
         "#],
     );
@@ -684,7 +684,7 @@ fn test_type_index_expr_eagerly_evaluates() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : struct@main.plk:4:13 = struct#0 {
+            %0 : struct@main.plk:5:13 = struct#0 {
                 67,
             }
             %1 : never = @evm_stop()

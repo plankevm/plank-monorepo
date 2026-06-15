@@ -2370,7 +2370,6 @@ fn test_if_stmt_if_only() {
                         "}"
                     ElseIfBranchList
                         " "
-
                 "}"
         "#,
     );

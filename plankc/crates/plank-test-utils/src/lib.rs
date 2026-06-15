@@ -5,18 +5,29 @@ use plank_source::{
 use std::path::{Path, PathBuf};
 
 /// Strips the minimum common leading whitespace from all non-empty lines,
-/// preserving relative indentation. Empty lines are removed.
+/// preserving relative indentation and interior blank lines.
 pub fn dedent_preserve_indent(s: &str) -> String {
-    let non_empty_lines: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
+    let lines: Vec<&str> = s.lines().collect();
 
-    if non_empty_lines.is_empty() {
+    let Some(first_non_empty) = lines.iter().position(|l| !l.trim().is_empty()) else {
         return String::new();
-    }
+    };
+    let last_non_empty =
+        lines.iter().rposition(|l| !l.trim().is_empty()).expect("first non-empty line exists");
+    let lines = &lines[first_non_empty..=last_non_empty];
 
-    let min_indent =
-        non_empty_lines.iter().map(|line| line.len() - line.trim_start().len()).min().unwrap_or(0);
+    let min_indent = lines
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start().len())
+        .min()
+        .unwrap_or(0);
 
-    non_empty_lines.iter().map(|line| &line[min_indent..]).collect::<Vec<_>>().join("\n")
+    lines
+        .iter()
+        .map(|line| if line.trim().is_empty() { "" } else { &line[min_indent..] })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Like [`dedent_preserve_indent`], but keeps blank lines in the output.

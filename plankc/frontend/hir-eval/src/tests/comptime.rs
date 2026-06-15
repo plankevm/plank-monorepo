@@ -926,9 +926,9 @@ fn test_poisoned_any_type_arg_does_not_panic() {
         "#,
         &[r#"
         error: unresolved identifier 'missing'
-         --> main.plk:3:7
+         --> main.plk:4:7
           |
-        3 |     f(missing);
+        4 |     f(missing);
           |       ^^^^^^^ not found in this scope
         "#],
     );
@@ -947,12 +947,12 @@ fn test_any_type_capture_used_by_later_param_type_mismatch() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:3:10
+         --> main.plk:4:10
           |
         1 | const f = fn (x: $T, y: T) T { y };
           |                         - `u256` expected because of this
-        2 | init {
-        3 |     f(1, false);
+        ...
+        4 |     f(1, false);
           |          ^^^^^ expected `u256`, got `bool`
         "#],
     );
@@ -1046,17 +1046,17 @@ fn test_comptime_param_not_eager() {
         "#,
         &[r#"
         error: attempted to pass runtime value as comptime parameter
-         --> main.plk:6:24
+         --> main.plk:8:24
           |
-        2 | const my_add = fn (comptime N: u256, x: u256) u256 {
+        3 | const my_add = fn (comptime N: u256, x: u256) u256 {
           |                    ---------------- parameter defined as comptime here
         ...
-        6 |     let mut x = my_add(ident(4), 4);
+        8 |     let mut x = my_add(ident(4), 4);
           |                        ^^^^^^^^ runtime argument defined here
           |
         help: you can force compile time evaluation with a `comptime` block
           |
-        6 |     let mut x = my_add(comptime { ident(4) }, 4);
+        8 |     let mut x = my_add(comptime { ident(4) }, 4);
           |                        ++++++++++          +
           = note: this only works if the expression is not fundamentally runtime
         "#],
@@ -1082,9 +1082,9 @@ fn test_comptime_call_comptime_param_runtime() {
         "#,
         &[r#"
         error: attempting to evaluate runtime expression in comptime context
-         --> main.plk:7:16
+         --> main.plk:8:16
           |
-        7 |         my_add(x, 4)
+        8 |         my_add(x, 4)
           |                ^ runtime expression
         "#],
     );
@@ -2350,22 +2350,22 @@ fn test_cached_const_does_not_increase_caller_quota() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-          --> main.plk:14:15
+          --> main.plk:15:15
            |
-        14 |         while i < 2000 {
+        15 |         while i < 2000 {
            |               ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:9:1
+          --> main.plk:10:1
            |
-         9 | / init {
-        10 | |     let mut warm: u256 = comptime { F };
-        11 | |     let mut x: u256 = comptime {
-        12 | |         let start = F;
+        10 | / init {
+        11 | |     let mut warm: u256 = comptime { F };
+        12 | |     let mut x: u256 = comptime {
+        13 | |         let start = F;
         ...  |
-        19 | |     @evm_stop();
-        20 | | }
+        20 | |     @evm_stop();
+        21 | | }
            | |_^
         "#],
     );

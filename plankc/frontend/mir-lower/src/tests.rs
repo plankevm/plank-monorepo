@@ -782,7 +782,6 @@ fn test_data_offset_lowers_to_data_segment() {
                 stop
             }
 
-
         data .0 0x68656c6c6f
         "#,
     );
@@ -818,7 +817,6 @@ fn test_data_offset_dedups_identical_literals() {
                 stop
             }
 
-
         data .0 0x68656c6c6f
         data .1 0x00ff
         "#,
@@ -846,7 +844,6 @@ fn test_data_offset_of_slice_cbytes_adds_start_offset() {
                 $0 = add $1 $2
                 stop
             }
-
 
         data .0 0x68656c6c6f00ff
         "#,

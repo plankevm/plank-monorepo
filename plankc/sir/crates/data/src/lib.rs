@@ -234,8 +234,6 @@ pub fn display_program(ir: &EthIRProgram) -> String {
 
     // Display data segments
     if !ir.data_segments.is_empty() {
-        writeln!(&mut output).unwrap();
-
         for (segment_id, data) in ir.data_segments.enumerate_idx() {
             write!(&mut output, "data .{segment_id} ").unwrap();
 
@@ -270,9 +268,9 @@ impl fmt::Display for EthIRProgram {
             if func_id == self.init_entry {
                 writeln!(f, "fn init:")?;
             } else if self.main_entry.is_some_and(|main_entry| main_entry == func_id) {
-                writeln!(f, "\nfn main:")?;
+                writeln!(f, "fn main:")?;
             } else {
-                writeln!(f, "\nfn f{}:", func_id)?;
+                writeln!(f, "fn f{}:", func_id)?;
             }
 
             bb_worklist.push(self.function(func_id).entry().id());
@@ -731,7 +729,6 @@ mod tests {
                     $1 = data_offset .1
                     stop
                 }
-
 
             data .0 0x1234
             data .1 0x56789abc

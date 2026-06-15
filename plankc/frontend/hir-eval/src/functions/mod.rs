@@ -218,7 +218,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let fn_def = this.eval.hir.fns[id];
             let closure_value = this.eval.values.intern(Value::Closure {
                 fn_def: id,
-                def_loc: fn_def.loc(fn_def.param_list_span),
+                def_loc: fn_def.loc(fn_def.source_span),
                 captures: capture_values,
             });
             Ok(EvalValue::Comptime(closure_value))

@@ -593,12 +593,14 @@ impl BlockLowerer<'_> {
         self.in_function_body = true;
 
         let body = self.lower_fn_body_block(fn_def.body());
+        let source_span = self.lexed.tokens_src_span(fn_def.node().span());
         let param_list_span = self.lexed.tokens_src_span(fn_def.param_list_span());
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,
             return_type,
             source: self.source_id,
+            source_span,
             param_list_span,
         });
 

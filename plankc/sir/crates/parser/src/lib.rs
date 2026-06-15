@@ -882,7 +882,6 @@ Basic Blocks:
         return $0 $3
     }
 
-
 data .0 0x48656c6c6f2c20576f726c6421
 data .1 0xdeadbeef
         "#;

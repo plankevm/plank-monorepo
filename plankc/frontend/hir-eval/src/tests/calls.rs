@@ -245,12 +245,12 @@ fn test_same_file_not_callable() {
         "#,
         &[r#"
         error: expected function
-         --> main.plk:3:5
+         --> main.plk:4:5
           |
         1 | const x = 5;
           | ------------ defined here
-        2 | init {
-        3 |     x();
+        ...
+        4 |     x();
           |     ^ `u256` is not callable
         "#],
     );
@@ -652,16 +652,16 @@ fn test_inconsistent_premable() {
         "#,
         &[r#"
         error: value used as type
-         --> main.plk:3:38
-          |
-        3 | const weird = fn (comptime N: u256) (if even(N) { not_a_type } else { bool }) {
-          |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected type, got value of type `void`
-          |
+          --> main.plk:5:38
+           |
+         5 | const weird = fn (comptime N: u256) (if even(N) { not_a_type } else { bool }) {
+           |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected type, got value of type `void`
+           |
         note: called here
-         --> main.plk:8:20
-          |
-        8 |     let mut nope = weird(2);
-          |                    ^^^^^^^^
+          --> main.plk:11:20
+           |
+        11 |     let mut nope = weird(2);
+           |                    ^^^^^^^^
         "#],
     );
 }
@@ -821,9 +821,9 @@ fn test_cached_non_never_poison_does_not_diverge() {
             "#,
             r#"
             error: mismatched types
-             --> main.plk:6:27
+             --> main.plk:8:27
               |
-            6 |         let after: u256 = false;
+            8 |         let after: u256 = false;
               |                    ----   ^^^^^ expected `u256`, got `bool`
               |                    |
               |                    `u256` expected because of this
@@ -998,22 +998,22 @@ fn test_comptime_function_calls_consume_call_entry_quota() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-          --> main.plk:10:9
+          --> main.plk:11:9
            |
-        10 |         f(2);
+        11 |         f(2);
            |         ^^^^ evaluating this call exceeded the comptime branch quota
            |
            = note: current eval branch quota is 2000
         note: comptime evaluation began here
-          --> main.plk:2:1
+          --> main.plk:3:1
            |
-         2 | / init {
-         3 | |     let mut x: u256 = comptime {
-         4 | |         @set_eval_branch_quota(2000);
-         5 | |         let mut i = 0;
+         3 | / init {
+         4 | |     let mut x: u256 = comptime {
+         5 | |         @set_eval_branch_quota(2000);
+         6 | |         let mut i = 0;
         ...  |
-        13 | |     @evm_stop();
-        14 | | }
+        14 | |     @evm_stop();
+        15 | | }
            | |_^
         "#],
     );
@@ -1057,15 +1057,15 @@ fn test_cached_comptime_function_calls_replay_body_quota() {
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:8:1
+          --> main.plk:9:1
            |
-         8 | / init {
-         9 | |     let mut warm: u256 = comptime { consume_3_branches() };
-        10 | |     let mut x: u256 = comptime {
-        11 | |         let mut i = 0;
+         9 | / init {
+        10 | |     let mut warm: u256 = comptime { consume_3_branches() };
+        11 | |     let mut x: u256 = comptime {
+        12 | |         let mut i = 0;
         ...  |
-        18 | |     @evm_stop();
-        19 | | }
+        19 | |     @evm_stop();
+        20 | | }
            | |_^
         "#],
     );
@@ -1101,22 +1101,22 @@ fn test_runtime_function_body_comptime_quota_counts_in_caller() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-          --> main.plk:13:15
+          --> main.plk:14:15
            |
-        13 |         while i < 1000 {
+        14 |         while i < 1000 {
            |               ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:9:1
+          --> main.plk:10:1
            |
-         9 | / init {
-        10 | |     spend_500();
-        11 | |     let mut x: u256 = comptime {
-        12 | |         let mut i = 0;
+        10 | / init {
+        11 | |     spend_500();
+        12 | |     let mut x: u256 = comptime {
+        13 | |         let mut i = 0;
         ...  |
-        18 | |     @evm_stop();
-        19 | | }
+        19 | |     @evm_stop();
+        20 | | }
            | |_^
         "#],
     );
@@ -1160,11 +1160,11 @@ fn test_runtime_lowering_quota_exhaustion_is_retryable() {
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:10:1
+          --> main.plk:11:1
            |
-        10 | / init {
-        11 | |     f();
-        12 | | }
+        11 | / init {
+        12 | |     f();
+        13 | | }
            | |_^
         "#],
     );
@@ -1247,22 +1247,22 @@ fn test_runtime_recursion_preamble_quota_counts_in_caller() {
         "#,
             r#"
         error: comptime branch quota exhausted
-          --> main.plk:14:9
+          --> main.plk:16:9
            |
-        14 |         identity(0)
+        16 |         identity(0)
            |         ^^^^^^^^^^^ evaluating this call exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:11:1
+          --> main.plk:13:1
            |
-        11 | / init {
-        12 | |     f();
-        13 | |     let mut x: u256 = comptime {
-        14 | |         identity(0)
-        15 | |     };
-        16 | |     @evm_stop();
-        17 | | }
+        13 | / init {
+        14 | |     f();
+        15 | |     let mut x: u256 = comptime {
+        16 | |         identity(0)
+        17 | |     };
+        18 | |     @evm_stop();
+        19 | | }
            | |_^
         "#,
         ],
@@ -1303,9 +1303,9 @@ fn test_mutual_runtime_recursion_preamble_quota_raise_counts_in_caller() {
         ),
         &[r#"
         error: runtime recursion not supported
-         --> main.plk:8:5
+         --> main.plk:9:5
           |
-        8 |     a();
+        9 |     a();
           |     ^^^ runtime call that recurses
           |
           = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
@@ -1346,22 +1346,22 @@ fn test_cached_comptime_function_replay_applies_eval_branch_quota_raise() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-          --> main.plk:15:9
+          --> main.plk:17:9
            |
-        15 |         identity(2);
+        17 |         identity(2);
            |         ^^^^^^^^^^^ evaluating this call exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1001
         note: comptime evaluation began here
-          --> main.plk:6:1
+          --> main.plk:8:1
            |
-         6 | / init {
-         7 | |     let mut warm: u256 = comptime { raise_quota() };
-         8 | |     let mut x: u256 = comptime {
-         9 | |         let mut i = 0;
+         8 | / init {
+         9 | |     let mut warm: u256 = comptime { raise_quota() };
+        10 | |     let mut x: u256 = comptime {
+        11 | |         let mut i = 0;
         ...  |
-        18 | |     @evm_stop();
-        19 | | }
+        20 | |     @evm_stop();
+        21 | | }
            | |_^
         "#],
     );
@@ -1397,17 +1397,17 @@ fn test_comptime_function_preamble_quota_exhaustion_reports_call_site() {
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:8:1
+          --> main.plk:9:1
            |
-         8 | / init {
-         9 | |     let mut x: u256 = comptime { f() };
-        10 | |     @evm_stop();
-        11 | | }
+         9 | / init {
+        10 | |     let mut x: u256 = comptime { f() };
+        11 | |     @evm_stop();
+        12 | | }
            | |_^
         note: called here
-          --> main.plk:9:34
+          --> main.plk:10:34
            |
-         9 |     let mut x: u256 = comptime { f() };
+        10 |     let mut x: u256 = comptime { f() };
            |                                  ^^^
         "#],
     );
@@ -1442,12 +1442,12 @@ fn test_runtime_context_comptime_call_entry_counts_before_body_quota() {
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:8:1
+          --> main.plk:9:1
            |
-         8 | / init {
-         9 | |     let mut x: f() = 0;
-        10 | |     @evm_stop();
-        11 | | }
+         9 | / init {
+        10 | |     let mut x: f() = 0;
+        11 | |     @evm_stop();
+        12 | | }
            | |_^
         "#],
     );
@@ -1476,22 +1476,22 @@ fn test_runtime_forced_comptime_call_entry_after_comptime_quota_reports_eval_sta
         ),
         &[r#"
         error: comptime branch quota exhausted
-          --> main.plk:10:16
+          --> main.plk:11:16
            |
-        10 |     let mut x: f() = 0;
+        11 |     let mut x: f() = 0;
            |                ^^^ evaluating this call exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1000
         note: comptime evaluation began here
-          --> main.plk:2:1
+          --> main.plk:3:1
            |
-         2 | / init {
-         3 | |     let mut warm: u256 = comptime {
-         4 | |         let mut i = 0;
-         5 | |         while i < 1000 {
+         3 | / init {
+         4 | |     let mut warm: u256 = comptime {
+         5 | |         let mut i = 0;
+         6 | |         while i < 1000 {
         ...  |
-        11 | |     @evm_stop();
-        12 | | }
+        12 | |     @evm_stop();
+        13 | | }
            | |_^
         "#],
     );

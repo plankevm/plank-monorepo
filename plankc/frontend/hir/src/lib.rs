@@ -166,6 +166,7 @@ pub struct FnDef {
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
     pub source: SourceId,
+    pub source_span: SourceSpan,
     pub param_list_span: SourceSpan,
 }
 

@@ -345,9 +345,9 @@ fn test_diagnostic_renders_generic_struct_name() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:5:24
+         --> main.plk:6:24
           |
-        5 |     let x: Box(u256) = Box(bool) { value: true };
+        6 |     let x: Box(u256) = Box(bool) { value: true };
           |            ---------   ^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Box(u256)`, got `Box(bool)`
           |            |
           |            `Box(u256)` expected because of this
@@ -383,14 +383,14 @@ fn test_diagnostic_renders_struct_value_type_name_arg_with_cbytes() {
         "#,
         &[r#"
         error: mismatched types
-          --> main.plk:14:59
+          --> main.plk:16:59
            |
-        14 |       let x: Bob(Pair { lhs: 0, rhs: 1, data: expected }) = Bob(Pair { lhs: 21, rhs: 67, data: actual }) {
+        16 |       let x: Bob(Pair { lhs: 0, rhs: 1, data: expected }) = Bob(Pair { lhs: 21, rhs: 67, data: actual }) {
            |  ____________--------------------------------------------___^
            | |            |
            | |            `Bob(Pair { lhs: 0, rhs: 1, data: "\x00\xff" })` expected because of this
-        15 | |         wow: false,
-        16 | |     };
+        17 | |         wow: false,
+        18 | |     };
            | |_____^ expected `Bob(Pair { lhs: 0, rhs: 1, data: "\x00\xff" })`, got `Bob(Pair { lhs: 21, rhs: 67, data: "other" })`
         "#],
     );
@@ -424,15 +424,15 @@ fn test_diagnostic_renders_closure_type_name_arg() {
         "#,
         &[r#"
         error: mismatched types
-          --> main.plk:13:50
+          --> main.plk:16:50
            |
-        13 |       let x: Bob(WithClosure { n: 0, f: first }) = Bob(WithClosure { n: 1, f: second }) {
+        16 |       let x: Bob(WithClosure { n: 0, f: first }) = Bob(WithClosure { n: 1, f: second }) {
            |  ____________-----------------------------------___^
            | |            |
-           | |            `Bob(WithClosure { n: 0, f: <closure@main.plk:5:17> })` expected because of this
-        14 | |         wow: false,
-        15 | |     };
-           | |_____^ expected `Bob(WithClosure { n: 0, f: <closure@main.plk:5:17> })`, got `Bob(WithClosure { n: 1, f: <closure@main.plk:6:18> })`
+           | |            `Bob(WithClosure { n: 0, f: <closure@main.plk:6:15> })` expected because of this
+        17 | |         wow: false,
+        18 | |     };
+           | |_____^ expected `Bob(WithClosure { n: 0, f: <closure@main.plk:6:15> })`, got `Bob(WithClosure { n: 1, f: <closure@main.plk:7:16> })`
         "#],
     );
 }
@@ -465,15 +465,15 @@ fn test_diagnostic_renders_closure_type_name_arg_with_captures() {
         "#,
         &[r#"
         error: mismatched types
-          --> main.plk:13:52
+          --> main.plk:16:52
            |
-        13 |       let x: Bob(WithClosure { f: make(1, true) }) = Bob(WithClosure { f: make(2, true) }) {
+        16 |       let x: Bob(WithClosure { f: make(1, true) }) = Bob(WithClosure { f: make(2, true) }) {
            |  ____________-------------------------------------___^
            | |            |
-           | |            `Bob(WithClosure { f: <closure@main.plk:5:14(1, true)> })` expected because of this
-        14 | |         wow: false,
-        15 | |     };
-           | |_____^ expected `Bob(WithClosure { f: <closure@main.plk:5:14(1, true)> })`, got `Bob(WithClosure { f: <closure@main.plk:5:14(2, true)> })`
+           | |            `Bob(WithClosure { f: <closure@main.plk:6:12(1, true)> })` expected because of this
+        17 | |         wow: false,
+        18 | |     };
+           | |_____^ expected `Bob(WithClosure { f: <closure@main.plk:6:12(1, true)> })`, got `Bob(WithClosure { f: <closure@main.plk:6:12(2, true)> })`
         "#],
     );
 }
@@ -494,9 +494,9 @@ fn test_const_alias_preserves_generic_struct_name() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:6:20
+         --> main.plk:7:20
           |
-        6 |     let x: Alias = 42;
+        7 |     let x: Alias = 42;
           |            -----   ^^ expected `Box(u256)`, got `u256`
           |            |
           |            `Box(u256)` expected because of this
@@ -520,9 +520,9 @@ fn test_parameterized_name_for_deduped_struct_uses_first_specialization() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:6:28
+         --> main.plk:7:28
           |
-        6 |     let b: Phantom(bool) = 42;
+        7 |     let b: Phantom(bool) = 42;
           |            -------------   ^^ expected `Phantom(u256)`, got `u256`
           |            |
           |            `Phantom(u256)` expected because of this
@@ -567,9 +567,9 @@ fn test_identity_type_function_preserves_named_struct() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:4:23
+         --> main.plk:5:23
           |
-        4 |     let x: id(Pair) = 42;
+        5 |     let x: id(Pair) = 42;
           |            --------   ^^ expected `Pair`, got `u256`
           |            |
           |            `Pair` expected because of this
@@ -616,9 +616,9 @@ fn test_local_alias_parameterized_name_uses_original_callee_name() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:7:25
+         --> main.plk:8:25
           |
-        7 |     let x: Phantom(S) = 42;
+        8 |     let x: Phantom(S) = 42;
           |            ----------   ^^ expected `Phantom(u256)`, got `u256`
           |            |
           |            `Phantom(u256)` expected because of this
@@ -643,9 +643,9 @@ fn test_comptime_block_alias_parameterized_name_uses_original_callee_name() {
         "#,
         &[r#"
         error: mismatched types
-         --> main.plk:7:25
+         --> main.plk:8:25
           |
-        7 |     let x: Phantom(S) = 42;
+        8 |     let x: Phantom(S) = 42;
           |            ----------   ^^ expected `Phantom(u256)`, got `u256`
           |            |
           |            `Phantom(u256)` expected because of this
@@ -674,9 +674,9 @@ fn test_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
         "#,
         &[r#"
         error: mismatched types
-          --> main.plk:10:25
+          --> main.plk:12:25
            |
-        10 |     let x: Phantom(S) = 42;
+        12 |     let x: Phantom(S) = 42;
            |            ----------   ^^ expected `struct@main.plk:2:5`, got `u256`
            |            |
            |            `struct@main.plk:2:5` expected because of this
@@ -711,9 +711,9 @@ fn test_transitive_self_referential_parameterized_name_falls_back_to_anonymous_s
         "#,
         &[r#"
         error: mismatched types
-          --> main.plk:15:21
+          --> main.plk:18:21
            |
-        15 |     let x: NamedA = 42;
+        18 |     let x: NamedA = 42;
            |            ------   ^^ expected `struct@main.plk:2:5`, got `u256`
            |            |
            |            `struct@main.plk:2:5` expected because of this

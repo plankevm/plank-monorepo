@@ -256,10 +256,10 @@ fn unicode_in_string() {
         "#,
             r#"
         error: non-ASCII characters in string segment
-         --> test.plk:2:24
+         --> test.plk:3:24
           |
-        2 - const BAKED_GOOD = "Gebäck";
-        2 + const BAKED_GOOD = "Geb" hex"c3a4" "ck";
+        3 - const BAKED_GOOD = "Gebäck";
+        3 + const BAKED_GOOD = "Geb" hex"c3a4" "ck";
           |
           = help: to add unicode characters embed the UTF-8 encoded bytes
           = info: unicode characters are disallowed for auditability because they can introduce homoglyphs/confusables or bidirectional text-flow controls
@@ -343,9 +343,9 @@ fn test_unclosed_if() {
         "#,
         &[r#"
             error: unexpected EOF
-             --> test.plk:4:2
+             --> test.plk:7:2
               |
-            4 | }
+            7 | }
               |  ^ unexpected EOF, expected `}`
         "#],
     );

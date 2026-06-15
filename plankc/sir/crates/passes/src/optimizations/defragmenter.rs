@@ -636,7 +636,6 @@ mod tests {
                     stop
                 }
 
-
             data .0 0x1234
             data .1 0x5678
             "#,
@@ -678,7 +677,6 @@ mod tests {
                 @3 {
                     stop
                 }
-
 
             data .0 0x1234
             "#,
