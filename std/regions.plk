@@ -26,7 +26,7 @@ const bytes = fn (comptime region: type) type {
     };
 };
 
-const runtime_embed_cbytes = fn (comptime cb: cbytes, comptime region: type) bytes(region) {
+const embed_as = fn (comptime cb: cbytes, comptime region: type) bytes(region) {
     if region == code {
         return bytes(region) {
             ptr: @data_offset(cb),
@@ -49,7 +49,7 @@ const runtime_embed_cbytes = fn (comptime cb: cbytes, comptime region: type) byt
 
 const copy_if_not_already_memory = fn (data: $T) bytes(memory) {
     if T == cbytes {
-        return runtime_embed_cbytes(data, memory);
+        return embed_as(data, memory);
     }
     if T == bytes(calldata) {
         let ptr = @malloc_uninit(data.length);

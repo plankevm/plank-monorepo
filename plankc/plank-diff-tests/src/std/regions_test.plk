@@ -30,7 +30,7 @@ init {
         comptime_assert(bytes_eq(TEST_BYTES, TEST_BYTES), "cbytes equality failed");
     }
 
-    let mem_data = runtime_embed_cbytes(TEST_BYTES, memory);
+    let mem_data = embed_as(TEST_BYTES, memory);
     require(mem_data.length == TEST_BYTES.length);
     require(@mload1(mem_data.ptr) == 0x00);
     require(@mload1(mem_data.ptr +% 1) == 0x01);
@@ -47,7 +47,7 @@ init {
     require(@mload1(mem_slice.ptr) == 0x02);
     require(@mload1(mem_slice.ptr +% 2) == 0x04);
 
-    let code_data = runtime_embed_cbytes(TEST_BYTES, code);
+    let code_data = embed_as(TEST_BYTES, code);
     require(code_data.length == TEST_BYTES.length);
     require(keccak256(code_data).raw == TEST_BYTES_HASH);
     require(bytes_eq(TEST_BYTES, code_data));
@@ -114,7 +114,7 @@ run {
     });
 
     public("copyCodeLiteral()", fn () never {
-        let data = runtime_embed_cbytes(TEST_BYTES, code);
+        let data = embed_as(TEST_BYTES, code);
         let out = copy_if_not_already_memory(data);
         @evm_return(out.ptr, out.length);
     });
@@ -122,7 +122,7 @@ run {
     public("sliceCodeLiteral(uint256,uint256)", fn () never {
         let start = @evm_calldataload(4);
         let end = @evm_calldataload(36);
-        let data = runtime_embed_cbytes(TEST_BYTES, code);
+        let data = embed_as(TEST_BYTES, code);
         let slice = slice_bytes(data, start, end);
         let out = copy_if_not_already_memory(slice);
         @evm_return(out.ptr, out.length);

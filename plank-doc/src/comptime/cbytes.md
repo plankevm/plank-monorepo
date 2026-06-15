@@ -43,7 +43,7 @@ init {
 
     // ✅ unlike `cbytes`, `bytes(code)` is a pointer into your contract's data
     // which can be manipulated at runtime.
-    let mut author_name: bytes(code) = runtime_embed_cbytes(name, code);
+    let mut author_name: bytes(code) = embed_as(name, code);
 
     @evm_stop();
 }
@@ -64,7 +64,7 @@ However, if you then proceed to embed that slice:
 
 ```plank
 init {
-    let columns: bytes(memory) = runtime_embed_cbytes(BATTLE_SHIP_COLUMNS, memory);
+    let columns: bytes(memory) = embed_as(BATTLE_SHIP_COLUMNS, memory);
 
     // `use(columns)`;
 
