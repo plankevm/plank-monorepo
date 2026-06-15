@@ -4,7 +4,7 @@
 - [Getting Started](./getting-started.md)
 - [What Makes Plank Different](./what-makes-plank-different.md)
 - [Comptime](./comptime/overview.md)
-    - [Bytes & Strings](./comptime/bytes-strings.md)
+    - [`cbytes`](./comptime/cbytes.md)
 - [Examples](./examples/intro.md)
     - [ERC20 Token](./examples/erc20.md)
     - [Minimal Proxy (ERC1167)](./examples/minimal-proxy.md)
