@@ -26,7 +26,7 @@ html.dark .hljs-function { color: #ffb454; }
         hljs.C_BLOCK_COMMENT_MODE,
         {
           className: 'type',
-          begin: /\b(?:void|u256|bool|memptr|type|function|never)\b/
+          begin: /\b(?:void|u256|bool|memptr|type|function|never|bytes|cbytes|code|memory|calldata)\b/
         },
         {
           className: 'number',
@@ -69,11 +69,6 @@ html.dark .hljs-function { color: #ffb454; }
         {
           className: 'symbol',
           begin: /\b[A-Z][A-Z0-9_]{2,}\b/
-        },
-        {
-          className: 'variable',
-          begin: /\b[a-z_][a-z0-9_]*\s*(?==)/,
-          relevance: 0
         },
         {
           className: 'type',
