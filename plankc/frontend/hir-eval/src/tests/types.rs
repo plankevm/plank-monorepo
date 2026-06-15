@@ -595,11 +595,10 @@ fn test_type_annotation_not_comptime() {
 }
 
 #[test]
-fn test_self_referential_generic_name_renders_without_overflow() {
+fn test_self_referential_parameterized_name_renders_self() {
     // `f(u256)` creates the struct anonymously (local callee never names types), and
     // `Phantom(S)` dedups to `S` itself, so the naming pass would record `S = Phantom(S)`.
-    // Evaluating + rendering the resulting diagnostics must terminate.
-    let (_, _, session) = try_lower(
+    assert_diagnostics(
         r#"
         const Phantom = fn (comptime T: type) type {
             struct { value: u256 }
@@ -612,9 +611,14 @@ fn test_self_referential_generic_name_renders_without_overflow() {
             @evm_stop();
         }
         "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:7:25
+          |
+        7 |     let x: Phantom(S) = 42;
+          |            ----------   ^^ expected `Phantom(<self>)`, got `u256`
+          |            |
+          |            `Phantom(<self>)` expected because of this
+        "#],
     );
-    assert!(session.has_errors(), "the type mismatch should still be reported");
-    for diag in session.diagnostics() {
-        let _ = diag.render_plain(&session);
-    }
 }

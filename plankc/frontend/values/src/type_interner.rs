@@ -309,6 +309,8 @@ impl TypeInterner {
         let Type::Struct(r#struct) = self.lookup(ty) else {
             return;
         };
+        // Deduped structs may be reached through multiple parameterizations; if this
+        // TypeId already has a canonical display name, keep it.
         if r#struct.name.get().is_some() {
             return;
         }
@@ -322,11 +324,31 @@ impl TypeInterner {
         unsafe { (*self.type_name_args.get()).push_copy_slice(args) }
     }
 
-    pub fn fmt_struct(
+    fn fmt_type(
+        &self,
+        f: &mut impl fmt::Write,
+        ty: TypeId,
+        session: &Session,
+        type_format_stack: &TypeFormatStack<'_>,
+    ) -> fmt::Result {
+        if type_format_stack.contains(ty) {
+            return f.write_str("<self>");
+        }
+        match ty.as_primitive() {
+            Ok(prim) => write!(f, "{}", prim.name()),
+            Err(r#struct) => {
+                let type_format_stack = TypeFormatStack { parent: Some(type_format_stack), ty };
+                self.fmt_struct(f, r#struct, session, &type_format_stack)
+            }
+        }
+    }
+
+    fn fmt_struct(
         &self,
         f: &mut impl fmt::Write,
         r#struct: StructRef,
         session: &Session,
+        type_format_stack: &TypeFormatStack<'_>,
     ) -> fmt::Result {
         let view = self.lookup_struct(r#struct);
         if let Some(name) = view.name.get() {
@@ -335,7 +357,7 @@ impl TypeInterner {
                 TypeName::Parameterized { name, args } => {
                     f.write_str(session.lookup_name(name))?;
                     f.write_str("(")?;
-                    self.fmt_type_name_args(f, args, session)?;
+                    self.fmt_type_name_args(f, args, session, type_format_stack)?;
                     f.write_str(")")
                 }
             };
@@ -355,6 +377,7 @@ impl TypeInterner {
         f: &mut impl fmt::Write,
         args: TypeNameArgsId,
         session: &Session,
+        type_format_stack: &TypeFormatStack<'_>,
     ) -> fmt::Result {
         // SAFETY: Formatting only reads type-name args and must not call code that can mutate
         // `type_name_args`; otherwise this borrowed slice could be invalidated by reallocation.
@@ -363,7 +386,7 @@ impl TypeInterner {
         for &arg in args {
             f.write_str(sep)?;
             sep = ", ";
-            self.fmt_type_name_arg(f, arg, session)?;
+            self.fmt_type_name_arg(f, arg, session, type_format_stack)?;
         }
         Ok(())
     }
@@ -373,6 +396,7 @@ impl TypeInterner {
         f: &mut impl fmt::Write,
         arg: TypeNameArg,
         session: &Session,
+        type_format_stack: &TypeFormatStack<'_>,
     ) -> fmt::Result {
         match arg {
             TypeNameArg::Void => f.write_str("{}"),
@@ -382,7 +406,7 @@ impl TypeInterner {
                 let bytes = session.lookup_bytes_slice(value.contents, value.start, value.end);
                 write_bytes_literal(f, bytes)
             }
-            TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
+            TypeNameArg::Type(ty) => self.fmt_type(f, ty, session, type_format_stack),
             TypeNameArg::Closure { def_loc, captures } => {
                 let (line, col) = session.offset_to_line_col(def_loc.source, def_loc.span.start);
                 let source = &session.get_source(def_loc.source);
@@ -404,14 +428,15 @@ impl TypeInterner {
                     for &capture in captures {
                         f.write_str(sep)?;
                         sep = ", ";
-                        self.fmt_type_name_arg(f, capture, session)?;
+                        self.fmt_type_name_arg(f, capture, session, type_format_stack)?;
                     }
                     f.write_str(")")?;
                 }
                 f.write_str(">")
             }
             TypeNameArg::Struct { ty, fields } => {
-                write!(f, "{} {{", self.format(session, ty))?;
+                self.fmt_type(f, ty, session, type_format_stack)?;
+                f.write_str(" {")?;
                 let Type::Struct(r#struct) = self.lookup(ty) else {
                     unreachable!("invariant: type name struct argument has non-struct type")
                 };
@@ -426,7 +451,7 @@ impl TypeInterner {
                     sep = ", ";
                     f.write_str(session.lookup_name(field.name))?;
                     f.write_str(": ")?;
-                    self.fmt_type_name_arg(f, arg, session)?;
+                    self.fmt_type_name_arg(f, arg, session, type_format_stack)?;
                 }
                 if args.is_empty() { f.write_str("}") } else { f.write_str(" }") }
             }
@@ -474,11 +499,32 @@ pub struct FmtType<'a> {
     ty: TypeId,
 }
 
+struct TypeFormatStack<'a> {
+    parent: Option<&'a TypeFormatStack<'a>>,
+    ty: TypeId,
+}
+
+impl TypeFormatStack<'_> {
+    fn contains(&self, ty: TypeId) -> bool {
+        let mut current = Some(self);
+        while let Some(type_format_stack) = current {
+            if type_format_stack.ty == ty {
+                return true;
+            }
+            current = type_format_stack.parent;
+        }
+        false
+    }
+}
+
 impl std::fmt::Display for FmtType<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.ty.as_primitive() {
             Ok(prim) => write!(f, "{}", prim.name()),
-            Err(r#struct) => self.types.fmt_struct(f, r#struct, self.sess),
+            Err(r#struct) => {
+                let type_format_stack = TypeFormatStack { parent: None, ty: self.ty };
+                self.types.fmt_struct(f, r#struct, self.sess, &type_format_stack)
+            }
         }
     }
 }
@@ -579,7 +625,7 @@ mod tests {
         interner.try_name_struct_parameterized(ty, name, &[TypeNameArg::Type(ty)]);
 
         let rendered = format!("{}", interner.format(&session, ty));
-        assert!(!rendered.is_empty());
+        assert_eq!(rendered, "Phantom(<self>)");
     }
 
     #[test]
