@@ -709,6 +709,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return;
             };
             let arg = Self::build_type_name_arg(
+                self.eval.hir,
                 self.eval.values,
                 self.eval.types,
                 &mut self.eval.values_buf,
@@ -726,6 +727,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn build_type_name_arg(
+        hir: &hir::Hir,
         values: &ValueInterner,
         types: &TypeInterner,
         values_buf: &mut Vec<ValueId>,
@@ -738,7 +740,24 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Value::BigNum(value) => TypeNameArg::BigNum(value),
             Value::Bytes(value) => TypeNameArg::Bytes(value),
             Value::Type(ty) => TypeNameArg::Type(ty),
-            Value::Closure { .. } => TypeNameArg::Closure(value),
+            Value::Closure { fn_def, captures } => {
+                let args_offset = type_name_args_buf.len();
+                for &(capture, _) in captures {
+                    let arg = Self::build_type_name_arg(
+                        hir,
+                        values,
+                        types,
+                        values_buf,
+                        type_name_args_buf,
+                        capture,
+                    );
+                    type_name_args_buf.push(arg);
+                }
+                let captures = types.intern_type_name_args(&type_name_args_buf[args_offset..]);
+                type_name_args_buf.truncate(args_offset);
+                let fn_def = hir.fns[fn_def];
+                TypeNameArg::Closure { def_loc: fn_def.loc(fn_def.param_list_span), captures }
+            }
             Value::StructVal { ty, fields } => {
                 let values_offset = values_buf.len();
                 values_buf.extend_from_slice(fields);
@@ -747,6 +766,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let args_offset = type_name_args_buf.len();
                 for idx in values_offset..values_end {
                     let arg = Self::build_type_name_arg(
+                        hir,
                         values,
                         types,
                         values_buf,

@@ -426,10 +426,51 @@ fn test_diagnostic_renders_closure_type_name_arg() {
         13 |       let x: Bob(WithClosure { n: 0, f: first }) = Bob(WithClosure { n: 1, f: second }) {
            |  ____________-----------------------------------___^
            | |            |
-           | |            `Bob(WithClosure { n: 0, f: <closure#15> })` expected because of this
+           | |            `Bob(WithClosure { n: 0, f: <closure@main.plk:5:17> })` expected because of this
         14 | |         wow: false,
         15 | |     };
-           | |_____^ expected `Bob(WithClosure { n: 0, f: <closure#15> })`, got `Bob(WithClosure { n: 1, f: <closure#12> })`
+           | |_____^ expected `Bob(WithClosure { n: 0, f: <closure@main.plk:5:17> })`, got `Bob(WithClosure { n: 1, f: <closure@main.plk:6:18> })`
+        "#],
+    );
+}
+
+#[test]
+fn test_diagnostic_renders_closure_type_name_arg_with_captures() {
+    assert_diagnostics(
+        r#"
+        const WithClosure = struct {
+            f: function,
+        };
+
+        const make = fn (comptime N: u256, comptime B: bool) function {
+            return fn () u256 { if N == 0 { return 0; } if B { return N; } return 0; };
+        };
+
+        const Bob = fn (comptime P: WithClosure) type {
+            return struct P {
+                wow: bool,
+            };
+        };
+
+        init {
+            let x: Bob(WithClosure { f: make(1, true) }) = Bob(WithClosure { f: make(2, true) }) {
+                wow: false,
+            };
+
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+          --> main.plk:13:52
+           |
+        13 |       let x: Bob(WithClosure { f: make(1, true) }) = Bob(WithClosure { f: make(2, true) }) {
+           |  ____________-------------------------------------___^
+           | |            |
+           | |            `Bob(WithClosure { f: <closure@main.plk:5:14(1, true)> })` expected because of this
+        14 | |         wow: false,
+        15 | |     };
+           | |_____^ expected `Bob(WithClosure { f: <closure@main.plk:5:14(1, true)> })`, got `Bob(WithClosure { f: <closure@main.plk:5:14(2, true)> })`
         "#],
     );
 }

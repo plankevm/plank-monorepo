@@ -24,7 +24,7 @@ pub enum TypeNameArg {
     Bytes(CBytes),
     Type(TypeId),
     Struct { ty: TypeId, fields: TypeNameArgsId },
-    Closure(ValueId),
+    Closure { def_loc: SrcLoc, captures: TypeNameArgsId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -342,7 +342,12 @@ impl TypeInterner {
         }
         let (line, col) = session.offset_to_line_col(view.def_loc.source, view.def_loc.span.start);
         let source = &session.get_source(view.def_loc.source);
-        write!(f, "struct#{}@{}:{line}:{col}", r#struct.0, source.path.to_str().unwrap())
+        write!(
+            f,
+            "struct#{}@{}:{line}:{col}",
+            r#struct.0,
+            source.path.to_str().expect("source paths should be valid UTF-8 for diagnostics")
+        )
     }
 
     fn fmt_type_name_args(
@@ -378,7 +383,33 @@ impl TypeInterner {
                 write_bytes_literal(f, bytes)
             }
             TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
-            TypeNameArg::Closure(value) => write!(f, "<closure#{value}>",),
+            TypeNameArg::Closure { def_loc, captures } => {
+                let (line, col) = session.offset_to_line_col(def_loc.source, def_loc.span.start);
+                let source = &session.get_source(def_loc.source);
+                write!(
+                    f,
+                    "<closure@{}:{line}:{col}",
+                    source
+                        .path
+                        .to_str()
+                        .expect("source paths should be valid UTF-8 for diagnostics")
+                )?;
+                // SAFETY: Formatting only reads type-name args and must not call code that can
+                // mutate `type_name_args`; otherwise this borrowed slice could be invalidated by
+                // reallocation.
+                let captures = unsafe { &(&*self.type_name_args.get())[captures] };
+                if !captures.is_empty() {
+                    f.write_str("(")?;
+                    let mut sep = "";
+                    for &capture in captures {
+                        f.write_str(sep)?;
+                        sep = ", ";
+                        self.fmt_type_name_arg(f, capture, session)?;
+                    }
+                    f.write_str(")")?;
+                }
+                f.write_str(">")
+            }
             TypeNameArg::Struct { ty, fields } => {
                 write!(f, "{} {{", self.format(session, ty))?;
                 let Type::Struct(r#struct) = self.lookup(ty) else {
