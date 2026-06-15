@@ -736,6 +736,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Value::Void => TypeNameArg::Void,
             Value::Bool(value) => TypeNameArg::Bool(value),
             Value::BigNum(value) => TypeNameArg::BigNum(value),
+            Value::Bytes(value) => TypeNameArg::Bytes(value),
             Value::Type(ty) => TypeNameArg::Type(ty),
             Value::Closure { .. } => TypeNameArg::Closure(value),
             Value::StructVal { ty, fields } => {

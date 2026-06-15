@@ -1,26 +1,10 @@
 use crate::*;
 use plank_core::Idx;
-use plank_session::Session;
+use plank_session::{Session, write_bytes_literal};
 use plank_values::{U256, Value, ValueInterner, uint};
 use std::fmt::{self, Display, Formatter};
 
 const DISPLAY_AS_HEX_THRESHOLD: U256 = uint!(100_000_U256);
-
-fn write_bytes_literal(f: &mut Formatter<'_>, bytes: &[u8]) -> fmt::Result {
-    write!(f, "\"")?;
-    for &byte in bytes {
-        match byte {
-            b'\n' => write!(f, "\\n")?,
-            b'\r' => write!(f, "\\r")?,
-            b'\t' => write!(f, "\\t")?,
-            b'\\' => write!(f, "\\\\")?,
-            b'"' => write!(f, "\\\"")?,
-            0x20..=0x7e => write!(f, "{}", byte as char)?,
-            _ => write!(f, "\\x{byte:02x}")?,
-        }
-    }
-    write!(f, "\"")
-}
 
 pub struct DisplayHir<'a> {
     hir: &'a Hir,

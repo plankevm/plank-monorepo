@@ -8,9 +8,9 @@ use std::{
 };
 
 use hashbrown::{DefaultHashBuilder, HashSet, HashTable, hash_table::Entry};
-use plank_session::{Session, SourceSpan, SrcLoc, StrId};
+use plank_session::{Session, SourceSpan, SrcLoc, StrId, write_bytes_literal};
 
-use crate::ValueId;
+use crate::{CBytes, ValueId};
 
 newtype_index! {
     pub struct TypeNameArgsId;
@@ -21,6 +21,7 @@ pub enum TypeNameArg {
     Void,
     Bool(bool),
     BigNum(U256),
+    Bytes(CBytes),
     Type(TypeId),
     Struct { ty: TypeId, fields: TypeNameArgsId },
     Closure(ValueId),
@@ -368,6 +369,10 @@ impl TypeInterner {
             TypeNameArg::Void => f.write_str("{}"),
             TypeNameArg::Bool(value) => write!(f, "{value}"),
             TypeNameArg::BigNum(value) => write!(f, "{value}"),
+            TypeNameArg::Bytes(value) => {
+                let bytes = session.lookup_bytes_slice(value.contents, value.start, value.end);
+                write_bytes_literal(f, bytes)
+            }
             TypeNameArg::Type(ty) => write!(f, "{}", self.format(session, ty)),
             TypeNameArg::Closure(value) => write!(f, "<closure#{value}>",),
             TypeNameArg::Struct { ty, fields } => {

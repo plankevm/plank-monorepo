@@ -1,10 +1,12 @@
 pub mod builtins;
 pub mod diagnostic;
+pub mod display;
 mod interner;
 pub mod poison;
 
 pub use builtins::{Builtin, RuntimeBuiltin};
 pub use diagnostic::*;
+pub use display::write_bytes_literal;
 pub use interner::{BytesId, EMPTY_BYTES, StrId};
 pub use poison::{MaybePoisoned, Poisoned};
 
