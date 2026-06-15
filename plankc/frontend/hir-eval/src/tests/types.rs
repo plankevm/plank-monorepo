@@ -356,12 +356,13 @@ fn test_diagnostic_renders_generic_struct_name() {
 }
 
 #[test]
-fn test_diagnostic_does_not_render_struct_value_type_name_arg() {
+fn test_diagnostic_renders_struct_value_type_name_arg_with_cbytes() {
     assert_diagnostics(
         r#"
         const Pair = struct {
             lhs: u256,
             rhs: u256,
+            data: cbytes,
         };
 
         const Bob = fn (comptime P: Pair) type {
@@ -369,9 +370,11 @@ fn test_diagnostic_does_not_render_struct_value_type_name_arg() {
                 wow: bool,
             };
         };
+        const expected = @slice_cbytes("a" hex"00ff" "b", 1, 3);
+        const actual = "other";
 
         init {
-            let x: Bob(Pair { lhs: 0, rhs: 1 }) = Bob(Pair { lhs: 21, rhs: 67 }) {
+            let x: Bob(Pair { lhs: 0, rhs: 1, data: expected }) = Bob(Pair { lhs: 21, rhs: 67, data: actual }) {
                 wow: false,
             };
 
@@ -380,15 +383,15 @@ fn test_diagnostic_does_not_render_struct_value_type_name_arg() {
         "#,
         &[r#"
         error: mismatched types
-          --> main.plk:11:43
+          --> main.plk:14:59
            |
-        11 |       let x: Bob(Pair { lhs: 0, rhs: 1 }) = Bob(Pair { lhs: 21, rhs: 67 }) {
-           |  ____________----------------------------___^
+        14 |       let x: Bob(Pair { lhs: 0, rhs: 1, data: expected }) = Bob(Pair { lhs: 21, rhs: 67, data: actual }) {
+           |  ____________--------------------------------------------___^
            | |            |
-           | |            `Bob(Pair { lhs: 0, rhs: 1 })` expected because of this
-        12 | |         wow: false,
-        13 | |     };
-           | |_____^ expected `Bob(Pair { lhs: 0, rhs: 1 })`, got `Bob(Pair { lhs: 21, rhs: 67 })`
+           | |            `Bob(Pair { lhs: 0, rhs: 1, data: "\x00\xff" })` expected because of this
+        15 | |         wow: false,
+        16 | |     };
+           | |_____^ expected `Bob(Pair { lhs: 0, rhs: 1, data: "\x00\xff" })`, got `Bob(Pair { lhs: 21, rhs: 67, data: "other" })`
         "#],
     );
 }

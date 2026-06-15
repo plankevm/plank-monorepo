@@ -364,12 +364,7 @@ impl TypeInterner {
         }
         let (line, col) = session.offset_to_line_col(view.def_loc.source, view.def_loc.span.start);
         let source = &session.get_source(view.def_loc.source);
-        write!(
-            f,
-            "struct#{}@{}:{line}:{col}",
-            r#struct.0,
-            source.path.to_str().expect("source paths should be valid UTF-8 for diagnostics")
-        )
+        write!(f, "struct#{}@{}:{line}:{col}", r#struct.0, source.path.display())
     }
 
     fn fmt_type_name_args(
@@ -410,14 +405,7 @@ impl TypeInterner {
             TypeNameArg::Closure { def_loc, captures } => {
                 let (line, col) = session.offset_to_line_col(def_loc.source, def_loc.span.start);
                 let source = &session.get_source(def_loc.source);
-                write!(
-                    f,
-                    "<closure@{}:{line}:{col}",
-                    source
-                        .path
-                        .to_str()
-                        .expect("source paths should be valid UTF-8 for diagnostics")
-                )?;
+                write!(f, "<closure@{}:{line}:{col}", source.path.display())?;
                 // SAFETY: Formatting only reads type-name args and must not call code that can
                 // mutate `type_name_args`; otherwise this borrowed slice could be invalidated by
                 // reallocation.
