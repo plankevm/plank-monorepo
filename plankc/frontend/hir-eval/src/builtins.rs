@@ -79,7 +79,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 },
                 ty => unreachable!(
                     "unsupported result type `{}`",
-                    this.eval.types.format(this.diag_ctx.session, ty)
+                    this.eval.types.format(this.diag_ctx.session, this.eval.values, ty)
                 ),
             }))
         })?;
@@ -126,6 +126,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let arg_types = &this.eval.types_buf[types_buf_offset..];
             builtin_sigs::resolve_result_type(builtin.into(), arg_types).ok_or_else(|| {
                 this.diag_ctx.emit_no_matching_builtin_signature(
+                    this.eval.values,
                     builtin.into(),
                     &this.eval.types_buf[types_buf_offset..],
                     expr_loc,
@@ -178,7 +179,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let expr_loc = self.loc(expr_span);
 
         if builtin_sigs::arg_count(builtin) != args.len() {
-            self.diag_ctx.emit_wrong_arg_count(builtin, args.len(), expr_loc);
+            self.diag_ctx.emit_wrong_arg_count(self.eval.values, builtin, args.len(), expr_loc);
             return Err(Poisoned);
         }
 
@@ -212,6 +213,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Value::BigNum(requested_quota) => requested_quota,
                     other => {
                         self.diag_ctx.emit_no_matching_builtin_signature(
+                            self.eval.values,
                             builtin,
                             &[other.get_type()],
                             expr_loc,
@@ -291,7 +293,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         expr: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         if builtin_sigs::arg_count(builtin) != args.len() {
-            self.diag_ctx.emit_wrong_arg_count(builtin, args.len(), self.loc(expr));
+            self.diag_ctx.emit_wrong_arg_count(
+                self.eval.values,
+                builtin,
+                args.len(),
+                self.loc(expr),
+            );
             return Err(Poisoned);
         }
 
@@ -361,6 +368,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if !actual_ty.is_assignable_to(expected_field_type) {
             let field_def_loc = self.loc(field.def_span);
             self.diag_ctx.emit_type_mismatch(
+                self.eval.values,
                 expected_field_type,
                 field_def_loc,
                 actual_ty,
@@ -392,6 +400,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         // At least one side is runtime: emit MIR.
         if self.eval.types.is_comptime_only(instance_ty) {
             self.diag_ctx.emit_set_field_on_comptime_only_struct(
+                self.eval.values,
                 instance_ty,
                 self.loc(self.bindings[field_value].use_span),
                 r#struct.def_loc,
@@ -565,7 +574,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Ok(ty);
         }
         let actual_ty = self.state_type(state);
-        self.diag_ctx.emit_expected_type_arg(builtin, actual_ty, self.loc(span));
+        self.diag_ctx.emit_expected_type_arg(self.eval.values, builtin, actual_ty, self.loc(span));
         Err(Poisoned)
     }
 
@@ -582,7 +591,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Ok(bytes);
         }
         let actual_ty = self.state_type(state);
-        self.diag_ctx.emit_no_matching_builtin_signature(builtin, &[actual_ty], self.loc(span));
+        self.diag_ctx.emit_no_matching_builtin_signature(
+            self.eval.values,
+            builtin,
+            &[actual_ty],
+            self.loc(span),
+        );
         Err(Poisoned)
     }
 
@@ -601,6 +615,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let Value::BigNum(n) = self.values.lookup(vid) else {
             self.diag_ctx.emit_type_mismatch_simple(
+                self.eval.values,
                 TypeId::U256,
                 self.eval.values.type_of_value(vid),
                 self.loc(arg_binding.use_span),
@@ -619,7 +634,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         match self.types.lookup(ty) {
             Type::Struct(struct_info) => Ok(struct_info),
             _ => {
-                self.diag_ctx.emit_expected_struct_type_arg(builtin, ty, self.loc(span));
+                self.diag_ctx.emit_expected_struct_type_arg(
+                    self.eval.values,
+                    builtin,
+                    ty,
+                    self.loc(span),
+                );
                 Err(Poisoned)
             }
         }

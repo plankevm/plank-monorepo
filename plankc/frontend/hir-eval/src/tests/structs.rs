@@ -684,7 +684,7 @@ fn test_type_index_expr_eagerly_evaluates() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : struct#0@main.plk:4:13 = struct#0 {
+            %0 : struct@main.plk:4:13 = struct#0 {
                 67,
             }
             %1 : never = @evm_stop()

@@ -1,9 +1,12 @@
-use crate::{DefOrigin, FnDefId, TypeId, ValueId, bignum_interner::*};
+use crate::{
+    DefOrigin, FnDefId, Type, TypeId, TypeInterner, ValueId,
+    bignum_interner::{BigNumId, BigNumInterner},
+};
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::BytesId;
-use std::hash::BuildHasher;
+use plank_session::{BytesId, Session, SrcLoc, write_bytes_literal};
+use std::{fmt, hash::BuildHasher};
 
 newtype_index! {
     struct CompoundIdx;
@@ -24,7 +27,7 @@ enum StoredValue {
     BigNum(BigNumId),
     Type(TypeId),
     Bytes(CBytes),
-    Closure { fn_def: FnDefId, captures: CaptureIdx },
+    Closure { fn_def: FnDefId, def_loc: SrcLoc, captures: CaptureIdx },
     StructVal { ty: TypeId, children: CompoundIdx },
 }
 
@@ -35,7 +38,7 @@ pub enum Value<'a> {
     BigNum(U256),
     Type(TypeId),
     Bytes(CBytes),
-    Closure { fn_def: FnDefId, captures: &'a [(ValueId, DefOrigin)] },
+    Closure { fn_def: FnDefId, def_loc: SrcLoc, captures: &'a [(ValueId, DefOrigin)] },
     StructVal { ty: TypeId, fields: &'a [ValueId] },
 }
 
@@ -80,8 +83,8 @@ fn stored_to_value<'a>(
         StoredValue::BigNum(bid) => Value::BigNum(big_nums.lookup(bid)),
         StoredValue::Type(t) => Value::Type(t),
         StoredValue::Bytes(bytes) => Value::Bytes(bytes),
-        StoredValue::Closure { fn_def, captures: idx } => {
-            Value::Closure { fn_def, captures: &captures[idx] }
+        StoredValue::Closure { fn_def, def_loc, captures: idx } => {
+            Value::Closure { fn_def, def_loc, captures: &captures[idx] }
         }
         StoredValue::StructVal { ty, children: idx } => {
             Value::StructVal { ty, fields: &children[idx] }
@@ -157,8 +160,9 @@ impl ValueInterner {
                     Value::BigNum(n) => StoredValue::BigNum(self.big_nums.intern(n)),
                     Value::Type(t) => StoredValue::Type(t),
                     Value::Bytes(bytes) => StoredValue::Bytes(bytes),
-                    Value::Closure { fn_def, captures } => StoredValue::Closure {
+                    Value::Closure { fn_def, def_loc, captures } => StoredValue::Closure {
                         fn_def,
+                        def_loc,
                         captures: self.captures.push_copy_slice(captures),
                     },
                     Value::StructVal { ty, fields } => StoredValue::StructVal {
@@ -175,6 +179,76 @@ impl ValueInterner {
 
     pub fn lookup(&self, id: ValueId) -> Value<'_> {
         stored_to_value(self.values[id], &self.children, &self.captures, &self.big_nums)
+    }
+
+    pub fn format_value<'a>(
+        &'a self,
+        session: &'a Session,
+        types: &'a TypeInterner,
+        value: ValueId,
+    ) -> FmtValue<'a> {
+        FmtValue { values: self, session, types, value }
+    }
+}
+
+pub struct FmtValue<'a> {
+    values: &'a ValueInterner,
+    session: &'a Session,
+    types: &'a TypeInterner,
+    value: ValueId,
+}
+
+impl FmtValue<'_> {
+    fn fmt_value(&self, f: &mut impl fmt::Write, value: ValueId) -> fmt::Result {
+        match self.values.lookup(value) {
+            Value::Void => f.write_str("{}"),
+            Value::Bool(value) => write!(f, "{value}"),
+            Value::BigNum(value) => write!(f, "{value}"),
+            Value::Bytes(value) => {
+                let bytes = self.session.lookup_bytes_slice(value.contents, value.start, value.end);
+                write_bytes_literal(f, bytes)
+            }
+            Value::Type(ty) => write!(f, "{}", self.types.format(self.session, self.values, ty)),
+            Value::Closure { def_loc, captures, .. } => {
+                let (line, col) =
+                    self.session.offset_to_line_col(def_loc.source, def_loc.span.start);
+                let source = &self.session.get_source(def_loc.source);
+                write!(f, "<closure@{}:{line}:{col}", source.path.display())?;
+                if !captures.is_empty() {
+                    f.write_str("(")?;
+                    let mut sep = "";
+                    for &(capture, _) in captures {
+                        f.write_str(sep)?;
+                        sep = ", ";
+                        self.fmt_value(f, capture)?;
+                    }
+                    f.write_str(")")?;
+                }
+                f.write_str(">")
+            }
+            Value::StructVal { ty, fields } => {
+                write!(f, "{} {{", self.types.format(self.session, self.values, ty))?;
+                let Type::Struct(r#struct) = self.types.lookup(ty) else {
+                    unreachable!("invariant: struct value has non-struct type")
+                };
+                assert_eq!(r#struct.fields.len(), fields.len());
+                let mut sep = " ";
+                for (&field, &value) in r#struct.fields.iter().zip(fields) {
+                    f.write_str(sep)?;
+                    sep = ", ";
+                    f.write_str(self.session.lookup_name(field.name))?;
+                    f.write_str(": ")?;
+                    self.fmt_value(f, value)?;
+                }
+                if fields.is_empty() { f.write_str("}") } else { f.write_str(" }") }
+            }
+        }
+    }
+}
+
+impl fmt::Display for FmtValue<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_value(f, self.value)
     }
 }
 

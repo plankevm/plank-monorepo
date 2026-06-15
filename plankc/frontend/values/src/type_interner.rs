@@ -1,4 +1,3 @@
-use alloy_primitives::U256;
 use plank_core::{chunked_arena::ChunkedArena, list_of_lists::ListOfLists, newtype_index};
 use std::{
     cell::{Cell, UnsafeCell},
@@ -8,23 +7,12 @@ use std::{
 };
 
 use hashbrown::{DefaultHashBuilder, HashSet, HashTable, hash_table::Entry};
-use plank_session::{Session, SourceSpan, SrcLoc, StrId, write_bytes_literal};
+use plank_session::{Session, SourceSpan, SrcLoc, StrId};
 
-use crate::{CBytes, ValueId};
+use crate::{Value, ValueId, ValueInterner};
 
 newtype_index! {
     pub struct TypeNameArgsId;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeNameArg {
-    Void,
-    Bool(bool),
-    BigNum(U256),
-    Bytes(CBytes),
-    Type(TypeId),
-    Struct { ty: TypeId, fields: TypeNameArgsId },
-    Closure { def_loc: SrcLoc, captures: TypeNameArgsId },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,7 +115,7 @@ pub struct TypeInterner {
     dedup: UnsafeCell<HashTable<StructRef>>,
     arena: ChunkedArena<MIN_STRUCT_FIELD_ALIGN>,
     hasher: DefaultHashBuilder,
-    type_name_args: UnsafeCell<ListOfLists<TypeNameArgsId, TypeNameArg>>,
+    type_name_args: UnsafeCell<ListOfLists<TypeNameArgsId, ValueId>>,
 }
 
 impl Default for TypeInterner {
@@ -305,7 +293,13 @@ impl TypeInterner {
         }
     }
 
-    pub fn try_name_struct_parameterized(&self, ty: TypeId, name: StrId, args: &[TypeNameArg]) {
+    pub fn try_name_struct_parameterized(
+        &self,
+        values: &ValueInterner,
+        ty: TypeId,
+        name: StrId,
+        args: &[ValueId],
+    ) {
         let Type::Struct(r#struct) = self.lookup(ty) else {
             return;
         };
@@ -314,33 +308,78 @@ impl TypeInterner {
         if r#struct.name.get().is_some() {
             return;
         }
+        if self.would_create_recursive_type_name(values, args, ty) {
+            return;
+        }
         let args = self.intern_type_name_args(args);
         r#struct.name.set(Some(TypeName::Parameterized { name, args }));
     }
 
-    pub fn intern_type_name_args(&self, args: &[TypeNameArg]) -> TypeNameArgsId {
+    fn would_create_recursive_type_name(
+        &self,
+        values: &ValueInterner,
+        args: &[ValueId],
+        named_ty: TypeId,
+    ) -> bool {
+        const TYPE_NAME_VALIDATION_BUDGET: u32 = 1024;
+
+        fn walk_value(
+            types: &TypeInterner,
+            values: &ValueInterner,
+            value: ValueId,
+            named_ty: TypeId,
+            fuel: u32,
+        ) -> bool {
+            let Some(fuel) = fuel.checked_sub(1) else {
+                return true;
+            };
+            match values.lookup(value) {
+                Value::Type(ty) => walk_type(types, values, ty, named_ty, fuel),
+                Value::StructVal { ty, fields } => {
+                    walk_type(types, values, ty, named_ty, fuel)
+                        || fields
+                            .iter()
+                            .any(|&field| walk_value(types, values, field, named_ty, fuel))
+                }
+                Value::Closure { captures, .. } => captures
+                    .iter()
+                    .any(|&(capture, _)| walk_value(types, values, capture, named_ty, fuel)),
+                Value::Void | Value::Bool(_) | Value::BigNum(_) | Value::Bytes(_) => false,
+            }
+        }
+
+        fn walk_type(
+            types: &TypeInterner,
+            values: &ValueInterner,
+            ty: TypeId,
+            named_ty: TypeId,
+            fuel: u32,
+        ) -> bool {
+            let Some(fuel) = fuel.checked_sub(1) else {
+                return true;
+            };
+            if ty == named_ty {
+                return true;
+            }
+            let Type::Struct(r#struct) = types.lookup(ty) else {
+                return false;
+            };
+            let Some(TypeName::Parameterized { args, .. }) = r#struct.name.get() else {
+                return false;
+            };
+            // SAFETY: This only reads already-interned type-name args before the caller may append
+            // new args. None of the recursive calls mutate `type_name_args`.
+            let args = unsafe { &(&*types.type_name_args.get())[args] };
+            args.iter().any(|&arg| walk_value(types, values, arg, named_ty, fuel))
+        }
+
+        args.iter().any(|&arg| walk_value(self, values, arg, named_ty, TYPE_NAME_VALIDATION_BUDGET))
+    }
+
+    pub fn intern_type_name_args(&self, args: &[ValueId]) -> TypeNameArgsId {
         // SAFETY: We only create this mutable reference for the duration of this call. Callers must
         // not intern type-name args while formatting is holding slices borrowed from this list.
         unsafe { (*self.type_name_args.get()).push_copy_slice(args) }
-    }
-
-    fn fmt_type(
-        &self,
-        f: &mut impl fmt::Write,
-        ty: TypeId,
-        session: &Session,
-        type_format_stack: &TypeFormatStack<'_>,
-    ) -> fmt::Result {
-        if type_format_stack.contains(ty) {
-            return f.write_str("<self>");
-        }
-        match ty.as_primitive() {
-            Ok(prim) => write!(f, "{}", prim.name()),
-            Err(r#struct) => {
-                let type_format_stack = TypeFormatStack { parent: Some(type_format_stack), ty };
-                self.fmt_struct(f, r#struct, session, &type_format_stack)
-            }
-        }
     }
 
     fn fmt_struct(
@@ -348,7 +387,7 @@ impl TypeInterner {
         f: &mut impl fmt::Write,
         r#struct: StructRef,
         session: &Session,
-        type_format_stack: &TypeFormatStack<'_>,
+        values: &ValueInterner,
     ) -> fmt::Result {
         let view = self.lookup_struct(r#struct);
         if let Some(name) = view.name.get() {
@@ -357,14 +396,14 @@ impl TypeInterner {
                 TypeName::Parameterized { name, args } => {
                     f.write_str(session.lookup_name(name))?;
                     f.write_str("(")?;
-                    self.fmt_type_name_args(f, args, session, type_format_stack)?;
+                    self.fmt_type_name_args(f, args, session, values)?;
                     f.write_str(")")
                 }
             };
         }
         let (line, col) = session.offset_to_line_col(view.def_loc.source, view.def_loc.span.start);
         let source = &session.get_source(view.def_loc.source);
-        write!(f, "struct#{}@{}:{line}:{col}", r#struct.0, source.path.display())
+        write!(f, "struct@{}:{line}:{col}", source.path.display())
     }
 
     fn fmt_type_name_args(
@@ -372,7 +411,7 @@ impl TypeInterner {
         f: &mut impl fmt::Write,
         args: TypeNameArgsId,
         session: &Session,
-        type_format_stack: &TypeFormatStack<'_>,
+        values: &ValueInterner,
     ) -> fmt::Result {
         // SAFETY: Formatting only reads type-name args and must not call code that can mutate
         // `type_name_args`; otherwise this borrowed slice could be invalidated by reallocation.
@@ -381,73 +420,18 @@ impl TypeInterner {
         for &arg in args {
             f.write_str(sep)?;
             sep = ", ";
-            self.fmt_type_name_arg(f, arg, session, type_format_stack)?;
+            write!(f, "{}", values.format_value(session, self, arg))?;
         }
         Ok(())
     }
 
-    fn fmt_type_name_arg(
-        &self,
-        f: &mut impl fmt::Write,
-        arg: TypeNameArg,
-        session: &Session,
-        type_format_stack: &TypeFormatStack<'_>,
-    ) -> fmt::Result {
-        match arg {
-            TypeNameArg::Void => f.write_str("{}"),
-            TypeNameArg::Bool(value) => write!(f, "{value}"),
-            TypeNameArg::BigNum(value) => write!(f, "{value}"),
-            TypeNameArg::Bytes(value) => {
-                let bytes = session.lookup_bytes_slice(value.contents, value.start, value.end);
-                write_bytes_literal(f, bytes)
-            }
-            TypeNameArg::Type(ty) => self.fmt_type(f, ty, session, type_format_stack),
-            TypeNameArg::Closure { def_loc, captures } => {
-                let (line, col) = session.offset_to_line_col(def_loc.source, def_loc.span.start);
-                let source = &session.get_source(def_loc.source);
-                write!(f, "<closure@{}:{line}:{col}", source.path.display())?;
-                // SAFETY: Formatting only reads type-name args and must not call code that can
-                // mutate `type_name_args`; otherwise this borrowed slice could be invalidated by
-                // reallocation.
-                let captures = unsafe { &(&*self.type_name_args.get())[captures] };
-                if !captures.is_empty() {
-                    f.write_str("(")?;
-                    let mut sep = "";
-                    for &capture in captures {
-                        f.write_str(sep)?;
-                        sep = ", ";
-                        self.fmt_type_name_arg(f, capture, session, type_format_stack)?;
-                    }
-                    f.write_str(")")?;
-                }
-                f.write_str(">")
-            }
-            TypeNameArg::Struct { ty, fields } => {
-                self.fmt_type(f, ty, session, type_format_stack)?;
-                f.write_str(" {")?;
-                let Type::Struct(r#struct) = self.lookup(ty) else {
-                    unreachable!("invariant: type name struct argument has non-struct type")
-                };
-                // SAFETY: Formatting only reads type-name args and must not call code that can
-                // mutate `type_name_args`; otherwise this borrowed slice could be invalidated by
-                // reallocation.
-                let args = unsafe { &(&*self.type_name_args.get())[fields] };
-                assert_eq!(r#struct.fields.len(), args.len());
-                let mut sep = " ";
-                for (&field, &arg) in r#struct.fields.iter().zip(args) {
-                    f.write_str(sep)?;
-                    sep = ", ";
-                    f.write_str(session.lookup_name(field.name))?;
-                    f.write_str(": ")?;
-                    self.fmt_type_name_arg(f, arg, session, type_format_stack)?;
-                }
-                if args.is_empty() { f.write_str("}") } else { f.write_str(" }") }
-            }
-        }
-    }
-
-    pub fn format<'a>(&'a self, sess: &'a Session, ty: TypeId) -> FmtType<'a> {
-        FmtType { types: self, sess, ty }
+    pub fn format<'a>(
+        &'a self,
+        sess: &'a Session,
+        values: &'a ValueInterner,
+        ty: TypeId,
+    ) -> FmtType<'a> {
+        FmtType { types: self, values, sess, ty }
     }
 
     fn push_struct<'s, 'a>(&'s self, r#struct: StructInfo<'a>) -> StructRef {
@@ -483,36 +467,16 @@ impl TypeInterner {
 
 pub struct FmtType<'a> {
     types: &'a TypeInterner,
+    values: &'a ValueInterner,
     sess: &'a Session,
     ty: TypeId,
-}
-
-struct TypeFormatStack<'a> {
-    parent: Option<&'a TypeFormatStack<'a>>,
-    ty: TypeId,
-}
-
-impl TypeFormatStack<'_> {
-    fn contains(&self, ty: TypeId) -> bool {
-        let mut current = Some(self);
-        while let Some(type_format_stack) = current {
-            if type_format_stack.ty == ty {
-                return true;
-            }
-            current = type_format_stack.parent;
-        }
-        false
-    }
 }
 
 impl std::fmt::Display for FmtType<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.ty.as_primitive() {
             Ok(prim) => write!(f, "{}", prim.name()),
-            Err(r#struct) => {
-                let type_format_stack = TypeFormatStack { parent: None, ty: self.ty };
-                self.types.fmt_struct(f, r#struct, self.sess, &type_format_stack)
-            }
+            Err(r#struct) => self.types.fmt_struct(f, r#struct, self.sess, self.values),
         }
     }
 }
@@ -526,8 +490,7 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plank_session::{Session, Source, SourceId, SrcLoc, ZERO_SPAN, builtins};
-    use std::path::PathBuf;
+    use plank_session::{SourceId, SrcLoc, ZERO_SPAN, builtins};
 
     fn dummy_src_loc(id: u32) -> SrcLoc {
         SrcLoc::new(SourceId::new(id), ZERO_SPAN)
@@ -587,33 +550,6 @@ mod tests {
         let a = interner.intern_struct(a_info);
         let b = interner.intern_struct(b_info);
         assert_ne!(a, b);
-    }
-
-    #[test]
-    fn self_referential_type_name_formats_without_overflow() {
-        let interner = TypeInterner::new();
-        let mut session = Session::new();
-        let source = session
-            .register_source(Source { path: PathBuf::from("main.plk"), content: String::new() });
-        let name = session.intern("Phantom");
-        let field_name = session.intern("value");
-
-        let fields = [Field { name: field_name, ty: TypeId::U256, def_span: ZERO_SPAN }];
-        let info = StructInfo {
-            type_index: ValueId::VOID,
-            def_loc: SrcLoc::new(source, ZERO_SPAN),
-            fields: &fields,
-        };
-        let ty = TypeId::from_struct(interner.intern_struct(info));
-
-        // Struct deduplication allows a type function's result to be one of its own
-        // arguments (e.g. `Phantom(S)` returning a struct that dedups to `S`), so the
-        // name's argument list can reference the named type itself. Formatting must
-        // terminate regardless.
-        interner.try_name_struct_parameterized(ty, name, &[TypeNameArg::Type(ty)]);
-
-        let rendered = format!("{}", interner.format(&session, ty));
-        assert_eq!(rendered, "Phantom(<self>)");
     }
 
     #[test]

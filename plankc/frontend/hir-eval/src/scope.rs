@@ -7,7 +7,7 @@ use crate::{
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
+use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,11 +15,21 @@ pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
     pub use_span: SourceSpan,
     pub origin: DefOrigin,
+    pub symbolic_display_name: Option<StrId>,
 }
 
 impl Local {
     pub fn comptime(value: ValueId, use_span: SourceSpan, origin: DefOrigin) -> Self {
-        Self { state: Ok(LocalState::Comptime(value)), use_span, origin }
+        Self {
+            state: Ok(LocalState::Comptime(value)),
+            use_span,
+            origin,
+            symbolic_display_name: None,
+        }
+    }
+
+    pub fn set_symbolic_display_name(&mut self, symbolic_display_name: StrId) {
+        self.symbolic_display_name = Some(symbolic_display_name);
     }
 
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
@@ -181,7 +191,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
-            self.diag_ctx.emit_type_not_type(actual_ty, self.binding_loc(use_span, origin));
+            self.diag_ctx.emit_type_not_type(
+                self.eval.values,
+                actual_ty,
+                self.binding_loc(use_span, origin),
+            );
             return Err(Poisoned);
         };
         Ok(ty)
@@ -231,6 +245,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         } else {
             self.diag_ctx.emit_type_mismatch(
+                self.eval.values,
                 expected_ty,
                 expected_loc,
                 actual_ty,
@@ -270,8 +285,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings
-            .insert(local, Local { state, use_span: expr.span, origin: self.expr_origin(expr) });
+        self.bindings.insert(
+            local,
+            Local {
+                state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                symbolic_display_name: self.expr_symbolic_display_name(expr),
+            },
+        );
         Ok(())
     }
 
@@ -306,7 +328,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.bindings.insert(
             local,
-            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
+            Local {
+                state: new_state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                symbolic_display_name: self.expr_symbolic_display_name(expr),
+            },
         );
         Ok(())
     }
@@ -322,7 +349,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .map(LocalState::Comptime);
             let _ = self.bindings.insert(
                 local,
-                Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                Local {
+                    state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    symbolic_display_name: self.expr_symbolic_display_name(expr),
+                },
             );
             return Ok(());
         }
@@ -337,7 +369,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 self.bindings.insert(
                     local,
-                    Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                    Local {
+                        state,
+                        use_span: expr.span,
+                        origin: self.expr_origin(expr),
+                        symbolic_display_name: self.expr_symbolic_display_name(expr),
+                    },
                 );
             }
             Some(binding) => {
@@ -350,6 +387,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         };
                         if let Err(existing_ty) = self.mir_types[target].unify(ty) {
                             self.diag_ctx.emit_incompatible_branch_types(
+                                self.eval.values,
                                 existing_ty,
                                 self.origin_loc(binding.origin),
                                 ty,
@@ -363,8 +401,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] =
-                    Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) };
+                self.bindings[local] = Local {
+                    state: new_state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    symbolic_display_name: self.expr_symbolic_display_name(expr),
+                };
             }
         }
 
@@ -396,6 +438,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Comptime(ValueId::FALSE) => Ok(false),
             LocalState::Comptime(value) => {
                 self.diag_ctx.emit_type_mismatch_simple(
+                    self.eval.values,
                     TypeId::BOOL,
                     self.values.type_of_value(value),
                     self.loc(binding.use_span),
@@ -440,6 +483,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
         self.bindings[target].state = new_state;
+        self.bindings[target].symbolic_display_name = self.expr_symbolic_display_name(expr);
         Ok(())
     }
 
@@ -542,6 +586,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state) => {
                 let state_ty = self.state_type(state);
                 self.diag_ctx.emit_type_mismatch_simple(
+                    self.eval.values,
                     TypeId::BOOL,
                     state_ty,
                     self.loc(binding.use_span),
@@ -581,6 +626,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state_ty = this.state_type(state);
             if !state_ty.is_assignable_to(TypeId::BOOL) {
                 this.diag_ctx.emit_type_mismatch_simple(
+                    this.eval.values,
                     TypeId::BOOL,
                     state_ty,
                     this.loc(binding.use_span),
@@ -656,6 +702,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             DefOrigin::Const(id)
         } else {
             DefOrigin::Local(expr.span)
+        }
+    }
+
+    pub fn expr_symbolic_display_name(&self, expr: hir::Expr) -> Option<StrId> {
+        match expr.kind {
+            ExprKind::ConstRef(id) => Some(self.hir.consts[id].name),
+            ExprKind::LocalRef(local) => {
+                self.bindings.get(local).and_then(|binding| binding.symbolic_display_name)
+            }
+            _ => None,
         }
     }
 

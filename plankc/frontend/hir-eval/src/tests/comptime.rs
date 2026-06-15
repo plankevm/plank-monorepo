@@ -474,7 +474,7 @@ fn test_comptime_block_struct_type() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : struct#0@main.plk:3:9 = struct#0 {
+            %0 : struct@main.plk:3:9 = struct#0 {
                 42,
             }
             %1 : never = @evm_stop()

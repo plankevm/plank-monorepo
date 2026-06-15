@@ -2,7 +2,7 @@ use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
-use plank_values::{DefOrigin, Type, TypeId, TypeInterner, TypeNameArg, Value, ValueInterner};
+use plank_values::{DefOrigin, Type, TypeId, Value};
 
 mod cache;
 
@@ -89,11 +89,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
-        for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
-            fn_scope.bindings.insert_no_prev(
-                def.inner_local,
-                Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span)),
-            );
+        for (&(value, origin), &def) in captured_values.iter().zip(capture_defs) {
+            let mut local = Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span));
+            if let DefOrigin::Const(id) = origin {
+                local.set_symbolic_display_name(fn_scope.eval.hir.consts[id].name);
+            }
+            fn_scope.bindings.insert_no_prev(def.inner_local, local);
         }
 
         for (&param, &arg) in params.iter().zip(args) {
@@ -107,6 +108,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: param.span,
                             origin: DefOrigin::Local(param.span),
+                            symbolic_display_name: None,
                         },
                     );
                     continue;
@@ -138,7 +140,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
-                Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
+                Local {
+                    state,
+                    use_span: param.span,
+                    origin: DefOrigin::Local(param.span),
+                    symbolic_display_name: binding.symbolic_display_name,
+                },
             );
         }
 
@@ -208,8 +215,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             let capture_values = &this.eval.captures_buf[captures_buf_offset..];
             assert_eq!(capture_values.len(), def_captures.len());
-            let closure_value =
-                this.eval.values.intern(Value::Closure { fn_def: id, captures: capture_values });
+            let fn_def = this.eval.hir.fns[id];
+            let closure_value = this.eval.values.intern(Value::Closure {
+                fn_def: id,
+                def_loc: fn_def.loc(fn_def.param_list_span),
+                captures: capture_values,
+            });
             Ok(EvalValue::Comptime(closure_value))
         })
     }
@@ -222,7 +233,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
             this.with_maybe_values_buf(|this, values_buf_offset: usize| {
-                let (state, callee_use_span, callee_origin) = this.bindings[callee].poisoned()?;
+                let Local {
+                    state,
+                    use_span: callee_use_span,
+                    origin: callee_origin,
+                    symbolic_display_name,
+                } = this.bindings[callee];
+                let state = state?;
                 let closure_vid = match state {
                     LocalState::Comptime(value) => value,
                     LocalState::Runtime(_) => {
@@ -230,21 +247,24 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         return Err(Poisoned);
                     }
                 };
-                let Value::Closure { fn_def: fn_def_id, captures } =
+                let Value::Closure { fn_def: fn_def_id, captures, .. } =
                     this.eval.values.lookup(closure_vid)
                 else {
                     let ty = this.values.type_of_value(closure_vid);
-                    this.diag_ctx
-                        .emit_not_callable(ty, this.binding_loc(callee_use_span, callee_origin));
+                    this.diag_ctx.emit_not_callable(
+                        this.eval.values,
+                        ty,
+                        this.binding_loc(callee_use_span, callee_origin),
+                    );
                     return Err(Poisoned);
                 };
                 for &capture in captures {
                     this.eval.captures_buf.push(capture);
                 }
-                let type_name = match callee_origin {
+                let type_name = symbolic_display_name.or(match callee_origin {
                     DefOrigin::Const(id) => Some(this.eval.hir.consts[id].name),
                     DefOrigin::Local(_) => None,
-                };
+                });
 
                 let args = &this.hir.call_args[args_id];
                 let arg_spans = this
@@ -550,16 +570,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             cached.max_eval_branch_quota_seen,
                         ) =>
                     {
-                        if let (Some(type_name), ComptimeCallOutcome::Value(value)) =
-                            (call.type_name, cached.outcome)
-                        {
-                            self.try_name_anonymous_call_result_type(
-                                type_name,
-                                call,
-                                value,
-                                values_buf_offset,
-                            );
-                        }
                         self.max_eval_branch_quota_seen =
                             self.max_eval_branch_quota_seen.max(cached.max_eval_branch_quota_seen);
                         return Ok(Ok(cached));
@@ -708,80 +718,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval.type_name_args_buf.truncate(args_offset);
                 return;
             };
-            let arg = Self::build_type_name_arg(
-                self.eval.hir,
-                self.eval.values,
-                self.eval.types,
-                &mut self.eval.values_buf,
-                &mut self.eval.type_name_args_buf,
-                value,
-            );
-            self.eval.type_name_args_buf.push(arg);
+            self.eval.type_name_args_buf.push(value);
         }
         self.types.try_name_struct_parameterized(
+            self.eval.values,
             ty,
             name,
             &self.eval.type_name_args_buf[args_offset..],
         );
         self.eval.type_name_args_buf.truncate(args_offset);
-    }
-
-    fn build_type_name_arg(
-        hir: &hir::Hir,
-        values: &ValueInterner,
-        types: &TypeInterner,
-        values_buf: &mut Vec<ValueId>,
-        type_name_args_buf: &mut Vec<TypeNameArg>,
-        value: ValueId,
-    ) -> TypeNameArg {
-        match values.lookup(value) {
-            Value::Void => TypeNameArg::Void,
-            Value::Bool(value) => TypeNameArg::Bool(value),
-            Value::BigNum(value) => TypeNameArg::BigNum(value),
-            Value::Bytes(value) => TypeNameArg::Bytes(value),
-            Value::Type(ty) => TypeNameArg::Type(ty),
-            Value::Closure { fn_def, captures } => {
-                let args_offset = type_name_args_buf.len();
-                for &(capture, _) in captures {
-                    let arg = Self::build_type_name_arg(
-                        hir,
-                        values,
-                        types,
-                        values_buf,
-                        type_name_args_buf,
-                        capture,
-                    );
-                    type_name_args_buf.push(arg);
-                }
-                let captures = types.intern_type_name_args(&type_name_args_buf[args_offset..]);
-                type_name_args_buf.truncate(args_offset);
-                let fn_def = hir.fns[fn_def];
-                TypeNameArg::Closure { def_loc: fn_def.loc(fn_def.param_list_span), captures }
-            }
-            Value::StructVal { ty, fields } => {
-                let values_offset = values_buf.len();
-                values_buf.extend_from_slice(fields);
-                let values_end = values_buf.len();
-
-                let args_offset = type_name_args_buf.len();
-                for idx in values_offset..values_end {
-                    let arg = Self::build_type_name_arg(
-                        hir,
-                        values,
-                        types,
-                        values_buf,
-                        type_name_args_buf,
-                        values_buf[idx],
-                    );
-                    type_name_args_buf.push(arg);
-                }
-                let fields = types.intern_type_name_args(&type_name_args_buf[args_offset..]);
-                type_name_args_buf.truncate(args_offset);
-                values_buf.truncate(values_offset);
-
-                TypeNameArg::Struct { ty, fields }
-            }
-        }
     }
 
     pub fn eval_param(
@@ -813,6 +758,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let arg_ty = self.state_type(state);
                 if !arg_ty.is_assignable_to(param_ty) {
                     self.diag_ctx.emit_type_mismatch(
+                        self.eval.values,
                         param_ty,
                         self.origin_loc(self.bindings[local_id].origin),
                         arg_ty,
@@ -831,6 +777,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: arg_binding.use_span,
                             origin: DefOrigin::Local(arg_binding.use_span),
+                            symbolic_display_name: None,
                         },
                     );
                     return;
@@ -841,14 +788,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 );
                 let arg_ty = self.state_type(state);
                 let type_value = self.values.intern_type(arg_ty);
-                self.bindings.insert_no_prev(
-                    capture,
-                    Local::comptime(
-                        type_value,
-                        arg_binding.use_span,
-                        DefOrigin::Local(arg_binding.use_span),
-                    ),
+                let mut local = Local::comptime(
+                    type_value,
+                    arg_binding.use_span,
+                    DefOrigin::Local(arg_binding.use_span),
                 );
+                if let Some(symbolic_display_name) = arg_binding.symbolic_display_name {
+                    local.set_symbolic_display_name(symbolic_display_name);
+                }
+                self.bindings.insert_no_prev(capture, local);
             }
             hir::ParamType::Poisoned => {
                 self.bindings[arg].state = Err(Poisoned);
@@ -866,6 +814,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let ty = self.value_type(value);
             if !ty.is_assignable_to(return_type) {
                 self.diag_ctx.emit_type_mismatch(
+                    self.eval.values,
                     return_type,
                     ret_type_loc,
                     ty,

@@ -2,7 +2,7 @@ use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
-use plank_values::{PrimitiveType, TypeId, TypeInterner, builtins as builtin_sigs};
+use plank_values::{PrimitiveType, TypeId, TypeInterner, ValueInterner, builtins as builtin_sigs};
 
 pub(crate) struct BindingLoc {
     pub r#use: SrcLoc,
@@ -67,6 +67,7 @@ impl DiagEmitter for DiagCtx<'_> {
 impl DiagCtx<'_> {
     pub fn emit_type_mismatch(
         &mut self,
+        values: &ValueInterner,
         expected_ty: TypeId,
         expected_loc: SrcLoc,
         actual_ty: TypeId,
@@ -75,11 +76,13 @@ impl DiagCtx<'_> {
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
-            self.types.format(self.session, expected_ty),
-            self.types.format(self.session, actual_ty),
+            self.types.format(self.session, values, expected_ty),
+            self.types.format(self.session, values, actual_ty),
         );
-        let secondary_label =
-            format!("`{}` expected because of this", self.types.format(self.session, expected_ty));
+        let secondary_label = format!(
+            "`{}` expected because of this",
+            self.types.format(self.session, values, expected_ty)
+        );
         let diagnostic = Diagnostic::error("mismatched types").cross_source_annotations(
             actual_loc,
             primary_label,
@@ -93,11 +96,11 @@ impl DiagCtx<'_> {
         }
     }
 
-    pub fn emit_type_not_type(&mut self, ty: TypeId, loc: BindingLoc) {
+    pub fn emit_type_not_type(&mut self, values: &ValueInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label = format!(
             "expected {}, got value of type `{}`",
             builtin_names::TYPE,
-            self.types.format(self.session, ty),
+            self.types.format(self.session, values, ty),
         );
         let diag = Diagnostic::error("value used as type");
         let diag = match loc.def {
@@ -111,6 +114,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_literal_field_type_mismatch(
         &mut self,
+        values: &ValueInterner,
         expected_ty: TypeId,
         actual_ty: TypeId,
         field_value_loc: SrcLoc,
@@ -123,8 +127,8 @@ impl DiagCtx<'_> {
                 field_value_loc.span,
                 format!(
                     "field `{name}` expects `{}`, got `{}`",
-                    self.types.format(self.session, expected_ty),
-                    self.types.format(self.session, actual_ty),
+                    self.types.format(self.session, values, expected_ty),
+                    self.types.format(self.session, values, actual_ty),
                 ),
             )
             .emit(self);
@@ -132,6 +136,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_type_mismatch_simple(
         &mut self,
+        values: &ValueInterner,
         expected_ty: TypeId,
         actual_ty: TypeId,
         loc: SrcLoc,
@@ -142,16 +147,16 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "expected `{}`, got `{}`",
-                    self.types.format(self.session, expected_ty),
-                    self.types.format(self.session, actual_ty),
+                    self.types.format(self.session, values, expected_ty),
+                    self.types.format(self.session, values, actual_ty),
                 ),
             )
             .emit(self);
     }
 
-    pub fn emit_not_a_struct_type(&mut self, ty: TypeId, loc: BindingLoc) {
+    pub fn emit_not_a_struct_type(&mut self, values: &ValueInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label =
-            format!("`{}` is not a struct type", self.types.format(self.session, ty));
+            format!("`{}` is not a struct type", self.types.format(self.session, values, ty));
         let diag = Diagnostic::error("expected struct type");
         let diag = match loc.def {
             None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
@@ -162,9 +167,16 @@ impl DiagCtx<'_> {
         diag.emit(self);
     }
 
-    pub fn emit_member_on_non_struct(&mut self, ty: TypeId, loc: BindingLoc) {
-        let primary_label =
-            format!("value of type `{}` is not a struct type", self.types.format(self.session, ty));
+    pub fn emit_member_on_non_struct(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        loc: BindingLoc,
+    ) {
+        let primary_label = format!(
+            "value of type `{}` is not a struct type",
+            self.types.format(self.session, values, ty)
+        );
         let diag = Diagnostic::error("no fields on type");
         let diag = match loc.def {
             None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
@@ -186,8 +198,9 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_not_callable(&mut self, ty: TypeId, loc: BindingLoc) {
-        let primary_label = format!("`{}` is not callable", self.types.format(self.session, ty));
+    pub fn emit_not_callable(&mut self, values: &ValueInterner, ty: TypeId, loc: BindingLoc) {
+        let primary_label =
+            format!("`{}` is not callable", self.types.format(self.session, values, ty));
         let diag = Diagnostic::error("expected function");
         let diag = match loc.def {
             None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
@@ -200,6 +213,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_incompatible_branch_types(
         &mut self,
+        values: &ValueInterner,
         ty1: TypeId,
         loc1: SrcLoc,
         ty2: TypeId,
@@ -207,11 +221,11 @@ impl DiagCtx<'_> {
     ) {
         let primary_label = format!(
             "expected `{}`, got `{}`",
-            self.types.format(self.session, ty1),
-            self.types.format(self.session, ty2),
+            self.types.format(self.session, values, ty1),
+            self.types.format(self.session, values, ty2),
         );
         let secondary_label =
-            format!("`{}` expected because of this", self.types.format(self.session, ty1));
+            format!("`{}` expected because of this", self.types.format(self.session, values, ty1));
         Diagnostic::error("`if` and `else` have incompatible types")
             .cross_source_annotations(loc2, primary_label, loc1, secondary_label)
             .emit(self);
@@ -379,11 +393,12 @@ impl DiagCtx<'_> {
 
     pub fn emit_set_field_on_comptime_only_struct(
         &mut self,
+        values: &ValueInterner,
         struct_ty: TypeId,
         value_loc: SrcLoc,
         struct_def_loc: SrcLoc,
     ) {
-        let struct_name = self.types.format(self.session, struct_ty);
+        let struct_name = self.types.format(self.session, values, struct_ty);
         Diagnostic::error("mixing comptime and runtime data in struct")
             .cross_source_annotations(
                 value_loc,
@@ -394,7 +409,7 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    fn format_signatures_note(&self, builtin: Builtin) -> Option<String> {
+    fn format_signatures_note(&self, values: &ValueInterner, builtin: Builtin) -> Option<String> {
         use std::fmt::Write;
 
         let signatures = builtin_sigs::builtin_signatures(builtin);
@@ -412,14 +427,20 @@ impl DiagCtx<'_> {
                 if j > 0 {
                     note.push_str(", ");
                 }
-                let _ = write!(note, "{}", self.types.format(self.session, ty));
+                let _ = write!(note, "{}", self.types.format(self.session, values, ty));
             }
             note.push(')');
         }
         Some(note)
     }
 
-    pub fn emit_wrong_arg_count(&mut self, builtin: Builtin, actual: usize, loc: SrcLoc) {
+    pub fn emit_wrong_arg_count(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        actual: usize,
+        loc: SrcLoc,
+    ) {
         let name = builtin.name();
         let expected = builtin_sigs::arg_count(builtin);
 
@@ -432,7 +453,7 @@ impl DiagCtx<'_> {
             ),
         );
 
-        if let Some(note) = self.format_signatures_note(builtin) {
+        if let Some(note) = self.format_signatures_note(values, builtin) {
             diag = diag.note(note);
         }
 
@@ -441,6 +462,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_no_matching_builtin_signature(
         &mut self,
+        values: &ValueInterner,
         builtin: Builtin,
         arg_types: &[TypeId],
         loc: SrcLoc,
@@ -448,7 +470,7 @@ impl DiagCtx<'_> {
         use std::fmt::Write;
 
         if builtin_sigs::arg_count(builtin) != arg_types.len() {
-            return self.emit_wrong_arg_count(builtin, arg_types.len(), loc);
+            return self.emit_wrong_arg_count(values, builtin, arg_types.len(), loc);
         }
 
         let name = builtin.name();
@@ -457,7 +479,7 @@ impl DiagCtx<'_> {
             if i > 0 {
                 args_str.push_str(", ");
             }
-            let _ = write!(args_str, "{}", self.types.format(self.session, ty));
+            let _ = write!(args_str, "{}", self.types.format(self.session, values, ty));
         }
 
         let mut diag = Diagnostic::error("no valid match for builtin signature").primary(
@@ -466,7 +488,7 @@ impl DiagCtx<'_> {
             format!("`{name}` cannot be called with ({args_str})"),
         );
 
-        if let Some(note) = self.format_signatures_note(builtin) {
+        if let Some(note) = self.format_signatures_note(values, builtin) {
             diag = diag.note(note);
         }
 
@@ -508,6 +530,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_lit_unexpected_field(
         &mut self,
+        values: &ValueInterner,
         struct_ty: TypeId,
         lit_loc: SrcLoc,
         field: hir::FieldInfo,
@@ -517,13 +540,17 @@ impl DiagCtx<'_> {
             .primary(
                 lit_loc.source,
                 field_span,
-                format!("`{}` has no field `{field}`", self.types.format(self.session, struct_ty)),
+                format!(
+                    "`{}` has no field `{field}`",
+                    self.types.format(self.session, values, struct_ty)
+                ),
             )
             .emit(self);
     }
 
     pub fn emit_struct_unknown_field_access(
         &mut self,
+        values: &ValueInterner,
         struct_ty: TypeId,
         expr_loc: SrcLoc,
         field_name: StrId,
@@ -534,7 +561,7 @@ impl DiagCtx<'_> {
                 expr_loc.span,
                 format!(
                     "`{}` has no field `{}`",
-                    self.types.format(self.session, struct_ty),
+                    self.types.format(self.session, values, struct_ty),
                     self.session.lookup_name(field_name),
                 ),
             )
@@ -581,6 +608,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_missing_field(
         &mut self,
+        values: &ValueInterner,
         struct_ty: TypeId,
         field_name: StrId,
         lit_loc: SrcLoc,
@@ -592,7 +620,7 @@ impl DiagCtx<'_> {
                 format!(
                     "missing field `{}` in `{}`",
                     self.session.lookup_name(field_name),
-                    self.types.format(self.session, struct_ty),
+                    self.types.format(self.session, values, struct_ty),
                 ),
             )
             .emit(self);
@@ -600,6 +628,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_expected_struct_type_arg(
         &mut self,
+        values: &ValueInterner,
         builtin: Builtin,
         actual_ty: TypeId,
         loc: SrcLoc,
@@ -610,20 +639,26 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "`{builtin}` expects a struct type, got `{}`",
-                    self.types.format(self.session, actual_ty),
+                    self.types.format(self.session, values, actual_ty),
                 ),
             )
             .emit(self);
     }
 
-    pub fn emit_expected_type_arg(&mut self, builtin: Builtin, actual_ty: TypeId, loc: SrcLoc) {
+    pub fn emit_expected_type_arg(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
         Diagnostic::error("expected type argument")
             .primary(
                 loc.source,
                 loc.span,
                 format!(
                     "`{builtin}` expects a type argument, got a value of type `{}`",
-                    self.types.format(self.session, actual_ty),
+                    self.types.format(self.session, values, actual_ty),
                 ),
             )
             .emit(self);
@@ -792,6 +827,7 @@ impl DiagCtx<'_> {
 
     pub fn emit_operator_not_supported(
         &mut self,
+        values: &ValueInterner,
         op: impl std::fmt::Display,
         ty: TypeId,
         expr: SrcLoc,
@@ -802,7 +838,7 @@ impl DiagCtx<'_> {
                 expr.span,
                 format!(
                     "operator '{op}' is not supported for type `{}`",
-                    self.types.format(self.session, ty),
+                    self.types.format(self.session, values, ty),
                 ),
             )
             .emit(self);
@@ -823,15 +859,21 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_operator_type_mismatch(&mut self, lhs_ty: TypeId, rhs_ty: TypeId, loc: SrcLoc) {
+    pub fn emit_operator_type_mismatch(
+        &mut self,
+        values: &ValueInterner,
+        lhs_ty: TypeId,
+        rhs_ty: TypeId,
+        loc: SrcLoc,
+    ) {
         Diagnostic::error("mismatched types")
             .primary(
                 loc.source,
                 loc.span,
                 format!(
                     "expected `{}`, got `{}`",
-                    self.types.format(self.session, lhs_ty),
-                    self.types.format(self.session, rhs_ty),
+                    self.types.format(self.session, values, lhs_ty),
+                    self.types.format(self.session, values, rhs_ty),
                 ),
             )
             .emit(self);

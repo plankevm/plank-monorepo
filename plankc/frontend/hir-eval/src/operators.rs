@@ -114,7 +114,12 @@ impl crate::scope::Scope<'_, '_> {
         let rhs_ty = self.state_type(rhs_state);
 
         if lhs_ty != rhs_ty {
-            self.diag_ctx.emit_operator_type_mismatch(lhs_ty, rhs_ty, self.loc(expr));
+            self.diag_ctx.emit_operator_type_mismatch(
+                self.eval.values,
+                lhs_ty,
+                rhs_ty,
+                self.loc(expr),
+            );
             return Err(Poisoned);
         }
 
@@ -130,7 +135,12 @@ impl crate::scope::Scope<'_, '_> {
             {
                 self.diag_ctx.emit_operator_not_supported_for_memptr(op, self.loc(expr));
             } else {
-                self.diag_ctx.emit_operator_not_supported(op, lhs_ty, self.loc(expr));
+                self.diag_ctx.emit_operator_not_supported(
+                    self.eval.values,
+                    op,
+                    lhs_ty,
+                    self.loc(expr),
+                );
             }
             return Err(Poisoned);
         };
@@ -145,7 +155,7 @@ impl crate::scope::Scope<'_, '_> {
 
         self.with_captures_buf(|this, capture_buf_offset| {
             this.with_maybe_values_buf(|this, values_buf_offset| {
-                let Value::Closure { fn_def, captures } = this.eval.values.lookup(closure_vid)
+                let Value::Closure { fn_def, captures, .. } = this.eval.values.lookup(closure_vid)
                 else {
                     unreachable!("invariant: verified in build_table")
                 };
@@ -196,7 +206,7 @@ impl crate::scope::Scope<'_, '_> {
 
         let r#impl = self.eval.operator_table.negate.filter(|_| ty.is_assignable_to(TypeId::U256));
         let Some(closure_vid) = r#impl else {
-            self.diag_ctx.emit_operator_not_supported(op, ty, self.loc(expr));
+            self.diag_ctx.emit_operator_not_supported(self.eval.values, op, ty, self.loc(expr));
             return Err(Poisoned);
         };
 
@@ -208,7 +218,7 @@ impl crate::scope::Scope<'_, '_> {
 
         self.with_captures_buf(|this, capture_buf_offset| {
             this.with_maybe_values_buf(|this, values_buf_offset| {
-                let Value::Closure { fn_def: fn_def_id, captures } =
+                let Value::Closure { fn_def: fn_def_id, captures, .. } =
                     this.eval.values.lookup(closure_vid)
                 else {
                     unreachable!("invariant: verified in build_table")
@@ -324,7 +334,7 @@ impl crate::scope::Scope<'_, '_> {
             }
             (op_equals, Err(_) | Ok(PrimitiveType::Function | PrimitiveType::Never)) => {
                 let op = if op_equals { BinaryOp::Equals } else { BinaryOp::NotEquals };
-                self.diag_ctx.emit_operator_not_supported(op, ty, self.loc(expr));
+                self.diag_ctx.emit_operator_not_supported(self.eval.values, op, ty, self.loc(expr));
                 Err(Poisoned)
             }
         }
@@ -334,7 +344,12 @@ impl crate::scope::Scope<'_, '_> {
         let (state, use_span, _origin) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(TypeId::BOOL, ty, self.loc(use_span));
+            self.diag_ctx.emit_type_mismatch_simple(
+                self.eval.values,
+                TypeId::BOOL,
+                ty,
+                self.loc(use_span),
+            );
             return Err(Poisoned);
         }
         let value = match state {

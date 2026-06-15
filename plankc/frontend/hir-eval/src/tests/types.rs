@@ -546,9 +546,9 @@ fn test_identity_type_function_does_not_rename_struct() {
          --> main.plk:4:20
           |
         4 |     let x: id(T) = 42;
-          |            -----   ^^ expected `struct#0@main.plk:3:13`, got `u256`
+          |            -----   ^^ expected `struct@main.plk:3:13`, got `u256`
           |            |
-          |            `struct#0@main.plk:3:13` expected because of this
+          |            `struct@main.plk:3:13` expected because of this
         "#],
     );
 }
@@ -598,9 +598,9 @@ fn test_type_annotation_not_comptime() {
 }
 
 #[test]
-fn test_self_referential_parameterized_name_renders_self() {
-    // `f(u256)` creates the struct anonymously (local callee never names types), and
-    // `Phantom(S)` dedups to `S` itself, so the naming pass would record `S = Phantom(S)`.
+fn test_local_alias_parameterized_name_uses_original_callee_name() {
+    // `f` aliases `Phantom`, so `f(u256)` should still name its result `Phantom(u256)`.
+    // Without the propagated name, `Phantom(S)` would dedup to `S` and try to name it as itself.
     assert_diagnostics(
         r#"
         const Phantom = fn (comptime T: type) type {
@@ -619,9 +619,104 @@ fn test_self_referential_parameterized_name_renders_self() {
          --> main.plk:7:25
           |
         7 |     let x: Phantom(S) = 42;
-          |            ----------   ^^ expected `Phantom(<self>)`, got `u256`
+          |            ----------   ^^ expected `Phantom(u256)`, got `u256`
           |            |
-          |            `Phantom(<self>)` expected because of this
+          |            `Phantom(u256)` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_block_alias_parameterized_name_uses_original_callee_name() {
+    assert_diagnostics(
+        r#"
+        const Phantom = fn (comptime T: type) type {
+            struct { value: u256 }
+        };
+
+        init {
+            let f = comptime { Phantom };
+            let S = f(u256);
+            let x: Phantom(S) = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:7:25
+          |
+        7 |     let x: Phantom(S) = 42;
+          |            ----------   ^^ expected `Phantom(u256)`, got `u256`
+          |            |
+          |            `Phantom(u256)` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
+    assert_diagnostics(
+        r#"
+        const Phantom = fn (comptime T: type) type {
+            struct { value: u256 }
+        };
+
+        const erase_name = fn (comptime F: function) function {
+            F
+        };
+
+        init {
+            let f = erase_name(Phantom);
+            let S = f(u256);
+            let x: Phantom(S) = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+          --> main.plk:10:25
+           |
+        10 |     let x: Phantom(S) = 42;
+           |            ----------   ^^ expected `struct@main.plk:2:5`, got `u256`
+           |            |
+           |            `struct@main.plk:2:5` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_transitive_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
+    assert_diagnostics(
+        r#"
+        const MakeA = fn (comptime T: type) type {
+            struct { a: u256 }
+        };
+
+        const MakeB = fn (comptime T: type) type {
+            struct { b: u256 }
+        };
+
+        const erase_name = fn (comptime F: function) function {
+            F
+        };
+
+        init {
+            let make_a = erase_name(MakeA);
+            let A = make_a(u256);
+            let B = MakeB(A);
+            let NamedA = MakeA(B);
+            let x: NamedA = 42;
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+          --> main.plk:15:21
+           |
+        15 |     let x: NamedA = 42;
+           |            ------   ^^ expected `struct@main.plk:2:5`, got `u256`
+           |            |
+           |            `struct@main.plk:2:5` expected because of this
         "#],
     );
 }
