@@ -17,7 +17,7 @@ html.dark .hljs-function { color: #ffb454; }
       name: 'plank',
       case_insensitive: false,
       keywords: {
-        keyword: 'as comptime const else fn if import init inline let mut return run struct while',
+        keyword: 'as comptime const else fn if import init inline let mut return run struct while hex',
         type: 'void u256 bool memptr type function never',
         literal: 'true false'
       },
@@ -58,7 +58,7 @@ html.dark .hljs-function { color: #ffb454; }
         },
         {
           className: 'string',
-          begin: /(hex)?"[^"]*"/,
+          begin: /"(\\.|[^"\\])*"/,
           relevance: 0
         },
         {
