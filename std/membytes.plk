@@ -20,7 +20,7 @@ const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
 
 // Writes a u256 at `offset`. Returns None if out of bounds.
 const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
-    if offset + 32 > buf.length {
+    if (buf.length < 32) | (offset > buf.length -% 32) {
         return None(u256);
     }
     Some(unsafe_mem_write_u256(buf.ptr, offset, value))
@@ -28,7 +28,7 @@ const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option
 
 // Reads a u256 from `offset`. Returns None if out of bounds.
 const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
-    if offset + 32 > buf.length {
+    if (buf.length < 32) | (offset > buf.length -% 32)  {
         return None(u256);
     }
     Some(unsafe_mem_read_u256(buf.ptr, offset))
@@ -36,7 +36,8 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
 
 // Writes a value of any type T at `offset`. Returns None if out of bounds.
 const membytes_write = fn (buf: membytes, offset: u256, value: $T) Option(u256) {
-    if offset + sizeof(T) > buf.length {
+    let size = comptime { sizeof(T) };
+    if (buf.length < size) | (offset > buf.length -% size) {
         return None(u256);
     }
     Some(unsafe_mem_write(buf.ptr, offset, value))
