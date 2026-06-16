@@ -226,9 +226,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
             this.with_maybe_values_buf(|this, values_buf_offset: usize| {
-                let Local { state, use_span: callee_use_span, origin: callee_origin } =
-                    this.bindings[callee];
-                let state = state?;
+                let (state, callee_use_span, callee_origin) = this.bindings[callee].poisoned()?;
                 let closure_vid = match state {
                     LocalState::Comptime(value) => value,
                     LocalState::Runtime(_) => {
