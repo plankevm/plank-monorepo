@@ -39,7 +39,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     ) -> MaybePoisoned<EvalValue> {
         self.with_types_buf(|this, types_buf_offset| {
             let mut validity = Ok(());
-            let mut has_runtime = false;
+            let mut first_runtime_span = None;
             for &element in &this.hir.elements[elements] {
                 let Ok(state) = this.bindings[element].state else {
                     validity = Err(Poisoned);
@@ -54,11 +54,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 }
                 this.eval.types_buf.push(ty);
 
-                match state {
-                    LocalState::Comptime(_) => {}
-                    LocalState::Runtime(_) => {
-                        has_runtime = true;
-                    }
+                if let LocalState::Runtime(_) = state {
+                    first_runtime_span.get_or_insert(this.bindings[element].use_span);
                 }
             }
 
@@ -69,76 +66,55 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 .types
                 .intern_tuple(TupleInfo { elements: &this.eval.types_buf[types_buf_offset..] });
             let ty = tuple.into();
-            if has_runtime {
-                this.runtime_eval_tuple_lit(ty, elements, lit_span)
+            if let Some(runtime_span) = first_runtime_span {
+                this.eval_runtime_tuple_lit(ty, elements, lit_span, runtime_span)
             } else {
-                this.fold_tuple_lit(ty, elements)
+                Ok(this.eval_comptime_tuple_lit(ty, elements))
             }
         })
     }
 
-    fn fold_tuple_lit(
-        &mut self,
-        ty: TypeId,
-        elements: hir::ElementsId,
-    ) -> MaybePoisoned<EvalValue> {
+    fn eval_comptime_tuple_lit(&mut self, ty: TypeId, elements: hir::ElementsId) -> EvalValue {
         self.with_values_buf(|this, values_buf_offset| {
-            let mut validity = Ok(());
             for &element in &this.hir.elements[elements] {
-                match this.bindings[element].state {
-                    Ok(LocalState::Comptime(value)) => this.eval.values_buf.push(value),
-                    Ok(LocalState::Runtime(_)) => {
-                        unreachable!("tuple literal selected comptime path with runtime element")
-                    }
-                    Err(Poisoned) => {
-                        validity = Err(Poisoned);
-                    }
-                }
+                let Ok(LocalState::Comptime(value)) = this.bindings[element].state else {
+                    unreachable!("tuple literal selected comptime path with non-comptime element")
+                };
+                this.eval.values_buf.push(value);
             }
 
-            validity.map(|()| {
-                let elements = &this.eval.values_buf[values_buf_offset..];
-                EvalValue::Comptime(this.eval.values.intern(Value::TupleVal { ty, elements }))
-            })
+            let elements = &this.eval.values_buf[values_buf_offset..];
+            EvalValue::Comptime(this.eval.values.intern(Value::TupleVal { ty, elements }))
         })
     }
 
-    fn runtime_eval_tuple_lit(
+    fn eval_runtime_tuple_lit(
         &mut self,
         ty: TypeId,
         elements: hir::ElementsId,
         lit_span: SourceSpan,
+        runtime_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
-        self.with_locals_buf(|this, locals_buf_offset| {
-            let mut validity = Ok(());
-            let tuple_elements = &this.hir.elements[elements];
-
-            if this.is_comptime() {
-                for &element in tuple_elements {
-                    let local = this.bindings[element];
-                    let Ok(LocalState::Runtime(_)) = local.state else { continue };
-                    this.diag_ctx.emit_runtime_ref_in_comptime(
-                        this.loc(lit_span),
-                        this.origin_loc(local.origin),
-                    );
-                    validity = Err(Poisoned);
-                }
-                return validity
-                    .map(|()| unreachable!("runtime tuple literal without runtime element"));
+        if self.is_comptime() {
+            for &element in &self.hir.elements[elements] {
+                let local = self.bindings[element];
+                let Ok(LocalState::Runtime(_)) = local.state else { continue };
+                self.diag_ctx.emit_runtime_ref_in_comptime(
+                    self.loc(lit_span),
+                    self.origin_loc(local.origin),
+                );
             }
+            return Err(Poisoned);
+        }
 
-            let runtime_element = tuple_elements
-                .iter()
-                .copied()
-                .find(|&element| matches!(this.bindings[element].state, Ok(LocalState::Runtime(_))))
-                .expect("runtime tuple literal without runtime element");
-            let runtime_span = this.bindings[runtime_element].use_span;
+        self.with_locals_buf(|this, locals_buf_offset| {
+            let tuple_elements = &this.hir.elements[elements];
+            let mut validity = Ok(());
 
             for &element in tuple_elements {
                 let local = this.bindings[element];
                 let Ok(state) = local.state else {
-                    validity = Err(Poisoned);
-                    continue;
+                    unreachable!("tuple literal selected runtime path with poisoned element")
                 };
 
                 match state {
@@ -168,12 +144,12 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 }
             }
 
-            validity.map(|()| {
-                let locals = &this.eval.locals_buf[locals_buf_offset..];
-                assert_eq!(locals.len(), tuple_elements.len());
-                let elements = this.eval.mir_args.push_copy_slice(locals);
-                EvalValue::Runtime { expr: mir::Expr::TupleLit { ty, elements }, result_type: ty }
-            })
+            validity?;
+
+            let locals = &this.eval.locals_buf[locals_buf_offset..];
+            assert_eq!(locals.len(), tuple_elements.len());
+            let elements = this.eval.mir_args.push_copy_slice(locals);
+            Ok(EvalValue::Runtime { expr: mir::Expr::TupleLit { ty, elements }, result_type: ty })
         })
     }
 }
