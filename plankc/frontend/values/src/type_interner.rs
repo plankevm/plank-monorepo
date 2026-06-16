@@ -6,10 +6,9 @@ use std::{
     num::NonZero,
 };
 
+use crate::{ValueId, ValueInterner};
 use hashbrown::{DefaultHashBuilder, HashSet, HashTable, hash_table::Entry};
 use plank_session::{Session, SourceSpan, SrcLoc, StrId};
-
-use crate::{Value, ValueId, ValueInterner};
 
 newtype_index! {
     pub struct TypeNameArgsId;
@@ -293,13 +292,7 @@ impl TypeInterner {
         }
     }
 
-    pub fn try_name_struct_parameterized(
-        &self,
-        values: &ValueInterner,
-        ty: TypeId,
-        name: StrId,
-        args: &[ValueId],
-    ) {
+    pub fn try_name_struct_parameterized(&self, ty: TypeId, name: StrId, args: &[ValueId]) {
         let Type::Struct(r#struct) = self.lookup(ty) else {
             return;
         };
@@ -308,72 +301,8 @@ impl TypeInterner {
         if r#struct.name.get().is_some() {
             return;
         }
-        if self.would_create_recursive_type_name(values, args, ty) {
-            return;
-        }
         let args = self.intern_type_name_args(args);
         r#struct.name.set(Some(TypeName::Parameterized { name, args }));
-    }
-
-    fn would_create_recursive_type_name(
-        &self,
-        values: &ValueInterner,
-        args: &[ValueId],
-        named_ty: TypeId,
-    ) -> bool {
-        const TYPE_NAME_VALIDATION_BUDGET: u32 = 1024;
-
-        fn walk_value(
-            types: &TypeInterner,
-            values: &ValueInterner,
-            value: ValueId,
-            named_ty: TypeId,
-            fuel: u32,
-        ) -> bool {
-            let Some(fuel) = fuel.checked_sub(1) else {
-                return true;
-            };
-            match values.lookup(value) {
-                Value::Type(ty) => walk_type(types, values, ty, named_ty, fuel),
-                Value::StructVal { ty, fields } => {
-                    walk_type(types, values, ty, named_ty, fuel)
-                        || fields
-                            .iter()
-                            .any(|&field| walk_value(types, values, field, named_ty, fuel))
-                }
-                Value::Closure { captures, .. } => captures
-                    .iter()
-                    .any(|&(capture, _)| walk_value(types, values, capture, named_ty, fuel)),
-                Value::Void | Value::Bool(_) | Value::BigNum(_) | Value::Bytes(_) => false,
-            }
-        }
-
-        fn walk_type(
-            types: &TypeInterner,
-            values: &ValueInterner,
-            ty: TypeId,
-            named_ty: TypeId,
-            fuel: u32,
-        ) -> bool {
-            let Some(fuel) = fuel.checked_sub(1) else {
-                return true;
-            };
-            if ty == named_ty {
-                return true;
-            }
-            let Type::Struct(r#struct) = types.lookup(ty) else {
-                return false;
-            };
-            let Some(TypeName::Parameterized { args, .. }) = r#struct.name.get() else {
-                return false;
-            };
-            // SAFETY: This only reads already-interned type-name args before the caller may append
-            // new args. None of the recursive calls mutate `type_name_args`.
-            let args = unsafe { &(&*types.type_name_args.get())[args] };
-            args.iter().any(|&arg| walk_value(types, values, arg, named_ty, fuel))
-        }
-
-        args.iter().any(|&arg| walk_value(self, values, arg, named_ty, TYPE_NAME_VALIDATION_BUDGET))
     }
 
     pub fn intern_type_name_args(&self, args: &[ValueId]) -> TypeNameArgsId {
@@ -404,24 +333,6 @@ impl TypeInterner {
         let (line, col) = session.offset_to_line_col(view.def_loc.source, view.def_loc.span.start);
         let source = &session.get_source(view.def_loc.source);
         write!(f, "struct@{}:{line}:{col}", source.path.display())
-    }
-
-    pub fn append_named_struct_def_loc_suffix(
-        &self,
-        rendered: String,
-        session: &Session,
-        ty: TypeId,
-    ) -> String {
-        let Type::Struct(r#struct) = self.lookup(ty) else {
-            return rendered;
-        };
-        if r#struct.name.get().is_none() {
-            return rendered;
-        }
-        let (line, col) =
-            session.offset_to_line_col(r#struct.def_loc.source, r#struct.def_loc.span.start);
-        let source = &session.get_source(r#struct.def_loc.source);
-        format!("{rendered}@{}:{line}:{col}", source.path.display())
     }
 
     fn fmt_type_name_args(

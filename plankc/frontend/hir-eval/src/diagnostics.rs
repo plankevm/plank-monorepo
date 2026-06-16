@@ -65,20 +65,48 @@ impl DiagEmitter for DiagCtx<'_> {
 }
 
 impl DiagCtx<'_> {
-    fn format_expected_actual_types(
+    fn format_expected_types(
         &self,
         values: &ValueInterner,
         expected_ty: TypeId,
         actual_ty: TypeId,
-    ) -> (String, String) {
-        let mut expected = self.types.format(self.session, values, expected_ty).to_string();
-        let mut actual = self.types.format(self.session, values, actual_ty).to_string();
-        if expected_ty != actual_ty && expected == actual {
-            expected =
-                self.types.append_named_struct_def_loc_suffix(expected, self.session, expected_ty);
-            actual = self.types.append_named_struct_def_loc_suffix(actual, self.session, actual_ty);
-        }
-        (expected, actual)
+    ) -> (impl FnOnce(Diagnostic) -> Diagnostic, String, String) {
+        self.format_type_mismatch("ed", values, expected_ty, actual_ty)
+    }
+
+    fn format_expects_types(
+        &self,
+        values: &ValueInterner,
+        expected_ty: TypeId,
+        actual_ty: TypeId,
+    ) -> (impl FnOnce(Diagnostic) -> Diagnostic, String, String) {
+        self.format_type_mismatch("s", values, expected_ty, actual_ty)
+    }
+
+    fn format_type_mismatch(
+        &self,
+        expect_suffix: &str,
+        values: &ValueInterner,
+        expected_ty: TypeId,
+        actual_ty: TypeId,
+    ) -> (impl FnOnce(Diagnostic) -> Diagnostic, String, String) {
+        let expected = self.types.format(self.session, values, expected_ty).to_string();
+        let actual = self.types.format(self.session, values, actual_ty).to_string();
+        let repr_eq = expected == actual;
+        let diff = if repr_eq { " different" } else { "" };
+        let msg = format!("expect{expect_suffix} `{expected}`, got{diff} `{actual}`");
+
+        (
+            move |diag| {
+                if repr_eq {
+                    diag.note("types appear identical because they contain types with the same name defined in different files")
+                } else {
+                    diag
+                }
+            },
+            msg,
+            expected,
+        )
     }
 
     pub fn emit_type_mismatch(
@@ -90,8 +118,8 @@ impl DiagCtx<'_> {
         actual_loc: SrcLoc,
         add_called_here: bool,
     ) {
-        let (expected, actual) = self.format_expected_actual_types(values, expected_ty, actual_ty);
-        let primary_label = format!("expected `{expected}`, got `{actual}`");
+        let (maybe_add_note, primary_label, expected) =
+            self.format_expected_types(values, expected_ty, actual_ty);
         let secondary_label = format!("`{expected}` expected because of this");
         let diagnostic = Diagnostic::error("mismatched types").cross_source_annotations(
             actual_loc,
@@ -100,9 +128,9 @@ impl DiagCtx<'_> {
             secondary_label,
         );
         if add_called_here {
-            diagnostic.emit(self)
+            maybe_add_note(diagnostic).emit(self)
         } else {
-            diagnostic.emit(self.session);
+            maybe_add_note(diagnostic).emit(self.session);
         }
     }
 
@@ -131,14 +159,14 @@ impl DiagCtx<'_> {
         field_name: StrId,
     ) {
         let name = self.session.lookup_name(field_name);
-        let (expected, actual) = self.format_expected_actual_types(values, expected_ty, actual_ty);
-        Diagnostic::error("incorrect type for struct field")
-            .primary(
-                field_value_loc.source,
-                field_value_loc.span,
-                format!("field `{name}` expects `{expected}`, got `{actual}`"),
-            )
-            .emit(self);
+        let (maybe_add_note, primary, _) =
+            self.format_expects_types(values, expected_ty, actual_ty);
+        let diagnostic = Diagnostic::error("incorrect type for struct field").primary(
+            field_value_loc.source,
+            field_value_loc.span,
+            format!("field `{name}` {primary}"),
+        );
+        maybe_add_note(diagnostic).emit(self);
     }
 
     pub fn emit_type_mismatch_simple(
@@ -148,10 +176,12 @@ impl DiagCtx<'_> {
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
-        let (expected, actual) = self.format_expected_actual_types(values, expected_ty, actual_ty);
-        Diagnostic::error("mismatched types")
-            .primary(loc.source, loc.span, format!("expected `{expected}`, got `{actual}`"))
-            .emit(self);
+        let (maybe_add_note, primary, _) =
+            self.format_expected_types(values, expected_ty, actual_ty);
+        maybe_add_note(
+            Diagnostic::error("mismatched types").primary(loc.source, loc.span, primary),
+        )
+        .emit(self);
     }
 
     pub fn emit_not_a_struct_type(&mut self, values: &ValueInterner, ty: TypeId, loc: BindingLoc) {
@@ -219,12 +249,12 @@ impl DiagCtx<'_> {
         ty2: TypeId,
         loc2: SrcLoc,
     ) {
-        let (expected, actual) = self.format_expected_actual_types(values, ty1, ty2);
-        let primary_label = format!("expected `{expected}`, got `{actual}`");
+        let (maybe_add_note, primary_label, expected) =
+            self.format_expected_types(values, ty1, ty2);
         let secondary_label = format!("`{expected}` expected because of this");
-        Diagnostic::error("`if` and `else` have incompatible types")
-            .cross_source_annotations(loc2, primary_label, loc1, secondary_label)
-            .emit(self);
+        let diagnostic = Diagnostic::error("`if` and `else` have incompatible types")
+            .cross_source_annotations(loc2, primary_label, loc1, secondary_label);
+        maybe_add_note(diagnostic).emit(self);
     }
 
     pub fn emit_arg_count_mismatch(
@@ -862,10 +892,9 @@ impl DiagCtx<'_> {
         rhs_ty: TypeId,
         loc: SrcLoc,
     ) {
-        let (expected, actual) = self.format_expected_actual_types(values, lhs_ty, rhs_ty);
-        Diagnostic::error("mismatched types")
-            .primary(loc.source, loc.span, format!("expected `{expected}`, got `{actual}`"))
-            .emit(self);
+        let (maybe_add_note, label, _) = self.format_expected_types(values, lhs_ty, rhs_ty);
+        let diagnostic = Diagnostic::error("mismatched types").primary(loc.source, loc.span, label);
+        maybe_add_note(diagnostic).emit(self);
     }
 
     pub fn emit_comptime_arithmetic_overflow(&mut self, op: impl std::fmt::Display, loc: SrcLoc) {

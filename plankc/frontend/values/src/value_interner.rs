@@ -3,9 +3,9 @@ use crate::{
     bignum_interner::{BigNumId, BigNumInterner},
 };
 use alloy_primitives::U256;
-use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
+use hashbrown::{DefaultHashBuilder, HashMap, HashTable, hash_map, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{BytesId, Session, SrcLoc, write_bytes_literal};
+use plank_session::{BytesId, Session, SrcLoc, StrId, write_bytes_literal};
 use std::{fmt, hash::BuildHasher};
 
 newtype_index! {
@@ -63,6 +63,8 @@ pub struct ValueInterner {
     children: ListOfLists<CompoundIdx, ValueId>,
     captures: ListOfLists<CaptureIdx, (ValueId, DefOrigin)>,
     big_nums: BigNumInterner,
+
+    closure_names: HashMap<ValueId, StrId>,
 }
 
 impl Default for ValueInterner {
@@ -101,6 +103,7 @@ impl ValueInterner {
             children: ListOfLists::new(),
             captures: ListOfLists::new(),
             big_nums: BigNumInterner::new(),
+            closure_names: HashMap::new(),
         };
         assert_eq!(new_interner.intern(Value::Void), ValueId::VOID);
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
@@ -112,6 +115,16 @@ impl ValueInterner {
             ValueId::BYTES_EMPTY
         );
         new_interner
+    }
+
+    pub fn try_name_closure(&mut self, value: ValueId, name: StrId) {
+        if let hash_map::Entry::Vacant(vacant) = self.closure_names.entry(value) {
+            vacant.insert(name);
+        }
+    }
+
+    pub fn get_closure_name(&self, closure: ValueId) -> Option<StrId> {
+        self.closure_names.get(&closure).copied()
     }
 
     fn hash_value(&self, value: Value<'_>) -> u64 {

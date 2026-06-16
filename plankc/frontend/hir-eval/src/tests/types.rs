@@ -377,10 +377,12 @@ fn test_generic_struct_name_collision_across_files() {
          --> main.plk:5:17
           |
         3 | const takes_a_box = fn (value: Box(u256)) void {};
-          |                                --------- `Box(u256)@a.plk:1:42` expected because of this
+          |                                --------- `Box(u256)` expected because of this
         4 | init {
         5 |     takes_a_box(OtherBox(u256) { value: 1 });
-          |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Box(u256)@a.plk:1:42`, got `Box(u256)@b.plk:1:42`
+          |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Box(u256)`, got different `Box(u256)`
+          |
+          = note: types appear identical because they contain types with the same name defined in different files
         "#],
     );
 }
@@ -707,9 +709,9 @@ fn test_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
           --> main.plk:12:25
            |
         12 |     let x: Phantom(S) = 42;
-           |            ----------   ^^ expected `struct@main.plk:2:5`, got `u256`
+           |            ----------   ^^ expected `Phantom(u256)`, got `u256`
            |            |
-           |            `struct@main.plk:2:5` expected because of this
+           |            `Phantom(u256)` expected because of this
         "#],
     );
 }
@@ -744,9 +746,42 @@ fn test_transitive_self_referential_parameterized_name_falls_back_to_anonymous_s
           --> main.plk:18:21
            |
         18 |     let x: NamedA = 42;
-           |            ------   ^^ expected `struct@main.plk:2:5`, got `u256`
+           |            ------   ^^ expected `MakeA(u256)`, got `u256`
            |            |
-           |            `struct@main.plk:2:5` expected because of this
+           |            `MakeA(u256)` expected because of this
+        "#],
+    );
+}
+
+#[test]
+fn test_nested_generic_struct_name_collision_across_files() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+            import m::a::Box;
+            import m::b::Box as OtherBox;
+            const Wrap = fn (comptime T: type) type { struct T { value: T } };
+            const takes_wrap = fn (value: Wrap(Box(u256))) void {};
+            init {
+                takes_wrap(Wrap(OtherBox(u256)) { value: OtherBox(u256) { value: 1 } });
+                @evm_stop();
+            }
+            "#,
+        )
+        .add_file("a", "const Box = fn (comptime T: type) type { struct T { value: T } };")
+        .add_file("b", "const Box = fn (comptime T: type) type { struct T { value: T } };")
+        .add_module("m", ""),
+        &[r#"
+        error: mismatched types
+         --> main.plk:6:16
+          |
+        4 | const takes_wrap = fn (value: Wrap(Box(u256))) void {};
+          |                               --------------- `Wrap(Box(u256))` expected because of this
+        5 | init {
+        6 |     takes_wrap(Wrap(OtherBox(u256)) { value: OtherBox(u256) { value: 1 } });
+          |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Wrap(Box(u256))`, got different `Wrap(Box(u256))`
+          |
+          = note: types appear identical because they contain types with the same name defined in different files
         "#],
     );
 }

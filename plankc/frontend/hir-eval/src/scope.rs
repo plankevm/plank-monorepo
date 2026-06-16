@@ -7,7 +7,7 @@ use crate::{
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
+use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,21 +15,11 @@ pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
     pub use_span: SourceSpan,
     pub origin: DefOrigin,
-    pub symbolic_display_name: Option<StrId>,
 }
 
 impl Local {
     pub fn comptime(value: ValueId, use_span: SourceSpan, origin: DefOrigin) -> Self {
-        Self {
-            state: Ok(LocalState::Comptime(value)),
-            use_span,
-            origin,
-            symbolic_display_name: None,
-        }
-    }
-
-    pub fn set_symbolic_display_name(&mut self, symbolic_display_name: StrId) {
-        self.symbolic_display_name = Some(symbolic_display_name);
+        Self { state: Ok(LocalState::Comptime(value)), use_span, origin }
     }
 
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
@@ -285,15 +275,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings.insert(
-            local,
-            Local {
-                state,
-                use_span: expr.span,
-                origin: self.expr_origin(expr),
-                symbolic_display_name: self.expr_symbolic_display_name(expr),
-            },
-        );
+        self.bindings
+            .insert(local, Local { state, use_span: expr.span, origin: self.expr_origin(expr) });
         Ok(())
     }
 
@@ -328,12 +311,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.bindings.insert(
             local,
-            Local {
-                state: new_state,
-                use_span: expr.span,
-                origin: self.expr_origin(expr),
-                symbolic_display_name: self.expr_symbolic_display_name(expr),
-            },
+            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
         );
         Ok(())
     }
@@ -349,12 +327,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .map(LocalState::Comptime);
             let _ = self.bindings.insert(
                 local,
-                Local {
-                    state,
-                    use_span: expr.span,
-                    origin: self.expr_origin(expr),
-                    symbolic_display_name: self.expr_symbolic_display_name(expr),
-                },
+                Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
             );
             return Ok(());
         }
@@ -369,12 +342,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 self.bindings.insert(
                     local,
-                    Local {
-                        state,
-                        use_span: expr.span,
-                        origin: self.expr_origin(expr),
-                        symbolic_display_name: self.expr_symbolic_display_name(expr),
-                    },
+                    Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
                 );
             }
             Some(binding) => {
@@ -401,12 +369,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] = Local {
-                    state: new_state,
-                    use_span: expr.span,
-                    origin: self.expr_origin(expr),
-                    symbolic_display_name: self.expr_symbolic_display_name(expr),
-                };
+                self.bindings[local] =
+                    Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) };
             }
         }
 
@@ -483,7 +447,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
         self.bindings[target].state = new_state;
-        self.bindings[target].symbolic_display_name = self.expr_symbolic_display_name(expr);
         Ok(())
     }
 
@@ -702,16 +665,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             DefOrigin::Const(id)
         } else {
             DefOrigin::Local(expr.span)
-        }
-    }
-
-    pub fn expr_symbolic_display_name(&self, expr: hir::Expr) -> Option<StrId> {
-        match expr.kind {
-            ExprKind::ConstRef(id) => Some(self.hir.consts[id].name),
-            ExprKind::LocalRef(local) => {
-                self.bindings.get(local).and_then(|binding| binding.symbolic_display_name)
-            }
-            _ => None,
         }
     }
 

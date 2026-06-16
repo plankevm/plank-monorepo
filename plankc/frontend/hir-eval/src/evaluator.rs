@@ -175,14 +175,20 @@ impl<'a> Evaluator<'a> {
     }
 
     fn try_name_type(&mut self, name: StrId, value: MaybePoisoned<ValueId>) {
-        let Ok(Value::Type(ty)) = value.map(|vid| self.values.lookup(vid)) else {
-            return;
-        };
-        let Type::Struct(r#struct) = self.types.lookup(ty) else {
-            return;
-        };
-        if r#struct.name.get().is_none() {
-            r#struct.name.set(Some(TypeName::Plain(name)));
+        let Ok(value) = value else { return };
+        match self.values.lookup(value) {
+            Value::Type(ty) => {
+                let Type::Struct(r#struct) = self.types.lookup(ty) else {
+                    return;
+                };
+                if r#struct.name.get().is_none() {
+                    r#struct.name.set(Some(TypeName::Plain(name)));
+                }
+            }
+            Value::Closure { .. } => {
+                self.values.try_name_closure(value, name);
+            }
+            _ => return,
         }
     }
 

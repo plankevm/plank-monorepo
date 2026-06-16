@@ -89,12 +89,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
-        for (&(value, origin), &def) in captured_values.iter().zip(capture_defs) {
-            let mut local = Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span));
-            if let DefOrigin::Const(id) = origin {
-                local.set_symbolic_display_name(fn_scope.eval.hir.consts[id].name);
-            }
-            fn_scope.bindings.insert_no_prev(def.inner_local, local);
+        for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
+            fn_scope.bindings.insert_no_prev(
+                def.inner_local,
+                Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span)),
+            );
         }
 
         for (&param, &arg) in params.iter().zip(args) {
@@ -108,7 +107,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: param.span,
                             origin: DefOrigin::Local(param.span),
-                            symbolic_display_name: None,
                         },
                     );
                     continue;
@@ -140,12 +138,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
-                Local {
-                    state,
-                    use_span: param.span,
-                    origin: DefOrigin::Local(param.span),
-                    symbolic_display_name: binding.symbolic_display_name,
-                },
+                Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
             );
         }
 
@@ -233,12 +226,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
             this.with_maybe_values_buf(|this, values_buf_offset: usize| {
-                let Local {
-                    state,
-                    use_span: callee_use_span,
-                    origin: callee_origin,
-                    symbolic_display_name,
-                } = this.bindings[callee];
+                let Local { state, use_span: callee_use_span, origin: callee_origin } =
+                    this.bindings[callee];
                 let state = state?;
                 let closure_vid = match state {
                     LocalState::Comptime(value) => value,
@@ -261,10 +250,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 for &capture in captures {
                     this.eval.captures_buf.push(capture);
                 }
-                let type_name = symbolic_display_name.or(match callee_origin {
-                    DefOrigin::Const(id) => Some(this.eval.hir.consts[id].name),
-                    DefOrigin::Local(_) => None,
-                });
+                let type_name = this.values.get_closure_name(closure_vid);
 
                 let args = &this.hir.call_args[args_id];
                 let arg_spans = this
@@ -721,7 +707,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.eval.type_name_args_buf.push(value);
         }
         self.types.try_name_struct_parameterized(
-            self.eval.values,
             ty,
             name,
             &self.eval.type_name_args_buf[args_offset..],
@@ -777,7 +762,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: arg_binding.use_span,
                             origin: DefOrigin::Local(arg_binding.use_span),
-                            symbolic_display_name: None,
                         },
                     );
                     return;
@@ -788,15 +772,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 );
                 let arg_ty = self.state_type(state);
                 let type_value = self.values.intern_type(arg_ty);
-                let mut local = Local::comptime(
-                    type_value,
-                    arg_binding.use_span,
-                    DefOrigin::Local(arg_binding.use_span),
+                self.bindings.insert_no_prev(
+                    capture,
+                    Local::comptime(
+                        type_value,
+                        arg_binding.use_span,
+                        DefOrigin::Local(arg_binding.use_span),
+                    ),
                 );
-                if let Some(symbolic_display_name) = arg_binding.symbolic_display_name {
-                    local.set_symbolic_display_name(symbolic_display_name);
-                }
-                self.bindings.insert_no_prev(capture, local);
             }
             hir::ParamType::Poisoned => {
                 self.bindings[arg].state = Err(Poisoned);
