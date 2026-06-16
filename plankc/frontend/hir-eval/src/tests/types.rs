@@ -686,7 +686,7 @@ fn test_comptime_block_alias_parameterized_name_uses_original_callee_name() {
 }
 
 #[test]
-fn test_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
+fn test_returned_alias_preserves_generic_struct_name() {
     assert_diagnostics(
         r#"
         const Phantom = fn (comptime T: type) type {
@@ -717,7 +717,7 @@ fn test_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
 }
 
 #[test]
-fn test_transitive_self_referential_parameterized_name_falls_back_to_anonymous_struct() {
+fn test_transitive_parameterization_does_not_rename_deduped_struct() {
     assert_diagnostics(
         r#"
         const MakeA = fn (comptime T: type) type {
