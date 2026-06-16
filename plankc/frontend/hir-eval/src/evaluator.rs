@@ -188,7 +188,7 @@ impl<'a> Evaluator<'a> {
             Value::Closure { .. } => {
                 self.values.try_name_closure(value, name);
             }
-            _ => return,
+            _ => {}
         }
     }
 
