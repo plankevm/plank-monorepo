@@ -91,8 +91,8 @@ pub struct TupleInfo<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompoundKind {
-    Struct,
-    Tuple,
+    Struct(StructRef),
+    Tuple(TupleRef),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,7 +101,6 @@ enum CompoundInfo<'a> {
     Tuple(TupleInfo<'a>),
 }
 
-#[repr(C)]
 struct TupleHeader {
     total_elements: u32,
 }
@@ -155,7 +154,8 @@ pub enum Type<'fields> {
 
 pub struct TypeInterner {
     comptime_only: UnsafeCell<HashSet<CompoundRef>>,
-    dedup: UnsafeCell<HashTable<CompoundRef>>,
+    struct_dedup: UnsafeCell<HashTable<StructRef>>,
+    tuple_dedup: UnsafeCell<HashTable<TupleRef>>,
     arena: ChunkedArena<MIN_COMPOUND_ALIGN>,
     hasher: DefaultHashBuilder,
     type_name_args: UnsafeCell<ListOfLists<TypeNameArgsId, ValueId>>,
@@ -217,7 +217,11 @@ impl CompoundRef {
     }
 
     const fn kind(self) -> CompoundKind {
-        if self.0 & Self::TUPLE_TAG == 0 { CompoundKind::Struct } else { CompoundKind::Tuple }
+        if self.0 & Self::TUPLE_TAG == 0 {
+            CompoundKind::Struct(StructRef(self))
+        } else {
+            CompoundKind::Tuple(TupleRef(self))
+        }
     }
 }
 
@@ -324,8 +328,9 @@ impl TypeInterner {
     pub fn new() -> Self {
         Self {
             comptime_only: UnsafeCell::new(HashSet::new()),
+            struct_dedup: UnsafeCell::new(HashTable::new()),
+            tuple_dedup: UnsafeCell::new(HashTable::new()),
             arena: ChunkedArena::new(),
-            dedup: UnsafeCell::new(HashTable::new()),
             hasher: DefaultHashBuilder::default(),
             type_name_args: UnsafeCell::new(ListOfLists::new()),
         }
@@ -339,45 +344,51 @@ impl TypeInterner {
     }
 
     pub fn intern_struct(&self, struct_info: StructInfo<'_>) -> StructRef {
-        StructRef(self.intern_compound(
-            CompoundInfo::Struct(struct_info),
-            |this, info| this.push_struct(info).0,
-            |this| struct_info.fields.iter().any(|&field| this.is_comptime_only(field.ty)),
-        ))
-    }
-
-    pub fn intern_tuple(&self, tuple_info: TupleInfo<'_>) -> TupleRef {
-        TupleRef(self.intern_compound(
-            CompoundInfo::Tuple(tuple_info),
-            |this, info| this.push_tuple(info).0,
-            |this| tuple_info.elements.iter().any(|&element| this.is_comptime_only(element)),
-        ))
-    }
-
-    fn intern_compound(
-        &self,
-        info: CompoundInfo<'_>,
-        push: impl FnOnce(&Self, CompoundInfo<'_>) -> CompoundRef,
-        is_comptime_only: impl FnOnce(&Self) -> bool,
-    ) -> CompoundRef {
         use std::hash::BuildHasher;
-        let hash = self.hasher.hash_one(info);
+
+        let hash = self.hasher.hash_one(struct_info);
         // Safety: We only retain the `&mut` reference for the duration of this function and
-        // `lookup_compound_info` and `push` don't reference `self.dedup` at all.
-        let dedup = unsafe { &mut (*self.dedup.get()) };
+        // `lookup_struct` and `push_struct` don't reference `self.struct_dedup` at all.
+        let dedup = unsafe { &mut (*self.struct_dedup.get()) };
         let entry = dedup.entry(
             hash,
-            |&compound| self.lookup_compound_info(compound) == info,
-            |&compound| self.hasher.hash_one(self.lookup_compound_info(compound)),
+            |&r#struct| self.lookup_struct(r#struct).as_info() == struct_info,
+            |&r#struct| self.hasher.hash_one(self.lookup_struct(r#struct).as_info()),
         );
 
         match entry {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant_entry) => {
-                let new_ref = push(self, info);
+                let new_ref = self.push_struct(struct_info);
                 vacant_entry.insert(new_ref);
-                if is_comptime_only(self) {
-                    unsafe { (*self.comptime_only.get()).insert(new_ref) };
+                if struct_info.fields.iter().any(|&field| self.is_comptime_only(field.ty)) {
+                    unsafe { (*self.comptime_only.get()).insert(new_ref.0) };
+                }
+                new_ref
+            }
+        }
+    }
+
+    pub fn intern_tuple(&self, tuple_info: TupleInfo<'_>) -> TupleRef {
+        use std::hash::BuildHasher;
+
+        let hash = self.hasher.hash_one(tuple_info);
+        // Safety: We only retain the `&mut` reference for the duration of this function and
+        // `lookup_tuple` and `push_tuple` don't reference `self.tuple_dedup` at all.
+        let dedup = unsafe { &mut (*self.tuple_dedup.get()) };
+        let entry = dedup.entry(
+            hash,
+            |&tuple| self.lookup_tuple(tuple) == tuple_info,
+            |&tuple| self.hasher.hash_one(self.lookup_tuple(tuple)),
+        );
+
+        match entry {
+            Entry::Occupied(occupied) => *occupied.get(),
+            Entry::Vacant(vacant_entry) => {
+                let new_ref = self.push_tuple(tuple_info);
+                vacant_entry.insert(new_ref);
+                if tuple_info.elements.iter().any(|&element| self.is_comptime_only(element)) {
+                    unsafe { (*self.comptime_only.get()).insert(new_ref.0) };
                 }
                 new_ref
             }
@@ -398,23 +409,15 @@ impl TypeInterner {
         compound.kind()
     }
 
-    fn lookup_compound_info<'s>(&'s self, compound: CompoundRef) -> CompoundInfo<'s> {
-        match self.lookup_compound(compound) {
-            CompoundView::Struct(view) => CompoundInfo::Struct(view.as_info()),
-            CompoundView::Tuple(info) => CompoundInfo::Tuple(info),
-        }
-    }
-
     fn lookup_compound<'s>(&'s self, compound: CompoundRef) -> CompoundView<'s> {
         match self.compound_kind(compound) {
-            CompoundKind::Struct => CompoundView::Struct(self.lookup_struct(StructRef(compound))),
-            CompoundKind::Tuple => CompoundView::Tuple(self.lookup_tuple(TupleRef(compound))),
+            CompoundKind::Struct(r#ref) => CompoundView::Struct(self.lookup_struct(r#ref)),
+            CompoundKind::Tuple(r#ref) => CompoundView::Tuple(self.lookup_tuple(r#ref)),
         }
     }
 
     pub fn lookup_struct<'s>(&'s self, r#struct: StructRef) -> StructView<'s> {
         unsafe {
-            assert_eq!(self.compound_kind(r#struct.0), CompoundKind::Struct);
             let header_ptr = self.arena.get(r#struct.0.offset()) as *const StructHeader;
             let header = &(*header_ptr);
             let fields_start = header_ptr.add(1) as *const Field;
@@ -430,7 +433,6 @@ impl TypeInterner {
 
     pub fn lookup_tuple<'s>(&'s self, tuple: TupleRef) -> TupleInfo<'s> {
         unsafe {
-            assert_eq!(self.compound_kind(tuple.0), CompoundKind::Tuple);
             let header_ptr = self.arena.get(tuple.0.offset()) as *const TupleHeader;
             let header = &(*header_ptr);
             let elements_start = header_ptr.add(1) as *const TypeId;
@@ -533,8 +535,7 @@ impl TypeInterner {
         FmtType { types: self, values, sess, ty }
     }
 
-    fn push_struct<'s, 'a>(&'s self, compound: CompoundInfo<'a>) -> StructRef {
-        let CompoundInfo::Struct(r#struct) = compound else { unreachable!() };
+    fn push_struct(&self, r#struct: StructInfo<'_>) -> StructRef {
         let required_space =
             std::mem::size_of::<StructHeader>() + std::mem::size_of_val(r#struct.fields);
 
@@ -562,8 +563,7 @@ impl TypeInterner {
         }
     }
 
-    fn push_tuple<'s, 'a>(&'s self, compound: CompoundInfo<'a>) -> TupleRef {
-        let CompoundInfo::Tuple(tuple) = compound else { unreachable!() };
+    fn push_tuple(&self, tuple: TupleInfo<'_>) -> TupleRef {
         let required_space =
             std::mem::size_of::<TupleHeader>() + std::mem::size_of_val(tuple.elements);
 
@@ -666,12 +666,12 @@ mod tests {
         let c = interner.intern_struct(dummy_struct_info(&[f, f, f]));
 
         for r#struct in [a, b, c] {
-            assert_eq!(r#struct.0.kind(), CompoundKind::Struct);
+            assert!(matches!(r#struct.0.kind(), CompoundKind::Struct(_)));
             assert!(r#struct.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
         }
 
         let tuple = interner.intern_tuple(TupleInfo { elements: &[TypeId::U256] });
-        assert_eq!(tuple.0.kind(), CompoundKind::Tuple);
+        assert!(matches!(tuple.0.kind(), CompoundKind::Tuple(_)));
         assert!(tuple.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
     }
 
