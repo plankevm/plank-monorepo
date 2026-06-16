@@ -406,6 +406,24 @@ impl TypeInterner {
         write!(f, "struct@{}:{line}:{col}", source.path.display())
     }
 
+    pub fn append_named_struct_def_loc_suffix(
+        &self,
+        rendered: String,
+        session: &Session,
+        ty: TypeId,
+    ) -> String {
+        let Type::Struct(r#struct) = self.lookup(ty) else {
+            return rendered;
+        };
+        if r#struct.name.get().is_none() {
+            return rendered;
+        }
+        let (line, col) =
+            session.offset_to_line_col(r#struct.def_loc.source, r#struct.def_loc.span.start);
+        let source = &session.get_source(r#struct.def_loc.source);
+        format!("{rendered}@{}:{line}:{col}", source.path.display())
+    }
+
     fn fmt_type_name_args(
         &self,
         f: &mut impl fmt::Write,

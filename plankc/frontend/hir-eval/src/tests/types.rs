@@ -356,6 +356,36 @@ fn test_diagnostic_renders_generic_struct_name() {
 }
 
 #[test]
+fn test_generic_struct_name_collision_across_files() {
+    assert_project_diagnostics(
+        TestProject::root(
+            "
+            import m::a::Box;
+            import m::b::Box as OtherBox;
+            const takes_a_box = fn (value: Box(u256)) void {};
+            init {
+                takes_a_box(OtherBox(u256) { value: 1 });
+                @evm_stop();
+            }
+            ",
+        )
+        .add_file("a", "const Box = fn (comptime T: type) type { struct T { value: T } };")
+        .add_file("b", "const Box = fn (comptime T: type) type { struct T { value: T } };")
+        .add_module("m", ""),
+        &[r#"
+        error: mismatched types
+         --> main.plk:5:17
+          |
+        3 | const takes_a_box = fn (value: Box(u256)) void {};
+          |                                --------- `Box(u256)@a.plk:1:42` expected because of this
+        4 | init {
+        5 |     takes_a_box(OtherBox(u256) { value: 1 });
+          |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Box(u256)@a.plk:1:42`, got `Box(u256)@b.plk:1:42`
+        "#],
+    );
+}
+
+#[test]
 fn test_diagnostic_renders_struct_value_type_name_arg_with_cbytes() {
     assert_diagnostics(
         r#"

@@ -65,6 +65,22 @@ impl DiagEmitter for DiagCtx<'_> {
 }
 
 impl DiagCtx<'_> {
+    fn format_expected_actual_types(
+        &self,
+        values: &ValueInterner,
+        expected_ty: TypeId,
+        actual_ty: TypeId,
+    ) -> (String, String) {
+        let mut expected = self.types.format(self.session, values, expected_ty).to_string();
+        let mut actual = self.types.format(self.session, values, actual_ty).to_string();
+        if expected_ty != actual_ty && expected == actual {
+            expected =
+                self.types.append_named_struct_def_loc_suffix(expected, self.session, expected_ty);
+            actual = self.types.append_named_struct_def_loc_suffix(actual, self.session, actual_ty);
+        }
+        (expected, actual)
+    }
+
     pub fn emit_type_mismatch(
         &mut self,
         values: &ValueInterner,
@@ -74,15 +90,9 @@ impl DiagCtx<'_> {
         actual_loc: SrcLoc,
         add_called_here: bool,
     ) {
-        let primary_label = format!(
-            "expected `{}`, got `{}`",
-            self.types.format(self.session, values, expected_ty),
-            self.types.format(self.session, values, actual_ty),
-        );
-        let secondary_label = format!(
-            "`{}` expected because of this",
-            self.types.format(self.session, values, expected_ty)
-        );
+        let (expected, actual) = self.format_expected_actual_types(values, expected_ty, actual_ty);
+        let primary_label = format!("expected `{expected}`, got `{actual}`");
+        let secondary_label = format!("`{expected}` expected because of this");
         let diagnostic = Diagnostic::error("mismatched types").cross_source_annotations(
             actual_loc,
             primary_label,
@@ -121,15 +131,12 @@ impl DiagCtx<'_> {
         field_name: StrId,
     ) {
         let name = self.session.lookup_name(field_name);
+        let (expected, actual) = self.format_expected_actual_types(values, expected_ty, actual_ty);
         Diagnostic::error("incorrect type for struct field")
             .primary(
                 field_value_loc.source,
                 field_value_loc.span,
-                format!(
-                    "field `{name}` expects `{}`, got `{}`",
-                    self.types.format(self.session, values, expected_ty),
-                    self.types.format(self.session, values, actual_ty),
-                ),
+                format!("field `{name}` expects `{expected}`, got `{actual}`"),
             )
             .emit(self);
     }
@@ -141,16 +148,9 @@ impl DiagCtx<'_> {
         actual_ty: TypeId,
         loc: SrcLoc,
     ) {
+        let (expected, actual) = self.format_expected_actual_types(values, expected_ty, actual_ty);
         Diagnostic::error("mismatched types")
-            .primary(
-                loc.source,
-                loc.span,
-                format!(
-                    "expected `{}`, got `{}`",
-                    self.types.format(self.session, values, expected_ty),
-                    self.types.format(self.session, values, actual_ty),
-                ),
-            )
+            .primary(loc.source, loc.span, format!("expected `{expected}`, got `{actual}`"))
             .emit(self);
     }
 
@@ -219,13 +219,9 @@ impl DiagCtx<'_> {
         ty2: TypeId,
         loc2: SrcLoc,
     ) {
-        let primary_label = format!(
-            "expected `{}`, got `{}`",
-            self.types.format(self.session, values, ty1),
-            self.types.format(self.session, values, ty2),
-        );
-        let secondary_label =
-            format!("`{}` expected because of this", self.types.format(self.session, values, ty1));
+        let (expected, actual) = self.format_expected_actual_types(values, ty1, ty2);
+        let primary_label = format!("expected `{expected}`, got `{actual}`");
+        let secondary_label = format!("`{expected}` expected because of this");
         Diagnostic::error("`if` and `else` have incompatible types")
             .cross_source_annotations(loc2, primary_label, loc1, secondary_label)
             .emit(self);
@@ -866,16 +862,9 @@ impl DiagCtx<'_> {
         rhs_ty: TypeId,
         loc: SrcLoc,
     ) {
+        let (expected, actual) = self.format_expected_actual_types(values, lhs_ty, rhs_ty);
         Diagnostic::error("mismatched types")
-            .primary(
-                loc.source,
-                loc.span,
-                format!(
-                    "expected `{}`, got `{}`",
-                    self.types.format(self.session, values, lhs_ty),
-                    self.types.format(self.session, values, rhs_ty),
-                ),
-            )
+            .primary(loc.source, loc.span, format!("expected `{expected}`, got `{actual}`"))
             .emit(self);
     }
 
