@@ -32,19 +32,14 @@ const _TUPLE_HEADER_ELEMENT_LAYOUT_OK: () = const {
     assert!(size_of::<TupleHeader>().is_multiple_of(align_of::<TypeId>()));
 };
 
-const MIN_COMPOUND_ALIGN: usize = {
-    let mut align = align_of::<StructHeader>();
-    if align_of::<Field>() > align {
-        align = align_of::<Field>();
-    }
-    if align_of::<TupleHeader>() > align {
-        align = align_of::<TupleHeader>();
-    }
-    if align_of::<TypeId>() > align {
-        align = align_of::<TypeId>();
-    }
-    align
-};
+const fn const_max(lhs: usize, rhs: usize) -> usize {
+    if lhs > rhs { lhs } else { rhs }
+}
+
+const MIN_COMPOUND_ALIGN: usize = const_max(
+    const_max(align_of::<StructHeader>(), align_of::<Field>()),
+    const_max(align_of::<TupleHeader>(), align_of::<TypeId>()),
+);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Field {
@@ -89,24 +84,12 @@ pub struct StructInfo<'a> {
     pub fields: &'a [Field],
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct TupleView<'a> {
-    pub elements: &'a [TypeId],
-}
-
-impl<'a> TupleView<'a> {
-    fn as_info(self) -> TupleInfo<'a> {
-        TupleInfo { elements: self.elements }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TupleInfo<'a> {
     pub elements: &'a [TypeId],
 }
 
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompoundKind {
     Struct,
     Tuple,
@@ -119,17 +102,7 @@ enum CompoundInfo<'a> {
 }
 
 #[repr(C)]
-struct StructHeader {
-    kind: CompoundKind,
-    def_loc: SrcLoc,
-    type_index: ValueId,
-    name: Cell<Option<StrId>>,
-    total_fields: u32,
-}
-
-#[repr(C)]
 struct TupleHeader {
-    kind: CompoundKind,
     total_elements: u32,
 }
 
@@ -177,7 +150,7 @@ impl PrimitiveType {
 pub enum Type<'fields> {
     Primitive(PrimitiveType),
     Struct(StructView<'fields>),
-    Tuple(TupleView<'fields>),
+    Tuple(TupleInfo<'fields>),
 }
 
 pub struct TypeInterner {
@@ -198,11 +171,10 @@ impl Default for TypeInterner {
 /// the primitive type constants.
 ///
 /// # Representation
-/// For compound types the [`ChunkedArena`] offset is stored verbatim. Thanks to the guarantees from
-/// [`alloc_append`](ChunkedArena::alloc_append) we know that offsets will be a multiple of our
-/// chosen alignment ([`MIN_COMPOUND_ALIGN`]). This lets us uniquely identify primitive types
-/// by ensuring they are *not* multiples of [`MIN_COMPOUND_ALIGN`], this is done by setting the
-/// lower bit via [`IS_PRIMITIVE_FLAG`](TypeId::IS_PRIMITIVE_FLAG).
+/// For compound types the [`ChunkedArena`] offset is stored with spare low bits used as tags.
+/// Thanks to the guarantees from [`alloc_append`](ChunkedArena::alloc_append) we know that offsets
+/// will be a multiple of our chosen alignment ([`MIN_COMPOUND_ALIGN`]). The lowest bit identifies
+/// primitive types and the next bit distinguishes tuple compounds from struct compounds.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeId(pub(crate) NonZero<u32>);
 
@@ -226,8 +198,26 @@ impl std::fmt::Debug for TypeId {
 pub struct CompoundRef(u32);
 
 impl CompoundRef {
+    const TUPLE_TAG: u32 = 0b10;
+
     pub const fn get(self) -> u32 {
         self.0
+    }
+
+    const fn new_struct(offset: u32) -> Self {
+        CompoundRef(offset)
+    }
+
+    const fn new_tuple(offset: u32) -> Self {
+        CompoundRef(offset | Self::TUPLE_TAG)
+    }
+
+    const fn offset(self) -> u32 {
+        self.0 & !Self::TUPLE_TAG
+    }
+
+    const fn kind(self) -> CompoundKind {
+        if self.0 & Self::TUPLE_TAG == 0 { CompoundKind::Struct } else { CompoundKind::Tuple }
     }
 }
 
@@ -311,6 +301,12 @@ impl TypeId {
         Err(*self)
     }
 }
+
+const _TYPE_ID_TAGS_OK: () = const {
+    assert!(TypeId::IS_PRIMITIVE_FLAG < MIN_COMPOUND_ALIGN as u32);
+    assert!(CompoundRef::TUPLE_TAG < MIN_COMPOUND_ALIGN as u32);
+    assert!(CompoundRef::TUPLE_TAG & TypeId::IS_PRIMITIVE_FLAG == 0);
+};
 
 impl From<StructRef> for TypeId {
     fn from(value: StructRef) -> Self {
@@ -399,13 +395,13 @@ impl TypeInterner {
     }
 
     fn compound_kind(&self, compound: CompoundRef) -> CompoundKind {
-        unsafe { *(self.arena.get(compound.0) as *const CompoundKind) }
+        compound.kind()
     }
 
     fn lookup_compound_info<'s>(&'s self, compound: CompoundRef) -> CompoundInfo<'s> {
         match self.lookup_compound(compound) {
             CompoundView::Struct(view) => CompoundInfo::Struct(view.as_info()),
-            CompoundView::Tuple(view) => CompoundInfo::Tuple(view.as_info()),
+            CompoundView::Tuple(info) => CompoundInfo::Tuple(info),
         }
     }
 
@@ -419,7 +415,7 @@ impl TypeInterner {
     pub fn lookup_struct<'s>(&'s self, r#struct: StructRef) -> StructView<'s> {
         unsafe {
             assert_eq!(self.compound_kind(r#struct.0), CompoundKind::Struct);
-            let header_ptr = self.arena.get(r#struct.0.0) as *const StructHeader;
+            let header_ptr = self.arena.get(r#struct.0.offset()) as *const StructHeader;
             let header = &(*header_ptr);
             let fields_start = header_ptr.add(1) as *const Field;
 
@@ -432,14 +428,14 @@ impl TypeInterner {
         }
     }
 
-    pub fn lookup_tuple<'s>(&'s self, tuple: TupleRef) -> TupleView<'s> {
+    pub fn lookup_tuple<'s>(&'s self, tuple: TupleRef) -> TupleInfo<'s> {
         unsafe {
             assert_eq!(self.compound_kind(tuple.0), CompoundKind::Tuple);
-            let header_ptr = self.arena.get(tuple.0.0) as *const TupleHeader;
+            let header_ptr = self.arena.get(tuple.0.offset()) as *const TupleHeader;
             let header = &(*header_ptr);
             let elements_start = header_ptr.add(1) as *const TypeId;
 
-            TupleView {
+            TupleInfo {
                 elements: core::slice::from_raw_parts(
                     elements_start,
                     header.total_elements as usize,
@@ -555,7 +551,6 @@ impl TypeInterner {
 
             let header_ptr = new_struct_ptr as *mut StructHeader;
             header_ptr.write(StructHeader {
-                kind: CompoundKind::Struct,
                 def_loc: r#struct.def_loc,
                 type_index: r#struct.type_index,
                 name: Cell::new(None),
@@ -563,7 +558,7 @@ impl TypeInterner {
             });
 
             debug_assert!(offset.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
-            StructRef(CompoundRef(offset))
+            StructRef(CompoundRef::new_struct(offset))
         }
     }
 
@@ -584,20 +579,17 @@ impl TypeInterner {
             }
 
             let header_ptr = new_tuple_ptr as *mut TupleHeader;
-            header_ptr.write(TupleHeader {
-                kind: CompoundKind::Tuple,
-                total_elements: tuple.elements.len() as u32,
-            });
+            header_ptr.write(TupleHeader { total_elements: tuple.elements.len() as u32 });
 
             debug_assert!(offset.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
-            TupleRef(CompoundRef(offset))
+            TupleRef(CompoundRef::new_tuple(offset))
         }
     }
 }
 
 enum CompoundView<'a> {
     Struct(StructView<'a>),
-    Tuple(TupleView<'a>),
+    Tuple(TupleInfo<'a>),
 }
 
 pub struct FmtType<'a> {
@@ -665,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn struct_refs_are_aligned() {
+    fn compound_refs_have_aligned_offsets_and_kind_tags() {
         let interner = TypeInterner::new();
         let f = Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN };
 
@@ -674,9 +666,13 @@ mod tests {
         let c = interner.intern_struct(dummy_struct_info(&[f, f, f]));
 
         for r#struct in [a, b, c] {
-            let raw = TypeId::from_struct(r#struct).get();
-            assert!(raw.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
+            assert_eq!(r#struct.0.kind(), CompoundKind::Struct);
+            assert!(r#struct.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
         }
+
+        let tuple = interner.intern_tuple(TupleInfo { elements: &[TypeId::U256] });
+        assert_eq!(tuple.0.kind(), CompoundKind::Tuple);
+        assert!(tuple.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
     }
 
     #[test]

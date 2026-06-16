@@ -510,9 +510,8 @@ impl<'a> Parser<'a> {
 
         if self.eat(Token::LeftRound) {
             // TODO: Track recursion to emit nice error instead of stack overflow.
-            if self.check(Token::RightRound) {
+            if self.eat(Token::RightRound) {
                 let tuple = self.alloc_node_from(start, NodeKind::TupleLit);
-                self.expect(Token::RightRound);
                 return Some(self.close_node(tuple));
             }
 

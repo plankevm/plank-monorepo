@@ -1682,7 +1682,7 @@ fn test_uninit_tuple() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : tuple {u256, bool} = tuple#0 (
+            %0 : tuple {u256, bool} = tuple#2 (
                 0,
                 false,
             )
