@@ -62,7 +62,7 @@
         },
         {
           "name": "keyword.declaration.plank",
-          "match": "\\b(const|let|mut|fn|struct|init|run)\\b"
+          "match": "\\b(const|let|mut|fn|struct|tuple|init|run)\\b"
         },
         {
           "name": "keyword.other.plank",

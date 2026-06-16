@@ -69,6 +69,8 @@ module.exports = grammar({
       $.fn_def,
       $.struct_def,
       $.struct_lit,
+      $.tuple_type,
+      $.tuple_lit,
       $.binary_expr,
       $.unary_expr,
       $.paren_expr
@@ -154,6 +156,15 @@ module.exports = grammar({
       "}"
     ),
     field_def: ($) => seq(field("name", $.identifier), ":", field("type", $._expr)),
+
+    tuple_type: ($) => seq("tuple", "{", commaSeparated($._expr, "elements"), "}"),
+    tuple_lit: ($) => seq(
+      "(",
+      choice(
+        ")",
+        seq(field("elements", $._expr), ",", commaSeparated($._expr, "elements"), ")")
+      )
+    ),
 
     struct_lit: ($) => seq(field("type", $._expr), "{", commaSeparated($.field_init, "fields"), "}"),
     field_init: ($) => seq(field("name", $.identifier), ":", field("value", $._expr)),

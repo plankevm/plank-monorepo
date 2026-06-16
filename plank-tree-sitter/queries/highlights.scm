@@ -4,10 +4,10 @@
 ((identifier) @constant
  (#match? @constant "^[_A-Z][A-Z0-9_]+$"))
 
-; Type definitions (const assigned to a struct def)
+; Type definitions (const assigned to a type expression)
 (const_def
   (identifier) @type.definition
-  (struct_def))
+  [(struct_def) (tuple_type)])
 
 ; Builtin types
 
@@ -126,6 +126,7 @@
 "return" @keyword
 "run" @keyword
 "struct" @keyword
+"tuple" @keyword
 "while" @keyword
 
 "or" @keyword

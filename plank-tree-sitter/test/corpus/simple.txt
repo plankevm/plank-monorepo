@@ -201,6 +201,44 @@ const x = MyType { a: 1, b: 2 };
         (dec_literal)))))
 
 ================================================================================
+Tuple types and literals
+================================================================================
+const Pair = tuple { u256, Map(Key) };
+const empty = ();
+const one = (x,);
+const two = (f(x), y);
+const paren = (x);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (tuple_type
+      (identifier)
+      (fn_call
+        (identifier)
+        (identifier))))
+  (const_def
+    (identifier)
+    (tuple_lit))
+  (const_def
+    (identifier)
+    (tuple_lit
+      (identifier)))
+  (const_def
+    (identifier)
+    (tuple_lit
+      (fn_call
+        (identifier)
+        (identifier))
+      (identifier)))
+  (const_def
+    (identifier)
+    (paren_expr
+      (identifier))))
+
+================================================================================
 Function with comptime params
 ================================================================================
 const f = fn (comptime T: Type, x: T) T {

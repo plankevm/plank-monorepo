@@ -17,7 +17,7 @@ import_group_item = IDENT ("as" IDENT)?
 expr = "comptime"? block | if_expr | expr_no_block
 expr_no_block =
     IDENT | BUILTIN_IDENT | literal | member
-    | fn_call | fn_def | struct_def | struct_lit
+    | fn_call | fn_def | struct_def | struct_lit | tuple_type | tuple_lit
     | binary | unary | paren
 binary = expr binary_op expr
 unary = unary_op expr
@@ -55,6 +55,8 @@ param_type = expr | "$" IDENT
 
 struct_def = "struct" expr? "{" comma_separated{IDENT ":" expr}? "}"
 struct_lit = expr "{" comma_separated{IDENT ":" expr}? "}"
+tuple_type = "tuple" "{" comma_separated{expr}? "}"
+tuple_lit = "(" ")" | "(" expr "," comma_separated{expr}? ")"
 
 # Literals
 literal = bool_literal | hex_literal | bin_literal | dec_literal | bytes_literal
