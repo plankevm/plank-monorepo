@@ -35,11 +35,6 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     fields_poisoned = true;
                     continue;
                 };
-                if ty == TypeId::NEVER {
-                    this.diag_ctx.emit_never_as_struct_field(this.loc(field_def_span), field.name);
-                    fields_poisoned = true;
-                    continue;
-                }
                 if let Some(first_offset) = fields[..i].iter().find_map(|prev_field| {
                     (prev_field.name == field.name).then_some(prev_field.name_offset)
                 }) {
@@ -58,12 +53,12 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 return Err(Poisoned);
             }
 
-            let r#struct = this.eval.types.intern_struct(StructKey {
+            let (r#struct, ok) = this.eval.types.intern_struct(StructKey {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
                 fields: &this.eval.fields_buf[fields_buf_offset..],
             });
-            Ok(r#struct.into())
+            Ok(TypeId::from_struct(r#struct))
         })
     }
 

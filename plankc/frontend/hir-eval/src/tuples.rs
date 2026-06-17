@@ -11,16 +11,18 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<TypeId> {
         self.with_types_buf(|this, types_buf_offset| {
-            let mut validity = Ok(());
+            let mut poisoned = false;
             for &element in &this.hir.elements[elements] {
                 let Ok(ty) = this.expect_type(element) else {
-                    validity = Err(Poisoned);
+                    poisoned = true;
                     continue;
                 };
                 this.eval.types_buf.push(ty);
             }
 
-            validity?;
+            if poisoned {
+                return Err(Poisoned);
+            }
 
             let (tuple, ok) = this
                 .eval

@@ -82,26 +82,6 @@ fn test_tuple_with_struct_element() {
 }
 
 #[test]
-fn test_tuple_type_rejects_never_elements() {
-    assert_diagnostics(
-        r#"
-        const T = tuple { u256, never };
-
-        init {
-            @evm_stop();
-        }
-        "#,
-        &[r#"
-        error: `never` not valid tuple element type
-         --> main.plk:1:25
-          |
-        1 | const T = tuple { u256, never };
-          |                         ^^^^^ type of tuple element evaluated to `never`
-        "#],
-    );
-}
-
-#[test]
 fn test_mixed_comptime_runtime_tuple() {
     assert_diagnostics(
         r#"

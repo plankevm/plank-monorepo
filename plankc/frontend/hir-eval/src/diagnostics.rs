@@ -920,27 +920,6 @@ impl DiagCtx<'_> {
         .emit(self);
     }
 
-    fn emit_never_as_compound_member(
-        &mut self,
-        loc: SrcLoc,
-        type_context: &str,
-        value_label: impl std::fmt::Display,
-    ) {
-        Diagnostic::error(format!("`{}` not valid {type_context}", builtin_names::NEVER))
-            .primary(
-                loc.source,
-                loc.span,
-                format!("type of {value_label} evaluated to `{}`", builtin_names::NEVER),
-            )
-            .emit(self);
-    }
-
-    pub fn emit_never_as_struct_field(&mut self, field_def: SrcLoc, name: StrId) {
-        let name = self.session.lookup_name(name);
-        let label = format!("`{name}`");
-        self.emit_never_as_compound_member(field_def, "struct field type", label);
-    }
-
     pub fn emit_operator_not_supported(
         &mut self,
         values: &ValueInterner,
