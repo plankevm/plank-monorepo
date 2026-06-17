@@ -87,6 +87,9 @@ pub struct TupleKey<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MixedComptimeAndRuntime;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompoundKind {
     Struct(StructRef),
     Tuple(TupleRef),
@@ -305,7 +308,10 @@ impl TypeInterner {
         }
     }
 
-    pub fn intern_struct(&self, key: StructKey<'_>) -> StructRef {
+    pub fn intern_struct(
+        &self,
+        key: StructKey<'_>,
+    ) -> (StructRef, Result<(), MixedComptimeAndRuntime>) {
         use std::hash::BuildHasher;
 
         let hash = self.hasher.hash_one(key);
@@ -319,16 +325,19 @@ impl TypeInterner {
         );
 
         match entry {
-            Entry::Occupied(occupied) => *occupied.get(),
+            Entry::Occupied(occupied) => (*occupied.get(), Ok(())),
             Entry::Vacant(vacant_entry) => {
-                let new_ref = self.push_struct(key);
+                let (new_ref, ok) = self.push_struct(key);
                 vacant_entry.insert(new_ref);
-                new_ref
+                (new_ref, ok)
             }
         }
     }
 
-    pub fn intern_tuple(&self, key: TupleKey<'_>) -> TupleRef {
+    pub fn intern_tuple(
+        &self,
+        key: TupleKey<'_>,
+    ) -> (TupleRef, Result<(), MixedComptimeAndRuntime>) {
         use std::hash::BuildHasher;
 
         let hash = self.hasher.hash_one(key);
@@ -342,11 +351,11 @@ impl TypeInterner {
         );
 
         match entry {
-            Entry::Occupied(occupied) => *occupied.get(),
+            Entry::Occupied(occupied) => (*occupied.get(), Ok(())),
             Entry::Vacant(vacant_entry) => {
-                let new_ref = self.push_tuple(key);
+                let (new_ref, ok) = self.push_tuple(key);
                 vacant_entry.insert(new_ref);
-                new_ref
+                (new_ref, ok)
             }
         }
     }
@@ -489,7 +498,10 @@ impl TypeInterner {
         FmtType { types: self, values, sess, ty }
     }
 
-    fn push_struct(&self, r#struct: StructKey<'_>) -> StructRef {
+    fn push_struct(
+        &self,
+        r#struct: StructKey<'_>,
+    ) -> (StructRef, Result<(), MixedComptimeAndRuntime>) {
         let required_space =
             std::mem::size_of::<StructHeader>() + std::mem::size_of_val(r#struct.fields);
 
@@ -504,7 +516,7 @@ impl TypeInterner {
             assert!(align_of::<Field>() <= size_of::<StructHeader>())
         }
 
-        unsafe {
+        let r#struct = unsafe {
             let (offset, new_struct_ptr) = self.arena.alloc_append(required_space);
 
             let fields_start = new_struct_ptr.byte_add(size_of::<StructHeader>()) as *mut Field;
@@ -525,10 +537,16 @@ impl TypeInterner {
 
             debug_assert!(offset.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
             StructRef(CompoundRef::new_struct(offset))
-        }
+        };
+        let mixed = if flags.contains(TypeFlags::UNINITIALIZABLE_MIXED) {
+            Err(MixedComptimeAndRuntime)
+        } else {
+            Ok(())
+        };
+        (r#struct, mixed)
     }
 
-    fn push_tuple(&self, tuple: TupleKey<'_>) -> TupleRef {
+    fn push_tuple(&self, tuple: TupleKey<'_>) -> (TupleRef, Result<(), MixedComptimeAndRuntime>) {
         let required_space =
             std::mem::size_of::<TupleHeader>() + std::mem::size_of_val(tuple.elements);
 
@@ -543,7 +561,7 @@ impl TypeInterner {
             .iter()
             .fold(TypeFlags::NONE, |flags, element| flags | self.lookup(*element).flags());
 
-        unsafe {
+        let tuple = unsafe {
             let (offset, new_tuple_ptr) = self.arena.alloc_append(required_space);
 
             let elements_start = new_tuple_ptr.byte_add(size_of::<TupleHeader>()) as *mut TypeId;
@@ -558,7 +576,13 @@ impl TypeInterner {
 
             debug_assert!(offset.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
             TupleRef(CompoundRef::new_tuple(offset))
-        }
+        };
+        let mixed = if flags.contains(TypeFlags::UNINITIALIZABLE_MIXED) {
+            Err(MixedComptimeAndRuntime)
+        } else {
+            Ok(())
+        };
+        (tuple, mixed)
     }
 }
 
