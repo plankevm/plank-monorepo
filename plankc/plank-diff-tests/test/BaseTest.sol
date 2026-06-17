@@ -65,8 +65,8 @@ abstract contract BaseTest is Test, PlankDeployer {
         return _deploy(plank(sourcePath), 0);
     }
 
-    function baseBuildOptions() internal view returns (BuildOptions memory) {
-        return initBuildOptions().dependency("std", string.concat(vm.projectRoot(), "/../../std"));
+    function baseBuildOptions() internal pure returns (BuildOptions memory) {
+        return initBuildOptions().dependency("std", "../../std");
     }
 
     function plankBuild(string memory sourcePath, BuildOptions memory options) internal returns (bytes memory) {
