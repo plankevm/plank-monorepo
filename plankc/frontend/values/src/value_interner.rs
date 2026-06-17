@@ -265,6 +265,23 @@ impl FmtValue<'_> {
                 }
                 if fields.is_empty() { f.write_str("}") } else { f.write_str(" }") }
             }
+            Value::TupleVal { ty, elements } => {
+                write!(f, "{} (", self.types.format(self.session, self.values, ty))?;
+                let Type::Tuple(tuple) = self.types.lookup(ty) else {
+                    unreachable!("invariant: tuple value has non-tuple type")
+                };
+                assert_eq!(tuple.len(), elements.len());
+                let mut sep = "";
+                for &element in elements {
+                    f.write_str(sep)?;
+                    sep = ", ";
+                    self.fmt_value(f, element)?;
+                }
+                if elements.len() == 1 {
+                    f.write_str(",")?;
+                }
+                f.write_str(")")
+            }
         }
     }
 }

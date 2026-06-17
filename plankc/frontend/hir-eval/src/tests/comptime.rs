@@ -1662,7 +1662,7 @@ fn test_uninit_invalid_type() {
         1 | const x = @uninit(never);
           |           ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, memptr, structs and tuples
+          = help: @uninit only supports types that do not contain never or function
         "#],
     );
 }
@@ -1732,7 +1732,7 @@ fn test_uninit_struct_with_function_field() {
         1 | const Bad = struct { a: u256, b: function };
           |                               ----------- type 'function' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, memptr, structs and tuples
+          = help: @uninit only supports types that do not contain never or function
         "#],
     );
 }
@@ -1857,7 +1857,7 @@ fn test_uninit_struct_with_memptr_and_invalid_field_reports_invalid_field() {
         1 | const Bad = struct { ptr: memptr, f: function };
           |                                   ----------- type 'function' cannot be uninitialized
           |
-          = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+          = help: @uninit only supports types that do not contain never or function
         "#],
     );
 }
@@ -1883,7 +1883,7 @@ fn test_uninit_struct_reports_all_invalid_fields() {
             1 | const Bad = struct { f: function, g: function };
               |                      ----------- type 'function' cannot be uninitialized
               |
-              = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+              = help: @uninit only supports types that do not contain never or function
             "#,
             r#"
             error: struct contains field that cannot be uninitialized
@@ -1897,7 +1897,7 @@ fn test_uninit_struct_reports_all_invalid_fields() {
             1 | const Bad = struct { f: function, g: function };
               |                                   ----------- type 'function' cannot be uninitialized
               |
-              = help: @uninit only supports u256, bool, void, type, cbytes, memptr and struct types
+              = help: @uninit only supports types that do not contain never or function
             "#,
         ],
     );
