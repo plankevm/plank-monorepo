@@ -33,6 +33,11 @@ pub fn resolve_result_type(builtin: Builtin, arg_types: &[TypeId]) -> Option<Typ
     None
 }
 
+pub fn builtin_returns_never(builtin: Builtin) -> bool {
+    let sigs = builtin_signatures(builtin);
+    !sigs.is_empty() && sigs.iter().all(|sig| sig.result == TypeId::NEVER)
+}
+
 macro_rules! sig {
     ([$($arg:ident),* => $ret:ident]) => {
         BuiltinSignature {

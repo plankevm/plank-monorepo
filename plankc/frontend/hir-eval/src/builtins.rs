@@ -96,18 +96,24 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span)?;
+        let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span);
+        let poisoned_never =
+            result_type.is_err() && builtin_sigs::builtin_returns_never(builtin.into());
 
         if self.is_comptime() {
             self.diag_ctx.emit_unsupported_eval_of_runtime_builtin(builtin, self.loc(expr_span));
-            if result_type == TypeId::NEVER {
+            if result_type == Ok(TypeId::NEVER) || poisoned_never {
                 return Ok(Err(Diverge::ControlFlowPoisoned));
             } else {
                 return Err(Poisoned);
             }
         }
 
-        Ok(self.emit_runtime_builtin_mir(builtin, args, result_type))
+        match result_type {
+            Ok(result_type) => Ok(self.emit_runtime_builtin_mir(builtin, args, result_type)),
+            Err(Poisoned) if poisoned_never => Ok(Err(Diverge::END)),
+            Err(Poisoned) => Err(Poisoned),
+        }
     }
 
     fn resolve_runtime_builtin_result_type(

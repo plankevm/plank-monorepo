@@ -833,6 +833,87 @@ fn test_cached_non_never_poison_does_not_diverge() {
 }
 
 #[test]
+fn test_poisoned_arg_to_never_builtin_does_not_report_missing_terminator() {
+    assert_diagnostics(
+        r#"
+        init {
+            let bob = (struct {}) {};
+            @evm_return(@malloc_uninit(0), bob.missing);
+        }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:3:36
+          |
+        3 |     @evm_return(@malloc_uninit(0), bob.missing);
+          |                                    ^^^^^^^^^^^ `struct@main.plk:2:16` has no field `missing`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_poisoned_arg_to_never_builtin_reports_unsupported_builtin() {
+    assert_diagnostics(
+        r#"
+        const Bob = struct {};
+        const bob = Bob {};
+        const x = @evm_return(bob.missing, 0);
+
+        init { @evm_stop(); }
+        "#,
+        &[
+            r#"
+            error: unknown field
+             --> main.plk:3:23
+              |
+            3 | const x = @evm_return(bob.missing, 0);
+              |                       ^^^^^^^^^^^ `Bob` has no field `missing`
+            "#,
+            r#"
+            error: builtin not supported at compile time
+             --> main.plk:3:11
+              |
+            3 | const x = @evm_return(bob.missing, 0);
+              |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@evm_return` cannot be evaluated at compile time
+            "#,
+        ],
+    );
+}
+
+#[test]
+fn test_poisoned_arg_to_non_never_builtin_reports_missing_terminator() {
+    assert_diagnostics(
+        r#"
+        init {
+            let bob = (struct {}) {};
+            @evm_sstore(0, bob.missing);
+        }
+        "#,
+        &[
+            r#"
+            error: unknown field
+             --> main.plk:3:20
+              |
+            3 |     @evm_sstore(0, bob.missing);
+              |                    ^^^^^^^^^^^ `struct@main.plk:2:16` has no field `missing`
+            "#,
+            r#"
+            error: entry point must end with explicit terminator
+             --> main.plk:1:1
+              |
+            1 | / init {
+            2 | |     let bob = (struct {}) {};
+            3 | |     @evm_sstore(0, bob.missing);
+            4 | | }
+              | |_^ execution may reach end of entry point
+              |
+              = help: entry points must end with a terminating `never` expression (e.g. `@evm_stop()`, `@evm_revert(...)`, `@evm_invalid()`)
+            "#,
+        ],
+    );
+}
+
+#[test]
 fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
     assert_diagnostics(
         std_project(
