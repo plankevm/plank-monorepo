@@ -443,7 +443,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let flags = self.types.lookup(ty).flags();
         if flags.contains(TypeFlags::UNINIT_INCOMPATIBLE) {
             let expr = self.loc(expr_span);
-            self.diag_ctx.emit_uninit_incompatible_type(ty, expr, &self.eval.values);
+            self.diag_ctx.emit_uninit_incompatible_type(ty, expr, self.eval.values);
             return Err(Poisoned);
         }
 
