@@ -20,18 +20,6 @@ pub enum TypeName {
     Parameterized { name: StrId, args: TypeNameArgsId },
 }
 
-const _STRUCT_HEADER_FIELD_LAYOUT_OK: () = const {
-    assert!(align_of::<StructHeader>() <= MIN_COMPOUND_ALIGN);
-    assert!(align_of::<Field>() <= MIN_COMPOUND_ALIGN);
-    assert!(size_of::<StructHeader>().is_multiple_of(align_of::<Field>()));
-};
-
-const _TUPLE_HEADER_ELEMENT_LAYOUT_OK: () = const {
-    assert!(align_of::<TupleHeader>() <= MIN_COMPOUND_ALIGN);
-    assert!(align_of::<TypeId>() <= MIN_COMPOUND_ALIGN);
-    assert!(size_of::<TupleHeader>().is_multiple_of(align_of::<TypeId>()));
-};
-
 const fn const_max(lhs: usize, rhs: usize) -> usize {
     if lhs > rhs { lhs } else { rhs }
 }
@@ -539,8 +527,13 @@ impl TypeInterner {
         let required_space =
             std::mem::size_of::<StructHeader>() + std::mem::size_of_val(r#struct.fields);
 
+        const {
+            assert!(align_of::<StructHeader>() <= MIN_COMPOUND_ALIGN);
+            assert!(align_of::<Field>() <= MIN_COMPOUND_ALIGN);
+            assert!(align_of::<Field>() <= size_of::<StructHeader>())
+        }
+
         unsafe {
-            let () = _STRUCT_HEADER_FIELD_LAYOUT_OK;
             let (offset, new_struct_ptr) = self.arena.alloc_append(required_space);
 
             let fields_start = new_struct_ptr.byte_add(size_of::<StructHeader>()) as *mut Field;
@@ -567,8 +560,13 @@ impl TypeInterner {
         let required_space =
             std::mem::size_of::<TupleHeader>() + std::mem::size_of_val(tuple.elements);
 
+        const {
+            assert!(align_of::<TupleHeader>() <= MIN_COMPOUND_ALIGN);
+            assert!(align_of::<TypeId>() <= MIN_COMPOUND_ALIGN);
+            assert!(align_of::<TypeId>() <= align_of::<TupleHeader>());
+        }
+
         unsafe {
-            let () = _TUPLE_HEADER_ELEMENT_LAYOUT_OK;
             let (offset, new_tuple_ptr) = self.arena.alloc_append(required_space);
 
             let elements_start = new_tuple_ptr.byte_add(size_of::<TupleHeader>()) as *mut TypeId;
