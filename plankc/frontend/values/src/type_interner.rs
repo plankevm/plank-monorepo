@@ -276,18 +276,6 @@ const _TYPE_ID_TAGS_OK: () = const {
     assert!(CompoundRef::TUPLE_TAG & TypeId::IS_PRIMITIVE_FLAG == 0);
 };
 
-impl From<StructRef> for TypeId {
-    fn from(value: StructRef) -> Self {
-        Self::from_struct(value)
-    }
-}
-
-impl From<TupleRef> for TypeId {
-    fn from(value: TupleRef) -> Self {
-        Self::from_tuple(value)
-    }
-}
-
 impl TypeInterner {
     pub fn new() -> Self {
         Self {
