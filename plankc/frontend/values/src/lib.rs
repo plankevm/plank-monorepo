@@ -1,11 +1,13 @@
 mod bignum_interner;
 pub mod builtins;
+mod primitive_types;
 mod type_interner;
 mod value_interner;
 
 pub use alloy_primitives::{U256, uint};
 use plank_core::{const_print::const_assert_mem_size, newtype_index};
 use plank_session::SourceSpan;
+pub use primitive_types::{PrimitiveType, TypeFlags};
 pub use type_interner::*;
 pub use value_interner::*;
 

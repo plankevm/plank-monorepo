@@ -50,7 +50,8 @@ impl<'a> DisplayMir<'a> {
             }
             Value::Void => write!(f, "void_unit"),
             Value::StructVal { ty, fields } => {
-                write!(f, "struct#{} {{", ty.get())?;
+                self.fmt_type(f, ty)?;
+                write!(f, " {{")?;
                 if !fields.is_empty() {
                     writeln!(f)?;
                 }
@@ -62,7 +63,8 @@ impl<'a> DisplayMir<'a> {
                 write!(f, "{pad}}}")
             }
             Value::TupleVal { ty, elements } => {
-                write!(f, "tuple#{} (", ty.get())?;
+                self.fmt_type(f, ty)?;
+                write!(f, " (")?;
                 if !elements.is_empty() {
                     writeln!(f)?;
                 }

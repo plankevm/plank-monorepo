@@ -2,7 +2,7 @@ use crate::scope::{EvalValue, LocalState, Scope};
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan};
-use plank_values::{TupleInfo, TypeId, Value};
+use plank_values::{TupleKey, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_tuple_type(&mut self, elements: hir::ElementsId) -> MaybePoisoned<TypeId> {
@@ -27,7 +27,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let tuple = this
                 .eval
                 .types
-                .intern_tuple(TupleInfo { elements: &this.eval.types_buf[types_buf_offset..] });
+                .intern_tuple(TupleKey { elements: &this.eval.types_buf[types_buf_offset..] });
             Ok(tuple.into())
         })
     }
@@ -64,7 +64,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let tuple = this
                 .eval
                 .types
-                .intern_tuple(TupleInfo { elements: &this.eval.types_buf[types_buf_offset..] });
+                .intern_tuple(TupleKey { elements: &this.eval.types_buf[types_buf_offset..] });
             let ty = tuple.into();
             if let Some(runtime_span) = first_runtime_span {
                 this.eval_runtime_tuple_lit(ty, elements, lit_span, runtime_span)

@@ -6,20 +6,15 @@ use std::{
     num::NonZero,
 };
 
-use crate::{ValueId, ValueInterner};
-use hashbrown::{DefaultHashBuilder, HashSet, HashTable, hash_table::Entry};
+use crate::{
+    ValueId, ValueInterner,
+    primitive_types::{PrimitiveType, TypeFlags},
+};
+use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
 use plank_session::{Session, SourceSpan, SrcLoc, StrId};
 
 newtype_index! {
     pub struct TypeNameArgsId;
-}
-
-bitflags::bitflags! {
-    pub struct TypeFlags: u8 {
-        const RUNTIME_ONLY        = 1 << 0;
-        const COMPTIME_ONLY       = 1 << 1;
-        const UNINIT_INCOMPATIBLE = 1 << 2;
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +41,7 @@ pub struct Field {
 
 struct StructHeader {
     def_loc: SrcLoc,
+    flags: TypeFlags,
     type_index: ValueId,
     name: Cell<Option<TypeName>>,
     total_fields: u32,
@@ -54,26 +50,39 @@ struct StructHeader {
 #[derive(Debug, Clone, Copy)]
 pub struct StructView<'a> {
     pub def_loc: SrcLoc,
+    pub flags: TypeFlags,
     pub type_index: ValueId,
     pub name: &'a Cell<Option<TypeName>>,
     pub fields: &'a [Field],
 }
 
 impl<'a> StructView<'a> {
-    fn as_info(self) -> StructInfo<'a> {
-        StructInfo { def_loc: self.def_loc, type_index: self.type_index, fields: self.fields }
+    fn as_key(self) -> StructKey<'a> {
+        StructKey { def_loc: self.def_loc, type_index: self.type_index, fields: self.fields }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StructInfo<'a> {
+pub struct StructKey<'a> {
     pub type_index: ValueId,
     pub def_loc: SrcLoc,
     pub fields: &'a [Field],
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct TupleView<'a> {
+    pub flags: TypeFlags,
+    pub elements: &'a [TypeId],
+}
+
+impl<'a> TupleView<'a> {
+    fn as_key(self) -> TupleKey<'a> {
+        TupleKey { elements: self.elements }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TupleInfo<'a> {
+pub struct TupleKey<'a> {
     pub elements: &'a [TypeId],
 }
 
@@ -84,58 +93,28 @@ enum CompoundKind {
 }
 
 struct TupleHeader {
+    flags: TypeFlags,
     total_elements: u32,
-}
-
-#[derive(Debug, Clone, Copy)]
-#[cfg_attr(test, derive(enum_iterator::Sequence))]
-pub enum PrimitiveType {
-    Void,
-    U256,
-    Bool,
-    MemoryPointer,
-    Type,
-    Function,
-    CBytes,
-    Never,
-}
-
-impl PrimitiveType {
-    pub const fn name(self) -> &'static str {
-        use plank_session::builtins::builtin_names;
-        match self {
-            PrimitiveType::Void => builtin_names::VOID,
-            PrimitiveType::U256 => builtin_names::U256,
-            PrimitiveType::Bool => builtin_names::BOOL,
-            PrimitiveType::MemoryPointer => builtin_names::MEMORY_POINTER,
-            PrimitiveType::Type => builtin_names::TYPE,
-            PrimitiveType::Function => builtin_names::FUNCTION,
-            PrimitiveType::CBytes => builtin_names::CBYTES,
-            PrimitiveType::Never => builtin_names::NEVER,
-        }
-    }
-
-    pub const fn comptime_only(self) -> bool {
-        match self {
-            PrimitiveType::Void
-            | PrimitiveType::U256
-            | PrimitiveType::Bool
-            | PrimitiveType::MemoryPointer
-            | PrimitiveType::Never => false,
-            PrimitiveType::Type | PrimitiveType::Function | PrimitiveType::CBytes => true,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub enum Type<'fields> {
     Primitive(PrimitiveType),
     Struct(StructView<'fields>),
-    Tuple(TupleInfo<'fields>),
+    Tuple(TupleView<'fields>),
+}
+
+impl Type<'_> {
+    pub fn flags(&self) -> TypeFlags {
+        match self {
+            Type::Primitive(p) => p.flags(),
+            Type::Struct(r#struct) => r#struct.flags,
+            Type::Tuple(tuple) => tuple.flags,
+        }
+    }
 }
 
 pub struct TypeInterner {
-    comptime_only: UnsafeCell<HashSet<CompoundRef>>,
     struct_dedup: UnsafeCell<HashTable<StructRef>>,
     tuple_dedup: UnsafeCell<HashTable<TupleRef>>,
     arena: ChunkedArena<MIN_COMPOUND_ALIGN>,
@@ -309,7 +288,6 @@ impl From<TupleRef> for TypeId {
 impl TypeInterner {
     pub fn new() -> Self {
         Self {
-            comptime_only: UnsafeCell::new(HashSet::new()),
             struct_dedup: UnsafeCell::new(HashTable::new()),
             tuple_dedup: UnsafeCell::new(HashTable::new()),
             arena: ChunkedArena::new(),
@@ -321,57 +299,53 @@ impl TypeInterner {
     pub fn is_comptime_only(&self, ty: TypeId) -> bool {
         match ty.as_primitive() {
             Ok(prim) => prim.comptime_only(),
-            Err(compound) => unsafe { (*self.comptime_only.get()).contains(&compound) },
+            Err(compound) => {
+                self.lookup_compound(compound).flags().contains(TypeFlags::COMPTIME_ONLY)
+            }
         }
     }
 
-    pub fn intern_struct(&self, struct_info: StructInfo<'_>) -> StructRef {
+    pub fn intern_struct(&self, key: StructKey<'_>) -> StructRef {
         use std::hash::BuildHasher;
 
-        let hash = self.hasher.hash_one(struct_info);
+        let hash = self.hasher.hash_one(key);
         // Safety: We only retain the `&mut` reference for the duration of this function and
         // `lookup_struct` and `push_struct` don't reference `self.struct_dedup` at all.
         let dedup = unsafe { &mut (*self.struct_dedup.get()) };
         let entry = dedup.entry(
             hash,
-            |&r#struct| self.lookup_struct(r#struct).as_info() == struct_info,
-            |&r#struct| self.hasher.hash_one(self.lookup_struct(r#struct).as_info()),
+            |&r#struct| self.lookup_struct(r#struct).as_key() == key,
+            |&r#struct| self.hasher.hash_one(self.lookup_struct(r#struct).as_key()),
         );
 
         match entry {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant_entry) => {
-                let new_ref = self.push_struct(struct_info);
+                let new_ref = self.push_struct(key);
                 vacant_entry.insert(new_ref);
-                if struct_info.fields.iter().any(|&field| self.is_comptime_only(field.ty)) {
-                    unsafe { (*self.comptime_only.get()).insert(new_ref.0) };
-                }
                 new_ref
             }
         }
     }
 
-    pub fn intern_tuple(&self, tuple_info: TupleInfo<'_>) -> TupleRef {
+    pub fn intern_tuple(&self, key: TupleKey<'_>) -> TupleRef {
         use std::hash::BuildHasher;
 
-        let hash = self.hasher.hash_one(tuple_info);
+        let hash = self.hasher.hash_one(key);
         // Safety: We only retain the `&mut` reference for the duration of this function and
         // `lookup_tuple` and `push_tuple` don't reference `self.tuple_dedup` at all.
         let dedup = unsafe { &mut (*self.tuple_dedup.get()) };
         let entry = dedup.entry(
             hash,
-            |&tuple| self.lookup_tuple(tuple) == tuple_info,
-            |&tuple| self.hasher.hash_one(self.lookup_tuple(tuple)),
+            |&tuple| self.lookup_tuple(tuple).as_key() == key,
+            |&tuple| self.hasher.hash_one(self.lookup_tuple(tuple).as_key()),
         );
 
         match entry {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant_entry) => {
-                let new_ref = self.push_tuple(tuple_info);
+                let new_ref = self.push_tuple(key);
                 vacant_entry.insert(new_ref);
-                if tuple_info.elements.iter().any(|&element| self.is_comptime_only(element)) {
-                    unsafe { (*self.comptime_only.get()).insert(new_ref.0) };
-                }
                 new_ref
             }
         }
@@ -387,12 +361,8 @@ impl TypeInterner {
         }
     }
 
-    fn compound_kind(&self, compound: CompoundRef) -> CompoundKind {
-        compound.kind()
-    }
-
     fn lookup_compound<'s>(&'s self, compound: CompoundRef) -> CompoundView<'s> {
-        match self.compound_kind(compound) {
+        match compound.kind() {
             CompoundKind::Struct(r#ref) => CompoundView::Struct(self.lookup_struct(r#ref)),
             CompoundKind::Tuple(r#ref) => CompoundView::Tuple(self.lookup_tuple(r#ref)),
         }
@@ -406,6 +376,7 @@ impl TypeInterner {
 
             StructView {
                 def_loc: header.def_loc,
+                flags: header.flags,
                 type_index: header.type_index,
                 name: &header.name,
                 fields: core::slice::from_raw_parts(fields_start, header.total_fields as usize),
@@ -413,13 +384,14 @@ impl TypeInterner {
         }
     }
 
-    pub fn lookup_tuple<'s>(&'s self, tuple: TupleRef) -> TupleInfo<'s> {
+    pub fn lookup_tuple<'s>(&'s self, tuple: TupleRef) -> TupleView<'s> {
         unsafe {
             let header_ptr = self.arena.get(tuple.0.offset()) as *const TupleHeader;
             let header = &(*header_ptr);
             let elements_start = header_ptr.add(1) as *const TypeId;
 
-            TupleInfo {
+            TupleView {
+                flags: header.flags,
                 elements: core::slice::from_raw_parts(
                     elements_start,
                     header.total_elements as usize,
@@ -517,9 +489,14 @@ impl TypeInterner {
         FmtType { types: self, values, sess, ty }
     }
 
-    fn push_struct(&self, r#struct: StructInfo<'_>) -> StructRef {
+    fn push_struct(&self, r#struct: StructKey<'_>) -> StructRef {
         let required_space =
             std::mem::size_of::<StructHeader>() + std::mem::size_of_val(r#struct.fields);
+
+        let flags = r#struct
+            .fields
+            .iter()
+            .fold(TypeFlags::NONE, |flags, field| flags | self.lookup(field.ty).flags());
 
         const {
             assert!(align_of::<StructHeader>() <= MIN_COMPOUND_ALIGN);
@@ -540,6 +517,7 @@ impl TypeInterner {
             let header_ptr = new_struct_ptr as *mut StructHeader;
             header_ptr.write(StructHeader {
                 def_loc: r#struct.def_loc,
+                flags,
                 type_index: r#struct.type_index,
                 name: Cell::new(None),
                 total_fields: r#struct.fields.len() as u32,
@@ -550,7 +528,7 @@ impl TypeInterner {
         }
     }
 
-    fn push_tuple(&self, tuple: TupleInfo<'_>) -> TupleRef {
+    fn push_tuple(&self, tuple: TupleKey<'_>) -> TupleRef {
         let required_space =
             std::mem::size_of::<TupleHeader>() + std::mem::size_of_val(tuple.elements);
 
@@ -559,6 +537,11 @@ impl TypeInterner {
             assert!(align_of::<TypeId>() <= MIN_COMPOUND_ALIGN);
             assert!(align_of::<TypeId>() <= align_of::<TupleHeader>());
         }
+
+        let flags = tuple
+            .elements
+            .iter()
+            .fold(TypeFlags::NONE, |flags, element| flags | self.lookup(*element).flags());
 
         unsafe {
             let (offset, new_tuple_ptr) = self.arena.alloc_append(required_space);
@@ -571,7 +554,7 @@ impl TypeInterner {
             }
 
             let header_ptr = new_tuple_ptr as *mut TupleHeader;
-            header_ptr.write(TupleHeader { total_elements: tuple.elements.len() as u32 });
+            header_ptr.write(TupleHeader { flags, total_elements: tuple.elements.len() as u32 });
 
             debug_assert!(offset.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
             TupleRef(CompoundRef::new_tuple(offset))
@@ -581,7 +564,16 @@ impl TypeInterner {
 
 enum CompoundView<'a> {
     Struct(StructView<'a>),
-    Tuple(TupleInfo<'a>),
+    Tuple(TupleView<'a>),
+}
+
+impl CompoundView<'_> {
+    pub fn flags(&self) -> TypeFlags {
+        match self {
+            CompoundView::Struct(r#struct) => r#struct.flags,
+            CompoundView::Tuple(tuple) => tuple.flags,
+        }
+    }
 }
 
 pub struct FmtType<'a> {
@@ -622,8 +614,8 @@ mod tests {
         SrcLoc::new(SourceId::new(id), ZERO_SPAN)
     }
 
-    fn dummy_struct_info(fields: &[Field]) -> StructInfo<'_> {
-        StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields }
+    fn dummy_struct_info(fields: &[Field]) -> StructKey<'_> {
+        StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields }
     }
 
     #[test]
@@ -662,7 +654,7 @@ mod tests {
             assert!(r#struct.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
         }
 
-        let tuple = interner.intern_tuple(TupleInfo { elements: &[TypeId::U256] });
+        let tuple = interner.intern_tuple(TupleKey { elements: &[TypeId::U256] });
         assert!(matches!(tuple.0.kind(), CompoundKind::Tuple(_)));
         assert!(tuple.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
     }
@@ -673,9 +665,9 @@ mod tests {
         let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
 
         let a_info =
-            StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields: &fields };
+            StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields: &fields };
         let b_info =
-            StructInfo { type_index: ValueId::VOID, def_loc: dummy_src_loc(1), fields: &fields };
+            StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(1), fields: &fields };
 
         let a = interner.intern_struct(a_info);
         let b = interner.intern_struct(b_info);
@@ -707,19 +699,19 @@ mod tests {
         let interner = TypeInterner::new();
         let elements = [TypeId::U256, TypeId::BOOL];
 
-        let a = interner.intern_tuple(TupleInfo { elements: &elements });
-        let b = interner.intern_tuple(TupleInfo { elements: &elements });
+        let a = interner.intern_tuple(TupleKey { elements: &elements });
+        let b = interner.intern_tuple(TupleKey { elements: &elements });
         assert_eq!(a, b);
 
         let different = [TypeId::BOOL, TypeId::U256];
-        let c = interner.intern_tuple(TupleInfo { elements: &different });
+        let c = interner.intern_tuple(TupleKey { elements: &different });
         assert_ne!(a, c);
     }
 
     #[test]
     fn empty_tuple_is_not_void() {
         let interner = TypeInterner::new();
-        let tuple = interner.intern_tuple(TupleInfo { elements: &[] });
+        let tuple = interner.intern_tuple(TupleKey { elements: &[] });
         let tuple_ty = TypeId::from_tuple(tuple);
 
         assert_ne!(tuple_ty, TypeId::VOID);
@@ -731,20 +723,21 @@ mod tests {
     fn tuple_comptime_only_tracks_elements() {
         let interner = TypeInterner::new();
 
-        let comptime_tuple = interner.intern_tuple(TupleInfo { elements: &[TypeId::TYPE] });
+        let comptime_tuple = interner.intern_tuple(TupleKey { elements: &[TypeId::TYPE] });
         assert!(interner.is_comptime_only(TypeId::from_tuple(comptime_tuple)));
 
-        let runtime_tuple = interner.intern_tuple(TupleInfo { elements: &[TypeId::U256] });
+        let runtime_tuple = interner.intern_tuple(TupleKey { elements: &[TypeId::U256] });
         assert!(!interner.is_comptime_only(TypeId::from_tuple(runtime_tuple)));
     }
 
     #[test]
     fn tuple_and_struct_do_not_dedup() {
+        let mut sess = Session::new();
         let interner = TypeInterner::new();
-        let field = Field { name: StrId::new(0), ty: TypeId::U256, def_span: ZERO_SPAN };
+        let field = Field { name: sess.intern("name"), ty: TypeId::U256, def_span: ZERO_SPAN };
 
         let r#struct = interner.intern_struct(dummy_struct_info(&[field]));
-        let tuple = interner.intern_tuple(TupleInfo { elements: &[TypeId::U256] });
+        let tuple = interner.intern_tuple(TupleKey { elements: &[TypeId::U256] });
 
         assert_ne!(TypeId::from_struct(r#struct), TypeId::from_tuple(tuple));
     }

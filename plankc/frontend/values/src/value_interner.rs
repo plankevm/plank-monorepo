@@ -270,7 +270,7 @@ impl FmtValue<'_> {
                 let Type::Tuple(tuple) = self.types.lookup(ty) else {
                     unreachable!("invariant: tuple value has non-tuple type")
                 };
-                assert_eq!(tuple.len(), elements.len());
+                assert_eq!(tuple.elements.len(), elements.len());
                 let mut sep = "";
                 for &element in elements {
                     f.write_str(sep)?;

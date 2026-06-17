@@ -1,17 +1,14 @@
+use crate::scope::{Diverge, EvalValue, LocalState, Scope};
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
-use plank_session::{Builtin, MaybePoisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind};
+use plank_session::{
+    Builtin, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, builtins::BuiltinKind,
+};
 use plank_values::{
-    CBytes, Field, PrimitiveType, StructView, Type, TypeId, TypeInterner, Value, ValueId,
-    ValueInterner, builtins as builtin_sigs,
+    CBytes, Field, PrimitiveType, StructView, Type, TypeFlags, TypeId, TypeInterner, Value,
+    ValueId, ValueInterner, builtins as builtin_sigs,
 };
-
-use crate::{
-    diagnostics::DiagCtx,
-    scope::{Diverge, EvalValue, LocalState, Scope},
-};
-use plank_session::{Poisoned, SrcLoc};
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -443,13 +440,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty_local] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-        if validate_uninit_type(ty, self.eval.types, self.diag_ctx, self.loc(expr_span), None) {
+        let flags = self.types.lookup(ty).flags();
+        if flags.contains(TypeFlags::UNINIT_INCOMPATIBLE) {
+            let expr = self.loc(expr_span);
+            self.diag_ctx.emit_uninit_incompatible_type(ty, expr, &self.eval.values);
             return Err(Poisoned);
         }
 
-        // Types that require runtime allocation (memptr, structs containing memptr)
-        // produce MIR directly.
-        if contains_memptr(ty, self.eval.types) {
+        if flags.contains(TypeFlags::RUNTIME_ONLY) {
             if self.is_comptime() {
                 self.diag_ctx.emit_uninit_memptr_in_comptime(self.loc(expr_span));
                 return Err(Poisoned);
@@ -727,60 +725,6 @@ pub(crate) fn fold_runtime_builtin(
     }
 }
 
-fn validate_uninit_type(
-    ty: TypeId,
-    types: &TypeInterner,
-    diag_ctx: &mut DiagCtx<'_>,
-    expr: SrcLoc,
-    field_loc: Option<SrcLoc>,
-) -> bool {
-    match types.lookup(ty) {
-        Type::Primitive(
-            PrimitiveType::U256
-            | PrimitiveType::Bool
-            | PrimitiveType::MemoryPointer
-            | PrimitiveType::Void
-            | PrimitiveType::Type
-            | PrimitiveType::CBytes,
-        ) => false,
-        Type::Primitive(invalid @ (PrimitiveType::Function | PrimitiveType::Never)) => {
-            // `field_loc` is set when recursing into struct fields
-            if let Some(field_loc) = field_loc {
-                diag_ctx.emit_invalid_uninit_struct_field(invalid, expr, field_loc);
-            } else {
-                diag_ctx.emit_invalid_uninit_type(invalid, expr);
-            }
-            true
-        }
-        Type::Struct(view) => {
-            let mut has_invalid_uninit = false;
-            for field in view.fields {
-                let field_loc = SrcLoc::new(view.def_loc.source, field.def_span);
-                has_invalid_uninit |=
-                    validate_uninit_type(field.ty, types, diag_ctx, expr, Some(field_loc));
-            }
-            has_invalid_uninit
-        }
-        Type::Tuple(view) => {
-            let mut has_invalid_uninit = false;
-            for &element in view.elements {
-                has_invalid_uninit |=
-                    validate_uninit_type(element, types, diag_ctx, loc, field_loc);
-            }
-            has_invalid_uninit
-        }
-    }
-}
-
-fn contains_memptr(ty: TypeId, types: &TypeInterner) -> bool {
-    match types.lookup(ty) {
-        Type::Primitive(PrimitiveType::MemoryPointer) => true,
-        Type::Primitive(_) => false,
-        Type::Struct(view) => view.fields.iter().any(|field| contains_memptr(field.ty, types)),
-        Type::Tuple(view) => view.elements.iter().any(|&element| contains_memptr(element, types)),
-    }
-}
-
 fn build_uninit_comptime(
     ty: TypeId,
     types: &TypeInterner,
@@ -792,7 +736,7 @@ fn build_uninit_comptime(
         Type::Primitive(PrimitiveType::Bool) => ValueId::FALSE,
         Type::Primitive(PrimitiveType::Void) => ValueId::VOID,
         Type::Primitive(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
-        Ok(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
+        Type::Primitive(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
         Type::Primitive(
             PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never,
         ) => {
