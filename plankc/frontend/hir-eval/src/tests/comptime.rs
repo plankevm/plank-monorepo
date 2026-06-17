@@ -1835,17 +1835,19 @@ fn test_uninit_struct_with_comptime_only_field_direct_runtime_scope_is_comptime_
 fn test_uninit_struct_with_memptr_and_invalid_field_reports_invalid_field() {
     assert_diagnostics(
         r#"
-        const Bad = struct { ptr: memptr, f: function };
+        const Bad = struct { ptr: memptr, f: never };
+
         const x = @uninit(Bad);
         init { @evm_stop(); }
         "#,
         &[r#"
         error: struct contains field that cannot be uninitialized
-         --> main.plk:2:11
+         --> main.plk:3:11
           |
-        1 | const Bad = struct { ptr: memptr, f: function };
-          |                                   ----------- type 'function' cannot be uninitialized
-        2 | const x = @uninit(Bad);
+        1 | const Bad = struct { ptr: memptr, f: never };
+          |                                   -------- type 'never' cannot be uninitialized
+        2 |
+        3 | const x = @uninit(Bad);
           |           ^^^^^^^^^^^^ cannot use @uninit on this struct
           |
           = help: @uninit only supports types that do not contain never or function

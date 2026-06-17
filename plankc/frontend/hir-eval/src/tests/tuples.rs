@@ -82,6 +82,23 @@ fn test_tuple_with_struct_element() {
 }
 
 #[test]
+fn test_mixed_tuple_type() {
+    assert_diagnostics(
+        r#"
+        const T = tuple { type, memptr };
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: defining uninstantiable type
+         --> main.plk:1:11
+          |
+        1 | const T = tuple { type, memptr };
+          |           ^^^^^^^^^^^^^^^^^^^^^^ type 'memptr' of field #1 is runtime only, while type 'type' of field #0 is comptime only
+        "#],
+    );
+}
+
+#[test]
 fn test_mixed_comptime_runtime_tuple() {
     assert_diagnostics(
         r#"

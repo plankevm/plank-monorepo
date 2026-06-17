@@ -3,7 +3,8 @@ use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueInterner, builtins as builtin_sigs,
+    StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueInterner,
+    builtins as builtin_sigs,
 };
 
 pub(crate) struct BindingLoc {
@@ -440,12 +441,53 @@ impl DiagCtx<'_> {
                 expr.source,
                 expr.span,
                 format!(
-                    "type '{}' of field {} is runtime only, while type '{}' of field {} is comptime only",
+                    "type '{}' of field #{} is runtime only, while type '{}' of field #{} is comptime only",
                     self.types.format(self.session, values, runtime_ty),
                     runtime_pos,
                     self.types.format(self.session, values, comptime_ty),
                     comptime_pos
                 ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_mixed_struct_type(
+        &mut self,
+        expr: SrcLoc,
+        r#struct: StructRef,
+        values: &ValueInterner,
+    ) {
+        let mut runtime_field = None;
+        let mut comptime_field = None;
+        for &field in self.types.lookup_struct(r#struct).fields {
+            let flags = self.types.lookup(field.ty).flags();
+            if flags.contains(TypeFlags::COMPTIME_ONLY) {
+                comptime_field.get_or_insert(field);
+            }
+            if flags.contains(TypeFlags::RUNTIME_ONLY) {
+                runtime_field.get_or_insert(field);
+            }
+        }
+        let runtime = runtime_field.expect("mixed should have at least one runtime");
+        let comptime = comptime_field.expect("mixed should have at least one comptime");
+        Diagnostic::error("defining uninstantiable type")
+            .element(
+                Annotations::new(expr.source)
+                    .no_label(expr.span, AnnotationKind::Primary)
+                    .secondary(
+                        runtime.def_span,
+                        format!(
+                            "type '{}' is runtime only",
+                            self.types.format(self.session, values, runtime.ty),
+                        ),
+                    )
+                    .secondary(
+                        comptime.def_span,
+                        format!(
+                            "type '{}' is comptime only",
+                            self.types.format(self.session, values, comptime.ty),
+                        ),
+                    ),
             )
             .emit(self);
     }

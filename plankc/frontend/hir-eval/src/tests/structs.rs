@@ -226,6 +226,26 @@ fn test_comptime_struct_field_type_mismatch() {
 }
 
 #[test]
+fn test_mixed_struct_type() {
+    assert_diagnostics(
+        r#"
+        const S = struct { t: type, p: memptr };
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: defining uninstantiable type
+         --> main.plk:1:11
+          |
+        1 | const S = struct { t: type, p: memptr };
+          |           ^^^^^^^^^-------^^---------^^
+          |                    |        |
+          |                    |        type 'memptr' is runtime only
+          |                    type 'type' is comptime only
+        "#],
+    );
+}
+
+#[test]
 fn test_mixed_comptime_runtime_struct() {
     assert_diagnostics(
         r#"
