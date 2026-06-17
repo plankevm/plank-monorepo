@@ -14,6 +14,14 @@ newtype_index! {
     pub struct TypeNameArgsId;
 }
 
+bitflags::bitflags! {
+    pub struct TypeFlags: u8 {
+        const RUNTIME_ONLY        = 1 << 0;
+        const COMPTIME_ONLY       = 1 << 1;
+        const UNINIT_INCOMPATIBLE = 1 << 2;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeName {
     Plain(StrId),
@@ -42,14 +50,6 @@ struct StructHeader {
     name: Cell<Option<TypeName>>,
     total_fields: u32,
 }
-
-const _HEADER_FIELD_ALIGN_EQ: () =
-    const { assert!(align_of::<Field>() == align_of::<StructHeader>()) };
-
-const MIN_STRUCT_FIELD_ALIGN: usize = {
-    let () = _HEADER_FIELD_ALIGN_EQ;
-    align_of::<StructHeader>()
-};
 
 #[derive(Debug, Clone, Copy)]
 pub struct StructView<'a> {
@@ -81,12 +81,6 @@ pub struct TupleInfo<'a> {
 enum CompoundKind {
     Struct(StructRef),
     Tuple(TupleRef),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum CompoundInfo<'a> {
-    Struct(StructInfo<'a>),
-    Tuple(TupleInfo<'a>),
 }
 
 struct TupleHeader {

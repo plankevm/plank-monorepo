@@ -2184,6 +2184,7 @@ name = "plank-values"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "bitflags",
  "enum-iterator",
  "hashbrown 0.16.1",
  "plank-core",
