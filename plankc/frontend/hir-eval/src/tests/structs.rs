@@ -24,7 +24,7 @@ fn test_struct_field_access() {
         @fn0() -> never {
             %0 : u256 = 34
             %1 : bool = false
-            %2 : Pair = struct#0 {
+            %2 : Pair = Pair {
                 49,
                 true,
             }
@@ -684,7 +684,7 @@ fn test_type_index_expr_eagerly_evaluates() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : struct@main.plk:5:13 = struct#0 {
+            %0 : struct@main.plk:5:13 = struct@main.plk:5:13 {
                 67,
             }
             %1 : never = @evm_stop()

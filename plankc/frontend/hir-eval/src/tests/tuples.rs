@@ -15,7 +15,7 @@ fn test_comptime_tuple_literal() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : tuple {u256, bool} = tuple#2 (
+            %0 : tuple {u256, bool} = tuple {u256, bool} (
                 34,
                 false,
             )

@@ -41,7 +41,10 @@ pub enum Expr {
         contents: BytesId,
         start: u32,
     },
-    TupleLit { ty: TypeId, elements: ArgsId },
+    TupleLit {
+        ty: TypeId,
+        elements: ArgsId,
+    },
 }
 
 const _EXPR_SIZE: () = const_assert_mem_size::<Expr>(12);
