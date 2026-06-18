@@ -82,7 +82,7 @@ impl LowerCtx<'_> {
             Type::Struct(r#struct) => {
                 r#struct.fields.iter().map(|&field| self.size_in_locals(field.ty)).sum()
             }
-            Type::Tuple(tuple) => tuple.elements.iter().map(|&ty| self.size_in_locals(ty)).sum(),
+            Type::Tuple(tuple) => tuple.fields.iter().map(|&ty| self.size_in_locals(ty)).sum(),
         }
     }
 }
@@ -183,7 +183,7 @@ fn lower_basic_block(
                     }
 
                     Value::StructVal { ty, fields: children }
-                    | Value::TupleVal { ty, elements: children } => {
+                    | Value::TupleVal { ty, fields: children } => {
                         let size = ctx.size_in_locals(ty);
                         ctx.locals_map.ensure_many(
                             target,
@@ -276,9 +276,8 @@ fn lower_basic_block(
                         };
                     }
                 }
-                Expr::StructLit { ty, fields: children }
-                | Expr::TupleLit { ty, elements: children } => {
-                    lower_compound_literal(ctx, &mut current_bb, target, ty, children);
+                Expr::CompoundLit { ty, fields } => {
+                    lower_compound_literal(ctx, &mut current_bb, target, ty, fields);
                 }
                 Expr::FieldAccess { object, field_index } => {
                     lower_field_access(ctx, &mut current_bb, target, mir_func, object, field_index);
@@ -427,7 +426,7 @@ fn materialize_constant_compound_literal(
                 bb.add_set_const_op(sets, x);
             }
             Value::StructVal { ty: _, fields: children }
-            | Value::TupleVal { ty: _, elements: children } => {
+            | Value::TupleVal { ty: _, fields: children } => {
                 materialize_constant_compound_literal(values, bb, targets, children);
             }
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {

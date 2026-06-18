@@ -14,10 +14,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
         &mut self,
         builtin: Builtin,
-        args: hir::CallArgsId,
+        args: hir::ArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let args = &self.eval.hir.call_args[args];
+        let args = &self.eval.hir.args[args];
         match builtin {
             Builtin::Runtime(runtime) => {
                 if runtime.foldable() {
@@ -204,7 +204,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
                 let field_count = match self.types.lookup(ty) {
                     Type::Struct(r#struct) => r#struct.fields.len(),
-                    Type::Tuple(tuple) => tuple.elements.len(),
+                    Type::Tuple(tuple) => tuple.fields.len(),
                     _ => {
                         self.diag_ctx.emit_expected_struct_or_tuple_type_arg(
                             self.eval.values,
@@ -341,7 +341,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let &[ty, field_index] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty, builtin, expr_span)?;
         let (_struct, field, _index) =
-            self.resolve_struct_field_index(ty, field_index, builtin, expr_span)?;
+            self.resolve_field_index(ty, field_index, builtin, expr_span)?;
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field.ty))))
     }
 
@@ -355,7 +355,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let instance_state = self.bindings[r#struct].state?;
         let ty = self.state_type(instance_state);
         let (_struct, field, field_index) =
-            self.resolve_struct_field_index(ty, field_index, builtin, expr_span)?;
+            self.resolve_field_index(ty, field_index, builtin, expr_span)?;
 
         match instance_state {
             LocalState::Comptime(vid) => match self.values.lookup(vid) {
@@ -381,7 +381,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let instance_state = self.bindings[instance].state?;
         let instance_ty = self.state_type(instance_state);
         let (r#struct, field, field_index) =
-            self.resolve_struct_field_index(instance_ty, field_index, builtin, expr_span)?;
+            self.resolve_field_index(instance_ty, field_index, builtin, expr_span)?;
 
         let new_value_state = self.bindings[field_value].state?;
         let expected_field_type = field.ty;
@@ -451,7 +451,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         });
 
         Ok(Ok(EvalValue::Runtime {
-            expr: mir::Expr::StructLit { ty: instance_ty, fields: mir_fields },
+            expr: mir::Expr::CompoundLit { ty: instance_ty, fields: mir_fields },
             result_type: instance_ty,
         }))
     }
@@ -549,13 +549,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let target = self.mir_types.push(ty);
                 self.emit(mir::Instruction::Set {
                     target,
-                    expr: mir::Expr::StructLit { ty, fields },
+                    expr: mir::Expr::CompoundLit { ty, fields },
                 });
                 target
             }
             Type::Tuple(view) => {
-                let elements = self.with_locals_buf(|this, offset| {
-                    for &element in view.elements {
+                let fields = self.with_locals_buf(|this, offset| {
+                    for &element in view.fields {
                         let local = this.emit_uninit_runtime_local(element);
                         this.locals_buf.push(local);
                     }
@@ -564,14 +564,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let target = self.mir_types.push(ty);
                 self.emit(mir::Instruction::Set {
                     target,
-                    expr: mir::Expr::TupleLit { ty, elements },
+                    expr: mir::Expr::CompoundLit { ty, fields },
                 });
                 target
             }
         }
     }
 
-    fn resolve_struct_field_index(
+    fn resolve_field_index(
         &mut self,
         ty: TypeId,
         index_arg: hir::LocalId,
@@ -778,11 +778,11 @@ fn build_uninit_comptime(
         }
         Type::Tuple(view) => {
             let buf_offset = buf.len();
-            for &element in view.elements {
+            for &element in view.fields {
                 let vid = build_uninit_comptime(element, types, values, buf);
                 buf.push(vid);
             }
-            let result = values.intern(Value::TupleVal { ty, elements: &buf[buf_offset..] });
+            let result = values.intern(Value::TupleVal { ty, fields: &buf[buf_offset..] });
             buf.truncate(buf_offset);
             result
         }

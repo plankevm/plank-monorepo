@@ -37,35 +37,15 @@ impl<'a> DisplayHir<'a> {
         write!(f, "struct#{} {}:{}:{}", struct_id.get(), source.path.to_str().unwrap(), line, col)
     }
 
-    fn fmt_args(&self, f: &mut Formatter<'_>, args_id: CallArgsId) -> fmt::Result {
-        let args = &self.hir.call_args[args_id];
+    fn fmt_args(&self, f: &mut Formatter<'_>, args: ArgsId) -> fmt::Result {
         write!(f, "(")?;
-        for (i, &local) in args.iter().enumerate() {
+        for (i, &local) in self.hir.args[args].iter().enumerate() {
             if i > 0 {
                 write!(f, ", ")?;
             }
             self.fmt_local(f, local)?;
         }
         write!(f, ")")
-    }
-
-    fn fmt_elements(
-        &self,
-        f: &mut Formatter<'_>,
-        elements_id: ElementsId,
-        open: &str,
-        close: &str,
-    ) -> fmt::Result {
-        let elements = &self.hir.elements[elements_id];
-        write!(f, "{open}")?;
-        for (i, &local) in elements.iter().enumerate() {
-            if i > 0 {
-                write!(f, " ")?;
-            }
-            self.fmt_local(f, local)?;
-            write!(f, ",")?;
-        }
-        write!(f, "{close}")
     }
 
     fn fmt_expr(&self, f: &mut Formatter<'_>, expr: Expr) -> fmt::Result {
@@ -135,11 +115,14 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "}}")
             }
             Expr::StructDef(id) => self.fmt_struct_ref(f, id),
-            Expr::TupleType { elements } => {
-                write!(f, "tuple ")?;
-                self.fmt_elements(f, elements, "{", "}")
+            Expr::TupleType { fields } => {
+                write!(f, "tuple_type ")?;
+                self.fmt_args(f, fields)
             }
-            Expr::TupleLit { elements } => self.fmt_elements(f, elements, "(", ")"),
+            Expr::TupleLit { fields } => {
+                write!(f, "tuple_value ")?;
+                self.fmt_args(f, fields)
+            }
             Expr::LogicalNot { input } => {
                 write!(f, "logical_not ")?;
                 self.fmt_local(f, input)

@@ -324,7 +324,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 assert_eq!(locals.len(), def.fields.len());
                 let fields = self.eval.mir_args.push_copy_slice(locals);
                 EvalValue::Runtime {
-                    expr: mir::Expr::StructLit { ty: struct_ty, fields },
+                    expr: mir::Expr::CompoundLit { ty: struct_ty, fields },
                     result_type: struct_ty,
                 }
             }

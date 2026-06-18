@@ -62,13 +62,13 @@ impl<'a> DisplayMir<'a> {
                 }
                 write!(f, "{pad}}}")
             }
-            Value::TupleVal { ty, elements } => {
+            Value::TupleVal { ty, fields } => {
                 self.fmt_type(f, ty)?;
                 write!(f, " (")?;
-                if !elements.is_empty() {
+                if !fields.is_empty() {
                     writeln!(f)?;
                 }
-                for &element in elements {
+                for &element in fields {
                     write!(f, "{pad}{PAD}")?;
                     self.fmt_value(f, element, indent + 1)?;
                     writeln!(f, ",")?;
@@ -97,7 +97,7 @@ impl<'a> DisplayMir<'a> {
                 self.fmt_local(f, object)?;
                 write!(f, ".{field_index}")
             }
-            Expr::StructLit { ty, fields } => {
+            Expr::CompoundLit { ty, fields } => {
                 self.fmt_type(f, ty)?;
                 write!(f, " {{")?;
                 let args = &self.mir.args[fields];
@@ -123,22 +123,6 @@ impl<'a> DisplayMir<'a> {
                     write!(f, " + {start}")?;
                 }
                 Ok(())
-            }
-            Expr::TupleLit { ty, elements } => {
-                self.fmt_type(f, ty)?;
-                write!(f, " (")?;
-                let args = &self.mir.args[elements];
-                for (i, &local) in args.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ",")?;
-                    }
-                    write!(f, " ")?;
-                    self.fmt_local(f, local)?;
-                }
-                if !args.is_empty() {
-                    write!(f, " ")?;
-                }
-                write!(f, ")")
             }
         }
     }

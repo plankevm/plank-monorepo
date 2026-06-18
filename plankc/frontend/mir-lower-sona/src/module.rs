@@ -136,7 +136,7 @@ fn declare_runtime_shape(
         }
         PlankType::Tuple(tuple_view) => {
             let element_shapes = tuple_view
-                .elements
+                .fields
                 .iter()
                 .map(|&element| declare_runtime_shape(shapes, mir, builder, element))
                 .collect::<Vec<_>>();

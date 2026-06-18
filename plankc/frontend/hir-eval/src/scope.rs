@@ -705,8 +705,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::StructDef(struct_def_id) => self
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
-            ExprKind::TupleType { elements } => self
-                .eval_tuple_type(elements, expr.span)
+            ExprKind::TupleType { fields } => self
+                .eval_tuple_type(fields, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
             ExprKind::BinaryOpCall { op, lhs, rhs } => {
                 poison::transpose(self.eval_binary_op(op, lhs, rhs, expr.span))?
@@ -715,7 +715,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 poison::transpose(self.eval_unary_op(op, input, expr.span))?
             }
             ExprKind::StructLit { ty, fields } => self.eval_struct_lit(ty, fields, expr.span),
-            ExprKind::TupleLit { elements } => self.eval_tuple_lit(elements, expr.span),
+            ExprKind::TupleLit { fields } => self.eval_tuple_lit(fields, expr.span),
             ExprKind::Member { object, member } => {
                 self.eval_struct_member_access(object, member, expr.span)
             }

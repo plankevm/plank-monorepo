@@ -221,7 +221,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_call(
         &mut self,
         callee: hir::LocalId,
-        args_id: hir::CallArgsId,
+        args_id: hir::ArgsId,
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
@@ -250,7 +250,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 let type_name = this.values.get_closure_name(closure_vid);
 
-                let args = &this.hir.call_args[args_id];
+                let args = &this.hir.args[args_id];
                 let arg_spans = this
                     .eval
                     .call_arg_spans

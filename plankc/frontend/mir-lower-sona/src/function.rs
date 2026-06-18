@@ -208,10 +208,9 @@ impl<'a> FunctionLowerer<'a> {
                     return BlockExit::Terminated;
                 }
             }
-            Expr::StructLit { ty, fields: children }
-            | Expr::TupleLit { ty, elements: children } => {
-                let value = self.build_aggregate(ty, self.mir.args[children].len(), |this, i| {
-                    this.read_local(this.mir.args[children][i])
+            Expr::CompoundLit { ty, fields } => {
+                let value = self.build_aggregate(ty, self.mir.args[fields].len(), |this, i| {
+                    this.read_local(this.mir.args[fields][i])
                 });
                 self.write_local(target, value);
             }
@@ -344,7 +343,7 @@ impl<'a> FunctionLowerer<'a> {
     ) -> Option<SonaValueId> {
         let expected_count = match self.mir.types.lookup(ty) {
             PlankType::Struct(struct_) => struct_.fields.len(),
-            PlankType::Tuple(tuple) => tuple.elements.len(),
+            PlankType::Tuple(tuple) => tuple.fields.len(),
             PlankType::Primitive(_) => panic!("aggregate on primitive"),
         };
         assert_eq!(expected_count, element_count);
@@ -386,7 +385,7 @@ impl<'a> FunctionLowerer<'a> {
                 )
             }
             Value::StructVal { ty, fields: children }
-            | Value::TupleVal { ty, elements: children } => {
+            | Value::TupleVal { ty, fields: children } => {
                 self.build_aggregate(ty, children.len(), |this, i| {
                     this.materialize_constant(children[i])
                 })

@@ -17,9 +17,8 @@ newtype_index! {
     pub struct BlockId;
     pub struct EntryPointId;
     pub struct StructDefId;
-    pub struct CallArgsId;
+    pub struct ArgsId;
     pub struct FieldsId;
-    pub struct ElementsId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,11 +36,11 @@ pub enum ExprKind {
 
     Call {
         callee: LocalId,
-        args: CallArgsId,
+        args: ArgsId,
     },
     BuiltinCall {
         builtin: Builtin,
-        args: CallArgsId,
+        args: ArgsId,
     },
     UnaryOpCall {
         op: operators::UnaryOp,
@@ -62,10 +61,10 @@ pub enum ExprKind {
     },
     StructDef(StructDefId),
     TupleType {
-        elements: ElementsId,
+        fields: ArgsId,
     },
     TupleLit {
-        elements: ElementsId,
+        fields: ArgsId,
     },
 
     /// Bool-specific logical NOT (`!x`). Not in `operators::UnaryOp` because it is not
@@ -222,10 +221,9 @@ pub struct Hir {
     pub block_spans: IndexVec<BlockId, MaybePoisoned<SourceSpan>>,
     pub consts: IndexVec<ConstId, ConstDef>,
 
-    pub call_args: ListOfLists<CallArgsId, LocalId>,
+    pub args: ListOfLists<ArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
-    pub elements: ListOfLists<ElementsId, LocalId>,
 
     pub fns: IndexVec<FnDefId, FnDef>,
     pub fn_params: ListOfLists<FnDefId, ParamInfo>,

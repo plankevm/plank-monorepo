@@ -30,20 +30,15 @@ pub enum Expr {
         object: LocalId,
         field_index: u32,
     },
-    StructLit {
+    CompoundLit {
         ty: TypeId,
         fields: ArgsId,
     },
     /// Code offset (valid for `codecopy`) of the slice starting at `start`
-    /// within the interned bytes `contents`, only known after codegen. The
-    /// entire parent `contents` is lowered as one data segment.
+    /// within the interned bytes `contents`.
     DataOffset {
         contents: BytesId,
         start: u32,
-    },
-    TupleLit {
-        ty: TypeId,
-        elements: ArgsId,
     },
 }
 

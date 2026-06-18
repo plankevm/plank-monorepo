@@ -43,7 +43,7 @@ fn test_runtime_tuple_literal() {
             %1 : u256 = @evm_calldataload(%0)
             %2 : u256 = %1
             %3 : bool = false
-            %4 : tuple {u256, bool} = tuple {u256, bool} ( %2, %3 )
+            %4 : tuple {u256, bool} = tuple {u256, bool} { %2, %3 }
             %5 : never = @evm_stop()
         }
         "#,
@@ -74,7 +74,7 @@ fn test_tuple_with_struct_element() {
             %4 : Pair = Pair { %2, %3 }
             %5 : Pair = %4
             %6 : u256 = 7
-            %7 : tuple {Pair, u256} = tuple {Pair, u256} ( %5, %6 )
+            %7 : tuple {Pair, u256} = tuple {Pair, u256} { %5, %6 }
             %8 : never = @evm_stop()
         }
         "#,

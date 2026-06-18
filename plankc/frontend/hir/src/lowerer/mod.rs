@@ -31,10 +31,9 @@ struct HirBuilder {
     block_instrs: ListOfLists<BlockId, Instruction>,
     block_spans: IndexVec<BlockId, MaybePoisoned<SourceSpan>>,
 
-    call_args: ListOfLists<CallArgsId, LocalId>,
+    args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
     struct_defs: IndexVec<StructDefId, StructDef>,
-    elements: ListOfLists<ElementsId, LocalId>,
 
     fns: IndexVec<FnDefId, FnDef>,
     fn_params: ListOfLists<FnDefId, ParamInfo>,
@@ -46,13 +45,12 @@ impl HirBuilder {
         Self {
             block_instrs: ListOfLists::new(),
             block_spans: IndexVec::new(),
-            call_args: ListOfLists::new(),
+            args: ListOfLists::new(),
             fields: ListOfLists::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
             struct_defs: IndexVec::new(),
-            elements: ListOfLists::new(),
         }
     }
 }
@@ -206,26 +204,13 @@ impl BlockLowerer<'_> {
         Expr { kind, span: self.lexed.tokens_src_span(span) }
     }
 
-    fn lower_call_args<'a>(&mut self, args: impl Iterator<Item = ast::Expr<'a>>) -> CallArgsId {
+    fn lower_args<'a>(&mut self, args: impl Iterator<Item = ast::Expr<'a>>) -> ArgsId {
         let buf_start = self.locals_buf.len();
         for arg in args {
             let local = self.lower_expr_to_local(arg);
             self.locals_buf.push(local);
         }
-        self.builder.call_args.push_iter(self.locals_buf.drain(buf_start..))
-    }
-
-    // TODO: this is almost identical to lower_call_args. worth extracting a helper?
-    fn lower_tuple_elements<'a>(
-        &mut self,
-        elements: impl Iterator<Item = ast::Expr<'a>>,
-    ) -> ElementsId {
-        let buf_start = self.locals_buf.len();
-        for element in elements {
-            let local = self.lower_expr_to_local(element);
-            self.locals_buf.push(local);
-        }
-        self.builder.elements.push_iter(self.locals_buf.drain(buf_start..))
+        self.builder.args.push_iter(self.locals_buf.drain(buf_start..))
     }
 
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
@@ -388,7 +373,7 @@ impl BlockLowerer<'_> {
             ast::Expr::Call(call_expr) => {
                 let callee = call_expr.callee();
                 if let ast::Expr::BuiltinName { name, span } = callee {
-                    let args = self.lower_call_args(call_expr.args());
+                    let args = self.lower_args(call_expr.args());
                     if let Some(builtin) = Builtin::from_str_id(name) {
                         ExprKind::BuiltinCall { builtin, args }
                     } else {
@@ -397,7 +382,7 @@ impl BlockLowerer<'_> {
                     }
                 } else {
                     let callee = self.lower_expr_to_local(callee);
-                    let args = self.lower_call_args(call_expr.args());
+                    let args = self.lower_args(call_expr.args());
                     ExprKind::Call { callee, args }
                 }
             }
@@ -452,12 +437,12 @@ impl BlockLowerer<'_> {
                 ExprKind::StructDef(struct_def_id)
             }
             ast::Expr::TupleType(tuple_type) => {
-                let elements = self.lower_tuple_elements(tuple_type.elements());
-                ExprKind::TupleType { elements }
+                let fields = self.lower_args(tuple_type.fields());
+                ExprKind::TupleType { fields }
             }
             ast::Expr::TupleLit(tuple_lit) => {
-                let elements = self.lower_tuple_elements(tuple_lit.elements());
-                ExprKind::TupleLit { elements }
+                let fields = self.lower_args(tuple_lit.fields());
+                ExprKind::TupleLit { fields }
             }
             ast::Expr::FnDef(fn_def) => ExprKind::FnDef(self.lower_fn_def(fn_def)),
             ast::Expr::If(if_expr) => {
@@ -900,10 +885,9 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         block_spans: builder.block_spans,
         consts,
 
-        call_args: builder.call_args,
+        args: builder.args,
         fields: builder.fields,
         struct_defs: builder.struct_defs,
-        elements: builder.elements,
 
         fns: builder.fns,
         fn_params: builder.fn_params,

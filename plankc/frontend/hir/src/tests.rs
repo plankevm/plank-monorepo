@@ -406,14 +406,14 @@ fn test_tuple_type_and_literal() {
         ConstId(0) ("Pair") result=LocalId(0) {
             %1 = type:u256
             %2 = type:bool
-            %0 = tuple {%1, %2,}
+            %0 = tuple_type (%1, %2)
         }
 
         ==== Init ====
         %0 = 2
         %1 = true
         %3 = $0
-        %2 : %3 = (%0, %1,)
+        %2 : %3 = tuple_value (%0, %1)
         "#,
     );
 }

@@ -423,7 +423,7 @@ impl DiagCtx<'_> {
     pub fn emit_mixed_tuple_type(&mut self, expr: SrcLoc, tuple: TupleRef, values: &ValueInterner) {
         let mut runtime_field = None;
         let mut comptime_field = None;
-        for (i, &field) in self.types.lookup_tuple(tuple).elements.iter().enumerate() {
+        for (i, &field) in self.types.lookup_tuple(tuple).fields.iter().enumerate() {
             let flags = self.types.lookup(field).flags();
             if flags.contains(TypeFlags::COMPTIME_ONLY) {
                 comptime_field.get_or_insert((i, field));
@@ -945,14 +945,14 @@ impl DiagCtx<'_> {
             }
             Type::Tuple(tuple) => {
                 let field_pos = tuple
-                    .elements
+                    .fields
                     .iter()
                     .position(|element| {
                         let r#type = self.types.lookup(*element);
                         r#type.flags().contains(TypeFlags::UNINIT_INCOMPATIBLE)
                     })
                     .expect("empty tuple not uninit incompatible");
-                let element = tuple.elements[field_pos];
+                let element = tuple.fields[field_pos];
                 Diagnostic::error("tuple contains field that cannot be uninitialized").primary(
                     expr.source,
                     expr.span,

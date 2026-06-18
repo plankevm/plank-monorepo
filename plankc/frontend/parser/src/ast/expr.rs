@@ -319,7 +319,7 @@ pub struct TupleType<'cst> {
 }
 
 impl<'cst> TupleType<'cst> {
-    pub fn elements(&self) -> impl Iterator<Item = Expr<'cst>> {
+    pub fn fields(&self) -> impl Iterator<Item = Expr<'cst>> {
         self.view.children().map(Expr::new_unwrap)
     }
 
@@ -335,7 +335,7 @@ pub struct TupleLit<'cst> {
 }
 
 impl<'cst> TupleLit<'cst> {
-    pub fn elements(&self) -> impl Iterator<Item = Expr<'cst>> {
+    pub fn fields(&self) -> impl Iterator<Item = Expr<'cst>> {
         self.view.children().map(Expr::new_unwrap)
     }
 

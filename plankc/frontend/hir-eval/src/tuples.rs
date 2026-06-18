@@ -7,13 +7,13 @@ use plank_values::{MixedComptimeAndRuntime, TupleKey, TypeId, Value};
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_tuple_type(
         &mut self,
-        elements: hir::ElementsId,
+        fields: hir::ArgsId,
         expr_span: SourceSpan,
     ) -> MaybePoisoned<TypeId> {
         self.with_types_buf(|this, types_buf_offset| {
             let mut poisoned = false;
-            for &element in &this.hir.elements[elements] {
-                let Ok(ty) = this.expect_type(element) else {
+            for &field in &this.hir.args[fields] {
+                let Ok(ty) = this.expect_type(field) else {
                     poisoned = true;
                     continue;
                 };
@@ -27,7 +27,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let (tuple, ok) = this
                 .eval
                 .types
-                .intern_tuple(TupleKey { elements: &this.eval.types_buf[types_buf_offset..] });
+                .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
 
             if let Err(MixedComptimeAndRuntime) = ok {
                 this.diag_ctx.emit_mixed_tuple_type(this.loc(expr_span), tuple, this.eval.values);
@@ -40,14 +40,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
     pub(crate) fn eval_tuple_lit(
         &mut self,
-        elements: hir::ElementsId,
+        fields: hir::ArgsId,
         lit_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
         self.with_types_buf(|this, types_buf_offset| {
             this.with_values_buf(|this, values_buf_offset| {
                 let mut validity = Ok(());
                 let mut first_runtime_span = None;
-                for &element in &this.hir.elements[elements] {
+                for &element in &this.hir.args[fields] {
                     let Ok((state, use_span, origin)) = this.bindings[element].poisoned() else {
                         validity = Err(Poisoned);
                         continue;
@@ -76,14 +76,14 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 let (tuple, _ok) = this
                     .eval
                     .types
-                    .intern_tuple(TupleKey { elements: &this.eval.types_buf[types_buf_offset..] });
+                    .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
                 let ty = TypeId::from_tuple(tuple);
 
                 if let Some(runtime_span) = first_runtime_span {
-                    this.eval_runtime_tuple_lit(ty, elements, lit_span, runtime_span)
+                    this.eval_runtime_tuple_lit(ty, fields, lit_span, runtime_span)
                 } else {
-                    let elements = &this.eval.values_buf[values_buf_offset..];
-                    let tuple = this.eval.values.intern(Value::TupleVal { ty, elements });
+                    let fields = &this.eval.values_buf[values_buf_offset..];
+                    let tuple = this.eval.values.intern(Value::TupleVal { ty, fields });
                     Ok(EvalValue::Comptime(tuple))
                 }
             })
@@ -93,15 +93,15 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     fn eval_runtime_tuple_lit(
         &mut self,
         ty: TypeId,
-        elements: hir::ElementsId,
+        fields: hir::ArgsId,
         lit_span: SourceSpan,
         runtime_span: SourceSpan,
     ) -> MaybePoisoned<EvalValue> {
         self.with_locals_buf(|this, locals_buf_offset| {
-            let tuple_elements = &this.hir.elements[elements];
+            let fields = &this.hir.args[fields];
             let mut validity = Ok(());
 
-            for &element in tuple_elements {
+            for &element in fields {
                 let local = this.bindings[element];
                 let Ok(state) = local.state else {
                     unreachable!("tuple literal selected runtime path with poisoned element")
@@ -137,9 +137,9 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             validity?;
 
             let locals = &this.eval.locals_buf[locals_buf_offset..];
-            assert_eq!(locals.len(), tuple_elements.len());
-            let elements = this.eval.mir_args.push_copy_slice(locals);
-            Ok(EvalValue::Runtime { expr: mir::Expr::TupleLit { ty, elements }, result_type: ty })
+            assert_eq!(locals.len(), fields.len());
+            let fields = this.eval.mir_args.push_copy_slice(locals);
+            Ok(EvalValue::Runtime { expr: mir::Expr::CompoundLit { ty, fields }, result_type: ty })
         })
     }
 }
