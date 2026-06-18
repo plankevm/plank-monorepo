@@ -1161,6 +1161,51 @@ fn test_comptime_is_struct() {
 }
 
 #[test]
+fn test_comptime_is_tuple_expects_type() {
+    assert_diagnostics(
+        r#"
+        const x = @is_tuple(42);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected type argument
+         --> main.plk:1:11
+          |
+        1 | const x = @is_tuple(42);
+          |           ^^^^^^^^^^^^^ `@is_tuple` expects a type argument, got a value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_is_tuple() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const yes = @is_tuple(tuple { u256, bool });
+        const struct_no = @is_tuple(Pair);
+        const primitive_no = @is_tuple(u256);
+        init {
+            let mut x: bool = yes;
+            let mut y: bool = struct_no;
+            let mut z: bool = primitive_no;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = false
+            %2 : bool = false
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_field_count_expects_type() {
     assert_diagnostics(
         r#"
@@ -1185,11 +1230,11 @@ fn test_comptime_field_count_expects_struct() {
         init { @evm_stop(); }
         "#,
         &[r#"
-        error: expected struct type
+        error: unexpected type kind
          --> main.plk:1:11
           |
         1 | const x = @field_count(u256);
-          |           ^^^^^^^^^^^^^^^^^^ `@field_count` expects a struct type, got `u256`
+          |           ^^^^^^^^^^^^^^^^^^ `@field_count` expects a struct or tuple type, got `u256`
         "#],
     );
 }

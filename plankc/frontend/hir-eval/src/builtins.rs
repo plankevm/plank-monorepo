@@ -193,11 +193,29 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let is_struct = matches!(self.eval.types.lookup(ty), Type::Struct(_));
                 Ok(Ok(EvalValue::Comptime(is_struct.into())))
             }
+            Builtin::IsTuple => {
+                let &[ty_local] = args else { unreachable!("arg count checked") };
+                let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+                let is_tuple = matches!(self.eval.types.lookup(ty), Type::Tuple(_));
+                Ok(Ok(EvalValue::Comptime(is_tuple.into())))
+            }
             Builtin::FieldCount => {
                 let &[r#struct] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
-                let r#struct = self.expect_struct_type(ty, builtin, expr_span)?;
-                let count = U256::from(r#struct.fields.len());
+                let field_count = match self.types.lookup(ty) {
+                    Type::Struct(r#struct) => r#struct.fields.len(),
+                    Type::Tuple(tuple) => tuple.elements.len(),
+                    _ => {
+                        self.diag_ctx.emit_expected_struct_or_tuple_type_arg(
+                            self.eval.values,
+                            builtin,
+                            ty,
+                            expr_loc,
+                        );
+                        return Err(Poisoned);
+                    }
+                };
+                let count = U256::from(field_count);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),

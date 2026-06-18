@@ -744,6 +744,25 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_expected_struct_or_tuple_type_arg(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("unexpected type kind")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` expects a struct or tuple type, got `{}`",
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_expected_struct_type_arg(
         &mut self,
         values: &ValueInterner,

@@ -216,6 +216,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
 
         // Comptime builtins
         B::IsStruct => &[sig!([TYPE => BOOL])],
+        B::IsTuple => &[sig!([TYPE => BOOL])],
         B::FieldCount => &[sig!([TYPE => U256])],
         B::InComptime => &[sig!([=> BOOL])],
         B::SetEvalBranchQuota => &[sig!([U256 => VOID])],
