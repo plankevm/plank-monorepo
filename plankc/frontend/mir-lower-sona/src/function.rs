@@ -384,12 +384,8 @@ impl<'a> FunctionLowerer<'a> {
                     self.fb.make_imm_value(Immediate::from_i256(I256::from(value), SonaType::I256)),
                 )
             }
-            Value::StructVal { ty, fields: children }
-            | Value::TupleVal { ty, fields: children } => {
-                self.build_aggregate(ty, children.len(), |this, i| {
-                    this.materialize_constant(children[i])
-                })
-            }
+            Value::Compound { ty, fields } => self
+                .build_aggregate(ty, fields.len(), |this, i| this.materialize_constant(fields[i])),
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 panic!("comptime-only value in MIR")
             }

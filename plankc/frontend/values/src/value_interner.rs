@@ -28,8 +28,7 @@ enum StoredValue {
     Type(TypeId),
     Bytes(CBytes),
     Closure { fn_def: FnDefId, def_loc: SrcLoc, captures: CaptureIdx },
-    StructVal { ty: TypeId, children: CompoundIdx },
-    TupleVal { ty: TypeId, children: CompoundIdx },
+    Compound { ty: TypeId, fields: CompoundIdx },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,8 +39,7 @@ pub enum Value<'a> {
     Type(TypeId),
     Bytes(CBytes),
     Closure { fn_def: FnDefId, def_loc: SrcLoc, captures: &'a [(ValueId, DefOrigin)] },
-    StructVal { ty: TypeId, fields: &'a [ValueId] },
-    TupleVal { ty: TypeId, fields: &'a [ValueId] },
+    Compound { ty: TypeId, fields: &'a [ValueId] },
 }
 
 impl Value<'_> {
@@ -53,8 +51,7 @@ impl Value<'_> {
             Value::Type(_) => TypeId::TYPE,
             Value::Bytes(_) => TypeId::CBYTES,
             Value::Closure { .. } => TypeId::FUNCTION,
-            Value::StructVal { ty, .. } => *ty,
-            Value::TupleVal { ty, .. } => *ty,
+            Value::Compound { ty, .. } => *ty,
         }
     }
 }
@@ -91,12 +88,7 @@ fn stored_to_value<'a>(
         StoredValue::Closure { fn_def, def_loc, captures: idx } => {
             Value::Closure { fn_def, def_loc, captures: &captures[idx] }
         }
-        StoredValue::StructVal { ty, children: idx } => {
-            Value::StructVal { ty, fields: &children[idx] }
-        }
-        StoredValue::TupleVal { ty, children: idx } => {
-            Value::TupleVal { ty, fields: &children[idx] }
-        }
+        StoredValue::Compound { ty, fields } => Value::Compound { ty, fields: &children[fields] },
     }
 }
 
@@ -184,14 +176,9 @@ impl ValueInterner {
                         def_loc,
                         captures: self.captures.push_copy_slice(captures),
                     },
-                    Value::StructVal { ty, fields } => StoredValue::StructVal {
-                        ty,
-                        children: self.children.push_copy_slice(fields),
-                    },
-                    Value::TupleVal { ty, fields } => StoredValue::TupleVal {
-                        ty,
-                        children: self.children.push_copy_slice(fields),
-                    },
+                    Value::Compound { ty, fields } => {
+                        StoredValue::Compound { ty, fields: self.children.push_copy_slice(fields) }
+                    }
                 };
                 let id = self.values.push(stored);
                 vacant.insert(id);
@@ -249,39 +236,36 @@ impl FmtValue<'_> {
                 }
                 f.write_str(">")
             }
-            Value::StructVal { ty, fields } => {
-                write!(f, "{} {{", self.types.format(self.session, self.values, ty))?;
-                let Type::Struct(r#struct) = self.types.lookup(ty) else {
-                    unreachable!("invariant: struct value has non-struct type")
-                };
-                assert_eq!(r#struct.fields.len(), fields.len());
-                let mut sep = " ";
-                for (&field, &value) in r#struct.fields.iter().zip(fields) {
-                    f.write_str(sep)?;
-                    sep = ", ";
-                    f.write_str(self.session.lookup_name(field.name))?;
-                    f.write_str(": ")?;
-                    self.fmt_value(f, value)?;
+            Value::Compound { ty, fields } => match self.types.lookup(ty) {
+                Type::Struct(r#struct) => {
+                    write!(f, "{} {{", self.types.format(self.session, self.values, ty))?;
+                    assert_eq!(r#struct.fields.len(), fields.len());
+                    let mut sep = " ";
+                    for (&field, &value) in r#struct.fields.iter().zip(fields) {
+                        f.write_str(sep)?;
+                        sep = ", ";
+                        f.write_str(self.session.lookup_name(field.name))?;
+                        f.write_str(": ")?;
+                        self.fmt_value(f, value)?;
+                    }
+                    if fields.is_empty() { f.write_str("}") } else { f.write_str(" }") }
                 }
-                if fields.is_empty() { f.write_str("}") } else { f.write_str(" }") }
-            }
-            Value::TupleVal { ty, fields } => {
-                write!(f, "{} (", self.types.format(self.session, self.values, ty))?;
-                let Type::Tuple(tuple) = self.types.lookup(ty) else {
-                    unreachable!("invariant: tuple value has non-tuple type")
-                };
-                assert_eq!(tuple.fields.len(), fields.len());
-                let mut sep = "";
-                for &field in fields {
-                    f.write_str(sep)?;
-                    sep = ", ";
-                    self.fmt_value(f, field)?;
+                Type::Tuple(tuple) => {
+                    write!(f, "{} (", self.types.format(self.session, self.values, ty))?;
+                    assert_eq!(tuple.fields.len(), fields.len());
+                    let mut sep = "";
+                    for &field in fields {
+                        f.write_str(sep)?;
+                        sep = ", ";
+                        self.fmt_value(f, field)?;
+                    }
+                    if fields.len() == 1 {
+                        f.write_str(",")?;
+                    }
+                    f.write_str(")")
                 }
-                if fields.len() == 1 {
-                    f.write_str(",")?;
-                }
-                f.write_str(")")
-            }
+                _ => unreachable!("invariant: struct value has non-struct type"),
+            },
         }
     }
 }
@@ -312,46 +296,17 @@ mod tests {
     }
 
     #[test]
-    fn intern_struct_dedup() {
-        let mut interner = ValueInterner::new();
-        let v1 = interner.intern(Value::Void);
-        let ty = interner.intern(Value::Type(TypeId::new(1)));
-
-        let s1 = interner.intern(Value::StructVal { ty: TypeId::new(1), fields: &[v1, ty] });
-        let s2 = interner.intern(Value::StructVal { ty: TypeId::new(1), fields: &[v1, ty] });
-        assert_eq!(s1, s2);
-
-        let s3 = interner.intern(Value::StructVal { ty: TypeId::new(2), fields: &[v1, ty] });
-        assert_ne!(s1, s3);
-    }
-
-    #[test]
-    fn intern_tuple_dedup() {
-        let mut interner = ValueInterner::new();
-        let v1 = interner.intern(Value::Void);
-        let ty = interner.intern(Value::Type(TypeId::new(1)));
-
-        let t1 = interner.intern(Value::TupleVal { ty: TypeId::new(1), fields: &[v1, ty] });
-        let t2 = interner.intern(Value::TupleVal { ty: TypeId::new(1), fields: &[v1, ty] });
-        assert_eq!(t1, t2);
-
-        let t3 = interner.intern(Value::TupleVal { ty: TypeId::new(2), fields: &[v1, ty] });
-        assert_ne!(t1, t3);
-    }
-
-    #[test]
     fn intern_compound_dedup() {
         let mut interner = ValueInterner::new();
         let v1 = interner.intern(Value::Void);
-        let ty = TypeId::new(1);
-        let ty_value = interner.intern(Value::Type(ty));
+        let ty = interner.intern(Value::Type(TypeId::new(1)));
 
-        let s = interner.intern(Value::StructVal { ty, fields: &[v1, ty_value] });
-        let t = interner.intern(Value::TupleVal { ty, fields: &[v1, ty_value] });
+        let s1 = interner.intern(Value::Compound { ty: TypeId::new(1), fields: &[v1, ty] });
+        let s2 = interner.intern(Value::Compound { ty: TypeId::new(1), fields: &[v1, ty] });
+        assert_eq!(s1, s2);
 
-        assert_ne!(s, t);
-        assert_eq!(interner.lookup(s), Value::StructVal { ty, fields: &[v1, ty_value] });
-        assert_eq!(interner.lookup(t), Value::TupleVal { ty, fields: &[v1, ty_value] });
+        let s3 = interner.intern(Value::Compound { ty: TypeId::new(2), fields: &[v1, ty] });
+        assert_ne!(s1, s3);
     }
 
     #[test]

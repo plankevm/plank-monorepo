@@ -359,7 +359,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         match instance_state {
             LocalState::Comptime(vid) => match self.values.lookup(vid) {
-                Value::StructVal { fields, .. } => {
+                Value::Compound { fields, .. } => {
                     Ok(Ok(EvalValue::Comptime(fields[field_index as usize])))
                 }
                 _ => unreachable!("invariant: type checked as struct"),
@@ -405,7 +405,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         {
             return Ok(self.with_values_buf(|this, values_buf_offset| {
                 match this.eval.values.lookup(instance_vid) {
-                    Value::StructVal { fields: old_fields, .. } => {
+                    Value::Compound { fields: old_fields, .. } => {
                         this.eval.values_buf.extend_from_slice(old_fields);
                     }
                     _ => unreachable!("invariant: type checked as struct"),
@@ -413,7 +413,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let fields = &mut this.eval.values_buf[values_buf_offset..];
                 fields[field_index as usize] = new_value_vid;
                 Ok(EvalValue::Comptime(
-                    this.eval.values.intern(Value::StructVal { ty: instance_ty, fields }),
+                    this.eval.values.intern(Value::Compound { ty: instance_ty, fields }),
                 ))
             }));
         }
@@ -772,7 +772,7 @@ fn build_uninit_comptime(
                 let vid = build_uninit_comptime(field.ty, types, values, buf);
                 buf.push(vid);
             }
-            let result = values.intern(Value::StructVal { ty, fields: &buf[buf_offset..] });
+            let result = values.intern(Value::Compound { ty, fields: &buf[buf_offset..] });
             buf.truncate(buf_offset);
             result
         }
@@ -782,7 +782,7 @@ fn build_uninit_comptime(
                 let vid = build_uninit_comptime(element, types, values, buf);
                 buf.push(vid);
             }
-            let result = values.intern(Value::TupleVal { ty, fields: &buf[buf_offset..] });
+            let result = values.intern(Value::Compound { ty, fields: &buf[buf_offset..] });
             buf.truncate(buf_offset);
             result
         }

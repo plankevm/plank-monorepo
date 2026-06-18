@@ -15,10 +15,10 @@ fn test_comptime_tuple_literal() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : tuple {u256, bool} = tuple {u256, bool} (
+            %0 : tuple {u256, bool} = tuple {u256, bool} {
                 34,
                 false,
-            )
+            }
             %1 : never = @evm_stop()
         }
         "#,

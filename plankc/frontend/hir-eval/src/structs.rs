@@ -120,7 +120,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         match state {
             LocalState::Comptime(vid) => {
-                let Value::StructVal { ty: _, fields } = self.values.lookup(vid) else {
+                let Value::Compound { ty: _, fields } = self.values.lookup(vid) else {
                     unreachable!("invariant: `state_type` != type of value")
                 };
                 Ok(EvalValue::Comptime(fields[field_index as usize]))
@@ -211,7 +211,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let field_values = &self.eval.values_buf[values_buf_offset..];
             assert_eq!(field_values.len(), def.fields.len());
             EvalValue::Comptime(
-                self.eval.values.intern(Value::StructVal { ty: struct_ty, fields: field_values }),
+                self.eval.values.intern(Value::Compound { ty: struct_ty, fields: field_values }),
             )
         })
     }
@@ -316,7 +316,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 EvalValue::Comptime(
                     self.eval
                         .values
-                        .intern(Value::StructVal { ty: struct_ty, fields: field_values }),
+                        .intern(Value::Compound { ty: struct_ty, fields: field_values }),
                 )
             }
             Some(_) => {

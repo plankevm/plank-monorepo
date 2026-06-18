@@ -83,7 +83,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     this.eval_runtime_tuple_lit(ty, fields, lit_span, runtime_span)
                 } else {
                     let fields = &this.eval.values_buf[values_buf_offset..];
-                    let tuple = this.eval.values.intern(Value::TupleVal { ty, fields });
+                    let tuple = this.eval.values.intern(Value::Compound { ty, fields });
                     Ok(EvalValue::Comptime(tuple))
                 }
             })

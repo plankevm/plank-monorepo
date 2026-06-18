@@ -49,7 +49,7 @@ impl<'a> DisplayMir<'a> {
                 }
             }
             Value::Void => write!(f, "void_unit"),
-            Value::StructVal { ty, fields } => {
+            Value::Compound { ty, fields } => {
                 self.fmt_type(f, ty)?;
                 write!(f, " {{")?;
                 if !fields.is_empty() {
@@ -61,19 +61,6 @@ impl<'a> DisplayMir<'a> {
                     writeln!(f, ",")?;
                 }
                 write!(f, "{pad}}}")
-            }
-            Value::TupleVal { ty, fields } => {
-                self.fmt_type(f, ty)?;
-                write!(f, " (")?;
-                if !fields.is_empty() {
-                    writeln!(f)?;
-                }
-                for &element in fields {
-                    write!(f, "{pad}{PAD}")?;
-                    self.fmt_value(f, element, indent + 1)?;
-                    writeln!(f, ",")?;
-                }
-                write!(f, "{pad})")
             }
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 unreachable!("comptime-only value in MIR")

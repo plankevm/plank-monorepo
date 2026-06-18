@@ -182,8 +182,7 @@ fn lower_basic_block(
                         current_bb.add_set_const_op(sets, x);
                     }
 
-                    Value::StructVal { ty, fields: children }
-                    | Value::TupleVal { ty, fields: children } => {
+                    Value::Compound { ty, fields } => {
                         let size = ctx.size_in_locals(ty);
                         ctx.locals_map.ensure_many(
                             target,
@@ -195,7 +194,7 @@ fn lower_basic_block(
                             values,
                             &mut current_bb,
                             &mut locals,
-                            children,
+                            fields,
                         )
                     }
                     Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
@@ -425,9 +424,8 @@ fn materialize_constant_compound_literal(
                 let sets = targets.next().expect("target count, size mismatch");
                 bb.add_set_const_op(sets, x);
             }
-            Value::StructVal { ty: _, fields: children }
-            | Value::TupleVal { ty: _, fields: children } => {
-                materialize_constant_compound_literal(values, bb, targets, children);
+            Value::Compound { ty: _, fields } => {
+                materialize_constant_compound_literal(values, bb, targets, fields);
             }
             Value::Type(_) | Value::Bytes(_) | Value::Closure { .. } => {
                 unreachable!("MIR: comptime-only value")
