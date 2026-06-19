@@ -4,9 +4,13 @@ use crate::{
     state::is_last_use,
 };
 use allocator_api2::vec::Vec;
-use plank_core::{CheckedConvertTo, LoopLimit};
+use plank_core::LoopLimit;
 use stumpalo::ArenaRef;
 
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
 fn dedup_unsorted<T: PartialEq>(values: &mut Vec<T>) {
     let mut i = 0;
     while i < values.len() {
@@ -40,7 +44,7 @@ pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     }
 
     let target_depth_delta = op.inputs_fifo.len() - unique_last_uses.len();
-    let scheduler = GreedyIntraOpScheduler {
+    let mut scheduler = GreedyIntraOpScheduler {
         current: stack,
         target: op.inputs_fifo,
         complete: 0,
@@ -48,6 +52,8 @@ pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
         max_swap_depth: config.max_swap_depth,
         max_dup_depth: config.max_dup_depth,
     };
+
+    scheduler.grow();
 
     stack.op(graph, op_id);
 }
@@ -160,33 +166,5 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
             .take(total_incomplete)
             .rev()
             .map(|((&current, &target), i)| (current, target, i))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use allocator_api2::vec;
-
-    fn assert_dedup_equals<T: PartialEq + std::fmt::Debug, const N: usize>(
-        mut start: Vec<T>,
-        expected: [T; N],
-    ) {
-        for i in 0..N {
-            for j in i + 1..N {
-                assert_ne!(expected[i], expected[j], "expected contains duplicates");
-            }
-        }
-        dedup_unsorted(&mut start);
-        assert_eq!(&start, expected.as_slice(), "deduped != expected");
-    }
-
-    #[test]
-    fn test_dedup_unsorted() {
-        assert_dedup_equals::<u32, _>(vec![], []);
-        assert_dedup_equals(vec![1, 3, 2], [1, 3, 2]);
-        assert_dedup_equals(vec![1, 3, 2, 3], [1, 3, 2]);
-        assert_dedup_equals(vec![3, 1, 3, 3, 2], [3, 1, 2]);
-        assert_dedup_equals(vec![1, 1, 1, 1], [1]);
     }
 }

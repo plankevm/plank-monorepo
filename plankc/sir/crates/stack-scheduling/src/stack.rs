@@ -162,6 +162,16 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
         Self { next_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_from_parts(
+        next_alloc_id: &'ir Cell<StaticAllocId>,
+        ops_sink: Sink,
+        inner: EvmStack,
+        spilled: Vec<(ValueNodeId, StaticAllocId)>,
+    ) -> Self {
+        Self { next_alloc_id, ops_sink, spilled, inner }
+    }
+
     fn emit(&mut self, op: StackOps) {
         (self.ops_sink)(op);
     }
