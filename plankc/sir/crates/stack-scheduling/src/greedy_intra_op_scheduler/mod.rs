@@ -70,6 +70,10 @@ pub struct GreedyIntraOpScheduler<'a, 'ir, Sink: FnMut(StackOps)> {
 const LIMIT: u32 = 100_000;
 
 impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
+    fn update_complet(&mut self) {
+        // for p in self.iter_pairwise(self.)
+    }
+
     fn grow(&mut self) {
         let mut limit = LoopLimit::max(LIMIT);
         while self.complete < self.target.len() {
@@ -101,7 +105,7 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
             return false;
         };
 
-        self.current.swap(i);
+        self.swap(i);
         true
     }
 
@@ -139,10 +143,10 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
         todo!()
     }
 
-    fn swap(&mut self, depth: u8) {
-        assert!(depth <= self.max_swap_depth);
+    fn swap(&mut self, depth: u16) {
+        assert!(depth <= u16::from(self.max_swap_depth));
         if depth > 0 {
-            self.current.swap(depth);
+            self.current.swap(depth as u8);
         }
     }
 
@@ -154,8 +158,9 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
 
     fn iter_pairwise<'s>(
         &'s self,
-        max_depth: u8,
-    ) -> impl Iterator<Item = (ValueNodeId, ValueNodeId, u8)> {
+        max_depth: impl Into<u16>,
+    ) -> impl Iterator<Item = (ValueNodeId, ValueNodeId, u16)> {
+        let max_depth = max_depth.into();
         let total_incomplete = self.target.len() - self.complete - self.target_depth_delta;
         let lined_up_target = &self.target[self.target_depth_delta..];
         let current = self.current.fifo().iter();
