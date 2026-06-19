@@ -43,7 +43,7 @@ pub struct OpGraph {
     values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
     operations: IndexVec<OpNodeId, StoredOpView>,
 
-    /// Holds ` op_predecessors ++ value_consumers`
+    /// Holds `op_predecessors ++ value_consumers`
     bit_sets_arena: Vec<BitsetWord>,
 }
 

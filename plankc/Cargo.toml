@@ -51,7 +51,8 @@ sir-static-memory-allocator = { path = "sir/crates/static-memory-allocator" }
 
 # Shared Dependencies
 bumpalo = { version = "3.19.0", features = ["allocator-api2", "collections"] }
-allocator-api2 = "0.2"
+allocator-api2 = "0.4"
+stumpalo = { git = "https://codeberg.org/philogy/stumpalo.git", features = ["allocator-api2"] }
 hashbrown = { version = "0.16.0", features = ["allocator-api2"] }
 smallvec = "1.15.1"
 alloy-primitives = "1.1.2"
