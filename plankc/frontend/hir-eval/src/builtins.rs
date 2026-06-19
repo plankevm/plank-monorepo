@@ -313,6 +313,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         match builtin {
             Builtin::FieldType => self.eval_field_type(args, builtin, expr),
+            Builtin::GetStructTypeIndex => self.eval_get_struct_type_index(args, builtin, expr),
             Builtin::GetField => self.eval_get_field(args, builtin, expr),
             Builtin::SetField => self.eval_set_field(args, builtin, expr),
             Builtin::Uninit => self.eval_uninit(args, builtin, expr),
@@ -331,6 +332,26 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (compound, index) = self.resolve_field_index(ty, field_index, builtin, expr_span)?;
         let field_ty = compound.field_type(index as usize);
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
+    }
+
+    fn eval_get_struct_type_index(
+        &mut self,
+        args: &[hir::LocalId],
+        builtin: Builtin,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let &[ty] = args else { unreachable!("arg count checked") };
+        let ty = self.expect_type_arg(ty, builtin, expr_span)?;
+        let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty) else {
+            self.diag_ctx.emit_expected_struct_type_arg(
+                self.eval.values,
+                builtin,
+                ty,
+                self.loc(expr_span),
+            );
+            return Err(Poisoned);
+        };
+        Ok(Ok(EvalValue::Comptime(r#struct.type_index)))
     }
 
     fn eval_get_field(
