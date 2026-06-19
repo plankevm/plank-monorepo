@@ -820,7 +820,8 @@ impl DiagCtx<'_> {
                 loc.source,
                 loc.span,
                 format!(
-                    "`@cbytes_concat` expects a tuple, got `{}`",
+                    "`{}` expects a tuple, got `{}`",
+                    builtin_names::CBYTES_CONCAT,
                     self.types.format(self.session, values, actual_ty),
                 ),
             )
@@ -838,7 +839,10 @@ impl DiagCtx<'_> {
                 loc.source,
                 loc.span,
                 format!(
-                    "`@cbytes_concat` tuple elements must be `u256` or `cbytes`, got `{}`",
+                    "`{}` tuple elements must be `{}` or `{}`, got `{}`",
+                    builtin_names::CBYTES_CONCAT,
+                    builtin_names::U256,
+                    builtin_names::CBYTES,
                     self.types.format(self.session, values, actual_ty),
                 ),
             )
@@ -886,7 +890,7 @@ impl DiagCtx<'_> {
             .primary(
                 loc.source,
                 loc.span,
-                format!("offset {offset} is outside cbytes with length {len}"),
+                format!("offset {offset} is outside `{}` with length {len}", builtin_names::CBYTES),
             )
             .note("offset must be within `0..=bytes.length`")
             .emit(self);

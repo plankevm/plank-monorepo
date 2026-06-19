@@ -2229,7 +2229,7 @@ fn test_cbytes_padded_read_u256_offset_past_len() {
          --> main.plk:1:13
           |
         1 | const bad = @cbytes_padded_read_u256("hi", 3);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ offset 3 is outside cbytes with length 2
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ offset 3 is outside `cbytes` with length 2
           |
           = note: offset must be within `0..=bytes.length`
         "#],
