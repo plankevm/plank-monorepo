@@ -802,7 +802,7 @@ impl DiagCtx<'_> {
                 loc.source,
                 loc.span,
                 format!(
-                    "`{builtin}`: field index {index} is out of bounds for struct with {}",
+                    "`{builtin}`: field index {index} is out of bounds for type with {}",
                     fmt_count(field_count, "field"),
                 ),
             )

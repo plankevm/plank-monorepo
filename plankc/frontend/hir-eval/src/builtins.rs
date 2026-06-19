@@ -596,6 +596,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn resolve_field_index(
         &mut self,
         ty: TypeId,

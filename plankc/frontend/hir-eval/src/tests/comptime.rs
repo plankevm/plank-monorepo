@@ -1370,7 +1370,7 @@ fn test_comptime_get_field_out_of_bounds() {
          --> main.plk:3:27
           |
         3 | const val = @get_field(s, 3);
-          |                           ^ `@get_field`: field index 3 is out of bounds for struct with 1 field
+          |                           ^ `@get_field`: field index 3 is out of bounds for type with 1 field
         "#],
     );
 }
@@ -1389,7 +1389,7 @@ fn test_comptime_get_field_index_overflow() {
          --> main.plk:3:27
           |
         3 | const val = @get_field(s, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
-          |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is out of bounds for struct with 1 field
+          |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field`: field index 115792089237316195423570985008687907853269984665640564039457584007913129639935 is out of bounds for type with 1 field
         "#],
     );
 }
