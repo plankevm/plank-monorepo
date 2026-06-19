@@ -63,18 +63,6 @@ changes.
     IndexVec and RelSlice type variants instead of the general purpose u32/usize,
     Vec & [T] alternatives.
 
-### O(1) Allocation Principle
-
-Where heap allocations cannot be avoided you MUST ENSURE that the algorithms or
-functions you write at a high-level only make a constant number of allocations
-relative to the input size.
-
-This means methods such as `.collect`, `.to_vec`, etc. are **ANTI-PATTERNS** to
-be avoided. If there are borrow checker conflicts first try:
-- adapting functions to take specific fields rather than the entirety of `self`
-- defining a reusable heap-allocated before instead of ones that are allocated &
-  then freed on each call
-
 ### Warnings
 
 Never add `#[allow(dead_code)]` to supress dead code warnings. For WIP code it

@@ -20,11 +20,6 @@ You are a code quality reviewer for the Senseic compiler project. Your job is to
 
 ## Anti-Patterns to Flag
 
-### O(1) Allocation Violations
-- `.collect()` calls that create new allocations per iteration
-- `.to_vec()`, `.to_string()`, `.clone()` in hot paths
-- Creating temporary collections instead of using iterators
-
 ### Comment Violations
 - Comments describing *what* code does (e.g., `// Parse the token`)
 - Missing comments for non-obvious *why* decisions
