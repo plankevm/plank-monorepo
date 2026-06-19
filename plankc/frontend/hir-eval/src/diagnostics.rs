@@ -509,22 +509,30 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_set_field_on_comptime_only_struct(
+    pub fn emit_set_field_on_comptime_only(
         &mut self,
         values: &ValueInterner,
-        struct_ty: TypeId,
+        ty: TypeId,
         value_loc: SrcLoc,
-        struct_def_loc: SrcLoc,
+        def_loc: Option<SrcLoc>,
     ) {
-        let struct_name = self.types.format(self.session, values, struct_ty);
-        Diagnostic::error("mixing comptime and runtime data in struct")
-            .cross_source_annotations(
-                value_loc,
-                "this value is only known at runtime",
-                struct_def_loc,
-                format!("`{struct_name}` is comptime-only"),
-            )
-            .emit(self);
+        let diagnostic = Diagnostic::error("mixing comptime and runtime data in compound type");
+        let is_comptime_only_msg =
+            format!("'{}' is a comptime-only type", self.types.format(self.session, values, ty));
+        match def_loc {
+            Some(def_loc) => diagnostic
+                .cross_source_annotations(
+                    value_loc,
+                    "this value is only known at runtime",
+                    def_loc,
+                    is_comptime_only_msg,
+                )
+                .emit(self),
+            None => diagnostic
+                .primary(value_loc.source, value_loc.span, "this value is only know at runtime")
+                .note(is_comptime_only_msg)
+                .emit(self),
+        }
     }
 
     fn format_signatures_note(&self, values: &ValueInterner, builtin: Builtin) -> Option<String> {
@@ -757,25 +765,6 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "`{builtin}` expects a struct or tuple type, got `{}`",
-                    self.types.format(self.session, values, actual_ty),
-                ),
-            )
-            .emit(self);
-    }
-
-    pub fn emit_expected_struct_type_arg(
-        &mut self,
-        values: &ValueInterner,
-        builtin: Builtin,
-        actual_ty: TypeId,
-        loc: SrcLoc,
-    ) {
-        Diagnostic::error("expected struct type")
-            .primary(
-                loc.source,
-                loc.span,
-                format!(
-                    "`{builtin}` expects a struct type, got `{}`",
                     self.types.format(self.session, values, actual_ty),
                 ),
             )

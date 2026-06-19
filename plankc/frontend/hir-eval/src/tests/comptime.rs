@@ -1294,11 +1294,11 @@ fn test_comptime_field_type_expects_struct() {
         init { @evm_stop(); }
         "#,
         &[r#"
-        error: expected struct type
+        error: unexpected type kind
          --> main.plk:1:11
           |
         1 | const T = @field_type(u256, 0);
-          |           ^^^^^^^^^^^^^^^^^^^^ `@field_type` expects a struct type, got `u256`
+          |           ^^^^^^^^^^^^^^^^^^^^ `@field_type` expects a struct or tuple type, got `u256`
         "#],
     );
 }
@@ -1426,11 +1426,11 @@ fn test_get_field_non_struct_instance() {
         }
         "#,
         &[r#"
-        error: expected struct type
+        error: unexpected type kind
          --> main.plk:3:15
           |
         3 |     let val = @get_field(x, 0);
-          |               ^^^^^^^^^^^^^^^^ `@get_field` expects a struct type, got `u256`
+          |               ^^^^^^^^^^^^^^^^ `@get_field` expects a struct or tuple type, got `u256`
         "#],
     );
 }
@@ -1608,11 +1608,11 @@ fn test_set_field_comptime_only_struct_runtime_value() {
         }
         "#,
         &[r#"
-        error: mixing comptime and runtime data in struct
+        error: mixing comptime and runtime data in compound type
          --> main.plk:5:31
           |
         1 | const Wrapper = struct { t: type, n: u256 };
-          |                 --------------------------- `Wrapper` is comptime-only
+          |                 --------------------------- 'Wrapper' is a comptime-only type
         ...
         5 |     let w2 = @set_field(w, 1, v);
           |                               ^ this value is only known at runtime
