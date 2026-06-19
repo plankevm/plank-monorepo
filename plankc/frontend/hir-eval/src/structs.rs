@@ -3,7 +3,9 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
-use plank_values::{Field, MixedComptimeAndRuntime, StructKey, StructView, Type, TypeId, Value};
+use plank_values::{
+    Compound, Field, MixedComptimeAndRuntime, StructKey, StructView, Type, TypeId, Value,
+};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -96,7 +98,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             return Ok(EvalValue::Comptime(self.eval.values.intern_num(len)));
         }
 
-        let Type::Struct(struct_type_info) = self.types.lookup(object_ty) else {
+        let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(object_ty) else {
             let binding = self.bindings[object];
             self.diag_ctx.emit_member_on_non_struct(
                 self.eval.values,
@@ -107,7 +109,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         };
 
         let Some((field_index, &field)) =
-            (0u32..).zip(struct_type_info.fields).find(|&(_i, &field)| field.name == member)
+            (0u32..).zip(r#struct.fields).find(|&(_i, &field)| field.name == member)
         else {
             self.diag_ctx.emit_struct_unknown_field_access(
                 self.eval.values,
@@ -345,7 +347,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let mut validity = self.struct_lit_diagnose_duplicate_fields(lit_loc, lit_fields);
 
         let struct_ty = self.expect_type(struct_type_local)?;
-        let Type::Struct(def) = self.eval.types.lookup(struct_ty) else {
+        let Type::Compound(Compound::Struct(def)) = self.eval.types.lookup(struct_ty) else {
             let binding = self.bindings[struct_type_local];
             self.diag_ctx.emit_not_a_struct_type(
                 self.eval.values,

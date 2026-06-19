@@ -342,8 +342,7 @@ impl<'a> FunctionLowerer<'a> {
         mut get_element: impl FnMut(&mut Self, usize) -> Option<SonaValueId>,
     ) -> Option<SonaValueId> {
         let expected_count = match self.mir.types.lookup(ty) {
-            PlankType::Struct(struct_) => struct_.fields.len(),
-            PlankType::Tuple(tuple) => tuple.fields.len(),
+            PlankType::Compound(compound) => compound.field_count(),
             PlankType::Primitive(_) => panic!("aggregate on primitive"),
         };
         assert_eq!(expected_count, element_count);
@@ -364,10 +363,10 @@ impl<'a> FunctionLowerer<'a> {
 
     fn read_field(&mut self, object: mir::LocalId, field_index: u32) -> Option<SonaValueId> {
         let object_type = self.mir.fn_locals[self.fn_id][object.idx()];
-        let PlankType::Struct(struct_) = self.mir.types.lookup(object_type) else {
-            panic!("field access on non-struct");
+        let PlankType::Compound(compound) = self.mir.types.lookup(object_type) else {
+            panic!("field access on non-compound");
         };
-        let field_ty = self.shape(struct_.fields[field_index as usize].ty)?;
+        let field_ty = self.shape(compound.field_type(field_index as usize))?;
         let object_value = self.read_value(object);
         let idx = self.imm_256(field_index);
         Some(self.fb.insert_inst(ExtractValue::new_unchecked(self.is, object_value, idx), field_ty))

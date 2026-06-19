@@ -469,6 +469,49 @@ fn test_runtime_tuple_lit() {
 }
 
 #[test]
+fn test_runtime_tuple_field_builtins() {
+    assert_lowers_to(
+        r#"
+        init {
+            let pair = (@evm_calldataload(0), @evm_calldataload(0x20));
+            let pair2 = @set_field(pair, 0, 99);
+            let x = @get_field(pair2, 0);
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = const 0x20
+                $3 = calldataload $2
+                $4 = copy $1
+                $5 = copy $3
+                $6 = copy $4
+                $7 = copy $5
+                $8 = const 0x63
+                $9 = copy $7
+                $10 = copy $8
+                $11 = copy $9
+                $12 = copy $10
+                $13 = copy $11
+                $14 = copy $12
+                $15 = copy $14
+                $16 = const 0x0
+                sstore $16 $15
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_tuple_lit_with_void_element() {
     assert_lowers_to(
         r#"

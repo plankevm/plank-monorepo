@@ -103,16 +103,14 @@ struct TupleHeader {
 #[derive(Debug, Clone, Copy)]
 pub enum Type<'fields> {
     Primitive(PrimitiveType),
-    Struct(StructView<'fields>),
-    Tuple(TupleView<'fields>),
+    Compound(Compound<'fields>),
 }
 
-impl Type<'_> {
+impl<'a> Type<'a> {
     pub fn flags(&self) -> TypeFlags {
         match self {
             Type::Primitive(p) => p.flags(),
-            Type::Struct(r#struct) => r#struct.flags,
-            Type::Tuple(tuple) => tuple.flags,
+            Type::Compound(c) => c.flags(),
         }
     }
 }
@@ -240,6 +238,20 @@ impl TypeId {
         TypeId::from_compound(offset.0)
     }
 
+    pub const fn is_tuple(self) -> bool {
+        match self.as_primitive() {
+            Ok(_) => false,
+            Err(compound) => matches!(compound.kind(), CompoundKind::Tuple(_)),
+        }
+    }
+
+    pub const fn is_struct(self) -> bool {
+        match self.as_primitive() {
+            Ok(_) => false,
+            Err(compound) => matches!(compound.kind(), CompoundKind::Struct(_)),
+        }
+    }
+
     pub const fn as_primitive(self) -> Result<PrimitiveType, CompoundRef> {
         match self {
             TypeId::VOID => Ok(PrimitiveType::Void),
@@ -351,17 +363,14 @@ impl TypeInterner {
     pub fn lookup<'s>(&'s self, ty: TypeId) -> Type<'s> {
         match ty.as_primitive() {
             Ok(prim) => Type::Primitive(prim),
-            Err(compound) => match self.lookup_compound(compound) {
-                CompoundView::Struct(view) => Type::Struct(view),
-                CompoundView::Tuple(view) => Type::Tuple(view),
-            },
+            Err(compound) => Type::Compound(self.lookup_compound(compound)),
         }
     }
 
-    fn lookup_compound<'s>(&'s self, compound: CompoundRef) -> CompoundView<'s> {
+    fn lookup_compound<'s>(&'s self, compound: CompoundRef) -> Compound<'s> {
         match compound.kind() {
-            CompoundKind::Struct(r#ref) => CompoundView::Struct(self.lookup_struct(r#ref)),
-            CompoundKind::Tuple(r#ref) => CompoundView::Tuple(self.lookup_tuple(r#ref)),
+            CompoundKind::Struct(r#ref) => Compound::Struct(self.lookup_struct(r#ref)),
+            CompoundKind::Tuple(r#ref) => Compound::Tuple(self.lookup_tuple(r#ref)),
         }
     }
 
@@ -395,7 +404,7 @@ impl TypeInterner {
     }
 
     pub fn try_name_struct_parameterized(&self, ty: TypeId, name: StrId, args: &[ValueId]) {
-        let Type::Struct(r#struct) = self.lookup(ty) else {
+        let Type::Compound(Compound::Struct(r#struct)) = self.lookup(ty) else {
             return;
         };
         // Deduped structs may be reached through multiple parameterizations; if this
@@ -571,16 +580,31 @@ impl TypeInterner {
     }
 }
 
-enum CompoundView<'a> {
+#[derive(Debug, Clone, Copy)]
+pub enum Compound<'a> {
     Struct(StructView<'a>),
     Tuple(TupleView<'a>),
 }
 
-impl CompoundView<'_> {
+impl Compound<'_> {
+    pub fn field_count(&self) -> usize {
+        match self {
+            Compound::Struct(r#struct) => r#struct.fields.len(),
+            Compound::Tuple(tuple) => tuple.fields.len(),
+        }
+    }
+
+    pub fn field_type(&self, i: usize) -> TypeId {
+        match self {
+            Compound::Struct(r#struct) => r#struct.fields[i].ty,
+            Compound::Tuple(tuple) => tuple.fields[i],
+        }
+    }
+
     pub fn flags(&self) -> TypeFlags {
         match self {
-            CompoundView::Struct(r#struct) => r#struct.flags,
-            CompoundView::Tuple(tuple) => tuple.flags,
+            Compound::Struct(r#struct) => r#struct.flags,
+            Compound::Tuple(tuple) => tuple.flags,
         }
     }
 }
@@ -597,10 +621,10 @@ impl std::fmt::Display for FmtType<'_> {
         match self.ty.as_primitive() {
             Ok(prim) => write!(f, "{}", prim.name()),
             Err(compound) => match self.types.lookup_compound(compound) {
-                CompoundView::Struct(_) => {
+                Compound::Struct(_) => {
                     self.types.fmt_struct(f, StructRef(compound), self.sess, self.values)
                 }
-                CompoundView::Tuple(_) => {
+                Compound::Tuple(_) => {
                     self.types.fmt_tuple(f, TupleRef(compound), self.sess, self.values)
                 }
             },
@@ -736,8 +760,10 @@ mod tests {
         let tuple_ty = TypeId::from_tuple(tuple);
 
         assert_ne!(tuple_ty, TypeId::VOID);
-        let Type::Tuple(view) = interner.lookup(tuple_ty) else { panic!("expected tuple type") };
-        assert!(view.fields.is_empty());
+        let Type::Compound(Compound::Tuple(tuple)) = interner.lookup(tuple_ty) else {
+            panic!("expected tuple type")
+        };
+        assert!(tuple.fields.is_empty());
     }
 
     #[test]

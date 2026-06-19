@@ -1,5 +1,5 @@
 use crate::{
-    DefOrigin, FnDefId, Type, TypeId, TypeInterner, ValueId,
+    Compound, DefOrigin, FnDefId, Type, TypeId, TypeInterner, ValueId,
     bignum_interner::{BigNumId, BigNumInterner},
 };
 use alloy_primitives::U256;
@@ -237,7 +237,7 @@ impl FmtValue<'_> {
                 f.write_str(">")
             }
             Value::Compound { ty, fields } => match self.types.lookup(ty) {
-                Type::Struct(r#struct) => {
+                Type::Compound(Compound::Struct(r#struct)) => {
                     write!(f, "{} {{", self.types.format(self.session, self.values, ty))?;
                     assert_eq!(r#struct.fields.len(), fields.len());
                     let mut sep = " ";
@@ -250,7 +250,7 @@ impl FmtValue<'_> {
                     }
                     if fields.is_empty() { f.write_str("}") } else { f.write_str(" }") }
                 }
-                Type::Tuple(tuple) => {
+                Type::Compound(Compound::Tuple(tuple)) => {
                     write!(f, "{} (", self.types.format(self.session, self.values, ty))?;
                     assert_eq!(tuple.fields.len(), fields.len());
                     let mut sep = "";

@@ -6,14 +6,9 @@ use plank_session::{
     Builtin, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc, builtins::BuiltinKind,
 };
 use plank_values::{
-    CBytes, Field, PrimitiveType, StructView, TupleView, Type, TypeFlags, TypeId, TypeInterner,
-    Value, ValueId, ValueInterner, builtins as builtin_sigs,
+    CBytes, Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId,
+    ValueInterner, builtins as builtin_sigs,
 };
-
-enum StructOrTuple<S, T> {
-    Struct(S),
-    Tuple(T),
-}
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -195,22 +190,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::IsStruct => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_struct = matches!(self.eval.types.lookup(ty), Type::Struct(_));
+                let is_struct = ty.is_struct();
                 Ok(Ok(EvalValue::Comptime(is_struct.into())))
             }
             Builtin::IsTuple => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_tuple = matches!(self.eval.types.lookup(ty), Type::Tuple(_));
+                let is_tuple = ty.is_tuple();
                 Ok(Ok(EvalValue::Comptime(is_tuple.into())))
             }
             Builtin::FieldCount => {
                 let &[r#struct] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
-                let field_count = match self.expect_struct_or_tuple(ty, builtin, expr_span)? {
-                    StructOrTuple::Struct(r#struct) => r#struct.fields.len(),
-                    StructOrTuple::Tuple(tuple) => tuple.fields.len(),
-                };
+                let field_count = self.expect_compound(ty, builtin, expr_span)?.field_count();
                 let count = U256::from(field_count);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
             }
@@ -336,12 +328,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty, field_index] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty, builtin, expr_span)?;
-        let (field, _index) = self.resolve_field_index(ty, field_index, builtin, expr_span)?;
-        let ty = match field {
-            StructOrTuple::Struct((_, field)) => field.ty,
-            StructOrTuple::Tuple((_, ty)) => ty,
-        };
-        Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(ty))))
+        let (compound, index) = self.resolve_field_index(ty, field_index, builtin, expr_span)?;
+        let field_ty = compound.field_type(index as usize);
+        Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
 
     fn eval_get_field(
@@ -353,19 +342,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let &[r#struct, field_index] = args else { unreachable!("arg count checked") };
         let instance_state = self.bindings[r#struct].state?;
         let ty = self.state_type(instance_state);
-        let (field, field_index) = self.resolve_field_index(ty, field_index, builtin, expr_span)?;
-
-        let field_ty = match field {
-            StructOrTuple::Struct((_, field)) => field.ty,
-            StructOrTuple::Tuple((_, ty)) => ty,
-        };
+        let (compound, field_index) =
+            self.resolve_field_index(ty, field_index, builtin, expr_span)?;
+        let field_ty = compound.field_type(field_index as usize);
 
         match instance_state {
             LocalState::Comptime(vid) => match self.values.lookup(vid) {
                 Value::Compound { fields, .. } => {
                     Ok(Ok(EvalValue::Comptime(fields[field_index as usize])))
                 }
-                _ => unreachable!("invariant: type checked as struct"),
+                _ => unreachable!("invariant: type checked as compound"),
             },
             LocalState::Runtime(local) => Ok(Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess { object: local, field_index },
@@ -383,19 +369,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let &[instance, field_index, field_value] = args else { unreachable!("arg count checked") };
         let instance_state = self.bindings[instance].state?;
         let instance_ty = self.state_type(instance_state);
-        let (field, field_index) =
+        let (compound, field_index) =
             self.resolve_field_index(instance_ty, field_index, builtin, expr_span)?;
-
-        let field_ty = match field {
-            StructOrTuple::Struct((_, field)) => field.ty,
-            StructOrTuple::Tuple((_, ty)) => ty,
-        };
+        let field_ty = compound.field_type(field_index as usize);
 
         let (new_value_state, new_value_span, _) = self.bindings[field_value].poisoned()?;
         let actual_ty = self.state_type(new_value_state);
         if !actual_ty.is_assignable_to(field_ty) {
-            match field {
-                StructOrTuple::Struct((r#struct, field)) => {
+            match compound {
+                Compound::Struct(r#struct) => {
+                    let field = r#struct.fields[field_index as usize];
                     self.diag_ctx.emit_type_mismatch(
                         self.eval.values,
                         field_ty,
@@ -405,7 +388,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         false,
                     );
                 }
-                StructOrTuple::Tuple(_) => {
+                Compound::Tuple(_) => {
                     self.diag_ctx.emit_type_mismatch_simple(
                         self.eval.values,
                         field_ty,
@@ -426,7 +409,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Value::Compound { fields: old_fields, .. } => {
                         this.eval.values_buf.extend_from_slice(old_fields);
                     }
-                    _ => unreachable!("invariant: type checked as struct"),
+                    _ => unreachable!("invariant: type checked as compound"),
                 }
                 let fields = &mut this.eval.values_buf[values_buf_offset..];
                 fields[field_index as usize] = new_value_vid;
@@ -443,9 +426,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval.values,
                 instance_ty,
                 self.loc(self.bindings[field_value].use_span),
-                match field {
-                    StructOrTuple::Struct((r#struct, _)) => Some(r#struct.def_loc),
-                    StructOrTuple::Tuple(_) => None,
+                match compound {
+                    Compound::Struct(r#struct) => Some(r#struct.def_loc),
+                    Compound::Tuple(_) => None,
                 },
             );
             return Err(Poisoned);
@@ -465,15 +448,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             target
         };
 
-        let lit_args: Vec<_> = match field {
-            StructOrTuple::Struct((r#struct, _)) => {
-                (0..).zip(r#struct.fields).map(|(idx, &field)| lower_field(idx, field.ty)).collect()
+        let fields: Vec<_> = match compound {
+            Compound::Struct(r#struct) => {
+                (0..).zip(r#struct.fields).map(|(idx, field)| lower_field(idx, field.ty)).collect()
             }
-            StructOrTuple::Tuple((tuple, _)) => {
+            Compound::Tuple(tuple) => {
                 (0..).zip(tuple.fields).map(|(idx, &ty)| lower_field(idx, ty)).collect()
             }
         };
-        let fields = self.eval.mir_args.push_copy_slice(&lit_args);
+
+        let fields = self.eval.mir_args.push_copy_slice(&fields);
 
         Ok(Ok(EvalValue::Runtime {
             expr: mir::Expr::CompoundLit { ty: instance_ty, fields },
@@ -563,29 +547,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ) => {
                 unreachable!("comptime-only/never types do not produce runtime locals")
             }
-            Type::Struct(view) => {
-                let fields = self.with_locals_buf(|this, offset| {
-                    for field in view.fields {
-                        let local = this.emit_uninit_runtime_local(field.ty);
-                        this.locals_buf.push(local);
+            Type::Compound(compound) => {
+                let fields: Vec<_> = match compound {
+                    Compound::Struct(r#struct) => r#struct
+                        .fields
+                        .iter()
+                        .map(|field| self.emit_uninit_runtime_local(field.ty))
+                        .collect(),
+                    Compound::Tuple(tuple) => {
+                        tuple.fields.iter().map(|&ty| self.emit_uninit_runtime_local(ty)).collect()
                     }
-                    this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[offset..])
-                });
-                let target = self.mir_types.push(ty);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::CompoundLit { ty, fields },
-                });
-                target
-            }
-            Type::Tuple(view) => {
-                let fields = self.with_locals_buf(|this, offset| {
-                    for &element in view.fields {
-                        let local = this.emit_uninit_runtime_local(element);
-                        this.locals_buf.push(local);
-                    }
-                    this.eval.mir_args.push_copy_slice(&this.eval.locals_buf[offset..])
-                });
+                };
+                let fields = self.eval.mir_args.push_copy_slice(&fields);
                 let target = self.mir_types.push(ty);
                 self.emit(mir::Instruction::Set {
                     target,
@@ -596,40 +569,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    #[allow(clippy::type_complexity)]
     fn resolve_field_index(
         &mut self,
         ty: TypeId,
         index_arg: hir::LocalId,
         builtin: Builtin,
         expr_span: SourceSpan,
-    ) -> MaybePoisoned<(StructOrTuple<(StructView<'a>, Field), (TupleView<'a>, TypeId)>, u32)> {
-        let compound = self.expect_struct_or_tuple(ty, builtin, expr_span)?;
+    ) -> MaybePoisoned<(Compound<'a>, u32)> {
+        let compound = self.expect_compound(ty, builtin, expr_span)?;
         let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
-        let field_and_index = u32::try_from(index).ok().and_then(|index| {
-            let field = match compound {
-                StructOrTuple::Struct(r#struct) => {
-                    StructOrTuple::Struct((r#struct, *r#struct.fields.get(index as usize)?))
-                }
-                StructOrTuple::Tuple(tuple) => {
-                    StructOrTuple::Tuple((tuple, *tuple.fields.get(index as usize)?))
-                }
-            };
-            Some((field, index))
-        });
-        let Some((field, index)) = field_and_index else {
+        let field_count = compound.field_count();
+        let Some(index) = u32::try_from(index).ok().filter(|&index| (index as usize) < field_count)
+        else {
             self.diag_ctx.emit_field_index_out_of_bounds(
                 builtin,
                 index,
-                match compound {
-                    StructOrTuple::Struct(r#struct) => r#struct.fields.len(),
-                    StructOrTuple::Tuple(tuple) => tuple.fields.len(),
-                },
+                field_count,
                 self.loc(self.bindings[index_arg].use_span),
             );
             return Err(Poisoned);
         };
-        Ok((field, index))
+        Ok((compound, index))
     }
 
     fn expect_type_arg(
@@ -696,15 +656,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(n)
     }
 
-    fn expect_struct_or_tuple(
+    fn expect_compound(
         &mut self,
         ty: TypeId,
         builtin: Builtin,
         span: SourceSpan,
-    ) -> MaybePoisoned<StructOrTuple<StructView<'a>, TupleView<'a>>> {
+    ) -> MaybePoisoned<Compound<'a>> {
         match self.types.lookup(ty) {
-            Type::Struct(r#struct) => Ok(StructOrTuple::Struct(r#struct)),
-            Type::Tuple(tuple) => Ok(StructOrTuple::Tuple(tuple)),
+            Type::Compound(compound) => Ok(compound),
             _ => {
                 self.diag_ctx.emit_expected_struct_or_tuple_type_arg(
                     self.eval.values,
@@ -803,21 +762,21 @@ fn build_uninit_comptime(
         ) => {
             unreachable!("memptr/function/never cannot appear in comptime uninit compound")
         }
-        Type::Struct(view) => {
+        Type::Compound(compound) => {
             let buf_offset = buf.len();
-            for field in view.fields {
-                let vid = build_uninit_comptime(field.ty, types, values, buf);
-                buf.push(vid);
-            }
-            let result = values.intern(Value::Compound { ty, fields: &buf[buf_offset..] });
-            buf.truncate(buf_offset);
-            result
-        }
-        Type::Tuple(view) => {
-            let buf_offset = buf.len();
-            for &element in view.fields {
-                let vid = build_uninit_comptime(element, types, values, buf);
-                buf.push(vid);
+            match compound {
+                Compound::Struct(r#struct) => {
+                    for field in r#struct.fields {
+                        let vid = build_uninit_comptime(field.ty, types, values, buf);
+                        buf.push(vid);
+                    }
+                }
+                Compound::Tuple(tuple) => {
+                    for &field in tuple.fields {
+                        let vid = build_uninit_comptime(field, types, values, buf);
+                        buf.push(vid);
+                    }
+                }
             }
             let result = values.intern(Value::Compound { ty, fields: &buf[buf_offset..] });
             buf.truncate(buf_offset);

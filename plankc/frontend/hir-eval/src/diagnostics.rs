@@ -3,7 +3,7 @@ use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueInterner,
+    Compound, StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueInterner,
     builtins as builtin_sigs,
 };
 
@@ -912,7 +912,7 @@ impl DiagCtx<'_> {
                     format!("type '{}' cannot be uninitialized", primitive.name()),
                 )
             }
-            Type::Struct(r#struct) => {
+            Type::Compound(Compound::Struct(r#struct)) => {
                 let field = r#struct
                     .fields
                     .iter()
@@ -932,7 +932,7 @@ impl DiagCtx<'_> {
                         ),
                     )
             }
-            Type::Tuple(tuple) => {
+            Type::Compound(Compound::Tuple(tuple)) => {
                 let field_pos = tuple
                     .fields
                     .iter()

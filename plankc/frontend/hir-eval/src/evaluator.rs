@@ -5,7 +5,7 @@ use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
 use plank_values::{
-    DefOrigin, Field, Type, TypeId, TypeInterner, TypeName, Value, ValueId, ValueInterner,
+    Compound, DefOrigin, Field, Type, TypeId, TypeInterner, TypeName, Value, ValueId, ValueInterner,
 };
 
 use crate::{
@@ -178,7 +178,7 @@ impl<'a> Evaluator<'a> {
         let Ok(value) = value else { return };
         match self.values.lookup(value) {
             Value::Type(ty) => {
-                let Type::Struct(r#struct) = self.types.lookup(ty) else {
+                let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty) else {
                     return;
                 };
                 if r#struct.name.get().is_none() {

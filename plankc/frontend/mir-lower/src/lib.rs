@@ -6,7 +6,7 @@ mod tests;
 use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::{BytesId, Session};
-use plank_values::{PrimitiveType, Type, TypeId, Value, ValueId, ValueInterner};
+use plank_values::{Compound, PrimitiveType, Type, TypeId, Value, ValueId, ValueInterner};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},
@@ -79,10 +79,12 @@ impl LowerCtx<'_> {
                     unreachable!("comptime-only primitive unsizeable in SIR")
                 }
             },
-            Type::Struct(r#struct) => {
+            Type::Compound(Compound::Struct(r#struct)) => {
                 r#struct.fields.iter().map(|&field| self.size_in_locals(field.ty)).sum()
             }
-            Type::Tuple(tuple) => tuple.fields.iter().map(|&ty| self.size_in_locals(ty)).sum(),
+            Type::Compound(Compound::Tuple(tuple)) => {
+                tuple.fields.iter().map(|&ty| self.size_in_locals(ty)).sum()
+            }
         }
     }
 }
@@ -464,19 +466,24 @@ fn lower_field_access(
     field_index: u32,
 ) {
     let object_type = ctx.mir.fn_locals[mir_func][object.idx()];
-    let Type::Struct(r#struct) = ctx.mir.types.lookup(object_type) else {
-        unreachable!("MIR invariant: field access on non-struct");
+    let Type::Compound(compound) = ctx.mir.types.lookup(object_type) else {
+        unreachable!("MIR invariant: field access on non-compound");
     };
-    let target_field = r#struct.fields[field_index as usize];
-    let size = ctx.size_in_locals(target_field.ty);
+    let size = ctx.size_in_locals(compound.field_type(field_index as usize));
     if size == 0 {
         return;
     }
 
-    let flattened_fields_offset = r#struct.fields[..field_index as usize]
-        .iter()
-        .map(|&field| ctx.size_in_locals(field.ty))
-        .sum::<u32>() as usize;
+    let flattened_fields_offset = match compound {
+        Compound::Struct(r#struct) => r#struct.fields[..field_index as usize]
+            .iter()
+            .map(|&field| ctx.size_in_locals(field.ty))
+            .sum::<u32>(),
+        Compound::Tuple(tuple) => tuple.fields[..field_index as usize]
+            .iter()
+            .map(|&ty| ctx.size_in_locals(ty))
+            .sum::<u32>(),
+    } as usize;
 
     ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);
 

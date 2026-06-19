@@ -410,6 +410,22 @@ fn compiles_runtime_length_used_from_runtime_section() {
 }
 
 #[test]
+fn lowers_runtime_tuple_field_builtins() {
+    let bytecode = lower_bytecode(
+        r#"
+        init {
+            let pair = (@evm_calldataload(0), @evm_calldataload(0x20));
+            let pair2 = @set_field(pair, 0, 99);
+            let x = @get_field(pair2, 0);
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+    );
+    assert!(!bytecode.is_empty());
+}
+
+#[test]
 fn duplicates_runtime_introspection_helpers_per_section() {
     let source = r#"
         const len = fn () u256 {

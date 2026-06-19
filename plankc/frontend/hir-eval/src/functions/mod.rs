@@ -2,7 +2,7 @@ use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
-use plank_values::{DefOrigin, Type, TypeId, Value};
+use plank_values::{Compound, DefOrigin, Type, TypeId, Value};
 
 mod cache;
 
@@ -680,7 +680,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let Value::Type(ty) = self.values.lookup(value) else {
             return;
         };
-        let Type::Struct(r#struct) = self.types.lookup(ty) else {
+        let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty) else {
             return;
         };
         if r#struct.name.get().is_some() {

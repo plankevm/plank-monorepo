@@ -5,7 +5,7 @@ use crate::{
 use plank_core::{DenseIndexMap, DenseIndexSet, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::{BytesId, Session};
-use plank_values::{PrimitiveType, Type as PlankType, TypeId, ValueInterner};
+use plank_values::{Compound, PrimitiveType, Type as PlankType, TypeId, ValueInterner};
 use sonatina_ir::{
     GlobalVariableRef, Linkage, Module, Signature, Type as SonaType,
     builder::{ModuleBuilder, ObjectBuilder},
@@ -116,7 +116,7 @@ fn declare_runtime_shape(
                 panic!("comptime-only type in MIR: {primitive:?}")
             }
         },
-        PlankType::Struct(struct_) => {
+        PlankType::Compound(Compound::Struct(struct_)) => {
             let field_shapes = struct_
                 .fields
                 .iter()
@@ -134,7 +134,7 @@ fn declare_runtime_shape(
                 ))
             }
         }
-        PlankType::Tuple(tuple_view) => {
+        PlankType::Compound(Compound::Tuple(tuple_view)) => {
             let element_shapes = tuple_view
                 .fields
                 .iter()
