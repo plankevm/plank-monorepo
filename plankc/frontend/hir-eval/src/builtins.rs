@@ -313,7 +313,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         match builtin {
             Builtin::FieldType => self.eval_field_type(args, builtin, expr),
-            Builtin::GetStructTypeIndex => self.eval_get_struct_type_index(args, builtin, expr),
+            Builtin::TypeIndex => self.eval_type_index(args, builtin, expr),
             Builtin::GetField => self.eval_get_field(args, builtin, expr),
             Builtin::SetField => self.eval_set_field(args, builtin, expr),
             Builtin::Uninit => self.eval_uninit(args, builtin, expr),
@@ -334,7 +334,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
 
-    fn eval_get_struct_type_index(
+    fn eval_type_index(
         &mut self,
         args: &[hir::LocalId],
         builtin: Builtin,
