@@ -223,6 +223,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::CompileError => &[sig!([CBYTES => NEVER])],
         B::SliceCBytes => &[sig!([CBYTES, U256, U256 => CBYTES])],
         B::Keccak256CBytes => &[sig!([CBYTES => U256])],
+        B::Sha256Cbytes => &[sig!([CBYTES => U256])],
         B::DataOffset => &[sig!([CBYTES => U256])],
 
         // Comptime dynamic — no fixed signatures

@@ -17,6 +17,7 @@ plank-values.workspace = true
 
 alloy-primitives.workspace = true
 hashbrown.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 plank-test-utils.workspace = true

@@ -1,5 +1,6 @@
 use super::*;
 use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
+use sha2::Digest;
 
 #[test]
 fn test_comptime_only_return_caches_per_non_comptime_arg_value() {
@@ -2236,6 +2237,78 @@ fn test_keccak256_cbytes_of_slice() {
         r#"
         const ell_hash_matches = @keccak256_cbytes(@slice_cbytes("hello", 1, 4))
             == 0x0dd666b403ddf2d5833ea7c8306cfc8d62ee1052f2da09d8c290aac4d3085b43;
+        init {
+            let mut a: bool = ell_hash_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_sha256_cbytes_builtin() {
+    let abc_hash: [u8; 32] = sha2::Sha256::digest(b"abc").into();
+    assert_eq!(
+        abc_hash,
+        alloy_primitives::b256!(
+            "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+        .0,
+    );
+    let empty_hash: [u8; 32] = sha2::Sha256::digest(b"").into();
+    assert_eq!(
+        empty_hash,
+        alloy_primitives::b256!(
+            "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
+        .0,
+    );
+    assert_lowers_to(
+        r#"
+        const abc_hash_matches = @sha256_cbytes("abc")
+            == 0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad;
+        const empty_hash_matches = @sha256_cbytes("")
+            == 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855;
+        init {
+            let mut a: bool = abc_hash_matches;
+            let mut b: bool = empty_hash_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_sha256_cbytes_of_slice() {
+    let ell_hash: [u8; 32] = sha2::Sha256::digest(b"ell").into();
+    assert_eq!(
+        ell_hash,
+        alloy_primitives::b256!(
+            "0xbaea96500997ff5cd6cfd26592a978d6b73d480b4ad33d002499cf0041ac9996"
+        )
+        .0,
+    );
+    assert_lowers_to(
+        r#"
+        const ell_hash_matches = @sha256_cbytes(@slice_cbytes("hello", 1, 4))
+            == 0xbaea96500997ff5cd6cfd26592a978d6b73d480b4ad33d002499cf0041ac9996;
         init {
             let mut a: bool = ell_hash_matches;
             @evm_stop();

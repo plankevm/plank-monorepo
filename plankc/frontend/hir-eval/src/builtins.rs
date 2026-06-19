@@ -9,6 +9,7 @@ use plank_values::{
     CBytes, Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId,
     ValueInterner, builtins as builtin_sigs,
 };
+use sha2::{Digest, Sha256};
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -277,6 +278,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     bytes.end,
                 );
                 let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+            }
+            Builtin::Sha256Cbytes => {
+                let &[bytes] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let slice = self.diag_ctx.session.lookup_bytes_slice(
+                    bytes.contents,
+                    bytes.start,
+                    bytes.end,
+                );
+                let hash = U256::from_be_bytes(Sha256::digest(slice).into());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
             }
             Builtin::DataOffset => {

@@ -2092,6 +2092,7 @@ dependencies = [
  "plank-test-utils",
  "plank-values",
  "pretty_assertions",
+ "sha2",
 ]
 
 [[package]]
