@@ -1612,7 +1612,7 @@ fn test_set_field_comptime_only_struct_runtime_value() {
          --> main.plk:5:31
           |
         1 | const Wrapper = struct { t: type, n: u256 };
-          |                 --------------------------- 'Wrapper' is a comptime-only type
+          |                 --------------------------- `Wrapper` is a comptime-only type
         ...
         5 |     let w2 = @set_field(w, 1, v);
           |                               ^ this value is only known at runtime
@@ -1705,7 +1705,7 @@ fn test_uninit_invalid_type() {
          --> main.plk:1:11
           |
         1 | const x = @uninit(never);
-          |           ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
+          |           ^^^^^^^^^^^^^^ type `never` cannot be uninitialized
           |
           = help: @uninit only supports types that do not contain never or function
         "#],
@@ -1770,7 +1770,7 @@ fn test_uninit_struct_with_function_field() {
          --> main.plk:2:11
           |
         1 | const Bad = struct { a: u256, b: function };
-          |                               ----------- type 'function' cannot be uninitialized
+          |                               ----------- type `function` cannot be uninitialized
         2 | const x = @uninit(Bad);
           |           ^^^^^^^^^^^^ cannot use @uninit on this struct
           |
@@ -1792,7 +1792,7 @@ fn test_uninit_struct_with_invalid_tuple_field() {
          --> main.plk:2:11
           |
         1 | const Bad = struct { a: u256, b: tuple { function } };
-          |                               --------------------- type 'tuple {function}' cannot be uninitialized
+          |                               --------------------- type `tuple {function}` cannot be uninitialized
         2 | const x = @uninit(Bad);
           |           ^^^^^^^^^^^^ cannot use @uninit on this struct
           |
@@ -1890,7 +1890,7 @@ fn test_uninit_struct_with_memptr_and_invalid_field_reports_invalid_field() {
          --> main.plk:3:11
           |
         1 | const Bad = struct { ptr: memptr, f: never };
-          |                                   -------- type 'never' cannot be uninitialized
+          |                                   -------- type `never` cannot be uninitialized
         2 |
         3 | const x = @uninit(Bad);
           |           ^^^^^^^^^^^^ cannot use @uninit on this struct
@@ -1913,7 +1913,7 @@ fn test_uninit_struct_reports_all_invalid_fields() {
          --> main.plk:2:11
           |
         1 | const Bad = struct { f: function, g: function };
-          |                      ----------- type 'function' cannot be uninitialized
+          |                      ----------- type `function` cannot be uninitialized
         2 | const x = @uninit(Bad);
           |           ^^^^^^^^^^^^ cannot use @uninit on this struct
           |

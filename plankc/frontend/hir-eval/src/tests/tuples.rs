@@ -93,7 +93,7 @@ fn test_mixed_tuple_type() {
          --> main.plk:1:11
           |
         1 | const T = tuple { type, memptr };
-          |           ^^^^^^^^^^^^^^^^^^^^^^ type 'memptr' of field #1 is runtime only, while type 'type' of field #0 is comptime only
+          |           ^^^^^^^^^^^^^^^^^^^^^^ type `memptr` of field #1 is runtime only, while type `type` of field #0 is comptime only
         "#],
     );
 }

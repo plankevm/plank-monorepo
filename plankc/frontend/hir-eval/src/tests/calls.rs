@@ -815,7 +815,7 @@ fn test_cached_non_never_poison_does_not_diverge() {
              --> main.plk:1:32
               |
             1 | const bad = fn() u256 { return @uninit(never); };
-              |                                ^^^^^^^^^^^^^^ type 'never' cannot be uninitialized
+              |                                ^^^^^^^^^^^^^^ type `never` cannot be uninitialized
               |
               = help: @uninit only supports types that do not contain never or function
             "#,

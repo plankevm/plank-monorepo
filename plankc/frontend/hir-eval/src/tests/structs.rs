@@ -239,8 +239,8 @@ fn test_mixed_struct_type() {
         1 | const S = struct { t: type, p: memptr };
           |           ^^^^^^^^^-------^^---------^^
           |                    |        |
-          |                    |        type 'memptr' is runtime only
-          |                    type 'type' is comptime only
+          |                    |        type `memptr` is runtime only
+          |                    type `type` is comptime only
         "#],
     );
 }

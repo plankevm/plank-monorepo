@@ -441,7 +441,7 @@ impl DiagCtx<'_> {
                 expr.source,
                 expr.span,
                 format!(
-                    "type '{}' of field #{} is runtime only, while type '{}' of field #{} is comptime only",
+                    "type `{}` of field #{} is runtime only, while type `{}` of field #{} is comptime only",
                     self.types.format(self.session, values, runtime_ty),
                     runtime_pos,
                     self.types.format(self.session, values, comptime_ty),
@@ -477,14 +477,14 @@ impl DiagCtx<'_> {
                     .secondary(
                         runtime.def_span,
                         format!(
-                            "type '{}' is runtime only",
+                            "type `{}` is runtime only",
                             self.types.format(self.session, values, runtime.ty),
                         ),
                     )
                     .secondary(
                         comptime.def_span,
                         format!(
-                            "type '{}' is comptime only",
+                            "type `{}` is comptime only",
                             self.types.format(self.session, values, comptime.ty),
                         ),
                     ),
@@ -518,7 +518,7 @@ impl DiagCtx<'_> {
     ) {
         let diagnostic = Diagnostic::error("mixing comptime and runtime data in compound type");
         let is_comptime_only_msg =
-            format!("'{}' is a comptime-only type", self.types.format(self.session, values, ty));
+            format!("`{}` is a comptime-only type", self.types.format(self.session, values, ty));
         match def_loc {
             Some(def_loc) => diagnostic
                 .cross_source_annotations(
@@ -909,7 +909,7 @@ impl DiagCtx<'_> {
                 Diagnostic::error("cannot create uninitialized value").primary(
                     expr.source,
                     expr.span,
-                    format!("type '{}' cannot be uninitialized", primitive.name()),
+                    format!("type `{}` cannot be uninitialized", primitive.name()),
                 )
             }
             Type::Compound(Compound::Struct(r#struct)) => {
@@ -927,7 +927,7 @@ impl DiagCtx<'_> {
                         format!("cannot use {} on this struct", builtin_names::UNINIT),
                         SrcLoc::new(r#struct.def_loc.source, field.def_span),
                         format!(
-                            "type '{}' cannot be uninitialized",
+                            "type `{}` cannot be uninitialized",
                             self.types.format(self.session, values, field.ty)
                         ),
                     )
@@ -946,7 +946,7 @@ impl DiagCtx<'_> {
                     expr.source,
                     expr.span,
                     format!(
-                        "field {} of type '{}' cannot be uninitialized",
+                        "field {} of type `{}` cannot be uninitialized",
                         field_pos,
                         self.types.format(self.session, values, element)
                     ),
