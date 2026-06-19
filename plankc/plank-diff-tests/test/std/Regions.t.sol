@@ -19,6 +19,13 @@ contract RegionsTest is BaseTest {
         assertEq(bytes32(out), keccak256(TEST_BYTES));
     }
 
+    function test_sha256CodeLiteral() public {
+        (bool success, bytes memory out) = plankImpl.call(abi.encodeWithSignature("sha256CodeLiteral()"));
+        assertTrue(success);
+        assertEq(out.length, 32);
+        assertEq(bytes32(out), sha256(TEST_BYTES));
+    }
+
     function test_copyCodeLiteral() public {
         (bool success, bytes memory out) = plankImpl.call(abi.encodeWithSignature("copyCodeLiteral()"));
         assertTrue(success);

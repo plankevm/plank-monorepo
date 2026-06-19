@@ -5,6 +5,7 @@ import std::regions::*;
 
 const TEST_BYTES = hex"00010203040506070809aabbccddeeff";
 const TEST_BYTES_HASH = keccak256(TEST_BYTES).raw;
+const TEST_BYTES_SHA256 = @sha256_cbytes(TEST_BYTES);
 
 const comptime_assert = fn (comptime condition: bool, comptime message: cbytes) void {
     if !condition {
@@ -111,6 +112,10 @@ run {
 
     public("hashCodeLiteral()", fn () never {
         return_word(TEST_BYTES_HASH);
+    });
+
+    public("sha256CodeLiteral()", fn () never {
+        return_word(TEST_BYTES_SHA256);
     });
 
     public("copyCodeLiteral()", fn () never {
