@@ -634,6 +634,78 @@ fn lowers_sliced_data_offset_to_sym_addr_plus_start() {
 }
 
 #[test]
+fn lowers_data_offset_of_concat_to_const_global() {
+    assert_lowers_to_ir(
+        r#"
+        const VERY_LONG =
+            hex"0000000000000000000000000000000000000000000000000000000000000000"
+            hex"000102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff";
+
+        init {
+            let offset = @data_offset(
+                @concat_cbytes((@slice_cbytes(VERY_LONG, 33, 64), "a"))
+            );
+            @evm_stop();
+        }
+        "#,
+        r#"
+        target = "evm-ethereum-osaka"
+
+        global private const [i8; 32] $cbytes_0 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 17, 34, 51, 68, 85, 102, 119, -120, -103, -86, -69, -52, -35, -18, -1, 97];
+
+        func public %init() {
+            block0:
+                v0.i256 = sym_addr $cbytes_0;
+                evm_stop;
+        }
+
+
+        object @Contract {
+            section init {
+                entry %init;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
+fn lowers_data_offset_of_lone_concat_to_const_global() {
+    assert_lowers_to_ir(
+        r#"
+        const VERY_LONG =
+            hex"0000000000000000000000000000000000000000000000000000000000000000"
+            hex"000102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff";
+
+        init {
+            let offset = @data_offset(
+                @concat_cbytes((@slice_cbytes(VERY_LONG, 33, 64),))
+            );
+            @evm_stop();
+        }
+        "#,
+        r#"
+        target = "evm-ethereum-osaka"
+
+        global private const [i8; 31] $cbytes_0 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 17, 34, 51, 68, 85, 102, 119, -120, -103, -86, -69, -52, -35, -18, -1];
+
+        func public %init() {
+            block0:
+                v0.i256 = sym_addr $cbytes_0;
+                evm_stop;
+        }
+
+
+        object @Contract {
+            section init {
+                entry %init;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
 fn emits_bytecode_for_data_offset() {
     let bytecode = lower_bytecode(
         r#"

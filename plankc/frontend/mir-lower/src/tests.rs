@@ -972,3 +972,71 @@ fn test_data_offset_of_slice_cbytes_adds_start_offset() {
         "#,
     );
 }
+
+#[test]
+fn data_offset_of_concat() {
+    assert_lowers_to(
+        r#"
+        const VERY_LONG =
+            hex"0000000000000000000000000000000000000000000000000000000000000000"
+            hex"000102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff";
+
+        init {
+            let offset = @data_offset(
+                @concat_cbytes((@slice_cbytes(VERY_LONG, 33, 64), "a"))
+            );
+            @evm_stop();
+        }
+        "#,
+        r#"
+
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $1 = data_offset .0
+                $2 = const 0x0
+                $0 = add $1 $2
+                stop
+            }
+
+        data .0 0x0102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff61
+        "#,
+    );
+}
+
+#[test]
+fn data_offset_of_lone_concat() {
+    assert_lowers_to(
+        r#"
+        const VERY_LONG =
+            hex"0000000000000000000000000000000000000000000000000000000000000000"
+            hex"000102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff";
+
+        init {
+            let offset = @data_offset(
+                @concat_cbytes((@slice_cbytes(VERY_LONG, 33, 64),))
+            );
+            @evm_stop();
+        }
+        "#,
+        r#"
+
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $1 = data_offset .0
+                $2 = const 0x0
+                $0 = add $1 $2
+                stop
+            }
+
+        data .0 0x0102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff
+        "#,
+    );
+}
