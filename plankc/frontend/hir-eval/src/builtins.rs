@@ -269,6 +269,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     bytes.start + end,
                 ))))
             }
+            Builtin::CbytesPaddedReadU256 => {
+                let &[bytes, offset] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let offset =
+                    self.expect_comptime_u256(offset, builtin, "cbytes offset", expr_span)?;
+                let len = bytes.end - bytes.start;
+                if offset > U256::from(len) {
+                    self.diag_ctx.emit_cbytes_read_offset_out_of_bounds(offset, len, expr_loc);
+                    return Err(Poisoned);
+                }
+                let offset = u32::try_from(offset).expect("offset <= len which fits u32");
+
+                let read = (len - offset).min(32);
+                let start = bytes.start + offset;
+                let end = start + read;
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes.contents, start, end);
+                let mut word = [0; 32];
+                word[..read as usize].copy_from_slice(slice);
+                let value = U256::from_be_bytes(word);
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(value))))
+            }
             Builtin::Keccak256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;

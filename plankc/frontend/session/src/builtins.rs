@@ -360,6 +360,7 @@ define_builtins! {
 
         // Comptime Bytes
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
+        CBYTES_PADDED_READ_U256 "@cbytes_padded_read_u256" => CbytesPaddedReadU256;
         KECCAK256_CBYTES "@keccak256_cbytes" => Keccak256CBytes;
         SHA256_CBYTES "@sha256_cbytes" => Sha256Cbytes;
         DATA_OFFSET "@data_offset" => DataOffset;

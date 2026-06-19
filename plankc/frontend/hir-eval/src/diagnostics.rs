@@ -845,6 +845,17 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_cbytes_read_offset_out_of_bounds(&mut self, offset: U256, len: u32, loc: SrcLoc) {
+        Diagnostic::error("cbytes read offset out of bounds")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("offset {offset} is outside cbytes with length {len}"),
+            )
+            .note("offset must be within `0..=bytes.length`")
+            .emit(self);
+    }
+
     pub fn emit_expected_comptime_arg(&mut self, builtin: Builtin, arg_name: &str, loc: SrcLoc) {
         Diagnostic::error("expected comptime argument")
             .primary(

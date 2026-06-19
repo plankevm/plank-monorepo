@@ -2168,6 +2168,75 @@ fn test_slice_cbytes_runtime_bound() {
 }
 
 #[test]
+fn test_cbytes_padded_read_u256_without_padding() {
+    assert_lowers_to(
+        r#"
+        const read_matches = @cbytes_padded_read_u256(
+            hex"0000000000000000000000000000000000000000000000000000000000000000"
+            hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+            hex"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            33,
+        ) == 0x02030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20ff;
+        init {
+            let mut a: bool = read_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_cbytes_padded_read_u256_with_padding() {
+    assert_lowers_to(
+        r#"
+        const read_matches = @cbytes_padded_read_u256(hex"010203", 1)
+            == 0x0203000000000000000000000000000000000000000000000000000000000000;
+        init {
+            let mut a: bool = read_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_cbytes_padded_read_u256_offset_past_len() {
+    assert_diagnostics(
+        r#"
+        const bad = @cbytes_padded_read_u256("hi", 3);
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: cbytes read offset out of bounds
+         --> main.plk:1:13
+          |
+        1 | const bad = @cbytes_padded_read_u256("hi", 3);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ offset 3 is outside cbytes with length 2
+          |
+          = note: offset must be within `0..=bytes.length`
+        "#],
+    );
+}
+
+#[test]
 fn test_data_offset_of_slice_cbytes() {
     assert_lowers_to(
         r#"
