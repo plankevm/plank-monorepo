@@ -228,7 +228,9 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::DataOffset => &[sig!([CBYTES => U256])],
 
         // Comptime dynamic — no fixed signatures
-        B::FieldType | B::TypeIndex | B::GetField | B::SetField | B::Uninit | B::ConcatCBytes => &[],
+        B::FieldType | B::TypeIndex | B::GetField | B::SetField | B::Uninit | B::ConcatCBytes => {
+            &[]
+        }
     }
 }
 
