@@ -426,10 +426,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval.values,
                 instance_ty,
                 self.loc(self.bindings[field_value].use_span),
-                match compound {
-                    Compound::Struct(r#struct) => Some(r#struct.def_loc),
-                    Compound::Tuple(_) => None,
-                },
+                compound,
             );
             return Err(Poisoned);
         }
@@ -665,7 +662,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         match self.types.lookup(ty) {
             Type::Compound(compound) => Ok(compound),
             _ => {
-                self.diag_ctx.emit_expected_struct_or_tuple_type_arg(
+                self.diag_ctx.emit_expected_compound_type_arg(
                     self.eval.values,
                     builtin,
                     ty,

@@ -514,21 +514,21 @@ impl DiagCtx<'_> {
         values: &ValueInterner,
         ty: TypeId,
         value_loc: SrcLoc,
-        def_loc: Option<SrcLoc>,
+        info: Compound<'_>,
     ) {
         let diagnostic = Diagnostic::error("mixing comptime and runtime data in compound type");
         let is_comptime_only_msg =
             format!("`{}` is a comptime-only type", self.types.format(self.session, values, ty));
-        match def_loc {
-            Some(def_loc) => diagnostic
+        match info {
+            Compound::Struct(r#struct) => diagnostic
                 .cross_source_annotations(
                     value_loc,
                     "this value is only known at runtime",
-                    def_loc,
+                    r#struct.def_loc,
                     is_comptime_only_msg,
                 )
                 .emit(self),
-            None => diagnostic
+            Compound::Tuple(_) => diagnostic
                 .primary(value_loc.source, value_loc.span, "this value is only know at runtime")
                 .note(is_comptime_only_msg)
                 .emit(self),
@@ -752,7 +752,7 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_expected_struct_or_tuple_type_arg(
+    pub fn emit_expected_compound_type_arg(
         &mut self,
         values: &ValueInterner,
         builtin: Builtin,
