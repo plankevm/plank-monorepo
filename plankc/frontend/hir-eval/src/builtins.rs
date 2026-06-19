@@ -555,12 +555,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         };
 
-        let fields = match self.values.lookup(tuple_vid) {
-            Value::Compound { ty, fields }
-                if matches!(self.types.lookup(ty), Type::Compound(Compound::Tuple(_))) =>
-            {
-                fields
-            }
+        let fields = match self.eval.values.lookup(tuple_vid) {
+            Value::Compound { ty, fields } if ty.is_tuple() => fields,
             _ => {
                 let actual_ty = self.values.type_of_value(tuple_vid);
                 self.diag_ctx.emit_cbytes_concat_expected_tuple(
@@ -573,6 +569,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
 
         let mut buf = Vec::new();
+        let mut contains_invalid = false;
         for &field in fields {
             match self.values.lookup(field) {
                 Value::BigNum(n) => {
@@ -588,9 +585,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         other.get_type(),
                         self.loc(expr_span),
                     );
-                    return Err(Poisoned);
+                    contains_invalid = true;
                 }
             }
+        }
+        if contains_invalid {
+            return Err(Poisoned);
         }
         let bytes = self.diag_ctx.session.intern_bytes(&buf);
         let len = u32::try_from(buf.len()).expect("cbytes length fits u32");
