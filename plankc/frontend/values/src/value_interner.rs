@@ -5,19 +5,12 @@ use crate::{
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashMap, HashTable, hash_map, hash_table::Entry};
 use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
-use plank_session::{BytesId, Session, SrcLoc, StrId, write_bytes_literal};
+use plank_session::{BytesId, CBytes, Session, SrcLoc, StrId, write_bytes_literal};
 use std::{fmt, hash::BuildHasher};
 
 newtype_index! {
     struct CompoundIdx;
     struct CaptureIdx;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CBytes {
-    pub contents: BytesId,
-    pub start: u32,
-    pub end: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -215,7 +208,7 @@ impl FmtValue<'_> {
             Value::Bool(value) => write!(f, "{value}"),
             Value::BigNum(value) => write!(f, "{value}"),
             Value::Bytes(value) => {
-                let bytes = self.session.lookup_bytes_slice(value.contents, value.start, value.end);
+                let bytes = self.session.lookup_bytes_slice(value);
                 write_bytes_literal(f, bytes)
             }
             Value::Type(ty) => write!(f, "{}", self.types.format(self.session, self.values, ty)),
@@ -330,7 +323,10 @@ mod tests {
 
         // "hello"[1..3] and "xelx"[1..3] are both `el`: identical by value but
         // distinct by origin, so they must stay distinct values.
-        assert_eq!(session.lookup_bytes_slice(hello, 1, 3), session.lookup_bytes_slice(xelx, 1, 3));
+        assert_eq!(
+            session.lookup_bytes_slice(CBytes { contents: hello, start: 1, end: 3 }),
+            session.lookup_bytes_slice(CBytes { contents: xelx, start: 1, end: 3 })
+        );
         assert_ne!(interner.intern_bytes(xelx, 1, 3), slice);
     }
 

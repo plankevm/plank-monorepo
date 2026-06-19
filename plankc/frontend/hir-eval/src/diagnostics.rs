@@ -881,7 +881,7 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_cbytes_read_offset_out_of_bounds(&mut self, offset: U256, len: u32, loc: SrcLoc) {
+    pub fn emit_cbytes_read_offset_out_of_bounds(&mut self, offset: U256, len: usize, loc: SrcLoc) {
         Diagnostic::error("cbytes read offset out of bounds")
             .primary(
                 loc.source,

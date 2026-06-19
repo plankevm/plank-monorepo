@@ -73,8 +73,7 @@ impl<'a> DisplayHir<'a> {
                         .name()
                 ),
                 Value::Bytes(bytes) => {
-                    let bytes =
-                        self.session.lookup_bytes_slice(bytes.contents, bytes.start, bytes.end);
+                    let bytes = self.session.lookup_bytes_slice(bytes);
                     write_bytes_literal(f, bytes)
                 }
                 other @ (Value::Closure { .. } | Value::Compound { .. }) => {

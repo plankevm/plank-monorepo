@@ -3,11 +3,12 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{
-    Builtin, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc, builtins::BuiltinKind,
+    Builtin, CBytes, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc,
+    builtins::BuiltinKind,
 };
 use plank_values::{
-    CBytes, Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId,
-    ValueInterner, builtins as builtin_sigs,
+    Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
+    builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
 
@@ -243,11 +244,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::CompileError => {
                 let &[message] = args else { unreachable!("arg count checked") };
                 let message = self.expect_bytes_arg(message, builtin, expr_span)?;
-                let message = self.diag_ctx.session.lookup_bytes_lossy(
-                    message.contents,
-                    message.start,
-                    message.end,
-                );
+                let message = self.diag_ctx.session.lookup_bytes_lossy(message);
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
@@ -274,41 +271,38 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let offset =
                     self.expect_comptime_u256(offset, builtin, "cbytes offset", expr_span)?;
-                let len = bytes.end - bytes.start;
-                if offset > U256::from(len) {
-                    self.diag_ctx.emit_cbytes_read_offset_out_of_bounds(offset, len, expr_loc);
-                    return Err(Poisoned);
-                }
-                let offset = u32::try_from(offset).expect("offset <= len which fits u32");
 
-                let read = (len - offset).min(32);
-                let start = bytes.start + offset;
-                let end = start + read;
-                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes.contents, start, end);
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
+                let offset = match usize::try_from(offset) {
+                    Ok(offset) if offset <= slice.len() => offset,
+                    _ => {
+                        self.diag_ctx.emit_cbytes_read_offset_out_of_bounds(
+                            offset,
+                            slice.len(),
+                            expr_loc,
+                        );
+                        return Err(Poisoned);
+                    }
+                };
+
+                let slice = &slice[offset..(offset + 32).min(slice.len())];
                 let mut word = [0; 32];
-                word[..read as usize].copy_from_slice(slice);
+                word[..slice.len()].copy_from_slice(slice);
+
                 let value = U256::from_be_bytes(word);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(value))))
             }
             Builtin::Keccak256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
-                let slice = self.diag_ctx.session.lookup_bytes_slice(
-                    bytes.contents,
-                    bytes.start,
-                    bytes.end,
-                );
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
             }
             Builtin::Sha256Cbytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
-                let slice = self.diag_ctx.session.lookup_bytes_slice(
-                    bytes.contents,
-                    bytes.start,
-                    bytes.end,
-                );
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(Sha256::digest(slice).into());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
             }
@@ -585,11 +579,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     buf.extend_from_slice(&n.to_be_bytes::<32>());
                 }
                 Value::Bytes(bytes) => {
-                    let slice = self.diag_ctx.session.lookup_bytes_slice(
-                        bytes.contents,
-                        bytes.start,
-                        bytes.end,
-                    );
+                    let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                     buf.extend_from_slice(slice);
                 }
                 other => {
@@ -691,17 +681,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let compound = self.expect_compound(ty, builtin, expr_span)?;
         let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
         let field_count = compound.field_count();
-        let Some(index) = u32::try_from(index).ok().filter(|&index| (index as usize) < field_count)
-        else {
-            self.diag_ctx.emit_field_index_out_of_bounds(
-                builtin,
-                index,
-                field_count,
-                self.loc(self.bindings[index_arg].use_span),
-            );
-            return Err(Poisoned);
-        };
-        Ok((compound, index))
+        match u32::try_from(index) {
+            Ok(index) if (index as usize) < field_count => Ok((compound, index)),
+            _ => {
+                self.diag_ctx.emit_field_index_out_of_bounds(
+                    builtin,
+                    index,
+                    field_count,
+                    self.loc(self.bindings[index_arg].use_span),
+                );
+                Err(Poisoned)
+            }
+        }
     }
 
     fn expect_type_arg(
