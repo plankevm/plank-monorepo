@@ -809,7 +809,7 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_cbytes_concat_expected_tuple(
+    pub fn emit_concat_cbytes_expected_tuple(
         &mut self,
         values: &ValueInterner,
         actual_ty: TypeId,
@@ -821,14 +821,14 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "`{}` expects a tuple, got `{}`",
-                    builtin_names::CBYTES_CONCAT,
+                    builtin_names::CONCAT_CBYTES,
                     self.types.format(self.session, values, actual_ty),
                 ),
             )
             .emit(self);
     }
 
-    pub fn emit_cbytes_concat_invalid_element(
+    pub fn emit_concat_cbytes_invalid_element(
         &mut self,
         values: &ValueInterner,
         actual_ty: TypeId,
@@ -840,7 +840,7 @@ impl DiagCtx<'_> {
                 loc.span,
                 format!(
                     "`{}` tuple elements must be `{}` or `{}`, got `{}`",
-                    builtin_names::CBYTES_CONCAT,
+                    builtin_names::CONCAT_CBYTES,
                     builtin_names::U256,
                     builtin_names::CBYTES,
                     self.types.format(self.session, values, actual_ty),

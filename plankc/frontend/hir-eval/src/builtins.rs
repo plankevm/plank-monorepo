@@ -266,7 +266,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     bytes.start + end,
                 ))))
             }
-            Builtin::CbytesPaddedReadU256 => {
+            Builtin::PaddedReadCBytes => {
                 let &[bytes, offset] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let offset =
@@ -299,7 +299,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
             }
-            Builtin::Sha256Cbytes => {
+            Builtin::Sha256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
@@ -344,7 +344,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::GetField => self.eval_get_field(args, builtin, expr),
             Builtin::SetField => self.eval_set_field(args, builtin, expr),
             Builtin::Uninit => self.eval_uninit(args, builtin, expr),
-            Builtin::CbytesConcat => self.eval_cbytes_concat(args, expr),
+            Builtin::ConcatCBytes => self.eval_concat_cbytes(args, expr),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -542,7 +542,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         ))))
     }
 
-    fn eval_cbytes_concat(
+    fn eval_concat_cbytes(
         &mut self,
         args: &[hir::LocalId],
         expr_span: SourceSpan,
@@ -559,7 +559,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Value::Compound { ty, fields } if ty.is_tuple() => fields,
             _ => {
                 let actual_ty = self.values.type_of_value(tuple_vid);
-                self.diag_ctx.emit_cbytes_concat_expected_tuple(
+                self.diag_ctx.emit_concat_cbytes_expected_tuple(
                     self.eval.values,
                     actual_ty,
                     self.loc(expr_span),
@@ -580,7 +580,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     buf.extend_from_slice(slice);
                 }
                 other => {
-                    self.diag_ctx.emit_cbytes_concat_invalid_element(
+                    self.diag_ctx.emit_concat_cbytes_invalid_element(
                         self.eval.values,
                         other.get_type(),
                         self.loc(expr_span),

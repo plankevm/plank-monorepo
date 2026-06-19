@@ -2168,10 +2168,10 @@ fn test_slice_cbytes_runtime_bound() {
 }
 
 #[test]
-fn test_cbytes_padded_read_u256_without_padding() {
+fn test_padded_read_cbytes_without_padding() {
     assert_lowers_to(
         r#"
-        const read_matches = @cbytes_padded_read_u256(
+        const read_matches = @padded_read_cbytes(
             hex"0000000000000000000000000000000000000000000000000000000000000000"
             hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
             hex"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -2194,10 +2194,10 @@ fn test_cbytes_padded_read_u256_without_padding() {
 }
 
 #[test]
-fn test_cbytes_padded_read_u256_with_padding() {
+fn test_padded_read_cbytes_with_padding() {
     assert_lowers_to(
         r#"
-        const read_matches = @cbytes_padded_read_u256(hex"010203", 1)
+        const read_matches = @padded_read_cbytes(hex"010203", 1)
             == 0x0203000000000000000000000000000000000000000000000000000000000000;
         init {
             let mut a: bool = read_matches;
@@ -2216,10 +2216,10 @@ fn test_cbytes_padded_read_u256_with_padding() {
 }
 
 #[test]
-fn test_cbytes_padded_read_u256_offset_past_len() {
+fn test_padded_read_cbytes_offset_past_len() {
     assert_diagnostics(
         r#"
-        const bad = @cbytes_padded_read_u256("hi", 3);
+        const bad = @padded_read_cbytes("hi", 3);
         init {
             @evm_stop();
         }
@@ -2228,8 +2228,8 @@ fn test_cbytes_padded_read_u256_offset_past_len() {
         error: cbytes read offset out of bounds
          --> main.plk:1:13
           |
-        1 | const bad = @cbytes_padded_read_u256("hi", 3);
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ offset 3 is outside `cbytes` with length 2
+        1 | const bad = @padded_read_cbytes("hi", 3);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ offset 3 is outside `cbytes` with length 2
           |
           = note: offset must be within `0..=bytes.length`
         "#],
@@ -2237,10 +2237,10 @@ fn test_cbytes_padded_read_u256_offset_past_len() {
 }
 
 #[test]
-fn test_cbytes_concat_empty_tuple() {
+fn test_concat_cbytes_empty_tuple() {
     assert_lowers_to(
         r#"
-        const concat_matches = @cbytes_concat(()) == "";
+        const concat_matches = @concat_cbytes(()) == "";
         init {
             let mut a: bool = concat_matches;
             @evm_stop();
@@ -2258,10 +2258,10 @@ fn test_cbytes_concat_empty_tuple() {
 }
 
 #[test]
-fn test_cbytes_concat_mixed_elements() {
+fn test_concat_cbytes_mixed_elements() {
     assert_lowers_to(
         r#"
-        const concat_matches = @cbytes_concat(("a", 1, hex"ff"))
+        const concat_matches = @concat_cbytes(("a", 1, hex"ff"))
             == "a" hex"0000000000000000000000000000000000000000000000000000000000000001ff";
         init {
             let mut a: bool = concat_matches;
@@ -2280,10 +2280,10 @@ fn test_cbytes_concat_mixed_elements() {
 }
 
 #[test]
-fn test_cbytes_concat_uses_visible_slice() {
+fn test_concat_cbytes_uses_visible_slice() {
     assert_lowers_to(
         r#"
-        const concat_matches = @cbytes_concat((@slice_cbytes("hello", 1, 4), "!")) == "ell!";
+        const concat_matches = @concat_cbytes((@slice_cbytes("hello", 1, 4), "!")) == "ell!";
         init {
             let mut a: bool = concat_matches;
             @evm_stop();
@@ -2301,10 +2301,10 @@ fn test_cbytes_concat_uses_visible_slice() {
 }
 
 #[test]
-fn test_cbytes_concat_requires_tuple() {
+fn test_concat_cbytes_requires_tuple() {
     assert_diagnostics(
         r#"
-        const bad = @cbytes_concat("hello");
+        const bad = @concat_cbytes("hello");
         init {
             @evm_stop();
         }
@@ -2313,17 +2313,17 @@ fn test_cbytes_concat_requires_tuple() {
         error: invalid cbytes concat argument
          --> main.plk:1:13
           |
-        1 | const bad = @cbytes_concat("hello");
-          |             ^^^^^^^^^^^^^^^^^^^^^^^ `@cbytes_concat` expects a tuple, got `cbytes`
+        1 | const bad = @concat_cbytes("hello");
+          |             ^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` expects a tuple, got `cbytes`
         "#],
     );
 }
 
 #[test]
-fn test_cbytes_concat_rejects_invalid_element() {
+fn test_concat_cbytes_rejects_invalid_element() {
     assert_diagnostics(
         r#"
-        const bad = @cbytes_concat(("hello", true));
+        const bad = @concat_cbytes(("hello", true));
         init {
             @evm_stop();
         }
@@ -2332,19 +2332,19 @@ fn test_cbytes_concat_rejects_invalid_element() {
         error: invalid cbytes concat element
          --> main.plk:1:13
           |
-        1 | const bad = @cbytes_concat(("hello", true));
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@cbytes_concat` tuple elements must be `u256` or `cbytes`, got `bool`
+        1 | const bad = @concat_cbytes(("hello", true));
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256` or `cbytes`, got `bool`
         "#],
     );
 }
 
 #[test]
-fn test_cbytes_concat_rejects_runtime_tuple_element() {
+fn test_concat_cbytes_rejects_runtime_tuple_element() {
     assert_diagnostics(
         r#"
         init {
             let n = @evm_calldataload(0);
-            let bad = @cbytes_concat(("hello", n));
+            let bad = @concat_cbytes(("hello", n));
             @evm_stop();
         }
         "#,
@@ -2352,7 +2352,7 @@ fn test_cbytes_concat_rejects_runtime_tuple_element() {
         error: mixing comptime and runtime data in tuple
          --> main.plk:3:30
           |
-        3 |     let bad = @cbytes_concat(("hello", n));
+        3 |     let bad = @concat_cbytes(("hello", n));
           |                              ^-------^^-^
           |                              ||        |
           |                              ||        tuple element not comptime-known
