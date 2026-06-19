@@ -350,6 +350,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::GetField => self.eval_get_field(args, builtin, expr),
             Builtin::SetField => self.eval_set_field(args, builtin, expr),
             Builtin::Uninit => self.eval_uninit(args, builtin, expr),
+            Builtin::CbytesConcat => self.eval_cbytes_concat(args, expr),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -545,6 +546,66 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.eval.values,
             &mut self.eval.values_buf,
         ))))
+    }
+
+    fn eval_cbytes_concat(
+        &mut self,
+        args: &[hir::LocalId],
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let &[tuple] = args else { unreachable!("arg count checked") };
+        let (state, _, origin) = self.bindings[tuple].poisoned()?;
+        let LocalState::Comptime(tuple_vid) = state else {
+            self.diag_ctx
+                .emit_runtime_ref_in_comptime(self.loc(expr_span), self.origin_loc(origin));
+            return Err(Poisoned);
+        };
+
+        let fields = match self.values.lookup(tuple_vid) {
+            Value::Compound { ty, fields }
+                if matches!(self.types.lookup(ty), Type::Compound(Compound::Tuple(_))) =>
+            {
+                fields
+            }
+            _ => {
+                let actual_ty = self.values.type_of_value(tuple_vid);
+                self.diag_ctx.emit_cbytes_concat_expected_tuple(
+                    self.eval.values,
+                    actual_ty,
+                    self.loc(expr_span),
+                );
+                return Err(Poisoned);
+            }
+        };
+
+        let mut buf = Vec::new();
+        for &field in fields {
+            match self.values.lookup(field) {
+                Value::BigNum(n) => {
+                    buf.extend_from_slice(&n.to_be_bytes::<32>());
+                }
+                Value::Bytes(bytes) => {
+                    let slice = self.diag_ctx.session.lookup_bytes_slice(
+                        bytes.contents,
+                        bytes.start,
+                        bytes.end,
+                    );
+                    buf.extend_from_slice(slice);
+                }
+                other => {
+                    self.diag_ctx.emit_cbytes_concat_invalid_element(
+                        self.eval.values,
+                        other.get_type(),
+                        self.loc(expr_span),
+                    );
+                    return Err(Poisoned);
+                }
+            }
+        }
+        let bytes = self.diag_ctx.session.intern_bytes(&buf);
+        let len = u32::try_from(buf.len()).expect("cbytes length fits u32");
+        let value = self.eval.values.intern_bytes(bytes, 0, len);
+        Ok(Ok(EvalValue::Comptime(value)))
     }
 
     /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).

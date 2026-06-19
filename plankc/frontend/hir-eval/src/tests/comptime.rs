@@ -2237,6 +2237,132 @@ fn test_cbytes_padded_read_u256_offset_past_len() {
 }
 
 #[test]
+fn test_cbytes_concat_empty_tuple() {
+    assert_lowers_to(
+        r#"
+        const concat_matches = @cbytes_concat(()) == "";
+        init {
+            let mut a: bool = concat_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_cbytes_concat_mixed_elements() {
+    assert_lowers_to(
+        r#"
+        const concat_matches = @cbytes_concat(("a", 1, hex"ff"))
+            == "a" hex"0000000000000000000000000000000000000000000000000000000000000001ff";
+        init {
+            let mut a: bool = concat_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_cbytes_concat_uses_visible_slice() {
+    assert_lowers_to(
+        r#"
+        const concat_matches = @cbytes_concat((@slice_cbytes("hello", 1, 4), "!")) == "ell!";
+        init {
+            let mut a: bool = concat_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_cbytes_concat_requires_tuple() {
+    assert_diagnostics(
+        r#"
+        const bad = @cbytes_concat("hello");
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: invalid cbytes concat argument
+         --> main.plk:1:13
+          |
+        1 | const bad = @cbytes_concat("hello");
+          |             ^^^^^^^^^^^^^^^^^^^^^^^ `@cbytes_concat` expects a tuple, got `cbytes`
+        "#],
+    );
+}
+
+#[test]
+fn test_cbytes_concat_rejects_invalid_element() {
+    assert_diagnostics(
+        r#"
+        const bad = @cbytes_concat(("hello", true));
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: invalid cbytes concat element
+         --> main.plk:1:13
+          |
+        1 | const bad = @cbytes_concat(("hello", true));
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@cbytes_concat` tuple elements must be `u256` or `cbytes`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_cbytes_concat_rejects_runtime_tuple_element() {
+    assert_diagnostics(
+        r#"
+        init {
+            let n = @evm_calldataload(0);
+            let bad = @cbytes_concat(("hello", n));
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mixing comptime and runtime data in tuple
+         --> main.plk:3:30
+          |
+        3 |     let bad = @cbytes_concat(("hello", n));
+          |                              ^-------^^-^
+          |                              ||        |
+          |                              ||        tuple element not comptime-known
+          |                              |tuple element is comptime-only
+          |                              mixed tuple literal
+        "#],
+    );
+}
+
+#[test]
 fn test_data_offset_of_slice_cbytes() {
     assert_lowers_to(
         r#"

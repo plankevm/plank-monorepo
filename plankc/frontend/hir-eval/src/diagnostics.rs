@@ -809,6 +809,42 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_cbytes_concat_expected_tuple(
+        &mut self,
+        values: &ValueInterner,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("invalid cbytes concat argument")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`@cbytes_concat` expects a tuple, got `{}`",
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_cbytes_concat_invalid_element(
+        &mut self,
+        values: &ValueInterner,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("invalid cbytes concat element")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`@cbytes_concat` tuple elements must be `u256` or `cbytes`, got `{}`",
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_field_index_out_of_bounds(
         &mut self,
         builtin: Builtin,
