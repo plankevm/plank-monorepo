@@ -87,9 +87,17 @@ init {
 }
 ```
 
+> [!TIP]
+> Use `@concat_bytes((slice,))`  if you wish to ensure that only the bytes contained within your
+> slice are added to your contract's bytecode. This works because `@concat_bytes` creates *new*
+> strings while slicing merely creates views into other strings.
+
 ### Concatenating
 
-You can concatenate multiple `cbytes` and `u256` values together using the `@concat_cbytes` builtin. `@concat_cbytes` takes as argument a tuple containing the values you want to concatenate. String literals and hex literals both have type `cbytes`, so they are appended directly, while `u256` elements are encoded as 32-byte big-endian byte strings:
+You can concatenate multiple `cbytes` and `u256` values together using the `@concat_cbytes` builtin.
+`@concat_cbytes` takes as argument a tuple containing the values you want to concatenate. String
+literals and hex literals are appended directly since they have type `cbytes`, while `u256` elements
+are encoded as 32-byte big-endian byte strings:
 
 ```plank
 const MESSAGE = @concat_cbytes((
@@ -103,10 +111,9 @@ const MESSAGE = @concat_cbytes((
 //     hex"0a"
 ```
 
-> [!IMPORTANT]
-> Unlike slicing, `@concat_cbytes` produces an independent `cbytes` value from
-> the inputs. If you embed the result, only those bytes are embedded, even when
-> some inputs were slices of larger `cbytes` values.
+Unlike slicing, `@concat_cbytes` produces an independent `cbytes` value from
+the inputs. If you embed the result, only those bytes are embedded, even when
+some inputs were slices of larger `cbytes` values:
 
 ```plank
 import std::error::require;
@@ -137,9 +144,32 @@ init {
 }
 ```
 
-> [!TIP]
-> Use `@concat_cbytes` when you want an independent `cbytes` value instead of a
-> value that points into the original value.
+This becomes easier to understand if you imagine the underlying strings. The original literal
+is stored in `LOOKUP_TABLE` so that's an original string. The slice stored in `TABLE_WINDOW` is
+just a **view** into `LOOKUP_TABLE` while the call to `@concat_bytes` forces the
+creation of an independent string which is then stored in `WINDOW_COPY`.
+
+```
+LOOKUP_TABLE
+        ┊
+        ┊
+        ▼
+┌────────────── 32 bytes ──────────────┬────────────── 32 bytes ──────────────┐
+│ 00 00 00 ... 00                      │ 00 01 02 ... ee ff                   │
+└──────────────────────────────────────┴──────────────────────────────────────┘
+                                       ◄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄►
+                                               ┊
+                                               ┊
+TABLE_WINDOW = @slice_cbytes(LOOKUP_TABLE, 32, 64)
+
+
+┌────────────── 32 bytes ──────────────┐
+│ 00 01 02 ... ee ff                   │
+└──────────────────────────────────────┘
+                  ▲
+                  ┊
+WINDOW_COPY = @concat_cbytes((TABLE_WINDOW,))
+```
 
 ### Reading Padded Words
 
@@ -150,23 +180,17 @@ Use `@padded_read_cbytes(bytes, offset)` to read a 32-byte word from a `cbytes` 
 The result is interpreted as a 32-byte big-endian `u256`:
 
 ```plank
-comptime {
-    let padded_word = @padded_read_cbytes(hex"010203", 1);
-    if padded_word != 0x0203000000000000000000000000000000000000000000000000000000000000 {
-        @compile_error("unexpected padded word");
-    }
-};
+let char = @padded_read_cbytes("abc", 1);
+require(char == 0x6263000000000000000000000000000000000000000000000000000000000000);
+let char_byte = char >> (31 * 8);
+require(char_byte == 0x62);
 ```
 
 Reading at the end of a `cbytes` value is valid and returns zero:
 
 ```plank
-comptime {
-    let empty_word = @padded_read_cbytes(hex"010203", 3);
-    if empty_word != 0 {
-        @compile_error("expected zero word");
-    }
-};
+let empty_word = @padded_read_cbytes(hex"010203", 3);
+require(empty_word == 0);
 ```
 
 ## Syntax
