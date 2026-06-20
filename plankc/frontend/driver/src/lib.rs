@@ -248,7 +248,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "init {}\n".to_string());
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, Default::default());
         driver.register_module("m", PathBuf::from("/a"));
         driver.register_module("m", PathBuf::from("/b"));
 
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn missing_entry_file_emits_diagnostic() {
         let fs = InMemoryFs::new();
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, Default::default());
         let result = driver.load_project(Path::new("nonexistent.plk"));
         assert!(result.is_none());
 
@@ -286,7 +286,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import foo::bar::Baz;\ninit {}\n".to_string());
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, Default::default());
         driver.load_project(Path::new("main.plk"));
 
         assert_diagnostics(
@@ -316,7 +316,7 @@ mod tests {
             .to_string(),
         );
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, Default::default());
         driver.load_project(Path::new("main.plk"));
 
         assert_diagnostics(
@@ -340,7 +340,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
 
-        let mut driver = Driver::new(&fs);
+        let mut driver = Driver::new(&fs, Default::default());
         driver.register_module("m", PathBuf::from("/lib"));
         driver.load_project(Path::new("main.plk"));
 

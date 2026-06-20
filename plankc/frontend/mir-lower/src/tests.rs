@@ -5,10 +5,11 @@ use plank_values::ValueInterner;
 fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
     let mut session = Session::new();
     let project = TestProject::root(source).build(&mut session);
+    let active_evm_spec_id = Default::default();
 
     let mut values = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut values, &mut session);
-    let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session);
+    let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session, active_evm_spec_id);
     let sir = crate::lower(&mir, &values, &session);
     (sir, session)
 }

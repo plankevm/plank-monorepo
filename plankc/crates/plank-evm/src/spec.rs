@@ -1,9 +1,10 @@
 use alloy_primitives::U256;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum EvmSpecId {
     Cancun,
     Prague,
+    #[default]
     Osaka,
 }
 
