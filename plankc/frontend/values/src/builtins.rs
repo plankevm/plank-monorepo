@@ -224,6 +224,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::SliceCBytes => &[sig!([CBYTES, U256, U256 => CBYTES])],
         B::Keccak256CBytes => &[sig!([CBYTES => U256])],
         B::DataOffset => &[sig!([CBYTES => U256])],
+        B::ActiveEvmSpecId => &[sig!([=> U256])],
 
         // Comptime dynamic — no fixed signatures
         B::FieldType | B::TypeIndex | B::GetField | B::SetField | B::Uninit => &[],

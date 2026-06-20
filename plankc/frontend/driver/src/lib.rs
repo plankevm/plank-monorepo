@@ -1,3 +1,4 @@
+use plank_evm::EvmSpecId;
 use plank_hir::lower;
 use plank_session::{Session, SourceId};
 use plank_source::{
@@ -24,16 +25,18 @@ pub struct Driver<'a, F: SourceFs> {
     module_resolver: ModuleResolver,
     fs: &'a F,
     std_root: Option<PathBuf>,
+    evm_spec_id: EvmSpecId,
 }
 
 impl<'a, F: SourceFs> Driver<'a, F> {
-    pub fn new(fs: &'a F) -> Self {
+    pub fn new(fs: &'a F, evm_spec_id: EvmSpecId) -> Self {
         Self {
             session: Session::new(),
             values: ValueInterner::new(),
             module_resolver: ModuleResolver::default(),
             fs,
             std_root: None,
+            evm_spec_id,
         }
     }
 
@@ -79,7 +82,13 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         hir: &plank_hir::Hir,
         core_ops_source: Option<SourceId>,
     ) -> plank_mir::Mir {
-        plank_hir_eval::evaluate(hir, core_ops_source, &mut self.values, &mut self.session)
+        plank_hir_eval::evaluate(
+            hir,
+            core_ops_source,
+            &mut self.values,
+            &mut self.session,
+            self.evm_spec_id,
+        )
     }
 
     pub fn emit_bytecode_with_backend(

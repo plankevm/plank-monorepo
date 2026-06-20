@@ -2,6 +2,7 @@ use alloy_primitives as _;
 use hashbrown as _;
 use plank_evm as _;
 
+use plank_evm::EvmSpecId;
 use plank_hir::Hir;
 use plank_mir::Mir;
 use plank_session::{Session, SourceId};
@@ -30,10 +31,11 @@ pub fn evaluate(
     core_ops_source: Option<SourceId>,
     values: &mut ValueInterner,
     session: &mut Session,
+    evm_spec_id: EvmSpecId,
 ) -> Mir {
     let types = TypeInterner::new();
     let evaluated_fns_cache = EvaluatedFunctionCache::new();
-    let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values);
+    let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values, evm_spec_id);
     let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
     evaluator.operator_table = match core_ops_source {

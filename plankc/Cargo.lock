@@ -2018,6 +2018,7 @@ dependencies = [
  "clap",
  "owo-colors",
  "plank-driver",
+ "plank-evm",
  "plank-hir",
  "plank-mir",
  "plank-parser",
@@ -2042,6 +2043,7 @@ name = "plank-driver"
 version = "0.1.0"
 dependencies = [
  "anstream",
+ "plank-evm",
  "plank-hir",
  "plank-hir-eval",
  "plank-mir",

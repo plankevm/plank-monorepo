@@ -362,6 +362,8 @@ define_builtins! {
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
         KECCAK256_CBYTES "@keccak256_cbytes" => Keccak256CBytes;
         DATA_OFFSET "@data_offset" => DataOffset;
+
+        ACTIVE_EVM_SPEC_ID "@active_evm_spec_id" => ActiveEvmSpecId;
     }
 
     comptime_dynamic_builtins {

@@ -8,6 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+plank-evm.workspace = true
 plank-session.workspace = true
 plank-source.workspace = true
 plank-hir.workspace = true

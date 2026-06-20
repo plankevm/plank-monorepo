@@ -6,6 +6,7 @@ use tempfile as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
 use plank_driver::{BackendKind, Driver};
+use plank_evm::EvmSpecId;
 use plank_hir::display::DisplayHir;
 use plank_mir::display::DisplayMir;
 use plank_parser::cst::display::DisplayCST;
@@ -79,8 +80,28 @@ struct BuildArgs {
     #[arg(long = "module-root", requires = "module_name")]
     module_root: Option<String>,
 
+    #[arg(long = "evm-version", value_enum, default_value_t = EvmVersionArg::Osaka)]
+    evm_version: EvmVersionArg,
+
     #[arg(long = "dep", value_parser = parse_dep)]
     deps: Vec<(String, PathBuf)>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum EvmVersionArg {
+    Cancun,
+    Prague,
+    Osaka,
+}
+
+impl From<EvmVersionArg> for EvmSpecId {
+    fn from(value: EvmVersionArg) -> Self {
+        match value {
+            EvmVersionArg::Cancun => EvmSpecId::Cancun,
+            EvmVersionArg::Prague => EvmSpecId::Prague,
+            EvmVersionArg::Osaka => EvmSpecId::Osaka,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -172,7 +193,7 @@ fn doc(doc_dir: PathBuf, topic: Option<String>) {
 }
 
 fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
-    let mut driver = Driver::new(&RealFs);
+    let mut driver = Driver::new(&RealFs, args.evm_version.into());
 
     if let Some(name) = &args.module_name {
         let root = match &args.module_root {

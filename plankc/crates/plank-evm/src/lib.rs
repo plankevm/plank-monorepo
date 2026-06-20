@@ -1,5 +1,9 @@
 use alloy_primitives::{I256, U256, U512};
 
+pub mod spec;
+
+pub use spec::EvmSpecId;
+
 #[cfg(test)]
 mod tests;
 
