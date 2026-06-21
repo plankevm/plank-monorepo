@@ -200,18 +200,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
-        match builtin {
+        let value = match builtin {
             Builtin::IsStruct => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_struct = ty.is_struct();
-                Ok(Ok(EvalValue::Comptime(is_struct.into())))
+                ty.is_struct().into()
             }
             Builtin::IsTuple => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_tuple = ty.is_tuple();
-                Ok(Ok(EvalValue::Comptime(is_tuple.into())))
+                ty.is_tuple().into()
             }
             Builtin::HasPlainName | Builtin::HasParameterizedName => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
@@ -272,9 +270,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
                 let field_count = self.expect_compound(ty, builtin, expr_span)?.field_count();
                 let count = U256::from(field_count);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
+                self.eval.values.intern_num(count)
             }
-            Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
+            Builtin::InComptime => self.comptime.into(),
             Builtin::SetEvalBranchQuota => {
                 let &[quota_arg] = args else { unreachable!("arg count checked") };
                 let binding = self.bindings[quota_arg];
@@ -305,14 +303,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.comptime_quota.raise_limit(requested_quota);
                 self.max_eval_branch_quota_seen =
                     self.max_eval_branch_quota_seen.max(requested_quota);
-                Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
+
+                ValueId::VOID
             }
             Builtin::CompileError => {
                 let &[message] = args else { unreachable!("arg count checked") };
                 let message = self.expect_bytes_arg(message, builtin, expr_span)?;
                 let message = self.diag_ctx.session.lookup_bytes_lossy(message);
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
-                Ok(Err(Diverge::ControlFlowPoisoned))
+                return Ok(Err(Diverge::ControlFlowPoisoned));
             }
             Builtin::SliceCBytes => {
                 let &[bytes, start, end] = args else { unreachable!("arg count checked") };
@@ -326,11 +325,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 let start = u32::try_from(start).expect("start <= end <= len which fits u32");
                 let end = u32::try_from(end).expect("end <= len which fits u32");
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(
+                self.eval.values.intern_bytes(
                     bytes.contents,
                     bytes.start + start,
                     bytes.start + end,
-                ))))
+                )
             }
             Builtin::PaddedReadCBytes => {
                 let &[bytes, offset] = args else { unreachable!("arg count checked") };
@@ -356,21 +355,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 word[..slice.len()].copy_from_slice(slice);
 
                 let value = U256::from_be_bytes(word);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(value))))
+                self.eval.values.intern_num(value)
             }
             Builtin::Keccak256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+                self.eval.values.intern_num(hash)
             }
             Builtin::Sha256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(Sha256::digest(slice).into());
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+                self.eval.values.intern_num(hash)
             }
             Builtin::DataOffset => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
@@ -379,17 +378,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_data_offset_in_comptime(expr_loc);
                     return Err(Poisoned);
                 }
-                Ok(Ok(EvalValue::Runtime {
+                return Ok(Ok(EvalValue::Runtime {
                     expr: mir::Expr::DataOffset { contents: bytes.contents, start: bytes.start },
                     result_type: TypeId::U256,
-                }))
+                }));
             }
             Builtin::ActiveEvmVersion => {
                 let evm_version: U256 = self.eval.evm_version.into();
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(evm_version))))
             }
             _ => unreachable!("not a comptime builtin: {builtin}"),
-        }
+        };
+
+        Ok(Ok(EvalValue::Comptime(value)))
     }
 
     fn eval_comptime_dynamic_builtin(
