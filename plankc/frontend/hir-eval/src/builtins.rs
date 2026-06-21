@@ -7,8 +7,8 @@ use plank_session::{
     builtins::BuiltinKind,
 };
 use plank_values::{
-    Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
-    builtins as builtin_sigs,
+    Compound, PrimitiveType, StructView, Type, TypeFlags, TypeId, TypeInterner, TypeName, Value,
+    ValueId, ValueInterner, builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
 
@@ -201,6 +201,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let is_tuple = ty.is_tuple();
                 Ok(Ok(EvalValue::Comptime(is_tuple.into())))
             }
+            Builtin::HasPlainName | Builtin::HasParameterizedName => {
+                let &[ty_local] = args else { unreachable!("arg count checked") };
+                let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+                let r#struct = self.expect_struct(ty, builtin, expr_span)?;
+                let matches_name_kind = match builtin {
+                    Builtin::HasPlainName => {
+                        matches!(r#struct.name.get(), Some(TypeName::Plain(_)))
+                    }
+                    Builtin::HasParameterizedName => {
+                        matches!(r#struct.name.get(), Some(TypeName::Parameterized { .. }))
+                    }
+                    _ => unreachable!("matched above"),
+                };
+                Ok(Ok(EvalValue::Comptime(matches_name_kind.into())))
+            }
             Builtin::FieldCount => {
                 let &[r#struct] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
@@ -370,15 +385,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty, builtin, expr_span)?;
-        let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty) else {
-            self.diag_ctx.emit_expected_struct_type_arg(
-                self.eval.values,
-                builtin,
-                ty,
-                self.loc(expr_span),
-            );
-            return Err(Poisoned);
-        };
+        let r#struct = self.expect_struct(ty, builtin, expr_span)?;
         Ok(Ok(EvalValue::Comptime(r#struct.type_index)))
     }
 
@@ -769,6 +776,26 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Type::Compound(compound) => Ok(compound),
             _ => {
                 self.diag_ctx.emit_expected_compound_type_arg(
+                    self.eval.values,
+                    builtin,
+                    ty,
+                    self.loc(span),
+                );
+                Err(Poisoned)
+            }
+        }
+    }
+
+    fn expect_struct(
+        &mut self,
+        ty: TypeId,
+        builtin: Builtin,
+        span: SourceSpan,
+    ) -> MaybePoisoned<StructView<'a>> {
+        match self.types.lookup(ty) {
+            Type::Compound(Compound::Struct(r#struct)) => Ok(r#struct),
+            _ => {
+                self.diag_ctx.emit_expected_struct_type_arg(
                     self.eval.values,
                     builtin,
                     ty,

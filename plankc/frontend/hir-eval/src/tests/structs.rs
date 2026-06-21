@@ -110,6 +110,110 @@ fn test_comptime_struct_field_ordering() {
 }
 
 #[test]
+fn test_has_name_kind_plain_struct() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256 };
+        const plain = @has_plain_name(Pair);
+        const parameterized = @has_parameterized_name(Pair);
+        init {
+            let mut x: bool = plain;
+            let mut y: bool = parameterized;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = false
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_name_kind_parameterized_struct() {
+    assert_lowers_to(
+        r#"
+        const Box = fn (comptime T: type) type {
+            struct { value: T }
+        };
+        const BoxU256 = Box(u256);
+        const plain = @has_plain_name(BoxU256);
+        const parameterized = @has_parameterized_name(BoxU256);
+        init {
+            let mut x: bool = plain;
+            let mut y: bool = parameterized;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_name_kind_anonymous_struct() {
+    assert_lowers_to(
+        r#"
+        const plain = @has_plain_name(struct { a: u256 });
+        const parameterized = @has_parameterized_name(struct { a: u256 });
+        init {
+            let mut x: bool = plain;
+            let mut y: bool = parameterized;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = false
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_name_kind_expects_struct() {
+    assert_diagnostics(
+        r#"
+        const x = @has_plain_name(u256);
+        const y = @has_parameterized_name(tuple { u256 });
+        init { @evm_stop(); }
+        "#,
+        &[
+            r#"
+        error: unexpected type kind
+         --> main.plk:1:11
+          |
+        1 | const x = @has_plain_name(u256);
+          |           ^^^^^^^^^^^^^^^^^^^^^ `@has_plain_name` expects a struct type, got `u256`
+        "#,
+            r#"
+        error: unexpected type kind
+         --> main.plk:2:11
+          |
+        2 | const y = @has_parameterized_name(tuple { u256 });
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@has_parameterized_name` expects a struct type, got `tuple {u256}`
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_comptime_struct_missing_field() {
     assert_diagnostics(
         r#"
