@@ -1,6 +1,9 @@
 use clap::Parser;
 use sir_parser::{EmitConfig, parse_or_panic};
-use sir_passes::{OPTIMIZE_HELP, PassManager, parse_optimizations_string};
+use sir_passes::{
+    AnalysesStore, OPTIMIZE_HELP, PassManager, parse_optimizations_string, run_pass,
+    transforms::CriticalEdgeSplitting,
+};
 use std::{
     fs,
     io::{self, Read},
@@ -67,13 +70,25 @@ fn main() {
     // Parse IR to EthIRProgram
     let mut program = parse_or_panic(&source, config);
 
-    let analyses = match cli.optimize {
-        Some(passes) => {
+    let analyses = if cli.release {
+        let store = AnalysesStore::default();
+        run_pass(&mut CriticalEdgeSplitting, &mut program, &store);
+        if let Some(passes) = cli.optimize {
             let mut pass_manager = PassManager::new(&mut program);
             pass_manager.run_optimizations(&passes);
             pass_manager.into_store()
+        } else {
+            AnalysesStore::default()
         }
-        None => sir_passes::AnalysesStore::default(),
+    } else {
+        match cli.optimize {
+            Some(passes) => {
+                let mut pass_manager = PassManager::new(&mut program);
+                pass_manager.run_optimizations(&passes);
+                pass_manager.into_store()
+            }
+            None => sir_passes::AnalysesStore::default(),
+        }
     };
 
     let mut bytecode = Vec::with_capacity(0x6000);
