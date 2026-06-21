@@ -9,11 +9,11 @@ pub enum EvmSpecId {
 }
 
 impl From<EvmSpecId> for U256 {
-	fn from(value: EvmSpecId) -> Self {
-		match value {
+    fn from(value: EvmSpecId) -> Self {
+        match value {
             EvmSpecId::Cancun => U256::from(0),
             EvmSpecId::Prague => U256::from(1),
             EvmSpecId::Osaka => U256::from(2),
         }
-	}
+    }
 }
