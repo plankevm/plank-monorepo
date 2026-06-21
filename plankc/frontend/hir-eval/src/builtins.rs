@@ -230,11 +230,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let &[ty_local, index_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
+                let index =
+                    self.expect_comptime_u256(index_local, builtin, "field index", expr_span)?;
                 let index = self.expect_field_index_in_bounds(
+                    index,
                     index_local,
                     builtin,
                     r#struct.fields.len(),
-                    expr_span,
                 )?;
                 let field = r#struct.fields[index as usize];
                 let name = self.diag_ctx.session.lookup_name(field.name).as_bytes().to_vec();
@@ -442,7 +444,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let instance_state = self.bindings[r#struct].state?;
         let ty = self.state_type(instance_state);
         let (compound, field_index) =
-            self.resolve_field_index(ty, field_index, builtin, expr_span)?;
+            self.resolve_field_selector(ty, field_index, builtin, expr_span)?;
         let field_ty = compound.field_type(field_index as usize);
 
         match instance_state {
@@ -469,7 +471,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let instance_state = self.bindings[instance].state?;
         let instance_ty = self.state_type(instance_state);
         let (compound, field_index) =
-            self.resolve_field_index(instance_ty, field_index, builtin, expr_span)?;
+            self.resolve_field_selector(instance_ty, field_index, builtin, expr_span)?;
         let field_ty = compound.field_type(field_index as usize);
 
         let (new_value_state, new_value_span, _) = self.bindings[field_value].poisoned()?;
@@ -729,23 +731,87 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<(Compound<'a>, u32)> {
         let compound = self.expect_compound(ty, builtin, expr_span)?;
-        let index = self.expect_field_index_in_bounds(
-            index_arg,
-            builtin,
-            compound.field_count(),
-            expr_span,
-        )?;
+        let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
+        let index =
+            self.expect_field_index_in_bounds(index, index_arg, builtin, compound.field_count())?;
         Ok((compound, index))
+    }
+
+    fn resolve_field_selector(
+        &mut self,
+        ty: TypeId,
+        selector_arg: hir::LocalId,
+        builtin: Builtin,
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<(Compound<'a>, u32)> {
+        let compound = self.expect_compound(ty, builtin, expr_span)?;
+        let selector_binding = self.bindings[selector_arg];
+        let state = selector_binding.state?;
+        let LocalState::Comptime(selector) = state else {
+            self.diag_ctx.emit_expected_comptime_arg(
+                builtin,
+                "field selector",
+                self.loc(expr_span),
+            );
+            return Err(Poisoned);
+        };
+
+        match self.values.lookup(selector) {
+            Value::BigNum(index) => {
+                let index = self.expect_field_index_in_bounds(
+                    index,
+                    selector_arg,
+                    builtin,
+                    compound.field_count(),
+                )?;
+                Ok((compound, index))
+            }
+            Value::Bytes(name) => {
+                let Compound::Struct(r#struct) = compound else {
+                    self.diag_ctx.emit_invalid_field_selector_type(
+                        self.eval.values,
+                        builtin,
+                        ty,
+                        TypeId::CBYTES,
+                        self.loc(selector_binding.use_span),
+                    );
+                    return Err(Poisoned);
+                };
+                let name = self.diag_ctx.session.lookup_bytes_slice(name).to_vec();
+                let Some((field_index, _)) = (0u32..).zip(r#struct.fields).find(|&(_, field)| {
+                    self.diag_ctx.session.lookup_name(field.name).as_bytes() == name.as_slice()
+                }) else {
+                    self.diag_ctx.emit_unknown_field_name_selector(
+                        self.eval.values,
+                        builtin,
+                        ty,
+                        &name,
+                        self.loc(selector_binding.use_span),
+                    );
+                    return Err(Poisoned);
+                };
+                Ok((Compound::Struct(r#struct), field_index))
+            }
+            other => {
+                self.diag_ctx.emit_invalid_field_selector_type(
+                    self.eval.values,
+                    builtin,
+                    ty,
+                    other.get_type(),
+                    self.loc(selector_binding.use_span),
+                );
+                Err(Poisoned)
+            }
+        }
     }
 
     fn expect_field_index_in_bounds(
         &mut self,
+        index: U256,
         index_arg: hir::LocalId,
         builtin: Builtin,
         field_count: usize,
-        expr_span: SourceSpan,
     ) -> MaybePoisoned<u32> {
-        let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
         match u32::try_from(index) {
             Ok(index) if (index as usize) < field_count => Ok(index),
             _ => {

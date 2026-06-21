@@ -360,6 +360,81 @@ fn test_struct_name_builtins_expect_struct() {
 }
 
 #[test]
+fn test_get_field_unknown_name_selector() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const p = Pair { a: 1 };
+        const bad = @get_field(p, "missing");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:3:27
+          |
+        3 | const bad = @get_field(p, "missing");
+          |                           ^^^^^^^^^ `@get_field`: `Pair` has no field named "missing"
+        "#],
+    );
+}
+
+#[test]
+fn test_set_field_unknown_name_selector() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const p = Pair { a: 1 };
+        const bad = @set_field(p, "missing", 1);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:3:27
+          |
+        3 | const bad = @set_field(p, "missing", 1);
+          |                           ^^^^^^^^^ `@set_field`: `Pair` has no field named "missing"
+        "#],
+    );
+}
+
+#[test]
+fn test_tuple_field_name_selector_rejected() {
+    assert_diagnostics(
+        r#"
+        const pair = (1, 2);
+        const bad = @get_field(pair, "a");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid field selector
+         --> main.plk:2:30
+          |
+        2 | const bad = @get_field(pair, "a");
+          |                              ^^^ `@get_field` field selector must be `u256`, got `cbytes`
+        "#],
+    );
+}
+
+#[test]
+fn test_get_field_invalid_selector_type() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const p = Pair { a: 1 };
+        const bad = @get_field(p, false);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid field selector
+         --> main.plk:3:27
+          |
+        3 | const bad = @get_field(p, false);
+          |                           ^^^^^ `@get_field` field selector must be `u256` or `cbytes`, got `bool`
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_struct_missing_field() {
     assert_diagnostics(
         r#"

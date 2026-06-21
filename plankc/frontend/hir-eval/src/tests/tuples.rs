@@ -337,11 +337,11 @@ fn test_tuple_set_field_non_num_index() {
         init { @evm_stop(); }
         "#,
         &[r#"
-        error: mismatched types
+        error: invalid field selector
          --> main.plk:2:32
           |
         2 | const pair2 = @set_field(pair, false, 99);
-          |                                ^^^^^ expected `u256`, got `bool`
+          |                                ^^^^^ `@set_field` field selector must be `u256`, got `bool`
         "#],
     );
 }
@@ -361,7 +361,7 @@ fn test_tuple_get_field_runtime_index() {
          --> main.plk:3:15
           |
         3 |     let val = @get_field(pair, @evm_calldataload(0));
-          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field index to be known at comptime
+          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field selector to be known at comptime
         "#],
     );
 }
