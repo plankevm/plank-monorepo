@@ -1,0 +1,29 @@
+import std::abi::abi_decode;
+import std::error::require;
+import std::fixedbytes::{bytes32, membytes_read_bytes32};
+import std::membytes::membytes_from_ptr;
+import std::version::{active_evm_spec_id, CANCUN, PRAGUE, OSAKA};
+
+const EXPECT_CANCUN = 0;
+const EXPECT_PRAGUE = 1;
+const EXPECT_OSAKA = 2;
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let input = membytes_from_ptr(ptr, size);
+    let selector = abi_decode(u256, input);
+
+    let v = active_evm_spec_id();
+
+    if selector == EXPECT_CANCUN {
+        require(v.id == CANCUN.id);
+    } else if selector == EXPECT_PRAGUE {
+        require(v.id == PRAGUE.id);
+    } else if selector == EXPECT_OSAKA {
+        require(v.id == OSAKA.id);
+    }
+
+    @evm_stop();
+}

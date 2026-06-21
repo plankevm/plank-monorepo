@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import {Test, Vm} from "forge-std/Test.sol";
-import {PlankDeployer, BuildOptions} from "plank-foundry-deployer/PlankDeployer.sol";
+import {PlankDeployer, BuildOptions, EvmVersion} from "plank-foundry-deployer/PlankDeployer.sol";
 
 abstract contract BaseTest is Test, PlankDeployer {
     function deployCode(bytes memory initcode) internal returns (address addr) {
@@ -75,7 +75,7 @@ abstract contract BaseTest is Test, PlankDeployer {
         return plankBuildFFI(bin, sourcePath, options);
     }
 
-    function plank(string memory sourcePath) internal returns (bytes memory) {
+    function plank(string memory sourcePath, EvmVersion evmVersion) internal returns (bytes memory) {
         string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
 
@@ -87,6 +87,14 @@ abstract contract BaseTest is Test, PlankDeployer {
             options = options.disableOptimizations();
         }
 
+        if (evmVersion != DEFAULT_EVM_VERSION) {
+            options = options.withEvmVersion(evmVersion);
+        }
+
         return plankBuild(sourcePath, options);
+    }
+
+    function plank(string memory sourcePath) internal returns (bytes memory) {
+        plank(sourcePath, DEFAULT_EVM_VERSION);
     }
 }

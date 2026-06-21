@@ -1,10 +1,10 @@
 
-const EvmSpecId =  struct { id: u256 }
+const EvmSpecId =  struct { id: u256 };
 
-CANCUN = EvmSpecId { id: 0 };
-PRAGUE = EvmSpecId { id: 1 };
-OSAKA = EvmSpecId { id: 2 };
+const CANCUN = EvmSpecId { id: 0 };
+const PRAGUE = EvmSpecId { id: 1 };
+const OSAKA = EvmSpecId { id: 2 };
 
 const active_evm_spec_id = fn () EvmSpecId {
     EvmSpecId { id: @active_evm_spec_id() }
-}
+};
