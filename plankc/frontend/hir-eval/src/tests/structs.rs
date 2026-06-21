@@ -214,6 +214,152 @@ fn test_has_name_kind_expects_struct() {
 }
 
 #[test]
+fn test_type_name() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256 };
+        const Box = fn (comptime T: type) type {
+            struct { value: T }
+        };
+        const BoxU256 = Box(u256);
+
+        const plain_ok = @type_name(Pair) == "Pair";
+        const parameterized_ok = @type_name(BoxU256) == "Box(u256)";
+        const anonymous = @type_name(struct { a: u256 });
+        const anonymous_ok = @slice_cbytes(anonymous, 0, 15) == "struct@main.plk";
+
+        init {
+            let mut x: bool = plain_ok;
+            let mut y: bool = parameterized_ok;
+            let mut z: bool = anonymous_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : bool = true
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_field_name() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const first_ok = @field_name(Pair, 0) == "a";
+        const second_ok = @field_name(Pair, 1) == "b";
+
+        init {
+            let mut x: bool = first_ok;
+            let mut y: bool = second_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_field_name_out_of_bounds() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const bad = @field_name(Pair, 1);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: field index out of bounds
+         --> main.plk:2:31
+          |
+        2 | const bad = @field_name(Pair, 1);
+          |                               ^ `@field_name`: field index 1 is out of bounds for type with 1 field
+        "#],
+    );
+}
+
+#[test]
+fn test_field_index() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const first_ok = @field_index(Pair, "a") == 0;
+        const second_ok = @field_index(Pair, "b") == 1;
+        const missing_ok = @field_index(Pair, "missing") == 2;
+        const sliced_ok = @field_index(Pair, @slice_cbytes("xa", 1, 2)) == 0;
+
+        init {
+            let mut x: bool = first_ok;
+            let mut y: bool = second_ok;
+            let mut z: bool = missing_ok;
+            let mut w: bool = sliced_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : bool = true
+            %3 : bool = true
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_struct_name_builtins_expect_struct() {
+    assert_diagnostics(
+        r#"
+        const x = @type_name(u256);
+        const y = @field_name(tuple { u256 }, 0);
+        const z = @field_index(u256, "a");
+        init { @evm_stop(); }
+        "#,
+        &[
+            r#"
+        error: unexpected type kind
+         --> main.plk:1:11
+          |
+        1 | const x = @type_name(u256);
+          |           ^^^^^^^^^^^^^^^^ `@type_name` expects a struct type, got `u256`
+        "#,
+            r#"
+        error: unexpected type kind
+         --> main.plk:2:11
+          |
+        2 | const y = @field_name(tuple { u256 }, 0);
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@field_name` expects a struct type, got `tuple {u256}`
+        "#,
+            r#"
+        error: unexpected type kind
+         --> main.plk:3:11
+          |
+        3 | const z = @field_index(u256, "a");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^ `@field_index` expects a struct type, got `u256`
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_comptime_struct_missing_field() {
     assert_diagnostics(
         r#"

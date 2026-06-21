@@ -355,6 +355,9 @@ define_builtins! {
         IS_TUPLE "@is_tuple" => IsTuple;
         HAS_PLAIN_NAME "@has_plain_name" => HasPlainName;
         HAS_PARAMETERIZED_NAME "@has_parameterized_name" => HasParameterizedName;
+        TYPE_NAME "@type_name" => TypeName;
+        FIELD_NAME "@field_name" => FieldName;
+        FIELD_INDEX "@field_index" => FieldIndex;
         FIELD_COUNT "@field_count" => FieldCount;
 
         // Comptime Bytes
