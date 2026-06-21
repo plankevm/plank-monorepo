@@ -188,7 +188,7 @@
         {
           "comment": "Comptime Type Reflection",
           "name": "support.function.builtin.plank",
-          "match": "@(?:is_struct|field_count|field_type|get_field|set_field)\\b"
+          "match": "@(?:is_struct|has_plain_name|has_parameterized_name|type_name|field_count|field_type|field_name|field_index|get_field|set_field)\\b"
         },
         {
           "comment": "Comptime Diagnostics",
