@@ -1,4 +1,4 @@
-use plank_evm::EvmSpecId;
+use plank_evm::EvmVersion;
 use plank_hir::lower;
 use plank_session::{Session, SourceId};
 use plank_source::{
@@ -79,14 +79,14 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         &mut self,
         hir: &plank_hir::Hir,
         core_ops_source: Option<SourceId>,
-        evm_spec_id: EvmSpecId,
+        evm_version: EvmVersion,
     ) -> plank_mir::Mir {
         plank_hir_eval::evaluate(
             hir,
             core_ops_source,
             &mut self.values,
             &mut self.session,
-            evm_spec_id,
+            evm_version,
         )
     }
 

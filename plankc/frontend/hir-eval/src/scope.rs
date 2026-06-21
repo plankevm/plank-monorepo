@@ -5,7 +5,6 @@ use crate::{
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_evm::EvmSpecId;
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
@@ -75,8 +74,6 @@ pub(crate) struct Scope<'a, 'ctx> {
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
     pub mir_types: IndexVec<mir::LocalId, TypeId>,
-
-    pub evm_spec_id: EvmSpecId,
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
@@ -88,7 +85,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         comptime_quota: ComptimeQuota,
         eval_branch_quota_start_loc: SrcLoc,
         ctx: EvalContext,
-        evm_spec_id: EvmSpecId,
     ) -> Self {
         Self {
             eval,
@@ -104,8 +100,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
-
-            evm_spec_id,
         }
     }
 

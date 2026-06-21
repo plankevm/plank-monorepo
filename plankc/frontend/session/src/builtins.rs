@@ -363,7 +363,7 @@ define_builtins! {
         KECCAK256_CBYTES "@keccak256_cbytes" => Keccak256CBytes;
         DATA_OFFSET "@data_offset" => DataOffset;
 
-        ACTIVE_EVM_SPEC_ID "@active_evm_spec_id" => ActiveEvmSpecId;
+        ACTIVE_EVM_VERSION "@active_evm_version" => ActiveEvmVersion;
     }
 
     comptime_dynamic_builtins {

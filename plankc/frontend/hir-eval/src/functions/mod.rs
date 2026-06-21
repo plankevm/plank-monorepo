@@ -85,7 +85,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             comptime_quota,
             eval_branch_quota_start_loc,
             EvalContext::FunctionPreamble { arg_spans, call_source },
-            self.evm_spec_id,
         );
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];

@@ -6,7 +6,7 @@ use tempfile as _;
 use clap::{Parser, Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
 use plank_driver::{BackendKind, Driver};
-use plank_evm::EvmSpecId;
+use plank_evm::EvmVersion;
 use plank_hir::display::DisplayHir;
 use plank_mir::display::DisplayMir;
 use plank_parser::cst::display::DisplayCST;
@@ -94,12 +94,12 @@ enum EvmVersionArg {
     Osaka,
 }
 
-impl From<EvmVersionArg> for EvmSpecId {
+impl From<EvmVersionArg> for EvmVersion {
     fn from(value: EvmVersionArg) -> Self {
         match value {
-            EvmVersionArg::Cancun => EvmSpecId::Cancun,
-            EvmVersionArg::Prague => EvmSpecId::Prague,
-            EvmVersionArg::Osaka => EvmSpecId::Osaka,
+            EvmVersionArg::Cancun => EvmVersion::Cancun,
+            EvmVersionArg::Prague => EvmVersion::Prague,
+            EvmVersionArg::Osaka => EvmVersion::Osaka,
         }
     }
 }
