@@ -1,4 +1,3 @@
-
 const EvmSpecId =  struct { id: u256 };
 
 const CANCUN = EvmSpecId { id: 0 };

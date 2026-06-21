@@ -1,6 +1,5 @@
 import std::abi::abi_decode;
 import std::error::require;
-import std::fixedbytes::{bytes32, membytes_read_bytes32};
 import std::membytes::membytes_from_ptr;
 import std::version::{active_evm_spec_id, CANCUN, PRAGUE, OSAKA};
 
