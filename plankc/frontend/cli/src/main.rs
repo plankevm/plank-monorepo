@@ -193,7 +193,7 @@ fn doc(doc_dir: PathBuf, topic: Option<String>) {
 }
 
 fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
-    let mut driver = Driver::new(&RealFs, args.evm_version.into());
+    let mut driver = Driver::new(&RealFs);
 
     if let Some(name) = &args.module_name {
         let root = match &args.module_root {
@@ -259,7 +259,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         eprintln!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
     }
 
-    let mir = driver.evaluate_hir(&hir, project.core_ops_source);
+    let mir = driver.evaluate_hir(&hir, project.core_ops_source, args.evm_version.into());
 
     if args.show_mir {
         if needs_separators {

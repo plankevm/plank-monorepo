@@ -26,7 +26,8 @@ fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
 
     let mut big_nums = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir = crate::evaluate(&hir, project.core_ops_source, &mut big_nums, &mut session, evm_spec_id);
+    let mir =
+        crate::evaluate(&hir, project.core_ops_source, &mut big_nums, &mut session, evm_spec_id);
 
     (mir, big_nums, session)
 }

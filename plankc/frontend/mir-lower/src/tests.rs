@@ -9,7 +9,13 @@ fn try_lower(source: &str) -> (sir_data::EthIRProgram, Session) {
 
     let mut values = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut values, &mut session);
-    let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session, active_evm_spec_id);
+    let mir = plank_hir_eval::evaluate(
+        &hir,
+        project.core_ops_source,
+        &mut values,
+        &mut session,
+        active_evm_spec_id,
+    );
     let sir = crate::lower(&mir, &values, &session);
     (sir, session)
 }

@@ -8,7 +8,13 @@ fn lower_ir(source: &str) -> String {
     let project = TestProject::root(source).build(&mut session);
     let mut values = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut values, &mut session);
-    let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session, Default::default());
+    let mir = plank_hir_eval::evaluate(
+        &hir,
+        project.core_ops_source,
+        &mut values,
+        &mut session,
+        Default::default(),
+    );
     assert!(!session.has_errors());
     crate::emit_ir(&mir, &values, &session, OptLevel::O0).unwrap()
 }
@@ -18,7 +24,13 @@ fn lower_bytecode(source: &str) -> Vec<u8> {
     let project = TestProject::root(source).build(&mut session);
     let mut values = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut values, &mut session);
-    let mir = plank_hir_eval::evaluate(&hir, project.core_ops_source, &mut values, &mut session, Default::default());
+    let mir = plank_hir_eval::evaluate(
+        &hir,
+        project.core_ops_source,
+        &mut values,
+        &mut session,
+        Default::default(),
+    );
     assert!(!session.has_errors());
     crate::emit_bytecode(&mir, &values, &session, OptLevel::O0).unwrap()
 }

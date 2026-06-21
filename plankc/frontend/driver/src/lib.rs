@@ -25,18 +25,16 @@ pub struct Driver<'a, F: SourceFs> {
     module_resolver: ModuleResolver,
     fs: &'a F,
     std_root: Option<PathBuf>,
-    evm_spec_id: EvmSpecId,
 }
 
 impl<'a, F: SourceFs> Driver<'a, F> {
-    pub fn new(fs: &'a F, evm_spec_id: EvmSpecId) -> Self {
+    pub fn new(fs: &'a F) -> Self {
         Self {
             session: Session::new(),
             values: ValueInterner::new(),
             module_resolver: ModuleResolver::default(),
             fs,
             std_root: None,
-            evm_spec_id,
         }
     }
 
@@ -81,13 +79,14 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         &mut self,
         hir: &plank_hir::Hir,
         core_ops_source: Option<SourceId>,
+        evm_spec_id: EvmSpecId,
     ) -> plank_mir::Mir {
         plank_hir_eval::evaluate(
             hir,
             core_ops_source,
             &mut self.values,
             &mut self.session,
-            self.evm_spec_id,
+            evm_spec_id,
         )
     }
 
@@ -248,7 +247,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "init {}\n".to_string());
 
-        let mut driver = Driver::new(&fs, Default::default());
+        let mut driver = Driver::new(&fs);
         driver.register_module("m", PathBuf::from("/a"));
         driver.register_module("m", PathBuf::from("/b"));
 
@@ -266,7 +265,7 @@ mod tests {
     #[test]
     fn missing_entry_file_emits_diagnostic() {
         let fs = InMemoryFs::new();
-        let mut driver = Driver::new(&fs, Default::default());
+        let mut driver = Driver::new(&fs);
         let result = driver.load_project(Path::new("nonexistent.plk"));
         assert!(result.is_none());
 
@@ -286,7 +285,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import foo::bar::Baz;\ninit {}\n".to_string());
 
-        let mut driver = Driver::new(&fs, Default::default());
+        let mut driver = Driver::new(&fs);
         driver.load_project(Path::new("main.plk"));
 
         assert_diagnostics(
@@ -316,7 +315,7 @@ mod tests {
             .to_string(),
         );
 
-        let mut driver = Driver::new(&fs, Default::default());
+        let mut driver = Driver::new(&fs);
         driver.load_project(Path::new("main.plk"));
 
         assert_diagnostics(
@@ -340,7 +339,7 @@ mod tests {
         let mut fs = InMemoryFs::new();
         fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
 
-        let mut driver = Driver::new(&fs, Default::default());
+        let mut driver = Driver::new(&fs);
         driver.register_module("m", PathBuf::from("/lib"));
         driver.load_project(Path::new("main.plk"));
 

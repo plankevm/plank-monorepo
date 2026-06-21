@@ -148,7 +148,7 @@ fn test_comptime_evm_const_chain() {
 
 #[test]
 fn test_comptime_active_evm_spec_id_builtin() {
-	assert_lowers_to(
+    assert_lowers_to(
         r#"
         const a = @active_evm_spec_id();
         init {
