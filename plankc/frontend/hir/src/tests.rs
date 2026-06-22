@@ -525,6 +525,83 @@ fn test_duplicate_const_def() {
 }
 
 #[test]
+fn test_duplicated_const_def_should_not_be_lowered_into_hir() {
+    let project = TestProject::root(
+        r#"
+        import m::other::f2;
+
+        const f1 = fn (comptime T: type) void {
+            f2;
+        };
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const f2 = fn () void { };
+        const f2 = fn () void { };
+        "#,
+    )
+    .add_module("m", "");
+
+    let (hir, big_nums, session, _) = try_lower_project(project);
+
+    let rendered = format_session_diagnostics(&session);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: duplicate definition of 'f2'
+         --> other.plk:2:1
+          |
+        1 | const f2 = fn () void { };
+          | -------------------------- previously defined here
+        2 | const f2 = fn () void { };
+          | ^^^^^^^^^^^^^^^^^^^^^^^^^^ 'f2' redefined here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+
+    let actual_hir = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
+    let expected_hir = dedent_preserve_blank_lines(
+        r#"
+        ==== Constants ====
+        ConstId(0) ("f1") result=LocalId(0) {
+            %0 = @fn0
+        }
+        ConstId(1) ("f2") result=LocalId(0) {
+            %0 = @fn2
+        }
+
+        ==== Functions ====
+        @fn0(comptime %1: %0) -> %2 {
+            preamble:
+                %0 = type:type
+                [comptime] param#0 %1 : %0
+                %2 = type:void
+            body:
+                eval $1
+                ret void
+        }
+        @fn1() -> %0 {
+            preamble:
+                %0 = type:void
+            body:
+                ret void
+        }
+        @fn2() -> %0 {
+            preamble:
+                %0 = type:void
+            body:
+                ret void
+        }
+
+        ==== Init ====
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
+}
+
+#[test]
 fn test_import_name_collision() {
     let project = TestProject::root(
         r#"
