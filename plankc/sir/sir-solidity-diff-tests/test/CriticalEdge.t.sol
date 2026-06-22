@@ -3,34 +3,35 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "./BaseTest.sol";
 
-contract CriticalEdgeRef {
-    fallback() external payable {
-        assembly ("memory-safe") {
-            if iszero(calldatasize()) { revert(0, 0) }
-            if iszero(callvalue()) { revert(0, 0) }
-            sstore(0, callvalue())
-            stop()
-        }
-    }
-}
-
 contract CriticalEdgeTest is BaseTest {
-    CriticalEdgeRef solRef = new CriticalEdgeRef();
-    address sirImpl = makeAddr("sir-critical-edge");
+    address impl = makeAddr("sir-critical-edge");
 
     function setUp() public {
-        vm.etch(sirImpl, sir(abi.encode("src/critical_edge.sir", "--init-only")));
+        vm.etch(impl, sir(abi.encode("src/critical_edge.sir", "--init-only")));
     }
 
-    function test_criticalEdge() public {
-        uint256 value = 1;
-        vm.deal(address(this), value * 2);
+    function test_fuzzing_revert_noData(uint256 value) public {
+        vm.deal(address(this), value);
+        (bool succ, bytes memory data) = impl.call{value: value}("");
+        assertFalse(succ);
+        assertEq(data, "");
+    }
 
-        (bool refSucc, bytes memory refOut) = address(solRef).call{value: value}(hex"00");
-        (bool sirSucc, bytes memory sirOut) = sirImpl.call{value: value}(hex"00");
+    function test_fuzzing_revert_noData(bytes calldata input) public {
+        (bool succ, bytes memory data) = impl.call{value: 0}(input);
+        assertFalse(succ);
+        assertEq(data, "");
+    }
 
-        assertEq(refSucc, sirSucc, "different success");
-        assertEq(refOut, sirOut, "different output data");
-        assertEq(vm.load(address(solRef), bytes32(0)), vm.load(sirImpl, bytes32(0)), "different storage");
+    function test_fuzzing_call(uint256 value, bytes calldata b) public {
+        vm.assume(b.length > 0);
+        value = bound(value, 1, type(uint256).max);
+
+        vm.deal(address(this), value);
+        (bool succ, bytes memory data) = impl.call{value: value}(b);
+
+        assertTrue(succ);
+        assertEq(data, "");
+        assertEq(vm.load(impl, bytes32(0)), bytes32(value));
     }
 }
