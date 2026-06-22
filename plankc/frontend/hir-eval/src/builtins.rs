@@ -451,7 +451,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Runtime(local) => Ok(Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess {
                     object: local,
-                    field_index: u32::try_from(field_index).expect("field index fits u32"),
+                    field_index: field_index.try_into().expect("field index fits u32"),
                 },
                 result_type: field_ty,
             })),
@@ -531,7 +531,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let instance_local = self.materialize_as_local(instance_state, instance_ty);
 
-        let mut lower_field = |idx, ty| {
+        let mut lower_field = |idx: usize, ty| {
             if idx == field_index {
                 return self.materialize_as_local(new_value_state, ty);
             }
@@ -540,7 +540,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 target,
                 expr: mir::Expr::FieldAccess {
                     object: instance_local,
-                    field_index: u32::try_from(idx).expect("field index fits u32"),
+                    field_index: idx.try_into().expect("field index fits u32"),
                 },
             });
             target
@@ -553,13 +553,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .enumerate()
                 .map(|(idx, field)| lower_field(idx, field.ty))
                 .collect(),
-            Compound::Tuple(tuple) => tuple
-                .fields
-                .iter()
-                .copied()
-                .enumerate()
-                .map(|(idx, ty)| lower_field(idx, ty))
-                .collect(),
+            Compound::Tuple(tuple) => {
+                tuple.fields.iter().enumerate().map(|(idx, &ty)| lower_field(idx, ty)).collect()
+            }
         };
 
         let fields = self.eval.mir_args.push_copy_slice(&fields);
