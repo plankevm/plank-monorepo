@@ -2,6 +2,7 @@ mod basic;
 mod calls;
 mod compile_log;
 mod comptime;
+mod functions;
 mod logical_ops;
 mod operators;
 mod structs;

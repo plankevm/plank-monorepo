@@ -241,8 +241,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 )?;
                 let field = r#struct.fields[index];
                 let contents = BytesId::from(field.name);
-                let len = u32::try_from(self.diag_ctx.session.lookup_bytes(contents).len())
-                    .expect("field name length fits u32");
+                let len = self.diag_ctx.session.bytes_len(contents);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(contents, 0, len))))
             }
             Builtin::FieldIndex => {
@@ -261,6 +260,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let field_count = self.expect_compound(ty, builtin, expr_span)?.field_count();
                 let count = U256::from(field_count);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
+            }
+            Builtin::FnName => {
+                let &[closure] = args else { unreachable!("arg count checked") };
+                let closure = self.expect_closure_arg(closure, builtin)?;
+                let value = match self.values.get_closure_name(closure) {
+                    Some(name) => {
+                        let contents = BytesId::from(name);
+                        let len = self.diag_ctx.session.bytes_len(contents);
+                        self.eval.values.intern_bytes(contents, 0, len)
+                    }
+                    None => ValueId::BYTES_EMPTY,
+                };
+                Ok(Ok(EvalValue::Comptime(value)))
             }
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
             Builtin::SetEvalBranchQuota => {
@@ -882,6 +894,28 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             builtin,
             &[actual_ty],
             self.loc(span),
+        );
+        Err(Poisoned)
+    }
+
+    fn expect_closure_arg(
+        &mut self,
+        arg_local: hir::LocalId,
+        builtin: Builtin,
+    ) -> MaybePoisoned<ValueId> {
+        let arg_binding = self.bindings[arg_local];
+        let state = arg_binding.state?;
+        if let LocalState::Comptime(vid) = state
+            && let Value::Closure { .. } = self.values.lookup(vid)
+        {
+            return Ok(vid);
+        }
+        let actual_ty = self.state_type(state);
+        self.diag_ctx.emit_expected_closure_arg(
+            self.eval.values,
+            builtin,
+            actual_ty,
+            self.loc(arg_binding.use_span),
         );
         Err(Poisoned)
     }

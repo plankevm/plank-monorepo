@@ -105,6 +105,10 @@ impl Session {
         self.interner.lookup_bytes(bytes)
     }
 
+    pub fn bytes_len(&self, bytes: BytesId) -> u32 {
+        self.lookup_bytes(bytes).len().try_into().expect("interned bytes length fits u32")
+    }
+
     pub fn lookup_bytes_slice(&self, bytes: CBytes) -> &[u8] {
         &self.lookup_bytes(bytes.contents)[bytes.start as usize..bytes.end as usize]
     }

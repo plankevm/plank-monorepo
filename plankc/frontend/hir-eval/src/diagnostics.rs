@@ -811,6 +811,25 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_expected_closure_arg(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("expected function argument")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` expects a function argument, got a value of type `{}`",
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_concat_cbytes_expected_tuple(
         &mut self,
         values: &ValueInterner,

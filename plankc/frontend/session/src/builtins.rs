@@ -360,6 +360,9 @@ define_builtins! {
         FIELD_INDEX "@field_index" => FieldIndex;
         FIELD_COUNT "@field_count" => FieldCount;
 
+        // Function Introspection
+        FN_NAME "@fn_name" => FnName;
+
         // Comptime Bytes
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
         PADDED_READ_CBYTES "@padded_read_cbytes" => PaddedReadCBytes;
