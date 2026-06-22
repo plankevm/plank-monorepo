@@ -76,10 +76,10 @@ abstract contract BaseTest is Test, PlankDeployer {
     }
 
     function plank(string memory sourcePath) internal returns (bytes memory) {
-        return plank(sourcePath, new string[](0));
+        return plank(sourcePath, "");
     }
 
-    function plank(string memory sourcePath, string[] memory extraArgs) internal returns (bytes memory) {
+    function plank(string memory sourcePath, string memory evmVersionOverride) internal returns (bytes memory) {
         string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
 
@@ -91,8 +91,8 @@ abstract contract BaseTest is Test, PlankDeployer {
             options = options.disableOptimizations();
         }
 
-        for (uint256 i = 0; i < extraArgs.length; i++) {
-            options = options.extraArg(extraArgs[i]);
+        if (bytes(evmVersionOverride).length != 0) {
+            options = options.withEvmVersion(evmVersionOverride);
         }
 
         return plankBuild(sourcePath, options);
