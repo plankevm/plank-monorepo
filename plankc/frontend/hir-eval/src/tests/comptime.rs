@@ -505,6 +505,25 @@ fn test_comptime_block_runtime_capture() {
 }
 
 #[test]
+fn test_comptime_only_if_with_comptime_known_condition() {
+    assert_lowers_to(
+        r#"
+        init {
+            let T = if false { u256 } else { bool };
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_expr_runtime_dep() {
     assert_diagnostics(
         r#"
