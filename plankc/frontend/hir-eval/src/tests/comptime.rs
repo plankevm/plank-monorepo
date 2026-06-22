@@ -1411,8 +1411,10 @@ fn test_comptime_get_field() {
         const Pair = struct { a: u256, b: bool };
         const p = Pair { a: 42, b: true };
         const val = @get_field(p, 0);
+        const val_by_name = @get_field(p, "a");
         init {
             let mut x = val;
+            let mut y = val_by_name;
             @evm_stop();
         }
         "#,
@@ -1421,7 +1423,8 @@ fn test_comptime_get_field() {
         ; init
         @fn0() -> never {
             %0 : u256 = 42
-            %1 : never = @evm_stop()
+            %1 : u256 = 42
+            %2 : never = @evm_stop()
         }
         "#,
     );
@@ -1435,7 +1438,9 @@ fn test_runtime_get_field() {
         init {
             let s = Pair { a: @evm_calldataload(0), b: @evm_calldataload(0x20) };
             let val = @get_field(s, 1);
+            let val_by_name = @get_field(s, "b");
             let mut x: u256 = val;
+            let mut y: u256 = val_by_name;
             @evm_stop();
         }
         "#,
@@ -1450,8 +1455,11 @@ fn test_runtime_get_field() {
             %4 : Pair = Pair { %1, %3 }
             %5 : Pair = %4
             %6 : u256 = %5.1
-            %7 : u256 = %6
-            %8 : never = @evm_stop()
+            %7 : Pair = %4
+            %8 : u256 = %7.1
+            %9 : u256 = %6
+            %10 : u256 = %8
+            %11 : never = @evm_stop()
         }
         "#,
     );
@@ -1511,7 +1519,7 @@ fn test_comptime_get_field_runtime_index() {
          --> main.plk:4:15
           |
         4 |     let val = @get_field(s, @evm_calldataload(0));
-          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field index to be known at comptime
+          |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@get_field` requires field selector to be known at comptime
         "#],
     );
 }
@@ -1550,11 +1558,11 @@ fn test_set_field_non_num_index() {
         }
         "#,
         &[r#"
-        error: mismatched types
+        error: invalid field selector
          --> main.plk:3:26
           |
         3 | const p2 = @set_field(p, false, 99);
-          |                          ^^^^^ expected `u256`, got `bool`
+          |                          ^^^^^ `@set_field` field selector must be `u256` or `cbytes`, got `bool`
         "#],
     );
 }
@@ -1567,8 +1575,11 @@ fn test_comptime_set_field() {
         const p = Pair { a: 1, b: 2 };
         const p2 = @set_field(p, 0, 99);
         const val = p2.a;
+        const p3 = @set_field(p, "a", 99);
+        const val_by_name = p3.a;
         init {
             let mut x: u256 = val;
+            let mut y: u256 = val_by_name;
             @evm_stop();
         }
         "#,
@@ -1577,7 +1588,8 @@ fn test_comptime_set_field() {
         ; init
         @fn0() -> never {
             %0 : u256 = 99
-            %1 : never = @evm_stop()
+            %1 : u256 = 99
+            %2 : never = @evm_stop()
         }
         "#,
     );
@@ -1591,7 +1603,9 @@ fn test_runtime_set_field() {
         init {
             let s = Pair { a: @evm_calldataload(0), b: @evm_calldataload(0x20) };
             let s2 = @set_field(s, 0, 99);
+            let s3 = @set_field(s, "a", 99);
             let mut x: u256 = s2.a;
+            let mut y: u256 = s3.a;
             @evm_stop();
         }
         "#,
@@ -1608,9 +1622,15 @@ fn test_runtime_set_field() {
             %6 : u256 = 99
             %7 : u256 = %5.1
             %8 : Pair = Pair { %6, %7 }
-            %9 : Pair = %8
-            %10 : u256 = %9.0
-            %11 : never = @evm_stop()
+            %9 : Pair = %4
+            %10 : u256 = 99
+            %11 : u256 = %9.1
+            %12 : Pair = Pair { %10, %11 }
+            %13 : Pair = %8
+            %14 : u256 = %13.0
+            %15 : Pair = %12
+            %16 : u256 = %15.0
+            %17 : never = @evm_stop()
         }
         "#,
     );

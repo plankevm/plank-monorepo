@@ -59,7 +59,8 @@
   ; Bytecode Introspection
   "@runtime_start_offset" "@init_end_offset" "@runtime_length"
   ; Comptime Type Reflection
-  "@is_struct" "@field_count" "@field_type" "@get_field" "@set_field" "@uninit"
+  "@is_struct" "@has_plain_name" "@has_parameterized_name" "@type_name"
+  "@field_count" "@field_type" "@field_name" "@field_index" "@get_field" "@set_field" "@uninit"
   ; Comptime Diagnostics
   "@compile_error" "@in_comptime" "@set_eval_branch_quota"
   ; Bytes

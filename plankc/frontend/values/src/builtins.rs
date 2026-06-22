@@ -217,16 +217,23 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         // Comptime builtins
         B::IsStruct => &[sig!([TYPE => BOOL])],
         B::IsTuple => &[sig!([TYPE => BOOL])],
+        B::HasPlainName => &[sig!([TYPE => BOOL])],
+        B::HasParameterizedName => &[sig!([TYPE => BOOL])],
+        B::TypeName => &[sig!([TYPE => CBYTES])],
+        B::FieldName => &[sig!([TYPE, U256 => CBYTES])],
+        B::FieldIndex => &[sig!([TYPE, CBYTES => U256])],
         B::FieldCount => &[sig!([TYPE => U256])],
-        B::InComptime => &[sig!([=> BOOL])],
-        B::SetEvalBranchQuota => &[sig!([U256 => VOID])],
-        B::CompileError => &[sig!([CBYTES => NEVER])],
+
         B::SliceCBytes => &[sig!([CBYTES, U256, U256 => CBYTES])],
         B::PaddedReadCBytes => &[sig!([CBYTES, U256 => U256])],
         B::Keccak256CBytes => &[sig!([CBYTES => U256])],
         B::Sha256CBytes => &[sig!([CBYTES => U256])],
         B::DataOffset => &[sig!([CBYTES => U256])],
         B::ActiveEvmVersion => &[sig!([=> U256])],
+
+        B::InComptime => &[sig!([=> BOOL])],
+        B::SetEvalBranchQuota => &[sig!([U256 => VOID])],
+        B::CompileError => &[sig!([CBYTES => NEVER])],
 
         // Comptime dynamic — no fixed signatures
         B::FieldType | B::TypeIndex | B::GetField | B::SetField | B::Uninit | B::ConcatCBytes => {

@@ -353,10 +353,12 @@ define_builtins! {
         // Type Reflection
         IS_STRUCT "@is_struct" => IsStruct;
         IS_TUPLE "@is_tuple" => IsTuple;
+        HAS_PLAIN_NAME "@has_plain_name" => HasPlainName;
+        HAS_PARAMETERIZED_NAME "@has_parameterized_name" => HasParameterizedName;
+        TYPE_NAME "@type_name" => TypeName;
+        FIELD_NAME "@field_name" => FieldName;
+        FIELD_INDEX "@field_index" => FieldIndex;
         FIELD_COUNT "@field_count" => FieldCount;
-        IN_COMPTIME "@in_comptime" => InComptime;
-        SET_EVAL_BRANCH_QUOTA "@set_eval_branch_quota" => SetEvalBranchQuota;
-        COMPILE_ERROR "@compile_error" => CompileError;
 
         // Comptime Bytes
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
@@ -365,6 +367,10 @@ define_builtins! {
         SHA256_CBYTES "@sha256_cbytes" => Sha256CBytes;
         DATA_OFFSET "@data_offset" => DataOffset;
 
+        // Other
+        IN_COMPTIME "@in_comptime" => InComptime;
+        SET_EVAL_BRANCH_QUOTA "@set_eval_branch_quota" => SetEvalBranchQuota;
+        COMPILE_ERROR "@compile_error" => CompileError;
         ACTIVE_EVM_VERSION "@active_evm_version" => ActiveEvmVersion;
     }
 

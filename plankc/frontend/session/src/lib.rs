@@ -46,6 +46,16 @@ pub struct CBytes {
     pub end: u32,
 }
 
+impl CBytes {
+    pub fn len(self) -> u32 {
+        self.end - self.start
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.start == self.end
+    }
+}
+
 impl Session {
     pub fn new() -> Self {
         let mut this = Self {
@@ -79,6 +89,12 @@ impl Session {
 
     pub fn intern_bytes(&mut self, bytes: &[u8]) -> BytesId {
         self.interner.intern_bytes(bytes)
+    }
+
+    pub fn intern_cbytes(&mut self, bytes: &[u8]) -> CBytes {
+        let contents = self.intern_bytes(bytes);
+        let len = u32::try_from(bytes.len()).expect("cbytes length fits u32");
+        CBytes { contents, start: 0, end: len }
     }
 
     pub fn lookup_bytes(&self, bytes: BytesId) -> &[u8] {

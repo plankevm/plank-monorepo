@@ -37,6 +37,12 @@ impl StrId {
     }
 }
 
+impl From<StrId> for BytesId {
+    fn from(id: StrId) -> Self {
+        Self(id.0)
+    }
+}
+
 pub struct Interner {
     bytes: BytesInterner<InternIdx>,
 }

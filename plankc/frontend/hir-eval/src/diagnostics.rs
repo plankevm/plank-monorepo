@@ -868,6 +868,54 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_invalid_field_selector_type(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        target_ty: TypeId,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        let expected = if target_ty.is_tuple() {
+            format!("`{}`", builtin_names::U256)
+        } else {
+            format!("`{}` or `{}`", builtin_names::U256, builtin_names::CBYTES)
+        };
+        Diagnostic::error("invalid field selector")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` field selector must be {expected}, got `{}`",
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_unknown_field_name_selector(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        struct_ty: TypeId,
+        field_name_bytes: CBytes,
+        loc: SrcLoc,
+    ) {
+        let mut field_name = String::new();
+        write_bytes_literal(&mut field_name, self.session.lookup_bytes_slice(field_name_bytes))
+            .expect("writing to string cannot fail");
+        Diagnostic::error("unknown field")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}`: `{}` has no field named {field_name}",
+                    self.types.format(self.session, values, struct_ty),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_bytes_slice_out_of_bounds(
         &mut self,
         start: U256,

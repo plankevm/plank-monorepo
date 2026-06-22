@@ -110,6 +110,331 @@ fn test_comptime_struct_field_ordering() {
 }
 
 #[test]
+fn test_has_name_kind_plain_struct() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256 };
+        const plain = @has_plain_name(Pair);
+        const parameterized = @has_parameterized_name(Pair);
+        init {
+            let mut x: bool = plain;
+            let mut y: bool = parameterized;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = false
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_name_kind_parameterized_struct() {
+    assert_lowers_to(
+        r#"
+        const Box = fn (comptime T: type) type {
+            struct { value: T }
+        };
+        const BoxU256 = Box(u256);
+        const plain = @has_plain_name(BoxU256);
+        const parameterized = @has_parameterized_name(BoxU256);
+        init {
+            let mut x: bool = plain;
+            let mut y: bool = parameterized;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_name_kind_anonymous_struct() {
+    assert_lowers_to(
+        r#"
+        const plain = @has_plain_name(struct { a: u256 });
+        const parameterized = @has_parameterized_name(struct { a: u256 });
+        init {
+            let mut x: bool = plain;
+            let mut y: bool = parameterized;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = false
+            %1 : bool = false
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_name_kind_expects_struct() {
+    assert_diagnostics(
+        r#"
+        const x = @has_plain_name(u256);
+        const y = @has_parameterized_name(tuple { u256 });
+        init { @evm_stop(); }
+        "#,
+        &[
+            r#"
+        error: unexpected type kind
+         --> main.plk:1:11
+          |
+        1 | const x = @has_plain_name(u256);
+          |           ^^^^^^^^^^^^^^^^^^^^^ `@has_plain_name` expects a struct type, got `u256`
+        "#,
+            r#"
+        error: unexpected type kind
+         --> main.plk:2:11
+          |
+        2 | const y = @has_parameterized_name(tuple { u256 });
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@has_parameterized_name` expects a struct type, got `tuple {u256}`
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_type_name() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256 };
+        const Box = fn (comptime T: type) type {
+            struct { value: T }
+        };
+        const BoxU256 = Box(u256);
+
+        const plain_ok = @type_name(Pair) == "Pair";
+        const parameterized_ok = @type_name(BoxU256) == "Box(u256)";
+        const anonymous = @type_name(struct { a: u256 });
+        const anonymous_ok = anonymous == "struct@main.plk:9:30";
+
+        init {
+            let mut x: bool = plain_ok;
+            let mut y: bool = parameterized_ok;
+            let mut z: bool = anonymous_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : bool = true
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_field_name() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const first_ok = @field_name(Pair, 0) == "a";
+        const second_ok = @field_name(Pair, 1) == "b";
+
+        init {
+            let mut x: bool = first_ok;
+            let mut y: bool = second_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_field_name_out_of_bounds() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const bad = @field_name(Pair, 1);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: field index out of bounds
+         --> main.plk:2:31
+          |
+        2 | const bad = @field_name(Pair, 1);
+          |                               ^ `@field_name`: field index 1 is out of bounds for type with 1 field
+        "#],
+    );
+}
+
+#[test]
+fn test_field_index() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct { a: u256, b: bool };
+        const first_ok = @field_index(Pair, "a") == 0;
+        const second_ok = @field_index(Pair, "b") == 1;
+        const missing_ok = @field_index(Pair, "missing") == 2;
+        const sliced_ok = @field_index(Pair, @slice_cbytes("xa", 1, 2)) == 0;
+
+        init {
+            let mut x: bool = first_ok;
+            let mut y: bool = second_ok;
+            let mut z: bool = missing_ok;
+            let mut w: bool = sliced_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : bool = true
+            %3 : bool = true
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_struct_name_builtins_expect_struct() {
+    assert_diagnostics(
+        r#"
+        const x = @type_name(u256);
+        const y = @field_name(tuple { u256 }, 0);
+        const z = @field_index(u256, "a");
+        init { @evm_stop(); }
+        "#,
+        &[
+            r#"
+        error: unexpected type kind
+         --> main.plk:1:11
+          |
+        1 | const x = @type_name(u256);
+          |           ^^^^^^^^^^^^^^^^ `@type_name` expects a struct type, got `u256`
+        "#,
+            r#"
+        error: unexpected type kind
+         --> main.plk:2:11
+          |
+        2 | const y = @field_name(tuple { u256 }, 0);
+          |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@field_name` expects a struct type, got `tuple {u256}`
+        "#,
+            r#"
+        error: unexpected type kind
+         --> main.plk:3:11
+          |
+        3 | const z = @field_index(u256, "a");
+          |           ^^^^^^^^^^^^^^^^^^^^^^^ `@field_index` expects a struct type, got `u256`
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_get_field_unknown_name_selector() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const p = Pair { a: 1 };
+        const bad = @get_field(p, "missing");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:3:27
+          |
+        3 | const bad = @get_field(p, "missing");
+          |                           ^^^^^^^^^ `@get_field`: `Pair` has no field named "missing"
+        "#],
+    );
+}
+
+#[test]
+fn test_set_field_unknown_name_selector() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const p = Pair { a: 1 };
+        const bad = @set_field(p, "missing", 1);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:3:27
+          |
+        3 | const bad = @set_field(p, "missing", 1);
+          |                           ^^^^^^^^^ `@set_field`: `Pair` has no field named "missing"
+        "#],
+    );
+}
+
+#[test]
+fn test_tuple_field_name_selector_rejected() {
+    assert_diagnostics(
+        r#"
+        const pair = (1, 2);
+        const bad = @get_field(pair, "a");
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid field selector
+         --> main.plk:2:30
+          |
+        2 | const bad = @get_field(pair, "a");
+          |                              ^^^ `@get_field` field selector must be `u256`, got `cbytes`
+        "#],
+    );
+}
+
+#[test]
+fn test_get_field_invalid_selector_type() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { a: u256 };
+        const p = Pair { a: 1 };
+        const bad = @get_field(p, false);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid field selector
+         --> main.plk:3:27
+          |
+        3 | const bad = @get_field(p, false);
+          |                           ^^^^^ `@get_field` field selector must be `u256` or `cbytes`, got `bool`
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_struct_missing_field() {
     assert_diagnostics(
         r#"
