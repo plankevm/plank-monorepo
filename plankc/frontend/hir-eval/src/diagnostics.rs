@@ -809,6 +809,46 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_concat_cbytes_expected_tuple(
+        &mut self,
+        values: &ValueInterner,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("invalid cbytes concat argument")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{}` expects a tuple, got `{}`",
+                    builtin_names::CONCAT_CBYTES,
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_concat_cbytes_invalid_element(
+        &mut self,
+        values: &ValueInterner,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("invalid cbytes concat element")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{}` tuple elements must be `{}` or `{}`, got `{}`",
+                    builtin_names::CONCAT_CBYTES,
+                    builtin_names::U256,
+                    builtin_names::CBYTES,
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_field_index_out_of_bounds(
         &mut self,
         builtin: Builtin,
@@ -842,6 +882,17 @@ impl DiagCtx<'_> {
                 format!("requested range {start}..{end} of bytes with length {len}"),
             )
             .note("requires `start <= end` and `end <= bytes.length`")
+            .emit(self);
+    }
+
+    pub fn emit_cbytes_read_offset_out_of_bounds(&mut self, offset: U256, len: usize, loc: SrcLoc) {
+        Diagnostic::error("cbytes read offset out of bounds")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("offset {offset} is outside `{}` with length {len}", builtin_names::CBYTES),
+            )
+            .note("offset must be within `0..=bytes.length`")
             .emit(self);
     }
 

@@ -1,6 +1,9 @@
 use clap::Parser;
 use sir_parser::{EmitConfig, parse_or_panic};
-use sir_passes::{OPTIMIZE_HELP, PassManager, parse_optimizations_string};
+use sir_passes::{
+    OPTIMIZE_HELP, PassManager, parse_optimizations_string, run_pass,
+    transforms::CriticalEdgeSplitting,
+};
 use std::{
     fs,
     io::{self, Read},
@@ -78,6 +81,7 @@ fn main() {
 
     let mut bytecode = Vec::with_capacity(0x6000);
     if cli.release {
+        run_pass(&mut CriticalEdgeSplitting, &mut program, &analyses);
         sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode);
     } else {
         sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);

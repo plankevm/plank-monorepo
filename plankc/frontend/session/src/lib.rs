@@ -39,6 +39,13 @@ pub struct Session {
     diagnostics: Vec<Diagnostic>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CBytes {
+    pub contents: BytesId,
+    pub start: u32,
+    pub end: u32,
+}
+
 impl Session {
     pub fn new() -> Self {
         let mut this = Self {
@@ -78,12 +85,12 @@ impl Session {
         self.interner.lookup_bytes(bytes)
     }
 
-    pub fn lookup_bytes_slice(&self, bytes: BytesId, start: u32, end: u32) -> &[u8] {
-        &self.lookup_bytes(bytes)[start as usize..end as usize]
+    pub fn lookup_bytes_slice(&self, bytes: CBytes) -> &[u8] {
+        &self.lookup_bytes(bytes.contents)[bytes.start as usize..bytes.end as usize]
     }
 
-    pub fn lookup_bytes_lossy(&self, bytes: BytesId, start: u32, end: u32) -> String {
-        String::from_utf8_lossy(self.lookup_bytes_slice(bytes, start, end)).into_owned()
+    pub fn lookup_bytes_lossy(&self, bytes: CBytes) -> String {
+        String::from_utf8_lossy(self.lookup_bytes_slice(bytes)).into_owned()
     }
 
     pub fn next_source(&self) -> SourceId {

@@ -1,5 +1,6 @@
 use super::*;
 use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
+use sha2::Digest;
 
 #[test]
 fn test_comptime_only_return_caches_per_non_comptime_arg_value() {
@@ -2188,6 +2189,201 @@ fn test_slice_cbytes_runtime_bound() {
 }
 
 #[test]
+fn test_padded_read_cbytes_without_padding() {
+    assert_lowers_to(
+        r#"
+        const read_matches = @padded_read_cbytes(
+            hex"0000000000000000000000000000000000000000000000000000000000000000"
+            hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+            hex"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            33,
+        ) == 0x02030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20ff;
+        init {
+            let mut a: bool = read_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_padded_read_cbytes_with_padding() {
+    assert_lowers_to(
+        r#"
+        const read_matches = @padded_read_cbytes(hex"010203", 1)
+            == 0x0203000000000000000000000000000000000000000000000000000000000000;
+        init {
+            let mut a: bool = read_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_padded_read_cbytes_offset_past_len() {
+    assert_diagnostics(
+        r#"
+        const bad = @padded_read_cbytes("hi", 3);
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: cbytes read offset out of bounds
+         --> main.plk:1:13
+          |
+        1 | const bad = @padded_read_cbytes("hi", 3);
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ offset 3 is outside `cbytes` with length 2
+          |
+          = note: offset must be within `0..=bytes.length`
+        "#],
+    );
+}
+
+#[test]
+fn test_concat_cbytes_empty_tuple() {
+    assert_lowers_to(
+        r#"
+        const concat_matches = @concat_cbytes(()) == "";
+        init {
+            let mut a: bool = concat_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_concat_cbytes_mixed_elements() {
+    assert_lowers_to(
+        r#"
+        const concat_matches = @concat_cbytes(("a", 1, hex"ff"))
+            == "a" hex"0000000000000000000000000000000000000000000000000000000000000001ff";
+        init {
+            let mut a: bool = concat_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_concat_cbytes_uses_visible_slice() {
+    assert_lowers_to(
+        r#"
+        const concat_matches = @concat_cbytes((@slice_cbytes("hello", 1, 4), "!")) == "ell!";
+        init {
+            let mut a: bool = concat_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_concat_cbytes_requires_tuple() {
+    assert_diagnostics(
+        r#"
+        const bad = @concat_cbytes("hello");
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: invalid cbytes concat argument
+         --> main.plk:1:13
+          |
+        1 | const bad = @concat_cbytes("hello");
+          |             ^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` expects a tuple, got `cbytes`
+        "#],
+    );
+}
+
+#[test]
+fn test_concat_cbytes_rejects_invalid_element() {
+    assert_diagnostics(
+        r#"
+        const bad = @concat_cbytes(("hello", true));
+        init {
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: invalid cbytes concat element
+         --> main.plk:1:13
+          |
+        1 | const bad = @concat_cbytes(("hello", true));
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256` or `cbytes`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_concat_cbytes_rejects_runtime_tuple_element() {
+    assert_diagnostics(
+        r#"
+        init {
+            let n = @evm_calldataload(0);
+            let bad = @concat_cbytes(("hello", n));
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mixing comptime and runtime data in tuple
+         --> main.plk:3:30
+          |
+        3 |     let bad = @concat_cbytes(("hello", n));
+          |                              ^-------^^-^
+          |                              ||        |
+          |                              ||        tuple element not comptime-known
+          |                              |tuple element is comptime-only
+          |                              mixed tuple literal
+        "#],
+    );
+}
+
+#[test]
 fn test_data_offset_of_slice_cbytes() {
     assert_lowers_to(
         r#"
@@ -2257,6 +2453,78 @@ fn test_keccak256_cbytes_of_slice() {
         r#"
         const ell_hash_matches = @keccak256_cbytes(@slice_cbytes("hello", 1, 4))
             == 0x0dd666b403ddf2d5833ea7c8306cfc8d62ee1052f2da09d8c290aac4d3085b43;
+        init {
+            let mut a: bool = ell_hash_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_sha256_cbytes_builtin() {
+    let abc_hash: [u8; 32] = sha2::Sha256::digest(b"abc").into();
+    assert_eq!(
+        abc_hash,
+        alloy_primitives::b256!(
+            "0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+        .0,
+    );
+    let empty_hash: [u8; 32] = sha2::Sha256::digest(b"").into();
+    assert_eq!(
+        empty_hash,
+        alloy_primitives::b256!(
+            "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
+        .0,
+    );
+    assert_lowers_to(
+        r#"
+        const abc_hash_matches = @sha256_cbytes("abc")
+            == 0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad;
+        const empty_hash_matches = @sha256_cbytes("")
+            == 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855;
+        init {
+            let mut a: bool = abc_hash_matches;
+            let mut b: bool = empty_hash_matches;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_sha256_cbytes_of_slice() {
+    let ell_hash: [u8; 32] = sha2::Sha256::digest(b"ell").into();
+    assert_eq!(
+        ell_hash,
+        alloy_primitives::b256!(
+            "0xbaea96500997ff5cd6cfd26592a978d6b73d480b4ad33d002499cf0041ac9996"
+        )
+        .0,
+    );
+    assert_lowers_to(
+        r#"
+        const ell_hash_matches = @sha256_cbytes(@slice_cbytes("hello", 1, 4))
+            == 0xbaea96500997ff5cd6cfd26592a978d6b73d480b4ad33d002499cf0041ac9996;
         init {
             let mut a: bool = ell_hash_matches;
             @evm_stop();

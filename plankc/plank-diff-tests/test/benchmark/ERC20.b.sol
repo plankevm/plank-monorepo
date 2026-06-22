@@ -45,8 +45,11 @@ abstract contract ERC20BenchmarkBase is BaseTest {
     function test_deploy() public {
         bytes memory initcode = compile();
         vm.snapshotValue(group(), "erc20.initcode_size", initcode.length);
-        address deployed = rawCreate(initcode);
+        (bool success, bytes memory data) = CREATE2_FACTORY.call(bytes.concat(bytes32(uint256(0)), initcode));
         vm.snapshotGasLastCall(group(), "erc20.deploy");
+        assertTrue(success);
+        assertEq(data.length, 20);
+        address deployed = address(bytes20(data));
         vm.snapshotValue(group(), "erc20.deployed_size", deployed.code.length);
     }
 

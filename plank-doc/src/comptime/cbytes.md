@@ -51,7 +51,9 @@ init {
 }
 ```
 
-### Embedding of Slices
+## Operations
+
+### Slicing And Embedding
 
 At compile time, you can slice a larger `cbytes` into smaller sub-slices using
 the standard library function `std::regions::slice_bytes`:
@@ -83,6 +85,112 @@ init {
 
     @evm_stop();
 }
+```
+
+> [!TIP]
+> Use `@concat_bytes((slice,))`  if you wish to ensure that only the bytes contained within your
+> slice are added to your contract's bytecode. This works because `@concat_bytes` creates *new*
+> strings while slicing merely creates views into other strings.
+
+### Concatenating
+
+You can concatenate multiple `cbytes` and `u256` values together using the `@concat_cbytes` builtin.
+`@concat_cbytes` takes as argument a tuple containing the values you want to concatenate. String
+literals and hex literals are appended directly since they have type `cbytes`, while `u256` elements
+are encoded as 32-byte big-endian byte strings:
+
+```plank
+const MESSAGE = @concat_cbytes((
+    "count=",
+    3,
+    hex"0a",
+));
+
+// MESSAGE == "count="
+//     hex"0000000000000000000000000000000000000000000000000000000000000003"
+//     hex"0a"
+```
+
+Unlike slicing, `@concat_cbytes` produces an independent `cbytes` value from
+the inputs. If you embed the result, only those bytes are embedded, even when
+some inputs were slices of larger `cbytes` values:
+
+```plank
+import std::error::require;
+import std::regions::{embed_as, bytes, code};
+
+const LOOKUP_TABLE =
+    hex"0000000000000000000000000000000000000000000000000000000000000000"
+    hex"000102030405060708090a0b0c0d0e0f00112233445566778899aabbccddeeff";
+
+// A slice is a view into LOOKUP_TABLE.
+const TABLE_WINDOW = @slice_cbytes(LOOKUP_TABLE, 32, 64);
+
+// `@concat_cbytes` copies the visible bytes into an independent cbytes value.
+const WINDOW_COPY = @concat_cbytes((TABLE_WINDOW,));
+
+init {
+    let table: bytes(code) = embed_as(LOOKUP_TABLE, code);
+    let sliced_window: bytes(code) = embed_as(TABLE_WINDOW, code);
+    let copied_window: bytes(code) = embed_as(WINDOW_COPY, code);
+
+    // The slice points into the original embedded table.
+    require(sliced_window.ptr == table.ptr +% 32);
+
+    // The concat result is embedded independently.
+    require(sliced_window.ptr != copied_window.ptr);
+
+    @evm_stop();
+}
+```
+
+This becomes easier to understand if you imagine the underlying strings. The original literal
+is stored in `LOOKUP_TABLE` so that's an original string. The slice stored in `TABLE_WINDOW` is
+just a **view** into `LOOKUP_TABLE` while the call to `@concat_bytes` forces the
+creation of an independent string which is then stored in `WINDOW_COPY`.
+
+```
+LOOKUP_TABLE
+        ┊
+        ┊
+        ▼
+┌────────────── 32 bytes ──────────────┬────────────── 32 bytes ──────────────┐
+│ 00 00 00 ... 00                      │ 00 01 02 ... ee ff                   │
+└──────────────────────────────────────┴──────────────────────────────────────┘
+                                       ◄┄┄┄┄┄┄┄┬┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄►
+                                               ┊
+                                               ┊
+TABLE_WINDOW = @slice_cbytes(LOOKUP_TABLE, 32, 64)
+
+
+┌────────────── 32 bytes ──────────────┐
+│ 00 01 02 ... ee ff                   │
+└──────────────────────────────────────┘
+                  ▲
+                  ┊
+WINDOW_COPY = @concat_cbytes((TABLE_WINDOW,))
+```
+
+### Reading Padded Words
+
+Use `@padded_read_cbytes(bytes, offset)` to read a 32-byte word from a `cbytes` value.
+
+`offset` must be known at compile time and must be in the range `0..=bytes.length`. If fewer than 32 bytes remain after `offset`, the word is padded with zero bytes on the right.
+
+The result is interpreted as a 32-byte big-endian `u256`:
+
+```plank
+let char = @padded_read_cbytes("abc", 1);
+require(char == 0x6263000000000000000000000000000000000000000000000000000000000000);
+let char_byte = char >> (31 * 8);
+require(char_byte == 0x62);
+```
+
+Reading at the end of a `cbytes` value is valid and returns zero:
+
+```plank
+let empty_word = @padded_read_cbytes(hex"010203", 3);
+require(empty_word == 0);
 ```
 
 ## Syntax

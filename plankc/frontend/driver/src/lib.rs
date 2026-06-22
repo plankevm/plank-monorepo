@@ -5,7 +5,9 @@ use plank_source::{
     ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
 use plank_values::ValueInterner;
-use sir_passes::{PassManager, parse_optimizations_string};
+use sir_passes::{
+    PassManager, parse_optimizations_string, run_pass, transforms::CriticalEdgeSplitting,
+};
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
@@ -148,6 +150,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
 
         let mut bytecode = Vec::with_capacity(0x6000);
         if is_sir_debug_backend {
+            run_pass(&mut CriticalEdgeSplitting, &mut program, &analyses);
             sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
         } else {
             sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode);

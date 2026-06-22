@@ -20,7 +20,6 @@ If you'd like to contribute please read the [Contributor Guidelines](./CONTRIBUT
 - `plank-tree-sitter/`: Tree sitter grammar & parser for the plank language
 
 ## Donating
-
 If you'd like to support use you can donate at
 [Our Project Page on Giveth](https://qf.giveth.io/project/plankevm). Thanks to
 the currently running QF round and matching pool even a small donation has a

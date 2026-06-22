@@ -9,6 +9,21 @@ mod codegen_orchestrator;
 mod mark_map;
 
 pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode: &mut Vec<u8>) {
+    if cfg!(debug_assertions) {
+        let reachability = analyses.reachability(program);
+        let preds = analyses.predecessors(program);
+        for bb in program.blocks() {
+            if !reachability.contains(bb.id()) {
+                continue;
+            }
+            let succesor_count = bb.successors().count();
+            assert!(
+                succesor_count <= 1 || bb.successors().all(|succ| preds.of(succ).len() <= 1),
+                "release backend expects SIR without critical edges"
+            );
+        }
+    }
+
     let (stack_ops, _layouts) =
         sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
     let init_memory_layout = BumpAllocateAll::generate(program, program.init_entry, &stack_ops);

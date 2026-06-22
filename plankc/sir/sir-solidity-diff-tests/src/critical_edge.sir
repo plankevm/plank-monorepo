@@ -1,0 +1,16 @@
+fn init:
+    entry {
+        c0 = calldatasize
+        => c0 ? @use_value : @revert_error
+    }
+    use_value {
+        y = callvalue
+        => y ? @return_value : @revert_error
+    }
+    return_value {
+        sstore 0 y
+        stop
+    }
+    revert_error {
+        revert 0 0
+    }

@@ -360,7 +360,9 @@ define_builtins! {
 
         // Comptime Bytes
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
+        PADDED_READ_CBYTES "@padded_read_cbytes" => PaddedReadCBytes;
         KECCAK256_CBYTES "@keccak256_cbytes" => Keccak256CBytes;
+        SHA256_CBYTES "@sha256_cbytes" => Sha256CBytes;
         DATA_OFFSET "@data_offset" => DataOffset;
 
         ACTIVE_EVM_VERSION "@active_evm_version" => ActiveEvmVersion;
@@ -372,6 +374,7 @@ define_builtins! {
         GET_FIELD "@get_field" => GetField(2);
         SET_FIELD "@set_field" => SetField(3);
         UNINIT "@uninit" => Uninit(1);
+        CONCAT_CBYTES "@concat_cbytes" => ConcatCBytes(1);
     }
 
     builtin_attribute {

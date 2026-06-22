@@ -63,7 +63,8 @@
   ; Comptime Diagnostics
   "@compile_error" "@in_comptime" "@set_eval_branch_quota"
   ; Bytes
-  "@keccak256_cbytes" "@slice_cbytes" "@data_offset"
+  "@cbytes_concat" "@cbytes_padded_read_u256" "@keccak256_cbytes" "@sha256_cbytes"
+  "@slice_cbytes" "@data_offset"
   ))
 
 ; Function calls

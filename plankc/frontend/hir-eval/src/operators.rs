@@ -277,10 +277,8 @@ impl crate::scope::Scope<'_, '_> {
                 let Value::Bytes(rhs) = self.values.lookup(rhs) else {
                     unreachable!("invariant: type checked as cbytes")
                 };
-                let lhs =
-                    self.diag_ctx.session.lookup_bytes_slice(lhs.contents, lhs.start, lhs.end);
-                let rhs =
-                    self.diag_ctx.session.lookup_bytes_slice(rhs.contents, rhs.start, rhs.end);
+                let lhs = self.diag_ctx.session.lookup_bytes_slice(lhs);
+                let rhs = self.diag_ctx.session.lookup_bytes_slice(rhs);
                 let result = if op_equals { lhs == rhs } else { lhs != rhs };
                 Ok(Ok(EvalValue::Comptime(result.into())))
             }

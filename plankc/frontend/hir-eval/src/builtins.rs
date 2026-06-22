@@ -3,12 +3,14 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{
-    Builtin, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc, builtins::BuiltinKind,
+    Builtin, CBytes, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc,
+    builtins::BuiltinKind,
 };
 use plank_values::{
-    CBytes, Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId,
-    ValueInterner, builtins as builtin_sigs,
+    Compound, PrimitiveType, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
+    builtins as builtin_sigs,
 };
+use sha2::{Digest, Sha256};
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -242,11 +244,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::CompileError => {
                 let &[message] = args else { unreachable!("arg count checked") };
                 let message = self.expect_bytes_arg(message, builtin, expr_span)?;
-                let message = self.diag_ctx.session.lookup_bytes_lossy(
-                    message.contents,
-                    message.start,
-                    message.end,
-                );
+                let message = self.diag_ctx.session.lookup_bytes_lossy(message);
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
                 Ok(Err(Diverge::ControlFlowPoisoned))
             }
@@ -268,15 +266,44 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     bytes.start + end,
                 ))))
             }
+            Builtin::PaddedReadCBytes => {
+                let &[bytes, offset] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let offset =
+                    self.expect_comptime_u256(offset, builtin, "cbytes offset", expr_span)?;
+
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
+                let offset = match usize::try_from(offset) {
+                    Ok(offset) if offset <= slice.len() => offset,
+                    _ => {
+                        self.diag_ctx.emit_cbytes_read_offset_out_of_bounds(
+                            offset,
+                            slice.len(),
+                            expr_loc,
+                        );
+                        return Err(Poisoned);
+                    }
+                };
+
+                let slice = &slice[offset..(offset + 32).min(slice.len())];
+                let mut word = [0; 32];
+                word[..slice.len()].copy_from_slice(slice);
+
+                let value = U256::from_be_bytes(word);
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(value))))
+            }
             Builtin::Keccak256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
-                let slice = self.diag_ctx.session.lookup_bytes_slice(
-                    bytes.contents,
-                    bytes.start,
-                    bytes.end,
-                );
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+            }
+            Builtin::Sha256CBytes => {
+                let &[bytes] = args else { unreachable!("arg count checked") };
+                let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
+                let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
+                let hash = U256::from_be_bytes(Sha256::digest(slice).into());
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
             }
             Builtin::DataOffset => {
@@ -321,6 +348,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::GetField => self.eval_get_field(args, builtin, expr),
             Builtin::SetField => self.eval_set_field(args, builtin, expr),
             Builtin::Uninit => self.eval_uninit(args, builtin, expr),
+            Builtin::ConcatCBytes => self.eval_concat_cbytes(args, expr),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -518,6 +546,62 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         ))))
     }
 
+    fn eval_concat_cbytes(
+        &mut self,
+        args: &[hir::LocalId],
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let &[tuple] = args else { unreachable!("arg count checked") };
+        let (state, _, origin) = self.bindings[tuple].poisoned()?;
+        let LocalState::Comptime(tuple_vid) = state else {
+            self.diag_ctx
+                .emit_runtime_ref_in_comptime(self.loc(expr_span), self.origin_loc(origin));
+            return Err(Poisoned);
+        };
+
+        let fields = match self.eval.values.lookup(tuple_vid) {
+            Value::Compound { ty, fields } if ty.is_tuple() => fields,
+            _ => {
+                let actual_ty = self.values.type_of_value(tuple_vid);
+                self.diag_ctx.emit_concat_cbytes_expected_tuple(
+                    self.eval.values,
+                    actual_ty,
+                    self.loc(expr_span),
+                );
+                return Err(Poisoned);
+            }
+        };
+
+        let mut buf = Vec::new();
+        let mut contains_invalid = false;
+        for &field in fields {
+            match self.values.lookup(field) {
+                Value::BigNum(n) => {
+                    buf.extend_from_slice(&n.to_be_bytes::<32>());
+                }
+                Value::Bytes(bytes) => {
+                    let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
+                    buf.extend_from_slice(slice);
+                }
+                other => {
+                    self.diag_ctx.emit_concat_cbytes_invalid_element(
+                        self.eval.values,
+                        other.get_type(),
+                        self.loc(expr_span),
+                    );
+                    contains_invalid = true;
+                }
+            }
+        }
+        if contains_invalid {
+            return Err(Poisoned);
+        }
+        let bytes = self.diag_ctx.session.intern_bytes(&buf);
+        let len = u32::try_from(buf.len()).expect("cbytes length fits u32");
+        let value = self.eval.values.intern_bytes(bytes, 0, len);
+        Ok(Ok(EvalValue::Comptime(value)))
+    }
+
     /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).
     fn emit_uninit_runtime(&mut self, ty: TypeId) -> EvalValue {
         let local = self.emit_uninit_runtime_local(ty);
@@ -601,17 +685,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let compound = self.expect_compound(ty, builtin, expr_span)?;
         let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
         let field_count = compound.field_count();
-        let Some(index) = u32::try_from(index).ok().filter(|&index| (index as usize) < field_count)
-        else {
-            self.diag_ctx.emit_field_index_out_of_bounds(
-                builtin,
-                index,
-                field_count,
-                self.loc(self.bindings[index_arg].use_span),
-            );
-            return Err(Poisoned);
-        };
-        Ok((compound, index))
+        match u32::try_from(index) {
+            Ok(index) if (index as usize) < field_count => Ok((compound, index)),
+            _ => {
+                self.diag_ctx.emit_field_index_out_of_bounds(
+                    builtin,
+                    index,
+                    field_count,
+                    self.loc(self.bindings[index_arg].use_span),
+                );
+                Err(Poisoned)
+            }
+        }
     }
 
     fn expect_type_arg(
