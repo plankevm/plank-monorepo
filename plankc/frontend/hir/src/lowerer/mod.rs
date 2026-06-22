@@ -918,7 +918,6 @@ fn register_consts(
                     body: BlockId::ZERO,
                     result: LocalId::ZERO,
                 };
-
                 if let Some(prev) = seen.insert(const_def.name, const_def) {
                     diagnostics::error_duplicate_const(
                         session,
@@ -931,7 +930,6 @@ fn register_consts(
                     source_const_defs.push(const_def);
                 }
             }
-
             for const_def in source_const_defs.into_iter() {
                 let const_id = consts.push(const_def);
                 list.push((const_def.name, const_id));
