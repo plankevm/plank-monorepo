@@ -362,6 +362,7 @@ define_builtins! {
 
         // Function Introspection
         FN_NAME "@fn_name" => FnName;
+        GET_COMPTIME_PARAM_COUNT "@get_comptime_param_count" => GetComptimeParamCount;
 
         // Comptime Bytes
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;

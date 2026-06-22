@@ -226,6 +226,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::FieldCount => &[sig!([TYPE => U256])],
 
         B::FnName => &[sig!([FUNCTION => CBYTES])],
+        B::GetComptimeParamCount => &[sig!([FUNCTION => U256])],
 
         B::SliceCBytes => &[sig!([CBYTES, U256, U256 => CBYTES])],
         B::PaddedReadCBytes => &[sig!([CBYTES, U256 => U256])],

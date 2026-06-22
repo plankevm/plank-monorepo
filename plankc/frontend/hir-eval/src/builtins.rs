@@ -263,7 +263,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Builtin::FnName => {
                 let &[closure] = args else { unreachable!("arg count checked") };
-                let closure = self.expect_closure_arg(closure, builtin)?;
+                let (closure, _) = self.expect_closure_arg(closure, builtin)?;
                 let value = match self.values.get_closure_name(closure) {
                     Some(name) => {
                         let contents = BytesId::from(name);
@@ -273,6 +273,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     None => ValueId::BYTES_EMPTY,
                 };
                 Ok(Ok(EvalValue::Comptime(value)))
+            }
+            Builtin::GetComptimeParamCount => {
+                let &[closure] = args else { unreachable!("arg count checked") };
+                let (_, fn_def) = self.expect_closure_arg(closure, builtin)?;
+                let count = self.hir.fn_params[fn_def]
+                    .iter()
+                    .filter(|param| {
+                        param.is_comptime || matches!(param.r#type, hir::ParamType::Any { .. })
+                    })
+                    .count();
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(U256::from(count)))))
             }
             Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
             Builtin::SetEvalBranchQuota => {
@@ -902,13 +913,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         arg_local: hir::LocalId,
         builtin: Builtin,
-    ) -> MaybePoisoned<ValueId> {
+    ) -> MaybePoisoned<(ValueId, hir::FnDefId)> {
         let arg_binding = self.bindings[arg_local];
         let state = arg_binding.state?;
         if let LocalState::Comptime(vid) = state
-            && let Value::Closure { .. } = self.values.lookup(vid)
+            && let Value::Closure { fn_def, .. } = self.values.lookup(vid)
         {
-            return Ok(vid);
+            return Ok((vid, fn_def));
         }
         let actual_ty = self.state_type(state);
         self.diag_ctx.emit_expected_closure_arg(
