@@ -239,7 +239,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     expr_span,
                     r#struct.fields.len(),
                 )?;
-                let field = r#struct.fields[index as usize];
+                let field = r#struct.fields[index];
                 let contents = BytesId::from(field.name);
                 let len = u32::try_from(self.diag_ctx.session.lookup_bytes(contents).len())
                     .expect("field name length fits u32");
@@ -250,9 +250,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
-                let index = self.find_struct_field_name(r#struct, name).unwrap_or_else(|| {
-                    u32::try_from(r#struct.fields.len()).expect("field count fits u32")
-                });
+                let index =
+                    self.find_struct_field_by_name(r#struct, name).unwrap_or(r#struct.fields.len());
                 let index = U256::from(index);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(index))))
             }
@@ -415,7 +414,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let compound = self.expect_compound(ty, builtin, expr_span)?;
         let index =
             self.expect_field_index_arg(field_index, builtin, expr_span, compound.field_count())?;
-        let field_ty = compound.field_type(index as usize);
+        let field_ty = compound.field_type(index);
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
 
@@ -442,17 +441,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let ty = self.state_type(instance_state);
         let (compound, field_index) =
             self.resolve_field_selector(ty, field_index, builtin, expr_span)?;
-        let field_ty = compound.field_type(field_index as usize);
+        let field_ty = compound.field_type(field_index);
 
         match instance_state {
             LocalState::Comptime(vid) => match self.values.lookup(vid) {
-                Value::Compound { fields, .. } => {
-                    Ok(Ok(EvalValue::Comptime(fields[field_index as usize])))
-                }
+                Value::Compound { fields, .. } => Ok(Ok(EvalValue::Comptime(fields[field_index]))),
                 _ => unreachable!("invariant: type checked as compound"),
             },
             LocalState::Runtime(local) => Ok(Ok(EvalValue::Runtime {
-                expr: mir::Expr::FieldAccess { object: local, field_index },
+                expr: mir::Expr::FieldAccess {
+                    object: local,
+                    field_index: u32::try_from(field_index).expect("field index fits u32"),
+                },
                 result_type: field_ty,
             })),
         }
@@ -469,14 +469,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let instance_ty = self.state_type(instance_state);
         let (compound, field_index) =
             self.resolve_field_selector(instance_ty, field_index, builtin, expr_span)?;
-        let field_ty = compound.field_type(field_index as usize);
+        let field_ty = compound.field_type(field_index);
 
         let (new_value_state, new_value_span, _) = self.bindings[field_value].poisoned()?;
         let actual_ty = self.state_type(new_value_state);
         if !actual_ty.is_assignable_to(field_ty) {
             match compound {
                 Compound::Struct(r#struct) => {
-                    let field = r#struct.fields[field_index as usize];
+                    let field = r#struct.fields[field_index];
                     self.diag_ctx.emit_type_mismatch(
                         self.eval.values,
                         field_ty,
@@ -510,7 +510,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     _ => unreachable!("invariant: type checked as compound"),
                 }
                 let fields = &mut this.eval.values_buf[values_buf_offset..];
-                fields[field_index as usize] = new_value_vid;
+                fields[field_index] = new_value_vid;
                 Ok(EvalValue::Comptime(
                     this.eval.values.intern(Value::Compound { ty: instance_ty, fields }),
                 ))
@@ -538,18 +538,28 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let target = self.mir_types.push(ty);
             self.emit(mir::Instruction::Set {
                 target,
-                expr: mir::Expr::FieldAccess { object: instance_local, field_index: idx },
+                expr: mir::Expr::FieldAccess {
+                    object: instance_local,
+                    field_index: u32::try_from(idx).expect("field index fits u32"),
+                },
             });
             target
         };
 
         let fields: Vec<_> = match compound {
-            Compound::Struct(r#struct) => {
-                (0..).zip(r#struct.fields).map(|(idx, field)| lower_field(idx, field.ty)).collect()
-            }
-            Compound::Tuple(tuple) => {
-                (0..).zip(tuple.fields).map(|(idx, &ty)| lower_field(idx, ty)).collect()
-            }
+            Compound::Struct(r#struct) => r#struct
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(idx, field)| lower_field(idx, field.ty))
+                .collect(),
+            Compound::Tuple(tuple) => tuple
+                .fields
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(idx, ty)| lower_field(idx, ty))
+                .collect(),
         };
 
         let fields = self.eval.mir_args.push_copy_slice(&fields);
@@ -725,16 +735,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         builtin: Builtin,
         expr_span: SourceSpan,
         field_count: usize,
-    ) -> MaybePoisoned<u32> {
+    ) -> MaybePoisoned<usize> {
         let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
         self.expect_field_index_in_bounds(index, index_arg, builtin, field_count)
     }
 
-    fn find_struct_field_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<u32> {
+    fn find_struct_field_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
         let name = self.diag_ctx.session.lookup_bytes_slice(name);
-        (0u32..).zip(r#struct.fields).find_map(|(index, field)| {
-            (self.diag_ctx.session.lookup_bytes(BytesId::from(field.name)) == name).then_some(index)
-        })
+        r#struct
+            .fields
+            .iter()
+            .position(|field| self.diag_ctx.session.lookup_bytes(BytesId::from(field.name)) == name)
     }
 
     fn resolve_field_selector(
@@ -743,7 +754,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         selector_arg: hir::LocalId,
         builtin: Builtin,
         expr_span: SourceSpan,
-    ) -> MaybePoisoned<(Compound<'a>, u32)> {
+    ) -> MaybePoisoned<(Compound<'a>, usize)> {
         let compound = self.expect_compound(ty, builtin, expr_span)?;
         let selector_binding = self.bindings[selector_arg];
         let state = selector_binding.state?;
@@ -777,7 +788,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     );
                     return Err(Poisoned);
                 };
-                let Some(field_index) = self.find_struct_field_name(r#struct, name) else {
+                let Some(field_index) = self.find_struct_field_by_name(r#struct, name) else {
                     self.diag_ctx.emit_unknown_field_name_selector(
                         self.eval.values,
                         builtin,
@@ -808,9 +819,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         index_arg: hir::LocalId,
         builtin: Builtin,
         field_count: usize,
-    ) -> MaybePoisoned<u32> {
-        match u32::try_from(index) {
-            Ok(index) if (index as usize) < field_count => Ok(index),
+    ) -> MaybePoisoned<usize> {
+        match usize::try_from(index) {
+            Ok(index) if index < field_count => Ok(index),
             _ => {
                 self.diag_ctx.emit_field_index_out_of_bounds(
                     builtin,
