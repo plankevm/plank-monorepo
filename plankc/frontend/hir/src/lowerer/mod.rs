@@ -904,30 +904,37 @@ fn register_consts(
 
     let mut seen = HashMap::new();
     for (id, source) in sources.enumerate_idx() {
+        let mut source_const_defs: Vec<ConstDef> = Vec::new();
         let file = source.cst.as_file();
         seen.clear();
         source_consts.push_with(|mut list| {
             for def in file.iter_defs() {
-                let TopLevelDef::Const(const_def) = def else { continue };
-                let source_span = source.lexed.tokens_src_span(const_def.span());
-                let const_id = consts.push(ConstDef {
-                    name: const_def.name,
+                let TopLevelDef::Const(const_decl) = def else { continue };
+                let source_span = source.lexed.tokens_src_span(const_decl.span());
+                let const_def = ConstDef {
+                    name: const_decl.name,
                     source_id: id,
                     source_span,
                     body: BlockId::ZERO,
                     result: LocalId::ZERO,
-                });
-                if let Some(prev) = seen.insert(const_def.name, const_id) {
+                };
+
+                if let Some(prev) = seen.insert(const_def.name, const_def) {
                     diagnostics::error_duplicate_const(
                         session,
                         id,
                         const_def.name,
                         source_span,
-                        &consts[prev],
+                        &prev,
                     );
                 } else {
-                    list.push((const_def.name, const_id));
+                    source_const_defs.push(const_def);
                 }
+            }
+
+            for const_def in source_const_defs.into_iter() {
+                let const_id = consts.push(const_def);
+                list.push((const_def.name, const_id));
             }
         });
     }
