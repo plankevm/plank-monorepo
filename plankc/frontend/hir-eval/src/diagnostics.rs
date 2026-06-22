@@ -898,11 +898,11 @@ impl DiagCtx<'_> {
         values: &ValueInterner,
         builtin: Builtin,
         struct_ty: TypeId,
-        field_name_bytes: &[u8],
+        field_name_bytes: CBytes,
         loc: SrcLoc,
     ) {
         let mut field_name = String::new();
-        write_bytes_literal(&mut field_name, field_name_bytes)
+        write_bytes_literal(&mut field_name, self.session.lookup_bytes_slice(field_name_bytes))
             .expect("writing to string cannot fail");
         Diagnostic::error("unknown field")
             .primary(

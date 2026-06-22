@@ -94,8 +94,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let Value::Bytes(bytes) = self.values.lookup(vid) else {
                 unreachable!("invariant: `state_type` != type of value")
             };
-            let len = U256::from(bytes.end - bytes.start);
-            return Ok(EvalValue::Comptime(self.eval.values.intern_num(len)));
+            return Ok(EvalValue::Comptime(self.eval.values.intern_num(U256::from(bytes.len()))));
         }
 
         let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(object_ty) else {

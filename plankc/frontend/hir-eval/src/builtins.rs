@@ -3,7 +3,7 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{
-    Builtin, CBytes, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc,
+    Builtin, BytesId, CBytes, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc,
     builtins::BuiltinKind,
 };
 use plank_values::{
@@ -222,43 +222,38 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.expect_struct(ty, builtin, expr_span)?;
                 let name =
                     self.types.format(self.diag_ctx.session, self.eval.values, ty).to_string();
-                let bytes = self.diag_ctx.session.intern_bytes(name.as_bytes());
-                let len = u32::try_from(name.len()).expect("type name length fits u32");
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(bytes, 0, len))))
+                let cbytes = self.diag_ctx.session.intern_cbytes(name.as_bytes());
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(
+                    cbytes.contents,
+                    cbytes.start,
+                    cbytes.end,
+                ))))
             }
             Builtin::FieldName => {
                 let &[ty_local, index_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
-                let index =
-                    self.expect_comptime_u256(index_local, builtin, "field index", expr_span)?;
-                let index = self.expect_field_index_in_bounds(
-                    index,
+                let index = self.expect_field_index_arg(
                     index_local,
                     builtin,
+                    expr_span,
                     r#struct.fields.len(),
                 )?;
                 let field = r#struct.fields[index as usize];
-                let name = self.diag_ctx.session.lookup_name(field.name).as_bytes().to_vec();
-                let bytes = self.diag_ctx.session.intern_bytes(&name);
-                let len = u32::try_from(name.len()).expect("field name length fits u32");
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(bytes, 0, len))))
+                let contents = BytesId::from(field.name);
+                let len = u32::try_from(self.diag_ctx.session.lookup_bytes(contents).len())
+                    .expect("field name length fits u32");
+                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(contents, 0, len))))
             }
             Builtin::FieldIndex => {
                 let &[ty_local, name_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
-                let name = self.diag_ctx.session.lookup_bytes_slice(name);
-                let index = U256::from(
-                    r#struct
-                        .fields
-                        .iter()
-                        .position(|field| {
-                            self.diag_ctx.session.lookup_name(field.name).as_bytes() == name
-                        })
-                        .unwrap_or(r#struct.fields.len()),
-                );
+                let index = self.find_struct_field_name(r#struct, name).unwrap_or_else(|| {
+                    u32::try_from(r#struct.fields.len()).expect("field count fits u32")
+                });
+                let index = U256::from(index);
                 Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(index))))
             }
             Builtin::FieldCount => {
@@ -313,7 +308,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let start = self.expect_comptime_u256(start, builtin, "slice start", expr_span)?;
                 let end = self.expect_comptime_u256(end, builtin, "slice end", expr_span)?;
-                let len = bytes.end - bytes.start;
+                let len = bytes.len();
                 if start > end || end > U256::from(len) {
                     self.diag_ctx.emit_bytes_slice_out_of_bounds(start, end, len, expr_loc);
                     return Err(Poisoned);
@@ -417,7 +412,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let &[ty, field_index] = args else { unreachable!("arg count checked") };
         let ty = self.expect_type_arg(ty, builtin, expr_span)?;
-        let (compound, index) = self.resolve_field_index(ty, field_index, builtin, expr_span)?;
+        let compound = self.expect_compound(ty, builtin, expr_span)?;
+        let index =
+            self.expect_field_index_arg(field_index, builtin, expr_span, compound.field_count())?;
         let field_ty = compound.field_type(index as usize);
         Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(field_ty))))
     }
@@ -644,9 +641,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if contains_invalid {
             return Err(Poisoned);
         }
-        let bytes = self.diag_ctx.session.intern_bytes(&buf);
-        let len = u32::try_from(buf.len()).expect("cbytes length fits u32");
-        let value = self.eval.values.intern_bytes(bytes, 0, len);
+        let cbytes = self.diag_ctx.session.intern_cbytes(&buf);
+        let value = self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
         Ok(Ok(EvalValue::Comptime(value)))
     }
 
@@ -723,18 +719,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn resolve_field_index(
+    fn expect_field_index_arg(
         &mut self,
-        ty: TypeId,
         index_arg: hir::LocalId,
         builtin: Builtin,
         expr_span: SourceSpan,
-    ) -> MaybePoisoned<(Compound<'a>, u32)> {
-        let compound = self.expect_compound(ty, builtin, expr_span)?;
+        field_count: usize,
+    ) -> MaybePoisoned<u32> {
         let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
-        let index =
-            self.expect_field_index_in_bounds(index, index_arg, builtin, compound.field_count())?;
-        Ok((compound, index))
+        self.expect_field_index_in_bounds(index, index_arg, builtin, field_count)
+    }
+
+    fn find_struct_field_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<u32> {
+        let name = self.diag_ctx.session.lookup_bytes_slice(name);
+        (0u32..).zip(r#struct.fields).find_map(|(index, field)| {
+            (self.diag_ctx.session.lookup_bytes(BytesId::from(field.name)) == name).then_some(index)
+        })
     }
 
     fn resolve_field_selector(
@@ -777,15 +777,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     );
                     return Err(Poisoned);
                 };
-                let name = self.diag_ctx.session.lookup_bytes_slice(name).to_vec();
-                let Some((field_index, _)) = (0u32..).zip(r#struct.fields).find(|&(_, field)| {
-                    self.diag_ctx.session.lookup_name(field.name).as_bytes() == name.as_slice()
-                }) else {
+                let Some(field_index) = self.find_struct_field_name(r#struct, name) else {
                     self.diag_ctx.emit_unknown_field_name_selector(
                         self.eval.values,
                         builtin,
                         ty,
-                        &name,
+                        name,
                         self.loc(selector_binding.use_span),
                     );
                     return Err(Poisoned);

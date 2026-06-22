@@ -226,7 +226,7 @@ fn test_type_name() {
         const plain_ok = @type_name(Pair) == "Pair";
         const parameterized_ok = @type_name(BoxU256) == "Box(u256)";
         const anonymous = @type_name(struct { a: u256 });
-        const anonymous_ok = @slice_cbytes(anonymous, 0, 15) == "struct@main.plk";
+        const anonymous_ok = anonymous == "struct@main.plk:9:30";
 
         init {
             let mut x: bool = plain_ok;
