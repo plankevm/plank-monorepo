@@ -10,9 +10,16 @@ contract EvmVersionTest is BaseTest {
 
     function setUp() public {
         string memory sourceFile = "src/std/version_test.plk";
-        vm.etch(plankImplCancun, plank(sourceFile, "cancun"));
-        vm.etch(plankImplPrague, plank(sourceFile, "prague"));
+        vm.etch(plankImplCancun, compileForVersion(sourceFile, "cancun"));
+        vm.etch(plankImplPrague, compileForVersion(sourceFile, "prague"));
         vm.etch(plankImplOsaka, plank(sourceFile));
+    }
+
+    function compileForVersion(string memory sourceFile, string memory version) internal returns (bytes memory) {
+        string[] memory extraArgs = new string[](2);
+        extraArgs[0] = "--evm-version";
+        extraArgs[1] = version;
+        return plank(sourceFile, extraArgs);
     }
 
     function test_evm_version() public {
