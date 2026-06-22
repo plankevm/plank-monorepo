@@ -123,3 +123,118 @@ fn test_get_comptime_param_count_expects_function() {
         "#],
     );
 }
+
+#[test]
+fn test_function_signature_introspection() {
+    assert_lowers_to(
+        r#"
+        const simple = fn(x: u256, y: bool) u256 { x };
+        const generic = fn(x: $T) T { x };
+        const mixed = fn(comptime T: type, x: T, comptime n: u256, y: $U) U { y };
+
+        const simple_sig_ok = @get_runtime_signature(simple, ()) == tuple { u256, bool };
+        const simple_return_ok = @get_return_type(simple, ()) == u256;
+        const generic_sig_ok = @get_runtime_signature(generic, (bool,)) == tuple { bool };
+        const generic_return_ok = @get_return_type(generic, (bool,)) == bool;
+        const mixed_sig_ok = @get_runtime_signature(mixed, (u256, 7, bool)) == tuple { u256, bool };
+        const mixed_return_ok = @get_return_type(mixed, (u256, 7, bool)) == bool;
+
+        init {
+            let mut a: bool = simple_sig_ok;
+            let mut b: bool = simple_return_ok;
+            let mut c: bool = generic_sig_ok;
+            let mut d: bool = generic_return_ok;
+            let mut e: bool = mixed_sig_ok;
+            let mut f: bool = mixed_return_ok;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : bool = true
+            %3 : bool = true
+            %4 : bool = true
+            %5 : bool = true
+            %6 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_function_introspection_comptime_args_mismatch() {
+    assert_diagnostics(
+        r#"
+        const f = fn(comptime T: type, x: T, y: $U) U { y };
+        const bad = @get_return_type(f, (u256,));
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: `@get_return_type` arguments mismatch
+         --> main.plk:2:33
+          |
+        2 | const bad = @get_return_type(f, (u256,));
+          |                                 ^^^^^^^ function `f` expects 2 comptime argument values, but 1 comptime argument value was supplied
+        "#],
+    );
+}
+
+#[test]
+fn test_function_introspection_comptime_args_must_be_tuple() {
+    assert_diagnostics(
+        r#"
+        const f = fn(x: u256) u256 { x };
+        const bad = @get_runtime_signature(f, 42);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected tuple argument
+         --> main.plk:2:39
+          |
+        2 | const bad = @get_runtime_signature(f, 42);
+          |                                       ^^ `@get_runtime_signature` expects comptime_args to be a tuple, got a value of type `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_function_introspection_any_param_requires_type_arg() {
+    assert_diagnostics(
+        r#"
+        const f = fn(x: $T, y: $U) U { y };
+        const bad = @get_runtime_signature(f, (u256, 42));
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:39
+          |
+        2 | const bad = @get_runtime_signature(f, (u256, 42));
+          |                                       ^^^^^^^^^^ expected `type`, got `u256`
+        "#],
+    );
+}
+
+#[test]
+fn test_function_introspection_comptime_param_type_mismatch() {
+    assert_diagnostics(
+        r#"
+        const f = fn(comptime n: u256) void {};
+        const bad = @get_runtime_signature(f, (false,));
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:39
+          |
+        1 | const f = fn(comptime n: u256) void {};
+          |                          ---- `u256` expected because of this
+        2 | const bad = @get_runtime_signature(f, (false,));
+          |                                       ^^^^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}

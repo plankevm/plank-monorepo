@@ -89,26 +89,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
         let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
-        for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
-            fn_scope.bindings.insert_no_prev(
-                def.inner_local,
-                Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span)),
-            );
-        }
+        Self::bind_function_captures(&mut fn_scope.bindings, capture_defs, captured_values);
 
         for (&param, &arg) in params.iter().zip(args) {
             let binding = caller_bindings[arg];
             let state = match binding.state {
                 Ok(state) => state,
                 Err(Poisoned) => {
-                    fn_scope.bindings.insert_no_prev(
-                        param.value,
-                        Local {
-                            state: Err(Poisoned),
-                            use_span: param.span,
-                            origin: DefOrigin::Local(param.span),
-                        },
-                    );
+                    fn_scope.bind_param_local(param, param.value, Err(Poisoned));
                     continue;
                 }
             };
@@ -136,10 +124,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let inner_mir = fn_scope.mir_types.push(ty);
                 Ok(LocalState::Runtime(inner_mir))
             };
-            fn_scope.bindings.insert_no_prev(
-                param.value,
-                Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
-            );
+            fn_scope.bind_param_local(param, param.value, state);
         }
 
         let call = Call {
@@ -719,13 +704,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         param_kind: hir::ParamType,
         idx: u32,
     ) {
-        let EvalContext::FunctionPreamble { arg_spans, call_source } = self.ctx else {
-            unreachable!("invariant: param instr outside of fn preamable")
+        let arg_loc = match self.ctx {
+            EvalContext::FunctionPreamble { arg_spans, call_source } => {
+                let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
+                SrcLoc::new(call_source, arg_span)
+            }
+            EvalContext::IntrospectionPreamble { arg_loc } => arg_loc,
+            EvalContext::FunctionBody { .. } | EvalContext::Other => {
+                unreachable!("invariant: param instr outside of fn preamable")
+            }
         };
 
-        let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
-        let arg_loc = SrcLoc::new(call_source, arg_span);
+        self.eval_param_at_loc(comptime, arg, param_kind, arg_loc);
+    }
 
+    fn eval_param_at_loc(
+        &mut self,
+        comptime: bool,
+        arg: hir::LocalId,
+        param_kind: hir::ParamType,
+        arg_loc: SrcLoc,
+    ) {
         match param_kind {
             hir::ParamType::Explicit(local_id) => {
                 let Ok(param_ty) = self.expect_type(local_id) else {

@@ -246,7 +246,9 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         | B::SetField
         | B::Uninit
         | B::ConcatCBytes
-        | B::CompileLog => &[],
+        | B::CompileLog
+        | B::GetRuntimeSignature
+        | B::GetReturnType => &[],
     }
 }
 

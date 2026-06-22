@@ -830,6 +830,52 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_expected_tuple_arg(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        arg_name: &str,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("expected tuple argument")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` expects {arg_name} to be a tuple, got a value of type `{}`",
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_function_introspection_args_mismatch(
+        &mut self,
+        builtin: Builtin,
+        function_name: Option<StrId>,
+        expected: usize,
+        actual: usize,
+        loc: SrcLoc,
+    ) {
+        let function = match function_name {
+            Some(name) => format!("function `{}`", self.session.lookup_name(name)),
+            None => "this function".to_string(),
+        };
+        let supplied_verb = if actual == 1 { "was" } else { "were" };
+        Diagnostic::error(format!("`{builtin}` arguments mismatch"))
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "{function} expects {}, but {} {supplied_verb} supplied",
+                    fmt_count(expected, "comptime argument value"),
+                    fmt_count(actual, "comptime argument value"),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_concat_cbytes_expected_tuple(
         &mut self,
         values: &ValueInterner,

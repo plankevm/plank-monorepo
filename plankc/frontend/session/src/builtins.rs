@@ -386,6 +386,8 @@ define_builtins! {
         UNINIT "@uninit" => Uninit(1);
         CONCAT_CBYTES "@concat_cbytes" => ConcatCBytes(1);
         COMPILE_LOG "@compile_log" => CompileLog(1);
+        GET_RUNTIME_SIGNATURE "@get_runtime_signature" => GetRuntimeSignature(2);
+        GET_RETURN_TYPE "@get_return_type" => GetReturnType(2);
     }
 
     builtin_attribute {
