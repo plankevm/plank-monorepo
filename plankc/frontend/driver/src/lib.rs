@@ -59,6 +59,9 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         for diagnostic in self.session.diagnostics() {
             anstream::eprintln!("{}\n", diagnostic.render_styled(&self.session));
         }
+        for compile_log in self.session.compile_logs() {
+            anstream::eprintln!("{}", compile_log.format(&self.session));
+        }
         std::process::exit(1)
     }
 

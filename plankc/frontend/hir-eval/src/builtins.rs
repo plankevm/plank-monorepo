@@ -403,6 +403,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::SetField => self.eval_set_field(args, builtin, expr),
             Builtin::Uninit => self.eval_uninit(args, builtin, expr),
             Builtin::ConcatCBytes => self.eval_concat_cbytes(args, expr),
+            Builtin::CompileLog => self.eval_compile_log(args, expr),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -654,6 +655,23 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let cbytes = self.diag_ctx.session.intern_cbytes(&buf);
         let value = self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
         Ok(Ok(EvalValue::Comptime(value)))
+    }
+
+    fn eval_compile_log(
+        &mut self,
+        args: &[hir::LocalId],
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let &[obj] = args else { unreachable!("arg count checked") };
+        let (state, _, origin) = self.bindings[obj].poisoned()?;
+        let LocalState::Comptime(obj_vid) = state else {
+            self.diag_ctx
+                .emit_runtime_ref_in_comptime(self.loc(expr_span), self.origin_loc(origin));
+            return Err(Poisoned);
+        };
+
+        self.diag_ctx.emit_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
+        return Ok(Ok(EvalValue::Comptime(ValueId::VOID)));
     }
 
     /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).

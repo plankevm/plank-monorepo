@@ -3,7 +3,7 @@ use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    Compound, StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueInterner,
+    Compound, StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueInterner, ValueId,
     builtins as builtin_sigs,
 };
 
@@ -1176,4 +1176,18 @@ impl DiagCtx<'_> {
             .element(Element::Origin { path: source })
             .emit(self);
     }
+
+    pub fn emit_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
+    	if !self.session.has_compile_logs() {
+            Diagnostic::error(format!("found compile log"))
+                .element(
+                    Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary)
+                ).emit(self);
+        }
+	    let log = CompileLog {
+	      	loc,
+       	    msg: format!("{}", values.format_value(self.session, self.types, value_id))
+	    };
+	    self.session.emit_compile_log(log);
+	}
 }
