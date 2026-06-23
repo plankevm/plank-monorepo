@@ -655,7 +655,7 @@ fn test_inconsistent_premable() {
           --> main.plk:5:38
            |
          5 | const weird = fn (comptime N: u256) (if even(N) { not_a_type } else { bool }) {
-           |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected type, got value of type `tuple {}`
+           |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected type, got value of type `void`
            |
         note: called here
           --> main.plk:11:20

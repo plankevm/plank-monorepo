@@ -100,12 +100,14 @@ impl DiagCtx<'_> {
         let msg = format!("expect{expect_suffix} `{expected}`, got{diff} `{actual}`");
 
         (
-            move |diag| {
+            move |mut diag| {
                 if repr_eq {
-                    diag.note("types appear identical because they contain types with the same name defined in different files")
-                } else {
-                    diag
+                    diag = diag.note("types appear identical because they contain types with the same name defined in different files");
                 }
+                if expected_ty == TypeId::VOID {
+                    diag = diag.note("`void` is an alias for `tuple {}`")
+                }
+                diag
             },
             msg,
             expected,

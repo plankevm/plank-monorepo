@@ -462,6 +462,11 @@ impl TypeInterner {
         values: &ValueInterner,
     ) -> fmt::Result {
         let view = self.lookup_tuple(tuple);
+        if view.fields.is_empty() {
+            f.write_str("void")?;
+            return Ok(());
+        }
+
         f.write_str("tuple {")?;
         for (i, &element) in view.fields.iter().enumerate() {
             if i > 0 {

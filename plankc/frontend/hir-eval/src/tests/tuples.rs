@@ -383,3 +383,46 @@ fn test_tuple_set_field_type_mismatch() {
         "#],
     );
 }
+
+#[test]
+fn test_empty_tuple_void_equivalent() {
+    assert_lowers_to(
+        "
+        init {
+            let mut x = tuple {} == void;
+            @evm_stop();
+        }
+        ",
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_empty_tuple_in_diagnostic_is_void() {
+    assert_diagnostics(
+        "
+        init {
+            let x: tuple {} = 0;
+            @evm_stop();
+        }
+        ",
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:23
+          |
+        2 |     let x: tuple {} = 0;
+          |            --------   ^ expected `void`, got `u256`
+          |            |
+          |            `void` expected because of this
+          |
+          = note: `void` is an alias for `tuple {}`
+        "#],
+    );
+}
