@@ -1,6 +1,5 @@
 use alloy_primitives::U256;
 
-// EVM Versions
 // Sourced from https://github.com/argotorg/solidity/blob/develop/liblangutil/EVMVersion.h
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd)]
 pub enum EvmVersion {
