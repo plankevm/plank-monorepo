@@ -135,7 +135,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::Runtime(RB::Log4) => &[sig!([MP, U256, U256, U256, U256, U256 => VOID])],
         B::Runtime(RB::Create) => &[sig!([U256, MP, U256 => U256])],
         B::Runtime(RB::Create2) => &[sig!([U256, MP, U256, U256 => U256])],
-        B::Runtime(RB::Call) => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
+        B::Runtime(RB::EvmCall) => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
         B::Runtime(RB::CallCode) => &[sig!([U256, U256, U256, MP, U256, MP, U256 => BOOL])],
         B::Runtime(RB::DelegateCall) => &[sig!([U256, U256, MP, U256, MP, U256 => BOOL])],
         B::Runtime(RB::StaticCall) => &[sig!([U256, U256, MP, U256, MP, U256 => BOOL])],
@@ -248,7 +248,8 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         | B::ConcatCBytes
         | B::CompileLog
         | B::GetRuntimeSignature
-        | B::GetReturnType => &[],
+        | B::GetReturnType
+        | B::Call => &[],
     }
 }
 

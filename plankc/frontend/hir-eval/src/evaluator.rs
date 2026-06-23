@@ -14,7 +14,7 @@ use crate::{
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
     quota::ComptimeQuota,
-    scope::{Diverge, EvalContext, LocalState, Scope},
+    scope::{Diverge, EvalContext, Local, LocalState, Scope},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +41,7 @@ impl ConstEvalResult {
 
 newtype_index! {
     pub(crate) struct CallArgSpansIdx;
+    pub(crate) struct CallArgsIdx;
 }
 
 pub(crate) struct Evaluator<'a> {
@@ -58,6 +59,7 @@ pub(crate) struct Evaluator<'a> {
     pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
+    pub call_args: ListOfLists<CallArgsIdx, Local>,
 
     pub operator_table: OperatorTable,
 
@@ -96,6 +98,7 @@ impl<'a> Evaluator<'a> {
             lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
+            call_args: ListOfLists::new(),
 
             operator_table: OperatorTable::new(),
 

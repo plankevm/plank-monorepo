@@ -262,7 +262,7 @@ define_builtins! {
         // EVM System Calls
         CREATE "@evm_create" => Create;
         CREATE2 "@evm_create2" => Create2;
-        CALL "@evm_call" => Call;
+        EVM_CALL "@evm_call" => EvmCall;
         CALLCODE "@evm_callcode" => CallCode;
         DELEGATECALL "@evm_delegatecall" => DelegateCall;
         STATICCALL "@evm_staticcall" => StaticCall;
@@ -388,6 +388,7 @@ define_builtins! {
         COMPILE_LOG "@compile_log" => CompileLog(1);
         GET_RUNTIME_SIGNATURE "@get_runtime_signature" => GetRuntimeSignature(2);
         GET_RETURN_TYPE "@get_return_type" => GetReturnType(2);
+        CALL "@call" => Call(3);
     }
 
     builtin_attribute {

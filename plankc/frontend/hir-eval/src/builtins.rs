@@ -1,4 +1,4 @@
-use crate::scope::{Diverge, EvalValue, LocalState, Scope};
+use crate::scope::{Diverge, EvalValue, Local, LocalState, Scope};
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
@@ -430,6 +430,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Builtin::CompileLog => self.eval_compile_log(args, expr),
             Builtin::GetRuntimeSignature => self.eval_get_runtime_signature(args, expr),
             Builtin::GetReturnType => self.eval_get_return_type(args, expr),
+            Builtin::Call => self.eval_call_builtin(args, expr),
             _ => unreachable!("not a comptime dynamic builtin: {builtin}"),
         }
     }
@@ -764,6 +765,186 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Err(diverge) => Ok(Err(diverge)),
         }
+    }
+
+    fn eval_call_builtin(
+        &mut self,
+        args: &[hir::LocalId],
+        expr_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let &[closure, comptime_args, runtime_args] = args else {
+            unreachable!("arg count checked")
+        };
+        let closure = self.expect_closure_arg(closure, Builtin::Call)?;
+        let comptime_args_values = self.expect_comptime_tuple_arg(comptime_args, Builtin::Call)?;
+        let expected_comptime_args = self.comptime_param_count(closure.fn_def_id);
+        if expected_comptime_args != comptime_args_values.len() {
+            self.diag_ctx.emit_function_introspection_args_mismatch(
+                Builtin::Call,
+                self.values.get_closure_name(closure.value),
+                expected_comptime_args,
+                comptime_args_values.len(),
+                self.loc(self.bindings[comptime_args].use_span),
+            );
+            return Err(Poisoned);
+        }
+        let (runtime_signature, _return_type) = match self.eval_function_signature_introspection(
+            closure.fn_def_id,
+            &closure.captures,
+            &comptime_args_values,
+            self.bindings[comptime_args].use_span,
+        )? {
+            Ok(function_types) => function_types,
+            Err(diverge) => return Ok(Err(diverge)),
+        };
+        let runtime_arg_locals =
+            self.prepare_call_runtime_arg_locals(runtime_args, runtime_signature)?;
+        let (call_args, call_arg_spans) = self.assemble_call_args(
+            closure.fn_def_id,
+            &comptime_args_values,
+            &runtime_arg_locals,
+            self.bindings[comptime_args].use_span,
+            self.bindings[runtime_args].use_span,
+        );
+
+        let type_name = self.values.get_closure_name(closure.value);
+        self.with_captures_buf(|this, capture_buf_offset| {
+            for &capture in &closure.captures {
+                this.eval.captures_buf.push(capture);
+            }
+            this.with_maybe_values_buf(|this, values_buf_offset| {
+                let call_args = this.eval.call_args.push_copy_slice(&call_args);
+                let call_arg_spans = this.eval.call_arg_spans.push_copy_slice(&call_arg_spans);
+                let result = this.eval_call_inner(
+                    closure.value,
+                    closure.fn_def_id,
+                    call_args,
+                    call_arg_spans,
+                    expr_span,
+                    type_name,
+                    capture_buf_offset,
+                    values_buf_offset,
+                );
+                this.eval.call_arg_spans.pop();
+                this.eval.call_args.pop();
+                result
+            })
+        })
+    }
+
+    fn prepare_call_runtime_arg_locals(
+        &mut self,
+        runtime_args: hir::LocalId,
+        runtime_signature: TypeId,
+    ) -> MaybePoisoned<Vec<Local>> {
+        let runtime_args_binding = self.bindings[runtime_args];
+        let runtime_args_state = runtime_args_binding.state?;
+        let actual_ty = self.state_type(runtime_args_state);
+        if !actual_ty.is_assignable_to(runtime_signature) {
+            self.diag_ctx.emit_type_mismatch_simple(
+                self.eval.values,
+                runtime_signature,
+                actual_ty,
+                self.loc(runtime_args_binding.use_span),
+            );
+            return Err(Poisoned);
+        }
+
+        let Type::Compound(Compound::Tuple(tuple)) = self.types.lookup(runtime_signature) else {
+            unreachable!("runtime signature introspection always returns a tuple type")
+        };
+
+        match runtime_args_state {
+            LocalState::Comptime(value) => {
+                let Value::Compound { fields, .. } = self.values.lookup(value) else {
+                    unreachable!("runtime args type checked as tuple")
+                };
+                Ok(fields
+                    .iter()
+                    .map(|&field| {
+                        Local::comptime(
+                            field,
+                            runtime_args_binding.use_span,
+                            runtime_args_binding.origin,
+                        )
+                    })
+                    .collect())
+            }
+            LocalState::Runtime(local) => Ok(tuple
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(field_index, &field_ty)| {
+                    let target = self.mir_types.push(field_ty);
+                    self.emit(mir::Instruction::Set {
+                        target,
+                        expr: mir::Expr::FieldAccess {
+                            object: local,
+                            field_index: field_index.try_into().expect("field index fits u32"),
+                        },
+                    });
+                    Local {
+                        state: Ok(LocalState::Runtime(target)),
+                        use_span: runtime_args_binding.use_span,
+                        origin: runtime_args_binding.origin,
+                    }
+                })
+                .collect()),
+        }
+    }
+
+    fn assemble_call_args(
+        &mut self,
+        fn_def_id: hir::FnDefId,
+        comptime_args: &[ValueId],
+        runtime_args: &[Local],
+        comptime_args_span: SourceSpan,
+        runtime_args_span: SourceSpan,
+    ) -> (Vec<Local>, Vec<SourceSpan>) {
+        let mut call_args = Vec::with_capacity(self.hir.fn_params[fn_def_id].len());
+        let mut call_arg_spans = Vec::with_capacity(self.hir.fn_params[fn_def_id].len());
+        let mut next_comptime_arg = 0;
+        let mut next_runtime_arg = 0;
+
+        for &param in &self.hir.fn_params[fn_def_id] {
+            let (arg, span) = if param.is_comptime {
+                let value = comptime_args[next_comptime_arg];
+                next_comptime_arg += 1;
+                (
+                    Local::comptime(
+                        value,
+                        comptime_args_span,
+                        DefOrigin::Local(comptime_args_span),
+                    ),
+                    comptime_args_span,
+                )
+            } else {
+                match param.r#type {
+                    hir::ParamType::Any { .. } => {
+                        next_comptime_arg += 1;
+                    }
+                    hir::ParamType::Explicit(_) => {}
+                    hir::ParamType::Poisoned => {
+                        call_args.push(Local {
+                            state: Err(Poisoned),
+                            use_span: runtime_args_span,
+                            origin: DefOrigin::Local(runtime_args_span),
+                        });
+                        call_arg_spans.push(runtime_args_span);
+                        continue;
+                    }
+                }
+                let arg = runtime_args[next_runtime_arg];
+                next_runtime_arg += 1;
+                (arg, runtime_args_span)
+            };
+            call_args.push(arg);
+            call_arg_spans.push(span);
+        }
+
+        assert_eq!(next_comptime_arg, comptime_args.len());
+        assert_eq!(next_runtime_arg, runtime_args.len());
+        (call_args, call_arg_spans)
     }
 
     fn eval_function_signature_introspection(

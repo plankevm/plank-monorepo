@@ -488,7 +488,7 @@ impl<'a> FunctionLowerer<'a> {
 
             B::Create => emit!(EvmCreate::new, [a, b, c], Value),
             B::Create2 => emit!(EvmCreate2::new, [a, b, c, d], Value),
-            B::Call => emit!(EvmCall::new, [a, b, c, d, e, f, g], Value),
+            B::EvmCall => emit!(EvmCall::new, [a, b, c, d, e, f, g], Value),
             B::CallCode => emit!(EvmCallCode::new, [a, b, c, d, e, f, g], Value),
             B::DelegateCall => emit!(EvmDelegateCall::new, [a, b, c, d, e, f], Value),
             B::StaticCall => emit!(EvmStaticCall::new, [a, b, c, d, e, f], Value),

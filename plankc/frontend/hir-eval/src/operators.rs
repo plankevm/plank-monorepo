@@ -166,11 +166,12 @@ impl crate::scope::Scope<'_, '_> {
                     .eval
                     .call_arg_spans
                     .push_copy_slice(&[lhs_binding.use_span, rhs_binding.use_span]);
-                let args = [lhs, rhs];
+                let args =
+                    this.eval.call_args.push_copy_slice(&[this.bindings[lhs], this.bindings[rhs]]);
                 let res = this.eval_call_inner(
                     closure_vid,
                     fn_def,
-                    &args,
+                    args,
                     arg_spans,
                     expr,
                     None,
@@ -178,6 +179,7 @@ impl crate::scope::Scope<'_, '_> {
                     values_buf_offset,
                 );
                 this.eval.call_arg_spans.pop();
+                this.eval.call_args.pop();
                 res
             })
         })
@@ -227,11 +229,11 @@ impl crate::scope::Scope<'_, '_> {
                     this.eval.captures_buf.push(capture);
                 }
                 let arg_spans = this.eval.call_arg_spans.push_copy_slice(&[use_span]);
-                let args = [input];
+                let args = this.eval.call_args.push_copy_slice(&[this.bindings[input]]);
                 let res = this.eval_call_inner(
                     closure_vid,
                     fn_def_id,
-                    &args,
+                    args,
                     arg_spans,
                     expr,
                     None,
@@ -239,6 +241,7 @@ impl crate::scope::Scope<'_, '_> {
                     values_buf_offset,
                 );
                 this.eval.call_arg_spans.pop();
+                this.eval.call_args.pop();
                 res
             })
         })

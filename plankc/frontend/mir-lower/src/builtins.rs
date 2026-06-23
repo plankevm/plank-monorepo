@@ -93,7 +93,7 @@ pub(crate) fn add_as_op(
         // ========== EVM System Calls ==========
         RuntimeBuiltin::Create => OperationKind::Create,
         RuntimeBuiltin::Create2 => OperationKind::Create2,
-        RuntimeBuiltin::Call => OperationKind::Call,
+        RuntimeBuiltin::EvmCall => OperationKind::Call,
         RuntimeBuiltin::CallCode => OperationKind::CallCode,
         RuntimeBuiltin::DelegateCall => OperationKind::DelegateCall,
         RuntimeBuiltin::StaticCall => OperationKind::StaticCall,
