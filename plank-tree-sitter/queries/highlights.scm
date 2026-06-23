@@ -59,12 +59,15 @@
   ; Bytecode Introspection
   "@runtime_start_offset" "@init_end_offset" "@runtime_length"
   ; Comptime Type Reflection
-  "@is_struct" "@has_plain_name" "@has_parameterized_name" "@type_name"
-  "@field_count" "@field_type" "@field_name" "@field_index" "@get_field" "@set_field" "@uninit"
+  "@is_struct" "@is_tuple" "@has_plain_name" "@has_parameterized_name" "@type_name"
+  "@field_count" "@field_type" "@field_name" "@field_index" "@type_index"
+  "@get_field" "@set_field" "@uninit"
+  ; Function Introspection
+  "@fn_name" "@get_comptime_param_count" "@get_runtime_signature" "@get_return_type" "@call"
   ; Comptime Diagnostics
   "@compile_error" "@in_comptime" "@set_eval_branch_quota"
   ; Bytes
-  "@cbytes_concat" "@cbytes_padded_read_u256" "@keccak256_cbytes" "@sha256_cbytes"
+  "@concat_cbytes" "@padded_read_cbytes" "@keccak256_cbytes" "@sha256_cbytes"
   "@slice_cbytes" "@data_offset"
   ))
 
