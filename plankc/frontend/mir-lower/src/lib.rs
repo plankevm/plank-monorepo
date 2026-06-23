@@ -72,7 +72,7 @@ impl LowerCtx<'_> {
     fn size_in_locals(&self, ty: TypeId) -> u32 {
         match self.mir.types.lookup(ty) {
             Type::Primitive(prim) => match prim {
-                PrimitiveType::Void | PrimitiveType::Never => 0,
+                PrimitiveType::Never => 0,
                 PrimitiveType::Bool | PrimitiveType::U256 | PrimitiveType::MemoryPointer => 1,
                 PrimitiveType::Function => unreachable!("function unsizeable in SIR"),
                 PrimitiveType::Type | PrimitiveType::CBytes => {
@@ -168,7 +168,6 @@ fn lower_basic_block(
         match instr {
             Instruction::Set { target, expr } => match expr {
                 Expr::Const(vid) => match values.lookup(vid) {
-                    Value::Void => {}
                     Value::Bool(b) => {
                         let value = if b { 1u32 } else { 0u32 };
                         let sets =
@@ -413,7 +412,6 @@ fn materialize_constant_compound_literal(
 ) {
     for &field in fields {
         match values.lookup(field) {
-            Value::Void => {}
             Value::Bool(b) => {
                 let value = match b {
                     true => 1,

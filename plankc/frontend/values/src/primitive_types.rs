@@ -13,7 +13,6 @@ bitflags::bitflags! {
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(test, derive(enum_iterator::Sequence))]
 pub enum PrimitiveType {
-    Void,
     U256,
     Bool,
     MemoryPointer,
@@ -27,7 +26,6 @@ impl PrimitiveType {
     pub const fn name(self) -> &'static str {
         use plank_session::builtins::builtin_names;
         match self {
-            PrimitiveType::Void => builtin_names::VOID,
             PrimitiveType::U256 => builtin_names::U256,
             PrimitiveType::Bool => builtin_names::BOOL,
             PrimitiveType::MemoryPointer => builtin_names::MEMORY_POINTER,
@@ -40,7 +38,7 @@ impl PrimitiveType {
 
     pub const fn flags(self) -> TypeFlags {
         match self {
-            PrimitiveType::Void | PrimitiveType::U256 | PrimitiveType::Bool => TypeFlags::NONE,
+            PrimitiveType::U256 | PrimitiveType::Bool => TypeFlags::NONE,
             PrimitiveType::MemoryPointer => TypeFlags::RUNTIME_ONLY,
             PrimitiveType::Type => TypeFlags::COMPTIME_ONLY,
             PrimitiveType::Function => TypeFlags::from_bits_retain(

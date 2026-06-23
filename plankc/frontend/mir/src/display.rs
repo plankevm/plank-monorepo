@@ -48,7 +48,7 @@ impl<'a> DisplayMir<'a> {
                     write!(f, "0x{x:x}")
                 }
             }
-            Value::Void => write!(f, "void_unit"),
+            Value::Compound { ty, .. } if ty == TypeId::VOID => write!(f, "()"),
             Value::Compound { ty, fields } => {
                 self.fmt_type(f, ty)?;
                 write!(f, " {{")?;

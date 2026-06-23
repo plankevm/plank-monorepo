@@ -1,7 +1,7 @@
 use crate::*;
 use plank_core::Idx;
 use plank_session::{Session, write_bytes_literal};
-use plank_values::{U256, Value, ValueInterner, uint};
+use plank_values::{TypeId, U256, Value, ValueInterner, uint};
 use std::fmt::{self, Display, Formatter};
 
 const DISPLAY_AS_HEX_THRESHOLD: U256 = uint!(100_000_U256);
@@ -57,7 +57,6 @@ impl<'a> DisplayHir<'a> {
             Expr::Value(Err(Poisoned)) => write!(f, "<poison>"),
             Expr::Value(Ok(vid)) => match self.values.lookup(vid) {
                 Value::Bool(b) => write!(f, "{b}"),
-                Value::Void => write!(f, "void"),
                 Value::BigNum(x) => {
                     if x < DISPLAY_AS_HEX_THRESHOLD {
                         write!(f, "{x}")
@@ -65,17 +64,19 @@ impl<'a> DisplayHir<'a> {
                         write!(f, "0x{x:x}")
                     }
                 }
+                Value::Type(TypeId::VOID) => write!(f, "type:tuple {{}}"),
                 Value::Type(id) => write!(
                     f,
                     "type:{}",
                     id.as_primitive()
-                        .expect("invariant: only primitive types are inlined as HIR values")
+                        .expect("invariant: only primitive types and void are inlined as Value::Type in HIR")
                         .name()
                 ),
                 Value::Bytes(bytes) => {
                     let bytes = self.session.lookup_bytes_slice(bytes);
                     write_bytes_literal(f, bytes)
                 }
+                Value::Compound { ty, .. } if ty == TypeId::VOID => write!(f, "type:tuple {{}}"),
                 other @ (Value::Closure { .. } | Value::Compound { .. }) => {
                     unreachable!("unexpected value in HIR: {other:?}")
                 }

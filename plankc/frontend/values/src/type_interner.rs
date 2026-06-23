@@ -194,7 +194,9 @@ pub struct StructRef(CompoundRef);
 pub struct TupleRef(CompoundRef);
 
 impl TypeId {
-    pub const VOID: TypeId = TypeId::from_primitive(PrimitiveType::Void);
+    /// `void` is an alias for the empty tuple `tuple {}`. The empty tuple is pre-interned as the
+    /// first arena allocation in [`TypeInterner::new`], so it always lives at offset 0.
+    pub const VOID: TypeId = TypeId::from_tuple(TupleRef(CompoundRef::new_tuple(0)));
     pub const U256: TypeId = TypeId::from_primitive(PrimitiveType::U256);
     pub const BOOL: TypeId = TypeId::from_primitive(PrimitiveType::Bool);
     pub const MEMORY_POINTER: TypeId = TypeId::from_primitive(PrimitiveType::MemoryPointer);
@@ -254,7 +256,6 @@ impl TypeId {
 
     pub const fn as_primitive(self) -> Result<PrimitiveType, CompoundRef> {
         match self {
-            TypeId::VOID => Ok(PrimitiveType::Void),
             TypeId::U256 => Ok(PrimitiveType::U256),
             TypeId::BOOL => Ok(PrimitiveType::Bool),
             TypeId::MEMORY_POINTER => Ok(PrimitiveType::MemoryPointer),
@@ -290,13 +291,20 @@ const _TYPE_ID_TAGS_OK: () = const {
 
 impl TypeInterner {
     pub fn new() -> Self {
-        Self {
+        let interner = Self {
             struct_dedup: UnsafeCell::new(HashTable::new()),
             tuple_dedup: UnsafeCell::new(HashTable::new()),
             arena: ChunkedArena::new(),
             hasher: DefaultHashBuilder::default(),
             type_name_args: UnsafeCell::new(ListOfLists::new()),
-        }
+        };
+        let (empty_tuple, _) = interner.intern_tuple(TupleKey { fields: &[] });
+        assert_eq!(
+            TypeId::from_tuple(empty_tuple),
+            TypeId::VOID,
+            "empty tuple must be interned first so `void` lands at arena offset 0"
+        );
+        interner
     }
 
     pub fn is_comptime_only(&self, ty: TypeId) -> bool {
@@ -753,13 +761,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_tuple_is_not_void() {
+    fn empty_tuple_is_void() {
         let interner = TypeInterner::new();
         let (tuple, status) = interner.intern_tuple(TupleKey { fields: &[] });
         assert_eq!(status, Ok(()));
         let tuple_ty = TypeId::from_tuple(tuple);
 
-        assert_ne!(tuple_ty, TypeId::VOID);
+        assert_eq!(tuple_ty, TypeId::VOID);
         let Type::Compound(Compound::Tuple(tuple)) = interner.lookup(tuple_ty) else {
             panic!("expected tuple type")
         };

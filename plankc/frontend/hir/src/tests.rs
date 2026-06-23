@@ -117,14 +117,14 @@ fn test_inline_closure_lowering() {
                 %0 = type:never
             body:
                 eval @evm_stop()
-                ret void
+                ret type:tuple {}
         }
         @fn1() -> %0 {
             preamble:
                 %0 = type:never
             body:
                 eval @evm_invalid()
-                ret void
+                ret type:tuple {}
         }
         @fn2() -> %0 {
             captures: [%0 -> %1]
@@ -133,7 +133,7 @@ fn test_inline_closure_lowering() {
             body:
                 %2 = %1
                 eval call %2()
-                ret void
+                ret type:tuple {}
         }
 
         ==== Init ====
@@ -354,7 +354,7 @@ fn test_fn_struct_return() {
         r#"
         ==== Constants ====
         ConstId(0) ("Pair") result=LocalId(0) {
-            %1 = void
+            %1 = type:tuple {}
             %2 = type:u256
             %3 = type:u256
             %0 = struct#0 main.plk:1:14
@@ -1462,7 +1462,7 @@ fn test_explicit_return_in_function() {
                 %3 = %1
                 %4 = 1
                 ret @evm_add(%3, %4)
-                ret void
+                ret type:tuple {}
         }
 
         ==== Init ====

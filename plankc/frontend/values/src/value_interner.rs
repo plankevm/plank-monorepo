@@ -15,7 +15,6 @@ newtype_index! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StoredValue {
-    Void,
     Bool(bool),
     BigNum(BigNumId),
     Type(TypeId),
@@ -26,7 +25,6 @@ enum StoredValue {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Value<'a> {
-    Void,
     Bool(bool),
     BigNum(U256),
     Type(TypeId),
@@ -38,7 +36,6 @@ pub enum Value<'a> {
 impl Value<'_> {
     pub fn get_type(&self) -> TypeId {
         match self {
-            Value::Void => TypeId::VOID,
             Value::Bool(_) => TypeId::BOOL,
             Value::BigNum(_) => TypeId::U256,
             Value::Type(_) => TypeId::TYPE,
@@ -73,7 +70,6 @@ fn stored_to_value<'a>(
     big_nums: &'a BigNumInterner,
 ) -> Value<'a> {
     match stored {
-        StoredValue::Void => Value::Void,
         StoredValue::Bool(b) => Value::Bool(b),
         StoredValue::BigNum(bid) => Value::BigNum(big_nums.lookup(bid)),
         StoredValue::Type(t) => Value::Type(t),
@@ -96,7 +92,10 @@ impl ValueInterner {
             big_nums: BigNumInterner::new(),
             closure_names: HashMap::new(),
         };
-        assert_eq!(new_interner.intern(Value::Void), ValueId::VOID);
+        assert_eq!(
+            new_interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] }),
+            ValueId::VOID
+        );
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
         assert_eq!(new_interner.intern(Value::Bool(true)), ValueId::TRUE);
         assert_eq!(new_interner.intern_num(U256::ZERO), ValueId::ZERO_NUM);
@@ -159,7 +158,6 @@ impl ValueInterner {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let stored = match value {
-                    Value::Void => StoredValue::Void,
                     Value::Bool(b) => StoredValue::Bool(b),
                     Value::BigNum(n) => StoredValue::BigNum(self.big_nums.intern(n)),
                     Value::Type(t) => StoredValue::Type(t),
@@ -204,7 +202,6 @@ pub struct FmtValue<'a> {
 impl FmtValue<'_> {
     fn fmt_value(&self, f: &mut impl fmt::Write, value: ValueId) -> fmt::Result {
         match self.values.lookup(value) {
-            Value::Void => f.write_str("{}"),
             Value::Bool(value) => write!(f, "{value}"),
             Value::BigNum(value) => write!(f, "{value}"),
             Value::Bytes(value) => {
@@ -229,6 +226,7 @@ impl FmtValue<'_> {
                 }
                 f.write_str(">")
             }
+            Value::Compound { ty, .. } if ty == TypeId::VOID => f.write_str("()"),
             Value::Compound { ty, fields } => match self.types.lookup(ty) {
                 Type::Compound(Compound::Struct(r#struct)) => {
                     write!(f, "{} {{", self.types.format(self.session, self.values, ty))?;
@@ -277,8 +275,8 @@ mod tests {
     #[test]
     fn intern_primitives_dedup() {
         let mut interner = ValueInterner::new();
-        let v1 = interner.intern(Value::Void);
-        let v2 = interner.intern(Value::Void);
+        let v1 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] });
+        let v2 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] });
         assert_eq!(v1, v2);
 
         let b1 = interner.intern(Value::Bool(true));
@@ -291,7 +289,7 @@ mod tests {
     #[test]
     fn intern_compound_dedup() {
         let mut interner = ValueInterner::new();
-        let v1 = interner.intern(Value::Void);
+        let v1 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] });
         let ty = interner.intern(Value::Type(TypeId::new(1)));
 
         let s1 = interner.intern(Value::Compound { ty: TypeId::new(1), fields: &[v1, ty] });

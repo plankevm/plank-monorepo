@@ -18,7 +18,7 @@ fn test_simple_malloc_mstore_return() {
             %1 : memptr = @malloc_uninit(%0)
             %2 : memptr = %1
             %3 : u256 = 5
-            %4 : void = @mstore32(%2, %3)
+            %4 : tuple {} = @mstore32(%2, %3)
             %5 : memptr = %1
             %6 : u256 = 32
             %7 : never = @evm_return(%5, %6)
@@ -61,13 +61,13 @@ fn test_no_else_if_as_expr() {
                 if %10 {
                     %11 : u256 = 3
                     %12 : u256 = 4
-                    %13 : void = @evm_sstore(%11, %12)
-                    %14 : void = void_unit
+                    %13 : tuple {} = @evm_sstore(%11, %12)
+                    %14 : tuple {} = ()
                 } else {
-                    %14 : void = void_unit
+                    %14 : tuple {} = ()
                 }
             }
-            %15 : void = %14
+            %15 : tuple {} = %14
             %16 : never = @evm_stop()
         }
         "#,
@@ -94,7 +94,7 @@ fn test_comptime_if_condition_folds_in_runtime() {
         @fn0() -> never {
             %0 : u256 = 3
             %1 : u256 = 4
-            %2 : void = @evm_sstore(%0, %1)
+            %2 : tuple {} = @evm_sstore(%0, %1)
             %3 : never = @evm_stop()
         }
         "#,
@@ -437,7 +437,7 @@ fn test_never_fn_missing_termination() {
           | |                     `never` expected because of this
         3 | |         let x = 5;
         4 | |     };
-          | |_____^ expected `never`, got `void`
+          | |_____^ expected `never`, got `tuple {}`
         "#],
     );
 }

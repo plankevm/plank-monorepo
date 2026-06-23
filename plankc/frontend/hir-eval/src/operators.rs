@@ -289,8 +289,8 @@ impl crate::scope::Scope<'_, '_> {
                 let args = [lhs, rhs];
                 self.eval_runtime_foldable_builtin(RuntimeBuiltin::Eq, &args, expr)
             }
-            (op_equals, Ok(PrimitiveType::Void)) => {
-                // `(x: void) == (y: void)` is always `true`, `!=` always `false`.
+            (op_equals, Err(_)) if ty == TypeId::VOID => {
+                // `void` is the empty tuple: `() == ()` is always `true`, `!=` always `false`.
                 Ok(Ok(EvalValue::Comptime(op_equals.into())))
             }
             (false, Ok(PrimitiveType::U256 | PrimitiveType::MemoryPointer)) => {

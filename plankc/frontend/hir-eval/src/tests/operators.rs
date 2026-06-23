@@ -43,7 +43,7 @@ fn test_unary_bitwise_not_without_std() {
             %3 : u256 = @evm_not(%2)
             %4 : u256 = %3
             %5 : u256 = 0
-            %6 : void = @evm_sstore(%5, %4)
+            %6 : tuple {} = @evm_sstore(%5, %4)
             %7 : never = @evm_stop()
         }
         "#,
@@ -92,12 +92,12 @@ fn test_runtime_checked_add_with_std() {
             %3 : u256 = 0
             %4 : memptr = @evm_add(%2, %3)
             %5 : u256 = 0x4e487b71
-            %6 : void = @mstore32(%4, %5)
+            %6 : tuple {} = @mstore32(%4, %5)
             %7 : memptr = %1
             %8 : u256 = 32
             %9 : memptr = @evm_add(%7, %8)
             %10 : u256 = 17
-            %11 : void = @mstore32(%9, %10)
+            %11 : tuple {} = @mstore32(%9, %10)
             %12 : memptr = %1
             %13 : u256 = 28
             %14 : memptr = @evm_add(%12, %13)
@@ -115,9 +115,9 @@ fn test_runtime_checked_add_with_std() {
             if %7 {
                 %8 : never = call @fn0()
             } else {
-                %9 : void = void_unit
+                %9 : tuple {} = ()
             }
-            %10 : void = %9
+            %10 : tuple {} = %9
             %11 : u256 = %4
             ret %11
         }
@@ -296,16 +296,16 @@ fn test_shift_operators() {
             %13 : u256 = @evm_shl(%12, %11)
             %14 : u256 = %4
             %15 : u256 = 0
-            %16 : void = @evm_sstore(%15, %14)
+            %16 : tuple {} = @evm_sstore(%15, %14)
             %17 : u256 = %7
             %18 : u256 = 1
-            %19 : void = @evm_sstore(%18, %17)
+            %19 : tuple {} = @evm_sstore(%18, %17)
             %20 : u256 = %10
             %21 : u256 = 2
-            %22 : void = @evm_sstore(%21, %20)
+            %22 : tuple {} = @evm_sstore(%21, %20)
             %23 : u256 = %13
             %24 : u256 = 3
-            %25 : void = @evm_sstore(%24, %23)
+            %25 : tuple {} = @evm_sstore(%24, %23)
             %26 : never = @evm_stop()
         }
         "#,
@@ -475,7 +475,7 @@ fn test_runtime_bitwise_not_with_std() {
             %3 : u256 = @evm_not(%2)
             %4 : u256 = %3
             %5 : u256 = 0
-            %6 : void = @evm_sstore(%5, %4)
+            %6 : tuple {} = @evm_sstore(%5, %4)
             %7 : never = @evm_stop()
         }
         "#,
@@ -500,7 +500,7 @@ fn test_comptime_checked_add_fold_with_std() {
         @fn0() -> never {
             %0 : u256 = 7
             %1 : u256 = 0
-            %2 : void = @evm_sstore(%0, %1)
+            %2 : tuple {} = @evm_sstore(%0, %1)
             %3 : never = @evm_stop()
         }
         "#,
@@ -525,7 +525,7 @@ fn test_comptime_wrapping_add_fold_with_std() {
         @fn0() -> never {
             %0 : u256 = 8
             %1 : u256 = 0
-            %2 : void = @evm_sstore(%0, %1)
+            %2 : tuple {} = @evm_sstore(%0, %1)
             %3 : never = @evm_stop()
         }
         "#,
@@ -552,10 +552,10 @@ fn test_comptime_shift_fold_with_std() {
         @fn0() -> never {
             %0 : u256 = 0
             %1 : u256 = 16
-            %2 : void = @evm_sstore(%0, %1)
+            %2 : tuple {} = @evm_sstore(%0, %1)
             %3 : u256 = 1
             %4 : u256 = 256
-            %5 : void = @evm_sstore(%3, %4)
+            %5 : tuple {} = @evm_sstore(%3, %4)
             %6 : never = @evm_stop()
         }
         "#,
@@ -714,7 +714,7 @@ fn test_equals_type_equality() {
         @fn0() -> never {
             %0 : u256 = 0
             %1 : u256 = 1
-            %2 : void = @evm_sstore(%0, %1)
+            %2 : tuple {} = @evm_sstore(%0, %1)
             %3 : never = @evm_stop()
         }
         "#,
@@ -946,9 +946,9 @@ fn test_memptr_equality() {
             if %5 {
                 %6 : never = @evm_invalid()
             } else {
-                %7 : void = void_unit
+                %7 : tuple {} = ()
             }
-            %8 : void = %7
+            %8 : tuple {} = %7
             %9 : never = @evm_stop()
         }
         "#,
@@ -1042,12 +1042,12 @@ fn test_operator_precedence() {
             %3 : u256 = 0
             %4 : memptr = @evm_add(%2, %3)
             %5 : u256 = 0x4e487b71
-            %6 : void = @mstore32(%4, %5)
+            %6 : tuple {} = @mstore32(%4, %5)
             %7 : memptr = %1
             %8 : u256 = 32
             %9 : memptr = @evm_add(%7, %8)
             %10 : u256 = 17
-            %11 : void = @mstore32(%9, %10)
+            %11 : tuple {} = @mstore32(%9, %10)
             %12 : memptr = %1
             %13 : u256 = 28
             %14 : memptr = @evm_add(%12, %13)
@@ -1072,9 +1072,9 @@ fn test_operator_precedence() {
             if %14 {
                 %15 : never = call @fn2()
             } else {
-                %16 : void = void_unit
+                %16 : tuple {} = ()
             }
-            %17 : void = %16
+            %17 : tuple {} = %16
             %18 : u256 = %4
             ret %18
         }
@@ -1098,12 +1098,12 @@ fn test_operator_precedence() {
             %3 : u256 = 0
             %4 : memptr = @evm_add(%2, %3)
             %5 : u256 = 0x4e487b71
-            %6 : void = @mstore32(%4, %5)
+            %6 : tuple {} = @mstore32(%4, %5)
             %7 : memptr = %1
             %8 : u256 = 32
             %9 : memptr = @evm_add(%7, %8)
             %10 : u256 = 18
-            %11 : void = @mstore32(%9, %10)
+            %11 : tuple {} = @mstore32(%9, %10)
             %12 : memptr = %1
             %13 : u256 = 28
             %14 : memptr = @evm_add(%12, %13)
@@ -1118,9 +1118,9 @@ fn test_operator_precedence() {
             if %4 {
                 %5 : never = call @fn6()
             } else {
-                %6 : void = void_unit
+                %6 : tuple {} = ()
             }
-            %7 : void = %6
+            %7 : tuple {} = %6
             %8 : u256 = %0
             %9 : u256 = %1
             %10 : u256 = @evm_div(%8, %9)
@@ -1137,9 +1137,9 @@ fn test_operator_precedence() {
             if %7 {
                 %8 : never = call @fn2()
             } else {
-                %9 : void = void_unit
+                %9 : tuple {} = ()
             }
-            %10 : void = %9
+            %10 : tuple {} = %9
             %11 : u256 = %4
             ret %11
         }

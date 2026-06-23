@@ -109,7 +109,7 @@ fn declare_runtime_shape(
     }
     let shape = match mir.types.lookup(ty) {
         PlankType::Primitive(primitive) => match primitive {
-            PrimitiveType::Void | PrimitiveType::Never => None,
+            PrimitiveType::Never => None,
             PrimitiveType::Bool => Some(SonaType::I1),
             PrimitiveType::U256 | PrimitiveType::MemoryPointer => Some(SonaType::I256),
             PrimitiveType::Function | PrimitiveType::Type | PrimitiveType::CBytes => {

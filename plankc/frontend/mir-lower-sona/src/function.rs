@@ -374,7 +374,6 @@ impl<'a> FunctionLowerer<'a> {
 
     fn materialize_constant(&mut self, value: ValueId) -> Option<SonaValueId> {
         match self.values.lookup(value) {
-            Value::Void => None,
             Value::Bool(value) => Some(self.fb.make_imm_value(Immediate::I1(value))),
             Value::BigNum(value) => {
                 let bytes = value.to_be_bytes::<32>();

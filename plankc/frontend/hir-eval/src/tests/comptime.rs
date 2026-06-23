@@ -2935,11 +2935,11 @@ fn scoped_set_eval_in_branch() {
             %0 : bool = false
             %1 : bool = %0
             if %1 {
-                %2 : void = void_unit
+                %2 : tuple {} = ()
             } else {
-                %2 : void = void_unit
+                %2 : tuple {} = ()
             }
-            %3 : void = %2
+            %3 : tuple {} = %2
             %4 : never = @evm_stop()
         }
         "#,

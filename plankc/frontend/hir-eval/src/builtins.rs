@@ -636,11 +636,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 target
             }
-            Type::Primitive(PrimitiveType::Void) => {
-                let target = self.mir_types.push(TypeId::VOID);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::VOID) });
-                target
-            }
             Type::Primitive(
                 PrimitiveType::Type
                 | PrimitiveType::Function
@@ -857,7 +852,6 @@ fn build_uninit_comptime(
     match types.lookup(ty) {
         Type::Primitive(PrimitiveType::U256) => ValueId::ZERO_NUM,
         Type::Primitive(PrimitiveType::Bool) => ValueId::FALSE,
-        Type::Primitive(PrimitiveType::Void) => ValueId::VOID,
         Type::Primitive(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
         Type::Primitive(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
         Type::Primitive(

@@ -240,14 +240,14 @@ fn lowers_aggregate_access_to_exact_ir() {
         r#"
         target = "evm-ethereum-osaka"
 
-        type @struct_0 = {i256, unit, i256};
+        type @struct_8 = {i256, unit, i256};
 
         func public %init() {
             block0:
                 v1.i256 = evm_calldata_load 0.i256;
                 v3.i256 = evm_calldata_load 32.i256;
-                v5.@struct_0 = insert_value undef.@struct_0 0.i256 v1;
-                v7.@struct_0 = insert_value v5 2.i256 v3;
+                v5.@struct_8 = insert_value undef.@struct_8 0.i256 v1;
+                v7.@struct_8 = insert_value v5 2.i256 v3;
                 v8.*i8 = evm_malloc 32.i256;
                 v9.i256 = ptr_to_int v8 i256;
                 v10.i256 = extract_value v7 2.i256;
