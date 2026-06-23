@@ -21,33 +21,8 @@ pub enum EvmVersion {
     Osaka = 13,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Feature {
-    // Count leading zeros: https://eips.ethereum.org/EIPS/eip-7939
-    Clz,
-}
-
-impl EvmVersion {
-    pub fn supports(self, feature: Feature) -> bool {
-        match feature {
-            Feature::Clz => self >= Self::Osaka,
-        }
-    }
-}
-
 impl From<EvmVersion> for U256 {
     fn from(value: EvmVersion) -> Self {
         U256::from(value as u32)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn evm_spec_supports_feature() {
-        assert!(!EvmVersion::Cancun.supports(Feature::Clz));
-        assert!(EvmVersion::Osaka.supports(Feature::Clz));
     }
 }
