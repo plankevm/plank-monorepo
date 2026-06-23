@@ -577,22 +577,22 @@ fn test_duplicated_const_def_should_not_be_lowered_into_hir() {
             preamble:
                 %0 = type:type
                 [comptime] param#0 %1 : %0
-                %2 = type:void
+                %2 = type:tuple {}
             body:
                 eval $1
-                ret void
+                ret type:tuple {}
         }
         @fn1() -> %0 {
             preamble:
-                %0 = type:void
+                %0 = type:tuple {}
             body:
-                ret void
+                ret type:tuple {}
         }
         @fn2() -> %0 {
             preamble:
-                %0 = type:void
+                %0 = type:tuple {}
             body:
-                ret void
+                ret type:tuple {}
         }
 
         ==== Init ====
