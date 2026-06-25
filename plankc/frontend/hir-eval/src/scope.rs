@@ -134,14 +134,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         res
     }
 
-    pub fn eval_comptime_expr(
-        &mut self,
-        expr: hir::Expr,
-    ) -> Result<MaybePoisoned<EvalValue>, Diverge> {
+    fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
-        let value = self.eval_expr(expr);
+        let result = inner(self);
         self.comptime = parent_comptime;
-        value
+        result
     }
 
     pub fn emit(&mut self, instr: mir::Instruction) {
@@ -333,34 +330,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    fn eval_comptime_set_mut(
-        &mut self,
-        local: hir::LocalId,
-        r#type: Option<hir::LocalId>,
-        expr: hir::Expr,
-    ) -> Result<(), Diverge> {
-        let value = self.eval_comptime_expr(expr)?;
-        let value = value.and_then(|value| {
-            let Some(type_local) = r#type else {
-                return Ok(value);
-            };
-            let expected_ty = self.expect_type(type_local)?;
-            let type_loc = self.loc(self.bindings[type_local].use_span);
-            self.type_check(value, expected_ty, type_loc, expr.span)?;
-            Ok(value)
-        });
-
-        let new_state = value.and_then(|value| {
-            self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
-        });
-
-        self.bindings.insert(
-            local,
-            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
-        );
-        Ok(())
-    }
-
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
         if !self.conditional {
             return self.eval_set(local, None, expr);
@@ -500,35 +469,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         target: hir::LocalId,
         expr: hir::Expr,
     ) -> Result<(), Diverge> {
-        let value = self.eval_comptime_expr(expr)?;
-        let local = self.bindings[target];
-        let new_state = poison::zip(local.state, value).and_then(|(state, value)| {
-            if let ComptimeVarAssignment::Blocked { forced_by } = self.comptime_var_assignment {
-                self.diag_ctx.emit_comptime_var_assign_in_runtime_context(
-                    self.loc(expr.span),
-                    self.loc(local.use_span),
-                    forced_by.map(|l| self.loc(self.bindings[l].use_span)),
-                );
-                return Err(Poisoned);
-            }
-            let expected_ty = self.state_type(state);
-            let type_check =
-                self.type_check(value, expected_ty, self.origin_loc(local.origin), expr.span);
-            let state = match state {
-                LocalState::Comptime(vid) => Ok(vid),
-                LocalState::Runtime(_) => {
-                    self.diag_ctx.emit_runtime_ref_in_comptime(
-                        self.origin_loc(local.origin),
-                        self.loc(expr.span),
-                    );
-                    Err(Poisoned)
-                }
-            };
-            let value = self.expect_comptime_value(value, expr.span);
-            type_check.and(state).and(value).map(LocalState::Comptime)
-        });
-        self.bindings[target].state = new_state;
-        Ok(())
+        if let ComptimeVarAssignment::Blocked { forced_by } = self.comptime_var_assignment {
+            let _ = self.with_comptime(|this| this.eval_expr(expr))?;
+            let local = self.bindings[target];
+            self.diag_ctx.emit_comptime_var_assign_in_runtime_context(
+                self.loc(expr.span),
+                self.loc(local.use_span),
+                forced_by.map(|l| self.loc(self.bindings[l].use_span)),
+            );
+            self.bindings[target].state = Err(Poisoned);
+            return Ok(());
+        }
+        self.with_comptime(|this| this.eval_assign(target, expr))
     }
 
     pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), Diverge> {
@@ -536,7 +488,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr, comptime } => {
                 if comptime {
-                    self.eval_comptime_set_mut(local, r#type, expr)?
+                    self.with_comptime(|this| this.eval_set_mut(local, r#type, expr))?
                 } else {
                     self.eval_set_mut(local, r#type, expr)?
                 }
