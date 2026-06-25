@@ -3040,7 +3040,7 @@ fn test_comptime_var_assigned_in_implicit_comptime_context() {
 }
 
 #[test]
-fn test_comptime_var_referenced_in_explit_comptime_context() {
+fn test_comptime_var_referenced_in_explicit_comptime_context() {
     assert_lowers_to(
         std_project(
             r#"
@@ -3072,7 +3072,7 @@ fn test_comptime_var_referenced_in_explit_comptime_context() {
 
 #[test]
 fn test_comptime_var_assigned_in_implicit_runtime_context() {
-    assert_lowers_to(
+    assert_diagnostics(
         std_project(
             r#"
             init {
@@ -3085,27 +3085,9 @@ fn test_comptime_var_assigned_in_implicit_runtime_context() {
             }
         "#,
         ),
-        r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {
-            %0 : u256 = 0
-            %1 : u256 = @evm_calldataload(%0)
-            %2 : u256 = %1
-            %3 : u256 = 0
-            %4 : bool = @evm_eq(%2, %3)
-            if %4 {
-                %5 : void = ()
-            } else {
-                %5 : void = ()
-            }
-            %6 : void = %5
-            %7 : never = @evm_stop()
-        }
-
-
+        &[r#"
         error: assignment to mutable comptime variable in implicit runtime context
-         --> /Users/vincent/code/plank-monorepo/plankc/scratch2.plk:5:13
+         --> main.plk:5:13
           |
         3 |     comptime let mut x = 34;
           |                          -- comptime mutable variable defined here
@@ -3114,10 +3096,10 @@ fn test_comptime_var_assigned_in_implicit_runtime_context() {
           |             ^^^^^ assignment in implicit runtime context
           |
         note: runtime evaluation forced here
-         --> /Users/vincent/code/plank-monorepo/plankc/scratch2.plk:4:8
+         --> main.plk:4:8
           |
         4 |     if b == 0 {
           |        ^^^^^^^
-        "#,
+        "#],
     );
 }

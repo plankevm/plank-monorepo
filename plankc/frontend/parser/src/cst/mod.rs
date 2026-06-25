@@ -138,9 +138,12 @@ impl std::fmt::Debug for NodeKind {
             Self::RunBlock => write!(f, "RunBlock"),
             Self::ComptimeBlock => write!(f, "ComptimeBlock"),
             Self::Block => write!(f, "Block"),
-            Self::LetStmt { mutable, typed, comptime } => {
-                f.debug_struct("LetStmt").field("mutable", mutable).field("typed", typed).field("comptime", comptime).finish()
-            }
+            Self::LetStmt { mutable, typed, comptime } => f
+                .debug_struct("LetStmt")
+                .field("mutable", mutable)
+                .field("typed", typed)
+                .field("comptime", comptime)
+                .finish(),
             Self::ReturnStmt => write!(f, "ReturnStmt"),
             Self::AssignStmt => write!(f, "AssignStmt"),
             Self::WhileStmt => write!(f, "WhileStmt"),

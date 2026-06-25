@@ -842,7 +842,7 @@ impl<'a> Parser<'a> {
                 return self.parse_let(stmt_start, true);
             } else {
                 let expr = self.parse_block(stmt_start, NodeKind::ComptimeBlock);
-                self.finish_parse_stmt(stmt_start, expr);
+                return self.finish_parse_stmt(stmt_start, expr);
             }
         }
 

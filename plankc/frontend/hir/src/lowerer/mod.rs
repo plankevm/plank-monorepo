@@ -182,19 +182,37 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, mutable: bool, comptime: bool, span: TokenSpan) -> LocalId {
+    fn alloc_local(
+        &mut self,
+        name: StrId,
+        mutable: bool,
+        comptime: bool,
+        span: TokenSpan,
+    ) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable, comptime, span: Some(span) });
+        self.scoped_locals_stack.push(ScopedLocal {
+            name,
+            id,
+            mutable,
+            comptime,
+            span: Some(span),
+        });
         id
     }
 
     fn alloc_anonymous_local(&mut self, name: StrId) -> LocalId {
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable: false, comptime: false, span: None });
+        self.scoped_locals_stack.push(ScopedLocal {
+            name,
+            id,
+            mutable: false,
+            comptime: false,
+            span: None,
+        });
         id
     }
 
@@ -723,10 +741,14 @@ impl BlockLowerer<'_> {
                 }
                 let expr = self.lower_expr(let_stmt.value());
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
-                let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.comptime, let_stmt.name_span);
+                let local = self.alloc_local(
+                    let_stmt.name,
+                    let_stmt.mutable,
+                    let_stmt.comptime,
+                    let_stmt.name_span,
+                );
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
-
 
                 self.emit(if let_stmt.mutable {
                     InstructionKind::SetMut { local, r#type, expr, comptime: let_stmt.comptime }
@@ -766,11 +788,7 @@ impl BlockLowerer<'_> {
                 let target = entry.id;
                 let value = self.lower_expr(assign_stmt.value());
 
-                let comptime = if self.comptime {
-                    false
-                } else {
-                    entry.comptime
-                };
+                let comptime = if self.comptime { false } else { entry.comptime };
                 self.emit(InstructionKind::Assign { target, expr: value, comptime });
             }
             Statement::While(while_stmt) => {

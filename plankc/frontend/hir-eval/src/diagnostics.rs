@@ -320,14 +320,21 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_comptime_var_assign_in_runtime_context(&mut self, loc: SrcLoc, use_loc: SrcLoc, forced_by_expr: Option<SrcLoc>) {
-        let mut diagnostic = Diagnostic::error("assignment to mutable comptime variable in implicit runtime context")
-            .cross_source_annotations(
-                loc,
-                "assignment in implicit runtime context",
-                use_loc,
-                "comptime mutable variable defined here",
-            );
+    pub fn emit_comptime_var_assign_in_runtime_context(
+        &mut self,
+        loc: SrcLoc,
+        use_loc: SrcLoc,
+        forced_by_expr: Option<SrcLoc>,
+    ) {
+        let mut diagnostic = Diagnostic::error(
+            "assignment to mutable comptime variable in implicit runtime context",
+        )
+        .cross_source_annotations(
+            loc,
+            "assignment in implicit runtime context",
+            use_loc,
+            "comptime mutable variable defined here",
+        );
 
         if let Some(forced_by_expr) = forced_by_expr {
             diagnostic = diagnostic.claim(
