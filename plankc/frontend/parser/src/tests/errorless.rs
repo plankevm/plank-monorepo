@@ -2258,7 +2258,7 @@ fn test_let_basic() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: false, typed: false }
+                    LetStmt { mutable: false, typed: false, comptime: false }
                         "let"
                         " "
                         Identifier
@@ -2289,7 +2289,7 @@ fn test_let_with_mut() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: true, typed: false }
+                    LetStmt { mutable: true, typed: false, comptime: false }
                         "let"
                         " "
                         "mut"
@@ -2322,7 +2322,7 @@ fn test_let_with_type() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: false, typed: true }
+                    LetStmt { mutable: false, typed: true, comptime: false }
                         "let"
                         " "
                         Identifier
@@ -2357,7 +2357,7 @@ fn test_let_full() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: true, typed: true }
+                    LetStmt { mutable: true, typed: true, comptime: false }
                         "let"
                         " "
                         "mut"
@@ -2383,6 +2383,79 @@ fn test_let_full() {
 // =============================================================================
 // Other Statements
 // =============================================================================
+
+#[test]
+fn test_comptime_block_stmt_member_access() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        init { comptime { x }.foo; }
+        "#,
+        r#"
+        File
+            InitBlock
+                "init"
+                " "
+                "{"
+                StatementsList
+                    " "
+                    MemberExpr
+                        ComptimeBlock
+                            "comptime"
+                            " "
+                            "{"
+                            StatementsList
+                                " "
+                            Identifier
+                                "x"
+                            " "
+                            "}"
+                        "."
+                        Identifier
+                            "foo"
+                    ";"
+                    " "
+                "}"
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_block_stmt_infix() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        init { comptime { x } + 2; }
+        "#,
+        r#"
+        File
+            InitBlock
+                "init"
+                " "
+                "{"
+                StatementsList
+                    " "
+                    BinaryExpr(Plus)
+                        ComptimeBlock
+                            "comptime"
+                            " "
+                            "{"
+                            StatementsList
+                                " "
+                            Identifier
+                                "x"
+                            " "
+                            "}"
+                        " "
+                        Operator
+                            "+"
+                        " "
+                        NumLiteral
+                            "2"
+                    ";"
+                    " "
+                "}"
+        "#,
+    );
+}
 
 #[test]
 fn test_return_stmt() {

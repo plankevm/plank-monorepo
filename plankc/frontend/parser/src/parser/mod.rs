@@ -687,7 +687,7 @@ impl<'a> Parser<'a> {
     ) -> Option<NodeIdx> {
         let start = self.skip_trivia_start();
 
-        let mut expr = if let Some(((), rhs, kind)) = self.eat_unary() {
+        let expr = if let Some(((), rhs, kind)) = self.eat_unary() {
             let mut unary = self.alloc_node_from(start, NodeKind::UnaryExpr(kind));
             // TODO: Track recursion
             let expr = self.try_parse_expr_min_bp(mode, rhs).unwrap_or_else(|| {
@@ -701,6 +701,16 @@ impl<'a> Parser<'a> {
             self.try_parse_standalone_expr()?
         };
 
+        Some(self.continue_expr_min_bp(start, expr, mode, min_bp))
+    }
+
+    fn continue_expr_min_bp(
+        &mut self,
+        start: TokenIdx,
+        mut expr: NodeIdx,
+        mode: ParseExprMode,
+        min_bp: OpPriority,
+    ) -> NodeIdx {
         loop {
             if Self::MEMBER_PRIORITY > min_bp && self.eat(Token::Dot) {
                 let mut member = self.alloc_node_from(start, NodeKind::MemberExpr);
@@ -787,7 +797,7 @@ impl<'a> Parser<'a> {
             break;
         }
 
-        Some(expr)
+        expr
     }
 
     // ========================== STATEMENT PARSING ==========================
@@ -840,10 +850,15 @@ impl<'a> Parser<'a> {
         if self.eat(Token::Comptime) {
             if self.eat(Token::Let) {
                 return self.parse_let(stmt_start, true);
-            } else {
-                let expr = self.parse_block(stmt_start, NodeKind::ComptimeBlock);
-                return self.finish_parse_stmt(stmt_start, expr);
             }
+            let block = self.parse_block(stmt_start, NodeKind::ComptimeBlock);
+            let expr = self.continue_expr_min_bp(
+                stmt_start,
+                block,
+                ParseExprMode::AllowAll,
+                OpPriority::ZERO,
+            );
+            return self.finish_parse_stmt(stmt_start, expr);
         }
 
         let Some(expr) = self.try_parse_expr(ParseExprMode::AllowAll) else {
