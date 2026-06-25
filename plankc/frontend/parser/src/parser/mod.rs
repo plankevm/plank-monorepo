@@ -853,7 +853,7 @@ impl<'a> Parser<'a> {
             return None;
         };
 
-        return self.finish_parse_stmt(stmt_start, expr);
+        self.finish_parse_stmt(stmt_start, expr)
     }
 
     fn finish_parse_stmt(&mut self, stmt_start: TokenIdx, expr: NodeIdx) -> Option<StmtResult> {
@@ -904,7 +904,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon);
 
         let r#let = self.close_node(r#let);
-        return Some(StmtResult::Statement(r#let));
+        Some(StmtResult::Statement(r#let))
     }
 
     fn parse_block(&mut self, block_start: TokenIdx, block_kind: NodeKind) -> NodeIdx {

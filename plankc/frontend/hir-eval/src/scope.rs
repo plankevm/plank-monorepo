@@ -533,9 +533,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), Diverge> {
         match instr.kind {
-            InstructionKind::Set { local, r#type, expr, .. } => {
-                self.eval_set(local, r#type, expr)?
-            }
+            InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr, comptime } => {
                 if comptime {
                     self.eval_comptime_set_mut(local, r#type, expr)?
