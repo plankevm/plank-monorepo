@@ -145,7 +145,6 @@ impl<'a> DisplayHir<'a> {
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,
-        mutable: bool,
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         write!(f, "{pad}")?;
@@ -154,7 +153,31 @@ impl<'a> DisplayHir<'a> {
             write!(f, " : ")?;
             self.fmt_local(f, r#type)?;
         }
-        write!(f, " {}= ", if mutable { "[mut]" } else { "" })?;
+        write!(f, " = ")?;
+        self.fmt_expr(f, expr)?;
+        writeln!(f)
+    }
+
+    fn fmt_set_mut(
+        &self,
+        f: &mut Formatter<'_>,
+        indent: usize,
+        local: LocalId,
+        r#type: Option<LocalId>,
+        expr: Expr,
+        comptime: bool,
+    ) -> fmt::Result {
+        let pad = "    ".repeat(indent);
+        write!(f, "{pad}")?;
+        if comptime {
+            write!(f, "[comptime] ")?;
+        }
+        self.fmt_local(f, local)?;
+        if let Some(r#type) = r#type {
+            write!(f, " : ")?;
+            self.fmt_local(f, r#type)?;
+        }
+        write!(f, " [mut]= ")?;
         self.fmt_expr(f, expr)?;
         writeln!(f)
     }
@@ -168,10 +191,10 @@ impl<'a> DisplayHir<'a> {
         let pad = "    ".repeat(indent);
         match instr {
             InstructionKind::Set { local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr, false)
+                self.fmt_set(f, indent, local, r#type, expr)
             }
-            InstructionKind::SetMut { local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr, true)
+            InstructionKind::SetMut { local, r#type, expr, comptime } => {
+                self.fmt_set_mut(f, indent, local, r#type, expr, comptime)
             }
             InstructionKind::BranchSet { local, expr } => {
                 write!(f, "{pad}")?;
@@ -180,8 +203,11 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
-            InstructionKind::Assign { target, expr: value } => {
+            InstructionKind::Assign { target, expr: value, comptime } => {
                 write!(f, "{pad}")?;
+                if comptime {
+                    write!(f, "[comptime] ")?;
+                }
                 self.fmt_local(f, target)?;
                 write!(f, " := ")?;
                 self.fmt_expr(f, value)?;

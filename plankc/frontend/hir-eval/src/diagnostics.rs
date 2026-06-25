@@ -320,6 +320,27 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_comptime_var_assign_in_runtime_context(&mut self, loc: SrcLoc, use_loc: SrcLoc, forced_by_expr: Option<SrcLoc>) {
+        let mut diagnostic = Diagnostic::error("assignment to mutable comptime variable in implicit runtime context")
+            .cross_source_annotations(
+                loc,
+                "assignment in implicit runtime context",
+                use_loc,
+                "comptime mutable variable defined here",
+            );
+
+        if let Some(forced_by_expr) = forced_by_expr {
+            diagnostic = diagnostic.claim(
+                Claim::new(Level::Note, "runtime evaluation forced here").element(
+                    Annotations::new(forced_by_expr.source)
+                        .no_label(forced_by_expr.span, AnnotationKind::Primary),
+                ),
+            );
+        }
+
+        diagnostic.emit(self);
+    }
+
     pub fn emit_eval_branch_quota_too_large(&mut self, loc: SrcLoc) {
         Diagnostic::error("eval branch quota is too large")
             .primary(loc.source, loc.span, "quota must fit in u32")

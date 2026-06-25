@@ -60,6 +60,13 @@ pub(crate) enum EvalContext {
     Other,
 }
 
+pub(crate) enum ComptimeVarAssignment {
+    Allowed,
+    Blocked {
+        forced_by: Option<hir::LocalId>
+    }
+}
+
 pub(crate) struct Scope<'a, 'ctx> {
     pub eval: &'a mut Evaluator<'ctx>,
     pub diag_ctx: &'a mut DiagCtx<'ctx>,
@@ -68,6 +75,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub ctx: EvalContext,
     pub comptime: bool,
     pub conditional: bool,
+    pub comptime_var_assignment: ComptimeVarAssignment,
     pub comptime_quota: ComptimeQuota,
     pub eval_branch_quota_start_loc: SrcLoc,
     pub max_eval_branch_quota_seen: u32,
@@ -93,6 +101,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
+            comptime_var_assignment: ComptimeVarAssignment::Allowed,
             conditional: false,
             comptime_quota,
             eval_branch_quota_start_loc,
@@ -125,6 +134,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let res = self.eval_block_inline(block);
         self.comptime = parent_comptime;
         res
+    }
+
+    pub fn eval_comptime_expr(&mut self, expr: hir::Expr) -> Result<MaybePoisoned<EvalValue>, Diverge> {
+        let parent_comptime = std::mem::replace(&mut self.comptime, true);
+        let value = self.eval_expr(expr);
+        self.comptime = parent_comptime;
+        value
     }
 
     pub fn emit(&mut self, instr: mir::Instruction) {
@@ -316,6 +332,34 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
+    fn eval_comptime_set_mut(
+        &mut self,
+        local: hir::LocalId,
+        r#type: Option<hir::LocalId>,
+        expr: hir::Expr,
+    ) -> Result<(), Diverge> {
+        let value = self.eval_comptime_expr(expr)?;
+        let value = value.and_then(|value| {
+            let Some(type_local) = r#type else {
+                return Ok(value);
+            };
+            let expected_ty = self.expect_type(type_local)?;
+            let type_loc = self.loc(self.bindings[type_local].use_span);
+            self.type_check(value, expected_ty, type_loc, expr.span)?;
+            Ok(value)
+        });
+
+        let new_state = value.and_then(|value| {
+            self.expect_comptime_value(value, expr.span).map(LocalState::Comptime)
+        });
+
+        self.bindings.insert(
+            local,
+            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
+        );
+        Ok(())
+    }
+
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
         if !self.conditional {
             return self.eval_set(local, None, expr);
@@ -450,15 +494,57 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
+    fn eval_comptime_assign(&mut self, target: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
+        let value = self.eval_comptime_expr(expr)?;
+        let local = self.bindings[target];
+        let new_state = poison::zip(local.state, value).and_then(|(state, value)| {
+            if let ComptimeVarAssignment::Blocked { forced_by } = self.comptime_var_assignment {
+                self.diag_ctx.emit_comptime_var_assign_in_runtime_context(
+                    self.loc(expr.span),
+                    self.loc(local.use_span),
+                    forced_by.map(|l| self.loc(self.bindings[l].use_span)),
+                );
+                return Err(Poisoned)
+            }
+            let expected_ty = self.state_type(state);
+            let type_check =
+                self.type_check(value, expected_ty, self.origin_loc(local.origin), expr.span);
+            let state = match state {
+                LocalState::Comptime(vid) => Ok(vid),
+                LocalState::Runtime(_) => {
+                    self.diag_ctx.emit_runtime_ref_in_comptime(
+                        self.origin_loc(local.origin),
+                        self.loc(expr.span),
+                    );
+                    Err(Poisoned)
+                }
+            };
+            let value = self.expect_comptime_value(value, expr.span);
+            type_check.and(state).and(value).map(LocalState::Comptime)
+        });
+        self.bindings[target].state = new_state;
+        Ok(())
+    }
+
     pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), Diverge> {
         match instr.kind {
-            InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
-            InstructionKind::SetMut { local, r#type, expr } => {
-                self.eval_set_mut(local, r#type, expr)?
+            InstructionKind::Set { local, r#type, expr, .. } => self.eval_set(local, r#type, expr)?,
+            InstructionKind::SetMut { local, r#type, expr, comptime } => {
+                if comptime {
+                    self.eval_comptime_set_mut(local, r#type, expr)?
+                } else {
+                    self.eval_set_mut(local, r#type, expr)?
+                }
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
             InstructionKind::ComptimeBlock { body } => self.eval_comptime(body)?,
-            InstructionKind::Assign { target, expr } => self.eval_assign(target, expr)?,
+            InstructionKind::Assign { target, expr, comptime } => {
+                if comptime {
+                    self.eval_comptime_assign(target, expr)?
+                } else {
+                    self.eval_assign(target, expr)?
+                }
+            }
             InstructionKind::Eval(expr) => {
                 let value = self.eval_expr(expr)?;
                 if self.is_comptime() {
@@ -494,6 +580,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let prev_conditional = std::mem::replace(&mut self.conditional, conditional);
         let result = inner(self);
         self.conditional = prev_conditional;
+
+        result
+    }
+
+    fn with_comptime_assignment<R>(&mut self, comptime_var_assignment: ComptimeVarAssignment, inner: impl FnOnce(&mut Self) -> R) -> R {
+        let prev_comptime_var_assignment = std::mem::replace(&mut self.comptime_var_assignment, comptime_var_assignment);
+        let result = inner(self);
+        self.comptime_var_assignment = prev_comptime_var_assignment;
+
         result
     }
 
@@ -513,9 +608,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) =
-                    self.with_conditional(true, |this| this.eval_block_to_mir(then));
+                    self.with_conditional(true, |this| {
+                        this.with_comptime_assignment(
+                            ComptimeVarAssignment::Blocked { forced_by: Some(condition) },
+                            |this| this.eval_block_to_mir(then)
+                        )
+                    });
                 let (r#else, else_res) =
-                    self.with_conditional(true, |this| this.eval_block_to_mir(r#else));
+                    self.with_conditional(true, |this| {
+                        this.with_comptime_assignment(
+                            ComptimeVarAssignment::Blocked { forced_by: Some(condition) },
+                            |this| this.eval_block_to_mir(r#else)
+                        )
+                    });
+
                 self.emit(mir::Instruction::If {
                     condition: mir_local,
                     then_block: then,
@@ -613,15 +719,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        let condition = mir_condition_local?;
-        let (body, body_res) = self.eval_block_to_mir(body);
+        let mir_condition = mir_condition_local?;
+        let (body, body_res) = self.with_comptime_assignment(
+            ComptimeVarAssignment::Blocked { forced_by: None },
+            |this| this.eval_block_to_mir(body)
+        );
         match body_res {
             Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
                 return Err(err);
             }
             Err(Diverge::BlockEnd(_)) | Ok(()) => {}
         }
-        self.emit(mir::Instruction::While { condition_block, condition, body });
+        self.emit(mir::Instruction::While { condition_block, condition: mir_condition, body });
 
         Ok(())
     }

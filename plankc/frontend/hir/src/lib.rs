@@ -97,11 +97,13 @@ pub enum InstructionKind {
         expr: Expr,
     },
     SetMut {
+        comptime: bool,
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,
     },
     Assign {
+        comptime: bool,
         target: LocalId,
         expr: Expr,
     },

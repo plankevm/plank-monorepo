@@ -3005,3 +3005,119 @@ fn scoped_set_eval_in_branch() {
         "#,
     );
 }
+
+#[test]
+fn test_comptime_var_assigned_in_implicit_comptime_context() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            const MY_CONST = 7;
+
+            init {
+                comptime let mut x = 2;
+
+                if MY_CONST > x {
+                    x = x + 1;
+                    @evm_revert(@malloc_zeroed(x), x);
+                } else {
+                    x = x + 2;
+                    @evm_revert(@malloc_zeroed(x), x);
+                }
+            }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 3
+            %1 : memptr = @malloc_zeroed(%0)
+            %2 : u256 = 3
+            %3 : never = @evm_revert(%1, %2)
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_var_referenced_in_explit_comptime_context() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            const MY_CONST = 7;
+
+            init {
+                comptime let mut x = 2;
+
+                let y = comptime {
+                    MY_CONST + x
+                };
+
+                @evm_revert(@malloc_zeroed(y), y);
+            }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 9
+            %1 : memptr = @malloc_zeroed(%0)
+            %2 : u256 = 9
+            %3 : never = @evm_revert(%1, %2)
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_var_assigned_in_implicit_runtime_context() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            init {
+                let b = @evm_calldataload(0);
+                comptime let mut x = 34;
+                if b == 0 {
+                    x = x + 1;
+                }
+                @evm_stop();
+            }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = %1
+            %3 : u256 = 0
+            %4 : bool = @evm_eq(%2, %3)
+            if %4 {
+                %5 : void = ()
+            } else {
+                %5 : void = ()
+            }
+            %6 : void = %5
+            %7 : never = @evm_stop()
+        }
+
+
+        error: assignment to mutable comptime variable in implicit runtime context
+         --> /Users/vincent/code/plank-monorepo/plankc/scratch2.plk:5:13
+          |
+        3 |     comptime let mut x = 34;
+          |                          -- comptime mutable variable defined here
+        4 |     if b == 0 {
+        5 |         x = x + 1;
+          |             ^^^^^ assignment in implicit runtime context
+          |
+        note: runtime evaluation forced here
+         --> /Users/vincent/code/plank-monorepo/plankc/scratch2.plk:4:8
+          |
+        4 |     if b == 0 {
+          |        ^^^^^^^
+        "#,
+    );
+}

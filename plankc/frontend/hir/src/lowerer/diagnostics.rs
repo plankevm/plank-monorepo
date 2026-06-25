@@ -1,7 +1,6 @@
 use plank_parser::lexer::{Token, TokenSpan};
 use plank_session::{
-    Annotations, Builtin, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId,
-    SourceSpan, StrId,
+    Annotations, Builtin, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId, SourceSpan, StrId,
 };
 
 use super::BlockLowerer;
@@ -264,6 +263,17 @@ impl BlockLowerer<'_> {
                     .primary(self.lexed.tokens_src_span(return_span), "not allowed here"),
             )
             .emit(*self.session.borrow_mut());
+    }
+
+    pub fn emit_comptime_let_redundant_in_comptime_scope(&self, span: TokenSpan) {
+        let source_span = self.lexed.tokens_src_span(span);
+        Diagnostic::error(format!("'comptime let' is redundant in comptime scope"))
+            .element(
+                Annotations::new(self.source_id)
+                    .no_label(source_span, plank_session::AnnotationKind::Primary)
+            )
+            .emit(*self.session.borrow_mut());
+
     }
 }
 

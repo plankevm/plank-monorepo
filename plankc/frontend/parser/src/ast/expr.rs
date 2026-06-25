@@ -498,6 +498,7 @@ pub struct LetStmt<'cst> {
     pub name: StrId,
     pub name_span: TokenSpan,
     pub mutable: bool,
+    pub comptime: bool,
     type_view: Option<NodeView<'cst>>,
     value_view: NodeView<'cst>,
 }
@@ -505,7 +506,7 @@ pub struct LetStmt<'cst> {
 impl<'cst> LetStmt<'cst> {
     /// Returns `Ok(None)` for non-LetStmt nodes, `Err(span)` for malformed LetStmt nodes.
     fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
-        let NodeKind::LetStmt { mutable, typed } = view.kind() else {
+        let NodeKind::LetStmt { mutable, typed, comptime } = view.kind() else {
             return Ok(None);
         };
         let mut children = view.children();
@@ -514,7 +515,7 @@ impl<'cst> LetStmt<'cst> {
         let name = name_view.ident().ok_or(view.span())?;
         let type_view = if typed { Some(children.next().ok_or(view.span())?) } else { None };
         let value_view = children.next().ok_or(view.span())?;
-        Ok(Some(Self { name, name_span, mutable, type_view, value_view }))
+        Ok(Some(Self { name, name_span, mutable, comptime, type_view, value_view }))
     }
 
     pub fn type_expr(&self) -> Option<Expr<'cst>> {

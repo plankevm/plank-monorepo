@@ -834,28 +834,16 @@ impl<'a> Parser<'a> {
         }
 
         if self.eat(Token::Let) {
-            let mutable = self.eat(Token::Mut);
-            let mut r#let =
-                self.alloc_node_from(stmt_start, NodeKind::LetStmt { mutable, typed: false });
+            return self.parse_let(stmt_start, false);
+        }
 
-            let name = self.expect_ident();
-            self.push_child(&mut r#let, name);
-
-            if self.eat(Token::Colon) {
-                self.update_kind(r#let, NodeKind::LetStmt { mutable, typed: true });
-                let type_expr = self.parse_expr(ParseExprMode::AllowAll);
-                self.push_child(&mut r#let, type_expr);
+        if self.eat(Token::Comptime) {
+            if self.eat(Token::Let) {
+                return self.parse_let(stmt_start, true);
+            } else {
+                let expr = self.parse_block(stmt_start, NodeKind::ComptimeBlock);
+                self.finish_parse_stmt(stmt_start, expr);
             }
-
-            self.expect(Token::Equals);
-
-            let assign = self.parse_expr(ParseExprMode::AllowAll);
-            self.push_child(&mut r#let, assign);
-
-            self.expect(Token::Semicolon);
-
-            let r#let = self.close_node(r#let);
-            return Some(StmtResult::Statement(r#let));
         }
 
         let Some(expr) = self.try_parse_expr(ParseExprMode::AllowAll) else {
@@ -865,6 +853,10 @@ impl<'a> Parser<'a> {
             return None;
         };
 
+        return self.finish_parse_stmt(stmt_start, expr);
+    }
+
+    fn finish_parse_stmt(&mut self, stmt_start: TokenIdx, expr: NodeIdx) -> Option<StmtResult> {
         if self.eat(Token::Equals) {
             let mut assign = self.alloc_node_from(stmt_start, NodeKind::AssignStmt);
             self.push_child(&mut assign, expr);
@@ -888,6 +880,31 @@ impl<'a> Parser<'a> {
         } else {
             Some(StmtResult::EndExprOrStmt(expr))
         }
+    }
+
+    fn parse_let(&mut self, let_start: TokenIdx, comptime: bool) -> Option<StmtResult> {
+        let mutable = self.eat(Token::Mut);
+        let mut r#let =
+            self.alloc_node_from(let_start, NodeKind::LetStmt { mutable, typed: false, comptime });
+
+        let name = self.expect_ident();
+        self.push_child(&mut r#let, name);
+
+        if self.eat(Token::Colon) {
+            self.update_kind(r#let, NodeKind::LetStmt { mutable, typed: true, comptime });
+            let type_expr = self.parse_expr(ParseExprMode::AllowAll);
+            self.push_child(&mut r#let, type_expr);
+        }
+
+        self.expect(Token::Equals);
+
+        let assign = self.parse_expr(ParseExprMode::AllowAll);
+        self.push_child(&mut r#let, assign);
+
+        self.expect(Token::Semicolon);
+
+        let r#let = self.close_node(r#let);
+        return Some(StmtResult::Statement(r#let));
     }
 
     fn parse_block(&mut self, block_start: TokenIdx, block_kind: NodeKind) -> NodeIdx {
