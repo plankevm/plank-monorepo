@@ -127,13 +127,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         mir_block
     }
 
-    pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
-        let parent_comptime = std::mem::replace(&mut self.comptime, true);
-        let res = self.eval_block_inline(block);
-        self.comptime = parent_comptime;
-        res
-    }
-
     fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
         let result = inner(self);
@@ -494,7 +487,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
-            InstructionKind::ComptimeBlock { body } => self.eval_comptime(body)?,
+            InstructionKind::ComptimeBlock { body } => {
+                self.with_comptime(|this| this.eval_block_inline(body))?
+            },
             InstructionKind::Assign { target, expr, comptime } => {
                 if comptime {
                     self.eval_comptime_assign(target, expr)?

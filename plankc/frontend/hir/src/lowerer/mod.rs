@@ -329,6 +329,13 @@ impl BlockLowerer<'_> {
         self.instructions_buf.push(Instruction { kind });
     }
 
+    fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
+        let parent_comptime = std::mem::replace(&mut self.comptime, true);
+        let result = inner(self);
+        self.comptime = parent_comptime;
+        result
+    }
+
     fn flush_instructions_from(&mut self, start: usize, span: SourceSpan) -> BlockId {
         let block_id = self.builder.block_instrs.push_iter(self.instructions_buf.drain(start..));
         let span_id = self.builder.block_spans.push(Ok(span));
@@ -480,18 +487,18 @@ impl BlockLowerer<'_> {
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
                 let body = self.create_sub_block(block.node().span(), |this| {
-                    this.comptime = true;
-                    for stmt in block.statements() {
-                        this.lower_statement(stmt);
-                    }
-                    let expr = match block.end_expr() {
-                        Some(e) => this.lower_expr(e),
-                        None => {
-                            let span = block.node().span();
-                            this.expr(ExprKind::VOID, span)
+                    let expr = this.with_comptime(|this| {
+                        for stmt in block.statements() {
+                            this.lower_statement(stmt);
                         }
-                    };
-                    this.comptime = false;
+                        match block.end_expr() {
+                            Some(e) => this.lower_expr(e),
+                            None => {
+                                let span = block.node().span();
+                                this.expr(ExprKind::VOID, span)
+                            }
+                        }
+                    });
                     this.emit(InstructionKind::Set { local: result, r#type: None, expr });
                 });
 
