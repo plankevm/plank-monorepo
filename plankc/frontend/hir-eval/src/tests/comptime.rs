@@ -3007,6 +3007,32 @@ fn scoped_set_eval_in_branch() {
 }
 
 #[test]
+fn test_comptime_var_assigned_in_explicit_comptime_context() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            init {
+                comptime let mut x = 34;
+                let mut b = comptime {
+                    x = x + 1;
+                    x
+                };
+                @evm_stop();
+            }
+            "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 35
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_var_assigned_in_implicit_comptime_context() {
     assert_lowers_to(
         std_project(
@@ -3016,13 +3042,14 @@ fn test_comptime_var_assigned_in_implicit_comptime_context() {
             init {
                 comptime let mut x = 2;
 
-                if MY_CONST > x {
+                let mut b = if MY_CONST > x {
                     x = x + 1;
-                    @evm_revert(@malloc_zeroed(x), x);
+                    x
                 } else {
                     x = x + 2;
-                    @evm_revert(@malloc_zeroed(x), x);
-                }
+                    x
+                };
+                @evm_stop();
             }
         "#,
         ),
@@ -3031,40 +3058,7 @@ fn test_comptime_var_assigned_in_implicit_comptime_context() {
         ; init
         @fn0() -> never {
             %0 : u256 = 3
-            %1 : memptr = @malloc_zeroed(%0)
-            %2 : u256 = 3
-            %3 : never = @evm_revert(%1, %2)
-        }
-        "#,
-    );
-}
-
-#[test]
-fn test_comptime_var_referenced_in_explicit_comptime_context() {
-    assert_lowers_to(
-        std_project(
-            r#"
-            const MY_CONST = 7;
-
-            init {
-                comptime let mut x = 2;
-
-                let y = comptime {
-                    MY_CONST + x
-                };
-
-                @evm_revert(@malloc_zeroed(y), y);
-            }
-        "#,
-        ),
-        r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {
-            %0 : u256 = 9
-            %1 : memptr = @malloc_zeroed(%0)
-            %2 : u256 = 9
-            %3 : never = @evm_revert(%1, %2)
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -3104,5 +3098,32 @@ fn test_comptime_var_assigned_in_implicit_runtime_context() {
               |             ^^^^^^^^^ assignment in implicit runtime context
             "#
         ],
+    );
+}
+
+#[test]
+fn test_comptime_var_referenced_in_explicit_comptime_context() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            const MY_CONST = 7;
+
+            init {
+                comptime let mut x = 2;
+                let mut y = comptime {
+                    MY_CONST + x
+                };
+                @evm_stop()
+            }
+        "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 9
+            %1 : never = @evm_stop()
+        }
+        "#,
     );
 }
