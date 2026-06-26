@@ -62,7 +62,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         if self.session.has_compile_logs() {
             anstream::eprintln!("Compile Log Output:");
             for compile_log in self.session.compile_logs() {
-                anstream::eprintln!("{}", compile_log.format());
+                anstream::eprintln!("{compile_log}");
             }
         }
         std::process::exit(1)

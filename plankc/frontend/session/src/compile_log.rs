@@ -1,4 +1,5 @@
 use crate::SrcLoc;
+use std::fmt;
 
 #[derive(Debug, Clone)]
 pub struct CompileLog {
@@ -6,8 +7,8 @@ pub struct CompileLog {
     pub msg: String,
 }
 
-impl CompileLog {
-    pub fn format(&self) -> String {
-        self.msg.clone()
+impl fmt::Display for CompileLog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.msg)
     }
 }

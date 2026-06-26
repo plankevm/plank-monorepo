@@ -67,7 +67,7 @@ fn assert_project_diagnostics(test_project: impl Into<TestProject>, expected: &[
 #[track_caller]
 fn assert_compile_logs(source: impl Into<TestProject>, expected: &[&str]) {
     let (_, _, session) = try_lower(source);
-    let actual: Vec<String> = session.compile_logs().iter().map(|log| log.format()).collect();
+    let actual: Vec<String> = session.compile_logs().iter().map(|log| log.to_string()).collect();
     let expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
     pretty_assertions::assert_eq!(actual, expected);
 }
