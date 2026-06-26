@@ -79,7 +79,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let mut fn_scope = Scope::new(
             self.eval,
-            self.diag_ctx,
             fn_def.source,
             false,
             comptime_quota,
@@ -193,10 +192,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let value = match state {
                     LocalState::Comptime(value) => value,
                     LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_closure_capture_not_comptime(
-                            this.loc(capture.use_span),
-                            this.origin_loc(binding.origin),
-                        );
+                        let use_loc = this.loc(capture.use_span);
+                        let def_loc = this.origin_loc(binding.origin);
+                        this.eval.diag().emit_closure_capture_not_comptime(use_loc, def_loc);
                         poisoned = true;
                         continue;
                     }
@@ -230,7 +228,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let closure_vid = match state {
                     LocalState::Comptime(value) => value,
                     LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_use_span));
+                        let callee_loc = this.loc(callee_use_span);
+                        this.eval.diag().emit_call_target_not_comptime(callee_loc);
                         return Err(Poisoned);
                     }
                 };
@@ -238,11 +237,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     this.eval.values.lookup(closure_vid)
                 else {
                     let ty = this.values.type_of_value(closure_vid);
-                    this.diag_ctx.emit_not_callable(
-                        this.eval.values,
-                        ty,
-                        this.binding_loc(callee_use_span, callee_origin),
-                    );
+                    let callee_loc = this.binding_loc(callee_use_span, callee_origin);
+                    this.eval.diag().emit_not_callable(ty, callee_loc);
                     return Err(Poisoned);
                 };
                 for &capture in captures {
@@ -284,8 +280,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if (param.is_comptime || self.is_comptime())
                 && let Ok(LocalState::Runtime(_)) = arg.state
             {
-                self.diag_ctx
-                    .emit_comptime_param_got_runtime(self.loc(arg.use_span), func.loc(param.span));
+                let arg_loc = self.loc(arg.use_span);
+                let param_loc = func.loc(param.span);
+                self.eval.diag().emit_comptime_param_got_runtime(arg_loc, param_loc);
                 comptime_args_poisoned = true;
                 continue;
             };
@@ -310,11 +307,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let call_loc = self.loc(call_span);
 
         if params.len() != args.len() {
-            self.diag_ctx.emit_arg_count_mismatch(
+            let param_list_loc = func.loc(func.param_list_span);
+            self.eval.diag().emit_arg_count_mismatch(
                 params.len(),
                 args.len(),
-                self.loc(call_span),
-                func.loc(func.param_list_span),
+                call_loc,
+                param_list_loc,
             );
             return Err(Poisoned);
         }
@@ -349,9 +347,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         call_loc: SrcLoc,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let preamble = {
-            let restore = self.diag_ctx.set_preamble_call_site(call.loc());
+            let restore = self.eval.set_preamble_call_site(call.loc());
             let preamble = self.eval_preamble(fn_def_id);
-            self.diag_ctx.restore_preamble_call_site(restore);
+            self.eval.restore_preamble_call_site(restore);
             match preamble {
                 Ok(Ok(preamble)) => preamble,
                 Ok(Err(Poisoned)) => return Err(Poisoned),
@@ -416,8 +414,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let lowered = match self.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
             Ok(&mut LoweredFnState::Done(fn_id)) => fn_id,
             Ok(state @ LoweredFnState::InProgress) => {
-                self.diag_ctx.emit_runtime_call_with_recursion(call_loc);
                 *state = LoweredFnState::Done(Err(Poisoned));
+                self.eval.diag().emit_runtime_call_with_recursion(call_loc);
                 return Ok(Err(Diverge::ControlFlowPoisoned));
             }
             Ok(LoweredFnState::Empty) => unreachable!("empty lowered entry should be retried"),
@@ -527,7 +525,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble.return_type?;
 
         if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
-            self.diag_ctx.emit_comptime_call_branch_quota_exhausted(
+            self.eval.diag().emit_comptime_call_branch_quota_exhausted(
                 call.loc(),
                 self.comptime_quota.limit(),
                 self.eval_branch_quota_start_loc,
@@ -543,7 +541,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state) => match state.get() {
                 EvaluatedFnState::Empty => state,
                 EvaluatedFnState::InProgress => {
-                    self.diag_ctx.emit_infinite_comptime_recursion(call.loc());
+                    self.eval.diag().emit_infinite_comptime_recursion(call.loc());
                     state.set(EvaluatedFnState::Done(Err(Poisoned)));
                     return Err(Poisoned);
                 }
@@ -590,7 +588,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             DefOrigin::Local(span) => SrcLoc::new(call.source, span),
                             DefOrigin::Const(id) => self.eval.hir.consts[id].loc(),
                         };
-                        self.diag_ctx.emit_runtime_ref_in_comptime(
+                        self.eval.diag().emit_runtime_ref_in_comptime(
                             SrcLoc::new(call.source, call.span),
                             binding_loc,
                         );
@@ -599,7 +597,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             DefOrigin::Local(span) => SrcLoc::new(call.source, span),
                             DefOrigin::Const(id) => self.eval.hir.consts[id].loc(),
                         };
-                        self.diag_ctx
+                        self.eval
+                            .diag()
                             .emit_comptime_only_return_with_runtime_arg(arg_loc, call.loc());
                     }
                     poisoned = true;
@@ -740,14 +739,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 );
                 let arg_ty = self.state_type(state);
                 if !arg_ty.is_assignable_to(param_ty) {
-                    self.diag_ctx.emit_type_mismatch(
-                        self.eval.values,
-                        param_ty,
-                        self.origin_loc(self.bindings[local_id].origin),
-                        arg_ty,
-                        arg_loc,
-                        false,
-                    );
+                    let param_loc = self.origin_loc(self.bindings[local_id].origin);
+                    self.eval
+                        .diag()
+                        .emit_type_mismatch(param_ty, param_loc, arg_ty, arg_loc, false);
                     self.bindings[arg].state = Err(Poisoned);
                 }
             }
@@ -794,14 +789,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if let Ok((return_type, value)) = poison::zip(ret_type, value) {
             let ty = self.value_type(value);
             if !ty.is_assignable_to(return_type) {
-                self.diag_ctx.emit_type_mismatch(
-                    self.eval.values,
-                    return_type,
-                    ret_type_loc,
-                    ty,
-                    self.loc(expr.span),
-                    true,
-                );
+                let expr_loc = self.loc(expr.span);
+                self.eval.diag().emit_type_mismatch(return_type, ret_type_loc, ty, expr_loc, true);
                 return Err(Diverge::ControlFlowPoisoned);
             }
         }
@@ -825,7 +814,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             EvalValue::Comptime(value) => {
                 if self.is_comptime_only(value) {
-                    self.diag_ctx.emit_comptime_only_value_at_runtime(self.loc(expr.span));
+                    let expr_loc = self.loc(expr.span);
+                    self.eval.diag().emit_comptime_only_value_at_runtime(expr_loc);
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let ty = self.values.type_of_value(value);

@@ -19,7 +19,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 |(state, use_span, _origin)| match state {
                     LocalState::Comptime(vid) => Ok(vid),
                     LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_struct_type_index_not_comptime(this.loc(use_span));
+                        let use_loc = this.loc(use_span);
+                        this.eval.diag().emit_struct_type_index_not_comptime(use_loc);
                         Err(Poisoned)
                     }
                 },
@@ -40,7 +41,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 if let Some(first_offset) = fields[..i].iter().find_map(|prev_field| {
                     (prev_field.name == field.name).then_some(prev_field.name_offset)
                 }) {
-                    this.diag_ctx.emit_struct_def_duplicate_field(
+                    this.eval.diag().emit_struct_def_duplicate_field(
                         this.source,
                         field.name,
                         first_offset,
@@ -62,11 +63,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             });
 
             if let Err(MixedComptimeAndRuntime) = ok {
-                this.diag_ctx.emit_mixed_struct_type(
-                    this.loc(def_expr_span),
-                    r#struct,
-                    this.eval.values,
-                );
+                let def_loc = this.loc(def_expr_span);
+                this.eval.diag().emit_mixed_struct_type(def_loc, r#struct);
                 return Err(Poisoned);
             }
 
@@ -85,7 +83,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         if object_ty == TypeId::CBYTES {
             if member != builtins::LENGTH {
-                self.diag_ctx.emit_cbytes_unknown_attribute(member, self.loc(expr_span));
+                let loc = self.loc(expr_span);
+                self.eval.diag().emit_cbytes_unknown_attribute(member, loc);
                 return Err(Poisoned);
             }
             let LocalState::Comptime(vid) = state else {
@@ -99,23 +98,16 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(object_ty) else {
             let binding = self.bindings[object];
-            self.diag_ctx.emit_member_on_non_struct(
-                self.eval.values,
-                object_ty,
-                self.binding_loc(binding.use_span, binding.origin),
-            );
+            let binding_loc = self.binding_loc(binding.use_span, binding.origin);
+            self.eval.diag().emit_member_on_non_struct(object_ty, binding_loc);
             return Err(Poisoned);
         };
 
         let Some((field_index, &field)) =
             (0u32..).zip(r#struct.fields).find(|&(_i, &field)| field.name == member)
         else {
-            self.diag_ctx.emit_struct_unknown_field_access(
-                self.eval.values,
-                object_ty,
-                self.loc(expr_span),
-                member,
-            );
+            let loc = self.loc(expr_span);
+            self.eval.diag().emit_struct_unknown_field_access(object_ty, loc, member);
             return Err(Poisoned);
         };
 
@@ -162,7 +154,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             if let Some(prev) =
                 lit_fields[..i].iter().find(|prev_field| prev_field.name == cur_field.name)
             {
-                self.diag_ctx.emit_struct_duplicate_field(
+                self.eval.diag().emit_struct_duplicate_field(
                     cur_field.name,
                     lit_loc,
                     prev.name_offset,
@@ -198,10 +190,9 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 continue;
             };
             let LocalState::Comptime(value) = state else {
-                self.diag_ctx.emit_runtime_ref_in_comptime(
-                    self.loc(lit_span),
-                    self.origin_loc(local.origin),
-                );
+                let lit_loc = self.loc(lit_span);
+                let origin_loc = self.origin_loc(local.origin);
+                self.eval.diag().emit_runtime_ref_in_comptime(lit_loc, origin_loc);
                 validity = Err(Poisoned);
                 continue;
             };
@@ -251,17 +242,19 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 LocalState::Runtime(mir_local) => {
                     if first_runtime_field.is_none() {
                         // One time conversion of already pushed values.
-                        'materialize_comptime: for (&value, &def_field) in
-                            self.eval.values_buf[values_buf_offset..].iter().zip(def.fields)
-                        {
+                        let num_materialized = self.eval.values_buf.len() - values_buf_offset;
+                        'materialize_comptime: for materialized_idx in 0..num_materialized {
+                            let value = self.eval.values_buf[values_buf_offset + materialized_idx];
+                            let def_field = def.fields[materialized_idx];
                             let value_ty = self.values.type_of_value(value);
                             if self.types.is_comptime_only(value_ty) {
                                 let &comptime_lit_field = lit_fields
                                     .iter()
                                     .find(|lit_field| lit_field.name == def_field.name)
                                     .expect("pushed, but not skipped by lit_fields.find?");
-                                self.diag_ctx.emit_mixed_comptime_runtime_struct(
-                                    self.source,
+                                let source = self.source;
+                                self.eval.diag().emit_mixed_comptime_runtime_struct(
+                                    source,
                                     lit_span,
                                     comptime_lit_field,
                                     lit_field,
@@ -291,7 +284,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
                     let value_ty = self.values.type_of_value(value);
                     if self.types.is_comptime_only(value_ty) {
-                        self.diag_ctx.emit_mixed_comptime_runtime_struct(
+                        self.eval.diag().emit_mixed_comptime_runtime_struct(
                             self.source,
                             lit_span,
                             lit_field,
@@ -348,11 +341,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         let struct_ty = self.expect_type(struct_type_local)?;
         let Type::Compound(Compound::Struct(def)) = self.eval.types.lookup(struct_ty) else {
             let binding = self.bindings[struct_type_local];
-            self.diag_ctx.emit_not_a_struct_type(
-                self.eval.values,
-                struct_ty,
-                self.binding_loc(binding.use_span, binding.origin),
-            );
+            let binding_loc = self.binding_loc(binding.use_span, binding.origin);
+            self.eval.diag().emit_not_a_struct_type(struct_ty, binding_loc);
             return Err(Poisoned);
         };
 
@@ -360,12 +350,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         for &lit_field in lit_fields {
             let Some(&def_field) = def.fields.iter().find(|&&field| field.name == lit_field.name)
             else {
-                self.diag_ctx.emit_struct_lit_unexpected_field(
-                    self.eval.values,
-                    struct_ty,
-                    lit_loc,
-                    lit_field,
-                );
+                self.eval.diag().emit_struct_lit_unexpected_field(struct_ty, lit_loc, lit_field);
                 validity = Err(Poisoned);
                 continue;
             };
@@ -377,11 +362,11 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             };
             let field_value_ty = self.state_type(field_value_state);
             if !field_value_ty.is_assignable_to(def_field.ty) {
-                self.diag_ctx.emit_struct_literal_field_type_mismatch(
-                    self.eval.values,
+                let field_value_loc = self.loc(field_value_use_span);
+                self.eval.diag().emit_struct_literal_field_type_mismatch(
                     def_field.ty,
                     field_value_ty,
-                    self.loc(field_value_use_span),
+                    field_value_loc,
                     lit_field.name,
                 );
                 validity = Err(Poisoned);
@@ -392,12 +377,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         // Check for missing fields.
         for &def_field in def.fields {
             if !lit_fields.iter().any(|lit_field| lit_field.name == def_field.name) {
-                self.diag_ctx.emit_struct_missing_field(
-                    self.eval.values,
-                    struct_ty,
-                    def_field.name,
-                    lit_loc,
-                );
+                self.eval.diag().emit_struct_missing_field(struct_ty, def_field.name, lit_loc);
                 validity = Err(Poisoned);
             };
         }

@@ -35,20 +35,18 @@ pub fn evaluate(
 ) -> Mir {
     let types = TypeInterner::new();
     let evaluated_fns_cache = EvaluatedFunctionCache::new();
-    let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values, evm_version);
-    let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
+    let mut evaluator =
+        Evaluator::new(hir, &types, &evaluated_fns_cache, values, session, evm_version);
 
     evaluator.operator_table = match core_ops_source {
-        Some(core_ops_source) => {
-            OperatorTable::with_std_ops(hir, core_ops_source, &mut evaluator, &mut diag_ctx)
-        }
+        Some(core_ops_source) => OperatorTable::with_std_ops(hir, core_ops_source, &mut evaluator),
         None => OperatorTable::new(),
     };
 
     let mut init = None;
     let mut run = None;
     for (entry_id, &entry_point) in hir.entry_points.enumerate_idx() {
-        let fn_id = evaluator.lower_entrypoint(entry_point, &mut diag_ctx);
+        let fn_id = evaluator.lower_entrypoint(entry_point);
         if entry_id == hir.init {
             init = Some(fn_id);
         }
@@ -59,7 +57,7 @@ pub fn evaluate(
     let init = init.expect("HIR init entry point must exist in entry_points");
 
     for const_id in hir.consts.iter_idx() {
-        let _ = evaluator.evaluate_const(const_id, &mut diag_ctx);
+        let _ = evaluator.evaluate_const(const_id);
     }
 
     // A leftover `@compile_log` fails the build, but only when nothing else already has

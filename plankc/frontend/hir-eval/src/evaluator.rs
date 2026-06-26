@@ -4,13 +4,13 @@ use plank_core::{
 use plank_evm::EvmVersion;
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
+use plank_session::{MaybePoisoned, Poisoned, Session, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
 use plank_values::{
     Compound, DefOrigin, Field, Type, TypeId, TypeInterner, TypeName, Value, ValueId, ValueInterner,
 };
 
 use crate::{
-    diagnostics::DiagCtx,
+    diagnostics::{DiagCallSiteRestoreObligation, DiagCtx},
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
     quota::ComptimeQuota,
@@ -44,6 +44,15 @@ newtype_index! {
 }
 
 pub(crate) struct Evaluator<'a> {
+    /// The session is owned by the evaluator. Diagnostics borrow it transiently through
+    /// [`Evaluator::diag`]; non-diagnostic session writes (e.g. interning) go straight to
+    /// `session` without involving the diagnostics machinery.
+    pub session: &'a mut Session,
+    /// Anchors "called here" notes onto diagnostics emitted while evaluating a function preamble.
+    /// Set/restored around preamble evaluation via [`Evaluator::set_preamble_call_site`] and
+    /// borrowed by the transient [`DiagCtx`].
+    pub preamble_call_site: Option<SrcLoc>,
+
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,
@@ -79,9 +88,13 @@ impl<'a> Evaluator<'a> {
         types: &'a TypeInterner,
         evaluated_fns_cache: &'a EvaluatedFunctionCache,
         values: &'a mut ValueInterner,
+        session: &'a mut Session,
         evm_version: EvmVersion,
     ) -> Self {
         Evaluator {
+            session,
+            preamble_call_site: None,
+
             mir_blocks: ListOfLists::new(),
             mir_fns: IndexVec::new(),
             mir_fn_locals: ListOfLists::new(),
@@ -117,25 +130,45 @@ impl<'a> Evaluator<'a> {
         self.types.is_comptime_only(ty)
     }
 
-    pub fn evaluate_const(
-        &mut self,
-        const_id: ConstId,
-        diag_ctx: &mut DiagCtx<'a>,
-    ) -> MaybePoisoned<ValueId> {
+    /// Mints a transient diagnostics view borrowing the session and interners. A fresh one is
+    /// created at each diagnostic emission rather than being threaded through evaluation.
+    pub fn diag(&mut self) -> DiagCtx<'_> {
+        DiagCtx {
+            session: &mut *self.session,
+            types: self.types,
+            values: &*self.values,
+            preamble_call_site: &mut self.preamble_call_site,
+        }
+    }
+
+    pub fn set_preamble_call_site(&mut self, call_site: SrcLoc) -> DiagCallSiteRestoreObligation {
+        DiagCallSiteRestoreObligation::new(self.preamble_call_site.replace(call_site))
+    }
+
+    pub fn restore_preamble_call_site(&mut self, restore: DiagCallSiteRestoreObligation) {
+        self.preamble_call_site = restore.into_prev();
+    }
+
+    pub fn evaluate_const(&mut self, const_id: ConstId) -> MaybePoisoned<ValueId> {
         let const_def = self.hir.consts[const_id];
-        match self.evaluated_consts.entry(const_id) {
+        let is_cycle = match self.evaluated_consts.entry(const_id) {
             Entry::Occupied(State::Done(result)) => return result.value(),
             Entry::Occupied(state @ State::InProgress) => {
-                diag_ctx.emit_const_cycle(const_def.name, const_def.loc());
                 *state = State::Done(ConstEvalResult::Poisoned);
-                return Err(Poisoned);
+                true
             }
-            Entry::Vacant(vacant) => vacant.insert(State::InProgress),
+            Entry::Vacant(vacant) => {
+                vacant.insert(State::InProgress);
+                false
+            }
         };
+        if is_cycle {
+            self.diag().emit_const_cycle(const_def.name, const_def.loc());
+            return Err(Poisoned);
+        }
 
         let mut scope = Scope::new(
             self,
-            diag_ctx,
             const_def.source_id,
             true,
             ComptimeQuota::default(),
@@ -198,18 +231,13 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    pub fn lower_entrypoint(
-        &mut self,
-        entry_point: hir::EntryPoint,
-        diag_ctx: &mut DiagCtx<'a>,
-    ) -> mir::FnId {
+    pub fn lower_entrypoint(&mut self, entry_point: hir::EntryPoint) -> mir::FnId {
         let eval_branch_quota_start_loc = match self.hir.block_spans[entry_point.body] {
             Ok(span) => SrcLoc::new(entry_point.source_id, span),
             Err(Poisoned) => SrcLoc::new(entry_point.source_id, ZERO_SPAN),
         };
         let mut scope = Scope::new(
             self,
-            diag_ctx,
             entry_point.source_id,
             false,
             ComptimeQuota::default(),

@@ -7,7 +7,7 @@ use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, RuntimeBuiltin, SourceId, SourceSpan, SrcLoc};
 use plank_values::{PrimitiveType, TypeId, Value, ValueId};
 
-use crate::{diagnostics::DiagCtx, evaluator::Evaluator, scope::*};
+use crate::{evaluator::Evaluator, scope::*};
 
 pub(crate) struct OperatorTable {
     binary: Vec<(BinaryOp, TypeId, ValueId)>,
@@ -27,7 +27,6 @@ impl OperatorTable {
         hir: &hir::Hir,
         core_ops_source: SourceId,
         evaluator: &mut Evaluator<'a>,
-        diag_ctx: &mut DiagCtx<'a>,
     ) -> Self {
         let mut table = Self::new();
 
@@ -45,16 +44,13 @@ impl OperatorTable {
         ];
 
         for &(op, name) in U256_OPS {
-            let Some(value_id) = resolve_std_fn(hir, core_ops_source, name, evaluator, diag_ctx)
-            else {
+            let Some(value_id) = resolve_std_fn(hir, core_ops_source, name, evaluator) else {
                 continue;
             };
             table.binary.push((op, TypeId::U256, value_id));
         }
 
-        if let Some(value_id) =
-            resolve_std_fn(hir, core_ops_source, "neg_u256", evaluator, diag_ctx)
-        {
+        if let Some(value_id) = resolve_std_fn(hir, core_ops_source, "neg_u256", evaluator) {
             table.negate.replace(value_id);
         }
 
@@ -67,20 +63,19 @@ fn resolve_std_fn<'a>(
     core_ops_source: SourceId,
     name: &str,
     evaluator: &mut Evaluator<'a>,
-    diag_ctx: &mut DiagCtx<'a>,
 ) -> Option<ValueId> {
-    let name_id = diag_ctx.session.intern(name);
+    let name_id = evaluator.session.intern(name);
     let Some(const_id) = hir.consts.iter_idx().find(|id| {
         let def = hir.consts[*id];
         def.name == name_id && def.source_id == core_ops_source
     }) else {
-        diag_ctx.emit_failed_to_resolve_std_fn(core_ops_source, name);
+        evaluator.diag().emit_failed_to_resolve_std_fn(core_ops_source, name);
         return None;
     };
 
-    let value_id = evaluator.evaluate_const(const_id, diag_ctx).ok()?;
+    let value_id = evaluator.evaluate_const(const_id).ok()?;
     if !matches!(evaluator.values.lookup(value_id), Value::Closure { .. }) {
-        diag_ctx.emit_std_operator_not_a_function(name, hir.consts[const_id].loc());
+        evaluator.diag().emit_std_operator_not_a_function(name, hir.consts[const_id].loc());
         return None;
     }
     Some(value_id)
@@ -114,12 +109,8 @@ impl crate::scope::Scope<'_, '_> {
         let rhs_ty = self.state_type(rhs_state);
 
         if lhs_ty != rhs_ty {
-            self.diag_ctx.emit_operator_type_mismatch(
-                self.eval.values,
-                lhs_ty,
-                rhs_ty,
-                self.loc(expr),
-            );
+            let loc = self.loc(expr);
+            self.eval.diag().emit_operator_type_mismatch(lhs_ty, rhs_ty, loc);
             return Err(Poisoned);
         }
 
@@ -133,14 +124,11 @@ impl crate::scope::Scope<'_, '_> {
         let Some(closure_vid) = self.eval.operator_table.lookup_binary(op, lhs_ty) else {
             if lhs_ty == TypeId::MEMORY_POINTER && matches!(op, BinaryOp::Add | BinaryOp::Subtract)
             {
-                self.diag_ctx.emit_operator_not_supported_for_memptr(op, self.loc(expr));
+                let loc = self.loc(expr);
+                self.eval.diag().emit_operator_not_supported_for_memptr(op, loc);
             } else {
-                self.diag_ctx.emit_operator_not_supported(
-                    self.eval.values,
-                    op,
-                    lhs_ty,
-                    self.loc(expr),
-                );
+                let loc = self.loc(expr);
+                self.eval.diag().emit_operator_not_supported(op, lhs_ty, loc);
             }
             return Err(Poisoned);
         };
@@ -148,8 +136,14 @@ impl crate::scope::Scope<'_, '_> {
         let lhs_value = self.try_comptime(lhs_binding, expr)?;
         let rhs_value = self.try_comptime(rhs_binding, expr)?;
         if let Some((lhs, rhs)) = lhs_value.zip(rhs_value) {
-            let value =
-                fold_std_binary_op(op, lhs, rhs, self.eval.values, self.diag_ctx, self.loc(expr))?;
+            let value = match fold_std_binary_op(op, lhs, rhs, self.eval.values) {
+                Ok(value) => value,
+                Err(err) => {
+                    let loc = self.loc(expr);
+                    self.emit_fold_error(err, op, loc);
+                    return Err(Poisoned);
+                }
+            };
             return Ok(Ok(EvalValue::Comptime(value)));
         }
 
@@ -206,7 +200,8 @@ impl crate::scope::Scope<'_, '_> {
 
         let r#impl = self.eval.operator_table.negate.filter(|_| ty.is_assignable_to(TypeId::U256));
         let Some(closure_vid) = r#impl else {
-            self.diag_ctx.emit_operator_not_supported(self.eval.values, op, ty, self.loc(expr));
+            let loc = self.loc(expr);
+            self.eval.diag().emit_operator_not_supported(op, ty, loc);
             return Err(Poisoned);
         };
 
@@ -277,8 +272,8 @@ impl crate::scope::Scope<'_, '_> {
                 let Value::Bytes(rhs) = self.values.lookup(rhs) else {
                     unreachable!("invariant: type checked as cbytes")
                 };
-                let lhs = self.diag_ctx.session.lookup_bytes_slice(lhs);
-                let rhs = self.diag_ctx.session.lookup_bytes_slice(rhs);
+                let lhs = self.eval.session.lookup_bytes_slice(lhs);
+                let rhs = self.eval.session.lookup_bytes_slice(rhs);
                 let result = if op_equals { lhs == rhs } else { lhs != rhs };
                 Ok(Ok(EvalValue::Comptime(result.into())))
             }
@@ -332,7 +327,8 @@ impl crate::scope::Scope<'_, '_> {
             }
             (op_equals, Err(_) | Ok(PrimitiveType::Function | PrimitiveType::Never)) => {
                 let op = if op_equals { BinaryOp::Equals } else { BinaryOp::NotEquals };
-                self.diag_ctx.emit_operator_not_supported(self.eval.values, op, ty, self.loc(expr));
+                let loc = self.loc(expr);
+                self.eval.diag().emit_operator_not_supported(op, ty, loc);
                 Err(Poisoned)
             }
         }
@@ -342,12 +338,8 @@ impl crate::scope::Scope<'_, '_> {
         let (state, use_span, _origin) = self.bindings[local].poisoned()?;
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
-            self.diag_ctx.emit_type_mismatch_simple(
-                self.eval.values,
-                TypeId::BOOL,
-                ty,
-                self.loc(use_span),
-            );
+            let loc = self.loc(use_span);
+            self.eval.diag().emit_type_mismatch_simple(TypeId::BOOL, ty, loc);
             return Err(Poisoned);
         }
         let value = match state {
@@ -366,14 +358,33 @@ impl crate::scope::Scope<'_, '_> {
     }
 }
 
+/// A comptime fold that failed; the caller turns this into the matching diagnostic. Kept separate
+/// from emission so folding only needs `&mut values` while the diagnostic borrows the session.
+enum FoldError {
+    Overflow,
+    Underflow,
+    DivisionByZero,
+    ModuloByZero,
+}
+
+impl crate::scope::Scope<'_, '_> {
+    fn emit_fold_error(&mut self, err: FoldError, op: BinaryOp, loc: SrcLoc) {
+        let mut diag = self.eval.diag();
+        match err {
+            FoldError::Overflow => diag.emit_comptime_arithmetic_overflow(op, loc),
+            FoldError::Underflow => diag.emit_comptime_arithmetic_underflow(op, loc),
+            FoldError::DivisionByZero => diag.emit_comptime_division_by_zero(op, loc),
+            FoldError::ModuloByZero => diag.emit_comptime_modulo_by_zero(op, loc),
+        }
+    }
+}
+
 fn fold_std_binary_op(
     op: BinaryOp,
     lhs: ValueId,
     rhs: ValueId,
     values: &mut plank_values::ValueInterner,
-    diag_ctx: &mut DiagCtx,
-    loc: SrcLoc,
-) -> MaybePoisoned<ValueId> {
+) -> Result<ValueId, FoldError> {
     use alloy_primitives::U256;
 
     let a = builtins::as_u256(values, lhs);
@@ -383,38 +394,33 @@ fn fold_std_binary_op(
         BinaryOp::Add => {
             let (res, overflow) = a.overflowing_add(b);
             if overflow {
-                diag_ctx.emit_comptime_arithmetic_overflow(op, loc);
-                return Err(Poisoned);
+                return Err(FoldError::Overflow);
             }
             values.intern_num(res)
         }
         BinaryOp::Subtract => {
             let (res, overflow) = a.overflowing_sub(b);
             if overflow {
-                diag_ctx.emit_comptime_arithmetic_underflow(op, loc);
-                return Err(Poisoned);
+                return Err(FoldError::Underflow);
             }
             values.intern_num(res)
         }
         BinaryOp::Mul => {
             let (res, overflow) = a.overflowing_mul(b);
             if overflow {
-                diag_ctx.emit_comptime_arithmetic_overflow(op, loc);
-                return Err(Poisoned);
+                return Err(FoldError::Overflow);
             }
             values.intern_num(res)
         }
         BinaryOp::Mod => {
             let Some(rem) = a.checked_rem(b) else {
-                diag_ctx.emit_comptime_modulo_by_zero(op, loc);
-                return Err(Poisoned);
+                return Err(FoldError::ModuloByZero);
             };
             values.intern_num(rem)
         }
         BinaryOp::DivRoundPos | BinaryOp::DivRoundAwayFromZero => {
             let Some(rem) = a.checked_rem(b) else {
-                diag_ctx.emit_comptime_division_by_zero(op, loc);
-                return Err(Poisoned);
+                return Err(FoldError::DivisionByZero);
             };
             let mut res = a / b;
             if !rem.is_zero() {
@@ -424,8 +430,7 @@ fn fold_std_binary_op(
         }
         BinaryOp::DivRoundNeg | BinaryOp::DivRoundToZero => {
             let Some(res) = a.checked_div(b) else {
-                diag_ctx.emit_comptime_division_by_zero(op, loc);
-                return Err(Poisoned);
+                return Err(FoldError::DivisionByZero);
             };
             values.intern_num(res)
         }

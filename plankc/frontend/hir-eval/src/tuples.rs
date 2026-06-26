@@ -30,7 +30,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
 
             if let Err(MixedComptimeAndRuntime) = ok {
-                this.diag_ctx.emit_mixed_tuple_type(this.loc(expr_span), tuple, this.eval.values);
+                let loc = this.loc(expr_span);
+                this.eval.diag().emit_mixed_tuple_type(loc, tuple);
                 return Err(Poisoned);
             }
 
@@ -57,10 +58,9 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
                     match state {
                         LocalState::Runtime(_) if this.is_comptime() => {
-                            this.diag_ctx.emit_runtime_ref_in_comptime(
-                                this.loc(lit_span),
-                                this.origin_loc(origin),
-                            );
+                            let lit_loc = this.loc(lit_span);
+                            let origin_loc = this.origin_loc(origin);
+                            this.eval.diag().emit_runtime_ref_in_comptime(lit_loc, origin_loc);
                             validity = Err(Poisoned);
                         }
                         LocalState::Runtime(_) => {
@@ -114,7 +114,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     LocalState::Comptime(value) => {
                         let value_ty = this.values.type_of_value(value);
                         if this.types.is_comptime_only(value_ty) {
-                            this.diag_ctx.emit_mixed_comptime_runtime_tuple(
+                            this.eval.diag().emit_mixed_comptime_runtime_tuple(
                                 this.source,
                                 lit_span,
                                 local.use_span,
