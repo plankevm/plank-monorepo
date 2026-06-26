@@ -194,7 +194,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     LocalState::Runtime(_) => {
                         let use_loc = this.loc(capture.use_span);
                         let def_loc = this.origin_loc(binding.origin);
-                        this.eval.diag().emit_closure_capture_not_comptime(use_loc, def_loc);
+                        this.diag().emit_closure_capture_not_comptime(use_loc, def_loc);
                         poisoned = true;
                         continue;
                     }
@@ -229,7 +229,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     LocalState::Comptime(value) => value,
                     LocalState::Runtime(_) => {
                         let callee_loc = this.loc(callee_use_span);
-                        this.eval.diag().emit_call_target_not_comptime(callee_loc);
+                        this.diag().emit_call_target_not_comptime(callee_loc);
                         return Err(Poisoned);
                     }
                 };
@@ -238,7 +238,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 else {
                     let ty = this.values.type_of_value(closure_vid);
                     let callee_loc = this.binding_loc(callee_use_span, callee_origin);
-                    this.eval.diag().emit_not_callable(ty, callee_loc);
+                    this.diag().emit_not_callable(ty, callee_loc);
                     return Err(Poisoned);
                 };
                 for &capture in captures {
@@ -282,7 +282,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             {
                 let arg_loc = self.loc(arg.use_span);
                 let param_loc = func.loc(param.span);
-                self.eval.diag().emit_comptime_param_got_runtime(arg_loc, param_loc);
+                self.diag().emit_comptime_param_got_runtime(arg_loc, param_loc);
                 comptime_args_poisoned = true;
                 continue;
             };
@@ -308,12 +308,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         if params.len() != args.len() {
             let param_list_loc = func.loc(func.param_list_span);
-            self.eval.diag().emit_arg_count_mismatch(
-                params.len(),
-                args.len(),
-                call_loc,
-                param_list_loc,
-            );
+            self.diag().emit_arg_count_mismatch(params.len(), args.len(), call_loc, param_list_loc);
             return Err(Poisoned);
         }
 
@@ -415,7 +410,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(&mut LoweredFnState::Done(fn_id)) => fn_id,
             Ok(state @ LoweredFnState::InProgress) => {
                 *state = LoweredFnState::Done(Err(Poisoned));
-                self.eval.diag().emit_runtime_call_with_recursion(call_loc);
+                self.diag().emit_runtime_call_with_recursion(call_loc);
                 return Ok(Err(Diverge::ControlFlowPoisoned));
             }
             Ok(LoweredFnState::Empty) => unreachable!("empty lowered entry should be retried"),
@@ -525,11 +520,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble.return_type?;
 
         if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
-            self.eval.diag().emit_comptime_call_branch_quota_exhausted(
-                call.loc(),
-                self.comptime_quota.limit(),
-                self.eval_branch_quota_start_loc,
-            );
+            let limit = self.comptime_quota.limit();
+            let start_loc = self.eval_branch_quota_start_loc;
+            self.diag().emit_comptime_call_branch_quota_exhausted(call.loc(), limit, start_loc);
             return Ok(Err(Diverge::ComptimeQuotaExhausted));
         }
 
@@ -541,7 +534,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state) => match state.get() {
                 EvaluatedFnState::Empty => state,
                 EvaluatedFnState::InProgress => {
-                    self.eval.diag().emit_infinite_comptime_recursion(call.loc());
+                    self.diag().emit_infinite_comptime_recursion(call.loc());
                     state.set(EvaluatedFnState::Done(Err(Poisoned)));
                     return Err(Poisoned);
                 }
@@ -588,7 +581,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             DefOrigin::Local(span) => SrcLoc::new(call.source, span),
                             DefOrigin::Const(id) => self.eval.hir.consts[id].loc(),
                         };
-                        self.eval.diag().emit_runtime_ref_in_comptime(
+                        self.diag().emit_runtime_ref_in_comptime(
                             SrcLoc::new(call.source, call.span),
                             binding_loc,
                         );
@@ -790,7 +783,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let ty = self.value_type(value);
             if !ty.is_assignable_to(return_type) {
                 let expr_loc = self.loc(expr.span);
-                self.eval.diag().emit_type_mismatch(return_type, ret_type_loc, ty, expr_loc, true);
+                self.diag().emit_type_mismatch(return_type, ret_type_loc, ty, expr_loc, true);
                 return Err(Diverge::ControlFlowPoisoned);
             }
         }
@@ -815,7 +808,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             EvalValue::Comptime(value) => {
                 if self.is_comptime_only(value) {
                     let expr_loc = self.loc(expr.span);
-                    self.eval.diag().emit_comptime_only_value_at_runtime(expr_loc);
+                    self.diag().emit_comptime_only_value_at_runtime(expr_loc);
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let ty = self.values.type_of_value(value);

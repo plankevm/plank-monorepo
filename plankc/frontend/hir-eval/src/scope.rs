@@ -1,6 +1,6 @@
 use crate::{
     Evaluator,
-    diagnostics::BindingLoc,
+    diagnostics::{BindingLoc, DiagCtx},
     evaluator::CallArgSpansIdx,
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
@@ -106,7 +106,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(()) => {
                 if let Ok(span) = self.hir.block_spans[hir_block] {
                     let loc = self.loc(span);
-                    self.eval.diag().emit_entry_point_missing_terminator(loc);
+                    self.diag().emit_entry_point_missing_terminator(loc);
                 }
             }
             Err(
@@ -130,6 +130,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.eval.instr_stack_buf.push(instr);
     }
 
+    /// Mints a transient diagnostics view; convenience wrapper over [`Evaluator::diag`].
+    pub fn diag(&mut self) -> DiagCtx<'_> {
+        self.eval.diag()
+    }
+
     pub fn try_comptime(
         &mut self,
         binding: Local,
@@ -141,7 +146,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Runtime(_) => {
                 let use_loc = self.loc(expr);
                 let def_loc = self.origin_loc(binding.origin);
-                self.eval.diag().emit_runtime_ref_in_comptime(use_loc, def_loc);
+                self.diag().emit_runtime_ref_in_comptime(use_loc, def_loc);
                 Err(Poisoned)
             }
         }
@@ -175,13 +180,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let (state, use_span, origin) = self.bindings[type_local].poisoned()?;
         let type_loc = self.loc(use_span);
         let LocalState::Comptime(vid) = state else {
-            self.eval.diag().emit_type_not_comptime(type_loc);
+            self.diag().emit_type_not_comptime(type_loc);
             return Err(Poisoned);
         };
         let Value::Type(ty) = self.values.lookup(vid) else {
             let actual_ty = self.values.type_of_value(vid);
             let def_loc = self.binding_loc(use_span, origin);
-            self.eval.diag().emit_type_not_type(actual_ty, def_loc);
+            self.diag().emit_type_not_type(actual_ty, def_loc);
             return Err(Poisoned);
         };
         Ok(ty)
@@ -196,7 +201,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             EvalValue::Comptime(vid) => {
                 if self.is_comptime_only(vid) {
                     let loc = self.loc(use_span);
-                    self.eval.diag().emit_comptime_only_value_at_runtime(loc);
+                    self.diag().emit_comptime_only_value_at_runtime(loc);
                     Err(Poisoned)
                 } else {
                     Ok((mir::Expr::Const(vid), self.values.type_of_value(vid)))
@@ -215,7 +220,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             EvalValue::Comptime(vid) => Ok(vid),
             EvalValue::Runtime { result_type: _, expr: _ } => {
                 let loc = self.loc(expr_span);
-                self.eval.diag().emit_runtime_eval_in_comptime(loc);
+                self.diag().emit_runtime_eval_in_comptime(loc);
                 Err(Poisoned)
             }
         }
@@ -233,13 +238,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(())
         } else {
             let actual_loc = self.loc(actual_span);
-            self.eval.diag().emit_type_mismatch(
-                expected_ty,
-                expected_loc,
-                actual_ty,
-                actual_loc,
-                true,
-            );
+            self.diag().emit_type_mismatch(expected_ty, expected_loc, actual_ty, actual_loc, true);
             Err(Poisoned)
         }
     }
@@ -354,7 +353,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         if let Err(existing_ty) = self.mir_types[target].unify(ty) {
                             let def_loc = self.origin_loc(binding.origin);
                             let use_loc = self.loc(expr.span);
-                            self.eval.diag().emit_incompatible_branch_types(
+                            self.diag().emit_incompatible_branch_types(
                                 existing_ty,
                                 def_loc,
                                 ty,
@@ -402,12 +401,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             LocalState::Comptime(value) => {
                 let actual_ty = self.values.type_of_value(value);
                 let loc = self.loc(binding.use_span);
-                self.eval.diag().emit_type_mismatch_simple(TypeId::BOOL, actual_ty, loc);
+                self.diag().emit_type_mismatch_simple(TypeId::BOOL, actual_ty, loc);
                 Err(Diverge::ControlFlowPoisoned)
             }
             LocalState::Runtime(_) => {
                 let loc = self.loc(binding.use_span);
-                self.eval.diag().emit_runtime_eval_in_comptime(loc);
+                self.diag().emit_runtime_eval_in_comptime(loc);
                 Err(Diverge::ControlFlowPoisoned)
             }
         }
@@ -426,7 +425,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     LocalState::Runtime(_) => {
                         let def_loc = self.origin_loc(local.origin);
                         let use_loc = self.loc(expr.span);
-                        self.eval.diag().emit_runtime_ref_in_comptime(def_loc, use_loc);
+                        self.diag().emit_runtime_ref_in_comptime(def_loc, use_loc);
                         Err(Poisoned)
                     }
                 };
@@ -506,7 +505,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             {
                 if self.is_comptime() {
                     let loc = self.loc(binding.use_span);
-                    self.eval.diag().emit_runtime_eval_in_comptime(loc);
+                    self.diag().emit_runtime_eval_in_comptime(loc);
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) =
@@ -546,7 +545,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             Ok(state) => {
                 let state_ty = self.state_type(state);
                 let loc = self.loc(binding.use_span);
-                self.eval.diag().emit_type_mismatch_simple(TypeId::BOOL, state_ty, loc);
+                self.diag().emit_type_mismatch_simple(TypeId::BOOL, state_ty, loc);
                 Err(Diverge::ControlFlowPoisoned)
             }
             Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
@@ -582,7 +581,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state_ty = this.state_type(state);
             if !state_ty.is_assignable_to(TypeId::BOOL) {
                 let loc = this.loc(binding.use_span);
-                this.eval.diag().emit_type_mismatch_simple(TypeId::BOOL, state_ty, loc);
+                this.diag().emit_type_mismatch_simple(TypeId::BOOL, state_ty, loc);
                 return Err(Diverge::ControlFlowPoisoned);
             }
             match state {
@@ -590,7 +589,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 LocalState::Comptime(value) => {
                     if this.is_comptime_only(value) {
                         let loc = this.loc(binding.use_span);
-                        this.eval.diag().emit_comptime_only_value_at_runtime(loc);
+                        this.diag().emit_comptime_only_value_at_runtime(loc);
                         return Err(Diverge::ControlFlowPoisoned);
                     }
                     let condition = this.mir_types.push(this.values.type_of_value(value));
@@ -636,7 +635,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let loc = self.loc(span);
                 let limit = self.comptime_quota.limit();
                 let start_loc = self.eval_branch_quota_start_loc;
-                self.eval.diag().emit_comptime_loop_branch_quota_exhausted(loc, limit, start_loc);
+                self.diag().emit_comptime_loop_branch_quota_exhausted(loc, limit, start_loc);
                 return Err(Diverge::ComptimeQuotaExhausted);
             }
 

@@ -110,7 +110,7 @@ impl crate::scope::Scope<'_, '_> {
 
         if lhs_ty != rhs_ty {
             let loc = self.loc(expr);
-            self.eval.diag().emit_operator_type_mismatch(lhs_ty, rhs_ty, loc);
+            self.diag().emit_operator_type_mismatch(lhs_ty, rhs_ty, loc);
             return Err(Poisoned);
         }
 
@@ -125,10 +125,10 @@ impl crate::scope::Scope<'_, '_> {
             if lhs_ty == TypeId::MEMORY_POINTER && matches!(op, BinaryOp::Add | BinaryOp::Subtract)
             {
                 let loc = self.loc(expr);
-                self.eval.diag().emit_operator_not_supported_for_memptr(op, loc);
+                self.diag().emit_operator_not_supported_for_memptr(op, loc);
             } else {
                 let loc = self.loc(expr);
-                self.eval.diag().emit_operator_not_supported(op, lhs_ty, loc);
+                self.diag().emit_operator_not_supported(op, lhs_ty, loc);
             }
             return Err(Poisoned);
         };
@@ -201,7 +201,7 @@ impl crate::scope::Scope<'_, '_> {
         let r#impl = self.eval.operator_table.negate.filter(|_| ty.is_assignable_to(TypeId::U256));
         let Some(closure_vid) = r#impl else {
             let loc = self.loc(expr);
-            self.eval.diag().emit_operator_not_supported(op, ty, loc);
+            self.diag().emit_operator_not_supported(op, ty, loc);
             return Err(Poisoned);
         };
 
@@ -328,7 +328,7 @@ impl crate::scope::Scope<'_, '_> {
             (op_equals, Err(_) | Ok(PrimitiveType::Function | PrimitiveType::Never)) => {
                 let op = if op_equals { BinaryOp::Equals } else { BinaryOp::NotEquals };
                 let loc = self.loc(expr);
-                self.eval.diag().emit_operator_not_supported(op, ty, loc);
+                self.diag().emit_operator_not_supported(op, ty, loc);
                 Err(Poisoned)
             }
         }
@@ -339,7 +339,7 @@ impl crate::scope::Scope<'_, '_> {
         let ty = self.state_type(state);
         if !ty.is_assignable_to(TypeId::BOOL) {
             let loc = self.loc(use_span);
-            self.eval.diag().emit_type_mismatch_simple(TypeId::BOOL, ty, loc);
+            self.diag().emit_type_mismatch_simple(TypeId::BOOL, ty, loc);
             return Err(Poisoned);
         }
         let value = match state {
@@ -369,7 +369,7 @@ enum FoldError {
 
 impl crate::scope::Scope<'_, '_> {
     fn emit_fold_error(&mut self, err: FoldError, op: BinaryOp, loc: SrcLoc) {
-        let mut diag = self.eval.diag();
+        let mut diag = self.diag();
         match err {
             FoldError::Overflow => diag.emit_comptime_arithmetic_overflow(op, loc),
             FoldError::Underflow => diag.emit_comptime_arithmetic_underflow(op, loc),
