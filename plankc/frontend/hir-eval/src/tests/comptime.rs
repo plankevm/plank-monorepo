@@ -3079,21 +3079,30 @@ fn test_comptime_var_assigned_in_implicit_runtime_context() {
                 let b = @evm_calldataload(0);
                 comptime let mut x = 34;
                 if b == 0 {
-                    x = x + 1;
+                    x = x + "foo";
                 }
                 @evm_stop();
             }
         "#,
         ),
-        &[r#"
-        error: assignment to mutable comptime variable in implicit runtime context
-         --> main.plk:5:13
-          |
-        3 |     comptime let mut x = 34;
-          |                          -- comptime mutable variable defined here
-        4 |     if b == 0 {
-        5 |         x = x + 1;
-          |             ^^^^^ assignment in implicit runtime context
-        "#],
+        &[
+            r#"
+            error: mismatched types
+             --> main.plk:5:13
+              |
+            5 |         x = x + "foo";
+              |             ^^^^^^^^^ expected `u256`, got `cbytes`
+            "#,
+            r#"
+            error: assignment to mutable comptime variable in implicit runtime context
+             --> main.plk:5:13
+              |
+            3 |     comptime let mut x = 34;
+              |                          -- comptime mutable variable defined here
+            4 |     if b == 0 {
+            5 |         x = x + "foo";
+              |             ^^^^^^^^^ assignment in implicit runtime context
+            "#
+        ],
     );
 }
