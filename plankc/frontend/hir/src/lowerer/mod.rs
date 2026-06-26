@@ -329,13 +329,6 @@ impl BlockLowerer<'_> {
         self.instructions_buf.push(Instruction { kind });
     }
 
-    fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
-        let parent_comptime = std::mem::replace(&mut self.comptime, true);
-        let result = inner(self);
-        self.comptime = parent_comptime;
-        result
-    }
-
     fn flush_instructions_from(&mut self, start: usize, span: SourceSpan) -> BlockId {
         let block_id = self.builder.block_instrs.push_iter(self.instructions_buf.drain(start..));
         let span_id = self.builder.block_spans.push(Ok(span));
@@ -487,18 +480,16 @@ impl BlockLowerer<'_> {
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
                 let body = self.create_sub_block(block.node().span(), |this| {
-                    let expr = this.with_comptime(|this| {
                         for stmt in block.statements() {
                             this.lower_statement(stmt);
                         }
-                        match block.end_expr() {
+                        let expr = match block.end_expr() {
                             Some(e) => this.lower_expr(e),
                             None => {
                                 let span = block.node().span();
                                 this.expr(ExprKind::VOID, span)
                             }
-                        }
-                    });
+                        };
                     this.emit(InstructionKind::Set { local: result, r#type: None, expr });
                 });
 
@@ -743,9 +734,6 @@ impl BlockLowerer<'_> {
     fn lower_statement(&mut self, stmt: Statement<'_>) {
         match stmt {
             Statement::Let(let_stmt) => {
-                if self.comptime && let_stmt.comptime {
-                    self.emit_comptime_let_redundant_in_comptime_scope(let_stmt.name_span);
-                }
                 let expr = self.lower_expr(let_stmt.value());
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
                 let local = self.alloc_local(

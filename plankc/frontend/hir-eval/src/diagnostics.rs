@@ -324,9 +324,8 @@ impl DiagCtx<'_> {
         &mut self,
         loc: SrcLoc,
         use_loc: SrcLoc,
-        forced_by_expr: Option<SrcLoc>,
     ) {
-        let mut diagnostic = Diagnostic::error(
+        Diagnostic::error(
             "assignment to mutable comptime variable in implicit runtime context",
         )
         .cross_source_annotations(
@@ -334,18 +333,8 @@ impl DiagCtx<'_> {
             "assignment in implicit runtime context",
             use_loc,
             "comptime mutable variable defined here",
-        );
-
-        if let Some(forced_by_expr) = forced_by_expr {
-            diagnostic = diagnostic.claim(
-                Claim::new(Level::Note, "runtime evaluation forced here").element(
-                    Annotations::new(forced_by_expr.source)
-                        .no_label(forced_by_expr.span, AnnotationKind::Primary),
-                ),
-            );
-        }
-
-        diagnostic.emit(self);
+        )
+        .emit(self);
     }
 
     pub fn emit_eval_branch_quota_too_large(&mut self, loc: SrcLoc) {
@@ -1202,6 +1191,15 @@ impl DiagCtx<'_> {
     pub fn emit_failed_to_resolve_std_fn(&mut self, source: SourceId, op_name: &str) {
         Diagnostic::error(format!("failed to resolve core operation handler `{op_name}`"))
             .element(Element::Origin { path: source })
+            .emit(self);
+    }
+
+    pub fn emit_comptime_var_redundant_in_comptime_context(&mut self, loc: SrcLoc) {
+        Diagnostic::error("'comptime let mut' is redundant in comptime context")
+            .element(
+                Annotations::new(loc.source)
+                    .no_label(loc.span, plank_session::AnnotationKind::Primary),
+            )
             .emit(self);
     }
 }

@@ -3094,12 +3094,6 @@ fn test_comptime_var_assigned_in_implicit_runtime_context() {
         4 |     if b == 0 {
         5 |         x = x + 1;
           |             ^^^^^ assignment in implicit runtime context
-          |
-        note: runtime evaluation forced here
-         --> main.plk:4:8
-          |
-        4 |     if b == 0 {
-          |        ^^^^^^^
         "#],
     );
 }

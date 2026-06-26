@@ -60,11 +60,6 @@ pub(crate) enum EvalContext {
     Other,
 }
 
-pub(crate) enum ComptimeVarAssignment {
-    Allowed,
-    Blocked { forced_by: Option<hir::LocalId> },
-}
-
 pub(crate) struct Scope<'a, 'ctx> {
     pub eval: &'a mut Evaluator<'ctx>,
     pub diag_ctx: &'a mut DiagCtx<'ctx>,
@@ -73,7 +68,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub ctx: EvalContext,
     pub comptime: bool,
     pub conditional: bool,
-    pub comptime_var_assignment: ComptimeVarAssignment,
+    pub comptime_var_assignability: bool,
     pub comptime_quota: ComptimeQuota,
     pub eval_branch_quota_start_loc: SrcLoc,
     pub max_eval_branch_quota_seen: u32,
@@ -99,7 +94,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
-            comptime_var_assignment: ComptimeVarAssignment::Allowed,
+            comptime_var_assignability: true,
             conditional: false,
             comptime_quota,
             eval_branch_quota_start_loc,
@@ -462,25 +457,29 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         target: hir::LocalId,
         expr: hir::Expr,
     ) -> Result<(), Diverge> {
-        if let ComptimeVarAssignment::Blocked { forced_by } = self.comptime_var_assignment {
-            let _ = self.with_comptime(|this| this.eval_expr(expr))?;
-            let local = self.bindings[target];
-            self.diag_ctx.emit_comptime_var_assign_in_runtime_context(
-                self.loc(expr.span),
-                self.loc(local.use_span),
-                forced_by.map(|l| self.loc(self.bindings[l].use_span)),
-            );
-            self.bindings[target].state = Err(Poisoned);
-            return Ok(());
-        }
-        self.with_comptime(|this| this.eval_assign(target, expr))
+        self.with_comptime(|this| {
+            if !this.comptime_var_assignability {
+                let _ = this.eval_expr(expr);
+                let local = this.bindings[target];
+                this.diag_ctx.emit_comptime_var_assign_in_runtime_context(
+                    this.loc(expr.span),
+                    this.loc(local.use_span),
+                );
+                this.bindings[target].state = Err(Poisoned);
+                return Ok(());
+            }
+            this.eval_assign(target, expr)
+        })
     }
 
     pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), Diverge> {
         match instr.kind {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr, comptime } => {
-                if comptime {
+                if comptime && self.comptime {
+                    self.diag_ctx.emit_comptime_var_redundant_in_comptime_context(self.loc(expr.span));
+                    self.eval_set_mut(local, r#type, expr)?
+                } else if comptime {
                     self.with_comptime(|this| this.eval_set_mut(local, r#type, expr))?
                 } else {
                     self.eval_set_mut(local, r#type, expr)?
@@ -536,29 +535,25 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         result
     }
 
-    fn with_comptime_assignment<R>(
+    fn with_comptime_var_assignability<R>(
         &mut self,
-        comptime_var_assignment: ComptimeVarAssignment,
+        comptime_var_assignability: bool,
         inner: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let prev_comptime_var_assignment =
-            std::mem::replace(&mut self.comptime_var_assignment, comptime_var_assignment);
+        let prev_comptime_var_assignability =
+            std::mem::replace(&mut self.comptime_var_assignability, comptime_var_assignability);
         let result = inner(self);
-        self.comptime_var_assignment = prev_comptime_var_assignment;
+        self.comptime_var_assignability = prev_comptime_var_assignability;
 
         result
     }
 
     fn with_runtime_branch<R>(
         &mut self,
-        forced_by: Option<hir::LocalId>,
         inner: impl FnOnce(&mut Self) -> R,
     ) -> R {
         self.with_conditional(true, |this| {
-            this.with_comptime_assignment(
-                ComptimeVarAssignment::Blocked { forced_by },
-                inner,
-            )
+            this.with_comptime_var_assignability(false, inner)
         })
     }
 
@@ -579,12 +574,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
 
                 let (then, then_res) = self.with_runtime_branch(
-                    Some(condition),
                     |this| this.eval_block_to_mir(then)
                 );
 
                 let (r#else, else_res) = self.with_runtime_branch(
-                    Some(condition),
                     |this| this.eval_block_to_mir(r#else)
                 );
 
@@ -687,9 +680,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         });
         let mir_condition = mir_condition_local?;
         let (body, body_res) = self
-            .with_comptime_assignment(ComptimeVarAssignment::Blocked { forced_by: None }, |this| {
-                this.eval_block_to_mir(body)
-            });
+            .with_comptime_var_assignability(false, |this| this.eval_block_to_mir(body));
         match body_res {
             Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
                 return Err(err);

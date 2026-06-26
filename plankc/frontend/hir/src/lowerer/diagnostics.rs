@@ -265,16 +265,6 @@ impl BlockLowerer<'_> {
             )
             .emit(*self.session.borrow_mut());
     }
-
-    pub fn emit_comptime_let_redundant_in_comptime_scope(&self, span: TokenSpan) {
-        let source_span = self.lexed.tokens_src_span(span);
-        Diagnostic::error("'comptime let' is redundant in comptime scope")
-            .element(
-                Annotations::new(self.source_id)
-                    .no_label(source_span, plank_session::AnnotationKind::Primary),
-            )
-            .emit(*self.session.borrow_mut());
-    }
 }
 
 pub(super) fn error_duplicate_const(
