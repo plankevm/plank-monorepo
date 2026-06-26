@@ -6,11 +6,11 @@ mod interner;
 pub mod poison;
 
 pub use builtins::{Builtin, RuntimeBuiltin};
+pub use compile_log::CompileLog;
 pub use diagnostic::*;
 pub use display::write_bytes_literal;
 pub use interner::{BytesId, EMPTY_BYTES, StrId};
 pub use poison::{MaybePoisoned, Poisoned};
-pub use compile_log::CompileLog;
 
 use interner::Interner;
 use plank_core::{Idx, IndexVec, Span, newtype_index};
@@ -138,7 +138,7 @@ impl Session {
     }
 
     pub fn has_compile_logs(&self) -> bool {
-        self.compile_logs.len() > 0
+        !self.compile_logs.is_empty()
     }
 
     /// Both line and col are 1-indexed. O(n) linear scan.
@@ -162,8 +162,8 @@ impl Session {
     }
 
     pub fn emit_compile_log(&mut self, log: CompileLog) {
-    	self.compile_logs.push(log);
-	}
+        self.compile_logs.push(log);
+    }
 }
 
 impl DiagEmitter for Session {

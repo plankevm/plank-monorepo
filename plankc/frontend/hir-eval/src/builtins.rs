@@ -671,7 +671,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
 
         self.diag_ctx.emit_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
-        return Ok(Ok(EvalValue::Comptime(ValueId::VOID)));
+        Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
     }
 
     /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).
