@@ -79,8 +79,6 @@ impl ExprKind {
     pub const POISON: Self = ExprKind::Value(Err(Poisoned));
 }
 
-/// How a `let` binding behaves. An immutable binding is never `comptime`
-/// (an immutable `comptime let` is redundant), so that state is unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BindingMode {
     Immutable,
