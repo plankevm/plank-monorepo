@@ -107,6 +107,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: param.span,
                             origin: DefOrigin::Local(param.span),
+                            comptime_mut: false,
                         },
                     );
                     continue;
@@ -138,7 +139,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
-                Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
+                Local {
+                    state,
+                    use_span: param.span,
+                    origin: DefOrigin::Local(param.span),
+                    comptime_mut: false,
+                },
             );
         }
 
@@ -760,6 +766,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: arg_binding.use_span,
                             origin: DefOrigin::Local(arg_binding.use_span),
+                            comptime_mut: false,
                         },
                     );
                     return;

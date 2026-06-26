@@ -95,10 +95,6 @@ impl BindingMode {
     pub fn is_mutable(self) -> bool {
         matches!(self, BindingMode::Mutable { .. })
     }
-
-    pub fn is_comptime(self) -> bool {
-        matches!(self, BindingMode::Mutable { comptime: true })
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -125,7 +121,6 @@ pub enum InstructionKind {
         expr: Expr,
     },
     Assign {
-        comptime: bool,
         target: LocalId,
         expr: Expr,
     },

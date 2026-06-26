@@ -15,11 +15,12 @@ pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
     pub use_span: SourceSpan,
     pub origin: DefOrigin,
+    pub comptime_mut: bool,
 }
 
 impl Local {
     pub fn comptime(value: ValueId, use_span: SourceSpan, origin: DefOrigin) -> Self {
-        Self { state: Ok(LocalState::Comptime(value)), use_span, origin }
+        Self { state: Ok(LocalState::Comptime(value)), use_span, origin, comptime_mut: false }
     }
 
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
@@ -277,8 +278,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings
-            .insert(local, Local { state, use_span: expr.span, origin: self.expr_origin(expr) });
+        self.bindings.insert(
+            local,
+            Local {
+                state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                comptime_mut: false,
+            },
+        );
         Ok(())
     }
 
@@ -287,6 +295,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         local: hir::LocalId,
         r#type: Option<hir::LocalId>,
         expr: hir::Expr,
+        comptime_mut: bool,
     ) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let value = value.and_then(|value| {
@@ -313,7 +322,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.bindings.insert(
             local,
-            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
+            Local {
+                state: new_state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                comptime_mut,
+            },
         );
         Ok(())
     }
@@ -329,7 +343,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .map(LocalState::Comptime);
             let _ = self.bindings.insert(
                 local,
-                Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                Local {
+                    state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    comptime_mut: false,
+                },
             );
             return Ok(());
         }
@@ -344,7 +363,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 self.bindings.insert(
                     local,
-                    Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                    Local {
+                        state,
+                        use_span: expr.span,
+                        origin: self.expr_origin(expr),
+                        comptime_mut: false,
+                    },
                 );
             }
             Some(binding) => {
@@ -371,8 +395,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] =
-                    Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) };
+                self.bindings[local] = Local {
+                    state: new_state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    comptime_mut: binding.comptime_mut,
+                };
             }
         }
 
@@ -479,19 +507,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 if comptime && self.comptime {
                     self.diag_ctx
                         .emit_comptime_var_redundant_in_comptime_context(self.loc(expr.span));
-                    self.eval_set_mut(local, r#type, expr)?
+                    self.eval_set_mut(local, r#type, expr, comptime)?
                 } else if comptime {
-                    self.with_comptime(|this| this.eval_set_mut(local, r#type, expr))?
+                    self.with_comptime(|this| this.eval_set_mut(local, r#type, expr, comptime))?
                 } else {
-                    self.eval_set_mut(local, r#type, expr)?
+                    self.eval_set_mut(local, r#type, expr, comptime)?
                 }
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
             InstructionKind::ComptimeBlock { body } => {
                 self.with_comptime(|this| this.eval_block_inline(body))?
             }
-            InstructionKind::Assign { target, expr, comptime } => {
-                if comptime {
+            InstructionKind::Assign { target, expr } => {
+                if self.bindings[target].comptime_mut {
                     self.eval_comptime_assign(target, expr)?
                 } else {
                     self.eval_assign(target, expr)?

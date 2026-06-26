@@ -187,11 +187,8 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
-            InstructionKind::Assign { target, expr: value, comptime } => {
+            InstructionKind::Assign { target, expr: value } => {
                 write!(f, "{pad}")?;
-                if comptime {
-                    write!(f, "[comptime] ")?;
-                }
                 self.fmt_local(f, target)?;
                 write!(f, " := ")?;
                 self.fmt_expr(f, value)?;

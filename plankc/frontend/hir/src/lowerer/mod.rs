@@ -23,7 +23,7 @@ use crate::*;
 struct ScopedLocal {
     name: StrId,
     id: LocalId,
-    mode: BindingMode,
+    mutable: bool,
     span: Option<TokenSpan>,
 }
 
@@ -84,7 +84,6 @@ struct BlockLowerer<'a> {
 
     lexed: &'a Lexed,
     source_id: SourceId,
-    comptime: bool,
 }
 enum ShortCircuitOp {
     And,
@@ -181,24 +180,19 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, mode: BindingMode, span: TokenSpan) -> LocalId {
+    fn alloc_local(&mut self, name: StrId, mutable: bool, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, mode, span: Some(span) });
+        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable, span: Some(span) });
         id
     }
 
     fn alloc_anonymous_local(&mut self, name: StrId) -> LocalId {
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal {
-            name,
-            id,
-            mode: BindingMode::Immutable,
-            span: None,
-        });
+        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable: false, span: None });
         id
     }
 
@@ -543,7 +537,7 @@ impl BlockLowerer<'_> {
     }
 
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
-        self.alloc_local(param.name, BindingMode::Immutable, param.name_span())
+        self.alloc_local(param.name, false, param.name_span())
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
@@ -568,7 +562,7 @@ impl BlockLowerer<'_> {
                             self.error_duplicate_param_any_type_capture(name, name_span, prev.span);
                             ParamType::Poisoned
                         } else {
-                            let capture = self.alloc_local(name, BindingMode::Immutable, name_span);
+                            let capture = self.alloc_local(name, false, name_span);
                             ParamType::Any { capture }
                         }
                     }
@@ -726,7 +720,7 @@ impl BlockLowerer<'_> {
                 let mode = BindingMode::new(let_stmt.mutable, let_stmt.comptime);
                 let expr = self.lower_expr(let_stmt.value());
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
-                let local = self.alloc_local(let_stmt.name, mode, let_stmt.name_span);
+                let local = self.alloc_local(let_stmt.name, mode.is_mutable(), let_stmt.name_span);
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
 
@@ -758,7 +752,7 @@ impl BlockLowerer<'_> {
                     self.error_unresolved_identifier(name, span);
                     return;
                 };
-                if !entry.mode.is_mutable() {
+                if !entry.mutable {
                     self.error_assignment_to_immutable(
                         name,
                         span,
@@ -769,8 +763,7 @@ impl BlockLowerer<'_> {
                 let target = entry.id;
                 let value = self.lower_expr(assign_stmt.value());
 
-                let comptime = if self.comptime { false } else { entry.mode.is_comptime() };
-                self.emit(InstructionKind::Assign { target, expr: value, comptime });
+                self.emit(InstructionKind::Assign { target, expr: value });
             }
             Statement::While(while_stmt) => {
                 let span = while_stmt.node().span();
@@ -819,7 +812,6 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 
         lexed: &project.parsed_sources[SourceId::ROOT].lexed,
         source_id: SourceId::ROOT,
-        comptime: false,
     };
 
     for (source_id, source) in project.parsed_sources.enumerate_idx() {
