@@ -1177,17 +1177,8 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn record_compile_log(
-        &mut self,
-        values: &ValueInterner,
-        value_ids: &[ValueId],
-        loc: SrcLoc,
-    ) {
-        let msg = value_ids
-            .iter()
-            .map(|&value_id| values.format_value(self.session, self.types, value_id).to_string())
-            .collect::<Vec<_>>()
-            .join(" ");
+    pub fn record_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
+        let msg = values.format_value(self.session, self.types, value_id).to_string();
         self.session.emit_compile_log(CompileLog { loc, msg });
     }
 

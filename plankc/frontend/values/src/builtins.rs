@@ -1,7 +1,4 @@
-use plank_session::{
-    Builtin, RuntimeBuiltin, StrId,
-    builtins::{Arity, BuiltinKind},
-};
+use plank_session::{Builtin, RuntimeBuiltin, StrId, builtins::BuiltinKind};
 
 use crate::TypeId;
 
@@ -11,16 +8,9 @@ pub struct BuiltinSignature {
     pub result: TypeId,
 }
 
-/// The fixed argument count of `builtin`.
-///
-/// Only valid for builtins with a fixed arity; querying a variadic builtin is a bug, since
-/// there is no single count to report.
 pub fn arg_count(builtin: Builtin) -> usize {
     match builtin.kind() {
-        BuiltinKind::ComptimeDynamic { arity: Arity::Exact(n) } => n,
-        BuiltinKind::ComptimeDynamic { arity: Arity::Variadic } => {
-            unreachable!("arg_count queried for variadic builtin {builtin:?}")
-        }
+        BuiltinKind::ComptimeDynamic { arg_count } => arg_count,
         _ => builtin_signatures(builtin)[0].inputs.len(),
     }
 }

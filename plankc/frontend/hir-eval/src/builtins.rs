@@ -4,7 +4,7 @@ use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{
     Builtin, BytesId, CBytes, MaybePoisoned, Poisoned, RuntimeBuiltin, SourceSpan, SrcLoc,
-    builtins::{Arity, BuiltinKind},
+    builtins::BuiltinKind,
 };
 use plank_values::{
     Compound, PrimitiveType, StructView, Type, TypeFlags, TypeId, TypeInterner, TypeName, Value,
@@ -386,12 +386,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         expr: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let BuiltinKind::ComptimeDynamic { arity } = builtin.kind() else {
-            unreachable!("not a comptime dynamic builtin: {builtin}")
-        };
-        if let Arity::Exact(expected) = arity
-            && expected != args.len()
-        {
+        if builtin_sigs::arg_count(builtin) != args.len() {
             self.diag_ctx.emit_wrong_arg_count(
                 self.eval.values,
                 builtin,
@@ -667,23 +662,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let expr_loc = self.loc(expr_span);
-        self.with_values_buf(|this, offset| {
-            for &arg in args {
-                let (state, _, origin) = this.bindings[arg].poisoned()?;
-                let LocalState::Comptime(vid) = state else {
-                    this.diag_ctx.emit_runtime_ref_in_comptime(expr_loc, this.origin_loc(origin));
-                    return Err(Poisoned);
-                };
-                this.values_buf.push(vid);
-            }
-            this.diag_ctx.record_compile_log(
-                this.eval.values,
-                &this.eval.values_buf[offset..],
-                expr_loc,
-            );
-            Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
-        })
+        let &[obj] = args else { unreachable!("arg count checked") };
+        let (state, _, origin) = self.bindings[obj].poisoned()?;
+        let LocalState::Comptime(obj_vid) = state else {
+            self.diag_ctx
+                .emit_runtime_ref_in_comptime(self.loc(expr_span), self.origin_loc(origin));
+            return Err(Poisoned);
+        };
+
+        self.diag_ctx.record_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
+        Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
     }
 
     /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).
