@@ -145,26 +145,7 @@ impl<'a> DisplayHir<'a> {
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,
-    ) -> fmt::Result {
-        let pad = "    ".repeat(indent);
-        write!(f, "{pad}")?;
-        self.fmt_local(f, local)?;
-        if let Some(r#type) = r#type {
-            write!(f, " : ")?;
-            self.fmt_local(f, r#type)?;
-        }
-        write!(f, " = ")?;
-        self.fmt_expr(f, expr)?;
-        writeln!(f)
-    }
-
-    fn fmt_set_mut(
-        &self,
-        f: &mut Formatter<'_>,
-        indent: usize,
-        local: LocalId,
-        r#type: Option<LocalId>,
-        expr: Expr,
+        mutable: bool,
         comptime: bool,
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
@@ -177,7 +158,7 @@ impl<'a> DisplayHir<'a> {
             write!(f, " : ")?;
             self.fmt_local(f, r#type)?;
         }
-        write!(f, " [mut]= ")?;
+        write!(f, " {}= ", if mutable { "[mut]" } else { "" } )?;
         self.fmt_expr(f, expr)?;
         writeln!(f)
     }
@@ -191,10 +172,10 @@ impl<'a> DisplayHir<'a> {
         let pad = "    ".repeat(indent);
         match instr {
             InstructionKind::Set { local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr)
+                self.fmt_set(f, indent, local, r#type, expr, false, false)
             }
             InstructionKind::SetMut { local, r#type, expr, comptime } => {
-                self.fmt_set_mut(f, indent, local, r#type, expr, comptime)
+                self.fmt_set(f, indent, local, r#type, expr, true, comptime)
             }
             InstructionKind::BranchSet { local, expr } => {
                 write!(f, "{pad}")?;
