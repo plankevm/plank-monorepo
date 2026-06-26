@@ -142,7 +142,7 @@ impl<'a> Evaluator<'a> {
             const_def.loc(),
             EvalContext::Other,
         );
-        match scope.eval_comptime(const_def.body) {
+        match scope.with_comptime(|this| this.eval_block_inline(const_def.body)) {
             Err(Diverge::ComptimeQuotaExhausted) => {
                 self.evaluated_consts[const_id] = State::Done(ConstEvalResult::QuotaExhausted);
                 return Err(Poisoned);

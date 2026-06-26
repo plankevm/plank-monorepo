@@ -127,7 +127,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         mir_block
     }
 
-    fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
+    pub fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
         let result = inner(self);
         self.comptime = parent_comptime;
