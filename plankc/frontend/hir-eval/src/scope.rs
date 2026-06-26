@@ -477,7 +477,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { local, r#type, expr, comptime } => {
                 if comptime && self.comptime {
-                    self.diag_ctx.emit_comptime_var_redundant_in_comptime_context(self.loc(expr.span));
+                    self.diag_ctx
+                        .emit_comptime_var_redundant_in_comptime_context(self.loc(expr.span));
                     self.eval_set_mut(local, r#type, expr)?
                 } else if comptime {
                     self.with_comptime(|this| this.eval_set_mut(local, r#type, expr))?
@@ -488,7 +489,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
             InstructionKind::ComptimeBlock { body } => {
                 self.with_comptime(|this| this.eval_block_inline(body))?
-            },
+            }
             InstructionKind::Assign { target, expr, comptime } => {
                 if comptime {
                     self.eval_comptime_assign(target, expr)?
@@ -548,13 +549,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         result
     }
 
-    fn with_runtime_branch<R>(
-        &mut self,
-        inner: impl FnOnce(&mut Self) -> R,
-    ) -> R {
-        self.with_conditional(true, |this| {
-            this.with_comptime_var_assignability(false, inner)
-        })
+    fn with_runtime_branch<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
+        self.with_conditional(true, |this| this.with_comptime_var_assignability(false, inner))
     }
 
     fn eval_if(
@@ -573,13 +569,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Diverge::ControlFlowPoisoned);
                 }
 
-                let (then, then_res) = self.with_runtime_branch(
-                    |this| this.eval_block_to_mir(then)
-                );
+                let (then, then_res) =
+                    self.with_runtime_branch(|this| this.eval_block_to_mir(then));
 
-                let (r#else, else_res) = self.with_runtime_branch(
-                    |this| this.eval_block_to_mir(r#else)
-                );
+                let (r#else, else_res) =
+                    self.with_runtime_branch(|this| this.eval_block_to_mir(r#else));
 
                 self.emit(mir::Instruction::If {
                     condition: mir_local,
@@ -679,8 +673,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
         let mir_condition = mir_condition_local?;
-        let (body, body_res) = self
-            .with_comptime_var_assignability(false, |this| this.eval_block_to_mir(body));
+        let (body, body_res) =
+            self.with_comptime_var_assignability(false, |this| this.eval_block_to_mir(body));
         match body_res {
             Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
                 return Err(err);

@@ -3096,7 +3096,7 @@ fn test_comptime_var_assigned_in_implicit_runtime_context() {
             4 |     if b == 0 {
             5 |         x = x + "foo";
               |             ^^^^^^^^^ assignment in implicit runtime context
-            "#
+            "#,
         ],
     );
 }

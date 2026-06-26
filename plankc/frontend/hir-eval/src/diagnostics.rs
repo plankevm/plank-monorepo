@@ -320,21 +320,15 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_comptime_var_assign_in_runtime_context(
-        &mut self,
-        loc: SrcLoc,
-        use_loc: SrcLoc,
-    ) {
-        Diagnostic::error(
-            "assignment to mutable comptime variable in implicit runtime context",
-        )
-        .cross_source_annotations(
-            loc,
-            "assignment in implicit runtime context",
-            use_loc,
-            "comptime mutable variable defined here",
-        )
-        .emit(self);
+    pub fn emit_comptime_var_assign_in_runtime_context(&mut self, loc: SrcLoc, use_loc: SrcLoc) {
+        Diagnostic::error("assignment to mutable comptime variable in implicit runtime context")
+            .cross_source_annotations(
+                loc,
+                "assignment in implicit runtime context",
+                use_loc,
+                "comptime mutable variable defined here",
+            )
+            .emit(self);
     }
 
     pub fn emit_eval_branch_quota_too_large(&mut self, loc: SrcLoc) {
