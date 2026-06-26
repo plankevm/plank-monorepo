@@ -549,6 +549,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         result
     }
 
+    fn with_runtime_branch<R>(
+        &mut self,
+        forced_by: Option<hir::LocalId>,
+        inner: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.with_conditional(true, |this| {
+            this.with_comptime_assignment(
+                ComptimeVarAssignment::Blocked { forced_by },
+                inner,
+            )
+        })
+    }
+
     fn eval_if(
         &mut self,
         condition: hir::LocalId,
@@ -564,18 +577,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
                     return Err(Diverge::ControlFlowPoisoned);
                 }
-                let (then, then_res) = self.with_conditional(true, |this| {
-                    this.with_comptime_assignment(
-                        ComptimeVarAssignment::Blocked { forced_by: Some(condition) },
-                        |this| this.eval_block_to_mir(then),
-                    )
-                });
-                let (r#else, else_res) = self.with_conditional(true, |this| {
-                    this.with_comptime_assignment(
-                        ComptimeVarAssignment::Blocked { forced_by: Some(condition) },
-                        |this| this.eval_block_to_mir(r#else),
-                    )
-                });
+
+                let (then, then_res) = self.with_runtime_branch(
+                    Some(condition),
+                    |this| this.eval_block_to_mir(then)
+                );
+
+                let (r#else, else_res) = self.with_runtime_branch(
+                    Some(condition),
+                    |this| this.eval_block_to_mir(r#else)
+                );
 
                 self.emit(mir::Instruction::If {
                     condition: mir_local,
