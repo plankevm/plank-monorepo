@@ -1177,16 +1177,19 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
-        if !self.session.has_compile_logs() {
-            Diagnostic::error("found compile log")
-                .element(Annotations::new(loc.source).no_label(loc.span, AnnotationKind::Primary))
-                .emit(self);
-        }
-        let log = CompileLog {
-            loc,
-            msg: format!("{}", values.format_value(self.session, self.types, value_id)),
-        };
-        self.session.emit_compile_log(log);
+    pub fn record_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
+        let msg = values.format_value(self.session, self.types, value_id).to_string();
+        self.session.emit_compile_log(CompileLog { loc, msg });
+    }
+
+    /// Emits the umbrella "found compile log statement" error, anchored at the first
+    /// `@compile_log` call site.
+    pub fn emit_found_compile_log(&mut self, first_loc: SrcLoc) {
+        Diagnostic::error("found compile log statement")
+            .element(
+                Annotations::new(first_loc.source)
+                    .no_label(first_loc.span, AnnotationKind::Primary),
+            )
+            .emit(self);
     }
 }

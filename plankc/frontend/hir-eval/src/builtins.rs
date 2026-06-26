@@ -670,7 +670,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         };
 
-        self.diag_ctx.emit_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
+        self.diag_ctx.record_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
         Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
     }
 
