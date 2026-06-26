@@ -23,8 +23,7 @@ use crate::*;
 struct ScopedLocal {
     name: StrId,
     id: LocalId,
-    mutable: bool,
-    comptime: bool,
+    mode: BindingMode,
     span: Option<TokenSpan>,
 }
 
@@ -182,25 +181,13 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(
-        &mut self,
-        name: StrId,
-        mutable: bool,
-        comptime: bool,
-        span: TokenSpan,
-    ) -> LocalId {
+    fn alloc_local(&mut self, name: StrId, mode: BindingMode, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal {
-            name,
-            id,
-            mutable,
-            comptime,
-            span: Some(span),
-        });
+        self.scoped_locals_stack.push(ScopedLocal { name, id, mode, span: Some(span) });
         id
     }
 
@@ -209,8 +196,7 @@ impl BlockLowerer<'_> {
         self.scoped_locals_stack.push(ScopedLocal {
             name,
             id,
-            mutable: false,
-            comptime: false,
+            mode: BindingMode::Immutable,
             span: None,
         });
         id
@@ -557,7 +543,7 @@ impl BlockLowerer<'_> {
     }
 
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
-        self.alloc_local(param.name, false, false, param.name_span())
+        self.alloc_local(param.name, BindingMode::Immutable, param.name_span())
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
@@ -582,7 +568,7 @@ impl BlockLowerer<'_> {
                             self.error_duplicate_param_any_type_capture(name, name_span, prev.span);
                             ParamType::Poisoned
                         } else {
-                            let capture = self.alloc_local(name, false, false, name_span);
+                            let capture = self.alloc_local(name, BindingMode::Immutable, name_span);
                             ParamType::Any { capture }
                         }
                     }
@@ -737,21 +723,18 @@ impl BlockLowerer<'_> {
                 if let_stmt.comptime && !let_stmt.mutable {
                     self.error_immutable_comptime_let(let_stmt.name, let_stmt.span());
                 }
+                let mode = BindingMode::new(let_stmt.mutable, let_stmt.comptime);
                 let expr = self.lower_expr(let_stmt.value());
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
-                let local = self.alloc_local(
-                    let_stmt.name,
-                    let_stmt.mutable,
-                    let_stmt.comptime,
-                    let_stmt.name_span,
-                );
+                let local = self.alloc_local(let_stmt.name, mode, let_stmt.name_span);
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
 
-                self.emit(if let_stmt.mutable {
-                    InstructionKind::SetMut { local, r#type, expr, comptime: let_stmt.comptime }
-                } else {
-                    InstructionKind::Set { local, r#type, expr }
+                self.emit(match mode {
+                    BindingMode::Mutable { comptime } => {
+                        InstructionKind::SetMut { local, r#type, expr, comptime }
+                    }
+                    BindingMode::Immutable => InstructionKind::Set { local, r#type, expr },
                 });
             }
             Statement::Expr(expr) => {
@@ -775,7 +758,7 @@ impl BlockLowerer<'_> {
                     self.error_unresolved_identifier(name, span);
                     return;
                 };
-                if !entry.mutable {
+                if !entry.mode.is_mutable() {
                     self.error_assignment_to_immutable(
                         name,
                         span,
@@ -786,7 +769,7 @@ impl BlockLowerer<'_> {
                 let target = entry.id;
                 let value = self.lower_expr(assign_stmt.value());
 
-                let comptime = if self.comptime { false } else { entry.comptime };
+                let comptime = if self.comptime { false } else { entry.mode.is_comptime() };
                 self.emit(InstructionKind::Assign { target, expr: value, comptime });
             }
             Statement::While(while_stmt) => {

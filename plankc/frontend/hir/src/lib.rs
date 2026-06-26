@@ -79,6 +79,28 @@ impl ExprKind {
     pub const POISON: Self = ExprKind::Value(Err(Poisoned));
 }
 
+/// How a `let` binding behaves. An immutable binding is never `comptime`
+/// (an immutable `comptime let` is redundant), so that state is unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindingMode {
+    Immutable,
+    Mutable { comptime: bool },
+}
+
+impl BindingMode {
+    pub fn new(mutable: bool, comptime: bool) -> Self {
+        if mutable { BindingMode::Mutable { comptime } } else { BindingMode::Immutable }
+    }
+
+    pub fn is_mutable(self) -> bool {
+        matches!(self, BindingMode::Mutable { .. })
+    }
+
+    pub fn is_comptime(self) -> bool {
+        matches!(self, BindingMode::Mutable { comptime: true })
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum InstructionKind {
     Param {

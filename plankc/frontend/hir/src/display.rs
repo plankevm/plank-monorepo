@@ -6,11 +6,6 @@ use std::fmt::{self, Display, Formatter};
 
 const DISPLAY_AS_HEX_THRESHOLD: U256 = uint!(100_000_U256);
 
-enum SetKind {
-    Immutable,
-    Mutable { comptime: bool },
-}
-
 pub struct DisplayHir<'a> {
     hir: &'a Hir,
     values: &'a ValueInterner,
@@ -150,11 +145,11 @@ impl<'a> DisplayHir<'a> {
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,
-        kind: SetKind,
+        kind: BindingMode,
     ) -> fmt::Result {
         let (comptime, marker) = match kind {
-            SetKind::Immutable => (false, ""),
-            SetKind::Mutable { comptime } => (comptime, "[mut]"),
+            BindingMode::Immutable => (false, ""),
+            BindingMode::Mutable { comptime } => (comptime, "[mut]"),
         };
         let pad = "    ".repeat(indent);
         write!(f, "{pad}")?;
@@ -180,10 +175,10 @@ impl<'a> DisplayHir<'a> {
         let pad = "    ".repeat(indent);
         match instr {
             InstructionKind::Set { local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr, SetKind::Immutable)
+                self.fmt_set(f, indent, local, r#type, expr, BindingMode::Immutable)
             }
             InstructionKind::SetMut { local, r#type, expr, comptime } => {
-                self.fmt_set(f, indent, local, r#type, expr, SetKind::Mutable { comptime })
+                self.fmt_set(f, indent, local, r#type, expr, BindingMode::Mutable { comptime })
             }
             InstructionKind::BranchSet { local, expr } => {
                 write!(f, "{pad}")?;
