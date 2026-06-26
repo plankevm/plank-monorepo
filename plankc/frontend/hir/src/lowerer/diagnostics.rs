@@ -49,6 +49,23 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
+    pub(crate) fn error_immutable_comptime_let(&self, name: StrId, span: TokenSpan) {
+        let source_span = self.lexed.tokens_src_span(span);
+        let name_str = self.lookup_name(name);
+        Diagnostic::error("immutable `comptime let` is not allowed")
+            .primary(
+                self.source_id,
+                source_span,
+                "`comptime` on a `let` is only meaningful with `mut`",
+            )
+            .note("an immutable `comptime let` is redundant with a plain `let`")
+            .help(format!("remove `comptime` to bind `let {name_str} = ...`"))
+            .help(format!(
+                "use `comptime let mut {name_str}` to declare a compile-time mutable variable"
+            ))
+            .emit(*self.session.borrow_mut());
+    }
+
     pub(crate) fn error_multiple_init_blocks(&self, current: TokenSpan, previous: TokenSpan) {
         self.error_multiple_blocks("init", current, previous);
     }

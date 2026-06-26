@@ -158,7 +158,7 @@ impl<'a> DisplayHir<'a> {
             write!(f, " : ")?;
             self.fmt_local(f, r#type)?;
         }
-        write!(f, " {}= ", if mutable { "[mut]" } else { "" } )?;
+        write!(f, " {}= ", if mutable { "[mut]" } else { "" })?;
         self.fmt_expr(f, expr)?;
         writeln!(f)
     }

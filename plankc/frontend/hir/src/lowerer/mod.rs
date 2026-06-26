@@ -480,16 +480,16 @@ impl BlockLowerer<'_> {
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
                 let body = self.create_sub_block(block.node().span(), |this| {
-                        for stmt in block.statements() {
-                            this.lower_statement(stmt);
+                    for stmt in block.statements() {
+                        this.lower_statement(stmt);
+                    }
+                    let expr = match block.end_expr() {
+                        Some(e) => this.lower_expr(e),
+                        None => {
+                            let span = block.node().span();
+                            this.expr(ExprKind::VOID, span)
                         }
-                        let expr = match block.end_expr() {
-                            Some(e) => this.lower_expr(e),
-                            None => {
-                                let span = block.node().span();
-                                this.expr(ExprKind::VOID, span)
-                            }
-                        };
+                    };
                     this.emit(InstructionKind::Set { local: result, r#type: None, expr });
                 });
 
@@ -734,6 +734,9 @@ impl BlockLowerer<'_> {
     fn lower_statement(&mut self, stmt: Statement<'_>) {
         match stmt {
             Statement::Let(let_stmt) => {
+                if let_stmt.comptime && !let_stmt.mutable {
+                    self.error_immutable_comptime_let(let_stmt.name, let_stmt.span());
+                }
                 let expr = self.lower_expr(let_stmt.value());
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
                 let local = self.alloc_local(

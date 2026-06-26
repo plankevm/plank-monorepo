@@ -196,6 +196,31 @@ fn test_assign_to_immutable_let() {
 }
 
 #[test]
+fn test_immutable_comptime_let() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            comptime let x = 34;
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: immutable `comptime let` is not allowed
+         --> main.plk:2:5
+          |
+        2 |     comptime let x = 34;
+          |     ^^^^^^^^^^^^^^^^^^^^ `comptime` on a `let` is only meaningful with `mut`
+          |
+          = note: an immutable `comptime let` is redundant with a plain `let`
+          = help: remove `comptime` to bind `let x = ...`
+          = help: use `comptime let mut x` to declare a compile-time mutable variable
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_return_in_fn_param_type_expression() {
     let rendered = render_diagnostics(
         r#"
