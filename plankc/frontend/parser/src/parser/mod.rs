@@ -858,7 +858,7 @@ impl<'a> Parser<'a> {
                 ParseExprMode::AllowAll,
                 OpPriority::ZERO,
             );
-            return self.finish_parse_stmt(stmt_start, expr);
+            return self.continue_parse_stmt(stmt_start, expr);
         }
 
         let Some(expr) = self.try_parse_expr(ParseExprMode::AllowAll) else {
@@ -868,10 +868,10 @@ impl<'a> Parser<'a> {
             return None;
         };
 
-        self.finish_parse_stmt(stmt_start, expr)
+        self.continue_parse_stmt(stmt_start, expr)
     }
 
-    fn finish_parse_stmt(&mut self, stmt_start: TokenIdx, expr: NodeIdx) -> Option<StmtResult> {
+    fn continue_parse_stmt(&mut self, stmt_start: TokenIdx, expr: NodeIdx) -> Option<StmtResult> {
         if self.eat(Token::Equals) {
             let mut assign = self.alloc_node_from(stmt_start, NodeKind::AssignStmt);
             self.push_child(&mut assign, expr);
