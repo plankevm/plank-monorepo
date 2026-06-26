@@ -7,7 +7,14 @@ pub enum BuiltinKind {
     RuntimeFoldable,
     RuntimeOnly,
     Comptime,
-    ComptimeDynamic { arg_count: usize },
+    ComptimeDynamic { arity: Arity },
+}
+
+/// How many arguments a comptime-dynamic builtin accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arity {
+    Exact(usize),
+    Variadic,
 }
 
 macro_rules! define_builtins {
@@ -25,7 +32,7 @@ macro_rules! define_builtins {
             $($ct_const:ident $ct_str:literal => $ct_variant:ident;)*
         }
         comptime_dynamic_builtins {
-            $($cd_const:ident $cd_str:literal => $cd_variant:ident($cd_arg_count:literal);)*
+            $($cd_const:ident $cd_str:literal => $cd_variant:ident($cd_arity:expr);)*
         }
         builtin_attribute {
             $($builtin_attr:ident = $builtin_attr_str:literal;)*
@@ -141,7 +148,7 @@ macro_rules! define_builtins {
                     Self::Runtime(runtime) if runtime.foldable() => BuiltinKind::RuntimeFoldable,
                     Self::Runtime(_) => BuiltinKind::RuntimeOnly,
                     $(Self::$ct_variant => BuiltinKind::Comptime,)*
-                    $(Self::$cd_variant => BuiltinKind::ComptimeDynamic { arg_count: $cd_arg_count },)*
+                    $(Self::$cd_variant => BuiltinKind::ComptimeDynamic { arity: $cd_arity },)*
                 }
             }
         }
@@ -375,13 +382,13 @@ define_builtins! {
     }
 
     comptime_dynamic_builtins {
-        FIELD_TYPE "@field_type" => FieldType(2);
-        TYPE_INDEX "@type_index" => TypeIndex(1);
-        GET_FIELD "@get_field" => GetField(2);
-        SET_FIELD "@set_field" => SetField(3);
-        UNINIT "@uninit" => Uninit(1);
-        CONCAT_CBYTES "@concat_cbytes" => ConcatCBytes(1);
-        COMPILE_LOG "@compile_log" => CompileLog(1);
+        FIELD_TYPE "@field_type" => FieldType(Arity::Exact(2));
+        TYPE_INDEX "@type_index" => TypeIndex(Arity::Exact(1));
+        GET_FIELD "@get_field" => GetField(Arity::Exact(2));
+        SET_FIELD "@set_field" => SetField(Arity::Exact(3));
+        UNINIT "@uninit" => Uninit(Arity::Exact(1));
+        CONCAT_CBYTES "@concat_cbytes" => ConcatCBytes(Arity::Exact(1));
+        COMPILE_LOG "@compile_log" => CompileLog(Arity::Variadic);
     }
 
     builtin_attribute {

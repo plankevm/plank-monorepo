@@ -25,6 +25,39 @@ fn test_compile_log() {
     );
 }
 
+/// `@compile_log` is variadic: every argument is formatted and joined with a single space
+/// into one logged line.
+#[test]
+fn test_compile_log_multiple_values_joined_with_space() {
+    assert_compile_logs(
+        r#"
+        init {
+            comptime {
+                @compile_log(1, true, "three");
+            }
+            @evm_stop();
+        }
+        "#,
+        &[r#"1 true "three""#],
+    );
+}
+
+/// A `@compile_log` with no arguments still records an (empty) log line.
+#[test]
+fn test_compile_log_no_args() {
+    assert_compile_logs(
+        r#"
+        init {
+            comptime {
+                @compile_log();
+            }
+            @evm_stop();
+        }
+        "#,
+        &[""],
+    );
+}
+
 #[test]
 fn test_compile_log_usage_emits_error_diagnostic() {
     assert_diagnostics(
