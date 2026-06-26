@@ -44,7 +44,7 @@ stmt =
     | while
 
 while = "inline"? "while" expr block
-let = "let" "mut"? IDENT (":" expr)? "=" expr
+let = "comptime"? "let" "mut"? IDENT (":" expr)? "=" expr
 return = "return" expr
 assign = expr "=" expr
 

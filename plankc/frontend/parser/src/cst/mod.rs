@@ -78,7 +78,7 @@ pub enum NodeKind {
     // Statements
     ComptimeBlock,
     Block,
-    LetStmt { mutable: bool, typed: bool },
+    LetStmt { comptime: bool, mutable: bool, typed: bool },
     ReturnStmt,
     AssignStmt,
     WhileStmt,
@@ -138,9 +138,12 @@ impl std::fmt::Debug for NodeKind {
             Self::RunBlock => write!(f, "RunBlock"),
             Self::ComptimeBlock => write!(f, "ComptimeBlock"),
             Self::Block => write!(f, "Block"),
-            Self::LetStmt { mutable, typed } => {
-                f.debug_struct("LetStmt").field("mutable", mutable).field("typed", typed).finish()
-            }
+            Self::LetStmt { comptime, mutable, typed } => f
+                .debug_struct("LetStmt")
+                .field("comptime", comptime)
+                .field("mutable", mutable)
+                .field("typed", typed)
+                .finish(),
             Self::ReturnStmt => write!(f, "ReturnStmt"),
             Self::AssignStmt => write!(f, "AssignStmt"),
             Self::WhileStmt => write!(f, "WhileStmt"),

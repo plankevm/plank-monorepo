@@ -384,6 +384,22 @@ fn test_missing_close_run_block() {
 }
 
 #[test]
+fn test_comptime_stmt_expected_block_or_let() {
+    assert_parser_errors(
+        r#"
+            init { comptime foo; }
+        "#,
+        &[r#"
+            error: unexpected identifier
+             --> test.plk:1:17
+              |
+            1 | init { comptime foo; }
+              |                 ^^^ unexpected identifier, expected one of `{`, `let`
+        "#],
+    );
+}
+
+#[test]
 fn test_unexpected_token_at_top_level() {
     assert_parser_errors(
         r#"

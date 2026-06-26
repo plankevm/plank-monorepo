@@ -2258,7 +2258,7 @@ fn test_let_basic() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: false, typed: false }
+                    LetStmt { comptime: false, mutable: false, typed: false }
                         "let"
                         " "
                         Identifier
@@ -2289,7 +2289,7 @@ fn test_let_with_mut() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: true, typed: false }
+                    LetStmt { comptime: false, mutable: true, typed: false }
                         "let"
                         " "
                         "mut"
@@ -2322,7 +2322,7 @@ fn test_let_with_type() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: false, typed: true }
+                    LetStmt { comptime: false, mutable: false, typed: true }
                         "let"
                         " "
                         Identifier
@@ -2357,7 +2357,79 @@ fn test_let_full() {
                 "{"
                 StatementsList
                     " "
-                    LetStmt { mutable: true, typed: true }
+                    LetStmt { comptime: false, mutable: true, typed: true }
+                        "let"
+                        " "
+                        "mut"
+                        " "
+                        Identifier
+                            "x"
+                        ":"
+                        " "
+                        Identifier
+                            "T"
+                        " "
+                        "="
+                        " "
+                        NumLiteral
+                            "1"
+                        ";"
+                    " "
+                "}"
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_let_basic() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        init { comptime let x = 1; }
+        "#,
+        r#"
+        File
+            InitBlock
+                "init"
+                " "
+                "{"
+                StatementsList
+                    " "
+                    LetStmt { comptime: true, mutable: false, typed: false }
+                        "comptime"
+                        " "
+                        "let"
+                        " "
+                        Identifier
+                            "x"
+                        " "
+                        "="
+                        " "
+                        NumLiteral
+                            "1"
+                        ";"
+                    " "
+                "}"
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_let_full() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        init { comptime let mut x: T = 1; }
+        "#,
+        r#"
+        File
+            InitBlock
+                "init"
+                " "
+                "{"
+                StatementsList
+                    " "
+                    LetStmt { comptime: true, mutable: true, typed: true }
+                        "comptime"
+                        " "
                         "let"
                         " "
                         "mut"
@@ -2383,6 +2455,37 @@ fn test_let_full() {
 // =============================================================================
 // Other Statements
 // =============================================================================
+
+#[test]
+fn test_comptime_block_stmt() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        init { comptime { 1 }; }
+        "#,
+        r#"
+        File
+            InitBlock
+                "init"
+                " "
+                "{"
+                StatementsList
+                    " "
+                    ComptimeBlock
+                        "comptime"
+                        " "
+                        "{"
+                        StatementsList
+                            " "
+                        NumLiteral
+                            "1"
+                        " "
+                        "}"
+                    ";"
+                    " "
+                "}"
+        "#,
+    );
+}
 
 #[test]
 fn test_return_stmt() {
