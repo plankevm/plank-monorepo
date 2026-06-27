@@ -198,11 +198,13 @@ fn test_clz_builtin_requires_osaka_version() {
         "#,
         plank_evm::EvmVersion::Prague,
         &[r#"
-        error: builtin `@evm_clz` requires EVM version `Osaka` or later
+        error: builtin `@evm_clz` requires EVM version `osaka` or later
          --> main.plk:1:11
           |
         1 | const x = @evm_clz(1);
-          |           ^^^^^^^^^^^ not available in the active EVM version `Prague`
+          |           ^^^^^^^^^^^ not available in the active EVM version `prague`
+          |
+          = note: recompile with `--evm-version osaka` or later
         "#],
     );
 }

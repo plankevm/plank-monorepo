@@ -645,14 +645,15 @@ impl DiagCtx<'_> {
         loc: SrcLoc,
     ) {
         Diagnostic::error(format!(
-            "builtin `{}` requires EVM version `{required:?}` or later",
+            "builtin `{}` requires EVM version `{required}` or later",
             builtin.name()
         ))
         .primary(
             loc.source,
             loc.span,
-            format!("not available in the active EVM version `{active:?}`"),
+            format!("not available in the active EVM version `{active}`"),
         )
+        .note(format!("recompile with `--evm-version {required}` or later"))
         .emit(self);
     }
 

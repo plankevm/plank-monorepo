@@ -7,12 +7,12 @@ import {Bit} from "src/std/Bit.sol";
 contract BitTest is BaseTest {
     Bit solRef = new Bit();
 
-    // Compiled with a pre-Osaka EVM version that lacks the CLZ opcode: exercises
-    // the portable fallback in `std::bit::clz`.
     address plankFallback = makeAddr("plank-clz-fallback");
+    address plankOsaka = makeAddr("plank-clz-osaka");
 
     function setUp() public {
         vm.etch(plankFallback, plank("src/std/bit_test.plk", "prague"));
+        vm.etch(plankOsaka, plank("src/std/bit_test.plk", "osaka"));
     }
 
     function _clz(address impl, uint256 x) internal returns (uint256) {
@@ -21,24 +21,36 @@ contract BitTest is BaseTest {
         return abi.decode(out, (uint256));
     }
 
-    function test_clz_knownValues() public {
-        assertEq(_clz(plankFallback, 0), 256);
-        assertEq(_clz(plankFallback, 1), 255);
-        assertEq(_clz(plankFallback, 255), 248);
-        assertEq(_clz(plankFallback, 256), 247);
-        assertEq(_clz(plankFallback, 1 << 255), 0);
-        assertEq(_clz(plankFallback, (1 << 160) - 1), 96);
-        assertEq(_clz(plankFallback, type(uint256).max), 0);
+    function _assertKnownValues(address impl) internal {
+        assertEq(_clz(impl, 0), 256);
+        assertEq(_clz(impl, 1), 255);
+        assertEq(_clz(impl, 255), 248);
+        assertEq(_clz(impl, 256), 247);
+        assertEq(_clz(impl, 1 << 255), 0);
+        assertEq(_clz(impl, (1 << 160) - 1), 96);
+        assertEq(_clz(impl, type(uint256).max), 0);
+    }
+
+    function test_clz_knownValues_fallback() public {
+        _assertKnownValues(plankFallback);
+    }
+
+    function test_clz_knownValues_osaka() public {
+        _assertKnownValues(plankOsaka);
     }
 
     function test_fuzzing_clzFallbackMatchesReference(uint256 x) public {
-        (, bytes memory refOut) = address(solRef).call(abi.encode(x));
+        (bool ok, bytes memory refOut) = address(solRef).call(abi.encode(x));
+        assertTrue(ok, "ref call reverted");
         assertEq(_clz(plankFallback, x), abi.decode(refOut, (uint256)));
     }
 
-    // On Osaka (the default) the opcode path emits CLZ (0x1e, EIP-7939). We assert
-    // the byte is present in the compiled output rather than executing it, since
-    // the test EVM may not enable the opcode yet.
+    function test_fuzzing_clzOsakaMatchesReference(uint256 x) public {
+        (bool ok, bytes memory refOut) = address(solRef).call(abi.encode(x));
+        assertTrue(ok, "ref call reverted");
+        assertEq(_clz(plankOsaka, x), abi.decode(refOut, (uint256)));
+    }
+
     function test_osakaCompilesToClzOpcode() public {
         bytes memory code = plank("src/std/bit_test.plk", "osaka");
         bool found;

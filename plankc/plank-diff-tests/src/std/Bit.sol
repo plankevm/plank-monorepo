@@ -11,7 +11,6 @@ contract Bit {
         }
     }
 
-    // Obvious-by-construction reference for count-leading-zeros.
     function clz(uint256 x) internal pure returns (uint256) {
         if (x == 0) return 256;
         uint256 r = 0;

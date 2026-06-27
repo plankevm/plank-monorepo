@@ -23,6 +23,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let args = &self.eval.hir.args[args];
         match builtin {
             Builtin::Runtime(runtime) => {
+                if let Some(required) = runtime_builtin_min_evm_version(runtime)
+                    && self.eval.evm_version < required
+                {
+                    self.diag_ctx.emit_builtin_requires_evm_version(
+                        runtime,
+                        self.eval.evm_version,
+                        required,
+                        self.loc(expr_span),
+                    );
+                    return Err(Poisoned);
+                }
                 if runtime.foldable() {
                     self.eval_runtime_foldable_builtin(runtime, args, expr_span)
                 } else {
@@ -47,18 +58,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        if let Some(required) = runtime_builtin_min_evm_version(builtin)
-            && self.eval.evm_version < required
-        {
-            self.diag_ctx.emit_builtin_requires_evm_version(
-                builtin,
-                self.eval.evm_version,
-                required,
-                self.loc(expr_span),
-            );
-            return Err(Poisoned);
-        }
-
         let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span)?;
 
         let folded = self.with_values_buf(|this, values_buf_offset| {
