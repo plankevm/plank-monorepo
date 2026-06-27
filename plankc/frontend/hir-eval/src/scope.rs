@@ -130,7 +130,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.eval.instr_stack_buf.push(instr);
     }
 
-    /// Mints a transient diagnostics view; convenience wrapper over [`Evaluator::diag`].
     pub fn diag(&mut self) -> EvaluatorDiagnostics<'_> {
         self.eval.diag()
     }
@@ -492,8 +491,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         result
     }
 
-    /// Runs `inner` with `call_loc` installed as the preamble call site, so diagnostics emitted
-    /// during it carry a "called here" note, then restores the previous call site. Nests correctly.
     pub(crate) fn with_preamble_call_site<R>(
         &mut self,
         call_loc: SrcLoc,
