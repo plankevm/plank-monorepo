@@ -109,6 +109,10 @@ pub fn not(a: U256) -> U256 {
     !a
 }
 
+pub fn clz(a: U256) -> U256 {
+    U256::from(a.leading_zeros())
+}
+
 pub fn byte(i: U256, x: U256) -> U256 {
     let Ok(i) = usize::try_from(i) else {
         return U256::ZERO;

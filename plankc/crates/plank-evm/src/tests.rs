@@ -249,6 +249,21 @@ fn test_not() {
 }
 
 #[test]
+fn test_clz() {
+    let cases = &[
+        uint!(0_U256),
+        uint!(1_U256),
+        uint!(255_U256),
+        uint!(256_U256),
+        uint!(1_U256) << 255,
+        (uint!(1_U256) << 160) - uint!(1_U256),
+        U256::MAX,
+        uint!(0xfedcba9812345678cafebabe00000000deadbeef_U256),
+    ];
+    assert_unop(opcode::CLZ, crate::clz, cases);
+}
+
+#[test]
 fn test_byte() {
     assert_binop(
         opcode::BYTE,
