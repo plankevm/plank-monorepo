@@ -443,6 +443,7 @@ impl<'a> FunctionLowerer<'a> {
             B::Shl => emit!(Shl::new, [a, b], Value),
             B::Shr => emit!(Shr::new, [a, b], Value),
             B::Sar => emit!(Sar::new, [a, b], Value),
+            B::Clz => emit!(EvmClz::new, [a], Value),
 
             B::Keccak256 => emit!(EvmKeccak256::new, [a, b], Value),
             B::Address => emit!(EvmAddress::new, [], Value),
