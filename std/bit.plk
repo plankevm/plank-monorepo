@@ -1,0 +1,46 @@
+import std::version::{active_evm_version, OSAKA};
+
+// Whether the active EVM version supports the `CLZ` opcode (EIP-7939, shipped in
+// Osaka). Bound as a `const` so the branch in `clz` sees a comptime condition and
+// prunes the unused path — otherwise `@evm_clz` would be lowered (and rejected) on
+// versions that lack the opcode.
+const HAS_CLZ_OPCODE = active_evm_version().id >= OSAKA.id;
+
+// Count leading zeros: the number of zero bits preceding the most significant
+// set bit of `x`. Returns 256 when `x` is zero.
+//
+// On EVM versions that support the `CLZ` opcode (EIP-7939) this uses the native
+// opcode; otherwise it falls back to a portable implementation. The branch is
+// selected at compile time, so only one path is ever emitted.
+const clz = fn (x: u256) u256 {
+    if HAS_CLZ_OPCODE {
+        @evm_clz(x)
+    } else {
+        clz_fallback(x)
+    }
+};
+
+// `word` when `cond` holds, otherwise zero. Used to turn the boolean comparison
+// builtins into the 0/word selectors the count-leading-zeros search needs.
+const select = fn (cond: bool, word: u256) u256 {
+    if cond {
+        word
+    } else {
+        0
+    }
+};
+
+// Count leading zeros for EVM versions without the `CLZ` opcode.
+//
+// Recreated from solady `LibBit.clz` (MIT License), Copyright (c) 2022 solady:
+// https://github.com/Vectorized/solady/blob/5dc5fc87374e6e9de15e8139c09d80fde5a22303/src/utils/LibBit.sol#L33-L45
+const clz_fallback = fn (x: u256) u256 {
+    let r0 = select(@evm_lt(0xffffffffffffffffffffffffffffffff, x), 128);
+    let r1 = @evm_or(r0, select(@evm_lt(0xffffffffffffffff, @evm_shr(r0, x)), 64));
+    let r2 = @evm_or(r1, select(@evm_lt(0xffffffff, @evm_shr(r1, x)), 32));
+    let r3 = @evm_or(r2, select(@evm_lt(0xffff, @evm_shr(r2, x)), 16));
+    let r4 = @evm_or(r3, select(@evm_lt(0xff, @evm_shr(r3, x)), 8));
+    let index = @evm_and(0x1f, @evm_shr(@evm_shr(r4, x), 0x8421084210842108cc6318c6db6d54be));
+    let table = 0xf8f9f9faf9fdfafbf9fdfcfdfafbfcfef9fafdfafcfcfbfefafafcfbffffffff;
+    @evm_add(@evm_xor(r4, @evm_byte(index, table)), select(@evm_iszero(x), 1))
+};
