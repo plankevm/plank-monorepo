@@ -28,6 +28,7 @@ pub fn is_flippable(op: OperationKind) -> bool {
         | OperationKind::Shl
         | OperationKind::Shr
         | OperationKind::Sar
+        | OperationKind::Clz
         | OperationKind::Keccak256
         | OperationKind::Address
         | OperationKind::Balance

@@ -91,7 +91,8 @@ impl Effect {
             | OperationKind::Byte
             | OperationKind::Shl
             | OperationKind::Shr
-            | OperationKind::Sar => Effect::PURE,
+            | OperationKind::Sar
+            | OperationKind::Clz => Effect::PURE,
 
             OperationKind::Keccak256 => Effect::MEMORY_READ,
 

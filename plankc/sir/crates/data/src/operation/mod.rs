@@ -148,6 +148,7 @@ impl OperationKind {
             OperationKind::Shl => op::SHL,
             OperationKind::Shr => op::SHR,
             OperationKind::Sar => op::SAR,
+            OperationKind::Clz => op::CLZ,
 
             // ========== EVM Keccak-256 ==========
             OperationKind::Keccak256 => op::KECCAK256,
@@ -251,6 +252,7 @@ define_operations! {
     Shl(InlineOperands<2, 1>) "shl",
     Shr(InlineOperands<2, 1>) "shr",
     Sar(InlineOperands<2, 1>) "sar",
+    Clz(InlineOperands<1, 1>) "clz",
 
     // ========== EVM Keccak-256 ==========
     Keccak256(InlineOperands<2, 1>) "keccak256",
@@ -380,6 +382,7 @@ impl OperationKind {
             | OperationKind::Shl
             | OperationKind::Shr
             | OperationKind::Sar
+            | OperationKind::Clz
             | OperationKind::Keccak256
             | OperationKind::Address
             | OperationKind::Balance

@@ -132,6 +132,7 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
         | Operation::Shl(_)
         | Operation::Shr(_)
         | Operation::Sar(_)
+        | Operation::Clz(_)
         | Operation::Address(_)
         | Operation::Origin(_)
         | Operation::Caller(_)

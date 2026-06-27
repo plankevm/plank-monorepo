@@ -26,6 +26,7 @@ pub const BYTE: u8 = 0x1A;
 pub const SHL: u8 = 0x1B;
 pub const SHR: u8 = 0x1C;
 pub const SAR: u8 = 0x1D;
+pub const CLZ: u8 = 0x1E;
 // Keccak 0x20
 pub const KECCAK256: u8 = 0x20;
 // Call context introspection 0x30 - 0x3f
@@ -187,6 +188,7 @@ pub fn name(opcode: u8) -> &'static str {
         SHL => "SHL",
         SHR => "SHR",
         SAR => "SAR",
+        CLZ => "CLZ",
         KECCAK256 => "KECCAK256",
         ADDRESS => "ADDRESS",
         BALANCE => "BALANCE",
