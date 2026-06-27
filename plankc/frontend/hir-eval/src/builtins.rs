@@ -616,8 +616,28 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         };
 
-        let fields = match self.eval.values.lookup(tuple_vid) {
-            Value::Compound { ty, fields } if ty.is_tuple() => fields.to_vec(),
+        // The `fields` borrow is held only for this pure pass: it builds the byte buffer and
+        // records the types of any invalid elements. Diagnostics are emitted afterwards, once the
+        // borrow is released, so `self.diag()` (which needs `&mut self`) no longer conflicts with
+        // the slice borrowed from the value interner.
+        let (buf, invalid_types) = match self.eval.values.lookup(tuple_vid) {
+            Value::Compound { ty, fields } if ty.is_tuple() => {
+                let mut buf = Vec::new();
+                let mut invalid_types = Vec::new();
+                for &field in fields {
+                    match self.values.lookup(field) {
+                        Value::BigNum(n) => {
+                            buf.extend_from_slice(&n.to_be_bytes::<32>());
+                        }
+                        Value::Bytes(bytes) => {
+                            let slice = self.eval.session.lookup_bytes_slice(bytes);
+                            buf.extend_from_slice(slice);
+                        }
+                        other => invalid_types.push(other.get_type()),
+                    }
+                }
+                (buf, invalid_types)
+            }
             _ => {
                 let actual_ty = self.values.type_of_value(tuple_vid);
                 let loc = self.loc(expr_span);
@@ -626,26 +646,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         };
 
-        let mut buf = Vec::new();
-        let mut contains_invalid = false;
-        for &field in &fields {
-            match self.values.lookup(field) {
-                Value::BigNum(n) => {
-                    buf.extend_from_slice(&n.to_be_bytes::<32>());
-                }
-                Value::Bytes(bytes) => {
-                    let slice = self.eval.session.lookup_bytes_slice(bytes);
-                    buf.extend_from_slice(slice);
-                }
-                other => {
-                    let arg_ty = other.get_type();
-                    let loc = self.loc(expr_span);
-                    self.diag().emit_concat_cbytes_invalid_element(arg_ty, loc);
-                    contains_invalid = true;
-                }
+        if !invalid_types.is_empty() {
+            let loc = self.loc(expr_span);
+            for arg_ty in invalid_types {
+                self.diag().emit_concat_cbytes_invalid_element(arg_ty, loc);
             }
-        }
-        if contains_invalid {
             return Err(Poisoned);
         }
         let cbytes = self.eval.session.intern_cbytes(&buf);
