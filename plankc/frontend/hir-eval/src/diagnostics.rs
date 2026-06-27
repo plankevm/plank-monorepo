@@ -28,14 +28,14 @@ impl BindingLoc {
 /// from the `Evaluator`, so a fresh one is created at each diagnostic emission rather than being
 /// threaded around. Because it carries `values`/`types`, the emit methods read them from the view
 /// instead of taking them as parameters.
-pub(crate) struct EvaluatorDiagnostics<'a> {
+pub(crate) struct DiagEmitView<'a> {
     pub session: &'a mut Session,
     pub types: &'a TypeInterner,
     pub values: &'a ValueInterner,
-    pub preamble_call_site: &'a mut Option<SrcLoc>,
+    pub preamble_call_site: &'a Option<SrcLoc>,
 }
 
-impl DiagEmitter for EvaluatorDiagnostics<'_> {
+impl DiagEmitter for DiagEmitView<'_> {
     fn emit_diagnostic(&mut self, mut diagnostic: Diagnostic) {
         if let Some(call_site) = *self.preamble_call_site {
             diagnostic = diagnostic.claim(
@@ -49,7 +49,7 @@ impl DiagEmitter for EvaluatorDiagnostics<'_> {
     }
 }
 
-impl EvaluatorDiagnostics<'_> {
+impl DiagEmitView<'_> {
     /// Formats a type for display, threading the session and value interner the renderer needs.
     fn format_type(&self, ty: TypeId) -> FmtType<'_> {
         self.types.format(self.session, self.values, ty)
@@ -441,11 +441,11 @@ impl EvaluatorDiagnostics<'_> {
                     .no_label(expr.span, AnnotationKind::Primary)
                     .secondary(
                         runtime.def_span,
-                        format!("type `{}` is runtime only", self.format_type(runtime.ty),),
+                        format!("type `{}` is runtime only", self.format_type(runtime.ty)),
                     )
                     .secondary(
                         comptime.def_span,
-                        format!("type `{}` is comptime only", self.format_type(comptime.ty),),
+                        format!("type `{}` is comptime only", self.format_type(comptime.ty)),
                     ),
             )
             .emit(self);
@@ -1034,7 +1034,7 @@ impl EvaluatorDiagnostics<'_> {
             .primary(
                 expr.source,
                 expr.span,
-                format!("operator '{op}' is not supported for type `{}`", self.format_type(ty),),
+                format!("operator '{op}' is not supported for type `{}`", self.format_type(ty)),
             )
             .emit(self);
     }

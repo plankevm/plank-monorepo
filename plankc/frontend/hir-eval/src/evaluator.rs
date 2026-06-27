@@ -10,7 +10,7 @@ use plank_values::{
 };
 
 use crate::{
-    diagnostics::EvaluatorDiagnostics,
+    diagnostics::DiagEmitView,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
     quota::ComptimeQuota,
@@ -50,7 +50,7 @@ pub(crate) struct Evaluator<'a> {
     pub session: &'a mut Session,
     /// Anchors "called here" notes onto diagnostics emitted while evaluating a function preamble.
     /// Scoped around preamble evaluation via `Scope::with_preamble_call_site` and borrowed by the
-    /// transient [`EvaluatorDiagnostics`].
+    /// transient [`DiagEmitView`].
     pub preamble_call_site: Option<SrcLoc>,
 
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
@@ -132,12 +132,12 @@ impl<'a> Evaluator<'a> {
 
     /// Mints a transient diagnostics view borrowing the session and interners. A fresh one is
     /// created at each diagnostic emission rather than being threaded through evaluation.
-    pub fn diag(&mut self) -> EvaluatorDiagnostics<'_> {
-        EvaluatorDiagnostics {
+    pub fn diag(&mut self) -> DiagEmitView<'_> {
+        DiagEmitView {
             session: &mut *self.session,
             types: self.types,
             values: &*self.values,
-            preamble_call_site: &mut self.preamble_call_site,
+            preamble_call_site: &self.preamble_call_site,
         }
     }
 

@@ -1,6 +1,6 @@
 use crate::{
     Evaluator,
-    diagnostics::{BindingLoc, EvaluatorDiagnostics},
+    diagnostics::{BindingLoc, DiagEmitView},
     evaluator::CallArgSpansIdx,
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
@@ -130,7 +130,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.eval.instr_stack_buf.push(instr);
     }
 
-    pub fn diag(&mut self) -> EvaluatorDiagnostics<'_> {
+    pub fn diag(&mut self) -> DiagEmitView<'_> {
         self.eval.diag()
     }
 
