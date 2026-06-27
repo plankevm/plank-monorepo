@@ -341,15 +341,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         values_buf_offset: usize,
         call_loc: SrcLoc,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let preamble = {
-            let restore = self.eval.set_preamble_call_site(call.loc());
-            let preamble = self.eval_preamble(fn_def_id);
-            self.eval.restore_preamble_call_site(restore);
-            match preamble {
-                Ok(Ok(preamble)) => preamble,
-                Ok(Err(Poisoned)) => return Err(Poisoned),
-                Err(diverge) => return Ok(Err(diverge)),
-            }
+        let preamble =
+            self.with_preamble_call_site(call.loc(), |this| this.eval_preamble(fn_def_id));
+        let preamble = match preamble {
+            Ok(Ok(preamble)) => preamble,
+            Ok(Err(Poisoned)) => return Err(Poisoned),
+            Err(diverge) => return Ok(Err(diverge)),
         };
 
         let mut runtime_param_count = 0;

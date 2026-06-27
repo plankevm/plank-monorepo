@@ -492,6 +492,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         result
     }
 
+    /// Runs `inner` with `call_loc` installed as the preamble call site, so diagnostics emitted
+    /// during it carry a "called here" note, then restores the previous call site. Nests correctly.
+    pub(crate) fn with_preamble_call_site<R>(
+        &mut self,
+        call_loc: SrcLoc,
+        inner: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let prev = self.eval.preamble_call_site.replace(call_loc);
+        let result = inner(self);
+        self.eval.preamble_call_site = prev;
+        result
+    }
+
     fn eval_if(
         &mut self,
         condition: hir::LocalId,

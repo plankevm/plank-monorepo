@@ -10,7 +10,7 @@ use plank_values::{
 };
 
 use crate::{
-    diagnostics::{DiagCallSiteRestoreObligation, DiagCtx},
+    diagnostics::DiagCtx,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
     quota::ComptimeQuota,
@@ -49,8 +49,8 @@ pub(crate) struct Evaluator<'a> {
     /// `session` without involving the diagnostics machinery.
     pub session: &'a mut Session,
     /// Anchors "called here" notes onto diagnostics emitted while evaluating a function preamble.
-    /// Set/restored around preamble evaluation via [`Evaluator::set_preamble_call_site`] and
-    /// borrowed by the transient [`DiagCtx`].
+    /// Scoped around preamble evaluation via `Scope::with_preamble_call_site` and borrowed by the
+    /// transient [`DiagCtx`].
     pub preamble_call_site: Option<SrcLoc>,
 
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
@@ -139,14 +139,6 @@ impl<'a> Evaluator<'a> {
             values: &*self.values,
             preamble_call_site: &mut self.preamble_call_site,
         }
-    }
-
-    pub fn set_preamble_call_site(&mut self, call_site: SrcLoc) -> DiagCallSiteRestoreObligation {
-        DiagCallSiteRestoreObligation::new(self.preamble_call_site.replace(call_site))
-    }
-
-    pub fn restore_preamble_call_site(&mut self, restore: DiagCallSiteRestoreObligation) {
-        self.preamble_call_site = restore.into_prev();
     }
 
     pub fn evaluate_const(&mut self, const_id: ConstId) -> MaybePoisoned<ValueId> {

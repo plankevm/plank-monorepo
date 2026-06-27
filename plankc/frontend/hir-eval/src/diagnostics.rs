@@ -1,5 +1,5 @@
 use alloy_primitives::U256;
-use plank_core::{Span, must_use::MustUseStrict};
+use plank_core::Span;
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
@@ -32,24 +32,6 @@ pub(crate) struct DiagCtx<'a> {
     pub types: &'a TypeInterner,
     pub values: &'a ValueInterner,
     pub preamble_call_site: &'a mut Option<SrcLoc>,
-}
-
-#[must_use = "Must return to the evaluator via `restore_preamble_call_site`, will panic if left unused"]
-pub(crate) struct DiagCallSiteRestoreObligation {
-    prev: Option<SrcLoc>,
-    must_use: MustUseStrict,
-}
-
-impl DiagCallSiteRestoreObligation {
-    pub fn new(prev: Option<SrcLoc>) -> Self {
-        Self { prev, must_use: MustUseStrict }
-    }
-
-    pub fn into_prev(self) -> Option<SrcLoc> {
-        let DiagCallSiteRestoreObligation { prev, must_use } = self;
-        must_use.unchecked_destroy();
-        prev
-    }
 }
 
 impl DiagEmitter for DiagCtx<'_> {
