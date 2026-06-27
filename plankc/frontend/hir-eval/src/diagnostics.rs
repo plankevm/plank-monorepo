@@ -637,6 +637,25 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_builtin_requires_evm_version(
+        &mut self,
+        builtin: RuntimeBuiltin,
+        active: plank_evm::EvmVersion,
+        required: plank_evm::EvmVersion,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error(format!(
+            "builtin `{}` requires EVM version `{required:?}` or later",
+            builtin.name()
+        ))
+        .primary(
+            loc.source,
+            loc.span,
+            format!("not available in the active EVM version `{active:?}`"),
+        )
+        .emit(self);
+    }
+
     pub fn emit_custom_comptime_error(&mut self, message: impl Into<String>, loc: SrcLoc) {
         Diagnostic::error(message)
             .primary(loc.source, loc.span, "custom compile error triggered here")

@@ -19,15 +19,21 @@ fn std_project(source: &str) -> TestProject {
 }
 
 fn try_lower(project: impl Into<TestProject>) -> (Mir, ValueInterner, Session) {
+    try_lower_with_version(project, Default::default())
+}
+
+fn try_lower_with_version(
+    project: impl Into<TestProject>,
+    evm_version: plank_evm::EvmVersion,
+) -> (Mir, ValueInterner, Session) {
     let project = project.into();
     let mut session = Session::new();
     let project = project.build(&mut session);
-    let evm_spec_id = Default::default();
 
     let mut big_nums = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
     let mir =
-        crate::evaluate(&hir, project.core_ops_source, &mut big_nums, &mut session, evm_spec_id);
+        crate::evaluate(&hir, project.core_ops_source, &mut big_nums, &mut session, evm_version);
 
     (mir, big_nums, session)
 }
@@ -51,6 +57,16 @@ fn assert_lowers_to(project: impl Into<TestProject>, expected: &str) {
 #[track_caller]
 fn assert_diagnostics(source: impl Into<TestProject>, expected: &[&str]) {
     assert_project_diagnostics(source, expected)
+}
+
+#[track_caller]
+fn assert_diagnostics_with_version(
+    source: impl Into<TestProject>,
+    evm_version: plank_evm::EvmVersion,
+    expected: &[&str],
+) {
+    let (_, _, session) = try_lower_with_version(source, evm_version);
+    plank_test_utils::assert_diagnostics(session.diagnostics(), &session, expected);
 }
 
 #[track_caller]

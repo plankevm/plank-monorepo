@@ -208,6 +208,7 @@ define_builtins! {
         SHL "@evm_shl" => Shl;
         SHR "@evm_shr" => Shr;
         SAR "@evm_sar" => Sar;
+        CLZ "@evm_clz" => Clz;
     }
 
     runtime_only_builtins {

@@ -169,6 +169,45 @@ fn test_comptime_active_evm_version_builtin() {
 }
 
 #[test]
+fn test_comptime_clz_builtin() {
+    assert_lowers_to(
+        r#"
+        const a = @evm_clz(1);
+        init {
+            let mut x: u256 = a;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 255
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_clz_builtin_requires_osaka_version() {
+    assert_diagnostics_with_version(
+        r#"
+        const x = @evm_clz(1);
+        init { @evm_stop(); }
+        "#,
+        plank_evm::EvmVersion::Prague,
+        &[r#"
+        error: builtin `@evm_clz` requires EVM version `Osaka` or later
+         --> main.plk:1:11
+          |
+        1 | const x = @evm_clz(1);
+          |           ^^^^^^^^^^^ not available in the active EVM version `Prague`
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_unsupported_evm_builtin() {
     assert_diagnostics(
         r#"
