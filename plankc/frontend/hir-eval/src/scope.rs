@@ -1,6 +1,6 @@
 use crate::{
     Evaluator,
-    diagnostics::{BindingLoc, DiagCtx},
+    diagnostics::{BindingLoc, EvaluatorDiagnostics},
     evaluator::CallArgSpansIdx,
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
@@ -131,7 +131,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     /// Mints a transient diagnostics view; convenience wrapper over [`Evaluator::diag`].
-    pub fn diag(&mut self) -> DiagCtx<'_> {
+    pub fn diag(&mut self) -> EvaluatorDiagnostics<'_> {
         self.eval.diag()
     }
 

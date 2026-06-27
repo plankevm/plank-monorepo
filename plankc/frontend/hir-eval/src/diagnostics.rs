@@ -27,14 +27,14 @@ impl BindingLoc {
 /// from the `Evaluator`, so a fresh one is created at each diagnostic emission rather than being
 /// threaded around. Because it carries `values`/`types`, the emit methods read them from the view
 /// instead of taking them as parameters.
-pub(crate) struct DiagCtx<'a> {
+pub(crate) struct EvaluatorDiagnostics<'a> {
     pub session: &'a mut Session,
     pub types: &'a TypeInterner,
     pub values: &'a ValueInterner,
     pub preamble_call_site: &'a mut Option<SrcLoc>,
 }
 
-impl DiagEmitter for DiagCtx<'_> {
+impl DiagEmitter for EvaluatorDiagnostics<'_> {
     fn emit_diagnostic(&mut self, mut diagnostic: Diagnostic) {
         if let Some(call_site) = *self.preamble_call_site {
             diagnostic = diagnostic.claim(
@@ -48,7 +48,7 @@ impl DiagEmitter for DiagCtx<'_> {
     }
 }
 
-impl DiagCtx<'_> {
+impl EvaluatorDiagnostics<'_> {
     fn format_expected_types(
         &self,
         expected_ty: TypeId,
