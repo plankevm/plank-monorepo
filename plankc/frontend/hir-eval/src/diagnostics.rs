@@ -3,7 +3,8 @@ use plank_core::Span;
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    Compound, StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueId, ValueInterner,
+    Compound, FmtType, StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueId,
+    ValueInterner,
     builtins as builtin_sigs,
 };
 
@@ -49,6 +50,11 @@ impl DiagEmitter for EvaluatorDiagnostics<'_> {
 }
 
 impl EvaluatorDiagnostics<'_> {
+    /// Formats a type for display, threading the session and value interner the renderer needs.
+    fn format_type(&self, ty: TypeId) -> FmtType<'_> {
+        self.types.format(self.session, self.values, ty)
+    }
+
     fn format_expected_types(
         &self,
         expected_ty: TypeId,
@@ -71,8 +77,8 @@ impl EvaluatorDiagnostics<'_> {
         expected_ty: TypeId,
         actual_ty: TypeId,
     ) -> (impl FnOnce(Diagnostic) -> Diagnostic, String, String) {
-        let expected = self.types.format(self.session, self.values, expected_ty).to_string();
-        let actual = self.types.format(self.session, self.values, actual_ty).to_string();
+        let expected = self.format_type(expected_ty).to_string();
+        let actual = self.format_type(actual_ty).to_string();
         let repr_eq = expected == actual;
         let diff = if repr_eq { " different" } else { "" };
         let msg = format!("expect{expect_suffix} `{expected}`, got{diff} `{actual}`");
@@ -120,7 +126,7 @@ impl EvaluatorDiagnostics<'_> {
         let primary_label = format!(
             "expected {}, got value of type `{}`",
             builtin_names::TYPE,
-            self.types.format(self.session, self.values, ty),
+            self.format_type(ty),
         );
         let diag = Diagnostic::error("value used as type");
         let diag = match loc.def {
@@ -163,8 +169,7 @@ impl EvaluatorDiagnostics<'_> {
     }
 
     pub fn emit_not_a_struct_type(&mut self, ty: TypeId, loc: BindingLoc) {
-        let primary_label =
-            format!("`{}` is not a struct type", self.types.format(self.session, self.values, ty));
+        let primary_label = format!("`{}` is not a struct type", self.format_type(ty));
         let diag = Diagnostic::error("expected struct type");
         let diag = match loc.def {
             None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
@@ -176,10 +181,8 @@ impl EvaluatorDiagnostics<'_> {
     }
 
     pub fn emit_member_on_non_struct(&mut self, ty: TypeId, loc: BindingLoc) {
-        let primary_label = format!(
-            "value of type `{}` is not a struct type",
-            self.types.format(self.session, self.values, ty)
-        );
+        let primary_label =
+            format!("value of type `{}` is not a struct type", self.format_type(ty));
         let diag = Diagnostic::error("no fields on type");
         let diag = match loc.def {
             None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
@@ -202,8 +205,7 @@ impl EvaluatorDiagnostics<'_> {
     }
 
     pub fn emit_not_callable(&mut self, ty: TypeId, loc: BindingLoc) {
-        let primary_label =
-            format!("`{}` is not callable", self.types.format(self.session, self.values, ty));
+        let primary_label = format!("`{}` is not callable", self.format_type(ty));
         let diag = Diagnostic::error("expected function");
         let diag = match loc.def {
             None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
@@ -410,9 +412,9 @@ impl EvaluatorDiagnostics<'_> {
                 expr.span,
                 format!(
                     "type `{}` of field #{} is runtime only, while type `{}` of field #{} is comptime only",
-                    self.types.format(self.session, self.values, runtime_ty),
+                    self.format_type(runtime_ty),
                     runtime_pos,
-                    self.types.format(self.session, self.values, comptime_ty),
+                    self.format_type(comptime_ty),
                     comptime_pos
                 ),
             )
@@ -439,17 +441,11 @@ impl EvaluatorDiagnostics<'_> {
                     .no_label(expr.span, AnnotationKind::Primary)
                     .secondary(
                         runtime.def_span,
-                        format!(
-                            "type `{}` is runtime only",
-                            self.types.format(self.session, self.values, runtime.ty),
-                        ),
+                        format!("type `{}` is runtime only", self.format_type(runtime.ty),),
                     )
                     .secondary(
                         comptime.def_span,
-                        format!(
-                            "type `{}` is comptime only",
-                            self.types.format(self.session, self.values, comptime.ty),
-                        ),
+                        format!("type `{}` is comptime only", self.format_type(comptime.ty),),
                     ),
             )
             .emit(self);
@@ -479,10 +475,7 @@ impl EvaluatorDiagnostics<'_> {
         info: Compound<'_>,
     ) {
         let diagnostic = Diagnostic::error("mixing comptime and runtime data in compound type");
-        let is_comptime_only_msg = format!(
-            "`{}` is a comptime-only type",
-            self.types.format(self.session, self.values, ty)
-        );
+        let is_comptime_only_msg = format!("`{}` is a comptime-only type", self.format_type(ty));
         match info {
             Compound::Struct(r#struct) => diagnostic
                 .cross_source_annotations(
@@ -517,7 +510,7 @@ impl EvaluatorDiagnostics<'_> {
                 if j > 0 {
                     note.push_str(", ");
                 }
-                let _ = write!(note, "{}", self.types.format(self.session, self.values, ty));
+                let _ = write!(note, "{}", self.format_type(ty));
             }
             note.push(')');
         }
@@ -562,7 +555,7 @@ impl EvaluatorDiagnostics<'_> {
             if i > 0 {
                 args_str.push_str(", ");
             }
-            let _ = write!(args_str, "{}", self.types.format(self.session, self.values, ty));
+            let _ = write!(args_str, "{}", self.format_type(ty));
         }
 
         let mut diag = Diagnostic::error("no valid match for builtin signature").primary(
@@ -642,10 +635,7 @@ impl EvaluatorDiagnostics<'_> {
             .primary(
                 lit_loc.source,
                 field_span,
-                format!(
-                    "`{}` has no field `{field}`",
-                    self.types.format(self.session, self.values, struct_ty)
-                ),
+                format!("`{}` has no field `{field}`", self.format_type(struct_ty)),
             )
             .emit(self);
     }
@@ -662,7 +652,7 @@ impl EvaluatorDiagnostics<'_> {
                 expr_loc.span,
                 format!(
                     "`{}` has no field `{}`",
-                    self.types.format(self.session, self.values, struct_ty),
+                    self.format_type(struct_ty),
                     self.session.lookup_name(field_name),
                 ),
             )
@@ -720,7 +710,7 @@ impl EvaluatorDiagnostics<'_> {
                 format!(
                     "missing field `{}` in `{}`",
                     self.session.lookup_name(field_name),
-                    self.types.format(self.session, self.values, struct_ty),
+                    self.format_type(struct_ty),
                 ),
             )
             .emit(self);
@@ -738,7 +728,7 @@ impl EvaluatorDiagnostics<'_> {
                 loc.span,
                 format!(
                     "`{builtin}` expects a struct or tuple type, got `{}`",
-                    self.types.format(self.session, self.values, actual_ty),
+                    self.format_type(actual_ty),
                 ),
             )
             .emit(self);
@@ -756,7 +746,7 @@ impl EvaluatorDiagnostics<'_> {
                 loc.span,
                 format!(
                     "`{builtin}` expects a struct type, got `{}`",
-                    self.types.format(self.session, self.values, actual_ty),
+                    self.format_type(actual_ty),
                 ),
             )
             .emit(self);
@@ -769,7 +759,7 @@ impl EvaluatorDiagnostics<'_> {
                 loc.span,
                 format!(
                     "`{builtin}` expects a type argument, got a value of type `{}`",
-                    self.types.format(self.session, self.values, actual_ty),
+                    self.format_type(actual_ty),
                 ),
             )
             .emit(self);
@@ -783,7 +773,7 @@ impl EvaluatorDiagnostics<'_> {
                 format!(
                     "`{}` expects a tuple, got `{}`",
                     builtin_names::CONCAT_CBYTES,
-                    self.types.format(self.session, self.values, actual_ty),
+                    self.format_type(actual_ty),
                 ),
             )
             .emit(self);
@@ -799,7 +789,7 @@ impl EvaluatorDiagnostics<'_> {
                     builtin_names::CONCAT_CBYTES,
                     builtin_names::U256,
                     builtin_names::CBYTES,
-                    self.types.format(self.session, self.values, actual_ty),
+                    self.format_type(actual_ty),
                 ),
             )
             .emit(self);
@@ -842,7 +832,7 @@ impl EvaluatorDiagnostics<'_> {
                 loc.span,
                 format!(
                     "`{builtin}` field selector must be {expected}, got `{}`",
-                    self.types.format(self.session, self.values, actual_ty),
+                    self.format_type(actual_ty),
                 ),
             )
             .emit(self);
@@ -864,7 +854,7 @@ impl EvaluatorDiagnostics<'_> {
                 loc.span,
                 format!(
                     "`{builtin}`: `{}` has no field named {field_name}",
-                    self.types.format(self.session, self.values, struct_ty),
+                    self.format_type(struct_ty),
                 ),
             )
             .emit(self);
@@ -993,10 +983,7 @@ impl EvaluatorDiagnostics<'_> {
                         expr,
                         format!("cannot use {} on this struct", builtin_names::UNINIT),
                         SrcLoc::new(r#struct.def_loc.source, field.def_span),
-                        format!(
-                            "type `{}` cannot be uninitialized",
-                            self.types.format(self.session, self.values, field.ty)
-                        ),
+                        format!("type `{}` cannot be uninitialized", self.format_type(field.ty)),
                     )
             }
             Type::Compound(Compound::Tuple(tuple)) => {
@@ -1015,7 +1002,7 @@ impl EvaluatorDiagnostics<'_> {
                     format!(
                         "field {} of type `{}` cannot be uninitialized",
                         field_pos,
-                        self.types.format(self.session, self.values, element)
+                        self.format_type(element)
                     ),
                 )
             }
@@ -1047,10 +1034,7 @@ impl EvaluatorDiagnostics<'_> {
             .primary(
                 expr.source,
                 expr.span,
-                format!(
-                    "operator '{op}' is not supported for type `{}`",
-                    self.types.format(self.session, self.values, ty),
-                ),
+                format!("operator '{op}' is not supported for type `{}`", self.format_type(ty),),
             )
             .emit(self);
     }
