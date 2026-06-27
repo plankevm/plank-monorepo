@@ -1,0 +1,13 @@
+import std::abi::{abi_encode, abi_decode};
+import std::membytes::membytes_from_ptr;
+import std::bit::clz;
+
+init {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let input = membytes_from_ptr(ptr, size);
+    let x = abi_decode(u256, input);
+    let encoded = abi_encode(clz(x));
+    @evm_return(encoded.ptr, encoded.length);
+}
