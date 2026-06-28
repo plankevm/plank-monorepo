@@ -62,8 +62,7 @@ pub fn evaluate(
         let _ = evaluator.evaluate_const(const_id, &mut diag_ctx);
     }
 
-    // A leftover `@compile_log` fails the build, but only when nothing else already has:
-    // an otherwise-broken build keeps its real errors while the logs are still printed.
+    // A leftover `@compile_log` fails the build, but only when nothing else already has
     if let Some(first_loc) = diag_ctx.session.compile_logs().first().map(|log| log.loc)
         && !diag_ctx.session.has_errors()
     {

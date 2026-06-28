@@ -60,14 +60,17 @@ fn assert_project_diagnostics(test_project: impl Into<TestProject>, expected: &[
     plank_test_utils::assert_diagnostics(session.diagnostics(), &session, expected);
 }
 
-/// Asserts that lowering `source` produces exactly the given compile logs, in order.
-///
-/// Each entry of `expected` is matched against the rendered form of one `CompileLog`
-/// recorded on the session by `@compile_log`.
 #[track_caller]
-fn assert_compile_logs(source: impl Into<TestProject>, expected: &[&str]) {
+fn assert_diagnostics_and_compile_logs(
+    source: impl Into<TestProject>,
+    expected_diagnostics: &[&str],
+    expected_logs: &[&str],
+) {
     let (_, _, session) = try_lower(source);
-    let actual: Vec<String> = session.compile_logs().iter().map(|log| log.to_string()).collect();
-    let expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
-    pretty_assertions::assert_eq!(actual, expected);
+    plank_test_utils::assert_diagnostics(session.diagnostics(), &session, expected_diagnostics);
+
+    let actual_logs: Vec<String> =
+        session.compile_logs().iter().map(|log| log.to_string()).collect();
+    let expected_logs: Vec<String> = expected_logs.iter().map(|s| s.to_string()).collect();
+    pretty_assertions::assert_eq!(actual_logs, expected_logs);
 }

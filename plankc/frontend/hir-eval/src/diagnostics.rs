@@ -1177,13 +1177,6 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn record_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
-        let msg = values.format_value(self.session, self.types, value_id).to_string();
-        self.session.emit_compile_log(CompileLog { loc, msg });
-    }
-
-    /// Emits the umbrella "found compile log statement" error, anchored at the first
-    /// `@compile_log` call site.
     pub fn emit_found_compile_log(&mut self, first_loc: SrcLoc) {
         Diagnostic::error("found compile log statement")
             .element(
@@ -1191,5 +1184,11 @@ impl DiagCtx<'_> {
                     .no_label(first_loc.span, AnnotationKind::Primary),
             )
             .emit(self);
+    }
+
+    // TODO: Code smell due to https://github.com/plankevm/plank-monorepo/issues/253
+    pub fn record_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
+        let msg = values.format_value(self.session, self.types, value_id).to_string();
+        self.session.emit_compile_log(CompileLog { loc, msg });
     }
 }
