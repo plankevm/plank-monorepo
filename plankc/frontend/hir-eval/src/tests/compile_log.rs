@@ -6,15 +6,13 @@ fn test_compile_log() {
         std_project(
             r#"
     import std::option::Some;
-
     init {
         comptime {
-            let computed = @evm_add(20, 22);
             @compile_log(true);
             @compile_log(42);
             @compile_log("foo");
-            @compile_log(computed);
             @compile_log(u256);
+            @compile_log(Some(42));
             @compile_log(struct { id: u256 });
         }
         @evm_stop();
@@ -23,12 +21,19 @@ fn test_compile_log() {
         ),
         &[r#"
         error: found compile log statement
-         --> main.plk:6:9
+         --> main.plk:4:9
           |
-        6 |         @compile_log(true);
+        4 |         @compile_log(true);
           |         ^^^^^^^^^^^^^^^^^^
         "#],
-        &["true", "42", r#""foo""#, "42", "u256", "struct@main.plk:11:22"],
+        &[
+            "true",
+            "42",
+            r#""foo""#,
+            "u256",
+            "Option(u256) { inner: 42, is_some: true }",
+            "struct@main.plk:9:22",
+        ],
     );
 }
 
