@@ -7,8 +7,8 @@ use plank_session::{
     builtins::BuiltinKind,
 };
 use plank_values::{
-    Compound, DefOrigin, PrimitiveType, StructView, Type, TypeFlags, TypeId, TypeInterner,
-    TypeName, Value, ValueId, ValueInterner, builtins as builtin_sigs,
+    Compound, DefOrigin, PrimitiveType, StructView, TupleKey, Type, TypeFlags, TypeId,
+    TypeInterner, TypeName, Value, ValueId, ValueInterner, builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
 
@@ -703,18 +703,59 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn eval_get_runtime_signature(
         &mut self,
-        _args: &[hir::LocalId],
-        _expr_span: SourceSpan,
+        args: &[hir::LocalId],
+        expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        todo!("reimplement function signature introspection")
+        let &[closure, comptime_args] = args else { unreachable!("arg count checked") };
+        let closure = self.expect_closure_arg(closure, Builtin::GetRuntimeSignature)?;
+        let comptime_args_values =
+            self.expect_comptime_tuple_arg(comptime_args, Builtin::GetRuntimeSignature)?;
+        self.with_types_buf(|this, runtime_types_offset| {
+            match this.eval_fn_preamble_for_introspection(
+                Builtin::GetRuntimeSignature,
+                closure.value,
+                closure.fn_def_id,
+                &closure.captures,
+                &comptime_args_values,
+                this.bindings[comptime_args].use_span,
+                expr_span,
+            )? {
+                Ok(_) => {}
+                Err(diverge) => return Ok(Err(diverge)),
+            }
+
+            let (tuple, ok) = this
+                .eval
+                .types
+                .intern_tuple(TupleKey { fields: &this.eval.types_buf[runtime_types_offset..] });
+            assert_eq!(ok, Ok(()), "runtime signature tuple should not mix comptime-only types");
+            let ty = TypeId::from_tuple(tuple);
+            Ok(Ok(EvalValue::Comptime(this.eval.values.intern_type(ty))))
+        })
     }
 
     fn eval_get_return_type(
         &mut self,
-        _args: &[hir::LocalId],
-        _expr_span: SourceSpan,
+        args: &[hir::LocalId],
+        expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        todo!("reimplement function signature introspection")
+        let &[closure, comptime_args] = args else { unreachable!("arg count checked") };
+        let closure = self.expect_closure_arg(closure, Builtin::GetReturnType)?;
+        let comptime_args_values =
+            self.expect_comptime_tuple_arg(comptime_args, Builtin::GetReturnType)?;
+        let return_type = match self.eval_fn_preamble_for_introspection(
+            Builtin::GetReturnType,
+            closure.value,
+            closure.fn_def_id,
+            &closure.captures,
+            &comptime_args_values,
+            self.bindings[comptime_args].use_span,
+            expr_span,
+        )? {
+            Ok(return_type) => return_type,
+            Err(diverge) => return Ok(Err(diverge)),
+        };
+        Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(return_type))))
     }
 
     fn eval_call_builtin(
@@ -1108,13 +1149,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.loc(arg_binding.use_span),
         );
         Err(Poisoned)
-    }
-
-    fn comptime_param_count(&self, fn_def_id: hir::FnDefId) -> usize {
-        self.hir.fn_params[fn_def_id]
-            .iter()
-            .filter(|param| param.is_comptime || matches!(param.r#type, hir::ParamType::Any { .. }))
-            .count()
     }
 
     fn expect_comptime_tuple_arg(

@@ -56,8 +56,44 @@ impl Diverge {
 
 pub(crate) enum EvalContext {
     FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_loc: SrcLoc },
-    FunctionPreamble { arg_spans: CallArgSpansIdx, call_source: SourceId },
+    FunctionPreamble { call_source: SourceId, mode: FunctionPreambleMode },
     Other,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FunctionPreambleMode {
+    Call {
+        arg_spans: CallArgSpansIdx,
+    },
+    Introspection {
+        comptime_args_offset: usize,
+        comptime_args_len: usize,
+        next_comptime_arg: usize,
+        comptime_args_span: SourceSpan,
+    },
+}
+
+impl FunctionPreambleMode {
+    pub(crate) fn next_introspection_comptime_arg(
+        &mut self,
+        values_buf: &[ValueId],
+    ) -> Option<ValueId> {
+        let Self::Introspection {
+            comptime_args_offset, comptime_args_len, next_comptime_arg, ..
+        } = self
+        else {
+            return None;
+        };
+
+        assert!(
+            *next_comptime_arg < *comptime_args_len,
+            "introspection comptime args count should already be validated"
+        );
+
+        let value = values_buf[*comptime_args_offset + *next_comptime_arg];
+        *next_comptime_arg += 1;
+        Some(value)
+    }
 }
 
 pub(crate) struct Scope<'a, 'ctx> {
