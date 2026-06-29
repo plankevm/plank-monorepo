@@ -33,23 +33,23 @@ test-plank-diff: test-plank-diff-sir test-plank-diff-sona
 
 [working-directory: 'plank-diff-tests/']
 test-plank-diff-sir: build-debug
-     PLANK_BACKEND=sir-debug   PLANK_OPTIMIZE=     forge test --nmp test/benchmark/*
-     PLANK_BACKEND=sir-debug   PLANK_OPTIMIZE=csud forge test --nmp test/benchmark/*
-     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=     forge test --nmp test/benchmark/*
-     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=csud forge test --nmp test/benchmark/*
+     PLANK_BACKEND=sir-debug   PLANK_OPTIMIZE=     forge test --nmp 'test/benchmark/*'
+     PLANK_BACKEND=sir-debug   PLANK_OPTIMIZE=csud forge test --nmp 'test/benchmark/*'
+     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=     forge test --nmp 'test/benchmark/*'
+     PLANK_BACKEND=sir-release PLANK_OPTIMIZE=csud forge test --nmp 'test/benchmark/*'
 
 [working-directory: 'plank-diff-tests/']
 test-plank-diff-sona: build-debug
-     PLANK_BACKEND=sona PLANK_OPTIMIZE=   forge test --nmp test/benchmark/*
-     PLANK_BACKEND=sona PLANK_OPTIMIZE=O1 forge test --nmp test/benchmark/*
+     PLANK_BACKEND=sona PLANK_OPTIMIZE=   forge test --nmp 'test/benchmark/*'
+     PLANK_BACKEND=sona PLANK_OPTIMIZE=O1 forge test --nmp 'test/benchmark/*'
 
 [working-directory: 'plank-diff-tests/']
 bytecode-bench-check: build-debug
-    forge test --mp test/benchmark/* --gas-snapshot-check true
+    forge test --mp 'test/benchmark/*' --gas-snapshot-check true
 
 [working-directory: 'plank-diff-tests/']
 bytecode-bench-update: build-debug
-    forge test --mp test/benchmark/*
+    forge test --mp 'test/benchmark/*'
 
 test-all: test test-sir-diff test-plank-diff bytecode-bench-check
 
