@@ -16,12 +16,12 @@ const clz = fn (x: u256) u256 {
 // Recreated from solady `LibBit.clz` (MIT License), Copyright (c) 2022 solady:
 // https://github.com/Vectorized/solady/blob/5dc5fc87374e6e9de15e8139c09d80fde5a22303/src/utils/LibBit.sol#L33-L45
 const clz_fallback = fn (x: u256) u256 {
-    let r0 = @evm_shl(7, bool_to_u256(@evm_lt(0xffffffffffffffffffffffffffffffff, x)));
-    let r1 = @evm_or(r0, @evm_shl(6, bool_to_u256(@evm_lt(0xffffffffffffffff, @evm_shr(r0, x)))));
-    let r2 = @evm_or(r1, @evm_shl(5, bool_to_u256(@evm_lt(0xffffffff, @evm_shr(r1, x)))));
-    let r3 = @evm_or(r2, @evm_shl(4, bool_to_u256(@evm_lt(0xffff, @evm_shr(r2, x)))));
-    let r4 = @evm_or(r3, @evm_shl(3, bool_to_u256(@evm_lt(0xff, @evm_shr(r3, x)))));
-    let index = @evm_and(0x1f, @evm_shr(@evm_shr(r4, x), 0x8421084210842108cc6318c6db6d54be));
+    let r0 = bool_to_u256(0xffffffffffffffffffffffffffffffff < x) << 7;
+    let r1 = r0 | (bool_to_u256(0xffffffffffffffff < (x >> r0)) << 6);
+    let r2 = r1 | (bool_to_u256(0xffffffff < (x >> r1)) << 5);
+    let r3 = r2 | (bool_to_u256(0xffff < (x >> r2)) << 4);
+    let r4 = r3 | (bool_to_u256(0xff < (x >> r3)) << 3);
+    let index = 0x1f & (0x8421084210842108cc6318c6db6d54be >> (x >> r4));
     let table = 0xf8f9f9faf9fdfafbf9fdfcfdfafbfcfef9fafdfafcfcfbfefafafcfbffffffff;
-    @evm_add(@evm_xor(r4, @evm_byte(index, table)), bool_to_u256(@evm_iszero(x)))
+    (r4 ^ @evm_byte(index, table)) +% bool_to_u256(@evm_iszero(x))
 };
