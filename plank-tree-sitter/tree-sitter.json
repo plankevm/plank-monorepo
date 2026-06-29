@@ -7,7 +7,7 @@
       "title": "Plank",
       "scope": "source.plank",
       "file-types": [
-        "plank"
+        "plk"
       ],
       "injection-regex": "^plank$",
       "class-name": "TreeSitterPlank"

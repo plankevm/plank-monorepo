@@ -24,7 +24,7 @@
   ; EVM Comparison & Bitwise Logic
   "@evm_lt" "@evm_gt" "@evm_slt" "@evm_sgt" "@evm_eq" "@evm_iszero"
   "@evm_and" "@evm_or" "@evm_xor" "@evm_not"
-  "@evm_byte" "@evm_shl" "@evm_shr" "@evm_sar"
+  "@evm_byte" "@evm_shl" "@evm_shr" "@evm_sar" "@evm_clz"
   ; EVM Keccak-256
   "@evm_keccak256"
   ; EVM Environment Information
@@ -59,13 +59,13 @@
   ; Bytecode Introspection
   "@runtime_start_offset" "@init_end_offset" "@runtime_length"
   ; Comptime Type Reflection
-  "@is_struct" "@has_plain_name" "@has_parameterized_name" "@type_name"
+  "@is_struct" "@is_tuple" "@has_plain_name" "@has_parameterized_name" "@type_name" "@type_index"
   "@field_count" "@field_type" "@field_name" "@field_index" "@get_field" "@set_field" "@uninit"
   ; Comptime Diagnostics
-  "@compile_error" "@in_comptime" "@set_eval_branch_quota"
+  "@compile_error" "@compile_log" "@in_comptime" "@set_eval_branch_quota" "@active_evm_version"
   ; Bytes
-  "@cbytes_concat" "@cbytes_padded_read_u256" "@keccak256_cbytes" "@sha256_cbytes"
-  "@slice_cbytes" "@data_offset"
+  "@cbytes_concat" "@concat_cbytes" "@cbytes_padded_read_u256" "@padded_read_cbytes"
+  "@keccak256_cbytes" "@sha256_cbytes" "@slice_cbytes" "@data_offset"
   ))
 
 ; Function calls

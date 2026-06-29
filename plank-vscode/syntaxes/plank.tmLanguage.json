@@ -138,7 +138,7 @@
         {
           "comment": "EVM Comparison & Bitwise Logic",
           "name": "support.function.builtin.plank",
-          "match": "@(?:evm_lt|evm_gt|evm_slt|evm_sgt|evm_eq|evm_iszero|evm_and|evm_or|evm_xor|evm_not|evm_byte|evm_shl|evm_shr|evm_sar)\\b"
+          "match": "@(?:evm_lt|evm_gt|evm_slt|evm_sgt|evm_eq|evm_iszero|evm_and|evm_or|evm_xor|evm_not|evm_byte|evm_shl|evm_shr|evm_sar|evm_clz)\\b"
         },
         {
           "comment": "EVM Keccak-256",
@@ -188,17 +188,17 @@
         {
           "comment": "Comptime Type Reflection",
           "name": "support.function.builtin.plank",
-          "match": "@(?:is_struct|has_plain_name|has_parameterized_name|type_name|field_count|field_type|field_name|field_index|get_field|set_field)\\b"
+          "match": "@(?:is_struct|is_tuple|has_plain_name|has_parameterized_name|type_name|type_index|field_count|field_type|field_name|field_index|get_field|set_field|uninit)\\b"
         },
         {
           "comment": "Comptime Diagnostics",
           "name": "support.function.builtin.plank",
-          "match": "@compile_error\\b"
+          "match": "@(?:compile_error|compile_log|in_comptime|set_eval_branch_quota|active_evm_version)\\b"
         },
         {
           "comment": "Comptime Bytes",
           "name": "support.function.builtin.plank",
-          "match": "@(?:cbytes_concat|cbytes_padded_read_u256|keccak256_cbytes|sha256_cbytes|slice_cbytes|data_offset)\\b"
+          "match": "@(?:cbytes_concat|concat_cbytes|cbytes_padded_read_u256|padded_read_cbytes|keccak256_cbytes|sha256_cbytes|slice_cbytes|data_offset)\\b"
         }
       ]
     },
