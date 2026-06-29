@@ -7,8 +7,8 @@ use plank_session::{
     builtins::BuiltinKind,
 };
 use plank_values::{
-    Compound, DefOrigin, PrimitiveType, StructView, TupleKey, Type, TypeFlags, TypeId,
-    TypeInterner, TypeName, Value, ValueId, ValueInterner, builtins as builtin_sigs,
+    Compound, DefOrigin, PrimitiveType, StructView, Type, TypeFlags, TypeId, TypeInterner,
+    TypeName, Value, ValueId, ValueInterner, builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
 
@@ -703,68 +703,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn eval_get_runtime_signature(
         &mut self,
-        args: &[hir::LocalId],
+        _args: &[hir::LocalId],
         _expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let &[closure, comptime_args] = args else { unreachable!("arg count checked") };
-        let closure = self.expect_closure_arg(closure, Builtin::GetRuntimeSignature)?;
-        let comptime_args_values =
-            self.expect_comptime_tuple_arg(comptime_args, Builtin::GetRuntimeSignature)?;
-        let expected_comptime_args = self.comptime_param_count(closure.fn_def_id);
-        if expected_comptime_args != comptime_args_values.len() {
-            self.diag_ctx.emit_function_introspection_args_mismatch(
-                Builtin::GetRuntimeSignature,
-                self.values.get_closure_name(closure.value),
-                expected_comptime_args,
-                comptime_args_values.len(),
-                self.loc(self.bindings[comptime_args].use_span),
-            );
-            return Err(Poisoned);
-        }
-        match self.eval_function_signature_introspection(
-            closure.fn_def_id,
-            &closure.captures,
-            &comptime_args_values,
-            self.bindings[comptime_args].use_span,
-        )? {
-            Ok((runtime_signature, _return_type)) => {
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(runtime_signature))))
-            }
-            Err(diverge) => Ok(Err(diverge)),
-        }
+        todo!("reimplement function signature introspection")
     }
 
     fn eval_get_return_type(
         &mut self,
-        args: &[hir::LocalId],
+        _args: &[hir::LocalId],
         _expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let &[closure, comptime_args] = args else { unreachable!("arg count checked") };
-        let closure = self.expect_closure_arg(closure, Builtin::GetReturnType)?;
-        let comptime_args_values =
-            self.expect_comptime_tuple_arg(comptime_args, Builtin::GetReturnType)?;
-        let expected_comptime_args = self.comptime_param_count(closure.fn_def_id);
-        if expected_comptime_args != comptime_args_values.len() {
-            self.diag_ctx.emit_function_introspection_args_mismatch(
-                Builtin::GetReturnType,
-                self.values.get_closure_name(closure.value),
-                expected_comptime_args,
-                comptime_args_values.len(),
-                self.loc(self.bindings[comptime_args].use_span),
-            );
-            return Err(Poisoned);
-        }
-        match self.eval_function_signature_introspection(
-            closure.fn_def_id,
-            &closure.captures,
-            &comptime_args_values,
-            self.bindings[comptime_args].use_span,
-        )? {
-            Ok((_runtime_signature, return_type)) => {
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_type(return_type))))
-            }
-            Err(diverge) => Ok(Err(diverge)),
-        }
+        todo!("reimplement function signature introspection")
     }
 
     fn eval_call_builtin(
@@ -788,78 +738,26 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
             return Err(Poisoned);
         }
-        let (runtime_signature, _return_type) = match self.eval_function_signature_introspection(
-            closure.fn_def_id,
-            &closure.captures,
-            &comptime_args_values,
-            self.bindings[comptime_args].use_span,
-        )? {
-            Ok(function_types) => function_types,
-            Err(diverge) => return Ok(Err(diverge)),
-        };
-        let runtime_arg_locals =
-            self.prepare_call_runtime_arg_locals(runtime_args, runtime_signature)?;
-        let (call_args, call_arg_spans) = self.assemble_call_args(
-            closure.fn_def_id,
-            &comptime_args_values,
-            &runtime_arg_locals,
-            self.bindings[comptime_args].use_span,
-            self.bindings[runtime_args].use_span,
-        );
-
-        let type_name = self.values.get_closure_name(closure.value);
-        self.with_captures_buf(|this, capture_buf_offset| {
-            for &capture in &closure.captures {
-                this.eval.captures_buf.push(capture);
-            }
-            this.with_maybe_values_buf(|this, values_buf_offset| {
-                let call_args = this.eval.call_args.push_copy_slice(&call_args);
-                let call_arg_spans = this.eval.call_arg_spans.push_copy_slice(&call_arg_spans);
-                let result = this.eval_call_inner(
-                    closure.value,
-                    closure.fn_def_id,
-                    call_args,
-                    call_arg_spans,
-                    expr_span,
-                    type_name,
-                    capture_buf_offset,
-                    values_buf_offset,
-                );
-                this.eval.call_arg_spans.pop();
-                this.eval.call_args.pop();
-                result
-            })
-        })
-    }
-
-    fn prepare_call_runtime_arg_locals(
-        &mut self,
-        runtime_args: hir::LocalId,
-        runtime_signature: TypeId,
-    ) -> MaybePoisoned<Vec<Local>> {
         let runtime_args_binding = self.bindings[runtime_args];
         let runtime_args_state = runtime_args_binding.state?;
         let actual_ty = self.state_type(runtime_args_state);
-        if !actual_ty.is_assignable_to(runtime_signature) {
-            self.diag_ctx.emit_type_mismatch_simple(
+        let Type::Compound(Compound::Tuple(tuple)) = self.types.lookup(actual_ty) else {
+            self.diag_ctx.emit_expected_tuple_arg(
                 self.eval.values,
-                runtime_signature,
+                Builtin::Call,
+                "runtime_args",
                 actual_ty,
                 self.loc(runtime_args_binding.use_span),
             );
             return Err(Poisoned);
-        }
-
-        let Type::Compound(Compound::Tuple(tuple)) = self.types.lookup(runtime_signature) else {
-            unreachable!("runtime signature introspection always returns a tuple type")
         };
 
-        match runtime_args_state {
+        let runtime_arg_locals: Vec<_> = match runtime_args_state {
             LocalState::Comptime(value) => {
                 let Value::Compound { fields, .. } = self.values.lookup(value) else {
                     unreachable!("runtime args type checked as tuple")
                 };
-                Ok(fields
+                fields
                     .iter()
                     .map(|&field| {
                         Local::comptime(
@@ -868,9 +766,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             runtime_args_binding.origin,
                         )
                     })
-                    .collect())
+                    .collect()
             }
-            LocalState::Runtime(local) => Ok(tuple
+            LocalState::Runtime(local) => tuple
                 .fields
                 .iter()
                 .enumerate()
@@ -889,26 +787,34 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         origin: runtime_args_binding.origin,
                     }
                 })
-                .collect()),
-        }
-    }
+                .collect(),
+        };
 
-    fn assemble_call_args(
-        &mut self,
-        fn_def_id: hir::FnDefId,
-        comptime_args: &[ValueId],
-        runtime_args: &[Local],
-        comptime_args_span: SourceSpan,
-        runtime_args_span: SourceSpan,
-    ) -> (Vec<Local>, Vec<SourceSpan>) {
-        let mut call_args = Vec::with_capacity(self.hir.fn_params[fn_def_id].len());
-        let mut call_arg_spans = Vec::with_capacity(self.hir.fn_params[fn_def_id].len());
+        let params = &self.hir.fn_params[closure.fn_def_id];
+        let expected_arg_count = params.len();
+        let actual_arg_count =
+            params.iter().filter(|param| param.is_comptime).count() + runtime_arg_locals.len();
+        if expected_arg_count != actual_arg_count {
+            let fn_def = self.hir.fns[closure.fn_def_id];
+            self.diag_ctx.emit_arg_count_mismatch(
+                expected_arg_count,
+                actual_arg_count,
+                self.loc(expr_span),
+                fn_def.loc(fn_def.param_list_span),
+            );
+            return Err(Poisoned);
+        }
+
+        let comptime_args_span = self.bindings[comptime_args].use_span;
+        let runtime_args_span = runtime_args_binding.use_span;
+        let mut call_args = Vec::with_capacity(params.len());
+        let mut call_arg_spans = Vec::with_capacity(params.len());
         let mut next_comptime_arg = 0;
         let mut next_runtime_arg = 0;
 
-        for &param in &self.hir.fn_params[fn_def_id] {
+        for &param in params {
             let (arg, span) = if param.is_comptime {
-                let value = comptime_args[next_comptime_arg];
+                let value = comptime_args_values[next_comptime_arg];
                 next_comptime_arg += 1;
                 (
                     Local::comptime(
@@ -934,7 +840,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         continue;
                     }
                 }
-                let arg = runtime_args[next_runtime_arg];
+                let arg = runtime_arg_locals[next_runtime_arg];
                 next_runtime_arg += 1;
                 (arg, runtime_args_span)
             };
@@ -942,152 +848,32 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             call_arg_spans.push(span);
         }
 
-        assert_eq!(next_comptime_arg, comptime_args.len());
-        assert_eq!(next_runtime_arg, runtime_args.len());
-        (call_args, call_arg_spans)
-    }
+        assert_eq!(next_comptime_arg, comptime_args_values.len());
+        assert_eq!(next_runtime_arg, runtime_arg_locals.len());
 
-    fn eval_function_signature_introspection(
-        &mut self,
-        fn_def_id: hir::FnDefId,
-        captures: &[(ValueId, DefOrigin)],
-        comptime_args: &[ValueId],
-        comptime_args_span: SourceSpan,
-    ) -> MaybePoisoned<Result<(TypeId, TypeId), Diverge>> {
-        let comptime_args_loc = self.loc(comptime_args_span);
-        let (function_types, comptime_quota, max_eval_branch_quota_seen) = {
-            let mut fn_scope =
-                self.prepare_introspection_preamble_scope(fn_def_id, captures, comptime_args_loc);
-            let function_types = match fn_scope.eval_function_introspection_type_preamble(
-                fn_def_id,
-                comptime_args,
-                comptime_args_loc,
-            ) {
-                Ok(Ok(())) => fn_scope.with_types_buf(|this, types_buf_offset| {
-                    let fn_def = this.hir.fns[fn_def_id];
-                    let mut poisoned = false;
-                    for &param in &this.hir.fn_params[fn_def_id] {
-                        match this.bindings[param.value].state {
-                            Ok(LocalState::Runtime(local)) => {
-                                this.eval.types_buf.push(this.mir_types[local]);
-                            }
-                            Ok(LocalState::Comptime(_)) => {}
-                            Err(Poisoned) => poisoned = true,
-                        }
-                    }
-
-                    let return_type = this.expect_type(fn_def.return_type);
-                    if poisoned {
-                        return Err(Poisoned);
-                    }
-                    let return_type = return_type?;
-
-                    let (tuple, ok) = this.eval.types.intern_tuple(TupleKey {
-                        fields: &this.eval.types_buf[types_buf_offset..],
-                    });
-                    if ok.is_err() {
-                        this.diag_ctx.emit_mixed_tuple_type(
-                            comptime_args_loc,
-                            tuple,
-                            this.eval.values,
-                        );
-                        return Err(Poisoned);
-                    }
-
-                    Ok(Ok((TypeId::from_tuple(tuple), return_type)))
-                }),
-                Ok(Err(diverge)) => Ok(Err(diverge)),
-                Err(Poisoned) => Err(Poisoned),
-            };
-            (function_types, fn_scope.comptime_quota, fn_scope.max_eval_branch_quota_seen)
-        };
-        self.comptime_quota = comptime_quota;
-        self.max_eval_branch_quota_seen =
-            self.max_eval_branch_quota_seen.max(max_eval_branch_quota_seen);
-        function_types
-    }
-
-    fn eval_function_introspection_type_preamble(
-        &mut self,
-        fn_def_id: hir::FnDefId,
-        comptime_args: &[ValueId],
-        comptime_args_loc: SrcLoc,
-    ) -> MaybePoisoned<Result<(), Diverge>> {
-        let fn_def = self.hir.fns[fn_def_id];
-        let mut next_comptime_arg = 0;
-        for &instr in &self.hir.block_instrs[fn_def.type_preamble] {
-            let hir::InstructionKind::Param { comptime, arg, r#type, idx } = instr.kind else {
-                if let Err(diverge) = self.eval_instr(instr) {
-                    return Ok(Err(diverge));
-                }
-                continue;
-            };
-
-            self.bind_function_introspection_param_from_comptime_args(
-                fn_def_id,
-                comptime,
-                arg,
-                r#type,
-                idx,
-                comptime_args,
-                &mut next_comptime_arg,
-                comptime_args_loc,
-            )?;
-            self.eval_param(comptime, arg, r#type, idx);
-        }
-        Ok(Ok(()))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn bind_function_introspection_param_from_comptime_args(
-        &mut self,
-        fn_def_id: hir::FnDefId,
-        comptime: bool,
-        arg: hir::LocalId,
-        param_kind: hir::ParamType,
-        idx: u32,
-        comptime_args: &[ValueId],
-        next_comptime_arg: &mut usize,
-        comptime_args_loc: SrcLoc,
-    ) -> MaybePoisoned<()> {
-        let param = self.hir.fn_params[fn_def_id][idx as usize];
-        let state = match (comptime, param_kind) {
-            (_, hir::ParamType::Poisoned) => Err(Poisoned),
-            (true, _) => {
-                let value = comptime_args[*next_comptime_arg];
-                *next_comptime_arg += 1;
-                Ok(LocalState::Comptime(value))
+        let type_name = self.values.get_closure_name(closure.value);
+        self.with_captures_buf(|this, capture_buf_offset| {
+            for &capture in &closure.captures {
+                this.eval.captures_buf.push(capture);
             }
-            (false, hir::ParamType::Any { .. }) => {
-                let value = comptime_args[*next_comptime_arg];
-                *next_comptime_arg += 1;
-                match self.values.lookup(value) {
-                    Value::Type(ty) => {
-                        let local = self.mir_types.push(ty);
-                        Ok(LocalState::Runtime(local))
-                    }
-                    other => {
-                        self.diag_ctx.emit_type_mismatch_simple(
-                            self.eval.values,
-                            TypeId::TYPE,
-                            other.get_type(),
-                            comptime_args_loc,
-                        );
-                        Err(Poisoned)
-                    }
-                }
-            }
-            (false, hir::ParamType::Explicit(type_local)) => match self.expect_type(type_local) {
-                Ok(ty) => {
-                    let local = self.mir_types.push(ty);
-                    Ok(LocalState::Runtime(local))
-                }
-                Err(Poisoned) => Err(Poisoned),
-            },
-        };
-
-        self.bind_param_local(param, arg, state);
-        Ok(())
+            this.with_maybe_values_buf(|this, values_buf_offset| {
+                let call_args = this.eval.call_args.push_copy_slice(&call_args);
+                let call_arg_spans = this.eval.call_arg_spans.push_copy_slice(&call_arg_spans);
+                let result = this.eval_call_inner(
+                    closure.value,
+                    closure.fn_def_id,
+                    call_args,
+                    call_arg_spans,
+                    expr_span,
+                    type_name,
+                    capture_buf_offset,
+                    values_buf_offset,
+                );
+                this.eval.call_arg_spans.pop();
+                this.eval.call_args.pop();
+                result
+            })
+        })
     }
 
     /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).

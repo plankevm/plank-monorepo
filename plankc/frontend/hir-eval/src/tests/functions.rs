@@ -388,8 +388,28 @@ fn test_call_builtin_runtime_args_type_mismatch() {
         error: mismatched types
          --> main.plk:2:26
           |
+        1 | const f = fn(x: u256) u256 { x };
+          |                 ---- `u256` expected because of this
         2 | const bad = @call(f, (), (false,));
-          |                          ^^^^^^^^ expected `tuple {u256}`, got `tuple {bool}`
+          |                          ^^^^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_call_builtin_runtime_args_must_be_tuple() {
+    assert_diagnostics(
+        r#"
+        const f = fn(x: u256) u256 { x };
+        const bad = @call(f, (), false);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: expected tuple argument
+         --> main.plk:2:26
+          |
+        2 | const bad = @call(f, (), false);
+          |                          ^^^^^ `@call` expects runtime_args to be a tuple, got a value of type `bool`
         "#],
     );
 }

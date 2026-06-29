@@ -57,7 +57,6 @@ impl Diverge {
 pub(crate) enum EvalContext {
     FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_loc: SrcLoc },
     FunctionPreamble { arg_spans: CallArgSpansIdx, call_source: SourceId },
-    IntrospectionPreamble { arg_loc: SrcLoc },
     Other,
 }
 
@@ -102,55 +101,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
         }
-    }
-
-    pub(crate) fn prepare_introspection_preamble_scope<'s>(
-        &'s mut self,
-        fn_def_id: hir::FnDefId,
-        captures: &[(ValueId, DefOrigin)],
-        arg_loc: SrcLoc,
-    ) -> Scope<'s, 'ctx> {
-        let fn_def = self.eval.hir.fns[fn_def_id];
-        let mut fn_scope = Scope::new(
-            self.eval,
-            self.diag_ctx,
-            fn_def.source,
-            false,
-            self.comptime_quota,
-            self.eval_branch_quota_start_loc,
-            EvalContext::IntrospectionPreamble { arg_loc },
-        );
-
-        let capture_defs = &fn_scope.eval.hir.fn_captures[fn_def_id];
-        Self::bind_function_captures(&mut fn_scope.bindings, capture_defs, captures);
-
-        fn_scope
-    }
-
-    pub(crate) fn bind_function_captures(
-        bindings: &mut DenseIndexMap<hir::LocalId, Local>,
-        capture_defs: &[hir::CaptureInfo],
-        captures: &[(ValueId, DefOrigin)],
-    ) {
-        assert_eq!(captures.len(), capture_defs.len(), "closure capture count matches HIR defs");
-        for (&(value, _origin), &def) in captures.iter().zip(capture_defs) {
-            bindings.insert_no_prev(
-                def.inner_local,
-                Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span)),
-            );
-        }
-    }
-
-    pub(crate) fn bind_param_local(
-        &mut self,
-        param: hir::ParamInfo,
-        local: hir::LocalId,
-        state: MaybePoisoned<LocalState>,
-    ) {
-        self.bindings.insert_no_prev(
-            local,
-            Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
-        );
     }
 
     pub fn eval_entry_point_body(&mut self, hir_block: hir::BlockId) -> mir::BlockId {
