@@ -397,6 +397,26 @@ fn test_call_builtin_runtime_args_type_mismatch() {
 }
 
 #[test]
+fn test_call_builtin_runtime_any_type_arg_mismatch() {
+    assert_diagnostics(
+        r#"
+        const id = fn(x: $T) T { x };
+        const bad = @call(id, (u256,), (false,));
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:2:32
+          |
+        2 | const bad = @call(id, (u256,), (false,));
+          |                       -------  ^^^^^^^^ expected `u256`, got `bool`
+          |                       |
+          |                       `u256` expected because of this
+        "#],
+    );
+}
+
+#[test]
 fn test_call_builtin_runtime_args_must_be_tuple() {
     assert_diagnostics(
         r#"

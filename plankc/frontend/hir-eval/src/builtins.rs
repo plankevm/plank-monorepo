@@ -7,7 +7,7 @@ use plank_session::{
     builtins::BuiltinKind,
 };
 use plank_values::{
-    Compound, DefOrigin, PrimitiveType, StructView, TupleKey, Type, TypeFlags, TypeId,
+    Compound, DefOrigin, PrimitiveType, StructView, TupleKey, TupleView, Type, TypeFlags, TypeId,
     TypeInterner, TypeName, Value, ValueId, ValueInterner, builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
@@ -779,19 +779,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
             return Err(Poisoned);
         }
-        let runtime_args_binding = self.bindings[runtime_args];
-        let runtime_args_state = runtime_args_binding.state?;
-        let actual_ty = self.state_type(runtime_args_state);
-        let Type::Compound(Compound::Tuple(tuple)) = self.types.lookup(actual_ty) else {
-            self.diag_ctx.emit_expected_tuple_arg(
-                self.eval.values,
-                Builtin::Call,
-                "runtime_args",
-                actual_ty,
-                self.loc(runtime_args_binding.use_span),
-            );
-            return Err(Poisoned);
-        };
+        let (runtime_args_state, tuple, runtime_args_span, runtime_args_origin) =
+            self.expect_tuple_arg(runtime_args, Builtin::Call, "runtime_args")?;
 
         let runtime_arg_locals: Vec<_> = match runtime_args_state {
             LocalState::Comptime(value) => {
@@ -800,13 +789,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 };
                 fields
                     .iter()
-                    .map(|&field| {
-                        Local::comptime(
-                            field,
-                            runtime_args_binding.use_span,
-                            runtime_args_binding.origin,
-                        )
-                    })
+                    .map(|&field| Local::comptime(field, runtime_args_span, runtime_args_origin))
                     .collect()
             }
             LocalState::Runtime(local) => tuple
@@ -824,17 +807,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     });
                     Local {
                         state: Ok(LocalState::Runtime(target)),
-                        use_span: runtime_args_binding.use_span,
-                        origin: runtime_args_binding.origin,
+                        use_span: runtime_args_span,
+                        origin: runtime_args_origin,
                     }
                 })
                 .collect(),
         };
 
         let params = &self.hir.fn_params[closure.fn_def_id];
+        let comptime_param_count = params.iter().filter(|param| param.is_comptime).count();
         let expected_arg_count = params.len();
-        let actual_arg_count =
-            params.iter().filter(|param| param.is_comptime).count() + runtime_arg_locals.len();
+        let actual_arg_count = comptime_param_count + runtime_arg_locals.len();
         if expected_arg_count != actual_arg_count {
             let fn_def = self.hir.fns[closure.fn_def_id];
             self.diag_ctx.emit_arg_count_mismatch(
@@ -847,52 +830,72 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         let comptime_args_span = self.bindings[comptime_args].use_span;
-        let runtime_args_span = runtime_args_binding.use_span;
         let mut call_args = Vec::with_capacity(params.len());
         let mut call_arg_spans = Vec::with_capacity(params.len());
         let mut next_comptime_arg = 0;
         let mut next_runtime_arg = 0;
 
         for &param in params {
-            let (arg, span) = if param.is_comptime {
+            if param.is_comptime {
                 let value = comptime_args_values[next_comptime_arg];
                 next_comptime_arg += 1;
-                (
-                    Local::comptime(
-                        value,
-                        comptime_args_span,
-                        DefOrigin::Local(comptime_args_span),
-                    ),
+                call_args.push(Local::comptime(
+                    value,
                     comptime_args_span,
-                )
-            } else {
-                match param.r#type {
-                    hir::ParamType::Any { .. } => {
-                        next_comptime_arg += 1;
-                    }
-                    hir::ParamType::Explicit(_) => {}
-                    hir::ParamType::Poisoned => {
-                        call_args.push(Local {
-                            state: Err(Poisoned),
-                            use_span: runtime_args_span,
-                            origin: DefOrigin::Local(runtime_args_span),
-                        });
-                        call_arg_spans.push(runtime_args_span);
-                        continue;
-                    }
-                }
-                let arg = runtime_arg_locals[next_runtime_arg];
-                next_runtime_arg += 1;
-                (arg, runtime_args_span)
-            };
-            call_args.push(arg);
-            call_arg_spans.push(span);
-        }
+                    DefOrigin::Local(comptime_args_span),
+                ));
+                call_arg_spans.push(comptime_args_span);
+                continue;
+            }
 
+            let mut arg = runtime_arg_locals[next_runtime_arg];
+            next_runtime_arg += 1;
+            match param.r#type {
+                hir::ParamType::Any { .. } => {
+                    match self.values.lookup(comptime_args_values[next_comptime_arg]) {
+                        Value::Type(expected_ty) => {
+                            if let Ok(state) = arg.state {
+                                let actual_ty = self.state_type(state);
+                                if !actual_ty.is_assignable_to(expected_ty) {
+                                    self.diag_ctx.emit_type_mismatch(
+                                        self.eval.values,
+                                        expected_ty,
+                                        self.loc(comptime_args_span),
+                                        actual_ty,
+                                        self.loc(runtime_args_span),
+                                        false,
+                                    );
+                                    arg.state = Err(Poisoned);
+                                }
+                            }
+                        }
+                        other => {
+                            self.diag_ctx.emit_type_mismatch_simple(
+                                self.eval.values,
+                                TypeId::TYPE,
+                                other.get_type(),
+                                self.loc(comptime_args_span),
+                            );
+                            arg.state = Err(Poisoned);
+                        }
+                    }
+                    next_comptime_arg += 1;
+                }
+                hir::ParamType::Explicit(_) => {}
+                hir::ParamType::Poisoned => {
+                    arg = Local {
+                        state: Err(Poisoned),
+                        use_span: runtime_args_span,
+                        origin: DefOrigin::Local(runtime_args_span),
+                    };
+                }
+            }
+            call_args.push(arg);
+            call_arg_spans.push(runtime_args_span);
+        }
         assert_eq!(next_comptime_arg, comptime_args_values.len());
         assert_eq!(next_runtime_arg, runtime_arg_locals.len());
 
-        let type_name = self.values.get_closure_name(closure.value);
         self.with_captures_buf(|this, capture_buf_offset| {
             for &capture in &closure.captures {
                 this.eval.captures_buf.push(capture);
@@ -906,7 +909,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     call_args,
                     call_arg_spans,
                     expr_span,
-                    type_name,
+                    this.values.get_closure_name(closure.value),
                     capture_buf_offset,
                     values_buf_offset,
                 );
@@ -1012,8 +1015,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         expr_span: SourceSpan,
     ) -> MaybePoisoned<(Compound<'a>, usize)> {
         let compound = self.expect_compound(ty, builtin, expr_span)?;
-        let selector_binding = self.bindings[selector_arg];
-        let state = selector_binding.state?;
+        let (state, selector_span, _) = self.bindings[selector_arg].poisoned()?;
         let LocalState::Comptime(selector) = state else {
             self.diag_ctx.emit_expected_comptime_arg(
                 builtin,
@@ -1040,7 +1042,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         builtin,
                         ty,
                         TypeId::CBYTES,
-                        self.loc(selector_binding.use_span),
+                        self.loc(selector_span),
                     );
                     return Err(Poisoned);
                 };
@@ -1050,7 +1052,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         builtin,
                         ty,
                         name,
-                        self.loc(selector_binding.use_span),
+                        self.loc(selector_span),
                     );
                     return Err(Poisoned);
                 };
@@ -1062,7 +1064,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     builtin,
                     ty,
                     other.get_type(),
-                    self.loc(selector_binding.use_span),
+                    self.loc(selector_span),
                 );
                 Err(Poisoned)
             }
@@ -1134,8 +1136,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arg_local: hir::LocalId,
         builtin: Builtin,
     ) -> MaybePoisoned<ClosureArg> {
-        let arg_binding = self.bindings[arg_local];
-        let state = arg_binding.state?;
+        let (state, arg_use_span, _) = self.bindings[arg_local].poisoned()?;
         if let LocalState::Comptime(vid) = state
             && let Value::Closure { fn_def, captures, .. } = self.values.lookup(vid)
         {
@@ -1146,7 +1147,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.eval.values,
             builtin,
             actual_ty,
-            self.loc(arg_binding.use_span),
+            self.loc(arg_use_span),
         );
         Err(Poisoned)
     }
@@ -1156,29 +1157,37 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arg_local: hir::LocalId,
         builtin: Builtin,
     ) -> MaybePoisoned<Vec<ValueId>> {
-        let arg_binding = self.bindings[arg_local];
-        let state = arg_binding.state?;
+        let (state, _tuple, span, _origin) =
+            self.expect_tuple_arg(arg_local, builtin, "comptime_args")?;
         let LocalState::Comptime(vid) = state else {
-            self.diag_ctx.emit_expected_comptime_arg(
-                builtin,
-                "comptime_args",
-                self.loc(arg_binding.use_span),
-            );
+            self.diag_ctx.emit_expected_comptime_arg(builtin, "comptime_args", self.loc(span));
             return Err(Poisoned);
         };
         match self.values.lookup(vid) {
-            Value::Compound { ty, fields } if ty.is_tuple() => Ok(fields.to_vec()),
-            other => {
-                self.diag_ctx.emit_expected_tuple_arg(
-                    self.eval.values,
-                    builtin,
-                    "comptime_args",
-                    other.get_type(),
-                    self.loc(arg_binding.use_span),
-                );
-                Err(Poisoned)
-            }
+            Value::Compound { fields, .. } => Ok(fields.to_vec()),
+            _ => unreachable!("comptime arg type checked as tuple"),
         }
+    }
+
+    fn expect_tuple_arg(
+        &mut self,
+        arg_local: hir::LocalId,
+        builtin: Builtin,
+        arg_name: &str,
+    ) -> MaybePoisoned<(LocalState, TupleView<'a>, SourceSpan, DefOrigin)> {
+        let (state, arg_use_span, arg_origin) = self.bindings[arg_local].poisoned()?;
+        let actual_ty = self.state_type(state);
+        let Type::Compound(Compound::Tuple(tuple)) = self.types.lookup(actual_ty) else {
+            self.diag_ctx.emit_expected_tuple_arg(
+                self.eval.values,
+                builtin,
+                arg_name,
+                actual_ty,
+                self.loc(arg_use_span),
+            );
+            return Err(Poisoned);
+        };
+        Ok((state, tuple, arg_use_span, arg_origin))
     }
 
     fn expect_comptime_u256(
@@ -1188,8 +1197,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arg_name: &str,
         span: SourceSpan,
     ) -> MaybePoisoned<U256> {
-        let arg_binding = self.bindings[arg_local];
-        let state = arg_binding.state?;
+        let (state, arg_use_span, _) = self.bindings[arg_local].poisoned()?;
         let LocalState::Comptime(vid) = state else {
             self.diag_ctx.emit_expected_comptime_arg(builtin, arg_name, self.loc(span));
             return Err(Poisoned);
@@ -1199,7 +1207,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.eval.values,
                 TypeId::U256,
                 self.eval.values.type_of_value(vid),
-                self.loc(arg_binding.use_span),
+                self.loc(arg_use_span),
             );
             return Err(Poisoned);
         };

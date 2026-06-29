@@ -828,64 +828,43 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         param_kind: hir::ParamType,
         idx: u32,
     ) {
-        let (arg_loc, introspection_args_span) = match self.ctx {
-            EvalContext::FunctionPreamble { call_source, mode } => {
-                let (arg_span, introspection_args_span) = match mode {
-                    FunctionPreambleMode::Call { arg_spans } => {
-                        (self.eval.call_arg_spans[arg_spans][idx as usize], None)
-                    }
-                    FunctionPreambleMode::Introspection { comptime_args_span, .. } => {
-                        (comptime_args_span, Some(comptime_args_span))
-                    }
-                };
-                (SrcLoc::new(call_source, arg_span), introspection_args_span)
-            }
-            EvalContext::FunctionBody { .. } | EvalContext::Other => {
-                unreachable!("invariant: param instr outside of fn preamable")
-            }
+        let EvalContext::FunctionPreamble { call_source, mode } = self.ctx else {
+            unreachable!("invariant: param instr outside of fn preamable")
         };
+
+        match mode {
+            FunctionPreambleMode::Call { arg_spans } => {
+                self.eval_param_call(
+                    comptime,
+                    arg,
+                    param_kind,
+                    SrcLoc::new(call_source, self.eval.call_arg_spans[arg_spans][idx as usize]),
+                );
+            }
+            FunctionPreambleMode::Introspection { comptime_args_span, .. } => self
+                .eval_param_introspection(
+                    comptime,
+                    arg,
+                    param_kind,
+                    SrcLoc::new(call_source, comptime_args_span),
+                    comptime_args_span,
+                ),
+        }
+    }
+
+    fn eval_param_call(
+        &mut self,
+        comptime: bool,
+        arg: hir::LocalId,
+        param_kind: hir::ParamType,
+        arg_loc: SrcLoc,
+    ) {
         match param_kind {
             hir::ParamType::Explicit(local_id) => {
                 let Ok(param_ty) = self.expect_type(local_id) else {
-                    if let Some(comptime_args_span) = introspection_args_span {
-                        self.bindings.insert_no_prev(
-                            arg,
-                            Local {
-                                state: Err(Poisoned),
-                                use_span: comptime_args_span,
-                                origin: DefOrigin::Local(comptime_args_span),
-                            },
-                        );
-                    } else {
-                        self.bindings[arg].state = Err(Poisoned);
-                    }
+                    self.bindings[arg].state = Err(Poisoned);
                     return;
                 };
-                if let Some(comptime_args_span) = introspection_args_span {
-                    let state = if comptime {
-                        let value = match &mut self.ctx {
-                            EvalContext::FunctionPreamble { mode, .. } => mode
-                                .next_introspection_comptime_arg(&self.eval.values_buf)
-                                .expect("comptime introspection param should consume an argument"),
-                            EvalContext::FunctionBody { .. } | EvalContext::Other => {
-                                unreachable!("param instr outside of fn preamable")
-                            }
-                        };
-                        LocalState::Comptime(value)
-                    } else {
-                        let local = self.mir_types.push(param_ty);
-                        self.eval.types_buf.push(param_ty);
-                        LocalState::Runtime(local)
-                    };
-                    self.bindings.insert_no_prev(
-                        arg,
-                        Local {
-                            state: Ok(state),
-                            use_span: comptime_args_span,
-                            origin: DefOrigin::Local(comptime_args_span),
-                        },
-                    );
-                }
                 let arg_binding = self.bindings[arg];
                 let Ok(state) = arg_binding.state else { return };
                 assert!(
@@ -906,44 +885,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
             hir::ParamType::Any { capture } => {
-                if let Some(comptime_args_span) = introspection_args_span {
-                    let value = match &mut self.ctx {
-                        EvalContext::FunctionPreamble { mode, .. } => mode
-                            .next_introspection_comptime_arg(&self.eval.values_buf)
-                            .expect("any-type introspection param should consume an argument"),
-                        EvalContext::FunctionBody { .. } | EvalContext::Other => {
-                            unreachable!("param instr outside of fn preamable")
-                        }
-                    };
-                    let state = if comptime {
-                        Ok(LocalState::Comptime(value))
-                    } else {
-                        match self.values.lookup(value) {
-                            Value::Type(ty) => {
-                                let local = self.mir_types.push(ty);
-                                self.eval.types_buf.push(ty);
-                                Ok(LocalState::Runtime(local))
-                            }
-                            _ => {
-                                self.diag_ctx.emit_type_mismatch_simple(
-                                    self.eval.values,
-                                    TypeId::TYPE,
-                                    self.eval.values.type_of_value(value),
-                                    arg_loc,
-                                );
-                                Err(Poisoned)
-                            }
-                        }
-                    };
-                    self.bindings.insert_no_prev(
-                        arg,
-                        Local {
-                            state,
-                            use_span: comptime_args_span,
-                            origin: DefOrigin::Local(comptime_args_span),
-                        },
-                    );
-                }
                 let arg_binding = self.bindings[arg];
                 let Ok(state) = arg_binding.state else {
                     self.bindings.insert_no_prev(
@@ -972,7 +913,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 );
             }
             hir::ParamType::Poisoned => {
-                if let Some(comptime_args_span) = introspection_args_span {
+                self.bindings[arg].state = Err(Poisoned);
+            }
+        }
+    }
+
+    fn eval_param_introspection(
+        &mut self,
+        comptime: bool,
+        arg: hir::LocalId,
+        param_kind: hir::ParamType,
+        arg_loc: SrcLoc,
+        comptime_args_span: SourceSpan,
+    ) {
+        match param_kind {
+            hir::ParamType::Explicit(local_id) => {
+                let Ok(param_ty) = self.expect_type(local_id) else {
                     self.bindings.insert_no_prev(
                         arg,
                         Local {
@@ -981,11 +937,121 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             origin: DefOrigin::Local(comptime_args_span),
                         },
                     );
+                    return;
+                };
+                if comptime {
+                    let state = LocalState::Comptime(self.next_introspection_comptime_arg());
+                    self.bindings.insert_no_prev(
+                        arg,
+                        Local {
+                            state: Ok(state),
+                            use_span: comptime_args_span,
+                            origin: DefOrigin::Local(comptime_args_span),
+                        },
+                    );
+                    let arg_ty = self.state_type(state);
+                    if !arg_ty.is_assignable_to(param_ty) {
+                        self.diag_ctx.emit_type_mismatch(
+                            self.eval.values,
+                            param_ty,
+                            self.origin_loc(self.bindings[local_id].origin),
+                            arg_ty,
+                            arg_loc,
+                            false,
+                        );
+                        self.bindings[arg].state = Err(Poisoned);
+                    }
                 } else {
-                    self.bindings[arg].state = Err(Poisoned);
+                    let local = self.mir_types.push(param_ty);
+                    self.eval.types_buf.push(param_ty);
+                    self.bindings.insert_no_prev(
+                        arg,
+                        Local {
+                            state: Ok(LocalState::Runtime(local)),
+                            use_span: comptime_args_span,
+                            origin: DefOrigin::Local(comptime_args_span),
+                        },
+                    );
                 }
             }
+            hir::ParamType::Any { capture } => {
+                let value = self.next_introspection_comptime_arg();
+                let (param_state, type_capture_state) = if comptime {
+                    let arg_ty = self.values.type_of_value(value);
+                    let type_value = self.values.intern_type(arg_ty);
+                    (Ok(LocalState::Comptime(value)), Ok(LocalState::Comptime(type_value)))
+                } else {
+                    match self.values.lookup(value) {
+                        Value::Type(ty) => {
+                            let local = self.mir_types.push(ty);
+                            self.eval.types_buf.push(ty);
+                            let type_value = self.values.intern_type(ty);
+                            (Ok(LocalState::Runtime(local)), Ok(LocalState::Comptime(type_value)))
+                        }
+                        _ => {
+                            self.diag_ctx.emit_type_mismatch_simple(
+                                self.eval.values,
+                                TypeId::TYPE,
+                                self.eval.values.type_of_value(value),
+                                arg_loc,
+                            );
+                            (Err(Poisoned), Err(Poisoned))
+                        }
+                    }
+                };
+                self.bindings.insert_no_prev(
+                    arg,
+                    Local {
+                        state: param_state,
+                        use_span: comptime_args_span,
+                        origin: DefOrigin::Local(comptime_args_span),
+                    },
+                );
+                self.bindings.insert_no_prev(
+                    capture,
+                    Local {
+                        state: type_capture_state,
+                        use_span: comptime_args_span,
+                        origin: DefOrigin::Local(comptime_args_span),
+                    },
+                );
+            }
+            hir::ParamType::Poisoned => {
+                self.bindings.insert_no_prev(
+                    arg,
+                    Local {
+                        state: Err(Poisoned),
+                        use_span: comptime_args_span,
+                        origin: DefOrigin::Local(comptime_args_span),
+                    },
+                );
+            }
         }
+    }
+
+    fn next_introspection_comptime_arg(&mut self) -> ValueId {
+        let EvalContext::FunctionPreamble {
+            mode:
+                FunctionPreambleMode::Introspection {
+                    comptime_args_offset,
+                    comptime_args_len,
+                    next_comptime_arg,
+                    ..
+                },
+            ..
+        } = &mut self.ctx
+        else {
+            unreachable!("introspection param expected introspection preamble mode")
+        };
+
+        assert!(
+            *next_comptime_arg < *comptime_args_len,
+            "introspection comptime args count should already be validated"
+        );
+
+        let value = self.eval.values_buf[*comptime_args_offset + *next_comptime_arg];
+        *next_comptime_arg += 1;
+        value
     }
 
     pub fn eval_return(&mut self, expr: hir::Expr) -> Result<(), Diverge> {

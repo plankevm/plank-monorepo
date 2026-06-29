@@ -73,29 +73,6 @@ pub(crate) enum FunctionPreambleMode {
     },
 }
 
-impl FunctionPreambleMode {
-    pub(crate) fn next_introspection_comptime_arg(
-        &mut self,
-        values_buf: &[ValueId],
-    ) -> Option<ValueId> {
-        let Self::Introspection {
-            comptime_args_offset, comptime_args_len, next_comptime_arg, ..
-        } = self
-        else {
-            return None;
-        };
-
-        assert!(
-            *next_comptime_arg < *comptime_args_len,
-            "introspection comptime args count should already be validated"
-        );
-
-        let value = values_buf[*comptime_args_offset + *next_comptime_arg];
-        *next_comptime_arg += 1;
-        Some(value)
-    }
-}
-
 pub(crate) struct Scope<'a, 'ctx> {
     pub eval: &'a mut Evaluator<'ctx>,
     pub diag_ctx: &'a mut DiagCtx<'ctx>,
