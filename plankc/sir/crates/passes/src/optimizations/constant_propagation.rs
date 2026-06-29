@@ -186,8 +186,10 @@ impl SCCP {
                         | EvmConstKind::GasLimit
                         | EvmConstKind::ChainId,
                     ) => to == non_zero_target,
-                    either => {
-                        debug_assert!(either != LatticeValue::Unknown);
+                    // can be unknown as successors may be processed before predecessors touched for
+                    // the first time
+                    LatticeValue::Unknown => false,
+                    LatticeValue::Overdefined | LatticeValue::EvmConst(_) => {
                         to == zero_target || to == non_zero_target
                     }
                 }
@@ -1371,6 +1373,58 @@ mod tests {
             reachability.contains(BasicBlockId::new(6)),
             "false_target (@6) should be reachable"
         );
+    }
+
+    #[test]
+    fn test_unknown_branch_condition_after_copy_propagation() {
+        let input = r#"
+            fn init:
+                entry {
+                    zero = const 0
+                    x = calldataload zero
+                    cond = iszero x
+                    cond_copy = copy cond
+                    => cond ? @outer_true : @outer_false
+                }
+                outer_false {
+                    => @done
+                }
+                outer_true {
+                    inner_cond = copy cond
+                    val = const 0
+                    => cond ? @left : @right
+                }
+                right -> val {
+                    => @merge
+                }
+                left -> val {
+                    => @merge
+                }
+                merge input {
+                    input_copy = copy input
+                    => input ? @yes : @no
+                }
+                yes {
+                    => @join
+                }
+                no {
+                    => @join
+                }
+                join {
+                    => @done
+                }
+                done {
+                    stop
+                }
+        "#;
+
+        let mut ir = parse_or_panic(input, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut SCCP::default(), &mut ir, &store);
+
+        let reachability = store.reachability(&ir);
+        assert!(!reachability.contains(BasicBlockId::new(6)), "yes (@6) should be unreachable");
+        assert!(reachability.contains(BasicBlockId::new(7)), "no (@7) should be reachable");
     }
 
     #[test]
