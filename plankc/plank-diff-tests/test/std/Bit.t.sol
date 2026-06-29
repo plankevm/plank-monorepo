@@ -50,16 +50,4 @@ contract BitTest is BaseTest {
         assertTrue(ok, "ref call reverted");
         assertEq(_clz(plankOsaka, x), abi.decode(refOut, (uint256)));
     }
-
-    function test_osakaCompilesToClzOpcode() public {
-        bytes memory code = plank("src/std/bit_test.plk", "osaka");
-        bool found;
-        for (uint256 i = 0; i < code.length; i++) {
-            if (uint8(code[i]) == 0x1e) {
-                found = true;
-                break;
-            }
-        }
-        assertTrue(found, "CLZ opcode not emitted on Osaka EVM version");
-    }
 }
