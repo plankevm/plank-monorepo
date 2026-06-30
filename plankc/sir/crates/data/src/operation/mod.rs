@@ -100,6 +100,30 @@ macro_rules! define_operations {
 }
 
 impl OperationKind {
+    pub const fn flip(self) -> Option<OperationKind> {
+        match self {
+            OperationKind::Add
+            | OperationKind::Mul
+            | OperationKind::And
+            | OperationKind::Or
+            | OperationKind::Xor
+            | OperationKind::Eq
+            | OperationKind::AddMod
+            | OperationKind::MulMod => Some(self),
+
+            OperationKind::Lt => Some(OperationKind::Gt),
+            OperationKind::Gt => Some(OperationKind::Lt),
+            OperationKind::SLt => Some(OperationKind::SGt),
+            OperationKind::SGt => Some(OperationKind::SLt),
+
+            _ => None,
+        }
+    }
+
+    pub const fn flippable(self) -> bool {
+        self.flip().is_some()
+    }
+
     pub fn as_literal_evm_op(self) -> Option<u8> {
         use sir_assembler::op;
         let evm_op = match self {

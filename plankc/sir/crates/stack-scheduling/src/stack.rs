@@ -261,6 +261,10 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     pub fn stack(&self) -> &EvmStack {
         &self.inner
     }
+
+    pub fn into_alloc_id(self) -> StaticAllocId {
+        self.next_alloc_id
+    }
 }
 
 impl<Sink: FnMut(StackOps)> std::ops::Deref for TrackedStack<Sink> {

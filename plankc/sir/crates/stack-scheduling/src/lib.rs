@@ -1,5 +1,5 @@
 use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
-use sir_data::{BasicBlockId, EthIRProgram};
+use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
@@ -11,7 +11,6 @@ use crate::{op_graph::build_graph_effectful, scheduler::dumb_schedule, stack::St
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
-mod op_model;
 mod scheduler;
 pub mod stack;
 mod state;
@@ -42,9 +41,10 @@ pub fn schedule<'ir>(
     program: &'ir EthIRProgram,
     analyses: &AnalysesStore,
     config: ScheduleConfig,
-) -> (ScheduledOps, LayoutsTracker<'ir>) {
+) -> (ScheduledOps, LayoutsTracker<'ir>, StaticAllocId) {
     let in_out_bundling = ControlFlowGraphInOutBundling::new(program, analyses);
     let layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);
+    let mut next_alloc_id = program.next_static_alloc_id;
 
     // Naively take layout sets as layouts since they are deterministically ordered.
     let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
@@ -63,18 +63,12 @@ pub fn schedule<'ir>(
         let graph =
             build_graph_effectful(program, block, &layouts, input_layout, output_layout, analyses);
         let ops_idx = ops.push_with(|mut pusher| {
-            dumb_schedule(
-                |op| pusher.push(op),
-                block,
-                program.next_static_alloc_id,
-                config,
-                &graph,
-            );
+            dumb_schedule(|op| pusher.push(op), block, &mut next_alloc_id, config, &graph);
         });
         bb_to_ops.insert(block.id(), ops_idx);
     }
 
-    (ScheduledOps { bb_to_ops, ops }, layouts)
+    (ScheduledOps { bb_to_ops, ops }, layouts, next_alloc_id)
 }
 
 #[cfg(test)]

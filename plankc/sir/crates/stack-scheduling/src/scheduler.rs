@@ -66,7 +66,7 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 pub fn dumb_schedule(
     ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
-    next_alloc_id: StaticAllocId,
+    next_alloc_id: &mut StaticAllocId,
     config: ScheduleConfig,
     graph: &OpGraph,
 ) {
@@ -85,7 +85,7 @@ pub fn dumb_schedule(
         for input in graph.input_values_fifo().iter().rev() {
             inner.push(input);
         }
-        TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
+        TrackedStack::new_from_evm(*next_alloc_id, ops_sink, inner, 8)
     };
 
     'schedule: loop {
@@ -101,4 +101,6 @@ pub fn dumb_schedule(
     if !matches!(block.control(), ControlView::LastOpTerminates) {
         greedy_shuffler::shuffle(config, &mut stack, graph);
     }
+
+    *next_alloc_id = stack.into_alloc_id();
 }

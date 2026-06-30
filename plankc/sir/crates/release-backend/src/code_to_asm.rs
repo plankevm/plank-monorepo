@@ -113,7 +113,10 @@ impl<'a> CodeToAsmEmitter<'a> {
                         self.asm.push_reference(AsmReference::pushed(mark_ref));
                     }
                     StackOps::Op(op_idx) => {
-                        self.emit_op(state, &mut icall_return_marks, op_idx);
+                        self.emit_op(state, &mut icall_return_marks, op_idx, false);
+                    }
+                    StackOps::Flipped(op_idx) => {
+                        self.emit_op(state, &mut icall_return_marks, op_idx, true);
                     }
                 }
             }
@@ -180,9 +183,15 @@ impl<'a> CodeToAsmEmitter<'a> {
         state: &mut State,
         icall_return_marks: &mut ICallReturnMarks,
         op_idx: OperationIdx,
+        flipped: bool,
     ) {
         let op = self.ir.operations[op_idx];
-        if let Some(evm_op) = op.kind().as_literal_evm_op() {
+
+        let mut op_kind = op.kind();
+        if flipped {
+            op_kind = op_kind.flip().expect("flipping unflippable");
+        }
+        if let Some(evm_op) = op_kind.as_literal_evm_op() {
             self.asm.push_op_byte(evm_op);
             return;
         }
