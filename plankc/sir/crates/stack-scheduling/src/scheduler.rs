@@ -6,12 +6,11 @@ use crate::{
 };
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
-use std::cell::Cell;
 
 // dumb intra-instruction scheduler that always dups its inputs.
 fn dumb_schedule_op<Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
-    stack: &mut TrackedStack<'_, Sink>,
+    stack: &mut TrackedStack<Sink>,
     graph: &OpGraph,
     op: OpNodeId,
     in_the_way_buf: &mut Vec<ValueNodeId>,
@@ -58,7 +57,8 @@ fn dumb_schedule_op<Sink: FnMut(StackOps)>(
         // Load target value back
         stack.unspill(input);
     }
-    stack.op(graph, op);
+
+    stack.op(graph, op, false);
 }
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
@@ -66,7 +66,7 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 pub fn dumb_schedule(
     ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
-    next_alloc_id: &Cell<StaticAllocId>,
+    next_alloc_id: StaticAllocId,
     config: ScheduleConfig,
     graph: &OpGraph,
 ) {

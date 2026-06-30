@@ -1,7 +1,6 @@
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
-use plank_core::Idx;
+use plank_core::{Idx, IncIterable};
 use sir_data::{OperationIdx, StaticAllocId};
-use std::cell::Cell;
 
 const MAX_STACK_LENGTH: usize = 1024;
 
@@ -92,6 +91,7 @@ pub enum StackOps {
     Swap(u8),
     Dup(u8),
     Pop,
+    Flipped(OperationIdx),
     Op(OperationIdx),
     CallRetPush(OperationIdx),
     Exchange(u8, u8),
@@ -107,7 +107,8 @@ impl StackOps {
             StackOps::Exchange(n, m) => {
                 n.checked_add(m).is_some_and(|sum| sum <= config.max_exchange_range)
             }
-            StackOps::Op(_)
+            StackOps::Flipped(_)
+            | StackOps::Op(_)
             | StackOps::Pop
             | StackOps::Store(_)
             | StackOps::Load(_)
@@ -145,16 +146,16 @@ impl Default for ScheduleConfig {
     }
 }
 
-pub struct TrackedStack<'ir, Sink: FnMut(StackOps)> {
-    next_alloc_id: &'ir Cell<StaticAllocId>,
+pub struct TrackedStack<Sink: FnMut(StackOps)> {
+    next_alloc_id: StaticAllocId,
     ops_sink: Sink,
     spilled: Vec<(ValueNodeId, StaticAllocId)>,
     inner: EvmStack,
 }
 
-impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
+impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     pub fn new_from_evm(
-        next_alloc_id: &'ir Cell<StaticAllocId>,
+        next_alloc_id: StaticAllocId,
         ops_sink: Sink,
         inner: EvmStack,
         spilled_capacity: usize,
@@ -164,7 +165,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
 
     #[cfg(test)]
     pub(crate) fn new_from_parts(
-        next_alloc_id: &'ir Cell<StaticAllocId>,
+        next_alloc_id: StaticAllocId,
         ops_sink: Sink,
         inner: EvmStack,
         spilled: Vec<(ValueNodeId, StaticAllocId)>,
@@ -183,25 +184,29 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
     }
 
     #[track_caller]
-    pub fn op(&mut self, graph: &OpGraph, op_id: OpNodeId) {
+    pub fn op(&mut self, graph: &OpGraph, op_id: OpNodeId, flipped: bool) {
         let op = graph.get_op(op_id);
-        let (stack_op, flippable) = match op.kind {
-            OpNodeKind::Flippable(op_idx) => (StackOps::Op(op_idx), true),
-            OpNodeKind::Normal(op_idx) => (StackOps::Op(op_idx), false),
-            OpNodeKind::RetDestPush(op_idx) => (StackOps::CallRetPush(op_idx), false),
+        let stack_op = match op.kind {
+            OpNodeKind::Flippable(op_idx) => StackOps::Op(op_idx),
+            OpNodeKind::Normal(op_idx) => {
+                assert!(!flipped);
+                StackOps::Op(op_idx)
+            }
+            OpNodeKind::RetDestPush(op_idx) => {
+                assert!(!flipped);
+                StackOps::CallRetPush(op_idx)
+            }
         };
-        let mut flipping = false;
+
         for (i, &target) in (0usize..).zip(op.inputs_fifo) {
             let actual = self.inner.pop().expect("missing input");
 
-            let correct = if flippable && i == 0 && actual == op.inputs_fifo[1] {
-                flipping = true;
-                true
-            } else if flippable && flipping && i == 1 {
-                actual == op.inputs_fifo[0]
-            } else {
-                target == actual
+            let correct = match i {
+                0 if flipped => actual == op.inputs_fifo[1],
+                1 if flipped => actual == op.inputs_fifo[0],
+                _ => target == actual,
             };
+
             assert!(correct, "incorrect op schedule");
         }
         self.emit(stack_op);
@@ -229,8 +234,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
     #[track_caller]
     pub fn spill_top(&mut self) -> StaticAllocId {
         let target = self.inner.pop().expect("nothing to pop");
-        let new_alloc_id = self.next_alloc_id.get();
-        self.next_alloc_id.set(new_alloc_id + 1);
+        let new_alloc_id = self.next_alloc_id.get_and_inc();
         self.emit(StackOps::Store(new_alloc_id));
         self.spilled.push((target, new_alloc_id));
         new_alloc_id
@@ -259,7 +263,7 @@ impl<'ir, Sink: FnMut(StackOps)> TrackedStack<'ir, Sink> {
     }
 }
 
-impl<Sink: FnMut(StackOps)> std::ops::Deref for TrackedStack<'_, Sink> {
+impl<Sink: FnMut(StackOps)> std::ops::Deref for TrackedStack<Sink> {
     type Target = EvmStack;
 
     fn deref(&self) -> &Self::Target {

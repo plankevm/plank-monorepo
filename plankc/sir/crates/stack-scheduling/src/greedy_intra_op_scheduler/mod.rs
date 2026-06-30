@@ -1,84 +1,90 @@
 use crate::{
-    op_graph::{OpGraph, OpNodeId, OpSet, ValueNodeId},
+    op_graph::{OpGraph, OpNodeId, OpNodeKind, OpSet, ValueNodeId},
     stack::{ScheduleConfig, StackOps, TrackedStack},
-    state::is_last_use,
 };
 use allocator_api2::vec::Vec;
 use plank_core::LoopLimit;
 use stumpalo::ArenaRef;
 
+mod state;
+
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-fn dedup_unsorted<T: PartialEq>(values: &mut Vec<T>) {
-    let mut i = 0;
-    while i < values.len() {
-        let mut j = i + 1;
-        while j < values.len() {
-            if values[i] == values[j] {
-                values.swap_remove(j);
-            } else {
-                j += 1;
-            }
-        }
-        i += 1;
-    }
-}
+/*
+ * # Search State
+ * - stack
+ * - spilled
+ * - cost so far
+ * - list of actions
+ */
 
 pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     arena: &ArenaRef<'_>,
     config: ScheduleConfig,
-    stack: &mut TrackedStack<'_, Sink>,
+    stack: &mut TrackedStack<Sink>,
     graph: &OpGraph,
     op_id: OpNodeId,
     complete: OpSet<'_>,
+    beam_width: u16,
 ) {
     let op = graph.get_op(op_id);
+    let flippable = matches!(op.kind, OpNodeKind::Flippable(_));
 
     let mut unique_last_uses = Vec::with_capacity_in(op.inputs_fifo.len() / 2, arena);
     for &value in op.inputs_fifo {
-        if is_last_use(graph, complete, value) && !unique_last_uses.contains(&value) {
+        if graph.is_last_use(complete, value) && !unique_last_uses.contains(&value) {
             unique_last_uses.push(value);
         }
     }
 
-    let target_depth_delta = op.inputs_fifo.len() - unique_last_uses.len();
-    let mut scheduler = GreedyIntraOpScheduler {
-        current: stack,
-        target: op.inputs_fifo,
-        complete: 0,
-        target_depth_delta,
-        max_swap_depth: config.max_swap_depth,
-        max_dup_depth: config.max_dup_depth,
-    };
+    let flipped = false; // TODO
 
-    scheduler.grow();
-
-    stack.op(graph, op_id);
+    stack.op(graph, op_id, flipped);
 }
 
-pub struct GreedyIntraOpScheduler<'a, 'ir, Sink: FnMut(StackOps)> {
-    current: &'a mut TrackedStack<'ir, Sink>,
+pub struct GreedyIntraOpScheduler<'a, Sink: FnMut(StackOps)> {
+    current: &'a mut TrackedStack<Sink>,
     target: &'a [ValueNodeId],
-    complete: usize,
+    complete: u16,
     target_depth_delta: usize,
     max_swap_depth: u8,
     max_dup_depth: u8,
+    last_uses: Vec<ValueNodeId, &'a ArenaRef<'a>>,
 }
 
 const LIMIT: u32 = 100_000;
 
-impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
-    fn update_complet(&mut self) {
-        // for p in self.iter_pairwise(self.)
+impl<'a, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, Sink> {
+    fn update_complete(&mut self) {
+        let mut newly_complete = 0;
+        for (current, target, i) in self.iter_pairwise(u16::MAX) {
+            if current != target {
+                break;
+            }
+
+            let needed_further_up = self.lined_up_target()[..i as usize].contains(&target);
+            if needed_further_up {
+                let another_copy_exists_further_up = self.current.fifo()[..i as usize]
+                    .contains(&target)
+                    || self.current.get_spilled(target).is_some();
+                if !another_copy_exists_further_up {
+                    break;
+                }
+            }
+
+            newly_complete += 1;
+        }
+
+        self.complete += newly_complete;
     }
 
     fn grow(&mut self) {
         let mut limit = LoopLimit::max(LIMIT);
-        while self.complete < self.target.len() {
+        let complete = usize::from(self.complete);
+        while complete < self.target.len() {
             limit.tick();
-            let current_incomplete = self.complete + self.target_depth_delta < self.target.len();
+            let current_incomplete = complete + self.target_depth_delta < self.target.len();
             let stepped =
                 current_incomplete && (self.swap_to_correct_position() || self.exchange_via_top());
 
@@ -128,11 +134,24 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
     }
 
     fn can_push(&self) -> bool {
-        todo!()
+        self.reachable_incomplete() <= usize::from(self.max_swap_depth)
     }
 
     fn unspill_unavailable_horizon(&mut self) -> bool {
-        todo!()
+        let max_swap_depth = usize::from(self.max_swap_depth);
+        if self.reachable_incomplete() < max_swap_depth {
+            return false;
+        }
+
+        let horizon_idx = max_swap_depth - 1;
+        let target = self.lined_up_target()[horizon_idx];
+        let current = self.current.fifo()[horizon_idx];
+        if target != current && !self.current.fifo()[..max_swap_depth].contains(&target) {
+            self.current.unspill(target);
+            return true;
+        }
+
+        false
     }
 
     fn dup_needed(&mut self) -> bool {
@@ -156,19 +175,26 @@ impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyIntraOpScheduler<'a, 'ir, Sink> {
         self.current.dup(depth);
     }
 
+    fn lined_up_target(&self) -> &[ValueNodeId] {
+        &self.target[self.target_depth_delta..]
+    }
+
+    /// The number of values that are incomplete but reachable given the current depth.
+    fn reachable_incomplete(&self) -> usize {
+        self.target.len() - usize::from(self.complete) - self.target_depth_delta
+    }
+
+    /// Yields `(current, target, i)` up to depth `max_depth`.
     fn iter_pairwise<'s>(
         &'s self,
         max_depth: impl Into<u16>,
     ) -> impl Iterator<Item = (ValueNodeId, ValueNodeId, u16)> {
-        let max_depth = max_depth.into();
-        let total_incomplete = self.target.len() - self.complete - self.target_depth_delta;
-        let lined_up_target = &self.target[self.target_depth_delta..];
-        let current = self.current.fifo().iter();
-
-        current
-            .zip(lined_up_target)
-            .zip(0..=max_depth)
-            .take(total_incomplete)
+        self.current
+            .fifo()
+            .iter()
+            .zip(self.lined_up_target())
+            .zip(0..=max_depth.into())
+            .take(self.reachable_incomplete())
             .rev()
             .map(|((&current, &target), i)| (current, target, i))
     }

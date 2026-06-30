@@ -66,7 +66,7 @@ pub fn schedule<'ir>(
             dumb_schedule(
                 |op| pusher.push(op),
                 block,
-                &program.next_static_alloc_id,
+                program.next_static_alloc_id,
                 config,
                 &graph,
             );

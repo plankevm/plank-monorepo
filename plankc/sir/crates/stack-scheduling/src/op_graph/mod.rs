@@ -84,7 +84,11 @@ impl OpGraph {
         &self.values_arena[self.end_stack_fifo_start..]
     }
 
-    pub fn uses_remaining(&self, completed: &OpSet<'_>, value: ValueNodeId) -> u32 {
+    pub fn is_last_use(&self, completed: OpSet<'_>, value: ValueNodeId) -> bool {
+        self.uses_remaining(completed, value) == 1
+    }
+
+    pub fn uses_remaining(&self, completed: OpSet<'_>, value: ValueNodeId) -> u32 {
         let consumers = self.get_consumers(value);
         let total_uses = consumers.count_members();
         let already_used = consumers.intersect_count(completed);
@@ -143,11 +147,11 @@ impl<'a> OpSet<'a> {
         self.words.iter().copied().map(BitsetWord::count_ones).sum()
     }
 
-    pub fn intersect_count(&self, other: &Self) -> u32 {
+    pub fn intersect_count(&self, other: Self) -> u32 {
         self.words.iter().zip(other.words.iter()).map(|(&x, &y)| (x & y).count_ones()).sum()
     }
 
-    pub fn is_super(&self, other: &Self) -> bool {
+    pub fn is_super(&self, other: Self) -> bool {
         self.words
             .iter()
             .zip(other.words.iter())

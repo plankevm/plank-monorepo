@@ -1,37 +1,14 @@
-use super::dedup_unsorted;
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     op_graph::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, OpSet, ValueNodeId},
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
-use allocator_api2::{vec, vec::Vec as AllocVec};
+use StackOps::*;
+use allocator_api2::vec;
 use plank_core::Idx;
-use plank_test_utils::dedent_preserve_blank_lines;
 use sir_data::{OperationIdx, StaticAllocId};
-use std::{cell::Cell, collections::HashSet, fmt::Write};
+use std::collections::HashSet;
 use stumpalo::Arena;
-
-fn assert_dedup_equals<T: PartialEq + std::fmt::Debug, const N: usize>(
-    mut start: AllocVec<T>,
-    expected: [T; N],
-) {
-    for i in 0..N {
-        for j in i + 1..N {
-            assert_ne!(expected[i], expected[j], "expected contains duplicates");
-        }
-    }
-    dedup_unsorted(&mut start);
-    assert_eq!(&start, expected.as_slice(), "deduped != expected");
-}
-
-#[test]
-fn test_dedup_unsorted() {
-    assert_dedup_equals::<u32, _>(vec![], []);
-    assert_dedup_equals(vec![1, 3, 2], [1, 3, 2]);
-    assert_dedup_equals(vec![1, 3, 2, 3], [1, 3, 2]);
-    assert_dedup_equals(vec![3, 1, 3, 3, 2], [3, 1, 2]);
-    assert_dedup_equals(vec![1, 1, 1, 1], [1]);
-}
 
 fn build_graph(
     start_stack: &[u32],
@@ -103,14 +80,14 @@ fn assert_intra_op_schedule_exists(
         spilled.push((ValueNodeId::new(value), StaticAllocId::new(alloc)));
     }
 
-    let next_alloc_id = Cell::new(StaticAllocId::new(start_spilled.len() as u32));
+    let next_alloc_id = StaticAllocId::new(start_spilled.len() as u32);
     let arena = Arena::new();
     let complete_backing = vec![0; graph.words_per_set() as usize];
     let complete = OpSet::new(&complete_backing, graph.total_ops());
     let mut ops = Vec::new();
 
     let mut stack =
-        TrackedStack::new_from_parts(&next_alloc_id, |op| ops.push(op), evm_stack, spilled);
+        TrackedStack::new_from_parts(next_alloc_id, |op| ops.push(op), evm_stack, spilled);
 
     for &value in target {
         assert!(
@@ -119,11 +96,14 @@ fn assert_intra_op_schedule_exists(
         );
     }
 
-    greedy_schedule_op(arena.as_arena_ref(), config, &mut stack, &graph, op_id, complete);
+    greedy_schedule_op(arena.as_arena_ref(), config, &mut stack, &graph, op_id, complete, 4);
 
     for &op in &ops {
         assert!(op.is_valid(config));
     }
+
+    let last = ops.pop();
+    assert_eq!(last, Some(Op(OperationIdx::new(0))), "last op not `Op(...)`");
 
     ops
 }
@@ -134,7 +114,7 @@ fn assert_intra_op_schedule(
     start_spilled: impl AsRef<[u32]>,
     target_inputs: impl AsRef<[u32]>,
     last_uses: impl AsRef<[u32]>,
-    expected_ops: &str,
+    expected_ops: impl AsRef<[StackOps]>,
 ) {
     let ops = assert_intra_op_schedule_exists(
         config,
@@ -143,86 +123,81 @@ fn assert_intra_op_schedule(
         target_inputs,
         last_uses,
     );
-    let expected_ops = dedent_preserve_blank_lines(expected_ops);
-    pretty_assertions::assert_str_eq!(format_ops(&ops).trim(), expected_ops.trim());
+    let expected = expected_ops.as_ref();
+    assert_eq!(&ops, expected);
 }
 
-fn format_ops(ops: &[StackOps]) -> String {
-    let mut out = String::new();
-    for &op in ops {
-        fmt_stack_op(&mut out, op);
-        out.push('\n');
+const fn store(id: u32) -> StackOps {
+    StackOps::Store(StaticAllocId::new(id))
+}
+
+const fn load(id: u32) -> StackOps {
+    StackOps::Load(StaticAllocId::new(id))
+}
+
+struct AssertScheduleBuilder {
+    config: ScheduleConfig,
+    spilled: Vec<u32>,
+    last_uses: Vec<u32>,
+}
+
+impl AssertScheduleBuilder {
+    fn config(mut self, c: ScheduleConfig) -> Self {
+        self.config = c;
+        self
     }
-    out
+
+    fn spilled(mut self, values: impl AsRef<[u32]>) -> Self {
+        self.spilled = values.as_ref().into();
+        self
+    }
+
+    fn last_uses(mut self, values: impl AsRef<[u32]>) -> Self {
+        self.last_uses = values.as_ref().into();
+        self
+    }
+
+    fn assert(
+        self,
+        start: impl AsRef<[u32]>,
+        target: impl AsRef<[u32]>,
+        expected: impl AsRef<[StackOps]>,
+    ) {
+        assert_intra_op_schedule(
+            self.config,
+            start,
+            self.spilled,
+            target,
+            self.last_uses,
+            expected,
+        );
+    }
 }
 
-fn fmt_stack_op(out: &mut String, op: StackOps) {
-    match op {
-        StackOps::Swap(depth) => write!(out, "swap {depth}").unwrap(),
-        StackOps::Dup(depth) => write!(out, "dup {depth}").unwrap(),
-        StackOps::Pop => out.push_str("pop"),
-        StackOps::Op(op) => write!(out, "op #{op}").unwrap(),
-        StackOps::CallRetPush(op) => write!(out, "call_ret_push #{op}").unwrap(),
-        StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),
-        StackOps::Store(alloc) => write!(out, "store :{alloc}").unwrap(),
-        StackOps::Load(alloc) => write!(out, "load :{alloc}").unwrap(),
+fn opts() -> AssertScheduleBuilder {
+    AssertScheduleBuilder {
+        config: ScheduleConfig::default(),
+        spilled: Vec::new(),
+        last_uses: Vec::new(),
     }
 }
 
 #[test]
 fn no_inputs() {
-    assert_intra_op_schedule(
-        ScheduleConfig::default(),
-        [1, 2],
-        [3],
-        [],
-        [],
-        r#"
-        op #0
-        "#,
-    );
+    opts().spilled([3]).assert([1, 2], [], []);
 }
 
 #[test]
 fn dup_available_input() {
-    assert_intra_op_schedule(
-        ScheduleConfig::default(),
-        [1],
-        [],
-        [1],
-        [],
-        r#"
-        dup 0
-        op #0
-        "#,
-    );
+    opts().assert([1], [1], [Dup(0)]);
 }
 
 #[test]
 fn load_spilled_input() {
-    assert_intra_op_schedule(
-        ScheduleConfig::default(),
-        [],
-        [7],
-        [7],
-        [],
-        r#"
-        load :0
-        op #0
-        "#,
-    );
+    opts().spilled([7]).assert([], [7], [load(0)]);
 }
 
 #[test]
 fn last_use_in_place() {
-    assert_intra_op_schedule(
-        ScheduleConfig::default(),
-        [7],
-        [],
-        [7],
-        [7],
-        r#"
-        op #0
-        "#,
-    );
+    opts().last_uses([7]).assert([7], [7], []);
 }
