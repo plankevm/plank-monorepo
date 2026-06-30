@@ -211,8 +211,12 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
-            InstructionKind::While { condition_block, condition, body } => {
-                writeln!(f, "{pad}while {{")?;
+            InstructionKind::While { inline, condition_block, condition, body } => {
+                write!(f, "{pad}")?;
+                if inline {
+                    write!(f, "[inline] ")?;
+                }
+                writeln!(f, "while {{")?;
                 writeln!(f, "{pad}    cond:")?;
                 self.fmt_block(f, condition_block, indent + 2)?;
                 write!(f, "{pad}    test ")?;

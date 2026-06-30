@@ -115,6 +115,7 @@ pub enum InstructionKind {
         else_block: BlockId,
     },
     While {
+        inline: bool,
         condition_block: BlockId,
         condition: LocalId,
         body: BlockId,

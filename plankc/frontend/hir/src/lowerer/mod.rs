@@ -770,17 +770,17 @@ impl BlockLowerer<'_> {
                 self.emit(InstructionKind::Assign { target, expr: value });
             }
             Statement::While(while_stmt) => {
-                let span = while_stmt.node().span();
-                if while_stmt.inline {
-                    self.error_not_yet_implemented("inline while", span);
-                    return;
-                }
                 let (condition_block, condition) = self
                     .create_sub_block_with(while_stmt.condition().span(), |this| {
                         this.lower_expr_to_local(while_stmt.condition())
                     });
                 let body = self.lower_body_to_block(while_stmt.body());
-                self.emit(InstructionKind::While { condition_block, condition, body });
+                self.emit(InstructionKind::While {
+                    inline: while_stmt.inline,
+                    condition_block,
+                    condition,
+                    body,
+                });
             }
             Statement::Error { .. } => {}
         }

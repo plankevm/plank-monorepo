@@ -524,15 +524,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 if !binding.requires_comptime_assign {
                     self.eval_assign(target, expr)?
                 } else if self.runtime_controlled {
-                    self.with_comptime(|this| {
-                        let _ = this.eval_expr(expr);
-                        let binding = this.bindings[target];
-                        this.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
-                            this.loc(expr.span),
-                            this.loc(binding.use_span),
-                        );
-                        this.bindings[target].state = Err(Poisoned);
-                    });
+                    let rhs_res = self.with_comptime(|this| this.eval_expr(expr));
+                    let binding = self.bindings[target];
+                    self.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
+                        self.loc(expr.span),
+                        self.loc(binding.use_span),
+                    );
+                    self.bindings[target].state = Err(Poisoned);
+                    let _ = rhs_res?;
                 } else {
                     self.with_comptime(|this| this.eval_assign(target, expr))?
                 }
@@ -557,8 +556,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::If { condition, then_block, else_block } => {
                 self.eval_if(condition, then_block, else_block)?
             }
-            InstructionKind::While { condition_block, condition, body } => {
-                self.eval_while(condition_block, condition, body)?
+            InstructionKind::While { inline, condition_block, condition, body } => {
+                if inline {
+                    self.eval_inline_while(condition_block, condition, body)?
+                } else {
+                    self.eval_while(condition_block, condition, body)?
+                }
             }
             InstructionKind::Return(expr) => self.eval_return(expr)?,
             InstructionKind::Param { comptime, arg, r#type, idx } => {
@@ -722,6 +725,36 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         loop {
             self.eval_block_inline(condition_block)?;
             let condition_value = self.expect_comptime_bool_condition(condition)?;
+            if !condition_value {
+                return Ok(());
+            }
+
+            if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
+                let span =
+                    self.hir.block_spans[condition_block].expect("condition block wihtout span");
+                self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
+                    self.loc(span),
+                    self.comptime_quota.limit(),
+                    self.eval_branch_quota_start_loc,
+                );
+                return Err(Diverge::ComptimeQuotaExhausted);
+            }
+
+            self.eval_block_inline(body)?;
+        }
+    }
+
+    fn eval_inline_while(
+        &mut self,
+        condition_block: hir::BlockId,
+        condition: hir::LocalId,
+        body: hir::BlockId,
+    ) -> Result<(), Diverge> {
+        loop {
+            let condition_value = self.with_comptime(|this| {
+                this.eval_block_inline(condition_block)?;
+                this.expect_comptime_bool_condition(condition)
+            })?;
             if !condition_value {
                 return Ok(());
             }

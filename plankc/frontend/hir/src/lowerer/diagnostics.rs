@@ -11,13 +11,6 @@ impl BlockLowerer<'_> {
         self.session.borrow().lookup_name(name).to_string()
     }
 
-    pub(crate) fn error_not_yet_implemented(&self, feature: &str, span: TokenSpan) {
-        let source_span = self.lexed.tokens_src_span(span);
-        Diagnostic::error(format!("{feature} is not yet supported"))
-            .primary(self.source_id, source_span, "not yet supported")
-            .emit(*self.session.borrow_mut());
-    }
-
     pub(crate) fn error_unresolved_identifier(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);

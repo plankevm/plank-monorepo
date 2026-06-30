@@ -521,6 +521,110 @@ fn test_comptime_let_mut_direct_assignment() {
 }
 
 #[test]
+fn test_inline_while_unrolls_runtime_body() {
+    assert_lowers_to(
+        r#"
+        init {
+            comptime let mut i = 0;
+            inline while @evm_lt(i, 3) {
+                let mut x: u256 = i;
+                i = @evm_add(i, 1);
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = 1
+            %2 : u256 = 2
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_inline_while_rejects_runtime_condition() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            inline while cond {}
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: attempting to evaluate runtime expression in comptime context
+         --> main.plk:3:18
+          |
+        3 |     inline while cond {}
+          |                  ^^^^ runtime expression
+        "#],
+    );
+}
+
+#[test]
+fn test_inline_while_branch_quota_exhausted() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        r#"
+        init {
+            inline while true {}
+        }
+        "#,
+        &[r#"
+        error: comptime branch quota exhausted
+         --> main.plk:2:18
+          |
+        2 |     inline while true {}
+          |                  ^^^^ evaluating this loop exceeded the comptime branch quota
+          |
+          = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+         --> main.plk:1:1
+          |
+        1 | / init {
+        2 | |     inline while true {}
+        3 | | }
+          | |_^
+        "#],
+    );
+}
+
+#[test]
+fn test_inline_while_rejects_comptime_mut_assignment_in_nested_runtime_if() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            comptime let mut x = 0;
+            comptime let mut i = 0;
+            inline while @evm_lt(i, 1) {
+                if cond {
+                    x = 1;
+                }
+                i = @evm_add(i, 1);
+            }
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+         --> main.plk:7:17
+          |
+        3 |     comptime let mut x = 0;
+          |                          - comptime mutable variable initialized here
+        ...
+        7 |             x = 1;
+          |                 ^ assignment in runtime-controlled context
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_let_mut_runtime_assignment() {
     assert_diagnostics(
         r#"
@@ -570,6 +674,58 @@ fn test_comptime_let_mut_assignment_in_runtime_if_reports_invalid_rhs() {
         4 |     if cond {
         5 |         x = @evm_calldataload(0);
           |             ^^^^^^^^^^^^^^^^^^^^ assignment in runtime-controlled context
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_in_runtime_if_rhs_quota_exhaustion_diverges() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        r#"
+        const spin = fn() u256 {
+            while true {}
+            0
+        };
+
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            comptime let mut x = 0;
+            if cond {
+                x = spin();
+            }
+        }
+        "#,
+        &[
+            r#"
+        error: comptime branch quota exhausted
+          --> main.plk:2:11
+           |
+         2 |     while true {}
+           |           ^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:6:1
+           |
+         6 | / init {
+         7 | |     let cond = @evm_iszero(@evm_calldataload(0));
+         8 | |     comptime let mut x = 0;
+         9 | |     if cond {
+        ...  |
+        12 | | }
+           | |_^
+        "#,
+            r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+          --> main.plk:10:13
+           |
+         8 |     comptime let mut x = 0;
+           |                          - comptime mutable variable initialized here
+         9 |     if cond {
+        10 |         x = spin();
+           |             ^^^^^^ assignment in runtime-controlled context
         "#,
         ],
     );

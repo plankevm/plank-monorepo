@@ -977,24 +977,28 @@ fn test_number_out_of_range() {
 }
 
 #[test]
-fn test_inline_while_not_yet_supported() {
-    let rendered = render_diagnostics(
+fn test_inline_while_lowering() {
+    assert_lowers_to(
         r#"
         init {
-            inline while true {}
+            inline while false {
+                let x = 1;
+            }
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        [inline] while {
+            cond:
+                %0 = false
+            test %0
+            body:
+                %1 = 1
         }
         "#,
     );
-    let expected = dedent_preserve_blank_lines(
-        r#"
-        error: inline while is not yet supported
-         --> main.plk:2:5
-          |
-        2 |     inline while true {}
-          |     ^^^^^^^^^^^^^^^^^^^^ not yet supported
-        "#,
-    );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
 }
 
 #[test]
