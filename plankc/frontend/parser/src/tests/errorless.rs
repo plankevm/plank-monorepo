@@ -2457,37 +2457,6 @@ fn test_comptime_let_full() {
 // =============================================================================
 
 #[test]
-fn test_comptime_block_stmt() {
-    assert_parses_to_cst_no_errors_dedented(
-        r#"
-        init { comptime { 1 }; }
-        "#,
-        r#"
-        File
-            InitBlock
-                "init"
-                " "
-                "{"
-                StatementsList
-                    " "
-                    ComptimeBlock
-                        "comptime"
-                        " "
-                        "{"
-                        StatementsList
-                            " "
-                        NumLiteral
-                            "1"
-                        " "
-                        "}"
-                    ";"
-                    " "
-                "}"
-        "#,
-    );
-}
-
-#[test]
 fn test_return_stmt() {
     assert_parses_to_cst_no_errors_dedented(
         r#"

@@ -815,8 +815,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_let_stmt(&mut self, stmt_start: TokenIdx, comptime: bool) -> NodeIdx {
-        self.expect(Token::Let);
-
         let mutable = self.eat(Token::Mut);
         let mut r#let =
             self.alloc_node_from(stmt_start, NodeKind::LetStmt { comptime, mutable, typed: false });
@@ -869,7 +867,7 @@ impl<'a> Parser<'a> {
                 return Some(StmtResult::EndExprOrStmt(block));
             }
 
-            if self.check(Token::Let) {
+            if self.eat(Token::Let) {
                 let r#let = self.parse_let_stmt(stmt_start, true);
                 return Some(StmtResult::Statement(r#let));
             }
@@ -883,7 +881,7 @@ impl<'a> Parser<'a> {
             return Some(StmtResult::Statement(self.close_node(error)));
         }
 
-        if self.check(Token::Let) {
+        if self.eat(Token::Let) {
             let r#let = self.parse_let_stmt(stmt_start, false);
             return Some(StmtResult::Statement(r#let));
         }
