@@ -26,11 +26,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 if let Some(required) = runtime_builtin_min_evm_version(runtime)
                     && self.eval.evm_version < required
                 {
-                    self.diag_ctx.emit_builtin_requires_evm_version(
+                    let active = self.eval.evm_version;
+                    let loc = self.loc(expr_span);
+                    self.diag().emit_builtin_requires_evm_version(
                         runtime,
-                        self.eval.evm_version,
+                        active,
                         required,
-                        self.loc(expr_span),
+                        loc,
                     );
                     return Err(Poisoned);
                 }
@@ -142,7 +144,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
             let arg_types = &this.eval.types_buf[types_buf_offset..];
             builtin_sigs::resolve_result_type(builtin.into(), arg_types).ok_or_else(|| {
-                let arg_types: Vec<_> = this.eval.types_buf[types_buf_offset..].to_vec();
+                let arg_types = this.eval.types_buf[types_buf_offset..].to_vec();
                 this.diag().emit_no_matching_builtin_signature(
                     builtin.into(),
                     &arg_types,
@@ -343,8 +345,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Ok(offset) if offset <= slice.len() => offset,
                     _ => {
                         let slice_len = slice.len();
-                        self.eval
-                            .diag()
+                        self.diag()
                             .emit_cbytes_read_offset_out_of_bounds(offset, slice_len, expr_loc);
                         return Err(Poisoned);
                     }
@@ -666,12 +667,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let &[obj] = args else { unreachable!("arg count checked") };
         let (state, _, origin) = self.bindings[obj].poisoned()?;
         let LocalState::Comptime(obj_vid) = state else {
-            self.diag_ctx
-                .emit_runtime_ref_in_comptime(self.loc(expr_span), self.origin_loc(origin));
+            let expr_loc = self.loc(expr_span);
+            let origin_loc = self.origin_loc(origin);
+            self.diag().emit_runtime_ref_in_comptime(expr_loc, origin_loc);
             return Err(Poisoned);
         };
 
-        self.diag_ctx.record_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
+        let loc = self.loc(expr_span);
+        self.diag().record_compile_log(obj_vid, loc);
         Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
     }
 

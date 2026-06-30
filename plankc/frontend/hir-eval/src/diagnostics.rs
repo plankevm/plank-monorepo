@@ -1110,9 +1110,8 @@ impl DiagEmitView<'_> {
             .emit(self);
     }
 
-    // TODO: Code smell due to https://github.com/plankevm/plank-monorepo/issues/253
-    pub fn record_compile_log(&mut self, values: &ValueInterner, value_id: ValueId, loc: SrcLoc) {
-        let msg = values.format_value(self.session, self.types, value_id).to_string();
+    pub fn record_compile_log(&mut self, value_id: ValueId, loc: SrcLoc) {
+        let msg = self.values.format_value(self.session, self.types, value_id).to_string();
         self.session.emit_compile_log(CompileLog { loc, msg });
     }
 }

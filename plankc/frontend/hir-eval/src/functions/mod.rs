@@ -587,9 +587,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             DefOrigin::Local(span) => SrcLoc::new(call.source, span),
                             DefOrigin::Const(id) => self.eval.hir.consts[id].loc(),
                         };
-                        self.eval
-                            .diag()
-                            .emit_comptime_only_return_with_runtime_arg(arg_loc, call.loc());
+                        self.diag().emit_comptime_only_return_with_runtime_arg(arg_loc, call.loc());
                     }
                     poisoned = true;
                 }
@@ -730,9 +728,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let arg_ty = self.state_type(state);
                 if !arg_ty.is_assignable_to(param_ty) {
                     let param_loc = self.origin_loc(self.bindings[local_id].origin);
-                    self.eval
-                        .diag()
-                        .emit_type_mismatch(param_ty, param_loc, arg_ty, arg_loc, false);
+                    self.diag().emit_type_mismatch(param_ty, param_loc, arg_ty, arg_loc, false);
                     self.bindings[arg].state = Err(Poisoned);
                 }
             }

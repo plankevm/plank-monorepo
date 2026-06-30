@@ -61,10 +61,10 @@ pub fn evaluate(
     }
 
     // A leftover `@compile_log` fails the build, but only when nothing else already has
-    if let Some(first_loc) = diag_ctx.session.compile_logs().first().map(|log| log.loc)
-        && !diag_ctx.session.has_errors()
+    if let Some(first_loc) = evaluator.session.compile_logs().first().map(|log| log.loc)
+        && !evaluator.session.has_errors()
     {
-        diag_ctx.emit_found_compile_log(first_loc);
+        evaluator.diag().emit_found_compile_log(first_loc);
     }
 
     Mir {
