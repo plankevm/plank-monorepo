@@ -15,11 +15,17 @@ pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
     pub use_span: SourceSpan,
     pub origin: DefOrigin,
+    pub requires_comptime_assign: bool,
 }
 
 impl Local {
     pub fn comptime(value: ValueId, use_span: SourceSpan, origin: DefOrigin) -> Self {
-        Self { state: Ok(LocalState::Comptime(value)), use_span, origin }
+        Self {
+            state: Ok(LocalState::Comptime(value)),
+            use_span,
+            origin,
+            requires_comptime_assign: false,
+        }
     }
 
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
@@ -67,7 +73,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub source: SourceId,
     pub ctx: EvalContext,
     pub comptime: bool,
-    pub conditional: Option<SourceSpan>,
+    pub runtime_controlled: Option<SourceSpan>,
     pub comptime_quota: ComptimeQuota,
     pub eval_branch_quota_start_loc: SrcLoc,
     pub max_eval_branch_quota_seen: u32,
@@ -93,7 +99,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
-            conditional: None,
+            runtime_controlled: None,
             comptime_quota,
             eval_branch_quota_start_loc,
             max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
@@ -120,9 +126,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         mir_block
     }
 
-    pub fn eval_comptime(&mut self, block: hir::BlockId) -> Result<(), Diverge> {
+    pub fn with_comptime<R>(&mut self, inner: impl FnOnce(&mut Self) -> R) -> R {
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
-        let res = self.eval_block_inline(block);
+        let res = inner(self);
         self.comptime = parent_comptime;
         res
     }
@@ -275,8 +281,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings
-            .insert(local, Local { state, use_span: expr.span, origin: self.expr_origin(expr) });
+        self.bindings.insert(
+            local,
+            Local {
+                state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                requires_comptime_assign: false,
+            },
+        );
         Ok(())
     }
 
@@ -285,6 +298,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         local: hir::LocalId,
         r#type: Option<hir::LocalId>,
         expr: hir::Expr,
+        requires_comptime_assign: bool,
     ) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let value = value.and_then(|value| {
@@ -311,13 +325,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.bindings.insert(
             local,
-            Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) },
+            Local {
+                state: new_state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                requires_comptime_assign,
+            },
         );
         Ok(())
     }
 
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
-        let Some(condition_span) = self.conditional else {
+        let Some(condition_span) = self.runtime_controlled else {
             return self.eval_set(local, None, expr);
         };
         let value = self.eval_expr(expr)?;
@@ -327,7 +346,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .map(LocalState::Comptime);
             let _ = self.bindings.insert(
                 local,
-                Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                Local {
+                    state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    requires_comptime_assign: false,
+                },
             );
             return Ok(());
         }
@@ -358,7 +382,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 });
                 self.bindings.insert(
                     local,
-                    Local { state, use_span: expr.span, origin: self.expr_origin(expr) },
+                    Local {
+                        state,
+                        use_span: expr.span,
+                        origin: self.expr_origin(expr),
+                        requires_comptime_assign: false,
+                    },
                 );
             }
             Some(binding) => {
@@ -385,8 +414,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] =
-                    Local { state: new_state, use_span: expr.span, origin: self.expr_origin(expr) };
+                self.bindings[local] = Local {
+                    state: new_state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    requires_comptime_assign: binding.requires_comptime_assign,
+                };
             }
         }
 
@@ -468,13 +501,42 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     pub fn eval_instr(&mut self, instr: hir::Instruction) -> Result<(), Diverge> {
         match instr.kind {
-            InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
-            InstructionKind::SetMut { local, r#type, expr } => {
-                self.eval_set_mut(local, r#type, expr)?
+            InstructionKind::Set { comptime, local, r#type, expr } => {
+                if comptime {
+                    self.with_comptime(|this| this.eval_set(local, r#type, expr))?
+                } else {
+                    self.eval_set(local, r#type, expr)?
+                }
+            }
+            InstructionKind::SetMut { comptime, local, r#type, expr } => {
+                if comptime {
+                    self.with_comptime(|this| this.eval_set_mut(local, r#type, expr, comptime))?
+                } else {
+                    self.eval_set_mut(local, r#type, expr, comptime)?
+                }
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
-            InstructionKind::ComptimeBlock { body } => self.eval_comptime(body)?,
-            InstructionKind::Assign { target, expr } => self.eval_assign(target, expr)?,
+            InstructionKind::ComptimeBlock { body } => {
+                self.with_comptime(|this| this.eval_block_inline(body))?
+            }
+            InstructionKind::Assign { target, expr } => {
+                let binding = self.bindings[target];
+                if !binding.requires_comptime_assign {
+                    self.eval_assign(target, expr)?
+                } else if self.runtime_controlled {
+                    self.with_comptime(|this| {
+                        let _ = this.eval_expr(expr);
+                        let binding = this.bindings[target];
+                        this.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
+                            this.loc(expr.span),
+                            this.loc(binding.use_span),
+                        );
+                        this.bindings[target].state = Err(Poisoned);
+                    });
+                } else {
+                    self.with_comptime(|this| this.eval_assign(target, expr))?
+                }
+            }
             InstructionKind::Eval(expr) => {
                 let value = self.eval_expr(expr)?;
                 if self.is_comptime() {
@@ -506,14 +568,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    fn with_conditional<R>(
+    fn with_runtime_controlled<R>(
         &mut self,
-        conditional: Option<SourceSpan>,
+        runtime_controlled: Option<SourceSpan>,
         inner: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let prev_conditional = std::mem::replace(&mut self.conditional, conditional);
+        let prev_runtime_controlled = self.runtime_controlled;
+        self.runtime_controlled = prev_runtime_controlled || runtime_controlled;
         let result = inner(self);
-        self.conditional = prev_conditional;
+        self.runtime_controlled = prev_runtime_controlled;
         result
     }
 
@@ -533,8 +596,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) = self
-                    .with_conditional(Some(binding.use_span), |this| this.eval_block_to_mir(then));
-                let (r#else, else_res) = self.with_conditional(Some(binding.use_span), |this| {
+                    .with_runtime_controlled(Some(binding.use_span), |this| this.eval_block_to_mir(then));
+                let (r#else, else_res) = self.with_runtime_controlled(Some(binding.use_span), |this| {
                     this.eval_block_to_mir(r#else)
                 });
                 self.emit(mir::Instruction::If {
@@ -562,10 +625,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => {
-                self.with_conditional(None, |this| this.eval_block_inline(then))
+                self.with_runtime_controlled(None, |this| this.eval_block_inline(then))
             }
             Ok(LocalState::Comptime(ValueId::FALSE)) => {
-                self.with_conditional(None, |this| this.eval_block_inline(r#else))
+                self.with_runtime_controlled(None, |this| this.eval_block_inline(r#else))
             }
             Ok(state) => {
                 let state_ty = self.state_type(state);
@@ -601,7 +664,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         body: hir::BlockId,
     ) -> Result<(), Diverge> {
         let (condition_block, mir_condition_local) = self.with_instructions(|this| {
-            this.eval_block_inline(condition_block)?;
+            this.with_runtime_controlled(true, |this| this.eval_block_inline(condition_block))?;
             let binding = this.bindings[condition];
             let state = match binding.state {
                 Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
@@ -635,7 +698,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
         let condition = mir_condition_local?;
-        let (body, body_res) = self.eval_block_to_mir(body);
+        let (body, body_res) =
+            self.with_runtime_controlled(true, |this| this.eval_block_to_mir(body));
         match body_res {
             Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
                 return Err(err);

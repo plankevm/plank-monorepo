@@ -478,6 +478,227 @@ fn test_comptime_block_with_const_ref() {
 }
 
 #[test]
+fn test_comptime_let_initializer() {
+    assert_lowers_to(
+        r#"
+        init {
+            comptime let x = 5;
+            let mut y: u256 = x;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 5
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_direct_assignment() {
+    assert_lowers_to(
+        r#"
+        init {
+            comptime let mut x = 5;
+            x = @evm_add(x, 1);
+            let mut y: u256 = x;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 6
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_runtime_assignment() {
+    assert_diagnostics(
+        r#"
+        init {
+            comptime let mut x = 5;
+            x = @evm_calldataload(0);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: builtin not supported at compile time
+         --> main.plk:3:9
+          |
+        3 |     x = @evm_calldataload(0);
+          |         ^^^^^^^^^^^^^^^^^^^^ `@evm_calldataload` cannot be evaluated at compile time
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_in_runtime_if_reports_invalid_rhs() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            comptime let mut x = 1;
+            if cond {
+                x = @evm_calldataload(0);
+            }
+            @evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: builtin not supported at compile time
+         --> main.plk:5:13
+          |
+        5 |         x = @evm_calldataload(0);
+          |             ^^^^^^^^^^^^^^^^^^^^ `@evm_calldataload` cannot be evaluated at compile time
+        "#,
+            r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+         --> main.plk:5:13
+          |
+        3 |     comptime let mut x = 1;
+          |                          - comptime mutable variable initialized here
+        4 |     if cond {
+        5 |         x = @evm_calldataload(0);
+          |             ^^^^^^^^^^^^^^^^^^^^ assignment in runtime-controlled context
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_in_runtime_if() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            comptime let mut x = 1;
+            if cond {
+                x = 2;
+            }
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+         --> main.plk:5:13
+          |
+        3 |     comptime let mut x = 1;
+          |                          - comptime mutable variable initialized here
+        4 |     if cond {
+        5 |         x = 2;
+          |             ^ assignment in runtime-controlled context
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_in_comptime_if_nested_in_runtime_if() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            comptime let mut x = 1;
+            if cond {
+                if true {
+                    x = 2;
+                }
+            }
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+         --> main.plk:6:17
+          |
+        3 |     comptime let mut x = 1;
+          |                          - comptime mutable variable initialized here
+        ...
+        6 |             x = 2;
+          |                 ^ assignment in runtime-controlled context
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_in_runtime_while() {
+    assert_diagnostics(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            comptime let mut x = 1;
+            while cond {
+                x = 2;
+            }
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+         --> main.plk:5:13
+          |
+        3 |     comptime let mut x = 1;
+          |                          - comptime mutable variable initialized here
+        4 |     while cond {
+        5 |         x = 2;
+          |             ^ assignment in runtime-controlled context
+        "#],
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_in_comptime_if() {
+    assert_lowers_to(
+        r#"
+        init {
+            comptime let mut x = 1;
+            if true {
+                x = 2;
+            }
+            let mut y: u256 = x;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 2
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_let_runtime_initializer() {
+    assert_diagnostics(
+        r#"
+        init {
+            comptime let x = @evm_calldataload(0);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: builtin not supported at compile time
+         --> main.plk:2:22
+          |
+        2 |     comptime let x = @evm_calldataload(0);
+          |                      ^^^^^^^^^^^^^^^^^^^^ `@evm_calldataload` cannot be evaluated at compile time
+        "#],
+    );
+}
+
+#[test]
 fn test_out_of_order_const_ref() {
     assert_lowers_to(
         r#"

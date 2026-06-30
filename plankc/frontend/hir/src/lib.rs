@@ -88,6 +88,7 @@ pub enum InstructionKind {
         idx: u32,
     },
     Set {
+        comptime: bool,
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,
@@ -97,6 +98,7 @@ pub enum InstructionKind {
         expr: Expr,
     },
     SetMut {
+        comptime: bool,
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,

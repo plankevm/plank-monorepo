@@ -138,6 +138,7 @@ impl<'a> DisplayHir<'a> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn fmt_set(
         &self,
         f: &mut Formatter<'_>,
@@ -146,9 +147,13 @@ impl<'a> DisplayHir<'a> {
         r#type: Option<LocalId>,
         expr: Expr,
         mutable: bool,
+        comptime: bool,
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         write!(f, "{pad}")?;
+        if comptime {
+            write!(f, "[comptime] ")?;
+        }
         self.fmt_local(f, local)?;
         if let Some(r#type) = r#type {
             write!(f, " : ")?;
@@ -167,11 +172,11 @@ impl<'a> DisplayHir<'a> {
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         match instr {
-            InstructionKind::Set { local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr, false)
+            InstructionKind::Set { comptime, local, r#type, expr } => {
+                self.fmt_set(f, indent, local, r#type, expr, false, comptime)
             }
-            InstructionKind::SetMut { local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr, true)
+            InstructionKind::SetMut { comptime, local, r#type, expr } => {
+                self.fmt_set(f, indent, local, r#type, expr, true, comptime)
             }
             InstructionKind::BranchSet { local, expr } => {
                 write!(f, "{pad}")?;

@@ -107,6 +107,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: param.span,
                             origin: DefOrigin::Local(param.span),
+                            requires_comptime_assign: false,
                         },
                     );
                     continue;
@@ -138,7 +139,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
-                Local { state, use_span: param.span, origin: DefOrigin::Local(param.span) },
+                Local {
+                    state,
+                    use_span: param.span,
+                    origin: DefOrigin::Local(param.span),
+                    requires_comptime_assign: false,
+                },
             );
         }
 
@@ -164,7 +170,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         fn_def_id: hir::FnDefId,
     ) -> Result<MaybePoisoned<PreambleResult>, Diverge> {
         let fn_def = self.hir.fns[fn_def_id];
-        match self.eval_comptime(fn_def.type_preamble) {
+        match self.with_comptime(|this| this.eval_block_inline(fn_def.type_preamble)) {
             Ok(()) => {}
             Err(Diverge::ComptimeQuotaExhausted) => {
                 return Err(Diverge::ComptimeQuotaExhausted);
@@ -621,7 +627,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         cache_state.set(EvaluatedFnState::InProgress);
 
         let spent_before_body = self.comptime_quota.spent();
-        let eval_res = match self.eval_comptime(call.func.body) {
+        let eval_res = match self.with_comptime(|this| this.eval_block_inline(call.func.body)) {
             Ok(()) => unreachable!("lowerer should guarantee return in function body"),
             Err(Diverge::ControlFlowPoisoned) if preamble.return_type == Ok(TypeId::NEVER) => {
                 Ok(Err(Diverge::END))
@@ -760,6 +766,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: arg_binding.use_span,
                             origin: DefOrigin::Local(arg_binding.use_span),
+                            requires_comptime_assign: false,
                         },
                     );
                     return;

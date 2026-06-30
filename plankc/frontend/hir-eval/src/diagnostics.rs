@@ -320,6 +320,21 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_comptime_assign_in_runtime_controlled_context(
+        &mut self,
+        assign_loc: SrcLoc,
+        binding_loc: SrcLoc,
+    ) {
+        Diagnostic::error("assignment to comptime mutable variable in runtime-controlled context")
+            .cross_source_annotations(
+                assign_loc,
+                "assignment in runtime-controlled context",
+                binding_loc,
+                "comptime mutable variable initialized here",
+            )
+            .emit(self);
+    }
+
     pub fn emit_eval_branch_quota_too_large(&mut self, loc: SrcLoc) {
         Diagnostic::error("eval branch quota is too large")
             .primary(loc.source, loc.span, "quota must fit in u32")
