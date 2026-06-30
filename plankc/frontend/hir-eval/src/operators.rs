@@ -136,14 +136,8 @@ impl crate::scope::Scope<'_, '_> {
         let lhs_value = self.try_comptime(lhs_binding, expr)?;
         let rhs_value = self.try_comptime(rhs_binding, expr)?;
         if let Some((lhs, rhs)) = lhs_value.zip(rhs_value) {
-            let value = match fold_std_binary_op(op, lhs, rhs, self.eval.values) {
-                Ok(value) => value,
-                Err(err) => {
-                    let loc = self.loc(expr);
-                    self.emit_fold_error(err, op, loc);
-                    return Err(Poisoned);
-                }
-            };
+            let loc = self.loc(expr);
+            let value = self.fold_std_binary_op(op, lhs, rhs, loc)?;
             return Ok(Ok(EvalValue::Comptime(value)));
         }
 
@@ -358,97 +352,85 @@ impl crate::scope::Scope<'_, '_> {
     }
 }
 
-/// A comptime fold that failed; the caller turns this into the matching diagnostic. Kept separate
-/// from emission so folding only needs `&mut values` while the diagnostic borrows the session.
-enum FoldError {
-    Overflow,
-    Underflow,
-    DivisionByZero,
-    ModuloByZero,
-}
-
 impl crate::scope::Scope<'_, '_> {
-    fn emit_fold_error(&mut self, err: FoldError, op: BinaryOp, loc: SrcLoc) {
-        let mut diag = self.diag();
-        match err {
-            FoldError::Overflow => diag.emit_comptime_arithmetic_overflow(op, loc),
-            FoldError::Underflow => diag.emit_comptime_arithmetic_underflow(op, loc),
-            FoldError::DivisionByZero => diag.emit_comptime_division_by_zero(op, loc),
-            FoldError::ModuloByZero => diag.emit_comptime_modulo_by_zero(op, loc),
-        }
+    fn fold_std_binary_op(
+        &mut self,
+        op: BinaryOp,
+        lhs: ValueId,
+        rhs: ValueId,
+        loc: SrcLoc,
+    ) -> MaybePoisoned<ValueId> {
+        use alloy_primitives::U256;
+
+        let a = builtins::as_u256(self.eval.values, lhs);
+        let b = builtins::as_u256(self.eval.values, rhs);
+
+        let value = match op {
+            BinaryOp::Add => {
+                let (res, overflow) = a.overflowing_add(b);
+                if overflow {
+                    self.diag().emit_comptime_arithmetic_overflow(op, loc);
+                    return Err(Poisoned);
+                }
+                self.eval.values.intern_num(res)
+            }
+            BinaryOp::Subtract => {
+                let (res, overflow) = a.overflowing_sub(b);
+                if overflow {
+                    self.diag().emit_comptime_arithmetic_underflow(op, loc);
+                    return Err(Poisoned);
+                }
+                self.eval.values.intern_num(res)
+            }
+            BinaryOp::Mul => {
+                let (res, overflow) = a.overflowing_mul(b);
+                if overflow {
+                    self.diag().emit_comptime_arithmetic_overflow(op, loc);
+                    return Err(Poisoned);
+                }
+                self.eval.values.intern_num(res)
+            }
+            BinaryOp::Mod => {
+                let Some(rem) = a.checked_rem(b) else {
+                    self.diag().emit_comptime_modulo_by_zero(op, loc);
+                    return Err(Poisoned);
+                };
+                self.eval.values.intern_num(rem)
+            }
+            BinaryOp::DivRoundPos | BinaryOp::DivRoundAwayFromZero => {
+                let Some(rem) = a.checked_rem(b) else {
+                    self.diag().emit_comptime_division_by_zero(op, loc);
+                    return Err(Poisoned);
+                };
+                let mut res = a / b;
+                if !rem.is_zero() {
+                    res += U256::ONE;
+                }
+                self.eval.values.intern_num(res)
+            }
+            BinaryOp::DivRoundNeg | BinaryOp::DivRoundToZero => {
+                let Some(res) = a.checked_div(b) else {
+                    self.diag().emit_comptime_division_by_zero(op, loc);
+                    return Err(Poisoned);
+                };
+                self.eval.values.intern_num(res)
+            }
+            BinaryOp::GreaterEquals => (a >= b).into(),
+            BinaryOp::LessEquals => (a <= b).into(),
+
+            BinaryOp::NotEquals
+            | BinaryOp::Equals
+            | BinaryOp::LessThan
+            | BinaryOp::GreaterThan
+            | BinaryOp::BitwiseOr
+            | BinaryOp::BitwiseXor
+            | BinaryOp::BitwiseAnd
+            | BinaryOp::ShiftLeft
+            | BinaryOp::ShiftRight
+            | BinaryOp::AddWrap
+            | BinaryOp::SubtractWrap
+            | BinaryOp::MulWrap => unreachable!("not a std binary op: {op:?}"),
+        };
+        Ok(value)
     }
-}
-
-fn fold_std_binary_op(
-    op: BinaryOp,
-    lhs: ValueId,
-    rhs: ValueId,
-    values: &mut plank_values::ValueInterner,
-) -> Result<ValueId, FoldError> {
-    use alloy_primitives::U256;
-
-    let a = builtins::as_u256(values, lhs);
-    let b = builtins::as_u256(values, rhs);
-
-    let value = match op {
-        BinaryOp::Add => {
-            let (res, overflow) = a.overflowing_add(b);
-            if overflow {
-                return Err(FoldError::Overflow);
-            }
-            values.intern_num(res)
-        }
-        BinaryOp::Subtract => {
-            let (res, overflow) = a.overflowing_sub(b);
-            if overflow {
-                return Err(FoldError::Underflow);
-            }
-            values.intern_num(res)
-        }
-        BinaryOp::Mul => {
-            let (res, overflow) = a.overflowing_mul(b);
-            if overflow {
-                return Err(FoldError::Overflow);
-            }
-            values.intern_num(res)
-        }
-        BinaryOp::Mod => {
-            let Some(rem) = a.checked_rem(b) else {
-                return Err(FoldError::ModuloByZero);
-            };
-            values.intern_num(rem)
-        }
-        BinaryOp::DivRoundPos | BinaryOp::DivRoundAwayFromZero => {
-            let Some(rem) = a.checked_rem(b) else {
-                return Err(FoldError::DivisionByZero);
-            };
-            let mut res = a / b;
-            if !rem.is_zero() {
-                res += U256::ONE;
-            }
-            values.intern_num(res)
-        }
-        BinaryOp::DivRoundNeg | BinaryOp::DivRoundToZero => {
-            let Some(res) = a.checked_div(b) else {
-                return Err(FoldError::DivisionByZero);
-            };
-            values.intern_num(res)
-        }
-        BinaryOp::GreaterEquals => (a >= b).into(),
-        BinaryOp::LessEquals => (a <= b).into(),
-
-        BinaryOp::NotEquals
-        | BinaryOp::Equals
-        | BinaryOp::LessThan
-        | BinaryOp::GreaterThan
-        | BinaryOp::BitwiseOr
-        | BinaryOp::BitwiseXor
-        | BinaryOp::BitwiseAnd
-        | BinaryOp::ShiftLeft
-        | BinaryOp::ShiftRight
-        | BinaryOp::AddWrap
-        | BinaryOp::SubtractWrap
-        | BinaryOp::MulWrap => unreachable!("not a std binary op: {op:?}"),
-    };
-    Ok(value)
 }
