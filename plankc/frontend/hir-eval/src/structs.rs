@@ -243,10 +243,11 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 LocalState::Runtime(mir_local) => {
                     if first_runtime_field.is_none() {
                         // One time conversion of already pushed values.
-                        let num_materialized = self.eval.values_buf.len() - values_buf_offset;
-                        'materialize_comptime: for materialized_idx in 0..num_materialized {
-                            let value = self.eval.values_buf[values_buf_offset + materialized_idx];
-                            let def_field = def.fields[materialized_idx];
+                        let materialized = values_buf_offset..self.eval.values_buf.len();
+                        'materialize_comptime: for (value_idx, &def_field) in
+                            materialized.zip(def.fields)
+                        {
+                            let value = self.eval.values_buf[value_idx];
                             let value_ty = self.values.type_of_value(value);
                             if self.types.is_comptime_only(value_ty) {
                                 let &comptime_lit_field = lit_fields
