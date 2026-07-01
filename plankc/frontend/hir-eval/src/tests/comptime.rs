@@ -521,6 +521,37 @@ fn test_comptime_let_mut_direct_assignment() {
 }
 
 #[test]
+fn test_invalid_comptime_stmt_recovery_preserves_following_let_diagnostic() {
+    assert_diagnostics(
+        r#"
+        init {
+            comptime foo
+            let x: u256 = false;
+            @evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: unexpected identifier
+         --> main.plk:2:14
+          |
+        2 |     comptime foo
+          |              ^^^ unexpected identifier, expected one of `{`, `let`
+        "#,
+            r#"
+        error: mismatched types
+         --> main.plk:3:19
+          |
+        3 |     let x: u256 = false;
+          |            ----   ^^^^^ expected `u256`, got `bool`
+          |            |
+          |            `u256` expected because of this
+        "#,
+        ],
+    );
+}
+
+#[test]
 fn test_inline_while_unrolls_runtime_body() {
     assert_lowers_to(
         r#"

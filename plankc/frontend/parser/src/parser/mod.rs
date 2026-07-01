@@ -11,6 +11,15 @@ use plank_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
 use plank_session::{Session, SourceByteOffset, SourceId, SourceSpan, StrId};
 
 const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Import];
+const STMT_RECOVERY: &[Token] = &[
+    Token::Semicolon,
+    Token::RightCurly,
+    Token::Let,
+    Token::Return,
+    Token::Comptime,
+    Token::While,
+    Token::Inline,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct OpPriority(u8);
@@ -229,6 +238,16 @@ impl<'a> Parser<'a> {
             self.emit_unexpected();
         }
         false
+    }
+
+    fn skip_until_recovery_token(&mut self, recovery_tokens: &[Token]) {
+        while !self.eof() {
+            self.skip_trivia();
+            if recovery_tokens.contains(&self.current_token()) {
+                break;
+            }
+            self.advance();
+        }
     }
 
     fn expect(&mut self, token: Token) -> bool {
@@ -873,10 +892,10 @@ impl<'a> Parser<'a> {
             }
 
             self.emit_unexpected();
-            while !self.check(Token::Semicolon) && !self.check(Token::RightCurly) && !self.eof() {
+            self.skip_until_recovery_token(STMT_RECOVERY);
+            if self.at(Token::Semicolon) {
                 self.advance();
             }
-            self.eat(Token::Semicolon);
             let error = self.alloc_node_from(stmt_start, NodeKind::Error);
             return Some(StmtResult::Statement(self.close_node(error)));
         }
