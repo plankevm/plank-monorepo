@@ -4,11 +4,9 @@ use crate::{
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
 };
 use StackOps::*;
-use allocator_api2::vec;
 use plank_core::Idx;
 use sir_data::{OperationIdx, StaticAllocId};
 use std::collections::HashSet;
-use stumpalo::Arena;
 
 fn build_graph(
     start_stack: &[u32],
@@ -75,19 +73,17 @@ fn assert_intra_op_schedule_exists(
         evm_stack.push(ValueNodeId::new(value));
     }
 
-    let mut spilled = Vec::with_capacity(start_spilled.len());
-    for (alloc, &value) in (0u32..).zip(start_spilled) {
-        spilled.push((ValueNodeId::new(value), StaticAllocId::new(alloc)));
-    }
-
     let next_alloc_id = StaticAllocId::new(start_spilled.len() as u32);
-    let arena = Arena::new();
     let complete_backing = vec![0; graph.words_per_set() as usize];
     let complete = OpSet::new(&complete_backing, graph.total_ops());
     let mut ops = Vec::new();
 
-    let mut stack =
-        TrackedStack::new_from_parts(next_alloc_id, |op| ops.push(op), evm_stack, spilled);
+    let mut stack = TrackedStack::new_from_parts(
+        next_alloc_id,
+        |op| ops.push(op),
+        evm_stack.fifo(),
+        start_spilled.iter().map(|&v| ValueNodeId::new(v)).collect(),
+    );
 
     for &value in target {
         assert!(
@@ -96,7 +92,7 @@ fn assert_intra_op_schedule_exists(
         );
     }
 
-    greedy_schedule_op(arena.as_arena_ref(), config, &mut stack, &graph, op_id, complete, 4);
+    greedy_schedule_op(config, &mut stack, &graph, op_id, complete, 4);
 
     for &op in &ops {
         assert!(op.is_valid(config));

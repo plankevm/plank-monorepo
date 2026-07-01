@@ -24,7 +24,7 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
 
 fn format_scheduled(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let analyses = AnalysesStore::default();
-    let (lowered, layouts) = crate::schedule(program, &analyses, config);
+    let (lowered, layouts, _) = crate::schedule(program, &analyses, config);
 
     let mut out = String::new();
     for (block_id, ops) in lowered.enumerate_idx() {
@@ -82,6 +82,10 @@ fn fmt_stack_op(out: &mut String, program: &EthIRProgram, op: StackOps) {
         StackOps::Swap(depth) => write!(out, "swap {depth}").unwrap(),
         StackOps::Dup(depth) => write!(out, "dup {depth}").unwrap(),
         StackOps::Pop => out.push_str("pop"),
+        StackOps::Flipped(op) => {
+            out.push_str("[flipped] ");
+            fmt_op(out, program, op)
+        }
         StackOps::Op(op) => fmt_op(out, program, op),
         StackOps::CallRetPush(operation) => write!(out, "call_ret_push #{operation}").unwrap(),
         StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),

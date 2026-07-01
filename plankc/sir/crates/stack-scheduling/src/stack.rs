@@ -1,5 +1,5 @@
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
-use plank_core::{Idx, IncIterable};
+use plank_core::Idx;
 use sir_data::{OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;
@@ -27,6 +27,15 @@ impl EvmStack {
 
     pub const fn len(&self) -> u16 {
         self.stack_len
+    }
+
+    #[track_caller]
+    pub fn from_fifo(values: &[ValueNodeId]) -> Self {
+        assert!(values.len() <= MAX_STACK_LENGTH, "stack overflow");
+        let mut this = EvmStack::new();
+        this.stack_raw[MAX_STACK_LENGTH - values.len()..].copy_from_slice(values);
+        this.stack_len = values.len().try_into().unwrap();
+        this
     }
 
     pub const fn pop(&mut self) -> Option<ValueNodeId> {
@@ -147,30 +156,37 @@ impl Default for ScheduleConfig {
 }
 
 pub struct TrackedStack<Sink: FnMut(StackOps)> {
-    next_alloc_id: StaticAllocId,
+    start_alloc_id: StaticAllocId,
     ops_sink: Sink,
-    spilled: Vec<(ValueNodeId, StaticAllocId)>,
+    spilled: Vec<ValueNodeId>,
     inner: EvmStack,
 }
 
 impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     pub fn new_from_evm(
-        next_alloc_id: StaticAllocId,
+        start_alloc_id: StaticAllocId,
         ops_sink: Sink,
         inner: EvmStack,
         spilled_capacity: usize,
     ) -> Self {
-        Self { next_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
+        Self { start_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
     }
 
-    #[cfg(test)]
+    pub(crate) fn start_alloc_id(&self) -> StaticAllocId {
+        self.start_alloc_id
+    }
+
+    pub(crate) fn underlying_spilled(&self) -> &[ValueNodeId] {
+        &self.spilled
+    }
+
     pub(crate) fn new_from_parts(
-        next_alloc_id: StaticAllocId,
+        start_alloc_id: StaticAllocId,
         ops_sink: Sink,
-        inner: EvmStack,
-        spilled: Vec<(ValueNodeId, StaticAllocId)>,
+        stack_fifo: &[ValueNodeId],
+        spilled: Vec<ValueNodeId>,
     ) -> Self {
-        Self { next_alloc_id, ops_sink, spilled, inner }
+        Self { start_alloc_id, ops_sink, spilled, inner: EvmStack::from_fifo(stack_fifo) }
     }
 
     fn emit(&mut self, op: StackOps) {
@@ -228,15 +244,20 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     }
 
     pub fn get_spilled(&self, target: ValueNodeId) -> Option<StaticAllocId> {
-        self.spilled.iter().rev().find_map(|&(value, alloc)| (value == target).then_some(alloc))
+        self.spilled.iter().rposition(|&value| value == target).map(|i| self.alloc_id(i))
+    }
+
+    #[track_caller]
+    fn alloc_id(&self, i: usize) -> StaticAllocId {
+        self.start_alloc_id + u32::try_from(i).expect("overflow")
     }
 
     #[track_caller]
     pub fn spill_top(&mut self) -> StaticAllocId {
         let target = self.inner.pop().expect("nothing to pop");
-        let new_alloc_id = self.next_alloc_id.get_and_inc();
+        let new_alloc_id = self.alloc_id(self.spilled.len());
         self.emit(StackOps::Store(new_alloc_id));
-        self.spilled.push((target, new_alloc_id));
+        self.spilled.push(target);
         new_alloc_id
     }
 
@@ -249,11 +270,7 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
 
     #[track_caller]
     pub fn load(&mut self, target: StaticAllocId) {
-        let &(value, _) = self
-            .spilled
-            .iter()
-            .find(|&&(_, alloc)| alloc == target)
-            .expect("nothing spilled at alloc");
+        let value = self.spilled[(target - self.start_alloc_id) as usize];
         self.inner.push(value);
         self.emit(StackOps::Load(target));
     }
@@ -262,8 +279,8 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
         &self.inner
     }
 
-    pub fn into_alloc_id(self) -> StaticAllocId {
-        self.next_alloc_id
+    pub fn into_next_alloc_id(self) -> StaticAllocId {
+        self.start_alloc_id
     }
 }
 

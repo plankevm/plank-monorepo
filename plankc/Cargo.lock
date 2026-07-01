@@ -2445,12 +2445,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "readme-rustdocifier"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08ad765b21a08b1a8e5cdce052719188a23772bcbefb3c439f0baaf62c56ceac"
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3147,7 +3141,6 @@ dependencies = [
 name = "sir-stack-scheduling"
 version = "0.1.0"
 dependencies = [
- "allocator-api2 0.4.0",
  "hashbrown 0.16.1",
  "plank-core",
  "plank-test-utils",
@@ -3157,7 +3150,6 @@ dependencies = [
  "sir-parser",
  "sir-passes",
  "smallvec",
- "stumpalo",
 ]
 
 [[package]]
@@ -3324,16 +3316,6 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "stumpalo"
-version = "0.5.1"
-source = "git+https://codeberg.org/philogy/stumpalo.git#6a9245964be21e009ab3244a173471834f6464fa"
-dependencies = [
- "allocator-api2 0.4.0",
- "readme-rustdocifier",
- "rustc_version 0.4.1",
-]
 
 [[package]]
 name = "subtle"

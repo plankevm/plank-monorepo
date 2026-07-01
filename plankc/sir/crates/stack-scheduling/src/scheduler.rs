@@ -102,5 +102,5 @@ pub fn dumb_schedule(
         greedy_shuffler::shuffle(config, &mut stack, graph);
     }
 
-    *next_alloc_id = stack.into_alloc_id();
+    *next_alloc_id = stack.into_next_alloc_id();
 }
