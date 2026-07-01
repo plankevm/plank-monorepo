@@ -14,11 +14,17 @@ const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Cons
 const STMT_RECOVERY: &[Token] = &[
     Token::Semicolon,
     Token::RightCurly,
+    Token::Init,
+    Token::Run,
+    Token::Const,
+    Token::Import,
     Token::Let,
     Token::Return,
     Token::Comptime,
     Token::While,
     Token::Inline,
+    Token::If,
+    Token::LeftCurly,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

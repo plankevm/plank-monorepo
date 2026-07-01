@@ -7,7 +7,7 @@ fn test_comptime_only_return_caches_per_non_comptime_arg_value() {
     assert_lowers_to(
         r#"
         const f = fn(comptime T: type, x: T) type {
-            if @evm_eq(x, 0) { T } else { bool }
+            if x == 0 { T } else { bool }
         };
         init {
             let mut a: f(u256, 0) = 34;
@@ -33,9 +33,9 @@ fn test_comptime_only_return_caches_per_non_comptime_arg_value() {
 fn test_comptime_evm_builtins() {
     assert_lowers_to(
         r#"
-        const add_res = @evm_add(10, 7);
-        const mul_res = @evm_mul(3, 4);
-        const sub_res = @evm_sub(10, 3);
+        const add_res = 10 +% 7;
+        const mul_res = 3 *% 4;
+        const sub_res = 10 -% 3;
         const div_res = @evm_div(10, 3);
         const mod_res = @evm_mod(10, 3);
         const sdiv_res = @evm_sdiv(10, 3);
@@ -43,20 +43,20 @@ fn test_comptime_evm_builtins() {
         const exp_res = @evm_exp(2, 10);
         const div_zero = @evm_div(5, 0);
         const signext_res = @evm_signextend(0, 0x7F);
-        const and_res = @evm_and(0xFF, 0x0F);
-        const or_res = @evm_or(0xF0, 0x0F);
-        const xor_res = @evm_xor(0xFF, 0x0F);
+        const and_res = 0xFF & 0x0F;
+        const or_res = 0xF0 | 0x0F;
+        const xor_res = 0xFF ^ 0x0F;
         const byte_res = @evm_byte(31, 0x42);
-        const shl_res = @evm_shl(4, 1);
-        const shr_res = @evm_shr(1, 16);
+        const shl_res = 1 << 4;
+        const shr_res = 16 >> 1;
         const sar_res = @evm_sar(1, 8);
-        const lt_res = @evm_lt(3, 5);
-        const gt_res = @evm_gt(5, 3);
+        const lt_res = 3 < 5;
+        const gt_res = 5 > 3;
         const slt_res = @evm_slt(3, 5);
         const sgt_res = @evm_sgt(5, 3);
-        const eq_res = @evm_eq(5, 5);
-        const iszero_t = @evm_iszero(0);
-        const iszero_f = @evm_iszero(1);
+        const eq_res = 5 == 5;
+        const iszero_t = 0 == 0;
+        const iszero_f = 1 == 0;
         const addmod_res = @evm_addmod(5, 7, 10);
         const mulmod_res = @evm_mulmod(3, 4, 5);
         init {
@@ -129,8 +129,8 @@ fn test_comptime_evm_builtins() {
 fn test_comptime_evm_const_chain() {
     assert_lowers_to(
         r#"
-        const a = @evm_add(5, 10);
-        const b = @evm_mul(a, 3);
+        const a = 5 +% 10;
+        const b = a *% 3;
         init {
             let mut x: u256 = b;
             @evm_stop();
@@ -412,18 +412,18 @@ fn test_comptime_cbytes_literals() {
 }
 
 #[test]
-fn test_comptime_evm_wrong_arg_type_in_const() {
+fn test_comptime_operator_wrong_arg_type_in_const() {
     assert_diagnostics(
         r#"
-        const y = @evm_mul(true, 5);
+        const y = 1 *% true;
         init { @evm_stop(); }
         "#,
         &[r#"
         error: no valid match for builtin signature
          --> main.plk:1:11
           |
-        1 | const y = @evm_mul(true, 5);
-          |           ^^^^^^^^^^^^^^^^^ `@evm_mul` cannot be called with (bool, u256)
+        1 | const y = 1 *% true;
+          |           ^^^^^^^^^ `@evm_mul` cannot be called with (u256, bool)
           |
           = note: `@evm_mul` accepts (u256, u256)
         "#],
@@ -504,7 +504,7 @@ fn test_comptime_let_mut_direct_assignment() {
         r#"
         init {
             comptime let mut x = 5;
-            x = @evm_add(x, 1);
+            x = x +% 1;
             let mut y: u256 = x;
             @evm_stop();
         }
@@ -521,45 +521,14 @@ fn test_comptime_let_mut_direct_assignment() {
 }
 
 #[test]
-fn test_invalid_comptime_stmt_recovery_preserves_following_let_diagnostic() {
-    assert_diagnostics(
-        r#"
-        init {
-            comptime foo
-            let x: u256 = false;
-            @evm_stop();
-        }
-        "#,
-        &[
-            r#"
-        error: unexpected identifier
-         --> main.plk:2:14
-          |
-        2 |     comptime foo
-          |              ^^^ unexpected identifier, expected one of `{`, `let`
-        "#,
-            r#"
-        error: mismatched types
-         --> main.plk:3:19
-          |
-        3 |     let x: u256 = false;
-          |            ----   ^^^^^ expected `u256`, got `bool`
-          |            |
-          |            `u256` expected because of this
-        "#,
-        ],
-    );
-}
-
-#[test]
 fn test_inline_while_unrolls_runtime_body() {
     assert_lowers_to(
         r#"
         init {
             comptime let mut i = 0;
-            inline while @evm_lt(i, 3) {
+            inline while i < 3 {
                 let mut x: u256 = i;
-                i = @evm_add(i, 1);
+                i = i +% 1;
             }
             @evm_stop();
         }
@@ -578,11 +547,87 @@ fn test_inline_while_unrolls_runtime_body() {
 }
 
 #[test]
+fn test_inline_while_flattens_comptime_if_over_mut_iterator() {
+    assert_lowers_to(
+        r#"
+        init {
+            comptime let mut i = 0;
+            inline while i < 3 {
+                if i == 0 {
+                    let mut x: u256 = 10;
+                } else {
+                    let mut x: u256 = 20;
+                }
+                i = i +% 1;
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 10
+            %1 : u256 = 20
+            %2 : u256 = 20
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_inline_while_in_runtime_while_flattens_comptime_if_over_mut_iterator() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_calldataload(0) == 0;
+            while cond {
+                comptime let mut i = 0;
+                inline while i < 2 {
+                    if i == 0 {
+                        let mut x: u256 = 10;
+                    } else {
+                        let mut x: u256 = 20;
+                    }
+                    i = i +% 1;
+                }
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = 0
+            %3 : bool = @evm_eq(%1, %2)
+            while {
+              cond:
+                    %4 : bool = %3
+              test %4
+              body:
+                    %5 : u256 = 10
+                    %6 : void = ()
+                    %7 : void = %6
+                    %8 : u256 = 20
+                    %6 : void = ()
+                    %9 : void = %6
+            }
+            %10 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_inline_while_rejects_runtime_condition() {
     assert_diagnostics(
         r#"
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             inline while cond {}
             @evm_stop();
         }
@@ -630,27 +675,27 @@ fn test_inline_while_rejects_comptime_mut_assignment_in_nested_runtime_if() {
     assert_diagnostics(
         r#"
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             comptime let mut x = 0;
             comptime let mut i = 0;
-            inline while @evm_lt(i, 1) {
+            inline while i < 1 {
                 if cond {
                     x = 1;
                 }
-                i = @evm_add(i, 1);
+                i = i +% 1;
             }
             @evm_stop();
         }
         "#,
         &[r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
+        error: assignment to comptime mutable variable in runtime-dependent context
          --> main.plk:7:17
           |
         3 |     comptime let mut x = 0;
           |                          - comptime mutable variable initialized here
         ...
         7 |             x = 1;
-          |                 ^ assignment in runtime-controlled context
+          |                 ^ assignment in runtime-dependent context
         "#],
     );
 }
@@ -676,42 +721,7 @@ fn test_comptime_let_mut_runtime_assignment() {
 }
 
 #[test]
-fn test_comptime_let_mut_assignment_in_runtime_if_reports_invalid_rhs() {
-    assert_diagnostics(
-        r#"
-        init {
-            let cond = @evm_iszero(@evm_calldataload(0));
-            comptime let mut x = 1;
-            if cond {
-                x = @evm_calldataload(0);
-            }
-            @evm_stop();
-        }
-        "#,
-        &[
-            r#"
-        error: builtin not supported at compile time
-         --> main.plk:5:13
-          |
-        5 |         x = @evm_calldataload(0);
-          |             ^^^^^^^^^^^^^^^^^^^^ `@evm_calldataload` cannot be evaluated at compile time
-        "#,
-            r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
-         --> main.plk:5:13
-          |
-        3 |     comptime let mut x = 1;
-          |                          - comptime mutable variable initialized here
-        4 |     if cond {
-        5 |         x = @evm_calldataload(0);
-          |             ^^^^^^^^^^^^^^^^^^^^ assignment in runtime-controlled context
-        "#,
-        ],
-    );
-}
-
-#[test]
-fn test_comptime_let_mut_assignment_in_runtime_if_rhs_quota_exhaustion_diverges() {
+fn test_comptime_let_mut_assignment_in_runtime_if_does_not_evaluate_rhs() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
     assert_diagnostics(
         r#"
@@ -721,44 +731,24 @@ fn test_comptime_let_mut_assignment_in_runtime_if_rhs_quota_exhaustion_diverges(
         };
 
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             comptime let mut x = 0;
             if cond {
                 x = spin();
             }
+            @evm_stop();
         }
         "#,
-        &[
-            r#"
-        error: comptime branch quota exhausted
-          --> main.plk:2:11
-           |
-         2 |     while true {}
-           |           ^^^^ evaluating this loop exceeded the comptime branch quota
-           |
-           = note: current eval branch quota is 1000
-        note: comptime evaluation began here
-          --> main.plk:6:1
-           |
-         6 | / init {
-         7 | |     let cond = @evm_iszero(@evm_calldataload(0));
-         8 | |     comptime let mut x = 0;
-         9 | |     if cond {
-        ...  |
-        12 | | }
-           | |_^
-        "#,
-            r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
+        &[r#"
+        error: assignment to comptime mutable variable in runtime-dependent context
           --> main.plk:10:13
            |
          8 |     comptime let mut x = 0;
            |                          - comptime mutable variable initialized here
          9 |     if cond {
         10 |         x = spin();
-           |             ^^^^^^ assignment in runtime-controlled context
-        "#,
-        ],
+           |             ^^^^^^ assignment in runtime-dependent context
+        "#],
     );
 }
 
@@ -767,7 +757,7 @@ fn test_comptime_let_mut_assignment_in_runtime_if() {
     assert_diagnostics(
         r#"
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             comptime let mut x = 1;
             if cond {
                 x = 2;
@@ -776,14 +766,14 @@ fn test_comptime_let_mut_assignment_in_runtime_if() {
         }
         "#,
         &[r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
+        error: assignment to comptime mutable variable in runtime-dependent context
          --> main.plk:5:13
           |
         3 |     comptime let mut x = 1;
           |                          - comptime mutable variable initialized here
         4 |     if cond {
         5 |         x = 2;
-          |             ^ assignment in runtime-controlled context
+          |             ^ assignment in runtime-dependent context
         "#],
     );
 }
@@ -793,7 +783,7 @@ fn test_comptime_let_mut_declared_in_runtime_if_allows_nested_comptime_if_assign
     assert_lowers_to(
         r#"
         init {
-            if @evm_gt(@evm_callvalue(), 0) {
+            if @evm_callvalue() > 0 {
                 comptime let mut x = 5;
                 if true {
                     x = 6;
@@ -830,7 +820,7 @@ fn test_comptime_let_mut_assignment_tracks_runtime_control_depth() {
     assert_diagnostics(
         r#"
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             comptime let mut x = 1;
             if cond {
                 if true {
@@ -848,24 +838,24 @@ fn test_comptime_let_mut_assignment_tracks_runtime_control_depth() {
         "#,
         &[
             r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
+        error: assignment to comptime mutable variable in runtime-dependent context
          --> main.plk:6:17
           |
         3 |     comptime let mut x = 1;
           |                          - comptime mutable variable initialized here
         ...
         6 |             x = 2;
-          |                 ^ assignment in runtime-controlled context
+          |                 ^ assignment in runtime-dependent context
         "#,
             r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
+        error: assignment to comptime mutable variable in runtime-dependent context
           --> main.plk:12:17
            |
         10 |         comptime let mut y = 1;
            |                              - comptime mutable variable initialized here
         11 |         if cond {
         12 |             y = 2;
-           |                 ^ assignment in runtime-controlled context
+           |                 ^ assignment in runtime-dependent context
         "#,
         ],
     );
@@ -876,7 +866,7 @@ fn test_comptime_let_mut_assignment_in_runtime_while() {
     assert_diagnostics(
         r#"
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             comptime let mut x = 1;
             while cond {
                 x = 2;
@@ -885,14 +875,14 @@ fn test_comptime_let_mut_assignment_in_runtime_while() {
         }
         "#,
         &[r#"
-        error: assignment to comptime mutable variable in runtime-controlled context
+        error: assignment to comptime mutable variable in runtime-dependent context
          --> main.plk:5:13
           |
         3 |     comptime let mut x = 1;
           |                          - comptime mutable variable initialized here
         4 |     while cond {
         5 |         x = 2;
-          |             ^ assignment in runtime-controlled context
+          |             ^ assignment in runtime-dependent context
         "#],
     );
 }
@@ -926,7 +916,7 @@ fn test_comptime_let_runtime_initializer() {
     assert_diagnostics(
         r#"
         init {
-            comptime let x = @evm_calldataload(0);
+            comptime let x = @evm_calldataload(0) *% 5 +% 3;
             @evm_stop();
         }
         "#,
@@ -934,8 +924,10 @@ fn test_comptime_let_runtime_initializer() {
         error: builtin not supported at compile time
          --> main.plk:2:22
           |
-        2 |     comptime let x = @evm_calldataload(0);
+        2 |     comptime let x = @evm_calldataload(0) *% 5 +% 3;
           |                      ^^^^^^^^^^^^^^^^^^^^ `@evm_calldataload` cannot be evaluated at compile time
+          |
+          = note: initializer of `comptime let` must be known at compile time
         "#],
     );
 }
@@ -1053,7 +1045,7 @@ fn test_comptime_expr_runtime_dep() {
     assert_diagnostics(
         r#"
         init {
-            let cond = @evm_iszero(@evm_calldataload(0));
+            let cond = @evm_calldataload(0) == 0;
             let T = if cond { u256 } else { bool };
             @evm_stop();
         }
@@ -1284,10 +1276,10 @@ fn test_comptime_recursion() {
     assert_lowers_to(
         r#"
         const fib_inner = fn (n: u256, a: u256, b: u256) u256 {
-            if @evm_iszero(n) {
+            if n == 0 {
                 return a;
             }
-            fib_inner(@evm_sub(n, 1), b, @evm_add(a, b))
+            fib_inner(n -% 1, b, a +% b)
         };
         const fib = fn (n: u256) u256 {
             fib_inner(n, 0, 1)
@@ -1510,7 +1502,7 @@ fn comptime_arg_in_runtime_does_not_monomorphize() {
     assert_lowers_to(
         r#"
         const meta_add = fn (x: u256, y: u256) u256 {
-            @evm_add(x, y)
+            x +% y
         };
 
         init {
@@ -1554,7 +1546,7 @@ fn comptime_any_parameter() {
             if T == bool {
                 x and y
             } else if T == u256 {
-                @evm_mul(x, y)
+                x *% y
             }
         };
 
@@ -1711,7 +1703,7 @@ fn test_basic_polymorphic_function() {
         r#"
         const max = fn (comptime T: type, a: T, b: T) T {
             if T == u256 {
-                return if @evm_gt(a, b) { a } else { b };
+                return if a > b { a } else { b };
             }
             if T == bool {
                 return a or b;
@@ -1782,7 +1774,7 @@ fn test_comptime_param_not_eager() {
         const ident = fn (x: u256) u256 { x };
 
         const my_add = fn (comptime N: u256, x: u256) u256 {
-            @evm_add(N, x)
+            N +% x
         };
 
         init {
@@ -1815,7 +1807,7 @@ fn test_comptime_call_comptime_param_runtime() {
     assert_diagnostics(
         r#"
         const my_add = fn (comptime N: u256, x: u256) u256 {
-            @evm_add(N, x)
+            N +% x
         };
 
         init {

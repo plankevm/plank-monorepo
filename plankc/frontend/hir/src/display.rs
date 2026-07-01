@@ -226,7 +226,7 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, body, indent + 2)?;
                 writeln!(f, "{pad}}}")
             }
-            InstructionKind::ComptimeBlock { body } => {
+            InstructionKind::ComptimeBlock { body, reason: _ } => {
                 writeln!(f, "{pad}comptime {{")?;
                 self.fmt_block(f, body, indent + 1)?;
                 writeln!(f, "{pad}}}")

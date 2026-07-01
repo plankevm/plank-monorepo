@@ -20,13 +20,13 @@ pub(crate) struct Local {
 }
 
 impl Local {
-    pub fn comptime(value: ValueId, use_span: SourceSpan, origin: DefOrigin) -> Self {
-        Self {
-            state: Ok(LocalState::Comptime(value)),
-            use_span,
-            origin,
-            comptime_assign_depth: None,
-        }
+    pub fn new(
+        state: MaybePoisoned<LocalState>,
+        use_span: SourceSpan,
+        origin: DefOrigin,
+        comptime_assign_depth: Option<NonZeroU32>,
+    ) -> Self {
+        Self { state, use_span, origin, comptime_assign_depth }
     }
 
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
@@ -133,6 +133,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let parent_comptime = std::mem::replace(&mut self.comptime, true);
         let res = inner(self);
         self.comptime = parent_comptime;
+        res
+    }
+
+    pub fn with_comptime_reason<R>(
+        &mut self,
+        reason: hir::ComptimeReason,
+        inner: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let parent_reason = std::mem::replace(&mut self.diag_ctx.comptime_reason, reason);
+        let res = inner(self);
+        self.diag_ctx.comptime_reason = parent_reason;
         res
     }
 
@@ -291,15 +302,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings.insert(
-            local,
-            Local {
-                state,
-                use_span: expr.span,
-                origin: self.expr_origin(expr),
-                comptime_assign_depth: None,
-            },
-        );
+        self.bindings.insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
         Ok(())
     }
 
@@ -335,12 +338,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.bindings.insert(
             local,
-            Local {
-                state: new_state,
-                use_span: expr.span,
-                origin: self.expr_origin(expr),
-                comptime_assign_depth,
-            },
+            Local::new(new_state, expr.span, self.expr_origin(expr), comptime_assign_depth),
         );
         Ok(())
     }
@@ -354,15 +352,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state = value
                 .and_then(|value| self.expect_comptime_value(value, expr.span))
                 .map(LocalState::Comptime);
-            let _ = self.bindings.insert(
-                local,
-                Local {
-                    state,
-                    use_span: expr.span,
-                    origin: self.expr_origin(expr),
-                    comptime_assign_depth: None,
-                },
-            );
+            let _ = self
+                .bindings
+                .insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
             return Ok(());
         }
 
@@ -390,15 +382,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 });
-                self.bindings.insert(
-                    local,
-                    Local {
-                        state,
-                        use_span: expr.span,
-                        origin: self.expr_origin(expr),
-                        comptime_assign_depth: None,
-                    },
-                );
+                self.bindings
+                    .insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
             }
             Some(binding) => {
                 let new_state = poison::zip(binding.state, mir_expr).and_then(
@@ -424,12 +409,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] = Local {
-                    state: new_state,
-                    use_span: expr.span,
-                    origin: self.expr_origin(expr),
-                    comptime_assign_depth: binding.comptime_assign_depth,
-                };
+                self.bindings[local] = Local::new(
+                    new_state,
+                    expr.span,
+                    self.expr_origin(expr),
+                    binding.comptime_assign_depth,
+                );
             }
         }
 
@@ -528,24 +513,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
-            InstructionKind::ComptimeBlock { body } => {
-                self.with_comptime(|this| this.eval_block_inline(body))?
-            }
+            InstructionKind::ComptimeBlock { body, reason } => self
+                .with_comptime_reason(reason, |this| {
+                    this.with_comptime(|this| this.eval_block_inline(body))
+                })?,
             InstructionKind::Assign { target, expr } => {
                 let binding = self.bindings[target];
-                if binding.comptime_assign_depth.is_none() {
-                    self.eval_assign(target, expr)?
-                } else if binding.comptime_assign_depth != Some(self.comptime_assign_depth()) {
-                    let rhs_res = self.with_comptime(|this| this.eval_expr(expr));
-                    let binding = self.bindings[target];
-                    self.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
-                        self.loc(expr.span),
-                        self.loc(binding.use_span),
-                    );
-                    self.bindings[target].state = Err(Poisoned);
-                    let _ = rhs_res?;
-                } else {
-                    self.with_comptime(|this| this.eval_assign(target, expr))?
+                match binding.comptime_assign_depth {
+                    None => self.eval_assign(target, expr)?,
+                    Some(assign_depth) if assign_depth != self.comptime_assign_depth() => {
+                        self.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
+                            self.loc(expr.span),
+                            self.loc(binding.use_span),
+                        );
+                        self.bindings[target].state = Err(Poisoned);
+                    }
+                    Some(_) => self.with_comptime(|this| this.eval_assign(target, expr))?,
                 }
             }
             InstructionKind::Eval(expr) => {
@@ -688,7 +671,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         body: hir::BlockId,
     ) -> Result<(), Diverge> {
         let (condition_block, mir_condition_local) = self.with_instructions(|this| {
-            this.with_runtime_controlled(true, |this| this.eval_block_inline(condition_block))?;
+            this.with_runtime_controlled(|this| this.eval_block_inline(condition_block))?;
             let binding = this.bindings[condition];
             let state = match binding.state {
                 Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
@@ -722,8 +705,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
         let condition = mir_condition_local?;
-        let (body, body_res) =
-            self.with_runtime_controlled(true, |this| this.eval_block_to_mir(body));
+        let (body, body_res) = self.with_runtime_controlled(|this| this.eval_block_to_mir(body));
         match body_res {
             Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
                 return Err(err);

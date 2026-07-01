@@ -414,7 +414,10 @@ impl BlockLowerer<'_> {
                                 expr,
                             });
                         });
-                        self.emit(InstructionKind::ComptimeBlock { body: block });
+                        self.emit(InstructionKind::ComptimeBlock {
+                            body: block,
+                            reason: ComptimeReason::Explicit,
+                        });
                     }
                     None => {
                         let expr = self.expr(ExprKind::VOID, struct_def.node().span());
@@ -484,7 +487,10 @@ impl BlockLowerer<'_> {
                     });
                 });
 
-                self.emit(InstructionKind::ComptimeBlock { body });
+                self.emit(InstructionKind::ComptimeBlock {
+                    body,
+                    reason: ComptimeReason::Explicit,
+                });
                 ExprKind::LocalRef(result)
             }
             ast::Expr::Binary(binary) => 'binary: {
@@ -725,7 +731,27 @@ impl BlockLowerer<'_> {
     fn lower_statement(&mut self, stmt: Statement<'_>) {
         match stmt {
             Statement::Let(let_stmt) => {
-                let expr = self.lower_expr(let_stmt.value());
+                let value = let_stmt.value();
+                let expr = if let_stmt.comptime {
+                    let span = value.span();
+                    let rhs_local = self.alloc_temp();
+                    let body = self.create_sub_block(span, |this| {
+                        let expr = this.lower_expr(value);
+                        this.emit(InstructionKind::Set {
+                            comptime: false,
+                            local: rhs_local,
+                            r#type: None,
+                            expr,
+                        });
+                    });
+                    self.emit(InstructionKind::ComptimeBlock {
+                        body,
+                        reason: ComptimeReason::LetInitializer,
+                    });
+                    self.expr(ExprKind::LocalRef(rhs_local), span)
+                } else {
+                    self.lower_expr(value)
+                };
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
                 let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
                 let r#type =

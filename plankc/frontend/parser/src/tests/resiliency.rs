@@ -1,4 +1,4 @@
-use crate::tests::assert_parser_errors;
+use crate::tests::{assert_parser_errors, assert_parses_to_cst_with_errors};
 
 // ==============================================================================
 // Lexer error diagnostics
@@ -412,6 +412,162 @@ fn test_comptime_stmt_recovery_stops_at_block_end() {
             1 | init { comptime foo }
               |                 ^^^ unexpected identifier, expected one of `{`, `let`
         "#],
+    );
+}
+
+#[test]
+fn test_comptime_stmt_recovery_preserves_following_let() {
+    assert_parses_to_cst_with_errors(
+        r#"
+            init {
+                comptime false
+                let x: u256 = false;
+            }
+        "#,
+        &[r#"
+            error: unexpected `false`
+             --> test.plk:2:14
+              |
+            2 |     comptime false
+              |              ^^^^^ unexpected `false`, expected one of `{`, `let`
+        "#],
+        r#"
+            File
+                InitBlock
+                    "init"
+                    " "
+                    "{"
+                    StatementsList
+                        "\n    "
+                        Error
+                            "comptime"
+                            " "
+                            "false"
+                            "\n    "
+                        LetStmt { comptime: false, mutable: false, typed: true }
+                            "let"
+                            " "
+                            Identifier
+                                "x"
+                            ":"
+                            " "
+                            Identifier
+                                "u256"
+                            " "
+                            "="
+                            " "
+                            BoolLiteral(false)
+                                "false"
+                            ";"
+                        "\n"
+                    "}"
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_stmt_recovery_preserves_following_block() {
+    assert_parses_to_cst_with_errors(
+        r#"
+            init {
+                comptime foo baz
+                { let x = 1; }
+            }
+        "#,
+        &[r#"
+            error: unexpected identifier
+             --> test.plk:2:14
+              |
+            2 |     comptime foo baz
+              |              ^^^ unexpected identifier, expected one of `{`, `let`
+        "#],
+        r#"
+            File
+                InitBlock
+                    "init"
+                    " "
+                    "{"
+                    StatementsList
+                        "\n    "
+                        Error
+                            "comptime"
+                            " "
+                            "foo"
+                            " "
+                            "baz"
+                            "\n    "
+                    Block
+                        "{"
+                        StatementsList
+                            " "
+                            LetStmt { comptime: false, mutable: false, typed: false }
+                                "let"
+                                " "
+                                Identifier
+                                    "x"
+                                " "
+                                "="
+                                " "
+                                NumLiteral
+                                    "1"
+                                ";"
+                            " "
+                        "}"
+                    "\n"
+                    "}"
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_stmt_recovery_preserves_following_top_level_const() {
+    assert_parses_to_cst_with_errors(
+        r#"
+            init {
+                comptime foo
+            const x = 1;
+        "#,
+        &[
+            r#"
+            error: unexpected identifier
+             --> test.plk:2:14
+              |
+            2 |     comptime foo
+              |              ^^^ unexpected identifier, expected one of `{`, `let`
+        "#,
+            r#"
+            error: unexpected `const`
+             --> test.plk:3:1
+              |
+            3 | const x = 1;
+              | ^^^^^ unexpected `const`, expected `}`
+        "#,
+        ],
+        r#"
+            File
+                InitBlock
+                    "init"
+                    " "
+                    "{"
+                    StatementsList
+                        "\n    "
+                        Error
+                            "comptime"
+                            " "
+                            "foo"
+                            "\n"
+                ConstDecl { typed: false }
+                    "const"
+                    " "
+                    Identifier
+                        "x"
+                    " "
+                    "="
+                    " "
+                    NumLiteral
+                        "1"
+                    ";"
+        "#,
     );
 }
 

@@ -46,3 +46,21 @@ pub fn assert_parses_to_cst_no_errors(source: &str, expected: &str) {
         DisplayCST::new(&cst, source, &lexed).show_node_index(true).show_token_spans(true)
     );
 }
+
+pub fn assert_parses_to_cst_with_errors(source: &str, expected_errors: &[&str], expected: &str) {
+    let source = dedent_preserve_indent(source);
+    let mut session = Session::new();
+    let cst = parse_single_source(&source, &mut session);
+    assert_diagnostics(session.diagnostics(), &session, expected_errors);
+
+    let lexed = Lexed::lex(&source);
+    let actual = format!("{}", DisplayCST::new(&cst, &source, &lexed));
+    let expected = dedent_preserve_indent(expected);
+
+    pretty_assertions::assert_str_eq!(
+        actual.trim(),
+        expected.trim(),
+        "Full tree:\n{}",
+        DisplayCST::new(&cst, &source, &lexed).show_node_index(true).show_token_spans(true)
+    );
+}

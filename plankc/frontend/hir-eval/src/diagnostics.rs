@@ -25,6 +25,7 @@ impl BindingLoc {
 pub(crate) struct DiagCtx<'a> {
     pub session: &'a mut Session,
     pub types: &'a TypeInterner,
+    pub(crate) comptime_reason: hir::ComptimeReason,
     preamble_call_site: Option<SrcLoc>,
 }
 
@@ -36,7 +37,12 @@ pub(crate) struct DiagCallSiteRestoreObligation {
 
 impl<'a> DiagCtx<'a> {
     pub fn new(session: &'a mut Session, types: &'a TypeInterner) -> Self {
-        Self { session, types, preamble_call_site: None }
+        Self {
+            session,
+            types,
+            comptime_reason: hir::ComptimeReason::Explicit,
+            preamble_call_site: None,
+        }
     }
 
     pub fn set_preamble_call_site(&mut self, call_site: SrcLoc) -> DiagCallSiteRestoreObligation {
@@ -68,6 +74,15 @@ impl DiagEmitter for DiagCtx<'_> {
 }
 
 impl DiagCtx<'_> {
+    fn add_comptime_reason_note(&self, diagnostic: Diagnostic) -> Diagnostic {
+        match self.comptime_reason {
+            hir::ComptimeReason::Explicit => diagnostic,
+            hir::ComptimeReason::LetInitializer => {
+                diagnostic.note("initializer of `comptime let` must be known at compile time")
+            }
+        }
+    }
+
     fn format_expected_types(
         &self,
         values: &ValueInterner,
@@ -303,21 +318,22 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_runtime_ref_in_comptime(&mut self, expr_loc: SrcLoc, runtime_def_loc: SrcLoc) {
-        Diagnostic::error("runtime reference in comptime context")
+        let diagnostic = Diagnostic::error("runtime reference in comptime context")
             .cross_source_annotations(
                 expr_loc,
                 "expression with runtime reference",
                 runtime_def_loc,
                 "runtime value defined here",
             )
-            .note("comptime contexts can only reference values known at compile time")
-            .emit(self.session);
+            .note("comptime contexts can only reference values known at compile time");
+        self.add_comptime_reason_note(diagnostic).emit(self.session);
     }
 
     pub fn emit_runtime_eval_in_comptime(&mut self, expr: SrcLoc) {
-        Diagnostic::error("attempting to evaluate runtime expression in comptime context")
-            .primary(expr.source, expr.span, "runtime expression")
-            .emit(self);
+        let diagnostic =
+            Diagnostic::error("attempting to evaluate runtime expression in comptime context")
+                .primary(expr.source, expr.span, "runtime expression");
+        self.add_comptime_reason_note(diagnostic).emit(self);
     }
 
     pub fn emit_comptime_assign_in_runtime_controlled_context(
@@ -325,10 +341,10 @@ impl DiagCtx<'_> {
         assign_loc: SrcLoc,
         binding_loc: SrcLoc,
     ) {
-        Diagnostic::error("assignment to comptime mutable variable in runtime-controlled context")
+        Diagnostic::error("assignment to comptime mutable variable in runtime-dependent context")
             .cross_source_annotations(
                 assign_loc,
-                "assignment in runtime-controlled context",
+                "assignment in runtime-dependent context",
                 binding_loc,
                 "comptime mutable variable initialized here",
             )
@@ -660,13 +676,12 @@ impl DiagCtx<'_> {
         builtin: RuntimeBuiltin,
         loc: SrcLoc,
     ) {
-        Diagnostic::error("builtin not supported at compile time")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`{}` cannot be evaluated at compile time", builtin.name()),
-            )
-            .emit(self);
+        let diagnostic = Diagnostic::error("builtin not supported at compile time").primary(
+            loc.source,
+            loc.span,
+            format!("`{}` cannot be evaluated at compile time", builtin.name()),
+        );
+        self.add_comptime_reason_note(diagnostic).emit(self);
     }
 
     pub fn emit_builtin_requires_evm_version(

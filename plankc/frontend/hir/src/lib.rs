@@ -123,7 +123,14 @@ pub enum InstructionKind {
     /// Forces compile-time evaluation of the block body.
     ComptimeBlock {
         body: BlockId,
+        reason: ComptimeReason,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComptimeReason {
+    Explicit,
+    LetInitializer,
 }
 
 #[derive(Debug, Clone, Copy)]

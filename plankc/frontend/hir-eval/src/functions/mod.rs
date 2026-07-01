@@ -92,7 +92,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         for (&(value, _origin), &def) in captured_values.iter().zip(capture_defs) {
             fn_scope.bindings.insert_no_prev(
                 def.inner_local,
-                Local::comptime(value, def.use_span, DefOrigin::Local(def.use_span)),
+                Local::new(
+                    Ok(LocalState::Comptime(value)),
+                    def.use_span,
+                    DefOrigin::Local(def.use_span),
+                    None,
+                ),
             );
         }
 
@@ -103,12 +108,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Poisoned) => {
                     fn_scope.bindings.insert_no_prev(
                         param.value,
-                        Local {
-                            state: Err(Poisoned),
-                            use_span: param.span,
-                            origin: DefOrigin::Local(param.span),
-                            comptime_assign_depth: None,
-                        },
+                        Local::new(Err(Poisoned), param.span, DefOrigin::Local(param.span), None),
                     );
                     continue;
                 }
@@ -139,12 +139,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
-                Local {
-                    state,
-                    use_span: param.span,
-                    origin: DefOrigin::Local(param.span),
-                    comptime_assign_depth: None,
-                },
+                Local::new(state, param.span, DefOrigin::Local(param.span), None),
             );
         }
 
@@ -762,12 +757,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let Ok(state) = arg_binding.state else {
                     self.bindings.insert_no_prev(
                         capture,
-                        Local {
-                            state: Err(Poisoned),
-                            use_span: arg_binding.use_span,
-                            origin: DefOrigin::Local(arg_binding.use_span),
-                            comptime_assign_depth: None,
-                        },
+                        Local::new(
+                            Err(Poisoned),
+                            arg_binding.use_span,
+                            DefOrigin::Local(arg_binding.use_span),
+                            None,
+                        ),
                     );
                     return;
                 };
@@ -779,10 +774,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let type_value = self.values.intern_type(arg_ty);
                 self.bindings.insert_no_prev(
                     capture,
-                    Local::comptime(
-                        type_value,
+                    Local::new(
+                        Ok(LocalState::Comptime(type_value)),
                         arg_binding.use_span,
                         DefOrigin::Local(arg_binding.use_span),
+                        None,
                     ),
                 );
             }
