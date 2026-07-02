@@ -28,12 +28,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 {
                     let active = self.eval.evm_version;
                     let loc = self.loc(expr_span);
-                    self.diag().emit_builtin_requires_evm_version(
-                        runtime,
-                        active,
-                        required,
-                        loc,
-                    );
+                    self.diag().emit_builtin_requires_evm_version(runtime, active, required, loc);
                     return Err(Poisoned);
                 }
                 if runtime.foldable() {

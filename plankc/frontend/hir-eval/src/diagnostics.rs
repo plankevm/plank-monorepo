@@ -4,8 +4,7 @@ use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
     Compound, FmtType, StructRef, TupleRef, Type, TypeFlags, TypeId, TypeInterner, ValueId,
-    ValueInterner,
-    builtins as builtin_sigs,
+    ValueInterner, builtins as builtin_sigs,
 };
 
 pub(crate) struct BindingLoc {
