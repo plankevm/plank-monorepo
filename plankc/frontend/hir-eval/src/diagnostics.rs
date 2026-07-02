@@ -23,11 +23,6 @@ impl BindingLoc {
     }
 }
 
-/// A short-lived view over the session and its diagnostic context, minted per emit by
-/// [`Evaluator::diag`]. It borrows the session, interners, and preamble-call-site slot directly
-/// from the `Evaluator`, so a fresh one is created at each diagnostic emission rather than being
-/// threaded around. Because it carries `values`/`types`, the emit methods read them from the view
-/// instead of taking them as parameters.
 pub(crate) struct DiagEmitView<'a> {
     pub session: &'a mut Session,
     pub types: &'a TypeInterner,
@@ -50,7 +45,6 @@ impl DiagEmitter for DiagEmitView<'_> {
 }
 
 impl DiagEmitView<'_> {
-    /// Formats a type for display, threading the session and value interner the renderer needs.
     fn format_type(&self, ty: TypeId) -> FmtType<'_> {
         self.types.format(self.session, self.values, ty)
     }

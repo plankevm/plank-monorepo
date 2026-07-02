@@ -44,13 +44,7 @@ newtype_index! {
 }
 
 pub(crate) struct Evaluator<'a> {
-    /// The session is owned by the evaluator. Diagnostics borrow it transiently through
-    /// [`Evaluator::diag`]; non-diagnostic session writes (e.g. interning) go straight to
-    /// `session` without involving the diagnostics machinery.
     pub session: &'a mut Session,
-    /// Anchors "called here" notes onto diagnostics emitted while evaluating a function preamble.
-    /// Scoped around preamble evaluation via `Scope::with_preamble_call_site` and borrowed by the
-    /// transient [`DiagEmitView`].
     pub preamble_call_site: Option<SrcLoc>,
 
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
@@ -130,8 +124,6 @@ impl<'a> Evaluator<'a> {
         self.types.is_comptime_only(ty)
     }
 
-    /// Mints a transient diagnostics view borrowing the session and interners. A fresh one is
-    /// created at each diagnostic emission rather than being threaded through evaluation.
     pub fn diag(&mut self) -> DiagEmitView<'_> {
         DiagEmitView {
             session: &mut *self.session,

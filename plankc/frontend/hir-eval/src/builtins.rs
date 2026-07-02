@@ -616,11 +616,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.diag().emit_runtime_ref_in_comptime(use_loc, def_loc);
             return Err(Poisoned);
         };
-
-        // The `fields` borrow is held only for this pure pass: it builds the byte buffer and
-        // records the types of any invalid elements. Diagnostics are emitted afterwards, once the
-        // borrow is released, so `self.diag()` (which needs `&mut self`) no longer conflicts with
-        // the slice borrowed from the value interner.
         let (buf, invalid_types) = match self.eval.values.lookup(tuple_vid) {
             Value::Compound { ty, fields } if ty.is_tuple() => {
                 let mut buf = Vec::new();
