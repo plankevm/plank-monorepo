@@ -406,9 +406,10 @@ impl DiagCtx<'_> {
             .element(
                 Annotations::new(source)
                     .primary(value_span, "comptime-only value")
-                    .secondary(condition_span, "runtime control flow here"),
+                    .secondary(condition_span, "runtime condition here"),
             )
             .note("branches with runtime conditions must produce runtime-compatible values")
+            .help("make the condition comptime-known to evaluate only the taken branch")
             .emit(self);
     }
 

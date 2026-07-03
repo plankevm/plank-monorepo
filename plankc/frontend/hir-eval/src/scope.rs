@@ -335,6 +335,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let existing = self.bindings.get(local).copied();
         let mir_expr = value.and_then(|value| match value {
             EvalValue::Comptime(vid) if self.is_comptime_only(vid) => {
+                // A poisoned binding already produced a diagnostic (comptime-only sibling
+                // branch or otherwise); reporting again would only cascade noise.
                 let already_poisoned = existing.is_some_and(|binding| binding.state.is_err());
                 if !already_poisoned {
                     self.diag_ctx.emit_comptime_only_value_in_runtime_branch(
@@ -345,8 +347,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 Err(Poisoned)
             }
-            EvalValue::Comptime(vid) => Ok((mir::Expr::Const(vid), self.values.type_of_value(vid))),
-            EvalValue::Runtime { result_type, expr } => Ok((expr, result_type)),
+            value => self.value_to_runtime_expr(value, expr.span),
         });
         match existing {
             None => {
