@@ -67,7 +67,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub source: SourceId,
     pub ctx: EvalContext,
     pub comptime: bool,
-    pub conditional: bool,
+    pub conditional: Option<SourceSpan>,
     pub comptime_quota: ComptimeQuota,
     pub eval_branch_quota_start_loc: SrcLoc,
     pub max_eval_branch_quota_seen: u32,
@@ -93,7 +93,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
-            conditional: false,
+            conditional: None,
             comptime_quota,
             eval_branch_quota_start_loc,
             max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
@@ -317,9 +317,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
-        if !self.conditional {
+        let Some(condition_span) = self.conditional else {
             return self.eval_set(local, None, expr);
-        }
+        };
         let value = self.eval_expr(expr)?;
         if self.is_comptime() {
             let state = value
@@ -332,8 +332,23 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Ok(());
         }
 
-        let mir_expr = value.and_then(|value| self.value_to_runtime_expr(value, expr.span));
-        match self.bindings.get(local).copied() {
+        let existing = self.bindings.get(local).copied();
+        let mir_expr = value.and_then(|value| match value {
+            EvalValue::Comptime(vid) if self.is_comptime_only(vid) => {
+                let already_poisoned = existing.is_some_and(|binding| binding.state.is_err());
+                if !already_poisoned {
+                    self.diag_ctx.emit_comptime_only_value_in_runtime_branch(
+                        self.source,
+                        expr.span,
+                        condition_span,
+                    );
+                }
+                Err(Poisoned)
+            }
+            EvalValue::Comptime(vid) => Ok((mir::Expr::Const(vid), self.values.type_of_value(vid))),
+            EvalValue::Runtime { result_type, expr } => Ok((expr, result_type)),
+        });
+        match existing {
             None => {
                 let state = mir_expr.map(|(expr, ty)| {
                     let target = self.mir_types.push(ty);
@@ -490,7 +505,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(())
     }
 
-    fn with_conditional<R>(&mut self, conditional: bool, inner: impl FnOnce(&mut Self) -> R) -> R {
+    fn with_conditional<R>(
+        &mut self,
+        conditional: Option<SourceSpan>,
+        inner: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         let prev_conditional = std::mem::replace(&mut self.conditional, conditional);
         let result = inner(self);
         self.conditional = prev_conditional;
@@ -512,10 +531,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
                     return Err(Diverge::ControlFlowPoisoned);
                 }
-                let (then, then_res) =
-                    self.with_conditional(true, |this| this.eval_block_to_mir(then));
-                let (r#else, else_res) =
-                    self.with_conditional(true, |this| this.eval_block_to_mir(r#else));
+                let (then, then_res) = self
+                    .with_conditional(Some(binding.use_span), |this| this.eval_block_to_mir(then));
+                let (r#else, else_res) = self.with_conditional(Some(binding.use_span), |this| {
+                    this.eval_block_to_mir(r#else)
+                });
                 self.emit(mir::Instruction::If {
                     condition: mir_local,
                     then_block: then,
@@ -541,10 +561,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => {
-                self.with_conditional(false, |this| this.eval_block_inline(then))
+                self.with_conditional(None, |this| this.eval_block_inline(then))
             }
             Ok(LocalState::Comptime(ValueId::FALSE)) => {
-                self.with_conditional(false, |this| this.eval_block_inline(r#else))
+                self.with_conditional(None, |this| this.eval_block_inline(r#else))
             }
             Ok(state) => {
                 let state_ty = self.state_type(state);
