@@ -675,10 +675,13 @@ impl BlockLowerer<'_> {
             let Ok(first) = next else { continue };
             return self.create_sub_block(first.node().span(), |this| {
                 let condition = this.lower_expr_to_local(first.condition());
-                let then_block = this.lower_branch_body(first.body(), result);
+                let else_if_result = this.alloc_temp();
+                let then_block = this.lower_branch_body(first.body(), else_if_result);
                 let else_body = else_body.map_err(|_| first.body().node().span());
-                let else_block = this.lower_else_chain(result, branches, else_body);
+                let else_block = this.lower_else_chain(else_if_result, branches, else_body);
                 this.emit(InstructionKind::If { condition, then_block, else_block });
+                let expr = this.expr(ExprKind::LocalRef(else_if_result), first.node().span());
+                this.emit(InstructionKind::BranchSet { local: result, expr });
             });
         }
         match else_body {

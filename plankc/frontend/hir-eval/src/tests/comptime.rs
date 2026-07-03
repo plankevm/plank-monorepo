@@ -613,10 +613,60 @@ fn test_inline_while_in_runtime_while_flattens_comptime_if_over_mut_iterator() {
                     %6 : void = ()
                     %7 : void = %6
                     %8 : u256 = 20
-                    %6 : void = ()
-                    %9 : void = %6
+                    %9 : void = ()
+                    %10 : void = %9
             }
-            %10 : never = @evm_stop()
+            %11 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_inline_while_does_not_reuse_if_branch_result_type() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_calldataload(0) == 0;
+            comptime let mut i = 0;
+            inline while i < 2 {
+                let mut x = if cond {
+                    if i == 0 { 10 } else { true }
+                } else {
+                    if i == 0 { 20 } else { false }
+                };
+                i = i +% 1;
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = 0
+            %3 : bool = @evm_eq(%1, %2)
+            %4 : bool = %3
+            if %4 {
+                %5 : u256 = 10
+                %6 : u256 = %5
+            } else {
+                %7 : u256 = 20
+                %6 : u256 = %7
+            }
+            %8 : u256 = %6
+            %9 : bool = %3
+            if %9 {
+                %10 : bool = true
+                %11 : bool = %10
+            } else {
+                %12 : bool = false
+                %11 : bool = %12
+            }
+            %13 : bool = %11
+            %14 : never = @evm_stop()
         }
         "#,
     );

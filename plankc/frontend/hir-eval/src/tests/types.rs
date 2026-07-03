@@ -78,6 +78,37 @@ fn test_if_three_branches_type_mismatch() {
 }
 
 #[test]
+fn test_if_else_chain_type_mismatch_after_diverging_branch() {
+    assert_diagnostics(
+        "
+        init {
+            let c = @evm_calldataload(0);
+            let x = if @evm_slt(c, 0) {
+                3
+            } else if @evm_eq(c, 34) {
+                @evm_revert(@malloc_uninit(0), 0)
+            } else if @evm_eq(c, 35) {
+                false
+            } else {
+                true
+            };
+            @evm_stop();
+        }
+        ",
+        &[r#"
+            error: `if` and `else` have incompatible types
+             --> main.plk:8:9
+              |
+            4 |         3
+              |         - `u256` expected because of this
+            ...
+            8 |         false
+              |         ^^^^^ expected `u256`, got `bool`
+            "#],
+    );
+}
+
+#[test]
 fn test_if_type_mismatch() {
     assert_diagnostics(
         "
