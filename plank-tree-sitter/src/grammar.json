@@ -1095,6 +1095,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "comptime_block"
+        },
+        {
+          "type": "SYMBOL",
           "name": "while"
         }
       ]

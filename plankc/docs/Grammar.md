@@ -41,6 +41,7 @@ block = "{" stmt* expr? "}"
 stmt =
     (expr_no_block | return | assign | let) ";"
     | if_expr ";"?
+    | comptime_block
     | while
 
 while = "inline"? "while" expr block

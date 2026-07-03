@@ -473,6 +473,10 @@
             "named": true
           },
           {
+            "type": "comptime_block",
+            "named": true
+          },
+          {
             "type": "dec_literal",
             "named": true
           },
