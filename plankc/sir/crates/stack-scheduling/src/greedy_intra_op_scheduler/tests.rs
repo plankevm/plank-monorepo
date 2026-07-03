@@ -92,7 +92,7 @@ fn assert_intra_op_schedule_exists(
         );
     }
 
-    greedy_schedule_op(config, &mut stack, &graph, op_id, complete, 4);
+    greedy_schedule_op(config, &mut stack, &graph, op_id, complete);
 
     for &op in &ops {
         assert!(op.is_valid(config));
