@@ -1,22 +1,22 @@
 import std::utils::fold;
 
-const unsafe_mem_write_u256 = fn (ptr: memptr, offset: u256, value: u256) u256 {
+const unsafe_mem_write_u256 = fn (ptr: u256, offset: u256, value: u256) u256 {
     @mstore32(ptr +% offset, value);
     32
 };
 
-const unsafe_mem_read_u256 = fn (ptr: memptr, offset: u256) u256 {
+const unsafe_mem_read_u256 = fn (ptr: u256, offset: u256) u256 {
     @mload32(ptr +% offset)
 };
 
-const unsafe_mem_write_bytes = fn (dst: memptr, dst_offset: u256, src: memptr, len: u256) u256 {
+const unsafe_mem_write_bytes = fn (dst: u256, dst_offset: u256, src: u256, len: u256) u256 {
     @mcopy(dst +% dst_offset, src, len);
     len
 };
 
 // Writes a value of type T at `offset`. For structs, fields are serialized contiguously.
 // No bounds check. Returns bytes written.
-const unsafe_mem_write = fn (ptr: memptr, offset: u256, value: $T) u256 {
+const unsafe_mem_write = fn (ptr: u256, offset: u256, value: $T) u256 {
     if T == void {
         0
     } else if T == u256 {

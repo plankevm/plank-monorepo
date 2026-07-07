@@ -68,7 +68,7 @@ const abi_head_size = fn (comptime T: type) u256 {
 //   tail_offset   - current position in the tail section; advances as dynamic data is written
 const AbiEncodeAccumulator = fn (comptime T: type) type {
     struct {
-        buf: memptr,
+        buf: u256,
         base_offset: u256,
         encoded_value: T,
         head_offset: u256,
@@ -79,7 +79,7 @@ const AbiEncodeAccumulator = fn (comptime T: type) type {
 // ABI-encodes `value` of type `T` into `buf` starting at `offset`.
 // Returns the number of bytes written.
 // Caller must ensure `buf` is large enough for the full encoding (use `abi_encoded_size`).
-const unsafe_abi_encode_to = fn (buf: memptr, offset: u256, value: $T) u256 {
+const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
     if T == void {
         0
     } else if T == u256 {
@@ -149,7 +149,7 @@ const unsafe_abi_encode_to = fn (buf: memptr, offset: u256, value: $T) u256 {
 //   decoded_value - the value being decoded; fields are set one by one (runtime, mutated in fold)
 const AbiDecodeAccumulator = fn (comptime T: type) type {
     struct {
-        buf: memptr,
+        buf: u256,
         base_offset: u256,
         head_offset: u256,
         decoded_value: T
@@ -158,7 +158,7 @@ const AbiDecodeAccumulator = fn (comptime T: type) type {
 
 // ABI-decodes a value of type `T` from `buf` starting at `offset`.
 // Caller must ensure `buf` contains valid ABI-encoded data for type `T`.
-const unsafe_abi_decode_from = fn (comptime T: type, buf: memptr, offset: u256) T {
+const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T {
     if T == void {
         {}
     } else if T == u256 {

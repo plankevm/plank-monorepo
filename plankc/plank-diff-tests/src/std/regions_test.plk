@@ -19,11 +19,10 @@ init {
         comptime_assert(is_region(code), "code must be a region");
         comptime_assert(is_region(calldata), "calldata must be a region");
         comptime_assert(!is_region(struct {}), "anonymous struct must not be a region");
-        comptime_assert(region_ptr_type(memory) == memptr, "memory regions must use memptr pointers");
         comptime_assert(region_ptr_type(code) == u256, "code regions must use u256 pointers");
         comptime_assert(region_ptr_type(calldata) == u256, "calldata regions must use u256 pointers");
         comptime_assert(@field_count(bytes(memory)) == 2, "bytes(memory) must have two fields");
-        comptime_assert(@field_type(bytes(memory), 0) == memptr, "bytes(memory).ptr must be memptr");
+        comptime_assert(@field_type(bytes(memory), 0) == u256, "bytes(memory).ptr must be u256");
         comptime_assert(@field_type(bytes(code), 0) == u256, "bytes(code).ptr must be u256");
         comptime_assert(@field_type(bytes(calldata), 0) == u256, "bytes(calldata).ptr must be u256");
         comptime_assert(@field_type(bytes(memory), 1) == u256, "bytes(region).length must be u256");
