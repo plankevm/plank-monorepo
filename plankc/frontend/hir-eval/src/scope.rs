@@ -727,7 +727,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .eval_struct_def(struct_def_id, expr.span)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
             ExprKind::TupleType { fields } => self
-                .eval_tuple_type(fields, expr.span)
+                .eval_tuple_type(fields)
                 .map(|ty| EvalValue::Comptime(self.values.intern_type(ty))),
             ExprKind::BinaryOpCall { op, lhs, rhs } => {
                 poison::transpose(self.eval_binary_op(op, lhs, rhs, expr.span))?

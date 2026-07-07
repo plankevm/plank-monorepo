@@ -131,12 +131,7 @@ impl crate::scope::Scope<'_, '_> {
         }
 
         let Some(closure_vid) = self.eval.operator_table.lookup_binary(op, lhs_ty) else {
-            self.diag_ctx.emit_operator_not_supported(
-                self.eval.values,
-                op,
-                lhs_ty,
-                self.loc(expr),
-            );
+            self.diag_ctx.emit_operator_not_supported(self.eval.values, op, lhs_ty, self.loc(expr));
             return Err(Poisoned);
         };
 

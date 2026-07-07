@@ -2,11 +2,8 @@ bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct TypeFlags: u8 {
         const NONE                = 0;
-        const RUNTIME_ONLY        = 1 << 0;
-        const COMPTIME_ONLY       = 1 << 1;
-        const UNINIT_INCOMPATIBLE = 1 << 2;
-
-        const UNINITIALIZABLE_MIXED = TypeFlags::RUNTIME_ONLY.bits() | TypeFlags::COMPTIME_ONLY.bits();
+        const COMPTIME_ONLY       = 1 << 0;
+        const UNINIT_INCOMPATIBLE = 1 << 1;
     }
 }
 

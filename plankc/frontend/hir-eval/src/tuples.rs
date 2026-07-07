@@ -2,14 +2,10 @@ use crate::scope::{EvalValue, LocalState, Scope};
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan};
-use plank_values::{MixedComptimeAndRuntime, TupleKey, TypeId, Value};
+use plank_values::{TupleKey, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
-    pub(crate) fn eval_tuple_type(
-        &mut self,
-        fields: hir::ArgsId,
-        expr_span: SourceSpan,
-    ) -> MaybePoisoned<TypeId> {
+    pub(crate) fn eval_tuple_type(&mut self, fields: hir::ArgsId) -> MaybePoisoned<TypeId> {
         self.with_types_buf(|this, types_buf_offset| {
             let mut poisoned = false;
             for &field in &this.hir.args[fields] {
@@ -24,15 +20,10 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 return Err(Poisoned);
             }
 
-            let (tuple, ok) = this
+            let tuple = this
                 .eval
                 .types
                 .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
-
-            if let Err(MixedComptimeAndRuntime) = ok {
-                this.diag_ctx.emit_mixed_tuple_type(this.loc(expr_span), tuple, this.eval.values);
-                return Err(Poisoned);
-            }
 
             Ok(TypeId::from_tuple(tuple))
         })
@@ -73,7 +64,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 validity?;
 
                 // Mixed comptime/runtime checked independently
-                let (tuple, _ok) = this
+                let tuple = this
                     .eval
                     .types
                     .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
