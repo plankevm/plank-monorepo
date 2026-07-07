@@ -18,7 +18,7 @@ html.dark .hljs-function { color: #ffb454; }
       case_insensitive: false,
       keywords: {
         keyword: 'as comptime const else fn if import init inline let mut return run struct while hex',
-        type: 'void u256 bool memptr type function never bytes cbytes code memory calldata',
+        type: 'void u256 bool type function never bytes cbytes code memory calldata',
         literal: 'true false'
       },
       contains: [
@@ -26,7 +26,7 @@ html.dark .hljs-function { color: #ffb454; }
         hljs.C_BLOCK_COMMENT_MODE,
         {
           className: 'type',
-          begin: /\b(?:void|u256|bool|memptr|type|function|never|bytes|cbytes|code|memory|calldata)\b/
+          begin: /\b(?:void|u256|bool|type|function|never|bytes|cbytes|code|memory|calldata)\b/
         },
         {
           className: 'number',
