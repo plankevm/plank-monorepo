@@ -2185,18 +2185,38 @@ fn test_uninit_struct_with_invalid_tuple_field() {
 }
 
 #[test]
-fn test_uninit_memptr_in_comptime() {
+fn test_memptr_is_not_a_primitive_type() {
     assert_diagnostics(
         r#"
         const x = @uninit(memptr);
         init { @evm_stop(); }
         "#,
         &[r#"
-        error: cannot use @uninit on memptr type at comptime
-         --> main.plk:1:11
+        error: unresolved identifier 'memptr'
+         --> main.plk:1:19
           |
         1 | const x = @uninit(memptr);
-          |           ^^^^^^^^^^^^^^^ memptr requires runtime allocation
+          |                   ^^^^^^ not found in this scope
+        "#],
+    );
+}
+
+#[test]
+fn test_runtime_malloc_result_not_usable_in_comptime() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = @malloc_uninit(32);
+            let y = comptime { x +% 1 };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: attempting to evaluate runtime expression in comptime context
+         --> main.plk:3:24
+          |
+        3 |     let y = comptime { x +% 1 };
+          |                        ^ runtime expression
         "#],
     );
 }
@@ -2256,30 +2276,6 @@ fn test_uninit_struct_with_comptime_only_field_direct_runtime_scope_is_comptime_
             %0 : never = @evm_stop()
         }
         "#,
-    );
-}
-
-#[test]
-fn test_uninit_struct_with_memptr_and_invalid_field_reports_invalid_field() {
-    assert_diagnostics(
-        r#"
-        const Bad = struct { ptr: memptr, f: never };
-
-        const x = @uninit(Bad);
-        init { @evm_stop(); }
-        "#,
-        &[r#"
-        error: struct contains field that cannot be uninitialized
-         --> main.plk:3:11
-          |
-        1 | const Bad = struct { ptr: memptr, f: never };
-          |                                   -------- type `never` cannot be uninitialized
-        2 |
-        3 | const x = @uninit(Bad);
-          |           ^^^^^^^^^^^^ cannot use @uninit on this struct
-          |
-          = help: @uninit only supports types that do not contain never or function
-        "#],
     );
 }
 

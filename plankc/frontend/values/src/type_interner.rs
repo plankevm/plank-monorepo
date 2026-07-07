@@ -650,16 +650,13 @@ mod tests {
         let interner = TypeInterner::new();
         let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
 
-        let (a, a_status) = interner.intern_struct(dummy_struct_info(&fields));
-        let (b, b_status) = interner.intern_struct(dummy_struct_info(&fields));
+        let a = interner.intern_struct(dummy_struct_info(&fields));
+        let b = interner.intern_struct(dummy_struct_info(&fields));
         assert_eq!(a, b);
-        assert_eq!(a_status, Ok(()));
-        assert_eq!(b_status, Ok(()));
 
         let different = [Field { name: builtins::BOOL, ty: TypeId::BOOL, def_span: ZERO_SPAN }];
-        let (c, c_status) = interner.intern_struct(dummy_struct_info(&different));
+        let c = interner.intern_struct(dummy_struct_info(&different));
         assert_ne!(a, c);
-        assert_eq!(c_status, Ok(()));
     }
 
     #[test]
@@ -667,16 +664,16 @@ mod tests {
         let interner = TypeInterner::new();
         let f = Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN };
 
-        let (a, _) = interner.intern_struct(dummy_struct_info(&[f]));
-        let (b, _) = interner.intern_struct(dummy_struct_info(&[f, f]));
-        let (c, _) = interner.intern_struct(dummy_struct_info(&[f, f, f]));
+        let a = interner.intern_struct(dummy_struct_info(&[f]));
+        let b = interner.intern_struct(dummy_struct_info(&[f, f]));
+        let c = interner.intern_struct(dummy_struct_info(&[f, f, f]));
 
         for r#struct in [a, b, c] {
             assert!(matches!(r#struct.0.kind(), CompoundKind::Struct(_)));
             assert!(r#struct.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
         }
 
-        let (tuple, _) = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
+        let tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
         assert!(matches!(tuple.0.kind(), CompoundKind::Tuple(_)));
         assert!(tuple.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
     }
@@ -691,11 +688,9 @@ mod tests {
         let b_info =
             StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(1), fields: &fields };
 
-        let (a, a_status) = interner.intern_struct(a_info);
-        let (b, b_status) = interner.intern_struct(b_info);
+        let a = interner.intern_struct(a_info);
+        let b = interner.intern_struct(b_info);
         assert_ne!(a, b);
-        assert_eq!(a_status, Ok(()));
-        assert_eq!(b_status, Ok(()));
     }
 
     #[test]
@@ -703,21 +698,18 @@ mod tests {
         let interner = TypeInterner::new();
 
         let inner_fields = [Field { name: builtins::U256, ty: TypeId::TYPE, def_span: ZERO_SPAN }];
-        let (inner, inner_status) = interner.intern_struct(dummy_struct_info(&inner_fields));
-        assert_eq!(inner_status, Ok(()));
+        let inner = interner.intern_struct(dummy_struct_info(&inner_fields));
         let inner_ty = TypeId::from_struct(inner);
         assert!(interner.is_comptime_only(inner_ty));
 
         let outer_fields = [Field { name: builtins::BOOL, ty: inner_ty, def_span: ZERO_SPAN }];
-        let (outer, outer_status) = interner.intern_struct(dummy_struct_info(&outer_fields));
-        assert_eq!(outer_status, Ok(()));
+        let outer = interner.intern_struct(dummy_struct_info(&outer_fields));
         let outer_ty = TypeId::from_struct(outer);
         assert!(interner.is_comptime_only(outer_ty));
 
         let runtime_fields =
             [Field { name: builtins::CBYTES, ty: TypeId::U256, def_span: ZERO_SPAN }];
-        let (runtime, runtime_status) = interner.intern_struct(dummy_struct_info(&runtime_fields));
-        assert_eq!(runtime_status, Ok(()));
+        let runtime = interner.intern_struct(dummy_struct_info(&runtime_fields));
         assert!(!interner.is_comptime_only(TypeId::from_struct(runtime)));
     }
 
@@ -726,23 +718,19 @@ mod tests {
         let interner = TypeInterner::new();
         let elements = [TypeId::U256, TypeId::BOOL];
 
-        let (a, a_status) = interner.intern_tuple(TupleKey { fields: &elements });
-        let (b, b_status) = interner.intern_tuple(TupleKey { fields: &elements });
+        let a = interner.intern_tuple(TupleKey { fields: &elements });
+        let b = interner.intern_tuple(TupleKey { fields: &elements });
         assert_eq!(a, b);
-        assert_eq!(a_status, Ok(()));
-        assert_eq!(b_status, Ok(()));
 
         let different = [TypeId::BOOL, TypeId::U256];
-        let (c, c_status) = interner.intern_tuple(TupleKey { fields: &different });
+        let c = interner.intern_tuple(TupleKey { fields: &different });
         assert_ne!(a, c);
-        assert_eq!(c_status, Ok(()));
     }
 
     #[test]
     fn empty_tuple_is_void() {
         let interner = TypeInterner::new();
-        let (tuple, status) = interner.intern_tuple(TupleKey { fields: &[] });
-        assert_eq!(status, Ok(()));
+        let tuple = interner.intern_tuple(TupleKey { fields: &[] });
         let tuple_ty = TypeId::from_tuple(tuple);
 
         assert_eq!(tuple_ty, TypeId::VOID);
@@ -756,43 +744,31 @@ mod tests {
     fn tuple_comptime_only_tracks_elements() {
         let interner = TypeInterner::new();
 
-        let (comptime_tuple, comptime_status) =
-            interner.intern_tuple(TupleKey { fields: &[TypeId::TYPE] });
-        assert_eq!(comptime_status, Ok(()));
+        let comptime_tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::TYPE] });
         assert!(interner.is_comptime_only(TypeId::from_tuple(comptime_tuple)));
 
-        let (runtime_tuple, runtime_status) =
-            interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
-        assert_eq!(runtime_status, Ok(()));
+        let runtime_tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
         assert!(!interner.is_comptime_only(TypeId::from_tuple(runtime_tuple)));
     }
 
     #[test]
-    fn mixed_compound_reports_only_on_first_intern() {
+    fn compound_types_can_mix_comptime_only_and_runtime_capable_fields() {
         let interner = TypeInterner::new();
         let fields = [
-            Field {
-                name: builtins::MEMORY_POINTER,
-                ty: TypeId::MEMORY_POINTER,
-                def_span: ZERO_SPAN,
-            },
             Field { name: builtins::TYPE, ty: TypeId::TYPE, def_span: ZERO_SPAN },
+            Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN },
         ];
 
-        let (first_struct, first_struct_status) =
-            interner.intern_struct(dummy_struct_info(&fields));
-        let (second_struct, second_struct_status) =
-            interner.intern_struct(dummy_struct_info(&fields));
+        let first_struct = interner.intern_struct(dummy_struct_info(&fields));
+        let second_struct = interner.intern_struct(dummy_struct_info(&fields));
         assert_eq!(first_struct, second_struct);
-        assert_eq!(first_struct_status, Err(MixedComptimeAndRuntime));
-        assert_eq!(second_struct_status, Ok(()));
+        assert!(interner.is_comptime_only(TypeId::from_struct(first_struct)));
 
-        let fields = &[TypeId::MEMORY_POINTER, TypeId::TYPE];
-        let (first_tuple, first_tuple_status) = interner.intern_tuple(TupleKey { fields });
-        let (second_tuple, second_tuple_status) = interner.intern_tuple(TupleKey { fields });
+        let fields = &[TypeId::TYPE, TypeId::U256];
+        let first_tuple = interner.intern_tuple(TupleKey { fields });
+        let second_tuple = interner.intern_tuple(TupleKey { fields });
         assert_eq!(first_tuple, second_tuple);
-        assert_eq!(first_tuple_status, Err(MixedComptimeAndRuntime));
-        assert_eq!(second_tuple_status, Ok(()));
+        assert!(interner.is_comptime_only(TypeId::from_tuple(first_tuple)));
     }
 
     #[test]
@@ -801,10 +777,8 @@ mod tests {
         let interner = TypeInterner::new();
         let field = Field { name: sess.intern("name"), ty: TypeId::U256, def_span: ZERO_SPAN };
 
-        let (r#struct, struct_status) = interner.intern_struct(dummy_struct_info(&[field]));
-        let (tuple, tuple_status) = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
-        assert_eq!(struct_status, Ok(()));
-        assert_eq!(tuple_status, Ok(()));
+        let r#struct = interner.intern_struct(dummy_struct_info(&[field]));
+        let tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
 
         assert_ne!(TypeId::from_struct(r#struct), TypeId::from_tuple(tuple));
     }

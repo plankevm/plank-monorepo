@@ -87,20 +87,20 @@ fn test_runtime_checked_add_with_std() {
         ==== Functions ====
         @fn0() -> never {
             %0 : u256 = 64
-            %1 : memptr = @malloc_uninit(%0)
-            %2 : memptr = %1
+            %1 : u256 = @malloc_uninit(%0)
+            %2 : u256 = %1
             %3 : u256 = 0
-            %4 : memptr = @evm_add(%2, %3)
+            %4 : u256 = @evm_add(%2, %3)
             %5 : u256 = 0x4e487b71
             %6 : void = @mstore32(%4, %5)
-            %7 : memptr = %1
+            %7 : u256 = %1
             %8 : u256 = 32
-            %9 : memptr = @evm_add(%7, %8)
+            %9 : u256 = @evm_add(%7, %8)
             %10 : u256 = 17
             %11 : void = @mstore32(%9, %10)
-            %12 : memptr = %1
+            %12 : u256 = %1
             %13 : u256 = 28
-            %14 : memptr = @evm_add(%12, %13)
+            %14 : u256 = @evm_add(%12, %13)
             %15 : u256 = 36
             %16 : never = @evm_revert(%14, %15)
         }
@@ -919,7 +919,7 @@ fn test_bool_comptime_equality() {
 }
 
 #[test]
-fn test_memptr_equality() {
+fn test_malloc_result_equality() {
     assert_lowers_to(
         std_project(
             r#"
@@ -938,10 +938,10 @@ fn test_memptr_equality() {
         ; init
         @fn0() -> never {
             %0 : u256 = 0
-            %1 : memptr = @malloc_uninit(%0)
-            %2 : memptr = %1
-            %3 : memptr = %1
-            %4 : memptr = %2
+            %1 : u256 = @malloc_uninit(%0)
+            %2 : u256 = %1
+            %3 : u256 = %1
+            %4 : u256 = %2
             %5 : bool = @evm_eq(%3, %4)
             if %5 {
                 %6 : never = @evm_invalid()
@@ -952,56 +952,6 @@ fn test_memptr_equality() {
             %9 : never = @evm_stop()
         }
         "#,
-    );
-}
-
-#[test]
-fn test_memptr_add_not_supported() {
-    assert_project_diagnostics(
-        TestProject::root(
-            r#"
-        init {
-            let a = @malloc_uninit(32);
-            let b = @malloc_uninit(32);
-            let c = a + b;
-            @evm_stop();
-        }
-        "#,
-        ),
-        &[r#"
-        error: operator not supported
-         --> main.plk:4:13
-          |
-        4 |     let c = a + b;
-          |             ^^^^^ operator '+' is not supported for type `memptr`
-          |
-          = help: only wrapping operators `+%` and `-%` are supported for `memptr`
-        "#],
-    );
-}
-
-#[test]
-fn test_memptr_sub_not_supported() {
-    assert_project_diagnostics(
-        TestProject::root(
-            r#"
-        init {
-            let a = @malloc_uninit(32);
-            let b = @malloc_uninit(32);
-            let c = a - b;
-            @evm_stop();
-        }
-        "#,
-        ),
-        &[r#"
-        error: operator not supported
-         --> main.plk:4:13
-          |
-        4 |     let c = a - b;
-          |             ^^^^^ operator '-' is not supported for type `memptr`
-          |
-          = help: only wrapping operators `+%` and `-%` are supported for `memptr`
-        "#],
     );
 }
 
@@ -1037,20 +987,20 @@ fn test_operator_precedence() {
 
         @fn2() -> never {
             %0 : u256 = 64
-            %1 : memptr = @malloc_uninit(%0)
-            %2 : memptr = %1
+            %1 : u256 = @malloc_uninit(%0)
+            %2 : u256 = %1
             %3 : u256 = 0
-            %4 : memptr = @evm_add(%2, %3)
+            %4 : u256 = @evm_add(%2, %3)
             %5 : u256 = 0x4e487b71
             %6 : void = @mstore32(%4, %5)
-            %7 : memptr = %1
+            %7 : u256 = %1
             %8 : u256 = 32
-            %9 : memptr = @evm_add(%7, %8)
+            %9 : u256 = @evm_add(%7, %8)
             %10 : u256 = 17
             %11 : void = @mstore32(%9, %10)
-            %12 : memptr = %1
+            %12 : u256 = %1
             %13 : u256 = 28
-            %14 : memptr = @evm_add(%12, %13)
+            %14 : u256 = @evm_add(%12, %13)
             %15 : u256 = 36
             %16 : never = @evm_revert(%14, %15)
         }
@@ -1093,20 +1043,20 @@ fn test_operator_precedence() {
 
         @fn6() -> never {
             %0 : u256 = 64
-            %1 : memptr = @malloc_uninit(%0)
-            %2 : memptr = %1
+            %1 : u256 = @malloc_uninit(%0)
+            %2 : u256 = %1
             %3 : u256 = 0
-            %4 : memptr = @evm_add(%2, %3)
+            %4 : u256 = @evm_add(%2, %3)
             %5 : u256 = 0x4e487b71
             %6 : void = @mstore32(%4, %5)
-            %7 : memptr = %1
+            %7 : u256 = %1
             %8 : u256 = 32
-            %9 : memptr = @evm_add(%7, %8)
+            %9 : u256 = @evm_add(%7, %8)
             %10 : u256 = 18
             %11 : void = @mstore32(%9, %10)
-            %12 : memptr = %1
+            %12 : u256 = %1
             %13 : u256 = 28
-            %14 : memptr = @evm_add(%12, %13)
+            %14 : u256 = @evm_add(%12, %13)
             %15 : u256 = 36
             %16 : never = @evm_revert(%14, %15)
         }
