@@ -1118,15 +1118,6 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_uninit_memptr_in_comptime(&mut self, loc: SrcLoc) {
-        Diagnostic::error(format!(
-            "cannot use {} on memptr type at comptime",
-            builtin_names::UNINIT
-        ))
-        .primary(loc.source, loc.span, "memptr requires runtime allocation")
-        .emit(self);
-    }
-
     pub fn emit_operator_not_supported(
         &mut self,
         values: &ValueInterner,
@@ -1143,21 +1134,6 @@ impl DiagCtx<'_> {
                     self.types.format(self.session, values, ty),
                 ),
             )
-            .emit(self);
-    }
-
-    pub fn emit_operator_not_supported_for_memptr(
-        &mut self,
-        op: impl std::fmt::Display,
-        expr: SrcLoc,
-    ) {
-        Diagnostic::error("operator not supported")
-            .primary(
-                expr.source,
-                expr.span,
-                format!("operator '{op}' is not supported for type `memptr`"),
-            )
-            .help("only wrapping operators `+%` and `-%` are supported for `memptr`")
             .emit(self);
     }
 

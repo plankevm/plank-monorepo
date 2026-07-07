@@ -598,14 +598,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
-        if flags.contains(TypeFlags::RUNTIME_ONLY) {
-            if self.is_comptime() {
-                self.diag_ctx.emit_uninit_memptr_in_comptime(self.loc(expr_span));
-                return Err(Poisoned);
-            }
-            return Ok(Ok(self.emit_uninit_runtime(ty)));
-        }
-
         Ok(Ok(EvalValue::Comptime(build_uninit_comptime(
             ty,
             self.eval.types,
@@ -684,74 +676,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.diag_ctx.record_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
         Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
-    }
-
-    /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).
-    fn emit_uninit_runtime(&mut self, ty: TypeId) -> EvalValue {
-        let local = self.emit_uninit_runtime_local(ty);
-        EvalValue::Runtime { expr: mir::Expr::LocalRef(local), result_type: ty }
-    }
-
-    fn emit_uninit_runtime_local(&mut self, ty: TypeId) -> mir::LocalId {
-        match self.eval.types.lookup(ty) {
-            Type::Primitive(PrimitiveType::U256) => {
-                let target = self.mir_types.push(TypeId::U256);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::Const(ValueId::ZERO_NUM),
-                });
-                target
-            }
-            Type::Primitive(PrimitiveType::Bool) => {
-                let target = self.mir_types.push(TypeId::BOOL);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::FALSE) });
-                target
-            }
-            Type::Primitive(PrimitiveType::MemoryPointer) => {
-                let size_local = self.mir_types.push(TypeId::U256);
-                self.emit(mir::Instruction::Set {
-                    target: size_local,
-                    expr: mir::Expr::Const(ValueId::ZERO_NUM),
-                });
-                let args = self.eval.mir_args.push_copy_slice(&[size_local]);
-                let target = self.mir_types.push(TypeId::MEMORY_POINTER);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::RuntimeBuiltinCall {
-                        builtin: RuntimeBuiltin::DynamicAllocAnyBytes,
-                        args,
-                    },
-                });
-                target
-            }
-            Type::Primitive(
-                PrimitiveType::Type
-                | PrimitiveType::Function
-                | PrimitiveType::CBytes
-                | PrimitiveType::Never,
-            ) => {
-                unreachable!("comptime-only/never types do not produce runtime locals")
-            }
-            Type::Compound(compound) => {
-                let fields: Vec<_> = match compound {
-                    Compound::Struct(r#struct) => r#struct
-                        .fields
-                        .iter()
-                        .map(|field| self.emit_uninit_runtime_local(field.ty))
-                        .collect(),
-                    Compound::Tuple(tuple) => {
-                        tuple.fields.iter().map(|&ty| self.emit_uninit_runtime_local(ty)).collect()
-                    }
-                };
-                let fields = self.eval.mir_args.push_copy_slice(&fields);
-                let target = self.mir_types.push(ty);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::CompoundLit { ty, fields },
-                });
-                target
-            }
-        }
     }
 
     fn expect_field_index_arg(
@@ -1051,10 +975,8 @@ fn build_uninit_comptime(
         Type::Primitive(PrimitiveType::Bool) => ValueId::FALSE,
         Type::Primitive(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
         Type::Primitive(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
-        Type::Primitive(
-            PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never,
-        ) => {
-            unreachable!("memptr/function/never cannot appear in comptime uninit compound")
+        Type::Primitive(PrimitiveType::Function | PrimitiveType::Never) => {
+            unreachable!("function/never cannot appear in comptime uninit compound")
         }
         Type::Compound(compound) => {
             let buf_offset = buf.len();

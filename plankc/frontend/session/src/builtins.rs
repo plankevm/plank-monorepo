@@ -172,7 +172,6 @@ define_builtins! {
         VOID = "void" => Void;
         U256 = "u256" => U256;
         BOOL = "bool" => Bool;
-        MEMORY_POINTER = "memptr" => MemoryPointer;
         TYPE = "type" => Type;
         FUNCTION = "function" => Function;
         CBYTES = "cbytes" => CBytes;

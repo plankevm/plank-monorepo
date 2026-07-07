@@ -146,7 +146,6 @@ impl std::fmt::Debug for TypeId {
             TypeId::VOID => write!(f, "TypeId::VOID"),
             TypeId::U256 => write!(f, "TypeId::U256"),
             TypeId::BOOL => write!(f, "TypeId::BOOL"),
-            TypeId::MEMORY_POINTER => write!(f, "TypeId::MEMORY_POINTER"),
             TypeId::TYPE => write!(f, "TypeId::TYPE"),
             TypeId::FUNCTION => write!(f, "TypeId::FUNCTION"),
             TypeId::CBYTES => write!(f, "TypeId::CBYTES"),
@@ -199,7 +198,6 @@ impl TypeId {
     pub const VOID: TypeId = TypeId::from_tuple(TupleRef(CompoundRef::new_tuple(0)));
     pub const U256: TypeId = TypeId::from_primitive(PrimitiveType::U256);
     pub const BOOL: TypeId = TypeId::from_primitive(PrimitiveType::Bool);
-    pub const MEMORY_POINTER: TypeId = TypeId::from_primitive(PrimitiveType::MemoryPointer);
     pub const TYPE: TypeId = TypeId::from_primitive(PrimitiveType::Type);
     pub const FUNCTION: TypeId = TypeId::from_primitive(PrimitiveType::Function);
     pub const CBYTES: TypeId = TypeId::from_primitive(PrimitiveType::CBytes);
@@ -258,7 +256,6 @@ impl TypeId {
         match self {
             TypeId::U256 => Ok(PrimitiveType::U256),
             TypeId::BOOL => Ok(PrimitiveType::Bool),
-            TypeId::MEMORY_POINTER => Ok(PrimitiveType::MemoryPointer),
             TypeId::TYPE => Ok(PrimitiveType::Type),
             TypeId::FUNCTION => Ok(PrimitiveType::Function),
             TypeId::CBYTES => Ok(PrimitiveType::CBytes),
