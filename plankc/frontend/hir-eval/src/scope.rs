@@ -74,7 +74,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub source: SourceId,
     pub ctx: EvalContext,
     pub comptime: bool,
-    pub condition_source: Option<SourceSpan>,
+    pub if_condition_source: Option<SourceSpan>,
     pub runtime_control_depth: u32,
     pub comptime_quota: ComptimeQuota,
     pub eval_branch_quota_start_loc: SrcLoc,
@@ -101,7 +101,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
-            condition_source: None,
+            if_condition_source: None,
             runtime_control_depth: 0,
             comptime_quota,
             eval_branch_quota_start_loc,
@@ -344,7 +344,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
-        let Some(condition_span) = self.condition_source else {
+        let Some(condition_span) = self.if_condition_source else {
             return self.eval_set(local, None, expr);
         };
         let value = self.eval_expr(expr)?;
@@ -568,20 +568,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn with_runtime_controlled<R>(
         &mut self,
-        condition_source: Option<SourceSpan>,
+        if_condition_source: Option<SourceSpan>,
         inner: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        if let Some(condition_source) = condition_source {
-            let prev_source = self.condition_source.replace(condition_source);
-            self.runtime_control_depth =
-                self.runtime_control_depth.checked_add(1).expect("runtime control depth overflow");
-            let result = inner(self);
-            self.runtime_control_depth -= 1;
-            self.condition_source = prev_source;
-            result
-        } else {
-            inner(self)
-        }
+        let prev_source = std::mem::replace(&mut self.if_condition_source, if_condition_source);
+        self.runtime_control_depth =
+            self.runtime_control_depth.checked_add(1).expect("runtime control depth overflow");
+        let result = inner(self);
+        self.runtime_control_depth -= 1;
+        self.if_condition_source = prev_source;
+        result
     }
 
     fn eval_if(
@@ -632,12 +628,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
                 }
             }
-            Ok(LocalState::Comptime(ValueId::TRUE)) => {
-                self.with_runtime_controlled(None, |this| this.eval_block_inline(then))
-            }
-            Ok(LocalState::Comptime(ValueId::FALSE)) => {
-                self.with_runtime_controlled(None, |this| this.eval_block_inline(r#else))
-            }
+            Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
+            Ok(LocalState::Comptime(ValueId::FALSE)) => self.eval_block_inline(r#else),
             Ok(state) => {
                 let state_ty = self.state_type(state);
                 self.diag_ctx.emit_type_mismatch_simple(
@@ -672,7 +664,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         body: hir::BlockId,
     ) -> Result<(), Diverge> {
         let (condition_block, mir_condition_local) = self.with_instructions(|this| {
-            this.with_runtime_controlled(|this| this.eval_block_inline(condition_block))?;
+            this.with_runtime_controlled(None, |this| this.eval_block_inline(condition_block))?;
             let binding = this.bindings[condition];
             let state = match binding.state {
                 Err(Poisoned) => return Err(Diverge::ControlFlowPoisoned),
@@ -706,7 +698,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
         let condition = mir_condition_local?;
-        let (body, body_res) = self.with_runtime_controlled(|this| this.eval_block_to_mir(body));
+        let (body, body_res) =
+            self.with_runtime_controlled(None, |this| this.eval_block_to_mir(body));
         match body_res {
             Err(err @ (Diverge::ControlFlowPoisoned | Diverge::ComptimeQuotaExhausted)) => {
                 return Err(err);

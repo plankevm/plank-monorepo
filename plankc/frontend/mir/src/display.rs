@@ -148,12 +148,12 @@ impl<'a> DisplayMir<'a> {
             }
             Instruction::While { condition_block, condition, body } => {
                 writeln!(f, "{pad}while {{")?;
-                writeln!(f, "{pad}  cond:")?;
+                writeln!(f, "{pad}    cond:")?;
                 self.fmt_block(f, fn_id, condition_block, indent + 2)?;
-                write!(f, "{pad}  test ")?;
+                write!(f, "{pad}    test ")?;
                 self.fmt_local(f, condition)?;
                 writeln!(f)?;
-                writeln!(f, "{pad}  body:")?;
+                writeln!(f, "{pad}    body:")?;
                 self.fmt_block(f, fn_id, body, indent + 2)?;
                 writeln!(f, "{pad}}}")
             }

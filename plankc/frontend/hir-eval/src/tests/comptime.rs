@@ -605,18 +605,14 @@ fn test_inline_while_in_runtime_while_flattens_comptime_if_over_mut_iterator() {
             %2 : u256 = 0
             %3 : bool = @evm_eq(%1, %2)
             while {
-              cond:
+                cond:
                     %4 : bool = %3
-              test %4
-              body:
+                test %4
+                body:
                     %5 : u256 = 10
-                    %6 : void = ()
-                    %7 : void = %6
-                    %8 : u256 = 20
-                    %6 : void = ()
-                    %9 : void = %6
+                    %6 : u256 = 20
             }
-            %10 : never = @evm_stop()
+            %7 : never = @evm_stop()
         }
         "#,
     );
@@ -1236,11 +1232,12 @@ fn test_comptime_if_inside_runtime_branch_ok() {
             %3 : bool = %2
             if %3 {
                 %4 : u256 = 1
+                %5 : u256 = %4
             } else {
-                %4 : u256 = 3
+                %5 : u256 = 3
             }
-            %5 : u256 = %4
-            %6 : never = @evm_stop()
+            %6 : u256 = %5
+            %7 : never = @evm_stop()
         }
         "#,
     );
@@ -1258,10 +1255,10 @@ fn test_comptime_if_comptime_only_inside_runtime_branch() {
         "#,
         &[r#"
         error: comptime-only value depends on runtime control flow
-         --> main.plk:3:21
+         --> main.plk:3:31
           |
         3 |     let T = if rt { if true { u256 } else { bool } } else { 1 };
-          |                --   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comptime-only value
+          |                --             ^^^^ comptime-only value
           |                |
           |                runtime condition here
           |
