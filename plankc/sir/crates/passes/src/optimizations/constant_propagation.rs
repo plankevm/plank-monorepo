@@ -285,8 +285,8 @@ impl SCCP {
         if !reachable.contains(to) {
             reachable.add(to);
             self.cfg_worklist.push(to);
-            self.flow_outputs_to(program, from, to);
         }
+        self.flow_outputs_to(program, from, to);
     }
 
     fn flow_outputs_to(&mut self, program: &EthIRProgram, from: BasicBlockId, to: BasicBlockId) {
@@ -664,6 +664,67 @@ mod tests {
 
         assert_eq!(sccp.lattice[LocalId::new(6)], LatticeValue::Overdefined);
         assert_eq!(sccp.lattice[LocalId::new(8)], LatticeValue::Overdefined);
+    }
+
+    #[test]
+    fn test_late_reachable_predecessor_flows_outputs_to_merge() {
+        let input = r#"
+            fn init:
+                entry {
+                    stop
+                }
+            fn test:
+                entry arg {
+                    cond = iszero arg
+                    => cond ? @is_zero : @non_zero
+                }
+                non_zero -> arg {
+                    => @merge
+                }
+                is_zero -> replacement {
+                    replacement = const 0
+                    => @merge
+                }
+                merge value {
+                    result = div value value
+                    stop
+                }
+        "#;
+
+        let (actual, _sccp) = run_const_prop(input);
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    stop
+                }
+
+                @1 $0 {
+                    $1 = iszero $0
+                    => $1 ? @3 : @2
+                }
+
+                @2 -> $0 {
+                    => @4
+                }
+
+                @3 -> $2 {
+                    $2 = const 0x0
+                    => @4
+                }
+
+                @4 $3 {
+                    $4 = div $3 $3
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
