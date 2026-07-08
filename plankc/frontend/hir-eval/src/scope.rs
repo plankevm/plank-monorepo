@@ -559,8 +559,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                 }
             }
-            InstructionKind::If { result, condition, then_block, else_block } => {
-                self.eval_if(result, condition, then_block, else_block)?
+            InstructionKind::If { outer_result, condition, then_block, else_block } => {
+                self.eval_if(outer_result, condition, then_block, else_block)?
             }
             InstructionKind::While { inline, condition_block, condition, body } => {
                 if inline {
@@ -593,12 +593,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn eval_if(
         &mut self,
-        result: hir::LocalId,
+        result: Option<hir::LocalId>,
         condition: hir::LocalId,
         then: hir::BlockId,
         r#else: hir::BlockId,
     ) -> Result<(), Diverge> {
-        self.bindings.remove(result);
+        if let Some(result) = result {
+            self.bindings.remove(result);
+        }
         let binding = self.bindings[condition];
         match binding.state {
             Ok(LocalState::Runtime(mir_local))

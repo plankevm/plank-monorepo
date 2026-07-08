@@ -619,6 +619,125 @@ fn test_inline_while_in_runtime_while_flattens_comptime_if_over_mut_iterator() {
 }
 
 #[test]
+fn test_inline_while_resets_runtime_if_result_between_iterations() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_calldataload(0) == 0;
+            comptime let mut i = 0;
+            inline while i < 2 {
+                let mut x = if cond {
+                    if i == 0 { 20 } else { true }
+                } else {
+                    if i == 0 { 10 } else { false }
+                };
+                i = i +% 1;
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = 0
+            %3 : bool = @evm_eq(%1, %2)
+            %4 : bool = %3
+            if %4 {
+                %5 : u256 = 20
+                %6 : u256 = %5
+            } else {
+                %7 : u256 = 10
+                %6 : u256 = %7
+            }
+            %8 : u256 = %6
+            %9 : bool = %3
+            if %9 {
+                %10 : bool = true
+                %11 : bool = %10
+            } else {
+                %12 : bool = false
+                %11 : bool = %12
+            }
+            %13 : bool = %11
+            %14 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_inline_while_resets_else_if_result_between_iterations() {
+    assert_lowers_to(
+        r#"
+        init {
+            let a = @evm_calldataload(0) == 0;
+            let b = @evm_calldataload(32) == 0;
+            comptime let mut i = 0;
+            inline while i < 2 {
+                let mut x = if a {
+                    if i == 0 { 100 } else { true }
+                } else if b {
+                    if i == 0 { 200 } else { false }
+                } else {
+                    if i == 0 { 300 } else { false }
+                };
+                i = i +% 1;
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = 0
+            %3 : bool = @evm_eq(%1, %2)
+            %4 : u256 = 32
+            %5 : u256 = @evm_calldataload(%4)
+            %6 : u256 = 0
+            %7 : bool = @evm_eq(%5, %6)
+            %8 : bool = %3
+            if %8 {
+                %9 : u256 = 100
+                %10 : u256 = %9
+            } else {
+                %11 : bool = %7
+                if %11 {
+                    %12 : u256 = 200
+                    %10 : u256 = %12
+                } else {
+                    %13 : u256 = 300
+                    %10 : u256 = %13
+                }
+            }
+            %14 : u256 = %10
+            %15 : bool = %3
+            if %15 {
+                %16 : bool = true
+                %17 : bool = %16
+            } else {
+                %18 : bool = %7
+                if %18 {
+                    %19 : bool = false
+                    %17 : bool = %19
+                } else {
+                    %20 : bool = false
+                    %17 : bool = %20
+                }
+            }
+            %21 : bool = %17
+            %22 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_inline_while_rejects_runtime_condition() {
     assert_diagnostics(
         r#"

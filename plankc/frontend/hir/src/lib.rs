@@ -110,7 +110,7 @@ pub enum InstructionKind {
     Eval(Expr),
     Return(Expr),
     If {
-        result: LocalId,
+        outer_result: Option<LocalId>,
         condition: LocalId,
         then_block: BlockId,
         else_block: BlockId,

@@ -463,7 +463,12 @@ impl BlockLowerer<'_> {
                     if_expr.else_if_branches(),
                     if_expr.else_body().ok_or_else(|| if_expr.body().node().span()),
                 );
-                self.emit(InstructionKind::If { result, condition, then_block, else_block });
+                self.emit(InstructionKind::If {
+                    outer_result: Some(result),
+                    condition,
+                    then_block,
+                    else_block,
+                });
                 ExprKind::LocalRef(result)
             }
             ast::Expr::ComptimeBlock(block) => {
@@ -678,7 +683,12 @@ impl BlockLowerer<'_> {
                 let then_block = this.lower_branch_body(first.body(), result);
                 let else_body = else_body.map_err(|_| first.body().node().span());
                 let else_block = this.lower_else_chain(result, branches, else_body);
-                this.emit(InstructionKind::If { result, condition, then_block, else_block });
+                this.emit(InstructionKind::If {
+                    outer_result: None,
+                    condition,
+                    then_block,
+                    else_block,
+                });
             });
         }
         match else_body {
@@ -724,7 +734,7 @@ impl BlockLowerer<'_> {
             ShortCircuitOp::And => (eval_op_rhs_block, short_circuit_block),
         };
         let r#if = InstructionKind::If {
-            result: op_result_local,
+            outer_result: Some(op_result_local),
             condition: op_lhs_as_condition,
             then_block,
             else_block,
