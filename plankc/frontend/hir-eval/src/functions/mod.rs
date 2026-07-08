@@ -107,7 +107,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: param.span,
                             origin: DefOrigin::Local(param.span),
-                            requires_comptime_assign: false,
+                            comptime_assign_depth: None,
                         },
                     );
                     continue;
@@ -143,7 +143,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     state,
                     use_span: param.span,
                     origin: DefOrigin::Local(param.span),
-                    requires_comptime_assign: false,
+                    comptime_assign_depth: None,
                 },
             );
         }
@@ -766,7 +766,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             state: Err(Poisoned),
                             use_span: arg_binding.use_span,
                             origin: DefOrigin::Local(arg_binding.use_span),
-                            requires_comptime_assign: false,
+                            comptime_assign_depth: None,
                         },
                     );
                     return;

@@ -758,7 +758,44 @@ fn test_comptime_let_mut_assignment_in_runtime_if() {
 }
 
 #[test]
-fn test_comptime_let_mut_assignment_in_comptime_if_nested_in_runtime_if() {
+fn test_comptime_let_mut_declared_in_runtime_if_allows_nested_comptime_if_assignment() {
+    assert_lowers_to(
+        r#"
+        init {
+            if @evm_gt(@evm_callvalue(), 0) {
+                comptime let mut x = 5;
+                if true {
+                    x = 6;
+                }
+                let mut y: u256 = x;
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = @evm_callvalue()
+            %1 : u256 = 0
+            %2 : bool = @evm_gt(%0, %1)
+            if %2 {
+                %3 : void = ()
+                %4 : void = %3
+                %5 : u256 = 6
+                %6 : void = ()
+            } else {
+                %6 : void = ()
+            }
+            %7 : void = %6
+            %8 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_let_mut_assignment_tracks_runtime_control_depth() {
     assert_diagnostics(
         r#"
         init {
@@ -769,10 +806,17 @@ fn test_comptime_let_mut_assignment_in_comptime_if_nested_in_runtime_if() {
                     x = 2;
                 }
             }
+            if cond {
+                comptime let mut y = 1;
+                if cond {
+                    y = 2;
+                }
+            }
             @evm_stop();
         }
         "#,
-        &[r#"
+        &[
+            r#"
         error: assignment to comptime mutable variable in runtime-controlled context
          --> main.plk:6:17
           |
@@ -781,7 +825,18 @@ fn test_comptime_let_mut_assignment_in_comptime_if_nested_in_runtime_if() {
         ...
         6 |             x = 2;
           |                 ^ assignment in runtime-controlled context
-        "#],
+        "#,
+            r#"
+        error: assignment to comptime mutable variable in runtime-controlled context
+          --> main.plk:12:17
+           |
+        10 |         comptime let mut y = 1;
+           |                              - comptime mutable variable initialized here
+        11 |         if cond {
+        12 |             y = 2;
+           |                 ^ assignment in runtime-controlled context
+        "#,
+        ],
     );
 }
 

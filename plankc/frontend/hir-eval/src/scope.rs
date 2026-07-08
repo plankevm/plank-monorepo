@@ -9,13 +9,14 @@ use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
+use std::num::NonZeroU32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
     pub use_span: SourceSpan,
     pub origin: DefOrigin,
-    pub requires_comptime_assign: bool,
+    pub comptime_assign_depth: Option<NonZeroU32>,
 }
 
 impl Local {
@@ -24,7 +25,7 @@ impl Local {
             state: Ok(LocalState::Comptime(value)),
             use_span,
             origin,
-            requires_comptime_assign: false,
+            comptime_assign_depth: None,
         }
     }
 
@@ -73,7 +74,8 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub source: SourceId,
     pub ctx: EvalContext,
     pub comptime: bool,
-    pub runtime_controlled: Option<SourceSpan>,
+    pub condition_source: Option<SourceSpan>,
+    pub runtime_control_depth: u32,
     pub comptime_quota: ComptimeQuota,
     pub eval_branch_quota_start_loc: SrcLoc,
     pub max_eval_branch_quota_seen: u32,
@@ -99,7 +101,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source,
             ctx,
             comptime,
-            runtime_controlled: None,
+            condition_source: None,
+            runtime_control_depth: 0,
             comptime_quota,
             eval_branch_quota_start_loc,
             max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
@@ -131,6 +134,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let res = inner(self);
         self.comptime = parent_comptime;
         res
+    }
+
+    fn comptime_assign_depth(&self) -> NonZeroU32 {
+        NonZeroU32::new(
+            self.runtime_control_depth.checked_add(1).expect("runtime control depth overflow"),
+        )
+        .expect("runtime control depth tag is non-zero")
     }
 
     pub fn emit(&mut self, instr: mir::Instruction) {
@@ -287,7 +297,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 state,
                 use_span: expr.span,
                 origin: self.expr_origin(expr),
-                requires_comptime_assign: false,
+                comptime_assign_depth: None,
             },
         );
         Ok(())
@@ -298,7 +308,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         local: hir::LocalId,
         r#type: Option<hir::LocalId>,
         expr: hir::Expr,
-        requires_comptime_assign: bool,
+        comptime_assign_depth: Option<NonZeroU32>,
     ) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let value = value.and_then(|value| {
@@ -329,14 +339,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 state: new_state,
                 use_span: expr.span,
                 origin: self.expr_origin(expr),
-                requires_comptime_assign,
+                comptime_assign_depth,
             },
         );
         Ok(())
     }
 
     fn eval_branch_set(&mut self, local: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
-        let Some(condition_span) = self.runtime_controlled else {
+        let Some(condition_span) = self.condition_source else {
             return self.eval_set(local, None, expr);
         };
         let value = self.eval_expr(expr)?;
@@ -350,7 +360,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     state,
                     use_span: expr.span,
                     origin: self.expr_origin(expr),
-                    requires_comptime_assign: false,
+                    comptime_assign_depth: None,
                 },
             );
             return Ok(());
@@ -386,7 +396,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         state,
                         use_span: expr.span,
                         origin: self.expr_origin(expr),
-                        requires_comptime_assign: false,
+                        comptime_assign_depth: None,
                     },
                 );
             }
@@ -418,7 +428,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     state: new_state,
                     use_span: expr.span,
                     origin: self.expr_origin(expr),
-                    requires_comptime_assign: binding.requires_comptime_assign,
+                    comptime_assign_depth: binding.comptime_assign_depth,
                 };
             }
         }
@@ -510,9 +520,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             InstructionKind::SetMut { comptime, local, r#type, expr } => {
                 if comptime {
-                    self.with_comptime(|this| this.eval_set_mut(local, r#type, expr, comptime))?
+                    self.with_comptime(|this| {
+                        this.eval_set_mut(local, r#type, expr, Some(this.comptime_assign_depth()))
+                    })?
                 } else {
-                    self.eval_set_mut(local, r#type, expr, comptime)?
+                    self.eval_set_mut(local, r#type, expr, None)?
                 }
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
@@ -521,9 +533,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             InstructionKind::Assign { target, expr } => {
                 let binding = self.bindings[target];
-                if !binding.requires_comptime_assign {
+                if binding.comptime_assign_depth.is_none() {
                     self.eval_assign(target, expr)?
-                } else if self.runtime_controlled {
+                } else if binding.comptime_assign_depth != Some(self.comptime_assign_depth()) {
                     let rhs_res = self.with_comptime(|this| this.eval_expr(expr));
                     let binding = self.bindings[target];
                     self.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
@@ -573,14 +585,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn with_runtime_controlled<R>(
         &mut self,
-        runtime_controlled: Option<SourceSpan>,
+        condition_source: Option<SourceSpan>,
         inner: impl FnOnce(&mut Self) -> R,
     ) -> R {
-        let prev_runtime_controlled = self.runtime_controlled;
-        self.runtime_controlled = prev_runtime_controlled || runtime_controlled;
-        let result = inner(self);
-        self.runtime_controlled = prev_runtime_controlled;
-        result
+        if let Some(condition_source) = condition_source {
+            let prev_source = self.condition_source.replace(condition_source);
+            self.runtime_control_depth =
+                self.runtime_control_depth.checked_add(1).expect("runtime control depth overflow");
+            let result = inner(self);
+            self.runtime_control_depth -= 1;
+            self.condition_source = prev_source;
+            result
+        } else {
+            inner(self)
+        }
     }
 
     fn eval_if(
@@ -599,10 +617,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let (then, then_res) = self
-                    .with_runtime_controlled(Some(binding.use_span), |this| this.eval_block_to_mir(then));
-                let (r#else, else_res) = self.with_runtime_controlled(Some(binding.use_span), |this| {
-                    this.eval_block_to_mir(r#else)
-                });
+                    .with_runtime_controlled(Some(binding.use_span), |this| {
+                        this.eval_block_to_mir(then)
+                    });
+                let (r#else, else_res) = self
+                    .with_runtime_controlled(Some(binding.use_span), |this| {
+                        this.eval_block_to_mir(r#else)
+                    });
                 self.emit(mir::Instruction::If {
                     condition: mir_local,
                     then_block: then,
