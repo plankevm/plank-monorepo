@@ -328,7 +328,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         local: hir::LocalId,
         r#type: Option<hir::LocalId>,
         expr: hir::Expr,
-        comptime_assign_depth: Option<NonZeroU32>,
+        comptime: bool,
     ) -> Result<(), Diverge> {
         let value = self.eval_expr(expr)?;
         let value = value.and_then(|value| {
@@ -353,6 +353,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
 
+        let comptime_assign_depth = comptime.then(|| self.comptime_assign_depth());
         self.bind_with_depth(local, new_state, expr, comptime_assign_depth);
         Ok(())
     }
@@ -518,13 +519,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         match instr.kind {
             InstructionKind::Set { local, r#type, expr } => self.eval_set(local, r#type, expr)?,
             InstructionKind::SetMut { comptime, local, r#type, expr } => {
-                if comptime {
-                    self.with_comptime(|this| {
-                        this.eval_set_mut(local, r#type, expr, Some(this.comptime_assign_depth()))
-                    })?
-                } else {
-                    self.eval_set_mut(local, r#type, expr, None)?
-                }
+                self.eval_set_mut(local, r#type, expr, comptime)?
             }
             InstructionKind::BranchSet { local, expr } => self.eval_branch_set(local, expr)?,
             InstructionKind::ComptimeBlock { body, reason } => self

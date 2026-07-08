@@ -71,14 +71,14 @@ fn test_basic_init_builtin_calls() {
         ==== Init ====
         %0 = 0
         %1 = @evm_calldataload(%0)
-        %2 = 32
-        %4 = type:u256
-        %3 : %4 = @evm_calldataload(%2)
+        %2 = type:u256
+        %3 = 32
+        %4 : %2 = @evm_calldataload(%3)
         %5 = 32
         %6 = @malloc_uninit(%5)
         %7 = %6
         %8 = %1
-        %9 = %3
+        %9 = %4
         %10 = @evm_add(%8, %9)
         eval @mstore32(%7, %10)
         %11 = %6
@@ -410,10 +410,10 @@ fn test_tuple_type_and_literal() {
         }
 
         ==== Init ====
-        %0 = 2
-        %1 = true
-        %3 = $0
-        %2 : %3 = tuple_value (%0, %1)
+        %0 = $0
+        %1 = 2
+        %2 = true
+        %3 : %0 = tuple_value (%1, %2)
         "#,
     );
 }

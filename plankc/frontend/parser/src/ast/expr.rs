@@ -499,6 +499,7 @@ pub struct LetStmt<'cst> {
     pub name_span: TokenSpan,
     pub comptime: bool,
     pub mutable: bool,
+    pub span: TokenSpan,
     type_view: Option<NodeView<'cst>>,
     value_view: NodeView<'cst>,
 }
@@ -515,7 +516,15 @@ impl<'cst> LetStmt<'cst> {
         let name = name_view.ident().ok_or(view.span())?;
         let type_view = if typed { Some(children.next().ok_or(view.span())?) } else { None };
         let value_view = children.next().ok_or(view.span())?;
-        Ok(Some(Self { name, name_span, comptime, mutable, type_view, value_view }))
+        Ok(Some(Self {
+            span: view.span(),
+            name,
+            name_span,
+            comptime,
+            mutable,
+            type_view,
+            value_view,
+        }))
     }
 
     pub fn type_expr(&self) -> Option<Expr<'cst>> {
