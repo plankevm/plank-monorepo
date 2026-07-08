@@ -1,96 +1,140 @@
 use crate::{
-    greedy_intra_op_scheduler::state::{Candidate, IntraOp, StateKey, TargetCtx},
-    op_graph::{OpGraph, OpNodeId, OpSet},
+    op_graph::{OpGraph, OpNodeId, OpSet, ValueNodeId},
     stack::{ScheduleConfig, StackOps, TrackedStack},
 };
-use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::LoopLimit;
 
-mod state;
+mod permute;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
-    result_stack: &mut TrackedStack<Sink>,
+    stack: &mut TrackedStack<Sink>,
     graph: &OpGraph,
     op_id: OpNodeId,
     complete: OpSet<'_>,
 ) {
     let op = graph.get_op(op_id);
 
-    let mut unique_last_uses = Vec::with_capacity(op.inputs_fifo.len() / 2);
+    let mut unique_last_uses_on_stack = Vec::with_capacity(op.inputs_fifo.len() / 2);
     for &value in op.inputs_fifo {
-        if graph.is_last_use(complete, value) && !unique_last_uses.contains(&value) {
-            unique_last_uses.push(value);
-        }
-    }
-    let working_window_start_size = unique_last_uses.len();
-    let target_depth_delta = op.inputs_fifo.len() - working_window_start_size;
-    let mut todo_count = target_depth_delta;
-    for (current, target) in result_stack.fifo().iter().zip(&op.inputs_fifo[target_depth_delta..]) {
-        if current != target {
-            todo_count += 1;
-            if !op.inputs_fifo.contains(current) {
-                todo_count += 1;
-            }
+        if graph.is_last_use(complete, value)
+            && !unique_last_uses_on_stack.contains(&value)
+            && stack.count(value) > 0
+        {
+            unique_last_uses_on_stack.push(value);
         }
     }
 
-    let mut state_to_lowest_cost = HashMap::<StateKey, u32>::new();
-    let mut current = vec![Candidate {
-        stack: result_stack.fifo().into(),
-        spilled: result_stack.underlying_spilled().to_vec(),
-        cost_so_far: 0,
-        todo: todo_count.try_into().expect("overflow u32"),
-        estimated_remaining_cost: 0,
-        ops: Vec::new(),
-    }];
-    let mut next = vec![];
+    let head = unique_last_uses_on_stack.len().try_into().expect("overflow");
 
-    let target = TargetCtx { config, target: op.inputs_fifo, last_uses: &unique_last_uses };
+    let mut preparer = GreedyOperandPreparer::new(head, config, stack, op.inputs_fifo);
 
     let mut limit = LoopLimit::max(100_000);
-    let solution = loop {
+    while !matches!(preparer.progress(), Status::Done) {
         limit.tick();
+    }
 
-        current.drain(..).for_each(|candidate| {
-            candidate.expand(target, |new| match state_to_lowest_cost.entry(new.key()) {
-                Entry::Occupied(mut existing) => {
-                    let existing = existing.get_mut();
-                    if *existing > new.cost_so_far {
-                        *existing = new.cost_so_far;
-                        next.push(new);
-                    }
-                }
-                Entry::Vacant(vacant) => {
-                    vacant.insert_entry(new.cost_so_far);
-                    next.push(new);
-                }
-            });
-        });
-        next.sort_by_key(|c| c.cost_so_far + c.estimated_remaining_cost);
-        next.truncate(beam_width.into());
+    stack.op(graph, op_id, false);
+}
 
-        let best = next.first().expect("beam empty");
-        if best.complete() {
-            break best;
+enum Status {
+    Done,
+    ProcessNext,
+}
+
+struct GreedyOperandPreparer<'a, Sink: FnMut(StackOps)> {
+    head: u16,
+    max_dup_depth: u8,
+    stack: &'a mut TrackedStack<Sink>,
+    target: &'a [ValueNodeId],
+}
+
+impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
+    fn progress(&mut self) -> Status {
+        if self.head == 0 {
+            self.trivial_push_only();
+            return Status::Done;
         }
 
-        std::mem::swap(&mut current, &mut next);
-    };
+        assert!(self.head <= self.stack.len());
 
-    for &op in &solution.ops {
-        match op {
-            IntraOp::Swap(depth) => result_stack.swap(depth),
-            IntraOp::Dup(depth) => result_stack.dup(depth),
-            IntraOp::SpillTop => {
-                result_stack.spill_top();
+        if usize::from(self.head) == self.target.len() {
+            if self.stack.fifo().iter().zip(self.target).all(|(a, b)| a == b) {
+                return Status::Done;
             }
-            IntraOp::Unspill(value) => result_stack.unspill(value),
+
+            self.permute_allow_correct();
+            return Status::ProcessNext;
+        }
+
+        let top = self.stack.fifo()[0];
+        let target_top = self.index_target_aligned(0);
+
+        if top != target_top && self.permute_never_undo_top() {
+            return Status::ProcessNext;
+        }
+        self.dup_strategy();
+
+        Status::ProcessNext
+    }
+
+    fn dup_strategy(&mut self) {
+        todo!()
+    }
+
+    fn permute_allow_correct(&mut self) {
+        todo!()
+    }
+
+    #[must_use]
+    fn permute_never_undo_top(&mut self) -> bool {
+        todo!()
+    }
+
+    fn trivial_push_only(&mut self) {
+        for &value in self.target.iter().rev() {
+            if self.try_push(value) {
+                continue;
+            }
+
+            todo!("spill")
         }
     }
 
-    result_stack.op(graph, op_id, false);
+    fn new(
+        head: u16,
+        config: ScheduleConfig,
+        stack: &'a mut TrackedStack<Sink>,
+        target: &'a [ValueNodeId],
+    ) -> Self {
+        Self { head, max_dup_depth: config.max_dup_depth, stack, target }
+    }
+
+    #[must_use]
+    fn try_push(&mut self, value: ValueNodeId) -> bool {
+        if let Some(pos) =
+            self.stack.find_first(value).filter(|&depth| depth <= self.max_dup_depth as u16)
+        {
+            self.stack.dup(pos as u8);
+            return true;
+        }
+
+        if let Some(alloc) = self.stack.get_spilled(value) {
+            self.stack.load(alloc);
+            return true;
+        }
+
+        false
+    }
+
+    fn index_target_aligned(&self, i: usize) -> ValueNodeId {
+        self.target[self.target_depth_delta() + i]
+    }
+
+    fn target_depth_delta(&self) -> usize {
+        self.target.len() - usize::from(self.head)
+    }
 }

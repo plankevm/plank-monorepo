@@ -73,13 +73,12 @@ fn assert_intra_op_schedule_exists(
         evm_stack.push(ValueNodeId::new(value));
     }
 
-    let next_alloc_id = StaticAllocId::new(start_spilled.len() as u32);
     let complete_backing = vec![0; graph.words_per_set() as usize];
     let complete = OpSet::new(&complete_backing, graph.total_ops());
     let mut ops = Vec::new();
 
     let mut stack = TrackedStack::new_from_parts(
-        next_alloc_id,
+        StaticAllocId::ZERO,
         |op| ops.push(op),
         evm_stack.fifo(),
         start_spilled.iter().map(|&v| ValueNodeId::new(v)).collect(),
@@ -127,7 +126,7 @@ const fn store(id: u32) -> StackOps {
     StackOps::Store(StaticAllocId::new(id))
 }
 
-const fn load(id: u32) -> StackOps {
+fn load(id: u32) -> StackOps {
     StackOps::Load(StaticAllocId::new(id))
 }
 
@@ -179,7 +178,7 @@ fn opts() -> AssertScheduleBuilder {
 }
 
 #[test]
-fn no_inputs() {
+fn no_inputs_do_nothing() {
     opts().spilled([3]).assert([1, 2], [], []);
 }
 
@@ -196,4 +195,9 @@ fn load_spilled_input() {
 #[test]
 fn last_use_in_place() {
     opts().last_uses([7]).assert([7], [7], []);
+}
+
+#[test]
+fn simple_swap() {
+    opts().last_uses([1, 2]).assert([1, 2], [2, 1], [Swap(1)]);
 }

@@ -1,4 +1,6 @@
-use crate::op_graph::{BitsetWord, OpGraph, OpNodeId, OpSet, OpSetMut, ValueNodeId};
+#![allow(unused)]
+
+use crate::op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId};
 use plank_core::{Idx, IndexVec, newtype_index};
 use sir_data::StaticAllocId;
 use std::num::NonZero;
