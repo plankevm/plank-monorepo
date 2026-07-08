@@ -66,10 +66,9 @@ fn test_no_else_if_as_expr() {
                 } else {
                     %14 : void = ()
                 }
-                %15 : void = %14
             }
-            %16 : void = %15
-            %17 : never = @evm_stop()
+            %15 : void = %14
+            %16 : never = @evm_stop()
         }
         "#,
     );
@@ -133,14 +132,13 @@ fn test_if_three_branches() {
                 %6 : u256 = %1
                 %7 : bool = @evm_iszero(%6)
                 if %7 {
-                    %8 : u256 = 333
+                    %5 : u256 = 333
                 } else {
-                    %8 : u256 = 0
+                    %5 : u256 = 0
                 }
-                %5 : u256 = %8
             }
-            %9 : u256 = %5
-            %10 : never = @evm_stop()
+            %8 : u256 = %5
+            %9 : never = @evm_stop()
         }
         "#,
     );

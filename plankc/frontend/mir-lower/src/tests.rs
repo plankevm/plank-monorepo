@@ -326,22 +326,21 @@ fn test_nested_if_assign() {
             }
 
             @3 {
-                $9 = const 0x1
+                $5 = const 0x1
                 => @5
             }
 
             @4 {
-                $9 = const 0x2
+                $5 = const 0x2
                 => @5
             }
 
             @5 {
-                $5 = copy $9
                 => @6
             }
 
             @6 {
-                $10 = copy $5
+                $9 = copy $5
                 stop
             }
         "#,

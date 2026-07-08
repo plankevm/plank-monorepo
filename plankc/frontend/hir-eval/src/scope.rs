@@ -82,7 +82,6 @@ pub(crate) struct Scope<'a, 'ctx> {
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
     pub mir_types: IndexVec<mir::LocalId, TypeId>,
-    if_branch_merges: Vec<Option<(hir::LocalId, Local)>>,
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
@@ -110,7 +109,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
-            if_branch_merges: Vec::new(),
         }
     }
 
@@ -351,11 +349,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         };
         let value = self.eval_expr(expr)?;
         if self.is_comptime() {
-            let (use_span, origin) = self.branch_result_source(expr);
             let state = value
                 .and_then(|value| self.expect_comptime_value(value, expr.span))
                 .map(LocalState::Comptime);
-            let _ = self.bindings.insert(local, Local::new(state, use_span, origin, None));
+            let _ = self
+                .bindings
+                .insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
             return Ok(());
         }
 
@@ -378,109 +377,48 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         });
         match existing {
             None => {
-                let (use_span, origin) = self.branch_result_source(expr);
                 let state = mir_expr.map(|(expr, ty)| {
                     let target = self.mir_types.push(ty);
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 });
-                self.bindings.insert(local, Local::new(state, use_span, origin, None));
+                self.bindings
+                    .insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
             }
             Some(binding) => {
-                self.bindings[local] = self.merge_runtime_branch_result(binding, mir_expr, expr);
+                let new_state = poison::zip(binding.state, mir_expr).and_then(
+                    |(prev_state, (mir_expr, ty))| {
+                        let LocalState::Runtime(target) = prev_state else {
+                            unreachable!(
+                                "invariant: runtime branch set overwriting comptime state"
+                            );
+                        };
+                        if let Err(existing_ty) = self.mir_types[target].unify(ty) {
+                            self.diag_ctx.emit_incompatible_branch_types(
+                                self.eval.values,
+                                existing_ty,
+                                self.origin_loc(binding.origin),
+                                ty,
+                                self.loc(expr.span),
+                            );
+                            return Err(Poisoned);
+                        }
+
+                        self.emit(mir::Instruction::Set { target, expr: mir_expr });
+
+                        Ok(LocalState::Runtime(target))
+                    },
+                );
+                self.bindings[local] = Local::new(
+                    new_state,
+                    expr.span,
+                    self.expr_origin(expr),
+                    binding.comptime_assign_depth,
+                );
             }
         }
 
         Ok(())
-    }
-
-    fn eval_branch_set_for_if_merge(
-        &mut self,
-        local: hir::LocalId,
-        expr: hir::Expr,
-    ) -> Result<(), Diverge> {
-        let value = self.eval_expr(expr)?;
-        if self.is_comptime() {
-            let (use_span, origin) = self.branch_result_source(expr);
-            let state = value
-                .and_then(|value| self.expect_comptime_value(value, expr.span))
-                .map(LocalState::Comptime);
-            let branch_merge =
-                self.if_branch_merges.last_mut().expect("active if branch merge missing");
-            assert!(branch_merge.is_none(), "comptime branch merge already set");
-            *branch_merge = Some((local, Local::new(state, use_span, origin, None)));
-            return Ok(());
-        }
-
-        let mir_expr = value.and_then(|value| self.value_to_runtime_expr(value, expr.span));
-        let branch_merge =
-            self.if_branch_merges.last_mut().expect("active if branch merge missing").take();
-        let binding = match branch_merge {
-            None => {
-                let (use_span, origin) = self.branch_result_source(expr);
-                let state = mir_expr.map(|(expr, ty)| {
-                    let target = self.mir_types.push(ty);
-                    self.emit(mir::Instruction::Set { target, expr });
-                    LocalState::Runtime(target)
-                });
-                Local::new(state, use_span, origin, None)
-            }
-            Some((prev_local, binding)) => {
-                assert_eq!(prev_local, local, "branch merge local changed while evaluating if");
-                self.merge_runtime_branch_result(binding, mir_expr, expr)
-            }
-        };
-        *self.if_branch_merges.last_mut().expect("active if branch merge missing") =
-            Some((local, binding));
-
-        Ok(())
-    }
-
-    fn branch_result_source(&self, expr: hir::Expr) -> (SourceSpan, DefOrigin) {
-        match expr.kind {
-            ExprKind::LocalRef(local) => {
-                let binding = self.bindings[local];
-                (binding.use_span, binding.origin)
-            }
-            _ => (expr.span, self.expr_origin(expr)),
-        }
-    }
-
-    fn merge_runtime_branch_result(
-        &mut self,
-        binding: Local,
-        mir_expr: MaybePoisoned<(mir::Expr, TypeId)>,
-        expr: hir::Expr,
-    ) -> Local {
-        let (current_use_span, current_origin) = self.branch_result_source(expr);
-        let mut merged_use_span = binding.use_span;
-        let mut merged_origin = binding.origin;
-        let new_state =
-            poison::zip(binding.state, mir_expr).and_then(|(prev_state, (mir_expr, ty))| {
-                let LocalState::Runtime(target) = prev_state else {
-                    unreachable!("invariant: runtime branch set overwriting comptime state");
-                };
-                let previous_ty = self.mir_types[target];
-                if let Err(existing_ty) = self.mir_types[target].unify(ty) {
-                    self.diag_ctx.emit_incompatible_branch_types(
-                        self.eval.values,
-                        existing_ty,
-                        self.origin_loc(binding.origin),
-                        ty,
-                        self.loc(current_use_span),
-                    );
-                    return Err(Poisoned);
-                }
-                if previous_ty == TypeId::NEVER {
-                    merged_use_span = current_use_span;
-                    merged_origin = current_origin;
-                }
-
-                self.emit(mir::Instruction::Set { target, expr: mir_expr });
-
-                Ok(LocalState::Runtime(target))
-            });
-        Local::new(new_state, merged_use_span, merged_origin, binding.comptime_assign_depth)
     }
 
     pub fn eval_block_to_mir(
@@ -652,51 +590,46 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         then: hir::BlockId,
         r#else: hir::BlockId,
     ) -> Result<(), Diverge> {
-        let merge_stack_depth = self.if_branch_merges.len();
-        self.if_branch_merges.push(None);
         let binding = self.bindings[condition];
-        let result = match binding.state {
+        match binding.state {
             Ok(LocalState::Runtime(mir_local))
                 if self.mir_types[mir_local].is_assignable_to(TypeId::BOOL) =>
             {
                 if self.is_comptime() {
                     self.diag_ctx.emit_runtime_eval_in_comptime(self.loc(binding.use_span));
-                    Err(Diverge::ControlFlowPoisoned)
-                } else {
-                    let (then, then_res) = self
-                        .with_runtime_controlled(Some(binding.use_span), |this| {
-                            this.eval_block_to_mir(then)
-                        });
-                    let (r#else, else_res) = self
-                        .with_runtime_controlled(Some(binding.use_span), |this| {
-                            this.eval_block_to_mir(r#else)
-                        });
-                    self.emit(mir::Instruction::If {
-                        condition: mir_local,
-                        then_block: then,
-                        else_block: r#else,
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+                let (then, then_res) = self
+                    .with_runtime_controlled(Some(binding.use_span), |this| {
+                        this.eval_block_to_mir(then)
                     });
-                    match (then_res, else_res) {
-                        // Control flow was poisoned in either branch so we have to assume
-                        // everything was poisoned and bubble up.
-                        // Furthermore if control flow was poisoned there is
-                        // no point retrying evaluation if one of the branches failed from
-                        // insufficient quota.
-                        (Err(Diverge::ControlFlowPoisoned), _)
-                        | (_, Err(Diverge::ControlFlowPoisoned)) => {
-                            Err(Diverge::ControlFlowPoisoned)
-                        }
-                        (Err(Diverge::ComptimeQuotaExhausted), _)
-                        | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
-                            Err(Diverge::ComptimeQuotaExhausted)
-                        }
-                        (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
-                            Err(Diverge::BlockEnd(None))
-                        }
-                        (Ok(()), Ok(()))
-                        | (Err(Diverge::BlockEnd(_)), Ok(()))
-                        | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
+                let (r#else, else_res) = self
+                    .with_runtime_controlled(Some(binding.use_span), |this| {
+                        this.eval_block_to_mir(r#else)
+                    });
+                self.emit(mir::Instruction::If {
+                    condition: mir_local,
+                    then_block: then,
+                    else_block: r#else,
+                });
+                match (then_res, else_res) {
+                    // Control flow was poisoned in either branch so we have to assume
+                    // everything was poisoned and bubble up.
+                    // Furthermore if control flow was poisoned there is
+                    // no point retrying evaluation if one of the branches failed from
+                    // insufficient quota.
+                    (Err(Diverge::ControlFlowPoisoned), _)
+                    | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
+                    (Err(Diverge::ComptimeQuotaExhausted), _)
+                    | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
+                        Err(Diverge::ComptimeQuotaExhausted)
                     }
+                    (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
+                        Err(Diverge::BlockEnd(None))
+                    }
+                    (Ok(()), Ok(()))
+                    | (Err(Diverge::BlockEnd(_)), Ok(()))
+                    | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
                 }
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => {
@@ -716,17 +649,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Diverge::ControlFlowPoisoned)
             }
             Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
-        };
-        let branch_merge = self.if_branch_merges.pop().expect("if branch merge stack underflow");
-        assert_eq!(
-            self.if_branch_merges.len(),
-            merge_stack_depth,
-            "if branch merge stack was not restored"
-        );
-        if let Some((local, binding)) = branch_merge {
-            self.bindings.insert(local, binding);
         }
-        result
     }
 
     fn eval_while(
