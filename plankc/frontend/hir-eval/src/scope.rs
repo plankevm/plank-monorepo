@@ -20,13 +20,8 @@ pub(crate) struct Local {
 }
 
 impl Local {
-    pub fn new(
-        state: MaybePoisoned<LocalState>,
-        use_span: SourceSpan,
-        origin: DefOrigin,
-        comptime_assign_depth: Option<NonZeroU32>,
-    ) -> Self {
-        Self { state, use_span, origin, comptime_assign_depth }
+    pub fn new(state: MaybePoisoned<LocalState>, use_span: SourceSpan, origin: DefOrigin) -> Self {
+        Self { state, use_span, origin, comptime_assign_depth: None }
     }
 
     pub fn poisoned(self) -> MaybePoisoned<(LocalState, SourceSpan, DefOrigin)> {
@@ -110,6 +105,28 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
         }
+    }
+
+    fn bind(&mut self, local: hir::LocalId, state: MaybePoisoned<LocalState>, expr: hir::Expr) {
+        self.bind_with_depth(local, state, expr, None);
+    }
+
+    fn bind_with_depth(
+        &mut self,
+        local: hir::LocalId,
+        state: MaybePoisoned<LocalState>,
+        expr: hir::Expr,
+        comptime_assign_depth: Option<NonZeroU32>,
+    ) {
+        self.bindings.insert(
+            local,
+            Local {
+                state,
+                use_span: expr.span,
+                origin: self.expr_origin(expr),
+                comptime_assign_depth,
+            },
+        );
     }
 
     pub fn eval_entry_point_body(&mut self, hir_block: hir::BlockId) -> mir::BlockId {
@@ -302,7 +319,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
             }
         });
-        self.bindings.insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
+        self.bind(local, state, expr);
         Ok(())
     }
 
@@ -336,10 +353,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         });
 
-        self.bindings.insert(
-            local,
-            Local::new(new_state, expr.span, self.expr_origin(expr), comptime_assign_depth),
-        );
+        self.bind_with_depth(local, new_state, expr, comptime_assign_depth);
         Ok(())
     }
 
@@ -352,9 +366,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             let state = value
                 .and_then(|value| self.expect_comptime_value(value, expr.span))
                 .map(LocalState::Comptime);
-            let _ = self
-                .bindings
-                .insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
+            self.bind(local, state, expr);
             return Ok(());
         }
 
@@ -382,8 +394,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.emit(mir::Instruction::Set { target, expr });
                     LocalState::Runtime(target)
                 });
-                self.bindings
-                    .insert(local, Local::new(state, expr.span, self.expr_origin(expr), None));
+                self.bind(local, state, expr);
             }
             Some(binding) => {
                 let new_state = poison::zip(binding.state, mir_expr).and_then(
@@ -409,12 +420,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Runtime(target))
                     },
                 );
-                self.bindings[local] = Local::new(
-                    new_state,
-                    expr.span,
-                    self.expr_origin(expr),
-                    binding.comptime_assign_depth,
-                );
+                self.bindings[local] = Local {
+                    state: new_state,
+                    use_span: expr.span,
+                    origin: self.expr_origin(expr),
+                    comptime_assign_depth: binding.comptime_assign_depth,
+                };
             }
         }
 
@@ -548,8 +559,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                 }
             }
-            InstructionKind::If { condition, then_block, else_block } => {
-                self.eval_if(condition, then_block, else_block)?
+            InstructionKind::If { result, condition, then_block, else_block } => {
+                self.eval_if(result, condition, then_block, else_block)?
             }
             InstructionKind::While { inline, condition_block, condition, body } => {
                 if inline {
@@ -582,10 +593,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn eval_if(
         &mut self,
+        result: hir::LocalId,
         condition: hir::LocalId,
         then: hir::BlockId,
         r#else: hir::BlockId,
     ) -> Result<(), Diverge> {
+        self.bindings.remove(result);
         let binding = self.bindings[condition];
         match binding.state {
             Ok(LocalState::Runtime(mir_local))

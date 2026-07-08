@@ -96,7 +96,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Ok(LocalState::Comptime(value)),
                     def.use_span,
                     DefOrigin::Local(def.use_span),
-                    None,
                 ),
             );
         }
@@ -108,7 +107,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Poisoned) => {
                     fn_scope.bindings.insert_no_prev(
                         param.value,
-                        Local::new(Err(Poisoned), param.span, DefOrigin::Local(param.span), None),
+                        Local::new(Err(Poisoned), param.span, DefOrigin::Local(param.span)),
                     );
                     continue;
                 }
@@ -139,7 +138,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
             fn_scope.bindings.insert_no_prev(
                 param.value,
-                Local::new(state, param.span, DefOrigin::Local(param.span), None),
+                Local::new(state, param.span, DefOrigin::Local(param.span)),
             );
         }
 
@@ -761,7 +760,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             Err(Poisoned),
                             arg_binding.use_span,
                             DefOrigin::Local(arg_binding.use_span),
-                            None,
                         ),
                     );
                     return;
@@ -778,7 +776,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         Ok(LocalState::Comptime(type_value)),
                         arg_binding.use_span,
                         DefOrigin::Local(arg_binding.use_span),
-                        None,
                     ),
                 );
             }

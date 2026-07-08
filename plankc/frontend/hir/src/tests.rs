@@ -1087,7 +1087,7 @@ fn test_and_desugaring() {
         %1 = @evm_calldataload(%0)
         %2 = @evm_iszero(%1)
         %4 = %2
-        if %4 {
+        %3 <- if %4 {
             %5 = $0
             %3 [br]= call %5()
         } else {
@@ -1120,7 +1120,7 @@ fn test_or_desugaring() {
         %1 = @evm_calldataload(%0)
         %2 = @evm_iszero(%1)
         %4 = %2
-        if %4 {
+        %3 <- if %4 {
             %3 [br]= true
         } else {
             %5 = 1

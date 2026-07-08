@@ -202,8 +202,10 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_expr(f, expr)?;
                 writeln!(f)
             }
-            InstructionKind::If { condition, then_block, else_block } => {
-                write!(f, "{pad}if ")?;
+            InstructionKind::If { result, condition, then_block, else_block } => {
+                write!(f, "{pad}")?;
+                self.fmt_local(f, result)?;
+                write!(f, " <- if ")?;
                 self.fmt_local(f, condition)?;
                 writeln!(f, " {{")?;
                 self.fmt_block(f, then_block, indent + 1)?;
