@@ -19,11 +19,24 @@ use plank_source::ParsedProject;
 
 use crate::*;
 
+#[derive(Debug, Clone, Copy)]
+enum LocalKind {
+    Immutable,
+    RuntimeMutable,
+    ComptimeMutable,
+}
+
+impl LocalKind {
+    const fn mutable(self) -> bool {
+        matches!(self, LocalKind::RuntimeMutable | LocalKind::ComptimeMutable)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ScopedLocal {
     name: StrId,
     id: LocalId,
-    mutable: bool,
+    kind: LocalKind,
     span: Option<TokenSpan>,
 }
 
@@ -180,19 +193,24 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, mutable: bool, span: TokenSpan) -> LocalId {
+    fn alloc_local(&mut self, name: StrId, kind: LocalKind, span: TokenSpan) -> LocalId {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         }
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable, span: Some(span) });
+        self.scoped_locals_stack.push(ScopedLocal { name, id, kind, span: Some(span) });
         id
     }
 
     fn alloc_anonymous_local(&mut self, name: StrId) -> LocalId {
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, mutable: false, span: None });
+        self.scoped_locals_stack.push(ScopedLocal {
+            name,
+            id,
+            kind: LocalKind::Immutable,
+            span: None,
+        });
         id
     }
 
@@ -559,7 +577,7 @@ impl BlockLowerer<'_> {
     }
 
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
-        self.alloc_local(param.name, false, param.name_span())
+        self.alloc_local(param.name, LocalKind::Immutable, param.name_span())
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
@@ -584,7 +602,7 @@ impl BlockLowerer<'_> {
                             self.error_duplicate_param_any_type_capture(name, name_span, prev.span);
                             ParamType::Poisoned
                         } else {
-                            let capture = self.alloc_local(name, false, name_span);
+                            let capture = self.alloc_local(name, LocalKind::Immutable, name_span);
                             ParamType::Any { capture }
                         }
                     }
@@ -768,7 +786,12 @@ impl BlockLowerer<'_> {
                     self.lower_expr(value)
                 };
                 // Local allocated *after* to ensure it's not visible to `lower_expr`.
-                let local = self.alloc_local(let_stmt.name, let_stmt.mutable, let_stmt.name_span);
+                let kind = match (let_stmt.mutable, let_stmt.comptime) {
+                    (true, false) => LocalKind::RuntimeMutable,
+                    (true, true) => LocalKind::ComptimeMutable,
+                    (false, _) => LocalKind::Immutable,
+                };
+                let local = self.alloc_local(let_stmt.name, kind, let_stmt.name_span);
                 let r#type =
                     let_stmt.type_expr().map(|type_expr| self.lower_expr_to_local(type_expr));
                 self.emit(if let_stmt.mutable {
@@ -798,7 +821,7 @@ impl BlockLowerer<'_> {
                     self.error_unresolved_identifier(name, span);
                     return;
                 };
-                if !entry.mutable {
+                if !entry.kind.mutable() {
                     self.error_assignment_to_immutable(
                         name,
                         span,
@@ -806,9 +829,21 @@ impl BlockLowerer<'_> {
                     );
                     return;
                 }
-                let target = entry.id;
-                let value = self.lower_expr(assign_stmt.value());
-                self.emit(InstructionKind::Assign { target, expr: value });
+                if let LocalKind::ComptimeMutable = entry.kind {
+                    let block = self.create_sub_block(assign_stmt.node().span(), |this| {
+                        let target = entry.id;
+                        let value = this.lower_expr(assign_stmt.value());
+                        this.emit(InstructionKind::Assign { target, expr: value });
+                    });
+                    self.emit(InstructionKind::ComptimeBlock {
+                        body: block,
+                        reason: ComptimeReason::ComptimeLetAssign,
+                    })
+                } else {
+                    let target = entry.id;
+                    let value = self.lower_expr(assign_stmt.value());
+                    self.emit(InstructionKind::Assign { target, expr: value });
+                }
             }
             Statement::While(while_stmt) => {
                 let (condition_block, condition) = self

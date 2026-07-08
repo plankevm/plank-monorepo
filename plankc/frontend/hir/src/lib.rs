@@ -132,6 +132,7 @@ pub enum InstructionKind {
 pub enum ComptimeReason {
     Explicit,
     LetInitializer,
+    ComptimeLetAssign,
 }
 
 #[derive(Debug, Clone, Copy)]

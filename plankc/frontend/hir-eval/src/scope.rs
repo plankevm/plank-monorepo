@@ -472,8 +472,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn eval_assign(&mut self, target: hir::LocalId, expr: hir::Expr) -> Result<(), Diverge> {
-        let value = self.eval_expr(expr)?;
         let local = self.bindings[target];
+        if local.comptime_assign_depth.is_some_and(|depth| depth != self.comptime_assign_depth()) {
+            self.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
+                self.loc(expr.span),
+                self.loc(local.use_span),
+            );
+            self.bindings[target].state = Err(Poisoned);
+            return Ok(());
+        }
+
+        let value = self.eval_expr(expr)?;
         let new_state = poison::zip(local.state, value).and_then(|(state, value)| {
             let expected_ty = self.state_type(state);
             let type_check =
@@ -528,20 +537,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .with_comptime_reason(reason, |this| {
                     this.with_comptime(|this| this.eval_block_inline(body))
                 })?,
-            InstructionKind::Assign { target, expr } => {
-                let binding = self.bindings[target];
-                match binding.comptime_assign_depth {
-                    None => self.eval_assign(target, expr)?,
-                    Some(assign_depth) if assign_depth != self.comptime_assign_depth() => {
-                        self.diag_ctx.emit_comptime_assign_in_runtime_controlled_context(
-                            self.loc(expr.span),
-                            self.loc(binding.use_span),
-                        );
-                        self.bindings[target].state = Err(Poisoned);
-                    }
-                    Some(_) => self.with_comptime(|this| this.eval_assign(target, expr))?,
-                }
-            }
+            InstructionKind::Assign { target, expr } => self.eval_assign(target, expr)?,
             InstructionKind::Eval(expr) => {
                 let value = self.eval_expr(expr)?;
                 if self.is_comptime() {

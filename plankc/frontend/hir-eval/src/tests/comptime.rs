@@ -738,6 +738,34 @@ fn test_inline_while_resets_else_if_result_between_iterations() {
 }
 
 #[test]
+fn comptime_let_mut_assign_forces_comptime() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            const f = fn () u256 {
+                0
+            };
+
+            init {
+                comptime let mut x = 3;
+                x = 0 + f();
+                let mut y = x;
+                @evm_stop();
+            }
+            "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_inline_while_rejects_runtime_condition() {
     assert_diagnostics(
         r#"
@@ -831,6 +859,8 @@ fn test_comptime_let_mut_runtime_assignment() {
           |
         3 |     x = @evm_calldataload(0);
           |         ^^^^^^^^^^^^^^^^^^^^ `@evm_calldataload` cannot be evaluated at compile time
+          |
+          = note: assignment to value defined as `comptime let mut` must be known at compile time
         "#],
     );
 }

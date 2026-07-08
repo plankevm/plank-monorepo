@@ -80,6 +80,9 @@ impl DiagCtx<'_> {
             hir::ComptimeReason::LetInitializer => {
                 diagnostic.note("initializer of `comptime let` must be known at compile time")
             }
+            hir::ComptimeReason::ComptimeLetAssign => diagnostic.note(
+                "assignment to value defined as `comptime let mut` must be known at compile time",
+            ),
         }
     }
 
