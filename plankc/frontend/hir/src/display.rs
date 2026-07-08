@@ -172,8 +172,8 @@ impl<'a> DisplayHir<'a> {
     ) -> fmt::Result {
         let pad = "    ".repeat(indent);
         match instr {
-            InstructionKind::Set { comptime, local, r#type, expr } => {
-                self.fmt_set(f, indent, local, r#type, expr, false, comptime)
+            InstructionKind::Set { local, r#type, expr } => {
+                self.fmt_set(f, indent, local, r#type, expr, false, false)
             }
             InstructionKind::SetMut { comptime, local, r#type, expr } => {
                 self.fmt_set(f, indent, local, r#type, expr, true, comptime)

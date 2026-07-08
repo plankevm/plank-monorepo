@@ -234,7 +234,7 @@ impl BlockLowerer<'_> {
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
         let expr = self.lower_expr(expr);
         let local = self.alloc_temp();
-        self.emit(InstructionKind::Set { comptime: false, local, r#type: None, expr });
+        self.emit(InstructionKind::Set { local, r#type: None, expr });
         local
     }
 
@@ -426,7 +426,6 @@ impl BlockLowerer<'_> {
                         let block = self.create_sub_block(expr.span(), |this| {
                             let expr = this.lower_expr(expr);
                             this.emit(InstructionKind::Set {
-                                comptime: false,
                                 local: type_index,
                                 r#type: None,
                                 expr,
@@ -439,12 +438,7 @@ impl BlockLowerer<'_> {
                     }
                     None => {
                         let expr = self.expr(ExprKind::VOID, struct_def.node().span());
-                        self.emit(InstructionKind::Set {
-                            comptime: false,
-                            local: type_index,
-                            r#type: None,
-                            expr,
-                        });
+                        self.emit(InstructionKind::Set { local: type_index, r#type: None, expr });
                     }
                 }
                 let buf_start = self.field_buf.len();
@@ -502,12 +496,7 @@ impl BlockLowerer<'_> {
                             this.expr(ExprKind::VOID, span)
                         }
                     };
-                    this.emit(InstructionKind::Set {
-                        comptime: false,
-                        local: result,
-                        r#type: None,
-                        expr,
-                    });
+                    this.emit(InstructionKind::Set { local: result, r#type: None, expr });
                 });
 
                 self.emit(InstructionKind::ComptimeBlock {
@@ -770,12 +759,7 @@ impl BlockLowerer<'_> {
                     let rhs_local = self.alloc_temp();
                     let body = self.create_sub_block(span, |this| {
                         let expr = this.lower_expr(value);
-                        this.emit(InstructionKind::Set {
-                            comptime: false,
-                            local: rhs_local,
-                            r#type: None,
-                            expr,
-                        });
+                        this.emit(InstructionKind::Set { local: rhs_local, r#type: None, expr });
                     });
                     self.emit(InstructionKind::ComptimeBlock {
                         body,
@@ -797,7 +781,7 @@ impl BlockLowerer<'_> {
                 self.emit(if let_stmt.mutable {
                     InstructionKind::SetMut { comptime: let_stmt.comptime, local, r#type, expr }
                 } else {
-                    InstructionKind::Set { comptime: let_stmt.comptime, local, r#type, expr }
+                    InstructionKind::Set { local, r#type, expr }
                 });
             }
             Statement::Expr(expr) => {
@@ -837,7 +821,7 @@ impl BlockLowerer<'_> {
                     });
                     self.emit(InstructionKind::ComptimeBlock {
                         body: block,
-                        reason: ComptimeReason::ComptimeLetAssign,
+                        reason: ComptimeReason::Assign,
                     })
                 } else {
                     let target = entry.id;
@@ -914,12 +898,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
                         let r#type =
                             const_def.r#type.map(|type_expr| this.lower_expr_to_local(type_expr));
                         let expr = this.lower_expr(const_def.assign);
-                        this.emit(InstructionKind::Set {
-                            comptime: false,
-                            local: hir_def.result,
-                            r#type,
-                            expr,
-                        });
+                        this.emit(InstructionKind::Set { local: hir_def.result, r#type, expr });
                     });
                 }
                 TopLevelDef::Init(init_def) => {

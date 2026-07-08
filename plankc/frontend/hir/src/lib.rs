@@ -88,7 +88,6 @@ pub enum InstructionKind {
         idx: u32,
     },
     Set {
-        comptime: bool,
         local: LocalId,
         r#type: Option<LocalId>,
         expr: Expr,
@@ -132,7 +131,7 @@ pub enum InstructionKind {
 pub enum ComptimeReason {
     Explicit,
     LetInitializer,
-    ComptimeLetAssign,
+    Assign,
 }
 
 #[derive(Debug, Clone, Copy)]
