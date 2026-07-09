@@ -671,22 +671,30 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
-                    stop
+                    zero = const 0
+                    input = calldataload zero
+                    value = const 2
+                    is_zero = iszero input
+                    => is_zero ? @empty_true : @empty_false
                 }
-            fn test:
-                entry arg {
-                    cond = iszero arg
-                    => cond ? @is_zero : @non_zero
+                empty_false -> is_zero value {
+                    => @after_empty
                 }
-                non_zero -> arg {
+                empty_true -> is_zero value {
+                    => @after_empty
+                }
+                after_empty is_zero_after value_after {
+                    => is_zero_after ? @assign_zero : @keep_value
+                }
+                keep_value -> value_after {
                     => @merge
                 }
-                is_zero -> replacement {
+                assign_zero -> replacement {
                     replacement = const 0
                     => @merge
                 }
-                merge value {
-                    result = div value value
+                merge merged {
+                    result = div merged merged
                     stop
                 }
         "#;
@@ -698,29 +706,39 @@ mod tests {
             Init: @0
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
 
             Basic Blocks:
                 @0 {
-                    stop
+                    $0 = const 0x0
+                    $1 = calldataload $0
+                    $2 = const 0x2
+                    $3 = iszero $1
+                    => $3 ? @2 : @1
                 }
 
-                @1 $0 {
-                    $1 = iszero $0
-                    => $1 ? @3 : @2
+                @1 -> $3 $2 {
+                    => @3
                 }
 
-                @2 -> $0 {
-                    => @4
+                @2 -> $3 $2 {
+                    => @3
                 }
 
-                @3 -> $2 {
-                    $2 = const 0x0
-                    => @4
+                @3 $4 $5 {
+                    => $4 ? @5 : @4
                 }
 
-                @4 $3 {
-                    $4 = div $3 $3
+                @4 -> $5 {
+                    => @6
+                }
+
+                @5 -> $6 {
+                    $6 = const 0x0
+                    => @6
+                }
+
+                @6 $7 {
+                    $8 = div $7 $7
                     stop
                 }
             "#,
