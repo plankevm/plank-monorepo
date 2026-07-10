@@ -51,7 +51,7 @@ pub(crate) fn permute_for_head(
     current: &[ValueNodeId],
     target: &[ValueNodeId],
     last_uses: &[ValueNodeId],
-    node_budget: usize,
+    paths_budget: usize,
 ) -> (Vec<u16>, bool) {
     assert!(head_end > 0, "head must contain the stack top");
     assert!(head_end <= current.len(), "head exceeds current stack");
@@ -94,25 +94,38 @@ pub(crate) fn permute_for_head(
     let mut longest = Vec::new();
     let mut longest_ends_in_top = false;
 
-    for _ in 0..node_budget {
-        let Some((state, loc)) = pending.pop() else {
+    'trace_path: for _ in 0..paths_budget {
+        let Some((mut state, mut loc)) = pending.pop() else {
             break;
         };
 
-        let top_correct = loc.is_head_and_eq(head_target[0]);
-        if state.executed.len() > longest.len() {
-            longest = state.executed.clone();
-            longest_ends_in_top = top_correct;
-        }
-        if top_correct {
-            continue;
+        for _ in 0..current_len {
+            let top_correct = loc.is_head_and_eq(head_target[0]);
+            let mut done = true;
+            if !top_correct {
+                for swap_idx in (0..state.swaps.len()).rev() {
+                    let Some(next) = state.advance(loc, swap_idx) else { continue };
+                    done = false;
+                    let swap = state.swaps[swap_idx];
+                    pending.push((next, current_as_locs[usize::from(swap.pos)]));
+                }
+            }
+
+            if !done {
+                (state, loc) = pending.pop().expect("not done but pushed none");
+                continue;
+            }
+
+            if state.executed.len() > longest.len()
+                || (state.executed.len() == longest.len() && !longest_ends_in_top && top_correct)
+            {
+                longest = state.executed.clone();
+                longest_ends_in_top = top_correct;
+            }
+            continue 'trace_path;
         }
 
-        for swap_idx in (0..state.swaps.len()).rev() {
-            let Some(next) = state.advance(loc, swap_idx) else { continue };
-            let swap = state.swaps[swap_idx];
-            pending.push((next, current_as_locs[usize::from(swap.pos)]));
-        }
+        unreachable!("not done after after `current_len` swaps");
     }
 
     (longest, longest_ends_in_top)
@@ -131,7 +144,7 @@ mod tests {
         raw.iter().copied().map(value).collect()
     }
 
-    const TEST_NODE_BUDGET: usize = 100_000;
+    const TEST_NODE_BUDGET: usize = 100;
 
     struct AssertPermutationBuilder {
         todo_preserve: Vec<u8>,
@@ -181,7 +194,7 @@ mod tests {
                 &last_uses,
                 self.node_budget,
             );
-            assert_eq!(actual, expected.as_ref());
+            assert_eq!(actual, expected.as_ref(), "actual != expected");
             if let Some(expected_ends_in_top) = self.expect_ends_in_top {
                 assert_eq!(expected_ends_in_top, ends_in_top);
             }
@@ -297,6 +310,11 @@ mod tests {
     #[test]
     fn returns_longest_partial_progress() {
         opts().assert(3, [1, 2, 3], [9, 1, 2], [1, 2]);
+    }
+
+    #[test]
+    fn swappable_path_wins_over_correct_top() {
+        opts().ends_in_top(false).assert(5, [1, 2, 4, 3, 5], [3, 1, 1, 2, 4], [1, 3]);
     }
 
     #[test]
