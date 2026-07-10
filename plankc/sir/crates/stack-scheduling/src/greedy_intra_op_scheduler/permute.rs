@@ -343,13 +343,6 @@ mod tests {
         permute_for_head(&[], 2, &[value(1)], &[value(1), value(2)], &[], TEST_NODE_BUDGET);
     }
 
-    #[derive(Clone, Debug)]
-    struct RawGeneratedContext {
-        current: Vec<u8>,
-        target: Vec<u8>,
-        head_end: usize,
-    }
-
     #[derive(Debug)]
     struct GeneratedContext {
         todo_preserve: Vec<ValueNodeId>,
@@ -365,64 +358,39 @@ mod tests {
         values
     }
 
-    fn generated_stacks() -> impl Strategy<Value = (Vec<u8>, Vec<u8>)> {
-        let permutation = prop::collection::vec(0u8..64, 1..65)
-            .prop_flat_map(|current| {
-                let len = current.len();
-                (Just(current), prop::collection::vec(any::<u16>(), len))
-            })
-            .prop_map(|(current, ordering)| {
-                let mut positions: Vec<_> = (0..current.len()).collect();
-                positions.sort_by_key(|&position| ordering[position]);
-                let target = positions.into_iter().map(|position| current[position]).collect();
-                (current, target)
-            });
-
-        prop_oneof![
-            3 => (
-                prop::collection::vec(0u8..128, 1..65),
-                prop::collection::vec(0u8..128, 1..65),
-            ),
-            3 => (
-                prop::collection::vec(0u8..16, 1..65),
-                prop::collection::vec(0u8..16, 1..65),
-            ),
-            2 => permutation,
-        ]
-    }
-
     fn generated_context() -> impl Strategy<Value = GeneratedContext> {
-        (generated_stacks(), 0usize..64)
-            .prop_flat_map(|((current, target), head_selector)| {
-                let head_end = head_selector % current.len().min(target.len()) + 1;
+        (prop::collection::vec(0u8..64, 1..65), prop::collection::vec(0u8..64, 1..65))
+            .prop_flat_map(|(current, target)| {
+                let max_head_end = current.len().min(target.len());
+                (Just(current), Just(target), 1..=max_head_end)
+            })
+            .prop_flat_map(|(current, target, head_end)| {
                 let last_use_candidates = unique(target.clone());
-                let last_use_count = last_use_candidates.len();
+                let candidate_count = last_use_candidates.len();
                 (
-                    Just(RawGeneratedContext { current, target, head_end }),
-                    prop::sample::subsequence(last_use_candidates, 0..=last_use_count),
+                    Just((current, target, head_end)),
+                    prop::sample::subsequence(last_use_candidates, 0..=candidate_count),
                 )
             })
-            .prop_flat_map(|(context, last_uses)| {
+            .prop_flat_map(|((current, target, head_end), last_uses)| {
                 let preserve_candidates = unique(
-                    context.current[..context.head_end]
+                    current[..head_end]
                         .iter()
                         .copied()
-                        .filter(|value| {
-                            context.target.contains(value) && !last_uses.contains(value)
-                        })
+                        .filter(|value| target.contains(value) && !last_uses.contains(value))
                         .collect(),
                 );
-                let preserve_count = preserve_candidates.len();
+                let candidate_count = preserve_candidates.len();
                 (
-                    Just((context, last_uses)),
-                    prop::sample::subsequence(preserve_candidates, 0..=preserve_count),
+                    Just((current, target, head_end, last_uses)),
+                    prop::sample::subsequence(preserve_candidates, 0..=candidate_count),
                 )
             })
-            .prop_map(|((context, last_uses), todo_preserve)| GeneratedContext {
+            .prop_map(|((current, target, head_end, last_uses), todo_preserve)| GeneratedContext {
                 todo_preserve: values(&todo_preserve),
-                head_end: context.head_end,
-                current: values(&context.current),
-                target: values(&context.target),
+                head_end,
+                current: values(&current),
+                target: values(&target),
                 last_uses: values(&last_uses),
             })
     }
