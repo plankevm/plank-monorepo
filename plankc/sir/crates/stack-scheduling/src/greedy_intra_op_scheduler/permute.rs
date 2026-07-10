@@ -179,6 +179,21 @@ impl StackView<'_> {
     }
 }
 
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum LinkCurrentLoc {
+    Value(ValueNodeId),
+    Preserve(ValueNodeId),
+    Tail,
+}
+
+struct Link {
+    pos: u16,
+    target: ValueLoc,
+    current: ValueLoc,
+    preserve: bool,
+}
+
 pub(crate) fn permute_for_head(
     todo_preserve: &[ValueNodeId],
     head_end: usize,
@@ -207,6 +222,9 @@ pub(crate) fn permute_for_head(
             merged_cycles_map: HashMap::with_capacity(4),
         }
     };
+
+    let mut links = Vec::with_capacity(current.len() * 2 / 3);
+    for (i, (current, ))
 
     'find_next_cycle: for start_chain_idx in 0..current_len {
         if !view.swappable(start_chain_idx) {
