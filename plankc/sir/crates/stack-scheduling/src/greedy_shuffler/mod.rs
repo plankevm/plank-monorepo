@@ -28,7 +28,7 @@ pub fn shuffle<'a, Sink: FnMut(StackOps)>(
 
 const LIMIT: u32 = 100_000;
 
-impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, Sink> {
+impl<'a, Sink: FnMut(StackOps)> GreedyShuffler<'a, Sink> {
     pub fn run(
         config: ScheduleConfig,
         current: &'a mut TrackedStack<Sink>,

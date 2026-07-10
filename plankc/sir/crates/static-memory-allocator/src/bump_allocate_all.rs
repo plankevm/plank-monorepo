@@ -1,5 +1,5 @@
 use hashbrown::{HashMap, HashSet};
-use plank_core::{DenseIndexSet, Idx};
+use plank_core::DenseIndexSet;
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId};
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 
