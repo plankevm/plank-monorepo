@@ -52,7 +52,7 @@ pub(crate) fn permute_for_head(
     target: &[ValueNodeId],
     last_uses: &[ValueNodeId],
     node_budget: usize,
-) -> Vec<u16> {
+) -> (Vec<u16>, bool) {
     assert!(head_end > 0, "head must contain the stack top");
     assert!(head_end <= current.len(), "head exceeds current stack");
     assert!(head_end <= target.len(), "head exceeds target stack");
@@ -86,22 +86,25 @@ pub(crate) fn permute_for_head(
 
     let start_loc = current_as_locs[0];
     if start_loc.is_head_and_eq(head_target[0]) {
-        return Vec::new();
+        return (Vec::new(), true);
     }
 
     let start_state = State { swaps, todo_preserve: todo_preserve.to_vec(), executed: Vec::new() };
     let mut pending = vec![(start_state, start_loc)];
     let mut longest = Vec::new();
+    let mut longest_ends_in_top = false;
 
     for _ in 0..node_budget {
         let Some((state, loc)) = pending.pop() else {
             break;
         };
 
+        let top_correct = loc.is_head_and_eq(head_target[0]);
         if state.executed.len() > longest.len() {
             longest = state.executed.clone();
+            longest_ends_in_top = top_correct;
         }
-        if loc.is_head_and_eq(head_target[0]) {
+        if top_correct {
             continue;
         }
 
@@ -112,7 +115,7 @@ pub(crate) fn permute_for_head(
         }
     }
 
-    longest
+    (longest, longest_ends_in_top)
 }
 
 #[cfg(test)]
@@ -134,6 +137,7 @@ mod tests {
         todo_preserve: Vec<u8>,
         last_uses: Vec<u8>,
         node_budget: usize,
+        expect_ends_in_top: Option<bool>,
     }
 
     impl AssertPermutationBuilder {
@@ -147,11 +151,17 @@ mod tests {
             self
         }
 
+        fn ends_in_top(mut self, ends: bool) -> Self {
+            self.expect_ends_in_top = Some(ends);
+            self
+        }
+
         fn budget(mut self, budget: usize) -> Self {
             self.node_budget = budget;
             self
         }
 
+        #[track_caller]
         fn assert(
             self,
             head_end: usize,
@@ -163,7 +173,7 @@ mod tests {
             let current = values(current.as_ref());
             let target = values(target.as_ref());
             let last_uses = values(&self.last_uses);
-            let actual = permute_for_head(
+            let (actual, ends_in_top) = permute_for_head(
                 &todo_preserve,
                 head_end,
                 &current,
@@ -172,10 +182,15 @@ mod tests {
                 self.node_budget,
             );
             assert_eq!(actual, expected.as_ref());
-            assert!(
+            if let Some(expected_ends_in_top) = self.expect_ends_in_top {
+                assert_eq!(expected_ends_in_top, ends_in_top);
+            }
+            let Some(replay) =
                 replay_if_legal(&todo_preserve, head_end, &current, &target, &last_uses, &actual)
-                    .is_some()
-            );
+            else {
+                panic!("replay not legal")
+            };
+            assert_eq!(ends_in_top, replay.stack[0] == target[target.len() - head_end])
         }
     }
 
@@ -184,6 +199,7 @@ mod tests {
             todo_preserve: Vec::new(),
             last_uses: Vec::new(),
             node_budget: TEST_NODE_BUDGET,
+            expect_ends_in_top: None,
         }
     }
 
@@ -260,12 +276,12 @@ mod tests {
 
     #[test]
     fn correct_top_is_not_undone() {
-        opts().assert(3, [1, 3, 2], [1, 2, 3], []);
+        opts().ends_in_top(true).assert(3, [1, 3, 2], [1, 2, 3], []);
     }
 
     #[test]
     fn simple_cycle() {
-        opts().assert(2, [1, 2], [2, 1], [1]);
+        opts().ends_in_top(true).assert(2, [1, 2], [2, 1], [1]);
     }
 
     #[test]
@@ -275,7 +291,7 @@ mod tests {
 
     #[test]
     fn longest_branch_wins_over_fixing_top() {
-        opts().assert(4, [1, 2, 3, 4], [4, 1, 2, 1], [1, 2]);
+        opts().ends_in_top(false).assert(4, [1, 2, 3, 4], [4, 1, 2, 1], [1, 2]);
     }
 
     #[test]
@@ -403,7 +419,7 @@ mod tests {
             context in generated_context(),
         ) {
             let GeneratedContext { todo_preserve, head_end, current, target, last_uses } = context;
-            let actual = permute_for_head(
+            let (actual, ends_in_top) = permute_for_head(
                 &todo_preserve,
                 head_end,
                 &current,
@@ -422,12 +438,16 @@ mod tests {
 
             prop_assert!(replayed.is_some());
             let replayed = replayed.unwrap();
+            prop_assert_eq!(ends_in_top, replayed.stack[0] == target[target.len() - head_end]);
             let progressed_positions = replayed.available.iter().filter(|&&available| !available).count();
             prop_assert_eq!(progressed_positions, actual.len() + 1);
 
             let head_target = &target[target.len() - head_end..];
-            for depth in actual.iter().copied().map(usize::from).filter(|&depth| depth < head_end) {
-                prop_assert_eq!(replayed.stack[depth], head_target[depth]);
+            for &depth in actual.iter() {
+                let depth = depth as usize;
+                if depth < head_end {
+                    prop_assert_eq!(replayed.stack[depth], head_target[depth]);
+                }
             }
         }
     }
