@@ -144,12 +144,12 @@ mod tests {
         raw.iter().copied().map(value).collect()
     }
 
-    const TEST_NODE_BUDGET: usize = 100;
+    const TEST_PATHS_BUDGET: usize = 100;
 
     struct AssertPermutationBuilder {
         todo_preserve: Vec<u8>,
         last_uses: Vec<u8>,
-        node_budget: usize,
+        paths_budget: usize,
         expect_ends_in_top: Option<bool>,
     }
 
@@ -170,7 +170,7 @@ mod tests {
         }
 
         fn budget(mut self, budget: usize) -> Self {
-            self.node_budget = budget;
+            self.paths_budget = budget;
             self
         }
 
@@ -192,7 +192,7 @@ mod tests {
                 &current,
                 &target,
                 &last_uses,
-                self.node_budget,
+                self.paths_budget,
             );
             assert_eq!(actual, expected.as_ref(), "actual != expected");
             if let Some(expected_ends_in_top) = self.expect_ends_in_top {
@@ -211,7 +211,7 @@ mod tests {
         AssertPermutationBuilder {
             todo_preserve: Vec::new(),
             last_uses: Vec::new(),
-            node_budget: TEST_NODE_BUDGET,
+            paths_budget: TEST_PATHS_BUDGET,
             expect_ends_in_top: None,
         }
     }
@@ -313,8 +313,8 @@ mod tests {
     }
 
     #[test]
-    fn swappable_path_wins_over_correct_top() {
-        opts().ends_in_top(false).assert(5, [1, 2, 4, 3, 5], [3, 1, 1, 2, 4], [1, 3]);
+    fn correct_top_wins_over_unfinished_swappable_path() {
+        opts().ends_in_top(true).assert(5, [1, 2, 4, 3, 5], [3, 1, 1, 2, 4], [1, 3]);
     }
 
     #[test]
@@ -358,23 +358,22 @@ mod tests {
     }
 
     #[test]
-    fn node_budget_returns_best_expanded_state() {
-        let last_uses = [1, 2, 3, 4];
-        opts().budget(1).last_uses(last_uses).assert(4, [1, 2, 3, 4], [4, 1, 2, 1], []);
-        opts().budget(2).last_uses(last_uses).assert(4, [1, 2, 3, 4], [4, 1, 2, 1], [1]);
-        opts().budget(3).last_uses(last_uses).assert(4, [1, 2, 3, 4], [4, 1, 2, 1], [1, 2]);
+    fn paths_budget_returns_best_traced_path() {
+        opts().budget(0).assert(4, [1, 8, 2, 3], [9, 1, 1, 2], []);
+        opts().budget(1).assert(4, [1, 8, 2, 3], [9, 1, 1, 2], [1]);
+        opts().budget(2).assert(4, [1, 8, 2, 3], [9, 1, 1, 2], [2, 3]);
     }
 
     #[test]
     #[should_panic(expected = "head must contain the stack top")]
     fn rejects_empty_head() {
-        permute_for_head(&[], 0, &[value(1)], &[value(1)], &[], TEST_NODE_BUDGET);
+        permute_for_head(&[], 0, &[value(1)], &[value(1)], &[], TEST_PATHS_BUDGET);
     }
 
     #[test]
     #[should_panic(expected = "head exceeds current stack")]
     fn rejects_head_beyond_current() {
-        permute_for_head(&[], 2, &[value(1)], &[value(1), value(2)], &[], TEST_NODE_BUDGET);
+        permute_for_head(&[], 2, &[value(1)], &[value(1), value(2)], &[], TEST_PATHS_BUDGET);
     }
 
     #[derive(Debug)]
@@ -443,7 +442,7 @@ mod tests {
                 &current,
                 &target,
                 &last_uses,
-                TEST_NODE_BUDGET,
+                TEST_PATHS_BUDGET,
             );
             let replayed = replay_if_legal(
                 &todo_preserve,
