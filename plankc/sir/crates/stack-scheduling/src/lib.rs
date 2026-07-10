@@ -11,7 +11,6 @@ use crate::{op_graph::build_graph_effectful, scheduler::dumb_schedule, stack::St
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
-mod permute;
 mod scheduler;
 pub mod stack;
 mod state;
