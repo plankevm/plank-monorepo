@@ -537,6 +537,23 @@ fn lowers_bool_builtins_as_i1_without_zext() {
 }
 
 #[test]
+fn lowers_bool_to_u256_as_zext() {
+    let ir = lower_ir(
+        r#"
+        init {
+            let b = @evm_iszero(@evm_calldataload(0));
+            let x = @bool_to_u256(b);
+            @evm_sstore(x, 0);
+            @evm_stop();
+        }
+        "#,
+    );
+
+    assert_contains(&ir, " = zext ");
+    assert_contains(&ir, "evm_sstore");
+}
+
+#[test]
 fn lowers_structs_as_sonatina_aggregates() {
     let ir = lower_ir(
         r#"

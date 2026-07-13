@@ -42,6 +42,7 @@ pub(crate) fn add_as_op(
         RuntimeBuiltin::Shr => OperationKind::Shr,
         RuntimeBuiltin::Sar => OperationKind::Sar,
         RuntimeBuiltin::Clz => OperationKind::Clz,
+        RuntimeBuiltin::BoolToU256 => OperationKind::SetCopy,
 
         // ========== EVM Keccak-256 ==========
         RuntimeBuiltin::Keccak256 => OperationKind::Keccak256,
