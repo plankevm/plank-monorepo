@@ -447,7 +447,9 @@ impl<'a> FunctionLowerer<'a> {
             B::BoolToU256 => {
                 let [value] = self.arg_values(op, args);
                 let result_ty = rty.expect("builtin should produce a value");
-                BuiltinOutput::Value(self.fb.insert_inst(Zext::new(self.is, value, result_ty), result_ty))
+                BuiltinOutput::Value(
+                    self.fb.insert_inst(Zext::new(self.is, value, result_ty), result_ty),
+                )
             }
 
             B::Keccak256 => emit!(EvmKeccak256::new, [a, b], Value),
