@@ -3,6 +3,31 @@ use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
 use sha2::Digest;
 
 #[test]
+fn test_bool_to_u256_folds_at_comptime() {
+    assert_lowers_to(
+        r#"
+        const t = @bool_to_u256(true);
+        const f = @bool_to_u256(false);
+
+        init {
+            @evm_sstore(t, f);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 1
+            %1 : u256 = 0
+            %2 : void = @evm_sstore(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_comptime_only_return_caches_per_non_comptime_arg_value() {
     assert_lowers_to(
         r#"

@@ -1,5 +1,4 @@
 import std::version::{active_evm_version, OSAKA};
-import std::core_ops::{bool_to_u256};
 
 const HAS_CLZ_OPCODE = active_evm_version().id >= OSAKA.id;
 
@@ -16,12 +15,12 @@ const clz = fn (x: u256) u256 {
 // Recreated from solady `LibBit.clz` (MIT License), Copyright (c) 2022 solady:
 // https://github.com/Vectorized/solady/blob/5dc5fc87374e6e9de15e8139c09d80fde5a22303/src/utils/LibBit.sol#L33-L45
 const clz_fallback = fn (x: u256) u256 {
-    let r0 = bool_to_u256(0xffffffffffffffffffffffffffffffff < x) << 7;
-    let r1 = r0 | (bool_to_u256(0xffffffffffffffff < (x >> r0)) << 6);
-    let r2 = r1 | (bool_to_u256(0xffffffff < (x >> r1)) << 5);
-    let r3 = r2 | (bool_to_u256(0xffff < (x >> r2)) << 4);
-    let r4 = r3 | (bool_to_u256(0xff < (x >> r3)) << 3);
+    let r0 = @bool_to_u256(0xffffffffffffffffffffffffffffffff < x) << 7;
+    let r1 = r0 | (@bool_to_u256(0xffffffffffffffff < (x >> r0)) << 6);
+    let r2 = r1 | (@bool_to_u256(0xffffffff < (x >> r1)) << 5);
+    let r3 = r2 | (@bool_to_u256(0xffff < (x >> r2)) << 4);
+    let r4 = r3 | (@bool_to_u256(0xff < (x >> r3)) << 3);
     let index = 0x1f & (0x8421084210842108cc6318c6db6d54be >> (x >> r4));
     let table = 0xf8f9f9faf9fdfafbf9fdfcfdfafbfcfef9fafdfafcfcfbfefafafcfbffffffff;
-    (r4 ^ @evm_byte(index, table)) +% bool_to_u256(@evm_iszero(x))
+    (r4 ^ @evm_byte(index, table)) +% @bool_to_u256(@evm_iszero(x))
 };

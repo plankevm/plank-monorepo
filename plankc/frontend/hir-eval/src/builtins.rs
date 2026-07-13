@@ -995,6 +995,7 @@ pub(crate) fn fold_runtime_builtin(
                 RuntimeBuiltin::IsZero => U256::from(plank_evm::iszero(a)),
                 RuntimeBuiltin::Not => plank_evm::not(a),
                 RuntimeBuiltin::Clz => plank_evm::clz(a),
+                RuntimeBuiltin::BoolToU256 => a,
                 _ => unreachable!("not a unary foldable builtin: {builtin}"),
             }
         }

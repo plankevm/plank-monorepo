@@ -209,6 +209,7 @@ define_builtins! {
         SHR "@evm_shr" => Shr;
         SAR "@evm_sar" => Sar;
         CLZ "@evm_clz" => Clz;
+        BOOL_TO_U256 "@bool_to_u256" => BoolToU256;
     }
 
     runtime_only_builtins {

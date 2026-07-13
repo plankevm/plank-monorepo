@@ -10,7 +10,7 @@ use sonatina_ir::{
     func_cursor::InstInserter,
     inst::{
         arith::{Add, Mul, Sar, Shl, Shr, Sub},
-        cast::PtrToInt,
+        cast::{PtrToInt, Zext},
         cmp::{Eq, Gt, IsZero, Lt, Ne, Sgt, Slt},
         control_flow::{Br, Jump},
         data::{ExtractValue, InsertValue, Mload, Mstore, SymAddr, SymSize, SymbolRef},
@@ -444,6 +444,13 @@ impl<'a> FunctionLowerer<'a> {
             B::Shr => emit!(Shr::new, [a, b], Value),
             B::Sar => emit!(Sar::new, [a, b], Value),
             B::Clz => emit!(EvmClz::new, [a], Value),
+            B::BoolToU256 => {
+                let [value] = self.arg_values(op, args);
+                let result_ty = rty.expect("builtin should produce a value");
+                BuiltinOutput::Value(
+                    self.fb.insert_inst(Zext::new(self.is, value, result_ty), result_ty),
+                )
+            }
 
             B::Keccak256 => emit!(EvmKeccak256::new, [a, b], Value),
             B::Address => emit!(EvmAddress::new, [], Value),

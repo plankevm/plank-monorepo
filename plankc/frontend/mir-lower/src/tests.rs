@@ -738,6 +738,38 @@ fn test_logical_not() {
 }
 
 #[test]
+fn test_bool_to_u256_lowers_to_copy() {
+    assert_lowers_to(
+        r#"
+        init {
+            let b = @evm_iszero(@evm_calldataload(0));
+            let x = @bool_to_u256(b);
+            @evm_sstore(x, 0);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = iszero $1
+                $3 = copy $2
+                $4 = copy $3
+                $5 = copy $4
+                $6 = const 0x0
+                sstore $5 $6
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_uninit_struct() {
     assert_lowers_to(
         r#"
