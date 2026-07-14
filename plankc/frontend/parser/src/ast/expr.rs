@@ -15,6 +15,7 @@ pub enum Expr<'cst> {
     TupleType(TupleType<'cst>),
     TupleLit(TupleLit<'cst>),
     If(IfExpr<'cst>),
+    Match(MatchExpr<'cst>),
     FnDef(FnDef<'cst>),
     Block(BlockExpr<'cst>),
     ComptimeBlock(BlockExpr<'cst>),
@@ -66,6 +67,10 @@ impl<'cst> Expr<'cst> {
                     Some(body_node) => Expr::If(IfExpr { body_node, view }),
                     None => Expr::Error { span },
                 },
+                NodeKind::Match => match view.child(1) {
+                    Some(arm_list) => Expr::Match(MatchExpr { arm_list, view }),
+                    _ => Expr::Error { span },
+                },
                 NodeKind::FnDef => match (view.child(0), view.child(2)) {
                     (Some(param_list), Some(body_node)) => {
                         Expr::FnDef(FnDef { param_list, body_node, view })
@@ -99,6 +104,7 @@ impl<'cst> Expr<'cst> {
             | Expr::TupleType(TupleType { view })
             | Expr::TupleLit(TupleLit { view })
             | Expr::If(IfExpr { view, .. })
+            | Expr::Match(MatchExpr { view, .. })
             | Expr::FnDef(FnDef { view, .. })
             | Expr::Block(BlockExpr { view, .. })
             | Expr::ComptimeBlock(BlockExpr { view, .. }) => view.span(),
@@ -408,6 +414,62 @@ impl<'cst> ElseIfBranch<'cst> {
 
     pub fn node(&self) -> NodeView<'cst> {
         self.view
+    }
+}
+
+/// Match expression: `match subject { key => body, else binding => body }`
+#[derive(Debug, Clone, Copy)]
+pub struct MatchExpr<'cst> {
+    arm_list: NodeView<'cst>,
+    view: NodeView<'cst>,
+}
+
+impl<'cst> MatchExpr<'cst> {
+    pub fn subject(&self) -> Expr<'cst> {
+        self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
+    }
+
+    pub fn arms(&self) -> impl Iterator<Item = Result<MatchArm<'cst>, TokenSpan>> {
+        self.arm_list.children().map(MatchArm::new)
+    }
+
+    pub fn node(&self) -> NodeView<'cst> {
+        self.view
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum MatchArmKind<'cst> {
+    Case { key: NodeView<'cst> },
+    Fallback { binding: Option<NodeView<'cst>> },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatchArm<'cst> {
+    pub kind: MatchArmKind<'cst>,
+    pub body: NodeView<'cst>,
+    pub view: NodeView<'cst>,
+}
+
+impl<'cst> MatchArm<'cst> {
+    fn new(view: NodeView<'cst>) -> Result<Self, TokenSpan> {
+        match view.kind() {
+            NodeKind::MatchArm => Ok(Self {
+                kind: MatchArmKind::Case { key: view.child(0).ok_or(view.span())? },
+                body: view.child(1).ok_or(view.span())?,
+                view,
+            }),
+            NodeKind::MatchFallbackArm { binding } => {
+                let (binding, body) = if binding {
+                    (Some(view.child(0).ok_or(view.span())?), view.child(1).ok_or(view.span())?)
+                } else {
+                    (None, view.child(0).ok_or(view.span())?)
+                };
+
+                Ok(Self { kind: MatchArmKind::Fallback { binding }, body, view })
+            }
+            _ => Err(view.span()),
+        }
     }
 }
 

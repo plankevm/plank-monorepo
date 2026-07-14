@@ -324,7 +324,7 @@ fn test_missing_semicolon() {
              --> test.plk:2:1
               |
             2 | init {
-              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`
         "#],
     );
 }
@@ -615,7 +615,7 @@ fn test_const_decl_missing_expr() {
              --> test.plk:2:1
               |
             2 | init { }
-              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`
         "#],
     );
 }
@@ -683,7 +683,7 @@ fn test_arg_list_empty_after_comma() {
              --> test.plk:1:14
               |
             1 | run { foo(a, , b); }
-              |              ^ unexpected `,`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `)`
+              |              ^ unexpected `,`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`, `)`
         "#],
     );
 }
@@ -715,7 +715,7 @@ fn test_any_type_not_allowed_in_let_type() {
              --> test.plk:1:14
               |
             1 | run { let x: $T = 1; }
-              |              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`
               |
               = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
         "#],
@@ -733,7 +733,7 @@ fn test_any_type_not_allowed_in_const_type() {
              --> test.plk:1:10
               |
             1 | const X: $T = 1;
-              |          ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |          ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`
               |
               = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
         "#],
@@ -751,7 +751,7 @@ fn test_any_type_not_allowed_nested_in_param_type() {
              --> test.plk:1:30
               |
             1 | const f = fn(value: Array(4, $T)) void {};
-              |                              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `)`
+              |                              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`, `)`
               |
               = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
         "#],
@@ -817,7 +817,7 @@ fn test_binary_expr_missing_rhs() {
              --> test.plk:1:15
               |
             1 | run { x = 1 + ; }
-              |               ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |               ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`
         "#],
     );
 }
@@ -833,7 +833,7 @@ fn test_unary_expr_missing_operand() {
              --> test.plk:1:12
               |
             1 | run { x = -; }
-              |            ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |            ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `match`
         "#],
     );
 }

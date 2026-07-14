@@ -100,6 +100,12 @@ pub enum NodeKind {
     ElseIfBranchList,
     ElseIfBranch,
 
+    // Match
+    Match,
+    MatchArmList,
+    MatchArm,
+    MatchFallbackArm { binding: bool },
+
     // Atoms
     BoolLiteral(bool),
     NumLiteral { id: NumLitId },
@@ -160,6 +166,12 @@ impl std::fmt::Debug for NodeKind {
             Self::If => write!(f, "If"),
             Self::ElseIfBranchList => write!(f, "ElseIfBranchList"),
             Self::ElseIfBranch => write!(f, "ElseIfBranch"),
+            Self::Match => write!(f, "Match"),
+            Self::MatchArmList => write!(f, "MatchArmList"),
+            Self::MatchArm => write!(f, "MatchArm"),
+            Self::MatchFallbackArm { binding } => {
+                f.debug_struct("MatchFallbackArm").field("binding", binding).finish()
+            }
             Self::BoolLiteral(value) => write!(f, "BoolLiteral({value})"),
             Self::NumLiteral { .. } => write!(f, "NumLiteral"),
             Self::StringLiteral { .. } => write!(f, "StringLiteral"),
@@ -183,7 +195,7 @@ impl std::fmt::Debug for NodeKind {
 impl NodeKind {
     pub fn expr_requires_semi_as_stmt(&self) -> Option<bool> {
         match self {
-            Self::ComptimeBlock | Self::Block | Self::If | Self::Error => Some(false),
+            Self::ComptimeBlock | Self::Block | Self::If | Self::Match | Self::Error => Some(false),
             Self::BinaryExpr(_)
             | Self::UnaryExpr(_)
             | Self::ParenExpr

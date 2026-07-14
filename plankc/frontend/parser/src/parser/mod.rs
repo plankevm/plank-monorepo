@@ -24,6 +24,7 @@ const STMT_RECOVERY: &[Token] = &[
     Token::While,
     Token::Inline,
     Token::If,
+    Token::Match,
     Token::LeftCurly,
 ];
 
@@ -507,6 +508,63 @@ impl<'a> Parser<'a> {
         Some(self.close_node(conditional))
     }
 
+    fn try_parse_match(&mut self) -> Option<NodeIdx> {
+        let match_start = self.current_token_index();
+        if !self.eat(Token::Match) {
+            return None;
+        }
+
+        let mut r#match = self.alloc_node_from(match_start, NodeKind::Match);
+
+        let subject = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
+        self.push_child(&mut r#match, subject);
+
+        let mut arms = self.alloc_node(NodeKind::MatchArmList);
+        self.expect(Token::LeftCurly);
+
+        while !self.check(Token::RightCurly) && !self.eof() {
+            let mut arm = if self.eat(Token::Else) {
+                let mut arm = self.alloc_node_from(
+                    self.current_token_index() - 1,
+                    NodeKind::MatchFallbackArm { binding: false },
+                );
+
+                self.skip_trivia();
+                if self.at(Token::Identifier) {
+                    self.update_kind(arm, NodeKind::MatchFallbackArm { binding: true });
+                    let binding = self.try_parse_ident().expect("checked current token is ident");
+                    self.push_child(&mut arm, binding);
+                }
+
+                arm
+            } else {
+                let mut arm = self.alloc_node(NodeKind::MatchArm);
+                let key = self.parse_expr(ParseExprMode::AllowAll);
+                self.push_child(&mut arm, key);
+                arm
+            };
+
+            self.expect(Token::FatArrow);
+
+            let body = self.parse_expr(ParseExprMode::AllowAll);
+            self.push_child(&mut arm, body);
+
+            let arm = self.close_node(arm);
+            self.push_child(&mut arms, arm);
+
+            if !self.eat(Token::Comma) {
+                break;
+            }
+        }
+
+        self.expect(Token::RightCurly);
+
+        let arms = self.close_node(arms);
+        self.push_child(&mut r#match, arms);
+
+        Some(self.close_node(r#match))
+    }
+
     fn try_parse_standalone_expr(&mut self) -> Option<NodeIdx> {
         let start = self.current_token_index();
 
@@ -582,6 +640,10 @@ impl<'a> Parser<'a> {
 
         if let Some(conditional) = self.try_parse_conditional() {
             return Some(conditional);
+        }
+
+        if let Some(match_expr) = self.try_parse_match() {
+            return Some(match_expr);
         }
 
         None

@@ -492,6 +492,7 @@ impl BlockLowerer<'_> {
                 });
                 ExprKind::LocalRef(result)
             }
+            ast::Expr::Match(_) => todo!("lower match expressions"),
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
                 let body = self.create_sub_block(block.node().span(), |this| {

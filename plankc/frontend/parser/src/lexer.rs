@@ -121,6 +121,8 @@ pub enum Token {
     RightSquare,
     #[token("::")]
     DoubleColon,
+    #[token("=>")]
+    FatArrow,
 
     // Operators
     #[token("=")]
@@ -227,6 +229,8 @@ pub enum Token {
     Import,
     #[token("as")]
     As,
+    #[token("match")]
+    Match,
 
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Identifier,
@@ -322,6 +326,8 @@ impl Token {
             Token::RightRound => ")",
             Token::LeftSquare => "[",
             Token::RightSquare => "]",
+            Token::DoubleColon => "::",
+            Token::FatArrow => "=>",
             Token::Equals => "=",
             Token::Plus => "+",
             Token::PlusPercent => "+%",
@@ -370,7 +376,7 @@ impl Token {
             Token::Or => "or",
             Token::Import => "import",
             Token::As => "as",
-            Token::DoubleColon => "::",
+            Token::Match => "match",
 
             Token::Identifier
             | Token::BuiltinName
@@ -406,6 +412,8 @@ impl Token {
             Token::RightRound => "`)`",
             Token::LeftSquare => "`[`",
             Token::RightSquare => "`]`",
+            Token::DoubleColon => "`::`",
+            Token::FatArrow => "`=>`",
             Token::Equals => "`=`",
             Token::Plus => "`+`",
             Token::PlusPercent => "`+%`",
@@ -454,7 +462,7 @@ impl Token {
             Token::Or => "`or`",
             Token::Import => "`import`",
             Token::As => "`as`",
-            Token::DoubleColon => "`::`",
+            Token::Match => "`match`",
             Token::Identifier => "identifier",
             Token::BuiltinName => "builtin name",
             Token::DecimalLiteral => "decimal literal",
@@ -647,6 +655,7 @@ mod tests {
         assert_eq!(lex_all("while"), vec![(Token::While, 0..5, "while")]);
         assert_eq!(lex_all("true"), vec![(Token::True, 0..4, "true")]);
         assert_eq!(lex_all("false"), vec![(Token::False, 0..5, "false")]);
+        assert_eq!(lex_all("match"), vec![(Token::Match, 0..5, "match")]);
     }
 
     #[test]
@@ -666,8 +675,8 @@ mod tests {
 
     #[test]
     fn test_identifier_not_keyword() {
-        let results = lex_all("ifx elsewhere fns letter mutable constant");
-        assert_eq!(results.len(), 11);
+        let results = lex_all("ifx elsewhere fns letter mutable constant matcharoo");
+        assert_eq!(results.len(), 13);
         assert_eq!(results[0], (Token::Identifier, 0..3, "ifx"));
         assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
         assert_eq!(results[2], (Token::Identifier, 4..13, "elsewhere"));
@@ -679,6 +688,8 @@ mod tests {
         assert_eq!(results[8], (Token::Identifier, 25..32, "mutable"));
         assert_eq!(results[9], (Token::Whitespace, 32..33, " "));
         assert_eq!(results[10], (Token::Identifier, 33..41, "constant"));
+        assert_eq!(results[11], (Token::Whitespace, 41..42, " "));
+        assert_eq!(results[12], (Token::Identifier, 42..51, "matcharoo"));
     }
 
     #[test]

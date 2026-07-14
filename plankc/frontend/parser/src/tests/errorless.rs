@@ -1020,6 +1020,124 @@ fn test_if_expr_if_elseif_else() {
 }
 
 // =============================================================================
+// Match Expressions
+// =============================================================================
+
+#[test]
+fn test_match_expression() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const x = match value {
+            1 => one,
+            else => fallback,
+        };
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                Match
+                    "match"
+                    " "
+                    Identifier
+                        "value"
+                    " "
+                    MatchArmList
+                        "{"
+                        "\n    "
+                        MatchArm
+                            NumLiteral
+                                "1"
+                            " "
+                            "=>"
+                            " "
+                            Identifier
+                                "one"
+                        ","
+                        "\n    "
+                        MatchFallbackArm { binding: false }
+                            "else"
+                            " "
+                            "=>"
+                            " "
+                            Identifier
+                                "fallback"
+                        ","
+                        "\n"
+                        "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_match_expression_bound_fallback() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const x = match value {
+            1 => one,
+            else other => fallback(other),
+        };
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                Match
+                    "match"
+                    " "
+                    Identifier
+                        "value"
+                    " "
+                    MatchArmList
+                        "{"
+                        "\n    "
+                        MatchArm
+                            NumLiteral
+                                "1"
+                            " "
+                            "=>"
+                            " "
+                            Identifier
+                                "one"
+                        ","
+                        "\n    "
+                        MatchFallbackArm { binding: true }
+                            "else"
+                            " "
+                            Identifier
+                                "other"
+                            " "
+                            "=>"
+                            " "
+                            CallExpr
+                                Identifier
+                                    "fallback"
+                                "("
+                                Identifier
+                                    "other"
+                                ")"
+                        ","
+                        "\n"
+                        "}"
+                ";"
+        "#,
+    );
+}
+
+// =============================================================================
 // Function Calls
 // =============================================================================
 
