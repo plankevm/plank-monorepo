@@ -297,8 +297,21 @@ impl BlockLowerer<'_> {
             let value = match block.end_expr() {
                 Some(e) => this.lower_expr(e),
                 None => {
-                    let span = block.node().span();
-                    this.expr(ExprKind::VOID, span)
+                    let end = match block.statements().last() {
+                        Some(stmt) => {
+                            let span = match stmt {
+                                Statement::Let(stmt) => stmt.span,
+                                Statement::Return(stmt) => stmt.node().span(),
+                                Statement::Assign(stmt) => stmt.node().span(),
+                                Statement::While(stmt) => stmt.node().span(),
+                                Statement::Expr(expr) => expr.span(),
+                                Statement::Error { span } => span,
+                            };
+                            this.lexed.tokens_src_span(span).end
+                        }
+                        None => this.lexed.tokens_src_span(block.node().span()).end - 1,
+                    };
+                    Expr { kind: ExprKind::VOID, span: SourceSpan::new(end, end) }
                 }
             };
             this.emit(InstructionKind::Return(value));
