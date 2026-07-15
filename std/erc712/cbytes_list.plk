@@ -1,0 +1,99 @@
+import std::regions::*;
+import std::error::comptime_assert;
+import std::format::format_hex;
+
+const CBytesList = struct {
+    lengths: cbytes,
+    contents: cbytes,
+};
+
+const STR_LIST_LEN_BYTES = 32;
+
+const cbytes_list_length_of = fn (list: CBytesList, i: u256) u256 {
+    if i >= list.lengths.length >/ STR_LIST_LEN_BYTES {
+        @compile_error("index out of range");
+    }
+
+    @padded_read_cbytes(list.lengths, i * STR_LIST_LEN_BYTES)
+};
+
+const _cbytes_list_contents_offset = fn (list: CBytesList, i: u256) u256 {
+    let mut contents_offset = 0;
+    let mut seek_idx = 0;
+
+    while seek_idx < i {
+        let length = cbytes_list_length_of(list, seek_idx);
+        contents_offset = contents_offset + length;
+        seek_idx = seek_idx + 1;
+    }
+
+    contents_offset
+};
+
+const EMPTY_CBYTES_LIST = CBytesList {
+    lengths: "",
+    contents: ""
+};
+
+
+const cbytes_list_length = fn (list: CBytesList) u256 {
+    list.lengths.length -/ STR_LIST_LEN_BYTES
+};
+
+const cbytes_list_get = fn (list: CBytesList, i: u256) cbytes {
+    if i >= cbytes_list_length(list) {
+        @compile_error("index out of range");
+    }
+
+    let offset = _cbytes_list_contents_offset(list, i);
+    let length = cbytes_list_length_of(list, i);
+    slice_bytes(list.contents, offset, offset + length)
+};
+
+const cbytes_list_push = fn (list: CBytesList, value: cbytes) CBytesList {
+    CBytesList {
+        lengths:  @concat_cbytes((list.lengths, value.length)),
+        contents: @concat_cbytes((list.contents, value)),
+    }
+};
+
+const cbytes_list_insert = fn (list: CBytesList, i: u256, value: cbytes) CBytesList {
+    if i > cbytes_list_length(list) {
+        @compile_error("index out of range");
+    }
+
+    let contents_offset = _cbytes_list_contents_offset(list, i);
+    let lengths_offset = i * STR_LIST_LEN_BYTES;
+
+    CBytesList {
+        lengths: @concat_cbytes((
+            slice_bytes(list.lengths, 0, lengths_offset),
+            value.length,
+            slice_bytes(list.lengths, lengths_offset, list.lengths.length),
+        )),
+        contents: @concat_cbytes((
+            slice_bytes(list.contents, 0, contents_offset),
+            value,
+            slice_bytes(list.contents, contents_offset, list.contents.length),
+        ))
+    }
+};
+
+
+const _cbytes_list_tests = {
+    let mut list = EMPTY_CBYTES_LIST;
+    list = cbytes_list_push(list, "abc");
+    list = cbytes_list_push(list, "wowwww, very nice");
+    list = cbytes_list_push(list, "another");
+
+    comptime_assert(cbytes_list_get(list, 0) == "abc", "list[0]");
+    comptime_assert(cbytes_list_get(list, 1) == "wowwww, very nice", "list[1]");
+    comptime_assert(cbytes_list_get(list, 2) == "another", "list[2]");
+
+    list = cbytes_list_insert(list, 1, "skibidi");
+
+    comptime_assert(cbytes_list_get(list, 0) == "abc", "list'[0]");
+    comptime_assert(cbytes_list_get(list, 1) == "skibidi", "list'[1]");
+    comptime_assert(cbytes_list_get(list, 2) == "wowwww, very nice", "list'[2]");
+    comptime_assert(cbytes_list_get(list, 3) == "another", "list'[3]");
+};

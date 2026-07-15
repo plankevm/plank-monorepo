@@ -1,0 +1,245 @@
+import std::fixedbytes::bytes32;
+import std::regions::*;
+import std::addr::addr;
+import std::error::comptime_assert;
+import std::math::*;
+import std::option::*;
+import std::erc712::cbytes_list::*;
+
+const BaseTypeName = struct {
+    name: cbytes,
+    primitive: bool,
+};
+
+const base_type_name = fn (comptime type_names: $TypeNames, comptime T: type) BaseTypeName {
+    let prim = fn (name: cbytes) BaseTypeName {
+        BaseTypeName {
+            name: name,
+            primitive: true
+        }
+    };
+
+    if T == bool {
+        return prim("bool");
+    }
+    if T == u256 {
+        return prim("uint256");
+    }
+    if T == bytes32 {
+        return prim("bytes32");
+    }
+    if is_bytes(T) {
+        return prim("bytes");
+    }
+    if is_string(T) {
+        return prim("string");
+    }
+    if T == addr {
+        return prim("address");
+    }
+    if @is_struct(T) {
+        return BaseTypeName {
+            name: _get_name_fallback_plain(type_names, T),
+            primitive: false,
+        };
+    }
+
+    @compile_error("unsupported EIP712 type");
+};
+
+const TypeNameEntry = tuple { type, cbytes };
+
+const _is_type_name_map = fn (comptime M: type) bool {
+    if !@is_tuple(M) {
+        return false;
+    }
+
+    let mut i = 0;
+    while i < @field_count(M) {
+        if @field_type(M, i) != TypeNameEntry {
+            return false;
+        }
+        i = i + 1;
+    }
+
+    true
+};
+
+const _get_name_fallback_plain = fn (comptime names: $Names, comptime T: type) cbytes {
+    let mut i = 0;
+
+    while i < @field_count(Names) {
+        let entry = @get_field(names, i);
+        if @get_field(entry, 0) == T {
+            return @get_field(entry, 1);
+        }
+
+        i = i + 1;
+    }
+
+
+    if @is_struct(T) and @has_plain_name(T) {
+        return @type_name(T);
+    }
+
+    @compile_error("type not in names map");
+};
+
+const strings_le = fn (a: cbytes, b: cbytes) bool {
+    let min_len = min(a.length, b.length);
+    let sa = slice_bytes(a, 0, min_len);
+    let sb = slice_bytes(b, 0, min_len);
+
+    let mut offset = 0;
+    while offset < min_len {
+        let wa = @padded_read_cbytes(sa, offset);
+        let wb = @padded_read_cbytes(sb, offset);
+        if wa < wb {
+            return true;
+        } else if wa > wb {
+            return false;
+        }
+
+        offset = offset + 32;
+    }
+
+    a.length <= b.length
+};
+
+const _strings_le_tests = {
+    comptime_assert(strings_le("a", "a"), "a <= a");
+    comptime_assert(!strings_le("ab", "a"), "ab >= a");
+    comptime_assert(strings_le("ab", "ac"), "ab <= ac");
+};
+
+
+const _add_component = fn (components: CBytesList, encoded: cbytes) CBytesList {
+    let mut components = components;
+
+    let mut i = 0;
+    let mut broken = false;
+    while !broken and i < cbytes_list_length(components) {
+        let component = cbytes_list_get(components, i);
+        if strings_le(encoded, component) {
+            if encoded != component {
+                components = cbytes_list_insert(components, i, encoded);
+            }
+            broken = true;
+        }
+
+        i = i + 1;
+    }
+
+    if !broken {
+        components = cbytes_list_push(components, encoded);
+    }
+
+    components
+};
+
+const _merge_components = fn (components: CBytesList, res: CollectResult) CBytesList {
+    let mut components = _add_component(components, res.encoded);
+
+    let mut i = 0;
+    while i < cbytes_list_length(res.components) {
+        components = _add_component(components, cbytes_list_get(res.components, i));
+        i = i + 1;
+    }
+
+    components
+};
+
+const CollectResult = struct {
+    encoded: cbytes,
+    components: CBytesList,
+};
+
+const _collect_type_members = fn (
+    type_names: $TypeNames,
+    T: type
+) CollectResult {
+    let mut components = EMPTY_CBYTES_LIST;
+
+    let base_name = _get_name_fallback_plain(type_names, T);
+    let mut encoded = @concat_cbytes((base_name, "("));
+    let mut i = 0;
+
+    while i < @field_count(T) {
+        let fty = @field_type(T, i);
+        let field_type = base_type_name(type_names, fty);
+        if !field_type.primitive {
+            let res = _collect_type_members(type_names, fty);
+            components = _merge_components(components, res);
+        }
+        let field_name = @field_name(T, i);
+        let comma = if i == 0 { "" } else { "," };
+        encoded = @concat_cbytes((encoded, comma, field_type.name, " ", field_name));
+
+        i = i + 1;
+    }
+
+    let encoded = @concat_cbytes((encoded, ")"));
+
+    CollectResult {
+        encoded: encoded,
+        components: components,
+    }
+};
+
+const encode_type = fn (type_names: $TypeNames, T: type) cbytes {
+    if !_is_type_name_map(TypeNames) {
+        @compile_error("expected `type_names` to be a tuple of `TypeNameEntry` values");
+    }
+
+    if !@is_struct(T) {
+        @compile_error("encode_type expects `T` to be a struct type");
+    }
+
+    let result = _collect_type_members(type_names, T);
+
+    @concat_cbytes((result.encoded, result.components.contents))
+};
+
+const type_hash = fn (type_names: $TypeNames, T: type) bytes32 {
+    bytes32 {
+        raw: @keccak256_cbytes(encode_type(type_names, T))
+    }
+};
+
+const Nice = struct {
+    owner: addr,
+    salt: bytes32,
+};
+
+const Hello = struct {
+    bob: addr,
+    wow: u256,
+    nice: Nice,
+};
+
+const D = struct {
+    x: u256,
+};
+
+const Z = struct {
+    d: D,
+};
+
+const B = struct {
+    d: D,
+};
+
+const A = struct {
+    b: B,
+    c: Z,
+};
+
+init {
+    @compile_error(@concat_cbytes((
+         "A:", encode_type(((Z, "C"),), A),
+        ";B:", encode_type(((Z, "C"),), B),
+        ";Z:", encode_type(((Z, "C"),), Z),
+        ";D:", encode_type(((Z, "C"),), D),
+    )));
+    @evm_stop();
+}

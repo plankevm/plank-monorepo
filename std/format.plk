@@ -1,0 +1,20 @@
+const format_nibble = fn (b: u256) cbytes {
+    @slice_cbytes("0123456789abcdef", b, b + 1)
+};
+
+const format_hex = fn (s: cbytes) cbytes {
+    if s.length == 0 {
+        return "";
+    }
+    if s.length == 1 {
+        let byte = @evm_byte(0, @padded_read_cbytes(s, 0));
+        return @concat_cbytes((
+            format_nibble(byte >> 4),
+            format_nibble(byte & 0x0f),
+        ));
+    }
+    let mid = s.length +/ 2;
+    let lhs = format_hex(@slice_cbytes(s, 0, mid));
+    let rhs = format_hex(@slice_cbytes(s, mid, s.length));
+    @concat_cbytes((lhs, rhs))
+};

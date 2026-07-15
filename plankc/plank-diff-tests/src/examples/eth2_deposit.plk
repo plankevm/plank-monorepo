@@ -1,0 +1,112 @@
+import std::precompile::sha256;
+import std::constructor::*;
+import std::regions::bytes;
+
+
+const HASH_LENGTH = 32;
+const DEPOSIT_CONTRACT_TREE_DEPTH = 32;
+const MAX_DEPOSIT_COUNT = safe_exp(2, DEPOSIT_CONTRACT_TREE_DEPTH) - 1;
+
+const ZERO_HASHES = {
+    let mut table = @concat_cbytes((0,));
+    let mut last_hash = 0;
+
+    let mut i = 1;
+    while i < DEPOSIT_CONTRACT_TREE_DEPTH {
+        last_hash = @sha256_cbytes(@concat_cbytes((last_hash, last_hash)));
+        table = @concat_cbytes((table, last_hash));
+        i = i + 1;
+    }
+
+    table
+};
+
+const safe_exp = fn (base: u256, exp: u256) u256 {
+    let mut exp = exp;
+    let mut res = 1;
+    let mut factor = base;
+    while exp != 0 {
+        if exp & 2 == 1 {
+            res = res * factor;
+        }
+        factor = factor * factor;
+        exp = exp >> 1;
+    }
+    res
+};
+
+
+const _zero_hashes_len_valid = {
+    if DEPOSIT_CONTRACT_TREE_DEPTH * HASH_LENGTH != @bytes_len(ZERO_HASHES) {
+        @compile_error("invalid `ZERO_HASHES` length");
+    }
+};
+
+
+// const to_little_endian_64 = fn (value: u256)
+
+const BRANCHES_START_SLOT = 0;
+const DEPOSIT_COUNT_SLOT = BRANCHES_START_SLOT + DEPOSIT_CONTRACT_TREE_DEPTH;
+
+init {
+    return_runtime();
+}
+
+const deposit_count = fn () u256 { @evm_sload(DEPOSIT_COUNT_SLOT) };
+
+const to_little_endian = fn (x: u256) u256 {
+    let b0 = @evm_byte(31, x);
+    let b1 = @evm_byte(30, x);
+    let b2 = @evm_byte(29, x);
+    let b3 = @evm_byte(28, x);
+    let b4 = @evm_byte(27, x);
+    let b5 = @evm_byte(26, x);
+    let b6 = @evm_byte(25, x);
+    let b7 = @evm_byte(24, x);
+    (b0 << 248) | (b1 << 240) | (b2 << 232) | (b3 << 224) | (b4 << 216) | (b5 << 208) | (b6 << 200) | (b7 << 192)
+};
+
+const assert_eq = fn (lhs : $T, rhs: T) void {
+    if lhs != rhs {
+        @compile_error("assert failed");
+    }
+};
+
+const _to_little_endian_tests = {
+    assert_eq(to_little_endian(0xff000807060504030201), 0x0102030405060708 << (256 - 64));
+};
+
+
+const compute_deposit_root = fn () u256 {
+    let buf_len = 0x40;
+    let buf = @malloc_uninit(buf_len);
+    let lhs = buf +% 0x00;
+    let rhs = lhs +% 0x20;
+
+    let mut node = 0;
+    let mut height = 0;
+    let deposit_count_cached = deposit_count();
+    let mut size = deposit_count_cached;
+    while height < DEPOSIT_CONTRACT_TREE_DEPTH {
+        if size & 1 == 1 {
+            @mstore32(lhs, @evm_sload(BRANCHES_START_SLOT +% height));
+            @mstore32(rhs, node);
+        } else {
+            @mstore32(lhs, node);
+            let zero_hash_offset = @data_offset(ZERO_HASHES) +% height *% HASH_LENGTH;
+            @evm_codecopy(rhs, zero_hash_offset, HASH_LENGTH);
+        }
+
+        node = sha256(membytes_new(buf, buf_len));
+        height = height +% 1;
+        size = size </ 2;
+    }
+
+    @mstore32(lhs, node);
+    @mstore32(rhs, to_little_endian(deposit_count_cached));
+    sha256(membytes_new(buf, buf_len))
+};
+
+run {
+    @evm_invalid();
+}

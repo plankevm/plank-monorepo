@@ -3,3 +3,17 @@ const require = fn (condition: bool) void {
         @evm_revert(@malloc_uninit(0), 0);
     }
 };
+
+const comptime_assert = fn (comptime condition: bool, reason: $T) void {
+    let reason = if T == cbytes {
+        @concat_cbytes(("assert failed: ", reason))
+    } else if T == void or T == tuple {} {
+        "assert failed"
+    } else {
+        @compile_error("invalid reason type")
+    };
+
+    if !condition {
+        @compile_error(reason);
+    }
+};

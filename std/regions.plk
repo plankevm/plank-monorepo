@@ -5,7 +5,10 @@ const memory = struct {};
 const code = struct {};
 const calldata = struct {};
 
-const is_region = fn (comptime region: type) bool {
+const is_region = fn (comptime region: $T) bool {
+    if T != type {
+        return false;
+    }
     region == memory or region == code or region == calldata
 };
 
@@ -24,6 +27,31 @@ const bytes = fn (comptime region: type) type {
         ptr: region_ptr_type(region),
         length: u256,
     };
+};
+
+const is_bytes = fn (comptime T: type) bool {
+    if !@is_struct(T) {
+        return false;
+    }
+
+    let region = @type_index(T);
+    is_region(region) and bytes(region) == T
+};
+
+const string = fn (comptime region: type) type {
+    return struct region {
+        ptr: region_ptr_type(region),
+        length: u256,
+    };
+};
+
+const is_string = fn (comptime T: type) bool {
+    if !@is_struct(T) {
+        return false;
+    }
+
+    let region = @type_index(T);
+    is_region(region) and string(region) == T
 };
 
 const embed_as = fn (comptime cb: cbytes, comptime region: type) bytes(region) {
@@ -118,5 +146,6 @@ const bytes_eq = fn (b1: $T1, b2: $T2) bool {
     if T2 == cbytes {
         return keccak256(b1).raw == comptime { keccak256(b2).raw };
     }
-    @compile_error("unsupported type pair");
+
+    keccak256(b1).raw == keccak256(b2).raw
 };
