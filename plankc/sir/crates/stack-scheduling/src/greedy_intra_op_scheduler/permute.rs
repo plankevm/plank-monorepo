@@ -17,33 +17,6 @@ impl ValueLoc {
     }
 }
 
-#[derive(Clone)]
-struct State {
-    todo_preserve: Vec<ValueNodeId>,
-    swaps: Vec<u16>,
-    executed: Vec<u16>,
-}
-
-impl State {
-    fn advance(&self, target: TargetHead<'_>, loc: ValueLoc, swap_idx: usize) -> Option<Self> {
-        let swap = self.swaps[swap_idx];
-        let mut next = match (loc, target.loc(swap)) {
-            (l1, l2) if l1 == l2 => self.clone(),
-            (ValueLoc::Head(value), ValueLoc::Tail) => {
-                let preserve_idx =
-                    self.todo_preserve.iter().position(|&preserve| preserve == value)?;
-                let mut next = self.clone();
-                next.todo_preserve.swap_remove(preserve_idx);
-                next
-            }
-            _ => return None,
-        };
-        next.swaps.swap_remove(swap_idx);
-        next.executed.push(swap);
-        Some(next)
-    }
-}
-
 #[derive(Clone, Copy)]
 struct TargetHead<'a> {
     values: &'a [ValueNodeId],
@@ -60,24 +33,6 @@ impl TargetHead<'_> {
 
     fn value(self, i: u16) -> ValueNodeId {
         self.values[usize::from(i)]
-    }
-}
-
-#[derive(Clone, Copy)]
-enum TopValue {
-    Head(ValueNodeId),
-    Preserve(ValueNodeId),
-    Tail,
-}
-
-impl TopValue {
-    fn may_go_to(self, loc: ValueLoc) -> bool {
-        match (self, loc) {
-            (TopValue::Head(_), ValueLoc::Head(_)) => true,
-            (TopValue::Preserve(_), _) => true,
-            (TopValue::Tail, ValueLoc::Tail) => true,
-            _ => false,
-        }
     }
 }
 
@@ -404,7 +359,7 @@ mod tests {
             assert_eq!(head_end, target.len() - (missing_copies as usize));
         }
 
-        let start_to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
+        let start_to_preserve = build_to_preserve(head_end, current, target, last_uses);
         let target_depth_delta = target.len() - head_end;
 
         let mut current = current.to_vec();
@@ -413,7 +368,7 @@ mod tests {
 
         for &swap in executed {
             let i = usize::from(swap);
-            let top_want = target[target_depth_delta + 0];
+            let top_want = target[target_depth_delta];
             let top = current[0];
             let have = current[i];
 
@@ -487,17 +442,17 @@ mod tests {
 
     #[test]
     fn longest_branch_wins_over_fixing_top() {
-        opts().allow_swap_top().assert([1, 2, 3, 4], [4, 1, 2, 1], [1, 2]);
+        opts().last_uses([2, 4]).allow_swap_top().assert([1, 2, 3, 4, 1, 1], [4, 1, 2, 1], [1, 2]);
     }
 
     #[test]
     fn returns_longest_partial_progress() {
-        opts().assert([1, 2, 3], [9, 1, 2], [1, 2]);
+        opts().last_uses([1, 2]).assert([1, 2, 3, 9, 9], [9, 1, 2], [1, 2]);
     }
 
     #[test]
     fn equal_length_branches_choose_first_position() {
-        opts().assert([1, 2, 3], [9, 1, 1], [1]);
+        opts().last_uses([]).assert([1, 2, 3, 1, 1, 9, 9], [9, 1, 1], [1]);
     }
 
     #[test]
@@ -516,8 +471,8 @@ mod tests {
     }
 
     #[test]
-    fn skibidi() {
-        opts().last_uses([1, 4]).assert([9, 1, 4, 2, 3], [3, 1, 2, 4], []);
+    fn tail_progress_enables_head_progress() {
+        opts().last_uses([1, 4]).assert([9, 1, 4, 2, 3], [3, 1, 2, 4], [2, 1]);
     }
 
     #[test]
@@ -532,9 +487,11 @@ mod tests {
 
     #[test]
     fn paths_budget_returns_best_traced_path() {
-        opts().budget(0).assert([1, 8, 2, 3], [9, 1, 1, 2], []);
-        opts().budget(1).assert([1, 8, 2, 3], [9, 1, 1, 2], [1]);
-        opts().budget(2).assert([1, 8, 2, 3], [9, 1, 1, 2], [2, 3]);
+        let current = [1, 8, 2, 3, 1, 1, 9, 9];
+        let target = [9, 1, 1, 2];
+        opts().last_uses([2]).budget(0).assert(current, target, []);
+        opts().last_uses([2]).budget(1).assert(current, target, [1]);
+        opts().last_uses([2]).budget(2).assert(current, target, [2, 3]);
     }
 
     #[test]
@@ -560,51 +517,74 @@ mod tests {
     }
 
     fn generated_context() -> impl Strategy<Value = GeneratedContext> {
-        (prop::collection::vec(0u8..64, 1..65), prop::collection::vec(0u8..64, 1..65))
-            .prop_flat_map(|(current, target)| {
-                let last_use_candidates = unique(target.clone());
+        prop::collection::vec(0u8..64, 1..33)
+            .prop_flat_map(|target| {
+                let target_len = target.len();
+                (Just(target.clone()), prop::sample::subsequence(target, 1..=target_len))
+            })
+            .prop_flat_map(|(target, operand_copies)| {
+                let last_use_candidates = unique(operand_copies.clone());
                 let candidate_count = last_use_candidates.len();
                 (
-                    Just((current, target)),
-                    prop::sample::subsequence(last_use_candidates, 1..=candidate_count),
+                    Just((target, operand_copies)),
+                    prop::sample::subsequence(last_use_candidates, 0..=candidate_count),
                 )
             })
-            .prop_map(|((current, target), last_uses)| GeneratedContext {
-                current: values(&current),
-                target: values(&target),
-                last_uses: values(&last_uses),
+            .prop_flat_map(|((target, operand_copies), last_uses)| {
+                let mut current = operand_copies;
+                current.extend(unique(
+                    target.iter().copied().filter(|value| !last_uses.contains(value)).collect(),
+                ));
+                (Just((target, last_uses, current)), prop::collection::vec(64u8..128, 0..17))
+            })
+            .prop_flat_map(|((target, last_uses, mut current), irrelevant)| {
+                current.extend(irrelevant);
+                let current_len = current.len();
+                (
+                    Just((target, last_uses, current)),
+                    prop::collection::vec(any::<u16>(), current_len),
+                )
+            })
+            .prop_map(|((target, last_uses, current), ordering)| {
+                let mut positions = (0..current.len()).collect::<Vec<_>>();
+                positions.sort_by_key(|&position| ordering[position]);
+                let current =
+                    positions.into_iter().map(|position| current[position]).collect::<Vec<_>>();
+                GeneratedContext {
+                    current: values(&current),
+                    target: values(&target),
+                    last_uses: values(&last_uses),
+                }
             })
     }
 
-    // proptest! {
-    //     #![proptest_config(ProptestConfig::with_cases(512))]
-    //
-    //     #[test]
-    //     fn generated_swaps_are_legal_and_make_progress(
-    //         context in generated_context(),
-    //     ) {
-    //         let GeneratedContext {   current, target, last_uses } = context;
-    //         let head_end = compute_head_end(&current, &target, &last_uses);
-    //         let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
-    //         let actual = best_permute(
-    //             &to_preserve,
-    //             &last_uses,
-    //             head_end,
-    //             &current,
-    //             &target,
-    //             TEST_PATHS_BUDGET,
-    //             false
-    //         );
-    //         let replayed = swap_sequence_legal(
-    //             head_end,
-    //             &current,
-    //             &target,
-    //             &last_uses,
-    //             &actual,
-    //             false
-    //         );
-    //
-    //         prop_assert!(replayed);
-    //     }
-    // }
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        #[test]
+        fn generated_swaps_are_legal(context in generated_context()) {
+            let GeneratedContext { current, target, last_uses } = context;
+            let head_end = compute_head_end(&current, &target, &last_uses);
+            let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
+            let actual = best_permute(
+                &to_preserve,
+                &last_uses,
+                head_end,
+                &current,
+                &target,
+                TEST_PATHS_BUDGET,
+                false
+            );
+            let replayed = swap_sequence_legal(
+                head_end,
+                &current,
+                &target,
+                &last_uses,
+                &actual,
+                false
+            );
+
+            prop_assert!(replayed);
+        }
+    }
 }
