@@ -429,15 +429,12 @@ fn test_never_fn_missing_termination() {
         ",
         &[r#"
         error: mismatched types
-         --> main.plk:2:27
+         --> main.plk:3:19
           |
-        2 |       let halt = fn() never {
-          |  _____________________-----_^
-          | |                     |
-          | |                     `never` expected because of this
-        3 | |         let x = 5;
-        4 | |     };
-          | |_____^ expected `never`, got `void`
+        2 |     let halt = fn() never {
+          |                     ----- `never` expected because of this
+        3 |         let x = 5;
+          |                   ^ expected `never`, got `void`
         "#],
     );
 }
