@@ -1,0 +1,18 @@
+init {
+    let input = @evm_calldataload(0);
+
+    let mut value = 2;
+    let is_zero = @evm_iszero(input);
+    if is_zero {
+    } else {
+    }
+    if is_zero {
+        value = 0;
+    } else {
+    }
+    value = @evm_div(value, value);
+
+    let out = @malloc_uninit(32);
+    @mstore32(out, value);
+    @evm_return(out, 32);
+}
