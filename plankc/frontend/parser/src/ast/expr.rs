@@ -652,6 +652,17 @@ impl<'cst> Statement<'cst> {
         }
         None
     }
+
+    pub fn span(&self) -> TokenSpan {
+        match self {
+            Statement::Let(stmt) => stmt.span,
+            Statement::Return(stmt) => stmt.node().span(),
+            Statement::Assign(stmt) => stmt.node().span(),
+            Statement::While(stmt) => stmt.node().span(),
+            Statement::Expr(expr) => expr.span(),
+            Statement::Error { span } => *span,
+        }
+    }
 }
 
 impl<'cst> BlockExpr<'cst> {
