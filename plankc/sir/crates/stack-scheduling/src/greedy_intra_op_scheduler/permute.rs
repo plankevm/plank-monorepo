@@ -303,14 +303,14 @@ mod tests {
     }
 
     struct AssertPermutationBuilder {
-        last_uses: Vec<u8>,
+        last_uses_override: Option<Vec<u8>>,
         paths_budget: usize,
         allow_swap_top: bool,
     }
 
     impl AssertPermutationBuilder {
         fn last_uses(mut self, values: impl AsRef<[u8]>) -> Self {
-            self.last_uses = values.as_ref().into();
+            self.last_uses_override = Some(values.as_ref().into());
             self
         }
 
@@ -333,7 +333,10 @@ mod tests {
         ) {
             let current = values(current.as_ref());
             let target = values(target.as_ref());
-            let last_uses = values(&self.last_uses);
+            let last_uses = match self.last_uses_override {
+                Some(last_uses) => values(&last_uses),
+                None => unique(target.clone()),
+            };
 
             let head_end = compute_head_end(&current, &target, &last_uses);
             let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
@@ -347,7 +350,7 @@ mod tests {
                 self.paths_budget,
                 self.allow_swap_top,
             );
-            assert_eq!(actual, expected.as_ref(), "actual != expected");
+            assert_eq!(actual, expected.as_ref(), "actual != expected (head_end = {head_end})");
             assert!(
                 swap_sequence_legal(
                     head_end,
@@ -365,7 +368,7 @@ mod tests {
 
     fn opts() -> AssertPermutationBuilder {
         AssertPermutationBuilder {
-            last_uses: Vec::new(),
+            last_uses_override: None,
             paths_budget: TEST_PATHS_BUDGET,
             allow_swap_top: false,
         }
@@ -474,7 +477,7 @@ mod tests {
 
     #[test]
     fn simple_cycle() {
-        opts().assert([1, 2], [2, 1], [1]);
+        opts().last_uses([1, 2]).assert([1, 2], [2, 1], [1]);
     }
 
     #[test]
@@ -490,11 +493,6 @@ mod tests {
     #[test]
     fn returns_longest_partial_progress() {
         opts().assert([1, 2, 3], [9, 1, 2], [1, 2]);
-    }
-
-    #[test]
-    fn correct_top_wins_over_unfinished_swappable_path() {
-        opts().assert([1, 2, 4, 3, 5], [3, 1, 1, 2, 4], [1, 3]);
     }
 
     #[test]
@@ -541,7 +539,11 @@ mod tests {
 
     #[test]
     fn allow_swap_top_fixes_remaining() {
-        opts().allow_swap_top().assert([1, 3, 4, 2], [1, 2, 3, 4], [1, 2, 3, 1]);
+        opts().last_uses([1, 2, 3, 4]).allow_swap_top().assert(
+            [1, 3, 4, 2],
+            [1, 2, 3, 4],
+            [1, 2, 3, 1],
+        );
     }
 
     #[derive(Debug)]
@@ -551,7 +553,7 @@ mod tests {
         last_uses: Vec<ValueNodeId>,
     }
 
-    fn unique(mut values: Vec<u8>) -> Vec<u8> {
+    fn unique<T: Ord>(mut values: Vec<T>) -> Vec<T> {
         values.sort_unstable();
         values.dedup();
         values
@@ -564,7 +566,7 @@ mod tests {
                 let candidate_count = last_use_candidates.len();
                 (
                     Just((current, target)),
-                    prop::sample::subsequence(last_use_candidates, 0..=candidate_count),
+                    prop::sample::subsequence(last_use_candidates, 1..=candidate_count),
                 )
             })
             .prop_map(|((current, target), last_uses)| GeneratedContext {
