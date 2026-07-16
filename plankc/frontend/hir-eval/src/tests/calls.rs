@@ -409,7 +409,7 @@ fn test_no_matching_builtin_signature() {
         2 |     @evm_add(true, false);
           |     ^^^^^^^^^^^^^^^^^^^^^ `@evm_add` cannot be called with (bool, bool)
           |
-          = note: `@evm_add` accepts (u256, u256), (memptr, u256), (u256, memptr)
+          = note: `@evm_add` accepts (u256, u256)
         "#],
     );
 }
@@ -430,7 +430,7 @@ fn test_builtin_wrong_arg_count() {
         2 |     @evm_add(1);
           |     ^^^^^^^^^^^ `@evm_add` called with 1 argument, but requires 2
           |
-          = note: `@evm_add` accepts (u256, u256), (memptr, u256), (u256, memptr)
+          = note: `@evm_add` accepts (u256, u256)
         "#],
     );
 }

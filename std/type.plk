@@ -7,8 +7,6 @@ const sizeof = fn (comptime T: type) u256 {
         32
     } else if T == bool {
         32
-    } else if T == memptr {
-        32
     } else if @is_struct(T) {
         fold(
             @field_count(T),

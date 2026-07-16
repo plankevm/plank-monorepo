@@ -55,7 +55,7 @@ const abi_encoded_size = fn (value: $T) u256 {
 
 // Encodes `value` into pre-allocated memory at `ptr`. Caller must ensure
 // the region is large enough. Returns the number of bytes written.
-const unsafe_abi_encode = fn (ptr: memptr, value: $T) u256 {
+const unsafe_abi_encode = fn (ptr: u256, value: $T) u256 {
     unsafe_abi_encode_to(ptr, 0, value)
 };
 
@@ -79,7 +79,7 @@ const abi_encode = fn (value: $T) membytes {
 
 // Decodes a value of type T from raw memory. Caller must ensure
 // the region contains valid ABI-encoded data.
-const unsafe_abi_decode = fn (comptime T: type, ptr: memptr, length: u256) T {
+const unsafe_abi_decode = fn (comptime T: type, ptr: u256, length: u256) T {
     unsafe_abi_decode_from(T, ptr, 0)
 };
 

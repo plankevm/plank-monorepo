@@ -86,7 +86,7 @@ fn test_evm_builtins() {
             let z = @evm_add(3, 4);
             @evm_add(3, 4);
             let w = @evm_callvalue();
-            let a: memptr = @malloc_uninit(@evm_calldataload(34));
+            let a: u256 = @malloc_uninit(@evm_calldataload(34));
             @evm_sstore(x, z);
             @evm_stop();
         }
@@ -166,7 +166,7 @@ fn test_explicit_terminator() {
 fn test_simple_call() {
     assert_lowers_to(
         r#"
-        const dangling = fn () memptr {
+        const dangling = fn () u256 {
             @malloc_uninit(0)
         };
 
@@ -618,7 +618,7 @@ fn test_multi_entry_multi_function() {
     assert_lowers_to(
         r#"
         const return_runtime = fn() never {
-            let runtime: memptr = @malloc_uninit(@runtime_length());
+            let runtime: u256 = @malloc_uninit(@runtime_length());
             @evm_codecopy(runtime, @runtime_start_offset(), @runtime_length());
             @evm_return(runtime, @runtime_length());
         };
@@ -800,45 +800,6 @@ fn test_uninit_struct() {
 }
 
 #[test]
-fn test_uninit_struct_with_memptr() {
-    assert_lowers_to(
-        r#"
-        const Buf = struct { ptr_a: memptr, ptr_b: memptr };
-        init {
-            let b = @uninit(Buf);
-            let mut a: memptr = b.ptr_a;
-            let mut c: memptr = b.ptr_b;
-            @evm_stop();
-        }
-        "#,
-        r#"
-        Init: @0
-        Functions:
-            fn @0 -> entry @0  (outputs: 0)
-
-        Basic Blocks:
-            @0 {
-                $0 = const 0x0
-                $1 = mallocany $0
-                $2 = const 0x0
-                $3 = mallocany $2
-                $4 = copy $1
-                $5 = copy $3
-                $6 = copy $4
-                $7 = copy $5
-                $8 = copy $6
-                $9 = copy $7
-                $10 = copy $8
-                $11 = copy $6
-                $12 = copy $7
-                $13 = copy $12
-                stop
-            }
-        "#,
-    );
-}
-
-#[test]
 fn test_uninit_struct_with_void_field() {
     assert_lowers_to(
         r#"
@@ -900,7 +861,6 @@ fn test_uninit_primitives() {
         init {
             let mut a: u256 = @uninit(u256);
             let mut b: bool = @uninit(bool);
-            let mut c: memptr = @uninit(memptr);
             @evm_stop();
         }
         "#,
@@ -913,9 +873,6 @@ fn test_uninit_primitives() {
             @0 {
                 $0 = const 0x0
                 $1 = const 0x0
-                $2 = const 0x0
-                $3 = mallocany $2
-                $4 = copy $3
                 stop
             }
         "#,

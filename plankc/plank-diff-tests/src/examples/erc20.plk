@@ -130,7 +130,7 @@ const compute_domain_separator = fn () u256 {
     @evm_keccak256(buf, 32 * 5)
 };
 
-const copy_domain_separator = fn (dst: memptr) void {
+const copy_domain_separator = fn (dst: u256) void {
     @evm_codecopy(dst, @runtime_length(), 32);
 };
 

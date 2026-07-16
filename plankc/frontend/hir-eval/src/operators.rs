@@ -131,17 +131,7 @@ impl crate::scope::Scope<'_, '_> {
         }
 
         let Some(closure_vid) = self.eval.operator_table.lookup_binary(op, lhs_ty) else {
-            if lhs_ty == TypeId::MEMORY_POINTER && matches!(op, BinaryOp::Add | BinaryOp::Subtract)
-            {
-                self.diag_ctx.emit_operator_not_supported_for_memptr(op, self.loc(expr));
-            } else {
-                self.diag_ctx.emit_operator_not_supported(
-                    self.eval.values,
-                    op,
-                    lhs_ty,
-                    self.loc(expr),
-                );
-            }
+            self.diag_ctx.emit_operator_not_supported(self.eval.values, op, lhs_ty, self.loc(expr));
             return Err(Poisoned);
         };
 
@@ -282,10 +272,7 @@ impl crate::scope::Scope<'_, '_> {
                 let result = if op_equals { lhs == rhs } else { lhs != rhs };
                 Ok(Ok(EvalValue::Comptime(result.into())))
             }
-            (
-                true,
-                Ok(PrimitiveType::U256 | PrimitiveType::MemoryPointer | PrimitiveType::Bool),
-            ) => {
+            (true, Ok(PrimitiveType::U256 | PrimitiveType::Bool)) => {
                 let args = [lhs, rhs];
                 self.eval_runtime_foldable_builtin(RuntimeBuiltin::Eq, &args, expr)
             }
@@ -293,7 +280,7 @@ impl crate::scope::Scope<'_, '_> {
                 // `void` is the empty tuple: `() == ()` is always `true`, `!=` always `false`.
                 Ok(Ok(EvalValue::Comptime(op_equals.into())))
             }
-            (false, Ok(PrimitiveType::U256 | PrimitiveType::MemoryPointer)) => {
+            (false, Ok(PrimitiveType::U256)) => {
                 let lhs_value = self.try_comptime(lhs_binding, expr)?;
                 let rhs_value = self.try_comptime(rhs_binding, expr)?;
                 if let Some((lhs, rhs)) = lhs_value.zip(rhs_value) {

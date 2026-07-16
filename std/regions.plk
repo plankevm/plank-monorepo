@@ -11,7 +11,7 @@ const is_region = fn (comptime region: type) bool {
 
 const region_ptr_type = fn (comptime region: type) type {
     if region == memory {
-        return memptr;
+        return u256;
     }
     if region == code or region == calldata {
         return u256;
