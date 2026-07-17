@@ -1593,3 +1593,83 @@ fn test_return_outside_function_body() {
     );
     pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
 }
+
+#[test]
+fn test_multiple_match_else_arms() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let x = match 0 {
+                else => 1,
+                else other => other,
+            };
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: multiple else arms in match
+         --> main.plk:4:9
+          |
+        3 |         else => 1,
+          |         --------- previous else arm
+        4 |         else other => other,
+          |         ^^^^^^^^^^^^^^^^^^^ duplicate else arm
+          |
+          = note: a match expression can have only one else arm
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_missing_match_else_arm() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let x = match 0 {
+                1 => 1,
+            };
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: missing else arm in match
+         --> main.plk:2:13
+          |
+        2 |       let x = match 0 {
+          |  _____________^
+        3 | |         1 => 1,
+        4 | |     };
+          | |_____^ match expression requires an else arm
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_match_case_after_else_arm() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let x = match 0 {
+                else => 0,
+                1 => 1,
+            };
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: else arm must be last
+         --> main.plk:4:9
+          |
+        3 |         else => 0,
+          |         --------- else arm starts here
+        4 |         1 => 1,
+          |         ^^^^^^ this arm appears after else
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}

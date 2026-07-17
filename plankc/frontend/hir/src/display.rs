@@ -216,6 +216,24 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
+            InstructionKind::Match { subject, result, arms, fallback } => {
+                write!(f, "{pad}")?;
+                self.fmt_local(f, result)?;
+                write!(f, " <- match ")?;
+                self.fmt_local(f, subject)?;
+                writeln!(f, " {{")?;
+                for arm in &self.hir.match_arms[arms] {
+                    write!(f, "{pad}    ")?;
+                    self.fmt_local(f, arm.key)?;
+                    writeln!(f, " => {{")?;
+                    self.fmt_block(f, arm.body, indent + 2)?;
+                    writeln!(f, "{pad}    }}")?;
+                }
+                writeln!(f, "{pad}    else => {{")?;
+                self.fmt_block(f, fallback, indent + 2)?;
+                writeln!(f, "{pad}    }}")?;
+                writeln!(f, "{pad}}}")
+            }
             InstructionKind::While { inline, condition_block, condition, body } => {
                 write!(f, "{pad}")?;
                 if inline {

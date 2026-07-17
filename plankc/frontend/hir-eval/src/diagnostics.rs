@@ -83,6 +83,9 @@ impl DiagCtx<'_> {
             hir::ComptimeReason::Assign => diagnostic.note(
                 "assignment to value defined as `comptime let mut` must be known at compile time",
             ),
+            hir::ComptimeReason::MatchKey => {
+                diagnostic.note("match arm key must be known at compile time")
+            }
         }
     }
 

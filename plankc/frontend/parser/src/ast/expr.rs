@@ -429,7 +429,7 @@ impl<'cst> MatchExpr<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
-    pub fn arms(&self) -> impl Iterator<Item = Result<MatchArm<'cst>, TokenSpan>> {
+    pub fn arms(&self) -> impl Iterator<Item = MatchArm<'cst>> {
         self.arm_list.children().map(MatchArm::new)
     }
 
@@ -452,23 +452,26 @@ pub struct MatchArm<'cst> {
 }
 
 impl<'cst> MatchArm<'cst> {
-    fn new(view: NodeView<'cst>) -> Result<Self, TokenSpan> {
+    fn new(view: NodeView<'cst>) -> Self {
         match view.kind() {
-            NodeKind::MatchArm => Ok(Self {
-                kind: MatchArmKind::Case { key: view.child(0).ok_or(view.span())? },
-                body: view.child(1).ok_or(view.span())?,
+            NodeKind::MatchArm => Self {
+                kind: MatchArmKind::Case { key: view.child(0).expect("match arm must have key") },
+                body: view.child(1).expect("match arm must have body"),
                 view,
-            }),
+            },
             NodeKind::MatchFallbackArm { binding } => {
                 let (binding, body) = if binding {
-                    (Some(view.child(0).ok_or(view.span())?), view.child(1).ok_or(view.span())?)
+                    (
+                        Some(view.child(0).expect("match fallback binding must have name")),
+                        view.child(1).expect("match fallback arm must have body"),
+                    )
                 } else {
-                    (None, view.child(0).ok_or(view.span())?)
+                    (None, view.child(0).expect("match fallback arm must have body"))
                 };
 
-                Ok(Self { kind: MatchArmKind::Fallback { binding }, body, view })
+                Self { kind: MatchArmKind::Fallback { binding }, body, view }
             }
-            _ => Err(view.span()),
+            _ => unreachable!("match arm list must contain only match arms"),
         }
     }
 }

@@ -547,6 +547,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::If { outer_result, condition, then_block, else_block } => {
                 self.eval_if(outer_result, condition, then_block, else_block)?
             }
+            InstructionKind::Match { .. } => todo!("evaluate match instructions"),
             InstructionKind::While { inline, condition_block, condition, body } => {
                 if inline {
                     self.eval_inline_while(condition_block, condition, body)?

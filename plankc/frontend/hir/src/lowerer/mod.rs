@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use hashbrown::HashMap;
 use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
 use plank_parser::{
-    ast::{self, Statement, TopLevelDef},
+    ast::{self, MatchArmKind, Statement, TopLevelDef},
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
@@ -46,6 +46,7 @@ struct HirBuilder {
 
     args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
+    match_arms: ListOfLists<MatchArmsId, MatchArm>,
     struct_defs: IndexVec<StructDefId, StructDef>,
 
     fns: IndexVec<FnDefId, FnDef>,
@@ -60,6 +61,7 @@ impl HirBuilder {
             block_spans: IndexVec::new(),
             args: ListOfLists::new(),
             fields: ListOfLists::new(),
+            match_arms: ListOfLists::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
@@ -92,6 +94,7 @@ struct BlockLowerer<'a> {
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
+    match_arm_buf: Vec<MatchArm>,
     param_info_buf: Vec<ParamInfo>,
     captures_buf: Vec<CaptureInfo>,
 
@@ -189,6 +192,7 @@ impl BlockLowerer<'_> {
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
+        debug_assert!(self.match_arm_buf.is_empty());
         debug_assert!(self.param_info_buf.is_empty());
         debug_assert!(self.captures_buf.is_empty());
     }
@@ -364,6 +368,81 @@ impl BlockLowerer<'_> {
         ExprKind::POISON
     }
 
+    fn lower_match(&mut self, match_expr: ast::MatchExpr<'_>) -> ExprKind {
+        let subject = self.lower_expr_to_local(match_expr.subject());
+        let result = self.alloc_temp();
+        let arm_buf_start = self.match_arm_buf.len();
+
+        let mut first_fallback = None;
+
+        for arm in match_expr.arms() {
+            match arm.kind {
+                MatchArmKind::Case { key } => {
+                    if let Some((_, else_span)) = first_fallback {
+                        self.error_match_case_after_else_arm(arm.view.span(), else_span);
+                    }
+
+                    let key = ast::Expr::new_unwrap(key);
+                    let key_local = self.alloc_temp();
+                    let key_block = self.create_sub_block(key.span(), |this| {
+                        let expr = this.lower_expr(key);
+                        this.emit(InstructionKind::Set { local: key_local, r#type: None, expr });
+                    });
+                    self.emit(InstructionKind::ComptimeBlock {
+                        body: key_block,
+                        reason: ComptimeReason::MatchKey,
+                    });
+
+                    let body = ast::Expr::new_unwrap(arm.body);
+                    let body_block = self.create_sub_block(body.span(), |this| {
+                        let expr = this.lower_expr(body);
+                        this.emit(InstructionKind::BranchSet { local: result, expr });
+                    });
+
+                    self.match_arm_buf.push(MatchArm { key: key_local, body: body_block });
+                }
+                MatchArmKind::Fallback { binding } => {
+                    let body = ast::Expr::new_unwrap(arm.body);
+                    let fallback = self.create_sub_block(body.span(), |this| {
+                        if let Some(binding) = binding {
+                            let name = binding
+                                .ident()
+                                .expect("invariant: match fallback binding must be an identifier");
+                            this.scoped_locals_stack.push(ScopedLocal {
+                                name,
+                                id: subject,
+                                kind: LocalKind::Immutable,
+                                span: Some(binding.span()),
+                            });
+                        }
+                        let expr = this.lower_expr(body);
+                        this.emit(InstructionKind::BranchSet { local: result, expr });
+                    });
+
+                    if let Some((_, previous_span)) = first_fallback {
+                        self.error_multiple_match_else_arms(arm.view.span(), previous_span);
+                    } else {
+                        first_fallback = Some((fallback, arm.view.span()));
+                    }
+                }
+            }
+        }
+        let arms = self.builder.match_arms.push_iter(self.match_arm_buf.drain(arm_buf_start..));
+        let fallback = match first_fallback {
+            Some((fallback, _)) => fallback,
+            None => {
+                let span = match_expr.node().span();
+                self.error_missing_match_else_arm(span);
+                self.create_sub_block(span, |this| {
+                    let expr = this.expr(ExprKind::POISON, span);
+                    this.emit(InstructionKind::BranchSet { local: result, expr });
+                })
+            }
+        };
+        self.emit(InstructionKind::Match { subject, result, arms, fallback });
+        ExprKind::LocalRef(result)
+    }
+
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
@@ -492,7 +571,7 @@ impl BlockLowerer<'_> {
                 });
                 ExprKind::LocalRef(result)
             }
-            ast::Expr::Match(_) => todo!("lower match expressions"),
+            ast::Expr::Match(match_expr) => self.lower_match(match_expr),
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
                 let body = self.create_sub_block(block.node().span(), |this| {
@@ -878,6 +957,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
+        match_arm_buf: Vec::new(),
         param_info_buf: Vec::new(),
         captures_buf: Vec::new(),
 
@@ -965,6 +1045,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 
         args: builder.args,
         fields: builder.fields,
+        match_arms: builder.match_arms,
         struct_defs: builder.struct_defs,
 
         fns: builder.fns,
