@@ -294,8 +294,12 @@ impl DiagCtx<'_> {
         let (maybe_add_note, primary_label, expected) =
             self.format_expected_types(values, ty1, ty2);
         let secondary_label = format!("`{expected}` expected because of this");
-        let diagnostic = Diagnostic::error("`if` and `else` have incompatible types")
-            .cross_source_annotations(loc2, primary_label, loc1, secondary_label);
+        let diagnostic = Diagnostic::error("incompatible branch types").cross_source_annotations(
+            loc2,
+            primary_label,
+            loc1,
+            secondary_label,
+        );
         maybe_add_note(diagnostic).emit(self);
     }
 

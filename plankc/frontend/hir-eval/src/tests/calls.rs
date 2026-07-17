@@ -934,7 +934,7 @@ fn test_if_arm_mismatch_into_never_call_prevents_cascade() {
         "#,
         ),
         &[r#"
-        error: `if` and `else` have incompatible types
+        error: incompatible branch types
          --> main.plk:7:9
           |
         5 |         1
@@ -970,7 +970,7 @@ fn test_if_arm_mismatch_into_non_never_call_preserves_poison() {
         ),
         &[
             r#"
-            error: `if` and `else` have incompatible types
+            error: incompatible branch types
              --> main.plk:7:9
               |
             5 |         1

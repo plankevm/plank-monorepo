@@ -36,7 +36,7 @@ fn test_if_two_branches_type_mismatch() {
         }
         ",
         &[r#"
-            error: `if` and `else` have incompatible types
+            error: incompatible branch types
              --> main.plk:6:9
               |
             4 |         334
@@ -65,7 +65,7 @@ fn test_if_three_branches_type_mismatch() {
         }
         ",
         &[r#"
-            error: `if` and `else` have incompatible types
+            error: incompatible branch types
              --> main.plk:6:9
               |
             4 |         3

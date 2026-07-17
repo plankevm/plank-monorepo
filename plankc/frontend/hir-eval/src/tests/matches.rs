@@ -157,7 +157,7 @@ fn test_runtime_match_arm_type_mismatch() {
         }
         "#,
         &[r#"
-        error: `if` and `else` have incompatible types
+        error: incompatible branch types
          --> main.plk:5:17
           |
         4 |         1 => 334,
