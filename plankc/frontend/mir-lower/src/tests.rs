@@ -492,6 +492,64 @@ fn test_nested_match() {
 }
 
 #[test]
+fn test_match_with_terminating_arm() {
+    assert_lowers_to(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            let x = match selector {
+                1 => @evm_stop(),
+                2 => 20,
+                else => 99,
+            };
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = copy $1
+                switch $2 {
+                    0x1 => @1,
+                    0x2 => @2,
+                    else => @3
+                }
+
+            }
+
+            @1 {
+                stop
+            }
+
+            @2 {
+                $3 = const 0x14
+                => @4
+            }
+
+            @3 {
+                $3 = const 0x63
+                => @4
+            }
+
+            @4 {
+                $4 = copy $3
+                $5 = copy $4
+                $6 = const 0x0
+                sstore $6 $5
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_while() {
     assert_lowers_to(
         r#"

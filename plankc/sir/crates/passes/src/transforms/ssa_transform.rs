@@ -843,6 +843,7 @@ mod tests {
                     switch v3 {
                         0x34 => @bb8
                         0x35 => @bb6
+                        else => @bb9
                 }
                 }
                 bb5 {
