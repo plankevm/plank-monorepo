@@ -72,6 +72,7 @@ pub fn evaluate(
     Mir {
         blocks: evaluator.mir_blocks,
         args: evaluator.mir_args,
+        match_arms: evaluator.mir_match_arms,
         fns: evaluator.mir_fns,
         fn_locals: evaluator.mir_fn_locals,
         types,

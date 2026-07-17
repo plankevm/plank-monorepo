@@ -86,6 +86,12 @@ fn collect_block_callees(
                 collect_block_callees(mir, then_block, block_seen, reachable, fn_worklist);
                 collect_block_callees(mir, else_block, block_seen, reachable, fn_worklist);
             }
+            Instruction::Match { arms, fallback, .. } => {
+                for &arm in &mir.match_arms[arms] {
+                    collect_block_callees(mir, arm.body, block_seen, reachable, fn_worklist);
+                }
+                collect_block_callees(mir, fallback, block_seen, reachable, fn_worklist);
+            }
             Instruction::While { condition_block, body, .. } => {
                 collect_block_callees(mir, condition_block, block_seen, reachable, fn_worklist);
                 collect_block_callees(mir, body, block_seen, reachable, fn_worklist);

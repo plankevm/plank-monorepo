@@ -11,6 +11,29 @@ use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poiso
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
 use std::num::NonZeroU32;
 
+fn join_branch_results(
+    first: Result<(), Diverge>,
+    second: Result<(), Diverge>,
+) -> Result<(), Diverge> {
+    match (first, second) {
+        // Control flow was poisoned in either branch so we have to assume
+        // everything was poisoned and bubble up.
+        // Furthermore if control flow was poisoned there is
+        // no point retrying evaluation if one of the branches failed from
+        // insufficient quota.
+        (Err(Diverge::ControlFlowPoisoned), _) | (_, Err(Diverge::ControlFlowPoisoned)) => {
+            Err(Diverge::ControlFlowPoisoned)
+        }
+        (Err(Diverge::ComptimeQuotaExhausted), _) | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
+            Err(Diverge::ComptimeQuotaExhausted)
+        }
+        (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => Err(Diverge::BlockEnd(None)),
+        (Ok(()), Ok(()))
+        | (Err(Diverge::BlockEnd(_)), Ok(()))
+        | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
     pub state: MaybePoisoned<LocalState>,
@@ -547,7 +570,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::If { outer_result, condition, then_block, else_block } => {
                 self.eval_if(outer_result, condition, then_block, else_block)?
             }
-            InstructionKind::Match { .. } => todo!("evaluate match instructions"),
+            InstructionKind::Match { subject, arms, fallback } => {
+                self.eval_match(subject, arms, fallback)?
+            }
             InstructionKind::While { inline, condition_block, condition, body } => {
                 if inline {
                     self.eval_inline_while(condition_block, condition, body)?
@@ -609,25 +634,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     then_block: then,
                     else_block: r#else,
                 });
-                match (then_res, else_res) {
-                    // Control flow was poisoned in either branch so we have to assume
-                    // everything was poisoned and bubble up.
-                    // Furthermore if control flow was poisoned there is
-                    // no point retrying evaluation if one of the branches failed from
-                    // insufficient quota.
-                    (Err(Diverge::ControlFlowPoisoned), _)
-                    | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
-                    (Err(Diverge::ComptimeQuotaExhausted), _)
-                    | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
-                        Err(Diverge::ComptimeQuotaExhausted)
-                    }
-                    (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
-                        Err(Diverge::BlockEnd(None))
-                    }
-                    (Ok(()), Ok(()))
-                    | (Err(Diverge::BlockEnd(_)), Ok(()))
-                    | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
-                }
+                join_branch_results(then_res, else_res)
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
             Ok(LocalState::Comptime(ValueId::FALSE)) => self.eval_block_inline(r#else),
@@ -642,6 +649,127 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Diverge::ControlFlowPoisoned)
             }
             Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
+        }
+    }
+
+    fn eval_match(
+        &mut self,
+        subject: hir::LocalId,
+        arms: hir::MatchArmsId,
+        fallback: hir::BlockId,
+    ) -> Result<(), Diverge> {
+        assert!(self.match_keys_seen.is_empty(), "match key scratch buffer must be empty");
+        let mut has_invalid_key = false;
+        for arm in &self.hir.match_arms[arms] {
+            let binding = self.bindings[arm.key];
+            let value = match binding.state {
+                Ok(LocalState::Comptime(value)) => value,
+                Ok(LocalState::Runtime(_)) => {
+                    unreachable!("invariant: match key was evaluated in a comptime block")
+                }
+                Err(Poisoned) => {
+                    has_invalid_key = true;
+                    continue;
+                }
+            };
+            let key = match self.values.lookup(value) {
+                Value::BigNum(key) => key,
+                value => {
+                    has_invalid_key = true;
+                    self.diag_ctx.emit_unsupported_match_value_type(
+                        self.eval.values,
+                        value.get_type(),
+                        self.loc(binding.use_span),
+                    );
+                    continue;
+                }
+            };
+            if let Err(existing) = self.match_keys_seen.try_insert(key, binding.use_span) {
+                has_invalid_key = true;
+                let previous_span = *existing.entry.get();
+                self.diag_ctx.emit_duplicate_match_key(
+                    key,
+                    self.loc(binding.use_span),
+                    self.loc(previous_span),
+                );
+            }
+        }
+        self.match_keys_seen.clear();
+        if has_invalid_key {
+            return Err(Diverge::ControlFlowPoisoned);
+        }
+
+        match self.bindings[subject].state {
+            Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
+            Ok(LocalState::Comptime(value)) => {
+                let subject = match self.values.lookup(value) {
+                    Value::BigNum(subject) => subject,
+                    value => {
+                        self.diag_ctx.emit_unsupported_match_value_type(
+                            self.eval.values,
+                            value.get_type(),
+                            self.loc(self.bindings[subject].use_span),
+                        );
+                        return Err(Diverge::ControlFlowPoisoned);
+                    }
+                };
+
+                let mut body = fallback;
+                for arm in &self.hir.match_arms[arms] {
+                    let key = self.bindings[arm.key];
+                    let Ok(LocalState::Comptime(key)) = key.state else {
+                        unreachable!("invariant: match keys were validated")
+                    };
+                    let Value::BigNum(key) = self.values.lookup(key) else {
+                        unreachable!("invariant: match keys were validated")
+                    };
+                    if subject == key {
+                        body = arm.body;
+                        break;
+                    }
+                }
+                self.eval_block_inline(body)
+            }
+            Ok(LocalState::Runtime(subject_local)) => {
+                if !self.mir_types[subject_local].is_assignable_to(TypeId::U256) {
+                    let actual_ty = self.mir_types[subject_local];
+                    let subject_loc = self.loc(self.bindings[subject].use_span);
+                    self.diag_ctx.emit_unsupported_match_value_type(
+                        self.eval.values,
+                        actual_ty,
+                        subject_loc,
+                    );
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+                let arm_buf_start = self.match_arms_buf.len();
+                let mut match_result = Err(Diverge::BlockEnd(None));
+                for &arm in &self.hir.match_arms[arms] {
+                    let key = self.bindings[arm.key];
+                    let Ok(LocalState::Comptime(value)) = key.state else {
+                        unreachable!("invariant: match keys were validated")
+                    };
+                    let Value::BigNum(key) = self.values.lookup(value) else {
+                        unreachable!("invariant: match keys were validated")
+                    };
+                    let (body, branch_result) = self
+                        .with_runtime_controlled(Some(self.bindings[subject].use_span), |this| {
+                            this.eval_block_to_mir(arm.body)
+                        });
+                    match_result = join_branch_results(match_result, branch_result);
+                    self.match_arms_buf.push(mir::MatchArm { key, body });
+                }
+                let (fallback, fallback_result) = self
+                    .with_runtime_controlled(Some(self.bindings[subject].use_span), |this| {
+                        this.eval_block_to_mir(fallback)
+                    });
+                match_result = join_branch_results(match_result, fallback_result);
+                let arms = self
+                    .eval
+                    .mir_match_arms
+                    .push_iter(self.eval.match_arms_buf.drain(arm_buf_start..));
+                self.emit(mir::Instruction::Match { subject: subject_local, arms, fallback });
+                match_result
+            }
         }
     }
 

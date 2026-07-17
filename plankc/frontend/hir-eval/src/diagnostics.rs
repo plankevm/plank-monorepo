@@ -210,6 +210,22 @@ impl DiagCtx<'_> {
         .emit(self);
     }
 
+    pub fn emit_unsupported_match_value_type(
+        &mut self,
+        values: &ValueInterner,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        let (maybe_add_note, primary, _) =
+            self.format_expected_types(values, TypeId::U256, actual_ty);
+        maybe_add_note(
+            Diagnostic::error("unsupported match value type")
+                .primary(loc.source, loc.span, primary)
+                .note("match expressions currently support only `u256` subjects and arm keys"),
+        )
+        .emit(self);
+    }
+
     pub fn emit_not_a_struct_type(&mut self, values: &ValueInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label =
             format!("`{}` is not a struct type", self.types.format(self.session, values, ty));
@@ -731,6 +747,17 @@ impl DiagCtx<'_> {
                 format!("`{field}` assigned more than once"),
                 SrcLoc::new(lit_loc.source, first_span),
                 "first assigned here",
+            )
+            .emit(self);
+    }
+
+    pub fn emit_duplicate_match_key(&mut self, key: U256, duplicate: SrcLoc, previous: SrcLoc) {
+        Diagnostic::error("duplicate match arm key")
+            .cross_source_annotations(
+                duplicate,
+                format!("key `{key}` is used more than once"),
+                previous,
+                "previous key here",
             )
             .emit(self);
     }

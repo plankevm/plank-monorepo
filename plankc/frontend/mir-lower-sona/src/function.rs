@@ -153,6 +153,7 @@ impl<'a> FunctionLowerer<'a> {
                 Instruction::If { condition, then_block, else_block } => {
                     self.lower_if(condition, then_block, else_block)
                 }
+                Instruction::Match { .. } => todo!("lower MIR match instructions to Sona IR"),
                 Instruction::While { condition_block, condition, body } => {
                     self.lower_while(condition_block, condition, body)
                 }

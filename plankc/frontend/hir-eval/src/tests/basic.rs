@@ -621,3 +621,78 @@ fn test_fn_struct_return() {
         "#,
     );
 }
+
+#[test]
+fn test_duplicate_match_key() {
+    assert_diagnostics(
+        std_project(
+            r#"
+        init {
+            let x = match @evm_calldataload(0) {
+                0x04 => 1,
+                2 + 2 => 2,
+                else => 0,
+            };
+            @evm_stop();
+        }
+        "#,
+        ),
+        &[r#"
+        error: duplicate match arm key
+         --> main.plk:4:9
+          |
+        3 |         0x04 => 1,
+          |         ---- previous key here
+        4 |         2 + 2 => 2,
+          |         ^^^^^^ key `4` is used more than once
+        "#],
+    );
+}
+
+#[test]
+fn test_match_key_must_be_u256() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = match @evm_calldataload(0) {
+                true => 1,
+                else => 0,
+            };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unsupported match value type
+         --> main.plk:3:9
+          |
+        3 |         true => 1,
+          |         ^^^^ expected `u256`, got `bool`
+          |
+          = note: match expressions currently support only `u256` subjects and arm keys
+        "#],
+    );
+}
+
+#[test]
+fn test_match_subject_must_be_u256() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = match true {
+                1 => 1,
+                else => 0,
+            };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unsupported match value type
+         --> main.plk:2:19
+          |
+        2 |     let x = match true {
+          |                   ^^^^ expected `u256`, got `bool`
+          |
+          = note: match expressions currently support only `u256` subjects and arm keys
+        "#],
+    );
+}

@@ -1,5 +1,6 @@
 pub mod display;
 
+use alloy_primitives::U256;
 use plank_core::{
     Idx, IndexVec, Span, const_print::const_assert_mem_size, list_of_lists::ListOfLists,
     newtype_index,
@@ -12,6 +13,7 @@ newtype_index! {
     pub struct BlockId;
     pub struct LocalId;
     pub struct ArgsId;
+    pub struct MatchArmsId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -50,7 +52,14 @@ pub enum Instruction {
     Set { target: LocalId, expr: Expr },
     Return(LocalId),
     If { condition: LocalId, then_block: BlockId, else_block: BlockId },
+    Match { subject: LocalId, arms: MatchArmsId, fallback: BlockId },
     While { condition_block: BlockId, condition: LocalId, body: BlockId },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatchArm {
+    pub key: U256,
+    pub body: BlockId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,6 +79,7 @@ impl FnDef {
 pub struct Mir {
     pub blocks: ListOfLists<BlockId, Instruction>,
     pub args: ListOfLists<ArgsId, LocalId>,
+    pub match_arms: ListOfLists<MatchArmsId, MatchArm>,
     pub fns: IndexVec<FnId, FnDef>,
     pub fn_locals: ListOfLists<FnId, TypeId>,
     pub types: TypeInterner,

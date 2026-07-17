@@ -1,3 +1,5 @@
+use alloy_primitives::U256;
+use hashbrown::HashMap;
 use plank_core::{
     DenseIndexMap, IndexVec, dense_index_map::Entry, list_of_lists::ListOfLists, newtype_index,
 };
@@ -46,6 +48,7 @@ newtype_index! {
 pub(crate) struct Evaluator<'a> {
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
+    pub mir_match_arms: ListOfLists<mir::MatchArmsId, mir::MatchArm>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,
     pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
     pub types: &'a TypeInterner,
@@ -66,6 +69,8 @@ pub(crate) struct Evaluator<'a> {
     pub locals_buf: Vec<mir::LocalId>,
     pub values_buf: Vec<ValueId>,
     pub maybe_values_buf: Vec<MaybePoisoned<ValueId>>,
+    pub match_keys_seen: HashMap<U256, SourceSpan>,
+    pub match_arms_buf: Vec<mir::MatchArm>,
     pub type_name_args_buf: Vec<ValueId>,
     pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
@@ -86,6 +91,7 @@ impl<'a> Evaluator<'a> {
             mir_fns: IndexVec::new(),
             mir_fn_locals: ListOfLists::new(),
             mir_args: ListOfLists::new(),
+            mir_match_arms: ListOfLists::new(),
             types,
 
             evaluated_consts: DenseIndexMap::new(),
@@ -104,6 +110,8 @@ impl<'a> Evaluator<'a> {
             locals_buf: Vec::new(),
             values_buf: Vec::new(),
             maybe_values_buf: Vec::new(),
+            match_keys_seen: HashMap::new(),
+            match_arms_buf: Vec::new(),
             type_name_args_buf: Vec::new(),
             fields_buf: Vec::new(),
             captures_buf: Vec::new(),

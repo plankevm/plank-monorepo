@@ -117,7 +117,6 @@ pub enum InstructionKind {
     },
     Match {
         subject: LocalId,
-        result: LocalId,
         arms: MatchArmsId,
         fallback: BlockId,
     },

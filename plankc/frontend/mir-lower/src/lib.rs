@@ -351,6 +351,7 @@ fn lower_basic_block(
 
                 current_bb = continue_bb;
             }
+            Instruction::Match { .. } => todo!("lower MIR match instructions"),
             Instruction::While { condition_block, condition, body } => {
                 // Purposefully invalid placeholder control.
                 let loop_entry_id = current_bb.finish_with_placeholder_control();
@@ -508,6 +509,12 @@ fn ensure_block_func_deps_lowered(
             Instruction::If { condition: _, then_block, else_block } => {
                 ensure_block_func_deps_lowered(ctx, values, builder, then_block);
                 ensure_block_func_deps_lowered(ctx, values, builder, else_block);
+            }
+            Instruction::Match { subject: _, arms, fallback } => {
+                for &arm in &ctx.mir.match_arms[arms] {
+                    ensure_block_func_deps_lowered(ctx, values, builder, arm.body);
+                }
+                ensure_block_func_deps_lowered(ctx, values, builder, fallback);
             }
             Instruction::While { condition_block, condition: _, body } => {
                 ensure_block_func_deps_lowered(ctx, values, builder, condition_block);

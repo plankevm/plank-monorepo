@@ -439,7 +439,7 @@ impl BlockLowerer<'_> {
                 })
             }
         };
-        self.emit(InstructionKind::Match { subject, result, arms, fallback });
+        self.emit(InstructionKind::Match { subject, arms, fallback });
         ExprKind::LocalRef(result)
     }
 
