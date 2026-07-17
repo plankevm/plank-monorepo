@@ -227,10 +227,10 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
 
             assert!(correct, "incorrect op schedule");
         }
-        self.emit(stack_op);
         for &output in op.outputs_fifo.iter().rev() {
             self.inner.push(output);
         }
+        self.emit(stack_op);
     }
 
     #[track_caller]
@@ -258,8 +258,8 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     pub fn spill_top(&mut self) -> StaticAllocId {
         let target = self.inner.pop().expect("nothing to pop");
         let new_alloc_id = self.alloc_id(self.spilled.len());
-        self.emit(StackOps::Store(new_alloc_id));
         self.spilled.push(target);
+        self.emit(StackOps::Store(new_alloc_id));
         new_alloc_id
     }
 
