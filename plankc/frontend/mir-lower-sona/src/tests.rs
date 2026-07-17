@@ -193,6 +193,76 @@ fn lowers_terminal_if_to_exact_ir() {
 }
 
 #[test]
+fn lowers_nested_match_to_exact_ir() {
+    assert_lowers_to_ir(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            let x = match selector {
+                1 => match selector {
+                    2 => 20,
+                    else => 10,
+                },
+                3 => 30,
+                else => match 5 {
+                    5 => 99,
+                    else => 0,
+                },
+            };
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        target = "evm-ethereum-osaka"
+
+        func public %init() {
+            block0:
+                v1.i256 = evm_calldata_load 0.i256;
+                v3.i1 = eq v1 1.i256;
+                br v3 block1 block4;
+
+            block1:
+                v8.i1 = eq v1 2.i256;
+                br v8 block5 block6;
+
+            block2:
+                jump block8;
+
+            block3:
+                jump block8;
+
+            block4:
+                v5.i1 = eq v1 3.i256;
+                br v5 block2 block3;
+
+            block5:
+                jump block7;
+
+            block6:
+                jump block7;
+
+            block7:
+                v11.i256 = phi (20.i256 block5) (10.i256 block6);
+                jump block8;
+
+            block8:
+                v14.i256 = phi (v11 block7) (30.i256 block2) (99.i256 block3);
+                evm_sstore 0.i256 v14;
+                evm_stop;
+        }
+
+
+        object @Contract {
+            section init {
+                entry %init;
+            }
+        }
+        "#,
+    );
+}
+
+#[test]
 fn lowers_runtime_object_to_exact_ir() {
     assert_lowers_to_ir(
         r#"

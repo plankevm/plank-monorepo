@@ -153,7 +153,9 @@ impl<'a> FunctionLowerer<'a> {
                 Instruction::If { condition, then_block, else_block } => {
                     self.lower_if(condition, then_block, else_block)
                 }
-                Instruction::Match { .. } => todo!("lower MIR match instructions to Sona IR"),
+                Instruction::Match { subject, arms, fallback } => {
+                    self.lower_match(subject, arms, fallback)
+                }
                 Instruction::While { condition_block, condition, body } => {
                     self.lower_while(condition_block, condition, body)
                 }
@@ -265,6 +267,66 @@ impl<'a> FunctionLowerer<'a> {
         }
         if let Some(else_end) = else_end {
             self.fb.switch_to_block(else_end);
+            self.jump(merge);
+        }
+
+        self.fb.switch_to_block(merge);
+        BlockExit::Loose
+    }
+
+    fn lower_match(
+        &mut self,
+        subject: mir::LocalId,
+        arms: mir::MatchArmsId,
+        fallback: mir::BlockId,
+    ) -> BlockExit {
+        let subject = self.read_value(subject);
+        let arms = &self.mir.match_arms[arms];
+        let mut arm_blocks = Vec::with_capacity(arms.len());
+        for _ in arms {
+            arm_blocks.push(self.fb.append_block());
+        }
+        let fallback_block = self.fb.append_block();
+
+        for i in 0..arms.len() {
+            let next_check =
+                if i + 1 == arms.len() { fallback_block } else { self.fb.append_block() };
+            let key = sonatina_ir::U256::from_big_endian(&arms[i].key.to_be_bytes::<32>());
+            let key = self.imm_256(key);
+            let matches = self.fb.insert_inst(Eq::new(self.is, subject, key), SonaType::I1);
+            self.br(matches, arm_blocks[i], next_check);
+            if i + 1 != arms.len() {
+                self.fb.switch_to_block(next_check);
+            }
+        }
+        if arms.is_empty() {
+            self.jump(fallback_block);
+        }
+
+        let mut loose_ends = Vec::with_capacity(arms.len() + 1);
+        for i in 0..arms.len() {
+            self.fb.switch_to_block(arm_blocks[i]);
+            if self.lower_block(arms[i].body) == BlockExit::Loose {
+                loose_ends.push(
+                    self.fb.current_block().expect("loose match arm must have a current block"),
+                );
+            }
+        }
+
+        self.fb.switch_to_block(fallback_block);
+        if self.lower_block(fallback) == BlockExit::Loose {
+            loose_ends.push(
+                self.fb.current_block().expect("loose match fallback must have a current block"),
+            );
+        }
+
+        if loose_ends.is_empty() {
+            return BlockExit::Terminated;
+        }
+
+        let merge = self.fb.append_block();
+        for loose_end in loose_ends {
+            self.fb.switch_to_block(loose_end);
             self.jump(merge);
         }
 
@@ -391,8 +453,8 @@ impl<'a> FunctionLowerer<'a> {
         }
     }
 
-    fn imm_256(&mut self, n: u32) -> SonaValueId {
-        self.fb.make_imm_value(Immediate::from_i256(I256::from(n), SonaType::I256))
+    fn imm_256(&mut self, n: impl Into<I256>) -> SonaValueId {
+        self.fb.make_imm_value(Immediate::from_i256(n.into(), SonaType::I256))
     }
 
     fn jump(&mut self, target: BlockId) {
