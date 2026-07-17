@@ -58,7 +58,7 @@
       "patterns": [
         {
           "name": "keyword.control.plank",
-          "match": "\\b(if|else|while|return|inline)\\b"
+          "match": "\\b(if|else|match|while|return|inline)\\b"
         },
         {
           "name": "keyword.declaration.plank",
@@ -256,7 +256,7 @@
         },
         {
           "name": "keyword.operator.assignment.plank",
-          "match": "="
+          "match": "=>|="
         }
       ]
     }

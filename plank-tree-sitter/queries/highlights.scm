@@ -124,6 +124,7 @@
 "init" @keyword
 "inline" @keyword
 "let" @keyword
+"match" @keyword
 "mut" @keyword
 "return" @keyword
 "run" @keyword
@@ -147,6 +148,7 @@
 ; Operators
 
 "=" @operator
+"=>" @operator
 "==" @operator
 "!=" @operator
 "<" @operator

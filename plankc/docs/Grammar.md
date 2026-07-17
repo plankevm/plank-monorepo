@@ -14,7 +14,7 @@ suffix_import_group = "::" "{" import_group_item ("," import_group_item)* ","? "
 import_group_item = IDENT ("as" IDENT)?
 
 # Expressions
-expr = "comptime"? block | if_expr | expr_no_block
+expr = "comptime"? block | if_expr | match_expr | expr_no_block
 expr_no_block =
     IDENT | BUILTIN_IDENT | literal | member
     | fn_call | fn_def | struct_def | struct_lit | tuple_type | tuple_lit
@@ -34,6 +34,9 @@ binary_op = "or" | "and"
 unary_op = "-" | "!" | "~"
 
 if_expr = "if" expr block ("else" "if" expr block)* ("else" block)?
+match_expr = "match" expr "{" (match_arm ",")* match_fallback_arm ","? "}"
+match_arm = expr "=>" expr
+match_fallback_arm = "else" IDENT? "=>" expr
 
 block = "{" stmt* expr? "}"
 
@@ -41,6 +44,7 @@ block = "{" stmt* expr? "}"
 stmt =
     (expr_no_block | return | assign | let) ";"
     | if_expr ";"?
+    | match_expr ";"?
     | comptime_block
     | while
 
