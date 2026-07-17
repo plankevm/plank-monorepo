@@ -5,6 +5,7 @@ use crate::{
 };
 use StackOps::*;
 use plank_core::Idx;
+use proptest::prelude::*;
 use sir_data::{OperationIdx, StaticAllocId};
 use std::collections::HashSet;
 
@@ -126,7 +127,7 @@ const fn store(id: u32) -> StackOps {
     StackOps::Store(StaticAllocId::new(id))
 }
 
-fn load(id: u32) -> StackOps {
+const fn load(id: u32) -> StackOps {
     StackOps::Load(StaticAllocId::new(id))
 }
 
@@ -137,8 +138,8 @@ struct AssertScheduleBuilder {
 }
 
 impl AssertScheduleBuilder {
-    fn config(mut self, c: ScheduleConfig) -> Self {
-        self.config = c;
+    fn max_swap_depth(mut self, depth: u8) -> Self {
+        self.config = ScheduleConfig::max_swap_no_exchange(depth);
         self
     }
 
@@ -200,4 +201,91 @@ fn last_use_in_place() {
 #[test]
 fn simple_swap() {
     opts().last_uses([1, 2]).assert([1, 2], [2, 1], [Swap(1)]);
+}
+
+#[test]
+fn permutes_below_a_correct_prefix() {
+    opts().last_uses([1, 2, 3]).assert([1, 3, 2], [1, 2, 3], [Swap(1), Swap(2), Swap(1)]);
+}
+
+#[test]
+fn preserves_a_non_last_use_in_the_tail() {
+    opts().last_uses([1, 3]).assert([1, 2, 3], [2, 1, 3], [Dup(1), Swap(3), Swap(2)]);
+}
+
+#[test]
+fn spills_until_a_push_is_in_reach() {
+    opts().max_swap_depth(2).assert([9, 8, 1], [1], [store(0), Dup(1)]);
+}
+
+#[test]
+fn pops_instead_of_spilling_an_already_spilled_value() {
+    opts().max_swap_depth(1).spilled([9]).assert([9, 1], [1], [Pop, Dup(0)]);
+}
+
+#[test]
+fn spills_an_unreachable_swap_top() {
+    opts().max_swap_depth(1).last_uses([1]).assert(
+        [9, 8, 1],
+        [1],
+        [store(0), store(1), store(2), load(2)],
+    );
+}
+
+#[test]
+fn spill_and_rebuild_correctly_when_swap_unreachable() {
+    opts().max_swap_depth(1).spilled([3]).assert(
+        [2, 3],
+        [2, 2, 3],
+        [load(0), Pop, Dup(0), load(0), Swap(1), Dup(0)],
+    );
+}
+
+fn unique(values: Vec<u32>) -> Vec<u32> {
+    let mut unique = Vec::with_capacity(values.len());
+    for value in values {
+        if !unique.contains(&value) {
+            unique.push(value);
+        }
+    }
+    unique
+}
+
+fn generated_schedule() -> impl Strategy<Value = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, u8)> {
+    (prop::collection::vec(0u32..32, 0..16), prop::collection::vec(0u32..32, 0..16))
+        .prop_map(|(stack, spilled)| (unique(stack), unique(spilled)))
+        .prop_filter("at least one value must be available", |(stack, spilled)| {
+            !stack.is_empty() || !spilled.is_empty()
+        })
+        .prop_flat_map(|(stack, spilled)| {
+            let available = unique(stack.iter().chain(&spilled).copied().collect());
+            (
+                Just(stack),
+                Just(spilled),
+                prop::collection::vec(prop::sample::select(available), 0..16),
+            )
+        })
+        .prop_flat_map(|(stack, spilled, target)| {
+            let candidates = unique(target.clone());
+            let candidate_count = candidates.len();
+            (
+                Just(stack),
+                Just(spilled),
+                Just(target),
+                prop::sample::subsequence(candidates, 0..=candidate_count),
+                1u8..=8,
+            )
+        })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn generated_operand_schedules_are_correct(
+        (stack, spilled, target, last_uses, max_swap_depth) in generated_schedule(),
+    ) {
+        let config = ScheduleConfig::max_swap_no_exchange(max_swap_depth);
+        assert_intra_op_schedule_exists(config, stack, spilled, target, last_uses);
+    }
 }

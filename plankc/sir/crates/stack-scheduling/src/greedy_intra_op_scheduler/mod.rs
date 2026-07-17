@@ -1,13 +1,17 @@
+use smallvec::SmallVec;
+
 use crate::{
     op_graph::{OpGraph, OpNodeId, OpSet, ValueNodeId},
     stack::{ScheduleConfig, StackOps, TrackedStack},
 };
-use plank_core::LoopLimit;
 
 mod permute;
 
 #[cfg(test)]
 mod tests;
+
+const SCHEDULE_MAX_STEPS: usize = 100_000;
+const PERMUTE_PATHS_BUDGET: usize = 100;
 
 pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
@@ -16,92 +20,150 @@ pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     op_id: OpNodeId,
     complete: OpSet<'_>,
 ) {
+    assert!(is_unique(stack.fifo()), "expecting start stack to be unique");
+
     let op = graph.get_op(op_id);
 
-    let mut unique_last_uses_on_stack = Vec::with_capacity(op.inputs_fifo.len() / 2);
-    for &value in op.inputs_fifo {
-        if graph.is_last_use(complete, value)
-            && !unique_last_uses_on_stack.contains(&value)
-            && stack.count(value) > 0
-        {
-            unique_last_uses_on_stack.push(value);
-        }
-    }
+    let unique_last_uses_on_stack = stack
+        .fifo()
+        .iter()
+        .copied()
+        .filter(|value| graph.is_last_use(complete, *value) && op.inputs_fifo.contains(value))
+        .collect::<SmallVec<[_; 32]>>();
 
     let head = unique_last_uses_on_stack.len().try_into().expect("overflow");
 
-    let mut preparer = GreedyOperandPreparer::new(head, config, stack, op.inputs_fifo);
+    let mut preparer =
+        GreedyOperandPreparer::new(head, config, stack, op.inputs_fifo, &unique_last_uses_on_stack);
 
-    let mut limit = LoopLimit::max(100_000);
-    while !matches!(preparer.progress(), Status::Done) {
-        limit.tick();
+    for _ in 0..SCHEDULE_MAX_STEPS {
+        if matches!(preparer.progress(), Ok(Status::Complete)) {
+            stack.op(graph, op_id, false);
+            return;
+        }
     }
 
-    stack.op(graph, op_id, false);
+    unreachable!("schedule didn't complete after {SCHEDULE_MAX_STEPS} steps");
 }
 
 enum Status {
-    Done,
-    ProcessNext,
+    Complete,
+    NotDone,
 }
+
+struct ProcessNext;
 
 struct GreedyOperandPreparer<'a, Sink: FnMut(StackOps)> {
     head: u16,
-    max_dup_depth: u8,
+    config: ScheduleConfig,
     stack: &'a mut TrackedStack<Sink>,
     target: &'a [ValueNodeId],
+    last_uses: &'a [ValueNodeId],
+    to_preserve: SmallVec<[ValueNodeId; 32]>,
+    to_push: SmallVec<[ValueNodeId; 32]>,
+}
+
+fn is_unique(values: &[ValueNodeId]) -> bool {
+    values.iter().enumerate().all(|(i, value)| !values[i + 1..].contains(value))
 }
 
 impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
-    fn progress(&mut self) -> Status {
-        if self.head == 0 {
-            self.trivial_push_only();
-            return Status::Done;
-        }
+    fn is_complete(&self) -> bool {
+        usize::from(self.head) == self.target.len()
+            && self.stack.fifo().iter().zip(self.target).all(|(a, b)| a == b)
+    }
 
+    fn progress(&mut self) -> Result<Status, ProcessNext> {
         assert!(self.head <= self.stack.len());
 
-        if usize::from(self.head) == self.target.len() {
-            if self.stack.fifo().iter().zip(self.target).all(|(a, b)| a == b) {
-                return Status::Done;
+        if self.is_complete() {
+            return Ok(Status::Complete);
+        }
+
+        if self.head > 0 && self.stack.fifo()[0] != self.target_head_top() {
+            let permuted = self.swap_next_best()?;
+            if permuted {
+                return Ok(Status::NotDone);
             }
-
-            self.permute_allow_correct();
-            return Status::ProcessNext;
         }
 
-        let top = self.stack.fifo()[0];
-        let target_top = self.index_target_aligned(0);
-
-        if top != target_top && self.permute_never_undo_top() {
-            return Status::ProcessNext;
+        let total_left_to_push = self.target.len() - usize::from(self.head);
+        match total_left_to_push {
+            0 => self.permute_until_complete(),
+            1 => {
+                self.push_next_single_best()?;
+                self.permute_until_complete()
+            }
+            _ => {
+                self.push_next_single_best()?;
+                Ok(Status::NotDone)
+            }
         }
-        self.dup_strategy();
-
-        Status::ProcessNext
     }
 
-    fn dup_strategy(&mut self) {
-        todo!()
-    }
+    fn push_next_single_best(&mut self) -> Result<(), ProcessNext> {
+        let (i, &value) = self
+            .to_push
+            .iter()
+            .enumerate()
+            .max_by_key(|&(_i, &value)| {
+                if self.to_preserve.contains(&value) {
+                    return self.target.len();
+                }
+                let depth_delta = self.target.len() - usize::from(self.head);
+                for (i, &want) in self.target.iter().enumerate().rev() {
+                    let hi = i.checked_sub(depth_delta);
+                    if hi.is_none_or(|hi| self.stack.fifo()[hi] != want) && want == value {
+                        return i;
+                    }
+                }
 
-    fn permute_allow_correct(&mut self) {
-        todo!()
+                unreachable!("{value} not in target");
+            })
+            .expect("nothing left to push");
+        self.to_push.swap_remove(i);
+        self.try_push(value)
     }
 
     #[must_use]
-    fn permute_never_undo_top(&mut self) -> bool {
-        todo!()
+    fn swap_next_best(&mut self) -> Result<bool, ProcessNext> {
+        let swaps = permute::best_permute(
+            &self.to_preserve,
+            self.last_uses,
+            usize::from(self.head),
+            self.stack.fifo(),
+            self.target,
+            PERMUTE_PATHS_BUDGET,
+            false,
+        );
+        if swaps.is_empty() {
+            return Ok(false);
+        }
+
+        for swap in swaps {
+            self.try_swap(swap)?;
+        }
+
+        Ok(true)
     }
 
-    fn trivial_push_only(&mut self) {
-        for &value in self.target.iter().rev() {
-            if self.try_push(value) {
-                continue;
-            }
+    fn permute_until_complete(&mut self) -> Result<Status, ProcessNext> {
+        assert_eq!(usize::from(self.head), self.target.len());
+        let swaps = permute::best_permute(
+            &self.to_preserve,
+            self.last_uses,
+            usize::from(self.head),
+            self.stack.fifo(),
+            self.target,
+            PERMUTE_PATHS_BUDGET,
+            true,
+        );
 
-            todo!("spill")
+        for &swap in &swaps {
+            self.try_swap(swap)?;
         }
+
+        Ok(Status::Complete)
     }
 
     fn new(
@@ -109,32 +171,98 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         config: ScheduleConfig,
         stack: &'a mut TrackedStack<Sink>,
         target: &'a [ValueNodeId],
+        last_uses: &'a [ValueNodeId],
     ) -> Self {
-        Self { head, max_dup_depth: config.max_dup_depth, stack, target }
+        let to_preserve = stack.fifo()[..usize::from(head)]
+            .iter()
+            .copied()
+            .filter(|value| target.contains(value) && !last_uses.contains(value))
+            .collect();
+
+        let mut to_push = SmallVec::<[ValueNodeId; 32]>::from_slice(target);
+        for &value in last_uses {
+            let i = to_push.iter().position(|&v| v == value).expect("last use not in target");
+            to_push.remove(i);
+        }
+        to_push.reverse();
+
+        Self { head, config, stack, target, last_uses, to_preserve, to_push }
     }
 
-    #[must_use]
-    fn try_push(&mut self, value: ValueNodeId) -> bool {
-        if let Some(pos) =
-            self.stack.find_first(value).filter(|&depth| depth <= self.max_dup_depth as u16)
+    fn try_swap(&mut self, depth: u16) -> Result<(), ProcessNext> {
+        if let Ok(depth) = depth.try_into()
+            && depth <= self.config.max_swap_depth
+        {
+            let value = self.stack.top().expect("trying to swap without top");
+            if self.head <= u16::from(depth)
+                && let Some(pi) = self.to_preserve.iter().position(|&v| v == value)
+            {
+                self.to_preserve.swap_remove(pi);
+            }
+
+            self.stack.swap(depth);
+            return Ok(());
+        }
+
+        println!("[swap spill] {depth}");
+        for _ in 0..=depth {
+            self.spill_top();
+        }
+
+        Err(ProcessNext)
+    }
+
+    fn try_push(&mut self, value: ValueNodeId) -> Result<(), ProcessNext> {
+        if let Some(pos) = self
+            .stack
+            .find_first(value)
+            .filter(|&depth| depth <= u16::from(self.config.max_dup_depth))
         {
             self.stack.dup(pos as u8);
-            return true;
+            self.head += 1;
+            return Ok(());
         }
 
         if let Some(alloc) = self.stack.get_spilled(value) {
             self.stack.load(alloc);
-            return true;
+            self.head += 1;
+            return Ok(());
         }
 
-        false
+        let depth = self.stack.find_first(value).expect("trying to push missing");
+        let total_to_spill = depth - u16::from(self.config.max_dup_depth);
+        println!("[dup spill] {}", total_to_spill);
+        for _ in 0..total_to_spill {
+            self.spill_top();
+        }
+        self.stack.dup(self.config.max_dup_depth);
+        self.head += 1;
+
+        Err(ProcessNext)
     }
 
-    fn index_target_aligned(&self, i: usize) -> ValueNodeId {
-        self.target[self.target_depth_delta() + i]
+    fn spill_top(&mut self) {
+        let value = self.stack.top().expect("spilling on empty stack");
+        if self.stack.get_spilled(value).is_some() {
+            self.stack.pop();
+        } else {
+            self.stack.spill_top();
+        }
+
+        if self.target.contains(&value) {
+            match self.to_preserve.iter().position(|&v| v == value) {
+                Some(pi) => {
+                    self.to_preserve.swap_remove(pi);
+                }
+                None => {
+                    self.to_push.push(value);
+                    self.head -= 1;
+                }
+            }
+        }
     }
 
-    fn target_depth_delta(&self) -> usize {
-        self.target.len() - usize::from(self.head)
+    fn target_head_top(&self) -> ValueNodeId {
+        self.target[self.target.len() - usize::from(self.head)]
     }
 }
