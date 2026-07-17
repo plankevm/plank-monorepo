@@ -4,6 +4,7 @@ use crate::{
     evaluator::CallArgSpansIdx,
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
+use alloy_primitives::U256;
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
@@ -73,6 +74,12 @@ pub(crate) enum Diverge {
     ComptimeQuotaExhausted,
     /// Signals a block ended normally, optionally with a comptime-known return value.
     BlockEnd(Option<ValueId>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MatchValue {
+    U256(U256),
+    Unsupported(ValueId),
 }
 
 impl Diverge {
@@ -652,6 +659,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
+    fn get_match_value(&self, local: hir::LocalId) -> MaybePoisoned<MatchValue> {
+        match self.bindings[local].state? {
+            LocalState::Comptime(value) => match self.values.lookup(value) {
+                Value::BigNum(value) => Ok(MatchValue::U256(value)),
+                _ => Ok(MatchValue::Unsupported(value)),
+            },
+            LocalState::Runtime(_) => unreachable!("invariant: expected comptime local"),
+        }
+    }
+
     fn eval_match(
         &mut self,
         subject: hir::LocalId,
@@ -662,23 +679,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let mut has_invalid_key = false;
         for arm in &self.hir.match_arms[arms] {
             let binding = self.bindings[arm.key];
-            let value = match binding.state {
-                Ok(LocalState::Comptime(value)) => value,
-                Ok(LocalState::Runtime(_)) => {
-                    unreachable!("invariant: match key was evaluated in a comptime block")
-                }
+            let key = match self.get_match_value(arm.key) {
+                Ok(MatchValue::U256(key)) => key,
                 Err(Poisoned) => {
                     has_invalid_key = true;
                     continue;
                 }
-            };
-            let key = match self.values.lookup(value) {
-                Value::BigNum(key) => key,
-                value => {
+                Ok(MatchValue::Unsupported(value)) => {
                     has_invalid_key = true;
                     self.diag_ctx.emit_unsupported_match_value_type(
                         self.eval.values,
-                        value.get_type(),
+                        self.values.type_of_value(value),
                         self.loc(binding.use_span),
                     );
                     continue;
@@ -701,13 +712,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         match self.bindings[subject].state {
             Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
-            Ok(LocalState::Comptime(value)) => {
-                let subject = match self.values.lookup(value) {
-                    Value::BigNum(subject) => subject,
-                    value => {
+            Ok(LocalState::Comptime(_)) => {
+                let subject = match self.get_match_value(subject) {
+                    Ok(MatchValue::U256(subject)) => subject,
+                    Err(Poisoned) => unreachable!("invariant: poisoned subject was handled"),
+                    Ok(MatchValue::Unsupported(value)) => {
                         self.diag_ctx.emit_unsupported_match_value_type(
                             self.eval.values,
-                            value.get_type(),
+                            self.values.type_of_value(value),
                             self.loc(self.bindings[subject].use_span),
                         );
                         return Err(Diverge::ControlFlowPoisoned);
@@ -716,11 +728,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
                 let mut body = fallback;
                 for arm in &self.hir.match_arms[arms] {
-                    let key = self.bindings[arm.key];
-                    let Ok(LocalState::Comptime(key)) = key.state else {
-                        unreachable!("invariant: match keys were validated")
-                    };
-                    let Value::BigNum(key) = self.values.lookup(key) else {
+                    let Ok(MatchValue::U256(key)) = self.get_match_value(arm.key) else {
                         unreachable!("invariant: match keys were validated")
                     };
                     if subject == key {
@@ -732,23 +740,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Ok(LocalState::Runtime(subject_local)) => {
                 if !self.mir_types[subject_local].is_assignable_to(TypeId::U256) {
-                    let actual_ty = self.mir_types[subject_local];
-                    let subject_loc = self.loc(self.bindings[subject].use_span);
                     self.diag_ctx.emit_unsupported_match_value_type(
                         self.eval.values,
-                        actual_ty,
-                        subject_loc,
+                        self.mir_types[subject_local],
+                        self.loc(self.bindings[subject].use_span),
                     );
                     return Err(Diverge::ControlFlowPoisoned);
                 }
                 let arm_buf_start = self.match_arms_buf.len();
                 let mut match_result = Err(Diverge::BlockEnd(None));
                 for &arm in &self.hir.match_arms[arms] {
-                    let key = self.bindings[arm.key];
-                    let Ok(LocalState::Comptime(value)) = key.state else {
-                        unreachable!("invariant: match keys were validated")
-                    };
-                    let Value::BigNum(key) = self.values.lookup(value) else {
+                    let Ok(MatchValue::U256(key)) = self.get_match_value(arm.key) else {
                         unreachable!("invariant: match keys were validated")
                     };
                     let (body, branch_result) = self
