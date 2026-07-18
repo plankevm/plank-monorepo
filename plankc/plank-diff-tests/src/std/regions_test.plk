@@ -18,6 +18,7 @@ init {
         comptime_assert(is_region(memory), "memory must be a region");
         comptime_assert(is_region(code), "code must be a region");
         comptime_assert(is_region(calldata), "calldata must be a region");
+        comptime_assert(is_region(ctime), "ctime must be a region");
         comptime_assert(!is_region(struct {}), "anonymous struct must not be a region");
         comptime_assert(region_ptr_type(code) == u256, "code regions must use u256 pointers");
         comptime_assert(region_ptr_type(calldata) == u256, "calldata regions must use u256 pointers");
@@ -26,9 +27,18 @@ init {
         comptime_assert(@field_type(bytes(code), 0) == u256, "bytes(code).ptr must be u256");
         comptime_assert(@field_type(bytes(calldata), 0) == u256, "bytes(calldata).ptr must be u256");
         comptime_assert(@field_type(bytes(memory), 1) == u256, "bytes(region).length must be u256");
+        comptime_assert(bytes(ctime) == cbytes, "bytes(ctime) must be cbytes");
         comptime_assert(slice_bytes(TEST_BYTES, 1, 4) == hex"010203", "cbytes slicing failed");
         comptime_assert(bytes_eq(TEST_BYTES, TEST_BYTES), "cbytes equality failed");
+        comptime_assert(
+            embed_as(TEST_BYTES, ctime) == TEST_BYTES,
+            "embedding as ctime must preserve bytes"
+        );
     }
+
+    let ctime_copy = copy_if_not_already_memory(TEST_BYTES);
+    require(ctime_copy.length == TEST_BYTES.length);
+    require(bytes_eq(TEST_BYTES, ctime_copy));
 
     let mem_data = embed_as(TEST_BYTES, memory);
     require(mem_data.length == TEST_BYTES.length);
