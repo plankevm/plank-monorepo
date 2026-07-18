@@ -1,0 +1,54 @@
+import std::type::sizeof;
+
+const encode_cbytes = fn (comptime value: $T) cbytes {
+    if T == void {
+        ""
+    } else if T == u256 {
+        @concat_cbytes((value,))
+    } else if T == bool {
+        @concat_cbytes((if value { 1 } else { 0 },))
+    } else if @is_struct(T) {
+        comptime let mut encoded = "";
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            encoded = @concat_cbytes((encoded, encode_cbytes(@get_field(value, i))));
+            i = i + 1;
+        }
+
+        encoded
+    } else {
+        @compile_error("unsupported type for encode_cbytes")
+    }
+};
+
+const unsafe_cbytes_read = fn (comptime T: type, comptime data: cbytes, comptime offset: u256) T {
+    if T == void {
+        {}
+    } else if T == u256 {
+        @padded_read_cbytes(data, offset)
+    } else if T == bool {
+        @padded_read_cbytes(data, offset) != 0
+    } else if @is_struct(T) {
+        let mut value = @uninit(T);
+        comptime let mut i = 0;
+        comptime let mut field_offset = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            let field_size = comptime { sizeof(field_type) };
+            let field_value = unsafe_cbytes_read(
+                field_type,
+                data,
+                offset + field_offset
+            );
+            value = @set_field(value, i, field_value);
+            field_offset = field_offset + field_size;
+            i = i + 1;
+        }
+
+        value
+    } else {
+        @compile_error("unsupported type for unsafe_cbytes_read")
+    }
+};

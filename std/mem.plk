@@ -1,4 +1,4 @@
-import std::utils::fold;
+import std::type::sizeof;
 
 const unsafe_mem_write_u256 = fn (ptr: u256, offset: u256, value: u256) u256 {
     @mstore32(ptr +% offset, value);
@@ -24,19 +24,53 @@ const unsafe_mem_write = fn (ptr: u256, offset: u256, value: $T) u256 {
     } else if T == bool {
         unsafe_mem_write_u256(ptr, offset, if value { 1 } else { 0 })
     } else if @is_struct(T) {
-        fold(
-            @field_count(T),
-            fn (comptime i: u256, bytes_written: u256) u256 {
-                let written = unsafe_mem_write(
-                    ptr,
-                    offset + bytes_written,
-                    @get_field(value, i)
-                );
-                bytes_written + written
-            },
-            0
-        )
+        comptime let mut i = 0;
+        comptime let mut field_offset = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            let field_size = comptime { sizeof(field_type) };
+            unsafe_mem_write(ptr, offset + field_offset, @get_field(value, i));
+            field_offset = field_offset + field_size;
+            i = i + 1;
+        }
+
+        field_offset
     } else {
         @compile_error("unsupported type for unsafe_mem_write")
+    }
+};
+
+// Reads a value of type T from memory at `ptr + offset`. For structs, fields are
+// read contiguously in declaration order. No bounds check; caller must ensure
+// the region contains a valid representation of T.
+const unsafe_mem_read = fn (comptime T: type, ptr: u256, offset: u256) T {
+    if T == void {
+        {}
+    } else if T == u256 {
+        unsafe_mem_read_u256(ptr, offset)
+    } else if T == bool {
+        unsafe_mem_read_u256(ptr, offset) != 0
+    } else if @is_struct(T) {
+        let mut value = @uninit(T);
+        comptime let mut i = 0;
+        comptime let mut field_offset = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            let field_size = comptime { sizeof(field_type) };
+            let field_value = unsafe_mem_read(
+                field_type,
+                ptr,
+                offset +% field_offset
+            );
+            value = @set_field(value, i, field_value);
+            field_offset = field_offset +% field_size;
+            i = i + 1;
+        }
+
+        return value;
+    } else {
+        @compile_error("unsupported type for unsafe_mem_read")
     }
 };

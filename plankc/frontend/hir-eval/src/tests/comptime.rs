@@ -269,6 +269,88 @@ fn test_compile_error_builtin() {
 }
 
 #[test]
+fn test_runtime_slice_rejects_cbytes_elements() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            import std::option::None;
+            import std::regions::memory;
+            import std::slice::Slice;
+
+            const InvalidSlice = Slice(memory, cbytes, None(u256));
+
+            init {
+                @evm_stop();
+            }
+            "#,
+        ),
+        &[r#"
+        error: runtime slices cannot contain cbytes elements
+          --> std/slice.plk:18:9
+           |
+        18 |         @compile_error("runtime slices cannot contain cbytes elements");
+           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_ctime_slice_rejects_unimplemented_cbytes_elements() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            import std::option::None;
+            import std::regions::ctime;
+            import std::slice::Slice;
+
+            const InvalidSlice = Slice(ctime, cbytes, None(u256));
+
+            init {
+                @evm_stop();
+            }
+            "#,
+        ),
+        &[r#"
+        error: not yet implemented: CSlice with cbytes elements
+          --> std/slice.plk:38:9
+           |
+        38 |         @compile_error("not yet implemented: CSlice with cbytes elements");
+           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_cslice_rejects_runtime_index() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            import std::option::None;
+            import std::slice::{CSlice, get};
+
+            const VALUES = CSlice(u256, None(u256)) {
+                data: @concat_cbytes((1, 2)),
+                len: 2
+            };
+
+            init {
+                let index = @evm_calldataload(0);
+                get(VALUES, index);
+                @evm_stop();
+            }
+            "#,
+        ),
+        &[r#"
+        error: attempting to evaluate runtime expression in comptime context
+          --> std/slice.plk:68:20
+           |
+        68 |         comptime { index }
+           |                    ^^^^^ runtime expression
+        "#],
+    );
+}
+
+#[test]
 fn test_compile_error_escaped_message() {
     assert_diagnostics(
         r#"

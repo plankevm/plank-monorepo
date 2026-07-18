@@ -3,3 +3,9 @@ const require = fn (condition: bool) void {
         @evm_revert(@malloc_uninit(0), 0);
     }
 };
+
+const comptime_assert = fn (comptime condition: bool, comptime message: cbytes) void {
+    if !condition {
+        @compile_error(message);
+    }
+};

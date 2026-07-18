@@ -1,0 +1,145 @@
+import std::cbytes::{encode_cbytes, unsafe_cbytes_read};
+import std::error::require;
+import std::mem::{unsafe_mem_read, unsafe_mem_write};
+import std::option::{None, Option, Some, unwrap};
+import std::regions::{bytes, copy_if_not_already_memory, ctime, is_region, memory, region_ptr_type};
+import std::type::sizeof;
+
+const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u256)) type {
+    if !is_region(R) {
+        @compile_error("R must be a region type");
+    }
+
+    if R == ctime {
+        return CSlice(T, arity);
+    }
+
+    if T == cbytes {
+        @compile_error("runtime slices cannot contain cbytes elements");
+    }
+
+    if arity.is_some {
+        struct (R, T, arity.inner) {
+            ptr: region_ptr_type(R)
+        }
+    } else {
+        struct (R, T) {
+            ptr: region_ptr_type(R),
+            len: u256
+        }
+    }
+};
+
+// Invariant: data contains complete, contiguous T values. For fixed slices, data
+// contains exactly arity elements; for dynamic slices, exactly len elements.
+// Construction is trusted until private fields allow this to be enforced.
+const CSlice = fn (comptime T: type, comptime arity: Option(u256)) type {
+    if T == cbytes {
+        @compile_error("not yet implemented: CSlice with cbytes elements");
+    }
+
+    if arity.is_some {
+        struct (ctime, T, arity.inner) {
+            data: cbytes
+        }
+    } else {
+        struct (ctime, T) {
+            data: cbytes,
+            len: u256
+        }
+    }
+};
+
+const len = fn (slice: $S) u256 {
+    let arity = comptime { slice_arity(@type_index(S)) };
+    if arity.is_some {
+        return arity.inner;
+    }
+    slice.len
+};
+
+const is_empty = fn (slice: $S) bool {
+    len(slice) == 0
+};
+
+const get = fn (slice: $S, index: u256) Option(element_type(S)) {
+    let R = region_type(S);
+    let index = if R == ctime {
+        comptime { index }
+    } else {
+        index
+    };
+
+    let T = element_type(S);
+    if index >= len(slice) {
+        return None(T);
+    }
+
+    let element_size = comptime { sizeof(T) };
+    let offset = index * element_size;
+    if R == ctime {
+        return comptime {
+            Some(unsafe_cbytes_read(T, slice.data, offset))
+        };
+    }
+    let element_bytes = bytes(R) {
+        ptr: slice.ptr +% offset,
+        length: element_size
+    };
+    let memory_bytes = copy_if_not_already_memory(element_bytes);
+    Some(unsafe_mem_read(T, memory_bytes.ptr, 0))
+};
+
+const at = fn (slice: $S, index: u256) element_type(S) {
+    unwrap(element_type(S), get(slice, index))
+};
+
+const set = fn (slice: $S, index: u256, value: element_type(S)) void {
+    if region_type(S) != memory {
+        @compile_error("set requires a memory slice");
+    }
+    require(index < len(slice));
+    let element_size = comptime { sizeof(element_type(S)) };
+    let offset = index * element_size;
+    unsafe_mem_write(slice.ptr, offset, value);
+};
+
+const replace = fn (comptime slice: $S, comptime index: u256, comptime value: element_type(S)) S {
+    if region_type(S) != ctime {
+        @compile_error("replace requires a ctime slice");
+    }
+
+    if index >= len(slice) {
+        @compile_error("replace index is out of bounds");
+    }
+
+    let element_size = sizeof(element_type(S));
+    let start = index * element_size;
+    let end = start + element_size;
+    let data = @concat_cbytes((
+        @slice_cbytes(slice.data, 0, start),
+        encode_cbytes(value),
+        @slice_cbytes(slice.data, end, slice.data.length)
+    ));
+    if slice_arity(@type_index(S)).is_some {
+        return S { data: data };
+    }
+    S { data: data, len: slice.len }
+};
+
+// Helpers
+const element_type = fn (comptime S: type) type {
+    @get_field(@type_index(S), 1)
+};
+
+const region_type = fn (comptime S: type) type {
+    @get_field(@type_index(S), 0)
+};
+
+const slice_arity = fn (comptime type_index: $I) Option(u256) {
+    if @field_count(I) == 3 {
+        Some(@get_field(type_index, 2))
+    } else {
+        None(u256)
+    }
+};
