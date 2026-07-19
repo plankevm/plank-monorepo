@@ -125,7 +125,6 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         self.try_push(value)
     }
 
-    #[must_use]
     fn swap_next_best(&mut self) -> Result<bool, ProcessNext> {
         let swaps = permute::best_permute(
             &self.to_preserve,
@@ -173,6 +172,7 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         target: &'a [ValueNodeId],
         last_uses: &'a [ValueNodeId],
     ) -> Self {
+        // May include spilled values => algorithm will *try* to get a copy on the stack again.
         let to_preserve = stack.fifo()[..usize::from(head)]
             .iter()
             .copied()
@@ -249,7 +249,8 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
             self.stack.spill_top();
         }
 
-        if self.target.contains(&value) {
+        let mut shrinking_tail = true;
+        if self.head > 0 && self.target.contains(&value) {
             match self.to_preserve.iter().position(|&v| v == value) {
                 Some(pi) => {
                     self.to_preserve.swap_remove(pi);
@@ -257,7 +258,17 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
                 None => {
                     self.to_push.push(value);
                     self.head -= 1;
+                    shrinking_tail = false;
                 }
+            }
+        }
+
+        if shrinking_tail && self.head > 0 {
+            let head_end = usize::from(self.head);
+            let promoted = self.stack.fifo()[head_end - 1];
+
+            if !self.last_uses.contains(&promoted) && self.target.contains(&promoted) {
+                self.to_preserve.push(promoted);
             }
         }
     }
