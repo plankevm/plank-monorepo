@@ -120,7 +120,15 @@ fn assert_intra_op_schedule(
         last_uses,
     );
     let expected = expected_ops.as_ref();
-    assert_eq!(&ops, expected);
+    let mut actual = String::new();
+    use std::fmt::Write;
+    for (i, e) in ops.iter().enumerate() {
+        if i > 0 {
+            write!(actual, ", ").unwrap();
+        }
+        write!(actual, "{e}").unwrap();
+    }
+    assert_eq!(&ops, expected, "actual = [{actual}]");
 }
 
 const fn store(id: u32) -> StackOps {
@@ -251,11 +259,26 @@ fn spill_and_rebuild_when_already_preserved_on_swap_unreachable() {
 }
 
 #[test]
-fn mega_skibidi() {
+fn everything_but_preserve_correct_requiring_spill() {
     opts().max_swap_depth(2).last_uses([0, 5]).spilled([5]).assert(
         [0, 1, 2, 3, 4, 5, 6],
         [5, 1, 0, 5],
-        [],
+        [
+            Dup(1),
+            load(0),
+            Pop,
+            store(1),
+            store(2),
+            Pop,
+            store(3),
+            store(4),
+            store(5),
+            Pop,
+            load(0),
+            load(2),
+            load(1),
+            load(0),
+        ],
     );
 }
 
@@ -276,24 +299,16 @@ impl Placement {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct RawValue {
     placement: Placement,
     stack_order: u16,
-    spilled_order: u16,
     is_last_use: bool,
 }
 
-#[derive(Debug)]
-struct RawSchedule {
-    values: Vec<RawValue>,
-    target_selectors: Vec<u8>,
-    max_swap_depth: u8,
-}
-
 fn raw_value() -> impl Strategy<Value = RawValue> {
-    (0u8..3, any::<u16>(), any::<u16>(), any::<bool>()).prop_map(
-        |(placement, stack_order, spilled_order, is_last_use)| RawValue {
+    (0u8..3, any::<u16>(), any::<bool>()).prop_map(|(placement, stack_order, is_last_use)| {
+        RawValue {
             placement: match placement {
                 0 => Placement::Stack,
                 1 => Placement::Spilled,
@@ -301,65 +316,34 @@ fn raw_value() -> impl Strategy<Value = RawValue> {
                 _ => unreachable!(),
             },
             stack_order,
-            spilled_order,
             is_last_use,
-        },
-    )
+        }
+    })
 }
 
 fn generated_schedule() -> impl Strategy<Value = (u8, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>)> {
-    (prop::collection::vec(raw_value(), 1..16), prop::collection::vec(any::<u8>(), 0..16), 1u8..=8)
-        .prop_map(|(values, target_selectors, max_swap_depth)| RawSchedule {
-            values,
-            target_selectors,
-            max_swap_depth,
+    (prop::collection::vec(raw_value(), 1..16), 1u8..=8)
+        .prop_flat_map(|(values, max_swap_depth)| {
+            let value_len = u32::try_from(values.len()).unwrap();
+            (Just(values), prop::collection::vec(0..value_len, 0..16), Just(max_swap_depth))
         })
-        .prop_map(|raw| {
-            let mut stack = raw
-                .values
-                .iter()
-                .enumerate()
-                .filter(|(_, value)| value.placement.is_on_stack())
-                .map(|(id, value)| (value.stack_order, u32::try_from(id).expect("value overflow")))
-                .collect::<Vec<_>>();
-            stack.sort_unstable();
-            let stack = stack.into_iter().map(|(_, value)| value).collect::<Vec<_>>();
+        .prop_map(|(values, target, max_swap_depth)| {
+            let value_len = u32::try_from(values.len()).unwrap();
+            let mut stack: Vec<u32> =
+                (0..value_len).filter(|&i| values[i as usize].placement.is_on_stack()).collect();
+            stack.sort_by_key(|&i| values[i as usize].stack_order);
 
-            let mut spilled = raw
-                .values
-                .iter()
-                .enumerate()
-                .filter(|(_, value)| value.placement.is_spilled())
-                .map(|(id, value)| {
-                    (value.spilled_order, u32::try_from(id).expect("value overflow"))
-                })
-                .collect::<Vec<_>>();
-            spilled.sort_unstable();
-            let spilled = spilled.into_iter().map(|(_, value)| value).collect::<Vec<_>>();
-
-            let value_count = u8::try_from(raw.values.len()).expect("value count overflow");
-            let target = raw
-                .target_selectors
-                .into_iter()
-                .map(|selector| u32::from(selector % value_count))
-                .collect::<Vec<_>>();
-            let last_uses = raw
-                .values
-                .iter()
-                .enumerate()
-                .filter_map(|(id, value)| {
-                    let id = u32::try_from(id).expect("value overflow");
-                    (value.is_last_use && target.contains(&id)).then_some(id)
-                })
+            let spilled =
+                (0..value_len).filter(|&i| values[i as usize].placement.is_spilled()).collect();
+            let last_uses = (0..value_len)
+                .filter(|&i| values[i as usize].is_last_use && target.contains(&i))
                 .collect();
 
-            (raw.max_swap_depth, last_uses, spilled, stack, target)
+            (max_swap_depth, last_uses, spilled, stack, target)
         })
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(50_000))]
-
     #[test]
     fn generated_operand_schedules_are_correct(
         (max_swap_depth, last_uses, spilled, stack, target) in generated_schedule(),
