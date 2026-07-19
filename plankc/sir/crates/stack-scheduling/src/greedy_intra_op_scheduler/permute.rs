@@ -60,7 +60,7 @@ fn expand_states(
         }
 
         let want = target.loc(pos);
-        if have == want {
+        if have == want || have == top {
             continue;
         }
 
@@ -364,7 +364,6 @@ mod tests {
 
         let mut current = current.to_vec();
         let mut to_preserve = start_to_preserve.clone();
-        let mut swapped_out_correct_top = false;
 
         for &swap in executed {
             let i = usize::from(swap);
@@ -388,38 +387,25 @@ mod tests {
                     return false;
                 }
 
-                if top == want {
-                    swapped_out_correct_top = false;
-                } else {
-                    if swapped_out_correct_top {
-                        eprintln!("swapped out correct top at end for no gain");
-                        return false;
-                    }
-                    if top == top_want {
-                        swapped_out_correct_top = true;
-                    } else if have != top_want {
-                        eprintln!("swapping without fixing target or top");
-                        return false;
-                    }
+                if top != want && top != top_want && have != top_want {
+                    eprintln!("swapping without fixing target or top");
+                    return false;
                 }
             } else if target.contains(&top) {
-                let Some(pi) = to_preserve.iter().position(|&v| v == top) else {
+                if let Some(pi) = to_preserve.iter().position(|&v| v == top) {
+                    to_preserve.swap_remove(pi);
+                } else if allow_swap_top && top == top_want {
+                    if !last_uses.contains(&have) {
+                        eprintln!("swapping {have} from tail but is not last use");
+                        return false;
+                    }
+                } else {
                     eprintln!("swapping {top} to tail despite not in `to_preserve`");
-                    return false;
-                };
-                to_preserve.swap_remove(pi);
-                if !last_uses.contains(&have) {
-                    eprintln!("swapping {have} from tail but is not last use");
                     return false;
                 }
             }
 
             current.swap(0, i);
-        }
-
-        if swapped_out_correct_top {
-            eprintln!("swapped out correct top at end for no gain");
-            return false;
         }
 
         true
@@ -562,7 +548,10 @@ mod tests {
         #![proptest_config(ProptestConfig::with_cases(512))]
 
         #[test]
-        fn generated_swaps_are_legal(context in generated_context()) {
+        fn generated_swaps_are_legal(
+            context in generated_context(),
+            allow_swap_top in any::<bool>(),
+        ) {
             let GeneratedContext { current, target, last_uses } = context;
             let head_end = compute_head_end(&current, &target, &last_uses);
             let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
@@ -573,7 +562,7 @@ mod tests {
                 &current,
                 &target,
                 TEST_PATHS_BUDGET,
-                false
+                allow_swap_top
             );
             let replayed = swap_sequence_legal(
                 head_end,
@@ -581,10 +570,10 @@ mod tests {
                 &target,
                 &last_uses,
                 &actual,
-                false
+                allow_swap_top
             );
 
-            prop_assert!(replayed);
+            prop_assert!(replayed, "actual = {actual:?}, head_end = {head_end}, to_preserve = {to_preserve:?}");
         }
     }
 }
