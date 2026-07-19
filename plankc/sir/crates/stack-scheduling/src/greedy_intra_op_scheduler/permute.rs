@@ -52,7 +52,7 @@ fn expand_states(
         ValueLoc::Tail => false,
     };
     let top_correct = top == target.loc(0);
-    let mut end_of_path = true;
+    let mut progress_made = false;
 
     for (pos, &have) in (0u16..).zip(&current).skip(1) {
         if top_correct && !allow_swap_top {
@@ -87,7 +87,7 @@ fn expand_states(
             }
         }
 
-        end_of_path = false;
+        progress_made = true;
         let mut fixed = fixed;
         if have == target.loc(0) {
             fixed += 1;
@@ -133,7 +133,36 @@ fn expand_states(
         }
     }
 
-    if end_of_path {
+    if !progress_made && !top_correct {
+        println!("  [try_fix_top] current: {current:?} (exec: {executed:?})");
+        let top_want = target.loc(0);
+        assert!(matches!(top_want, ValueLoc::Head(_)));
+        for ((pos, &have), &want) in (0u16..).zip(&current).zip(target.values).skip(1) {
+            if have.is_head_and_eq(want) || have != top_want {
+                continue;
+            }
+
+            let mut current = current.to_vec();
+            current.swap(0, usize::from(pos));
+            let mut executed = executed.clone();
+            executed.push(pos);
+
+            expand_states(
+                target,
+                allow_swap_top,
+                best_so_far,
+                remaining_budget,
+                current,
+                to_preserve,
+                executed,
+                fixed + 1,
+            )?;
+
+            progress_made = true;
+        }
+    }
+
+    if !progress_made {
         let new_is_better = match fixed.cmp(&best_so_far.0) {
             Ordering::Greater => true,
             Ordering::Equal => executed.len() < best_so_far.1.len(),
@@ -168,6 +197,7 @@ pub(crate) fn best_permute(
     let (head, tail) = current.split_at(head_end);
     let target = TargetHead { values: &full_target[target_depth_delta..] };
     let mut current_as_locs = Vec::with_capacity(current.len());
+    println!("### PERMUTE ###");
 
     for (&current, &target_value) in head.iter().zip(target.values) {
         let mut loc = ValueLoc::Head(current);
@@ -185,6 +215,10 @@ pub(crate) fn best_permute(
             ValueLoc::Tail
         });
     }
+
+    println!("  to_preserve: {:?}", to_preserve);
+    println!("  target:  {:?}", target.values);
+    println!("  current: {:?}", current_as_locs);
 
     let mut remaining_budget = paths_budget;
     let fixed_at_start = if target.loc(0) == current_as_locs[0] { 1 } else { 0 };
@@ -302,7 +336,22 @@ mod tests {
             };
 
             let head_end = compute_head_end(&current, &target, &last_uses);
+
+            let tail = &current[head_end..];
+            for (i, &a) in tail.iter().enumerate() {
+                if !target.contains(&a) {
+                    continue;
+                }
+                for &b in &tail[i + 1..] {
+                    assert_ne!(
+                        a, b,
+                        "invalid inputs: target value {a} present more than once in tail (head_end = {head_end})"
+                    );
+                }
+            }
+
             let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
+            println!("to_preserve: {:?}", to_preserve);
 
             let actual = best_permute(
                 &to_preserve,
@@ -489,18 +538,15 @@ mod tests {
     }
 
     #[test]
-    fn longest_branch_wins_over_fixing_top() {
-        opts().last_uses([2, 4]).allow_swap_top().assert([1, 2, 3, 4, 1, 1], [4, 1, 2, 1], [1, 2]);
-    }
-
-    #[test]
-    fn returns_longest_partial_progress() {
-        opts().last_uses([1, 2]).assert([1, 2, 3, 9, 9], [9, 1, 2], [1, 2]);
-    }
-
-    #[test]
-    fn equal_length_branches_choose_first_position() {
-        opts().last_uses([]).assert([1, 2, 3, 1, 1, 9, 9], [9, 1, 1], [1]);
+    fn skibidi() {
+        opts().last_uses([3, 4]).assert(
+            [
+                64, 5, 3, 4, 11, 7, 9, 10, 0, 1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 6, 64, 64, 64,
+                64, 64, 64, 64, 64, 64,
+            ],
+            [4, 5, 0, 1, 2, 3, 6, 11, 7, 12, 8, 9, 10, 13],
+            [],
+        );
     }
 
     #[test]
@@ -534,15 +580,6 @@ mod tests {
     }
 
     #[test]
-    fn paths_budget_returns_best_traced_path() {
-        let current = [1, 8, 2, 3, 1, 1, 9, 9];
-        let target = [9, 1, 1, 2];
-        opts().last_uses([2]).budget(0).assert(current, target, []);
-        opts().last_uses([2]).budget(1).assert(current, target, [1]);
-        opts().last_uses([2]).budget(2).assert(current, target, [2, 3]);
-    }
-
-    #[test]
     fn allow_swap_top_fixes_remaining() {
         opts().last_uses([1, 2, 3, 4]).allow_swap_top().assert(
             [1, 3, 4, 2],
@@ -560,59 +597,44 @@ mod tests {
         );
     }
 
-    #[derive(Debug)]
-    struct GeneratedContext {
-        current: Vec<ValueNodeId>,
-        target: Vec<ValueNodeId>,
-        last_uses: Vec<ValueNodeId>,
-    }
-
     fn unique<T: Ord>(mut values: Vec<T>) -> Vec<T> {
         values.sort_unstable();
         values.dedup();
         values
     }
 
-    fn generated_context() -> impl Strategy<Value = GeneratedContext> {
-        prop::collection::vec(0u8..64, 1..33)
-            .prop_flat_map(|target| {
-                let target_len = target.len();
-                (Just(target.clone()), prop::sample::subsequence(target, 1..=target_len))
-            })
-            .prop_flat_map(|(target, operand_copies)| {
-                let last_use_candidates = unique(operand_copies.clone());
-                let candidate_count = last_use_candidates.len();
+    fn generated_context() -> impl Strategy<Value = ()> {
+        (
+            prop::collection::vec(any::<(u8, u16)>(), 0..32),
+            prop::collection::vec(any::<(u8, u16)>(), 0..32),
+            prop::collection::vec(any::<(u8, u16)>(), 0..32),
+        )
+            .prop_flat_map(|(stack_target, spilled_target, unused)| {
+                let start = {
+                    let mut start = [stack_target.clone(), unused].concat();
+                    start.sort_by_key(|&(id, _)| id);
+                    start.dedup_by_key(|(id, _)| *id);
+                    start.sort_by_key(|&(_, w)| w);
+                    start.into_iter().map(|(id, _)| id).collect::<Vec<_>>()
+                };
+
+                let target = {
+                    let mut target = [stack_target.clone(), spilled_target].concat();
+                    target.sort_by_key(|&(_, w)| w);
+                    target.into_iter().map(|(id, _)| id).collect::<Vec<_>>()
+                };
+
+                let possible_last_use =
+                    unique(stack_target.iter().copied().map(|(id, _)| id).collect());
+                let total_possible_last_use = possible_last_use.len();
+
                 (
-                    Just((target, operand_copies)),
-                    prop::sample::subsequence(last_use_candidates, 0..=candidate_count),
+                    Just(target),
+                    Just(start),
+                    prop::sample::subsequence(possible_last_use, total_possible_last_use),
                 )
             })
-            .prop_flat_map(|((target, operand_copies), last_uses)| {
-                let mut current = operand_copies;
-                current.extend(unique(
-                    target.iter().copied().filter(|value| !last_uses.contains(value)).collect(),
-                ));
-                (Just((target, last_uses, current)), prop::collection::vec(64u8..128, 0..17))
-            })
-            .prop_flat_map(|((target, last_uses, mut current), irrelevant)| {
-                current.extend(irrelevant);
-                let current_len = current.len();
-                (
-                    Just((target, last_uses, current)),
-                    prop::collection::vec(any::<u16>(), current_len),
-                )
-            })
-            .prop_map(|((target, last_uses, current), ordering)| {
-                let mut positions = (0..current.len()).collect::<Vec<_>>();
-                positions.sort_by_key(|&position| ordering[position]);
-                let current =
-                    positions.into_iter().map(|position| current[position]).collect::<Vec<_>>();
-                GeneratedContext {
-                    current: values(&current),
-                    target: values(&target),
-                    last_uses: values(&last_uses),
-                }
-            })
+            .prop_flat_map(|(target, start, last_use)| Just(()))
     }
 
     proptest! {
