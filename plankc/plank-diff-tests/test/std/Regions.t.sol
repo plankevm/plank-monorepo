@@ -82,6 +82,33 @@ contract RegionsTest is BaseTest {
         assertFalse(endOutOfBounds);
     }
 
+    function test_fuzzing_eqCalldataCalldata(bytes memory a, bytes memory b) public {
+        (bool success, bytes memory out) =
+            plankImpl.call(abi.encodeWithSignature("eqCalldataCalldata(bytes,bytes)", a, b));
+        assertTrue(success);
+        assertEq(abi.decode(out, (uint256)), keccak256(a) == keccak256(b) ? 1 : 0);
+    }
+
+    function test_fuzzing_eqMemoryCalldata(bytes memory a, bytes memory b) public {
+        (bool success, bytes memory out) =
+            plankImpl.call(abi.encodeWithSignature("eqMemoryCalldata(bytes,bytes)", a, b));
+        assertTrue(success);
+        assertEq(abi.decode(out, (uint256)), keccak256(a) == keccak256(b) ? 1 : 0);
+    }
+    function test_eqMemoryCalldata() public {
+        bytes memory a = hex"aabbccdd";
+        bytes memory b = hex"aabbccdd";
+        (bool success, bytes memory out) = plankImpl.call(abi.encodeWithSignature("eqMemoryCalldata(bytes,bytes)", a, b));
+        assertTrue(success);
+        assertEq(abi.decode(out, (uint256)), 1);
+    }
+
+    function test_fuzzing_eqMemoryMemory(bytes memory a, bytes memory b) public {
+        (bool success, bytes memory out) = plankImpl.call(abi.encodeWithSignature("eqMemoryMemory(bytes,bytes)", a, b));
+        assertTrue(success);
+        assertEq(abi.decode(out, (uint256)), keccak256(a) == keccak256(b) ? 1 : 0);
+    }
+
     function slice(bytes memory data, uint256 start, uint256 end) internal pure returns (bytes memory out) {
         out = new bytes(end - start);
         for (uint256 i = 0; i < out.length; i++) {
