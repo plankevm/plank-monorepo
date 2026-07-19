@@ -65,10 +65,18 @@ fn expand_states(
         }
 
         if top_correct {
+            let can_preserve_this = match have {
+                ValueLoc::Tail => false,
+                ValueLoc::Head(value) => to_preserve.contains(&value),
+            };
+
             let has_at_least_one_destination =
                 (0u16..).zip(&current).skip(1).any(|(dst_pos, &have_there)| {
                     let want_there = target.loc(dst_pos);
-                    want_there == have && want_there != have_there
+                    let valid_there =
+                        want_there == have || (want_there == ValueLoc::Tail && can_preserve_this);
+                    let already_correct = want_there == have_there;
+                    valid_there && !already_correct
                 });
             if !has_at_least_one_destination {
                 continue;
@@ -313,7 +321,8 @@ mod tests {
                     &target,
                     &last_uses,
                     &actual,
-                    self.allow_swap_top
+                    self.allow_swap_top,
+                    self.paths_budget
                 ),
                 "replay of {:?} not legal",
                 actual
@@ -329,6 +338,43 @@ mod tests {
         }
     }
 
+    fn progres_to_be_made(
+        head_end: usize,
+        current: &[ValueNodeId],
+        target: &[ValueNodeId],
+        last_uses: &[ValueNodeId],
+        _to_preserve: &[ValueNodeId],
+        allow_swap_top: bool,
+    ) -> bool {
+        if head_end == 0 {
+            return false;
+        }
+
+        let target_depth_delta = target.len() - head_end;
+        if !allow_swap_top && target[target_depth_delta] == current[0] {
+            return false;
+        }
+        let tail = &current[head_end..];
+
+        for (&cur, &tgt) in current.iter().zip(&target[target_depth_delta..]) {
+            if cur != tgt {
+                if current
+                    .iter()
+                    .zip(&target[target_depth_delta..])
+                    .any(|(&ocur, &otgt)| ocur != otgt && ocur == tgt)
+                {
+                    return true;
+                }
+
+                if tail.iter().any(|&value| value == tgt && last_uses.contains(&value)) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     fn swap_sequence_legal(
         head_end: usize,
         current: &[ValueNodeId],
@@ -336,6 +382,7 @@ mod tests {
         last_uses: &[ValueNodeId],
         executed: &[u16],
         allow_swap_top: bool,
+        budget: usize,
     ) -> bool {
         {
             let mut cur_counts = HashMap::<ValueNodeId, u32>::new();
@@ -364,6 +411,21 @@ mod tests {
 
         let mut current = current.to_vec();
         let mut to_preserve = start_to_preserve.clone();
+
+        if executed.is_empty()
+            && budget > 0
+            && progres_to_be_made(
+                head_end,
+                &current,
+                target,
+                last_uses,
+                &to_preserve,
+                allow_swap_top,
+            )
+        {
+            eprintln!("returned empty sequence when can make progress");
+            return false;
+        }
 
         for &swap in executed {
             let i = usize::from(swap);
@@ -489,6 +551,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn replace_top_with_tail_for_progress() {
+        opts().last_uses([0, 5]).allow_swap_top().assert(
+            [5, 1, 0, 1, 2, 3, 4, 5, 6],
+            [5, 1, 0, 5],
+            [3, 7],
+        );
+    }
+
     #[derive(Debug)]
     struct GeneratedContext {
         current: Vec<ValueNodeId>,
@@ -570,7 +641,8 @@ mod tests {
                 &target,
                 &last_uses,
                 &actual,
-                allow_swap_top
+                allow_swap_top,
+                TEST_PATHS_BUDGET
             );
 
             prop_assert!(replayed, "actual = {actual:?}, head_end = {head_end}, to_preserve = {to_preserve:?}");
