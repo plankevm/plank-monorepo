@@ -241,49 +241,128 @@ fn spill_and_rebuild_correctly_when_swap_unreachable() {
     );
 }
 
-fn unique(values: Vec<u32>) -> Vec<u32> {
-    let mut unique = Vec::with_capacity(values.len());
-    for value in values {
-        if !unique.contains(&value) {
-            unique.push(value);
-        }
-    }
-    unique
+#[test]
+fn spill_and_rebuild_when_already_preserved_on_swap_unreachable() {
+    opts().max_swap_depth(1).spilled([0]).assert(
+        [0, 1, 2, 3],
+        [2, 0],
+        [Dup(0), Pop, Pop, store(1), Dup(0), load(0), Swap(1)],
+    );
 }
 
-fn generated_schedule() -> impl Strategy<Value = (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, u8)> {
-    (prop::collection::vec(0u32..32, 0..16), prop::collection::vec(0u32..32, 0..16))
-        .prop_map(|(stack, spilled)| (unique(stack), unique(spilled)))
-        .prop_filter("at least one value must be available", |(stack, spilled)| {
-            !stack.is_empty() || !spilled.is_empty()
+#[test]
+fn mega_skibidi() {
+    opts().max_swap_depth(2).last_uses([0, 5]).spilled([5]).assert(
+        [0, 1, 2, 3, 4, 5, 6],
+        [5, 1, 0, 5],
+        [],
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Placement {
+    Stack,
+    Spilled,
+    Both,
+}
+
+impl Placement {
+    const fn is_on_stack(self) -> bool {
+        matches!(self, Placement::Stack | Placement::Both)
+    }
+
+    const fn is_spilled(self) -> bool {
+        matches!(self, Placement::Spilled | Placement::Both)
+    }
+}
+
+#[derive(Debug)]
+struct RawValue {
+    placement: Placement,
+    stack_order: u16,
+    spilled_order: u16,
+    is_last_use: bool,
+}
+
+#[derive(Debug)]
+struct RawSchedule {
+    values: Vec<RawValue>,
+    target_selectors: Vec<u8>,
+    max_swap_depth: u8,
+}
+
+fn raw_value() -> impl Strategy<Value = RawValue> {
+    (0u8..3, any::<u16>(), any::<u16>(), any::<bool>()).prop_map(
+        |(placement, stack_order, spilled_order, is_last_use)| RawValue {
+            placement: match placement {
+                0 => Placement::Stack,
+                1 => Placement::Spilled,
+                2 => Placement::Both,
+                _ => unreachable!(),
+            },
+            stack_order,
+            spilled_order,
+            is_last_use,
+        },
+    )
+}
+
+fn generated_schedule() -> impl Strategy<Value = (u8, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>)> {
+    (prop::collection::vec(raw_value(), 1..16), prop::collection::vec(any::<u8>(), 0..16), 1u8..=8)
+        .prop_map(|(values, target_selectors, max_swap_depth)| RawSchedule {
+            values,
+            target_selectors,
+            max_swap_depth,
         })
-        .prop_flat_map(|(stack, spilled)| {
-            let available = unique(stack.iter().chain(&spilled).copied().collect());
-            (
-                Just(stack),
-                Just(spilled),
-                prop::collection::vec(prop::sample::select(available), 0..16),
-            )
-        })
-        .prop_flat_map(|(stack, spilled, target)| {
-            let candidates = unique(target.clone());
-            let candidate_count = candidates.len();
-            (
-                Just(stack),
-                Just(spilled),
-                Just(target),
-                prop::sample::subsequence(candidates, 0..=candidate_count),
-                1u8..=8,
-            )
+        .prop_map(|raw| {
+            let mut stack = raw
+                .values
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| value.placement.is_on_stack())
+                .map(|(id, value)| (value.stack_order, u32::try_from(id).expect("value overflow")))
+                .collect::<Vec<_>>();
+            stack.sort_unstable();
+            let stack = stack.into_iter().map(|(_, value)| value).collect::<Vec<_>>();
+
+            let mut spilled = raw
+                .values
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| value.placement.is_spilled())
+                .map(|(id, value)| {
+                    (value.spilled_order, u32::try_from(id).expect("value overflow"))
+                })
+                .collect::<Vec<_>>();
+            spilled.sort_unstable();
+            let spilled = spilled.into_iter().map(|(_, value)| value).collect::<Vec<_>>();
+
+            let value_count = u8::try_from(raw.values.len()).expect("value count overflow");
+            let target = raw
+                .target_selectors
+                .into_iter()
+                .map(|selector| u32::from(selector % value_count))
+                .collect::<Vec<_>>();
+            let last_uses = raw
+                .values
+                .iter()
+                .enumerate()
+                .filter_map(|(id, value)| {
+                    let id = u32::try_from(id).expect("value overflow");
+                    (value.is_last_use && target.contains(&id)).then_some(id)
+                })
+                .collect();
+
+            (raw.max_swap_depth, last_uses, spilled, stack, target)
         })
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(512))]
+    #![proptest_config(ProptestConfig::with_cases(50_000))]
 
     #[test]
     fn generated_operand_schedules_are_correct(
-        (stack, spilled, target, last_uses, max_swap_depth) in generated_schedule(),
+        (max_swap_depth, last_uses, spilled, stack, target) in generated_schedule(),
     ) {
         let config = ScheduleConfig::max_swap_no_exchange(max_swap_depth);
         assert_intra_op_schedule_exists(config, stack, spilled, target, last_uses);
