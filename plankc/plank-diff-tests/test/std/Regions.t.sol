@@ -95,10 +95,12 @@ contract RegionsTest is BaseTest {
         assertTrue(success);
         assertEq(abi.decode(out, (uint256)), keccak256(a) == keccak256(b) ? 1 : 0);
     }
+
     function test_eqMemoryCalldata() public {
         bytes memory a = hex"aabbccdd";
         bytes memory b = hex"aabbccdd";
-        (bool success, bytes memory out) = plankImpl.call(abi.encodeWithSignature("eqMemoryCalldata(bytes,bytes)", a, b));
+        (bool success, bytes memory out) =
+            plankImpl.call(abi.encodeWithSignature("eqMemoryCalldata(bytes,bytes)", a, b));
         assertTrue(success);
         assertEq(abi.decode(out, (uint256)), 1);
     }
