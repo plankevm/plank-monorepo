@@ -224,7 +224,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     _ => unreachable!("matched above"),
                 };
-                Ok(Ok(EvalValue::Comptime(matches_name_kind.into())))
+                matches_name_kind.into()
             }
             Builtin::TypeName => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
@@ -233,11 +233,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let name =
                     self.types.format(self.diag_ctx.session, self.eval.values, ty).to_string();
                 let cbytes = self.diag_ctx.session.intern_cbytes(name.as_bytes());
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(
-                    cbytes.contents,
-                    cbytes.start,
-                    cbytes.end,
-                ))))
+                self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end)
             }
             Builtin::FieldName => {
                 let &[ty_local, index_local] = args else { unreachable!("arg count checked") };
@@ -253,7 +249,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let contents = BytesId::from(field.name);
                 let len = u32::try_from(self.diag_ctx.session.lookup_bytes(contents).len())
                     .expect("field name length fits u32");
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(contents, 0, len))))
+                self.eval.values.intern_bytes(contents, 0, len)
             }
             Builtin::FieldIndex => {
                 let &[ty_local, name_local] = args else { unreachable!("arg count checked") };
@@ -263,7 +259,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let index =
                     self.find_struct_field_by_name(r#struct, name).unwrap_or(r#struct.fields.len());
                 let index = U256::from(index);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(index))))
+                self.eval.values.intern_num(index)
             }
             Builtin::FieldCount => {
                 let &[r#struct] = args else { unreachable!("arg count checked") };
@@ -385,7 +381,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             Builtin::ActiveEvmVersion => {
                 let evm_version: U256 = self.eval.evm_version.into();
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(evm_version))))
+                self.eval.values.intern_num(evm_version)
             }
             _ => unreachable!("not a comptime builtin: {builtin}"),
         };
