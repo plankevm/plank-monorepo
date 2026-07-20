@@ -307,7 +307,7 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     }
 
     pub fn into_next_alloc_id(self) -> StaticAllocId {
-        self.start_alloc_id
+        self.start_alloc_id + u32::try_from(self.spilled.len()).expect("overflow")
     }
 }
 
