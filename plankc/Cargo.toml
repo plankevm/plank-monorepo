@@ -75,3 +75,6 @@ enum-iterator = "2"
 [workspace.lints.rust]
 unused_crate_dependencies = "deny"
 unreachable_patterns = "deny"
+
+[workspace.lints.clippy]
+too_many_arguments = "allow"

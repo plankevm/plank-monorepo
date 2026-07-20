@@ -23,16 +23,8 @@ struct TargetHead<'a> {
 }
 
 impl TargetHead<'_> {
-    fn contains(self, value: ValueNodeId) -> bool {
-        self.values.contains(&value)
-    }
-
     fn loc(self, i: u16) -> ValueLoc {
         self.values.get(usize::from(i)).copied().map_or(ValueLoc::Tail, ValueLoc::Head)
-    }
-
-    fn value(self, i: u16) -> ValueNodeId {
-        self.values[usize::from(i)]
     }
 }
 
@@ -199,10 +191,8 @@ pub(crate) fn best_permute(
 
     for (&current, &target_value) in head.iter().zip(target.values) {
         let mut loc = ValueLoc::Head(current);
-        if current != target_value {
-            if !full_target.contains(&current) {
-                loc = ValueLoc::Tail;
-            }
+        if current != target_value && !full_target.contains(&current) {
+            loc = ValueLoc::Tail;
         }
         current_as_locs.push(loc);
     }
@@ -284,7 +274,6 @@ mod tests {
         for &v in target_counts.keys() {
             let cur = cur_counts.get(&v).copied().unwrap_or(0);
             let t = target_counts.get(&v).copied().unwrap_or(0);
-            let pmc = missing_copies;
             if last_uses.contains(&v) || cur == 0 {
                 missing_copies += t - cur;
             } else {
@@ -493,6 +482,12 @@ mod tests {
     #[test]
     fn longer_cycle() {
         opts().assert([1, 2, 3], [3, 1, 2], [1, 2]);
+    }
+
+    #[test]
+    fn low_budget_returns_suboptimal_path() {
+        opts().last_uses([0, 1]).budget(1).assert([2, 0, 1], [0, 1, 2], [1]);
+        opts().last_uses([0, 1]).budget(2).assert([2, 0, 1], [0, 1, 2], [2]);
     }
 
     #[test]
