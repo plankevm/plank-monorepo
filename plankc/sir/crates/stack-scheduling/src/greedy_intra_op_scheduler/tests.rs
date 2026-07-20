@@ -94,6 +94,16 @@ fn assert_intra_op_schedule_exists(
 
     greedy_schedule_op(config, &mut stack, &graph, op_id, complete);
 
+    for &value in start_stack {
+        let value = ValueNodeId::new(value);
+        if !last_uses.contains(&value) {
+            assert!(
+                stack.find_first(value).is_some() || stack.get_spilled(value).is_some(),
+                "non last use value {value:?} not preserved"
+            );
+        }
+    }
+
     for &op in &ops {
         assert!(op.is_valid(config));
     }
@@ -310,7 +320,7 @@ fn generated_schedule() -> impl Strategy<Value = (u8, Vec<u32>, Vec<u32>, Vec<u3
     (prop::collection::vec(raw_value(), 1..32), 1u8..=24)
         .prop_flat_map(|(values, max_swap_depth)| {
             let value_len = u32::try_from(values.len()).unwrap();
-            (Just(values), prop::collection::vec(0..value_len, 0..16), Just(max_swap_depth))
+            (Just(values), prop::collection::vec(0..value_len, 0..32), Just(max_swap_depth))
         })
         .prop_map(|(values, target, max_swap_depth)| {
             let value_len = u32::try_from(values.len()).unwrap();
