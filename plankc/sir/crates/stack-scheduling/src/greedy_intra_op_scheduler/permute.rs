@@ -134,7 +134,7 @@ fn expand_states(
     }
 
     if !progress_made && !top_correct {
-        println!("  [try_fix_top] current: {current:?} (exec: {executed:?})");
+        // println!("  [try_fix_top] current: {current:?} (exec: {executed:?})");
         let top_want = target.loc(0);
         assert!(matches!(top_want, ValueLoc::Head(_)));
         for ((pos, &have), &want) in (0u16..).zip(&current).zip(target.values).skip(1) {
@@ -197,7 +197,7 @@ pub(crate) fn best_permute(
     let (head, tail) = current.split_at(head_end);
     let target = TargetHead { values: &full_target[target_depth_delta..] };
     let mut current_as_locs = Vec::with_capacity(current.len());
-    println!("### PERMUTE ###");
+    // println!("### PERMUTE ###");
 
     for (&current, &target_value) in head.iter().zip(target.values) {
         let mut loc = ValueLoc::Head(current);
@@ -216,9 +216,9 @@ pub(crate) fn best_permute(
         });
     }
 
-    println!("  to_preserve: {:?}", to_preserve);
-    println!("  target:  {:?}", target.values);
-    println!("  current: {:?}", current_as_locs);
+    // println!("  to_preserve: {:?}", to_preserve);
+    // println!("  target:  {:?}", target.values);
+    // println!("  current: {:?}", current_as_locs);
 
     let mut remaining_budget = paths_budget;
     let fixed_at_start = if target.loc(0) == current_as_locs[0] { 1 } else { 0 };
@@ -290,12 +290,22 @@ mod tests {
         for &v in target_counts.keys() {
             let cur = cur_counts.get(&v).copied().unwrap_or(0);
             let t = target_counts.get(&v).copied().unwrap_or(0);
-            if last_uses.contains(&v) {
+            let pmc = missing_copies;
+            if last_uses.contains(&v) || cur == 0 {
                 missing_copies += t - cur;
             } else {
                 missing_copies += (t + 1) - cur;
             }
+            if missing_copies > pmc {
+                println!("  [pmc inc]   {v:2} (+{})", missing_copies - pmc);
+            } else {
+                println!("  [right num] {v:2}");
+            }
         }
+
+        println!("target.len(): {:?}", target.len());
+        println!("missing_copies: {:?}", missing_copies);
+
         target.len() - missing_copies
     }
 
@@ -362,20 +372,19 @@ mod tests {
                 self.paths_budget,
                 self.allow_swap_top,
             );
+            if let Err(msg) = swap_sequence_legal(
+                head_end,
+                &current,
+                &target,
+                &last_uses,
+                &to_preserve,
+                &actual,
+                self.allow_swap_top,
+                self.paths_budget,
+            ) {
+                panic!("replay of {:?} not legal (head_end={head_end}): {msg}", actual);
+            }
             assert_eq!(actual, expected.as_ref(), "actual != expected (head_end = {head_end})");
-            assert!(
-                swap_sequence_legal(
-                    head_end,
-                    &current,
-                    &target,
-                    &last_uses,
-                    &actual,
-                    self.allow_swap_top,
-                    self.paths_budget
-                ),
-                "replay of {:?} not legal",
-                actual
-            );
         }
     }
 
@@ -387,20 +396,20 @@ mod tests {
         }
     }
 
-    fn progres_to_be_made(
+    fn progress_to_be_made(
         head_end: usize,
         current: &[ValueNodeId],
         target: &[ValueNodeId],
         last_uses: &[ValueNodeId],
-        _to_preserve: &[ValueNodeId],
-        allow_swap_top: bool,
+        swap_until_completion: bool,
     ) -> bool {
         if head_end == 0 {
             return false;
         }
 
         let target_depth_delta = target.len() - head_end;
-        if !allow_swap_top && target[target_depth_delta] == current[0] {
+        if !swap_until_completion {
+            // Conservatively say no progress to be made instead of reimplementing permute logic.
             return false;
         }
         let tail = &current[head_end..];
@@ -429,51 +438,21 @@ mod tests {
         current: &[ValueNodeId],
         target: &[ValueNodeId],
         last_uses: &[ValueNodeId],
+        to_preserve: &[ValueNodeId],
         executed: &[u16],
         allow_swap_top: bool,
         budget: usize,
-    ) -> bool {
-        {
-            let mut cur_counts = HashMap::<ValueNodeId, u32>::new();
-            for &cur in current {
-                *cur_counts.entry(cur).or_default() += 1;
-            }
-            let mut target_counts = HashMap::<ValueNodeId, u32>::new();
-            for &t in target {
-                *target_counts.entry(t).or_default() += 1;
-            }
-            let mut missing_copies = 0u32;
-            for &v in target_counts.keys() {
-                let cur = cur_counts.get(&v).copied().unwrap_or(0);
-                let t = target_counts.get(&v).copied().unwrap_or(0);
-                if last_uses.contains(&v) {
-                    missing_copies += t - cur;
-                } else {
-                    missing_copies += (t + 1) - cur;
-                }
-            }
-            assert_eq!(head_end, target.len() - (missing_copies as usize));
-        }
-
-        let start_to_preserve = build_to_preserve(head_end, current, target, last_uses);
+    ) -> Result<(), String> {
         let target_depth_delta = target.len() - head_end;
 
         let mut current = current.to_vec();
-        let mut to_preserve = start_to_preserve.clone();
+        let mut to_preserve = to_preserve.to_vec();
 
         if executed.is_empty()
             && budget > 0
-            && progres_to_be_made(
-                head_end,
-                &current,
-                target,
-                last_uses,
-                &to_preserve,
-                allow_swap_top,
-            )
+            && progress_to_be_made(head_end, &current, target, last_uses, allow_swap_top)
         {
-            eprintln!("returned empty sequence when can make progress");
-            return false;
+            return Err("returned empty sequence when can make progress".into());
         }
 
         for &swap in executed {
@@ -483,43 +462,37 @@ mod tests {
             let have = current[i];
 
             if !allow_swap_top && top == top_want {
-                eprintln!("swapping out correct top when allow_swap_top=false");
-                return false;
+                return Err("swapping out correct top when allow_swap_top=false".into());
             }
 
             if i < head_end {
                 let want = target[target_depth_delta + i];
                 if have == want {
-                    eprintln!("swapping to already correct position {i}");
-                    return false;
+                    return Err("swapping to already correct position {i}".into());
                 }
                 if top == have {
-                    eprintln!("swapping identical values {top} at {i}");
-                    return false;
+                    return Err("swapping identical values {top} at {i}".into());
                 }
 
                 if top != want && top != top_want && have != top_want {
-                    eprintln!("swapping without fixing target or top");
-                    return false;
+                    return Err("swapping without fixing target or top".into());
                 }
             } else if target.contains(&top) {
                 if let Some(pi) = to_preserve.iter().position(|&v| v == top) {
                     to_preserve.swap_remove(pi);
                 } else if allow_swap_top && top == top_want {
                     if !last_uses.contains(&have) {
-                        eprintln!("swapping {have} from tail but is not last use");
-                        return false;
+                        return Err("swapping {have} from tail but is not last use".into());
                     }
                 } else {
-                    eprintln!("swapping {top} to tail despite not in `to_preserve`");
-                    return false;
+                    return Err("swapping {top} to tail despite not in `to_preserve`".into());
                 }
             }
 
             current.swap(0, i);
         }
 
-        true
+        Ok(())
     }
 
     #[test]
@@ -539,12 +512,13 @@ mod tests {
 
     #[test]
     fn skibidi() {
-        opts().last_uses([3, 4]).assert(
+        opts().last_uses([3]).allow_swap_top().assert(
             [
-                64, 5, 3, 4, 11, 7, 9, 10, 0, 1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 6, 64, 64, 64,
-                64, 64, 64, 64, 64, 64,
+                5, 0, 16, 19, 18, 15, 14, 9, 10, 11, 12, 13, 8, 7, 6, 17, 4, 2, 1, 0, 20, 1, 2, 3,
+                21, 5, 22, 23, 24, 8, 25, 4, 26, 27, 14, 28, 29, 30, 31, 32, 33, 34, 15, 35, 36,
+                37, 38, 39, 40,
             ],
-            [4, 5, 0, 1, 2, 3, 6, 11, 7, 12, 8, 9, 10, 13],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 0, 19],
             [],
         );
     }
@@ -603,9 +577,10 @@ mod tests {
         values
     }
 
-    fn generated_context() -> impl Strategy<Value = ()> {
+    fn generated_context()
+    -> impl Strategy<Value = (Vec<ValueNodeId>, bool, Vec<ValueNodeId>, Vec<ValueNodeId>)> {
         (
-            prop::collection::vec(any::<(u8, u16)>(), 0..32),
+            prop::collection::vec(any::<(u8, u16)>(), 1..32),
             prop::collection::vec(any::<(u8, u16)>(), 0..32),
             prop::collection::vec(any::<(u8, u16)>(), 0..32),
         )
@@ -629,12 +604,66 @@ mod tests {
                 let total_possible_last_use = possible_last_use.len();
 
                 (
-                    Just(target),
-                    Just(start),
-                    prop::sample::subsequence(possible_last_use, total_possible_last_use),
+                    Just((target, start)),
+                    prop::sample::subsequence(possible_last_use, 1..=total_possible_last_use),
                 )
             })
-            .prop_flat_map(|(target, start, last_use)| Just(()))
+            .prop_flat_map(|((target, start), last_uses)| {
+                let (target, start, last_uses) = {
+                    let mut old_new_map = [None; 256];
+                    let mut next_new_id = 0;
+                    let mut remap = |ids: Vec<u8>| {
+                        ids.into_iter()
+                            .map(|id| {
+                                if let Some(new_id) = old_new_map[id as usize] {
+                                    new_id
+                                } else {
+                                    let new_id = next_new_id;
+                                    next_new_id += 1;
+                                    old_new_map[id as usize] = Some(new_id);
+                                    new_id
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    };
+                    (remap(target), remap(start), remap(last_uses))
+                };
+
+                let head_end = last_uses.len();
+                let mut to_push = target.clone();
+                for &last_use in &last_uses {
+                    let position = to_push
+                        .iter()
+                        .position(|&value| value == last_use)
+                        .expect("last use must be in target");
+                    to_push.remove(position);
+                }
+                let min_pushes = usize::from(head_end == 0);
+                let max_pushes = to_push.len();
+
+                (
+                    Just((target, start, last_uses, head_end)),
+                    prop::sample::subsequence(to_push, min_pushes..=max_pushes),
+                )
+            })
+            .prop_flat_map(|((target, start, last_uses, head_end), to_push)| {
+                let swaps =
+                    (0..to_push.len()).map(|offset| 0..=head_end + offset).collect::<Vec<_>>();
+                let final_head_end = head_end + to_push.len();
+                let max_allow_swap_top = u8::from(final_head_end == target.len());
+
+                (Just((target, start, last_uses, to_push)), swaps, 0..=max_allow_swap_top)
+            })
+            .prop_map(
+                |((target, mut current, last_uses, to_push), swaps, allow_swap_top)| {
+                    for (value, swap) in to_push.into_iter().zip(swaps) {
+                        current.insert(0, value);
+                        current.swap(0, swap);
+                    }
+
+                    (values(&last_uses), allow_swap_top != 0, values(&current), values(&target))
+                },
+            )
     }
 
     proptest! {
@@ -642,12 +671,11 @@ mod tests {
 
         #[test]
         fn generated_swaps_are_legal(
-            context in generated_context(),
-            allow_swap_top in any::<bool>(),
+            (last_uses, allow_swap_top, current, target) in generated_context(),
         ) {
-            let GeneratedContext { current, target, last_uses } = context;
             let head_end = compute_head_end(&current, &target, &last_uses);
             let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
+
             let actual = best_permute(
                 &to_preserve,
                 &last_uses,
@@ -662,12 +690,15 @@ mod tests {
                 &current,
                 &target,
                 &last_uses,
+                &to_preserve,
                 &actual,
                 allow_swap_top,
                 TEST_PATHS_BUDGET
             );
 
-            prop_assert!(replayed, "actual = {actual:?}, head_end = {head_end}, to_preserve = {to_preserve:?}");
+            if let Err(msg) = replayed {
+                prop_assert!(false, "{msg}: actual = {actual:?}, head_end = {head_end}, to_preserve = {to_preserve:?}" )
+            }
         }
     }
 }
