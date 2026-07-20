@@ -118,5 +118,8 @@ const bytes_eq = fn (b1: $T1, b2: $T2) bool {
     if T2 == cbytes {
         return keccak256(b1).raw == comptime { keccak256(b2).raw };
     }
-    @compile_error("unsupported type pair");
+    if b1.length != b2.length {
+        return false;
+    }
+    return keccak256(b1).raw == keccak256(b2).raw;
 };

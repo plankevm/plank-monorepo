@@ -63,6 +63,13 @@ init {
     require(@mload1(code_slice_copy.ptr) == 0xaa);
     require(@mload1(code_slice_copy.ptr +% 3) == 0xdd);
 
+    require(bytes_eq(mem_data, mem_data));
+    require(!bytes_eq(mem_data, mem_slice));
+    require(bytes_eq(code_data, code_data));
+    require(!bytes_eq(code_data, code_slice));
+    require(bytes_eq(mem_data, code_data));
+    require(!bytes_eq(mem_data, code_slice));
+
     return_runtime();
 }
 
@@ -132,5 +139,23 @@ run {
         @evm_return(out.ptr, out.length);
     });
 
+    public("eqCalldataCalldata(bytes,bytes)", fn () never {
+        let a = calldata_bytes_arg(0);
+        let b = calldata_bytes_arg(1);
+        return_word(@bool_to_u256(bytes_eq(a, b)));
+    });
+
+    public("eqMemoryCalldata(bytes,bytes)", fn () never {
+        let a = calldata_bytes_arg(0);
+        let b = copy_if_not_already_memory(calldata_bytes_arg(1));
+        return_word(@bool_to_u256(bytes_eq(a, b)));
+    });
+
+    public("eqMemoryMemory(bytes,bytes)", fn () never {
+        let a = copy_if_not_already_memory(calldata_bytes_arg(0));
+        let b = copy_if_not_already_memory(calldata_bytes_arg(1));
+        return_word(@bool_to_u256(bytes_eq(a, b)));
+    });
+    
     @evm_revert(@malloc_uninit(0), 0);
 }
