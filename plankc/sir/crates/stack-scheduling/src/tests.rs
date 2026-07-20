@@ -214,8 +214,7 @@ fn lowers_terminator_inputs() {
         @0 []
             const 0x1
             const 0x2
-            dup 0
-            dup 2
+            swap 1
             return
             => []
             (return)
@@ -240,8 +239,7 @@ fn lowers_binary_operation_inputs() {
         @0 []
             const 0x1
             const 0x2
-            dup 0
-            dup 2
+            swap 1
             add
             stop
             => []
@@ -278,26 +276,24 @@ fn lowers_memory_hash_and_store() {
             const 0x20
             const 0x40
             const 0x1
-            dup 3
+            swap 3
             calldataload
-            dup 3
-            calldataload
-            dup 3
-            malloc
             dup 2
-            dup 1
+            calldataload
+            dup 2
+            malloc
+            swap 2
+            dup 2
             mstore
-            dup 5
+            swap 3
             dup 1
             add
-            dup 2
-            dup 1
+            swap 1
+            swap 3
+            swap 1
             mstore
-            dup 5
-            dup 2
+            swap 1
             keccak256
-            dup 5
-            dup 1
             sstore
             stop
             => []
@@ -343,14 +339,14 @@ fn lowers_calldata_sum_loop() {
         r#"
         @0 []
             const 0x0
-            dup 0
             calldataload
             const 0x0
             const 0x20
             const 0x0
-            swap 4
-            pop
+            swap 3
+            swap 1
             swap 2
+            swap 1
             => [$1, $2, $3, $4]
             (jmp @1)
         @1 [$5, $6, $7, $8]
@@ -362,37 +358,31 @@ fn lowers_calldata_sum_loop() {
         @2 [$10, $11, $12, $13]
             dup 2
             calldataload
-            dup 0
-            dup 5
+            swap 1
+            swap 4
             add
             const 0x1
-            dup 0
-            dup 5
+            swap 1
+            swap 2
             add
             const 0x20
-            dup 0
-            dup 8
+            swap 1
+            swap 3
             add
-            swap 8
-            pop
-            pop
-            swap 5
-            pop
-            pop
-            swap 5
-            pop
-            pop
+            swap 2
+            swap 1
+            swap 3
             => [$10, $17, $19, $15]
             (jmp @1)
         @3 [$20, $21, $22, $23]
             const 0x20
             dup 0
             malloc
+            swap 5
             dup 5
-            dup 1
             mstore
-            dup 1
-            dup 1
+            swap 1
+            swap 4
             return
             => []
             (return)
@@ -469,11 +459,10 @@ fn simple_icall() {
             caller
             const 0x0
             call_ret_push #2
-            dup 2
-            dup 1
+            swap 1
+            swap 2
+            swap 1
             icall #2
-            dup 2
-            dup 1
             sstore
             stop
             => []
@@ -514,11 +503,10 @@ fn simple_op_use_spill() {
             const 0x0
             store :0
             store :1
-            dup 2
             store :2
-            load :1
-            load :0
-            load :2
+            store :3
+            store :4
+            load :4
             not
             stop
             => []
@@ -570,8 +558,6 @@ fn repeated_input() {
         @0 []
             const 0x3
             const 0x2
-            dup 1
-            dup 1
             dup 1
             addmod
             stop

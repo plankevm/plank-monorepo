@@ -90,7 +90,10 @@ impl OpGraph {
 
     pub fn uses_remaining(&self, completed: OpSet<'_>, value: ValueNodeId) -> u32 {
         let consumers = self.get_consumers(value);
-        let total_uses = consumers.count_members();
+        let mut total_uses = consumers.count_members();
+        if self.output_values_fifo().contains(&value) {
+            total_uses += 1;
+        }
         let already_used = consumers.intersect_count(completed);
         total_uses - already_used
     }
