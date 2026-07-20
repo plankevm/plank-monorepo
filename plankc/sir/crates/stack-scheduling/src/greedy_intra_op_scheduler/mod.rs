@@ -204,7 +204,6 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
             return Ok(());
         }
 
-        println!("[swap spill] {depth}");
         for _ in 0..=depth {
             self.spill_top();
         }
@@ -231,7 +230,6 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
 
         let depth = self.stack.find_first(value).expect("trying to push missing");
         let total_to_spill = depth - u16::from(self.config.max_dup_depth);
-        println!("[dup spill] {}", total_to_spill);
         for _ in 0..total_to_spill {
             self.spill_top();
         }

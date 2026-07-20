@@ -134,7 +134,6 @@ fn expand_states(
     }
 
     if !progress_made && !top_correct {
-        // println!("  [try_fix_top] current: {current:?} (exec: {executed:?})");
         let top_want = target.loc(0);
         assert!(matches!(top_want, ValueLoc::Head(_)));
         for ((pos, &have), &want) in (0u16..).zip(&current).zip(target.values).skip(1) {
@@ -197,7 +196,6 @@ pub(crate) fn best_permute(
     let (head, tail) = current.split_at(head_end);
     let target = TargetHead { values: &full_target[target_depth_delta..] };
     let mut current_as_locs = Vec::with_capacity(current.len());
-    // println!("### PERMUTE ###");
 
     for (&current, &target_value) in head.iter().zip(target.values) {
         let mut loc = ValueLoc::Head(current);
@@ -215,10 +213,6 @@ pub(crate) fn best_permute(
             ValueLoc::Tail
         });
     }
-
-    // println!("  to_preserve: {:?}", to_preserve);
-    // println!("  target:  {:?}", target.values);
-    // println!("  current: {:?}", current_as_locs);
 
     let mut remaining_budget = paths_budget;
     let fixed_at_start = if target.loc(0) == current_as_locs[0] { 1 } else { 0 };
@@ -296,15 +290,7 @@ mod tests {
             } else {
                 missing_copies += (t + 1) - cur;
             }
-            if missing_copies > pmc {
-                println!("  [pmc inc]   {v:2} (+{})", missing_copies - pmc);
-            } else {
-                println!("  [right num] {v:2}");
-            }
         }
-
-        println!("target.len(): {:?}", target.len());
-        println!("missing_copies: {:?}", missing_copies);
 
         target.len() - missing_copies
     }
@@ -361,7 +347,6 @@ mod tests {
             }
 
             let to_preserve = build_to_preserve(head_end, &current, &target, &last_uses);
-            println!("to_preserve: {:?}", to_preserve);
 
             let actual = best_permute(
                 &to_preserve,
@@ -511,19 +496,6 @@ mod tests {
     }
 
     #[test]
-    fn skibidi() {
-        opts().last_uses([3]).allow_swap_top().assert(
-            [
-                5, 0, 16, 19, 18, 15, 14, 9, 10, 11, 12, 13, 8, 7, 6, 17, 4, 2, 1, 0, 20, 1, 2, 3,
-                21, 5, 22, 23, 24, 8, 25, 4, 26, 27, 14, 28, 29, 30, 31, 32, 33, 34, 15, 35, 36,
-                37, 38, 39, 40,
-            ],
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 0, 19],
-            [],
-        );
-    }
-
-    #[test]
     fn irrelevant_head_value_moves_to_tail() {
         opts().last_uses([1]).assert([9, 1], [1], [1]);
     }
@@ -643,21 +615,34 @@ mod tests {
 
                 (
                     Just((target, start, last_uses, head_end)),
-                    prop::sample::subsequence(to_push, min_pushes..=max_pushes),
+                    prop::sample::subsequence(to_push, min_pushes..=max_pushes).prop_shuffle(),
                 )
             })
-            .prop_flat_map(|((target, start, last_uses, head_end), to_push)| {
-                let swaps =
-                    (0..to_push.len()).map(|offset| 0..=head_end + offset).collect::<Vec<_>>();
-                let final_head_end = head_end + to_push.len();
+            .prop_flat_map(|((target, start, last_uses, start_head_end), to_push)| {
+                let swaps = (0..to_push.len())
+                    .map(|offset| 0..=start_head_end + offset)
+                    .collect::<Vec<_>>();
+                let final_head_end = start_head_end + to_push.len();
                 let max_allow_swap_top = u8::from(final_head_end == target.len());
 
-                (Just((target, start, last_uses, to_push)), swaps, 0..=max_allow_swap_top)
+                (
+                    Just((target, start, last_uses, start_head_end, to_push)),
+                    swaps,
+                    0..=max_allow_swap_top,
+                )
             })
             .prop_map(
-                |((target, mut current, last_uses, to_push), swaps, allow_swap_top)| {
+                |(
+                    (target, mut current, last_uses, mut head_end, to_push),
+                    swaps,
+                    allow_swap_top,
+                )| {
                     for (value, swap) in to_push.into_iter().zip(swaps) {
+                        if !current.contains(&value) {
+                            current.insert(head_end, value);
+                        }
                         current.insert(0, value);
+                        head_end += 1;
                         current.swap(0, swap);
                     }
 

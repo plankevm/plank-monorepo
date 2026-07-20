@@ -212,6 +212,11 @@ fn simple_swap() {
 }
 
 #[test]
+fn scratch_suboptimal_permute() {
+    opts().last_uses([1, 2]).assert([0, 1, 2], [0, 1, 2], [Swap(2), Swap(1), Dup(2)]);
+}
+
+#[test]
 fn permutes_below_a_correct_prefix() {
     opts().last_uses([1, 2, 3]).assert([1, 3, 2], [1, 2, 3], [Swap(1), Swap(2), Swap(1)]);
 }
@@ -282,26 +287,10 @@ fn everything_but_preserve_correct_requiring_spill() {
     );
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Placement {
-    Stack,
-    Spilled,
-    Both,
-}
-
-impl Placement {
-    const fn is_on_stack(self) -> bool {
-        matches!(self, Placement::Stack | Placement::Both)
-    }
-
-    const fn is_spilled(self) -> bool {
-        matches!(self, Placement::Spilled | Placement::Both)
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 struct RawValue {
-    placement: Placement,
+    is_on_stack: bool,
+    is_spilled: bool,
     stack_order: u16,
     is_last_use: bool,
 }
@@ -309,12 +298,8 @@ struct RawValue {
 fn raw_value() -> impl Strategy<Value = RawValue> {
     (0u8..3, any::<u16>(), any::<bool>()).prop_map(|(placement, stack_order, is_last_use)| {
         RawValue {
-            placement: match placement {
-                0 => Placement::Stack,
-                1 => Placement::Spilled,
-                2 => Placement::Both,
-                _ => unreachable!(),
-            },
+            is_on_stack: placement <= 1,
+            is_spilled: placement >= 1,
             stack_order,
             is_last_use,
         }
@@ -322,7 +307,7 @@ fn raw_value() -> impl Strategy<Value = RawValue> {
 }
 
 fn generated_schedule() -> impl Strategy<Value = (u8, Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>)> {
-    (prop::collection::vec(raw_value(), 1..16), 1u8..=8)
+    (prop::collection::vec(raw_value(), 1..32), 1u8..=24)
         .prop_flat_map(|(values, max_swap_depth)| {
             let value_len = u32::try_from(values.len()).unwrap();
             (Just(values), prop::collection::vec(0..value_len, 0..16), Just(max_swap_depth))
@@ -330,11 +315,10 @@ fn generated_schedule() -> impl Strategy<Value = (u8, Vec<u32>, Vec<u32>, Vec<u3
         .prop_map(|(values, target, max_swap_depth)| {
             let value_len = u32::try_from(values.len()).unwrap();
             let mut stack: Vec<u32> =
-                (0..value_len).filter(|&i| values[i as usize].placement.is_on_stack()).collect();
+                (0..value_len).filter(|&i| values[i as usize].is_on_stack).collect();
             stack.sort_by_key(|&i| values[i as usize].stack_order);
 
-            let spilled =
-                (0..value_len).filter(|&i| values[i as usize].placement.is_spilled()).collect();
+            let spilled = (0..value_len).filter(|&i| values[i as usize].is_spilled).collect();
             let last_uses = (0..value_len)
                 .filter(|&i| values[i as usize].is_last_use && target.contains(&i))
                 .collect();

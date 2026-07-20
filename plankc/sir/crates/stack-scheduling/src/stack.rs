@@ -6,7 +6,7 @@ use sir_data::{OperationIdx, StaticAllocId};
 
 const MAX_STACK_LENGTH: usize = 1024;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct EvmStack {
     stack_raw: [ValueNodeId; MAX_STACK_LENGTH],
     stack_len: u16,
@@ -110,6 +110,22 @@ pub enum StackOps {
     Load(StaticAllocId),
 }
 
+impl std::fmt::Display for StackOps {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StackOps::Swap(depth) => write!(f, "Swap({depth})"),
+            StackOps::Dup(depth) => write!(f, "Dup({depth})"),
+            StackOps::Pop => write!(f, "Pop"),
+            StackOps::Flipped(id) => write!(f, "flipped({id})"),
+            StackOps::Op(id) => write!(f, "op({id})"),
+            StackOps::CallRetPush(id) => write!(f, "call_ret_push({id})"),
+            StackOps::Exchange(a, b) => write!(f, "Exchange({a}, {b})"),
+            StackOps::Store(id) => write!(f, "store({id})"),
+            StackOps::Load(id) => write!(f, "load({id})"),
+        }
+    }
+}
+
 impl StackOps {
     pub fn is_valid(self, config: ScheduleConfig) -> bool {
         match self {
@@ -199,6 +215,15 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     pub fn pop(&mut self) {
         self.inner.pop().expect("nothing to pop");
         self.emit(StackOps::Pop);
+    }
+
+    pub fn clone_with<S2: FnMut(StackOps)>(&self, ops_sink: S2) -> TrackedStack<S2> {
+        TrackedStack {
+            start_alloc_id: self.start_alloc_id,
+            ops_sink,
+            spilled: self.spilled.clone(),
+            inner: self.inner.clone(),
+        }
     }
 
     #[track_caller]
