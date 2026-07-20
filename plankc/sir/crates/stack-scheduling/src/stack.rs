@@ -230,6 +230,7 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     pub fn op(&mut self, graph: &OpGraph, op_id: OpNodeId, flipped: bool) {
         let op = graph.get_op(op_id);
         let stack_op = match op.kind {
+            OpNodeKind::Flippable(op_idx) if flipped => StackOps::Flipped(op_idx),
             OpNodeKind::Flippable(op_idx) => StackOps::Op(op_idx),
             OpNodeKind::Normal(op_idx) => {
                 assert!(!flipped);
