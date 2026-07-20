@@ -1,8 +1,9 @@
+import std::calldata::unsafe_calldata_read;
 import std::cbytes::{encode_cbytes, unsafe_cbytes_read};
 import std::error::require;
 import std::mem::{unsafe_mem_read, unsafe_mem_write};
 import std::option::{None, Option, Some, unwrap};
-import std::regions::{bytes, copy_if_not_already_memory, ctime, is_region, memory, region_ptr_type};
+import std::regions::{calldata, code, ctime, is_region, memory, region_ptr_type};
 import std::type::sizeof;
 
 const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u256)) type {
@@ -14,8 +15,8 @@ const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u25
         return CSlice(T, arity);
     }
 
-    if T == cbytes {
-        @compile_error("runtime slices cannot contain cbytes elements");
+    if !can_embed_as_slice_element(T) {
+        @compile_error("type cannot be embedded as a runtime slice element");
     }
 
     if arity.is_some {
@@ -34,8 +35,8 @@ const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u25
 // contains exactly arity elements; for dynamic slices, exactly len elements.
 // Construction is trusted until private fields allow this to be enforced.
 const CSlice = fn (comptime T: type, comptime arity: Option(u256)) type {
-    if T == cbytes {
-        @compile_error("not yet implemented: CSlice with cbytes elements");
+    if !can_embed_as_slice_element(T) {
+        @compile_error("type cannot be embedded as a CSlice element");
     }
 
     if arity.is_some {
@@ -64,11 +65,9 @@ const is_empty = fn (slice: $S) bool {
 
 const get = fn (slice: $S, index: u256) Option(element_type(S)) {
     let R = region_type(S);
-    let index = if R == ctime {
-        comptime { index }
-    } else {
-        index
-    };
+    if R == ctime and !@in_comptime() {
+        @compile_error("CSlice access must be evaluated at compile time");
+    }
 
     let T = element_type(S);
     if index >= len(slice) {
@@ -78,16 +77,20 @@ const get = fn (slice: $S, index: u256) Option(element_type(S)) {
     let element_size = comptime { sizeof(T) };
     let offset = index * element_size;
     if R == ctime {
-        return comptime {
-            Some(unsafe_cbytes_read(T, slice.data, offset))
-        };
+        return Some(unsafe_cbytes_read(T, slice.data, offset));
     }
-    let element_bytes = bytes(R) {
-        ptr: slice.ptr +% offset,
-        length: element_size
-    };
-    let memory_bytes = copy_if_not_already_memory(element_bytes);
-    Some(unsafe_mem_read(T, memory_bytes.ptr, 0))
+    if R == memory {
+        return Some(unsafe_mem_read(T, slice.ptr, offset));
+    }
+    if R == calldata {
+        return Some(unsafe_calldata_read(T, slice.ptr, offset));
+    }
+    if R == code {
+        let ptr = @malloc_uninit(element_size);
+        @evm_codecopy(ptr, slice.ptr +% offset, element_size);
+        return Some(unsafe_mem_read(T, ptr, 0));
+    }
+    @compile_error("invariant: invalid slice region")
 };
 
 const at = fn (slice: $S, index: u256) element_type(S) {
@@ -142,4 +145,21 @@ const slice_arity = fn (comptime type_index: $I) Option(u256) {
     } else {
         None(u256)
     }
+};
+
+const can_embed_as_slice_element = fn (comptime T: type) bool {
+    if T == void or T == u256 or T == bool {
+        return true;
+    }
+    if @is_struct(T) or @is_tuple(T) {
+        comptime let mut i = 0;
+        inline while i < @field_count(T) {
+            if !can_embed_as_slice_element(@field_type(T, i)) {
+                return false;
+            }
+            i = i + 1;
+        }
+        return true;
+    }
+    false
 };

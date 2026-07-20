@@ -18,7 +18,7 @@ init {
     let expected = Outer {
         flag: false,
         inner: Inner {
-            marker: {},
+            marker: (),
             enabled: true,
             value: 42
         },

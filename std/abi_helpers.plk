@@ -160,7 +160,7 @@ const AbiDecodeAccumulator = fn (comptime T: type) type {
 // Caller must ensure `buf` contains valid ABI-encoded data for type `T`.
 const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T {
     if T == void {
-        {}
+        ()
     } else if T == u256 {
         unsafe_mem_read_u256(buf, offset)
     } else if T == bool {

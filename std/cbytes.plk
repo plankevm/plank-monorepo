@@ -8,10 +8,10 @@ const encode_cbytes = fn (comptime value: $T) cbytes {
     } else if T == bool {
         @concat_cbytes((if value { 1 } else { 0 },))
     } else if @is_struct(T) {
-        comptime let mut encoded = "";
-        comptime let mut i = 0;
+        let mut encoded = "";
+        let mut i = 0;
 
-        inline while i < @field_count(T) {
+        while i < @field_count(T) {
             encoded = @concat_cbytes((encoded, encode_cbytes(@get_field(value, i))));
             i = i + 1;
         }
@@ -24,7 +24,7 @@ const encode_cbytes = fn (comptime value: $T) cbytes {
 
 const unsafe_cbytes_read = fn (comptime T: type, comptime data: cbytes, comptime offset: u256) T {
     if T == void {
-        {}
+        ()
     } else if T == u256 {
         @padded_read_cbytes(data, offset)
     } else if T == bool {

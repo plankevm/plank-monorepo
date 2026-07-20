@@ -46,7 +46,7 @@ const unsafe_mem_write = fn (ptr: u256, offset: u256, value: $T) u256 {
 // the region contains a valid representation of T.
 const unsafe_mem_read = fn (comptime T: type, ptr: u256, offset: u256) T {
     if T == void {
-        {}
+        ()
     } else if T == u256 {
         unsafe_mem_read_u256(ptr, offset)
     } else if T == bool {
