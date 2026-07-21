@@ -2,7 +2,7 @@ import std::constructor::return_runtime;
 import std::error::{comptime_assert, require};
 import std::mem::unsafe_mem_write;
 import std::option::{None, Some};
-import std::regions::{calldata, code, ctime, embed_as, memory};
+import std::regions::{calldata, code, ctime, memory};
 import std::slice::*;
 import std::type::sizeof;
 
@@ -16,7 +16,7 @@ const test_basic = fn () void {
     comptime {
         let fixed_cslice = Slice(ctime, Pair, Some(2)) { data: PAIR_DATA };
         let dynamic_cslice = CSlice(TuplePair, None(u256)) { data: PAIR_DATA, len: 2 };
-        let empty_cslice = Slice(ctime, Pair, Some(0)) { data: "" };
+        let empty_cslice = empty(ctime, Pair);
         let fixed_zero_sized = CSlice(Empty, Some(3)) { data: "" };
         let dynamic_zero_sized = CSlice(Empty, None(u256)) { data: "", len: 3 };
 
@@ -33,7 +33,7 @@ const test_basic = fn () void {
 
     let fixed_memory_slice = Slice(memory, u256, comptime { Some(3) }) { ptr: 0 };
     let dynamic_code_slice = Slice(code, u256, comptime { None(u256) }) { ptr: 0, len: 7 };
-    let empty_calldata_slice = Slice(calldata, u256, comptime { None(u256) }) { ptr: 0, len: 0 };
+    let empty_calldata_slice = empty(calldata, u256);
 
     require(len(fixed_memory_slice) == 3);
     require(len(dynamic_code_slice) == 7);
@@ -44,7 +44,10 @@ const test_basic = fn () void {
 
 const test_ctime_access = fn () void {
     comptime {
-        let fixed_cslice = Slice(ctime, Pair, Some(2)) { data: PAIR_DATA };
+        let fixed_cslice = new(ctime, (
+            Pair { first: 1, second: 2 },
+            Pair { first: 3, second: 4 }
+        ));
         let dynamic_cslice = CSlice(TuplePair, None(u256)) { data: PAIR_DATA, len: 2 };
         let first = at(fixed_cslice, 0);
         let second = at(dynamic_cslice, 1);
@@ -83,12 +86,11 @@ const test_ctime_replace = fn () void {
 };
 
 const test_memory_access = fn () void {
-    let pair_size = comptime { sizeof(Pair) };
-    let pair_ptr = @malloc_uninit(pair_size * 2);
-    unsafe_mem_write(pair_ptr, 0, Pair { first: 5, second: 6 });
-    unsafe_mem_write(pair_ptr, pair_size, Pair { first: 7, second: 8 });
-
-    let memory_slice = Slice(memory, Pair, comptime { Some(2) }) { ptr: pair_ptr };
+    let runtime_value = @evm_calldatasize() </ 16;
+    let memory_slice = new(memory, (
+        Pair { first: 5, second: 6 },
+        Pair { first: 7, second: runtime_value }
+    ));
     let first = at(memory_slice, 0);
     let runtime_index = @evm_calldatasize() </ 128;
     let second = at(memory_slice, runtime_index);
@@ -130,13 +132,13 @@ const test_memory_set = fn () void {
 };
 
 const test_code_access = fn () void {
-    let code_data = embed_as(PAIR_DATA, code);
-    let code_slice = Slice(code, Pair, comptime { None(u256) }) {
-        ptr: code_data.ptr,
-        len: 2
-    };
+    let code_slice = new_code((
+        Pair { first: 1, second: 2 },
+        Pair { first: 3, second: 4 }
+    ));
     let code_first = at(code_slice, 0);
-    let code_second = at(code_slice, 1);
+    let runtime_index = @evm_calldatasize() </ 128;
+    let code_second = at(code_slice, runtime_index);
 
     require(code_first.first == 1);
     require(code_first.second == 2);

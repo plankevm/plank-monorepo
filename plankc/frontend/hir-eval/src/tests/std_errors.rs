@@ -107,6 +107,60 @@ fn test_ctime_slice_rejects_nested_cbytes_elements() {
 }
 
 #[test]
+fn test_slice_new_rejects_code_region() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            import std::regions::code;
+            import std::slice::new;
+
+            init {
+                new(code, (1, 2));
+                @evm_stop();
+            }
+            "#,
+        ),
+        &[r#"
+        error: `new` cannot construct code slices; use `new_code` to embed compile-time values in code
+          --> std/slice.plk:64:9
+           |
+        64 |         @compile_error("`new` cannot construct code slices; use `new_code` to embed compile-time values in code");
+           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_slice_new_rejects_heterogeneous_tuple() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            import std::regions::memory;
+            import std::slice::new;
+
+            init {
+                new(memory, (1, true));
+                @evm_stop();
+            }
+            "#,
+        ),
+        &[r#"
+        error: slice constructor elements must all have the same type
+           --> std/slice.plk:211:13
+            |
+        211 |             @compile_error("slice constructor elements must all have the same type");
+            |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+            |
+        note: called here
+           --> main.plk:5:5
+            |
+          5 |     new(memory, (1, true));
+            |     ^^^^^^^^^^^^^^^^^^^^^^
+        "#],
+    );
+}
+
+#[test]
 fn test_cslice_rejects_runtime_index() {
     assert_diagnostics(
         std_project(
@@ -128,10 +182,10 @@ fn test_cslice_rejects_runtime_index() {
         ),
         &[r#"
         error: CSlice access must be evaluated at compile time
-          --> std/slice.plk:69:9
-           |
-        69 |         @compile_error("CSlice access must be evaluated at compile time");
-           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+           --> std/slice.plk:101:9
+            |
+        101 |         @compile_error("CSlice access must be evaluated at compile time");
+            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
