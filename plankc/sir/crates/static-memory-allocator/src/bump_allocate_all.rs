@@ -1,5 +1,5 @@
 use hashbrown::{HashMap, HashSet};
-use plank_core::{DenseIndexSet, Idx};
+use plank_core::DenseIndexSet;
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId};
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 
@@ -10,7 +10,12 @@ const EVM_WORD_IN_BYTES: u32 = 0x20;
 pub struct BumpAllocateAll;
 
 impl BumpAllocateAll {
-    pub fn generate(ir: &EthIRProgram, entry_func: FunctionId, stack_ops: &ScheduledOps) -> Layout {
+    pub fn generate(
+        ir: &EthIRProgram,
+        entry_func: FunctionId,
+        stack_ops: &ScheduledOps,
+        total_allocs_hint: usize,
+    ) -> Layout {
         let mut layout_generator = MemoryLayoutCollector {
             ir,
             stack_ops,
@@ -21,8 +26,8 @@ impl BumpAllocateAll {
             bump: StaticBumpTracker { next_free: EvmMemAddr::new(0) },
             dyn_free_pointer: None,
             switch_store: None,
-            alloc_start: HashMap::with_capacity(ir.next_static_alloc_id.get().idx()),
-            alloc_needs_zeroing: HashSet::with_capacity(ir.next_static_alloc_id.get().idx()),
+            alloc_start: HashMap::with_capacity(total_allocs_hint),
+            alloc_needs_zeroing: HashSet::with_capacity(total_allocs_hint),
         };
 
         layout_generator.seen_functions.add(entry_func);
@@ -96,6 +101,7 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
                     | StackOps::Dup(_)
                     | StackOps::Pop
                     | StackOps::Op(_)
+                    | StackOps::Flipped(_)
                     | StackOps::CallRetPush(_)
                     | StackOps::Exchange(_, _) => {}
                 }

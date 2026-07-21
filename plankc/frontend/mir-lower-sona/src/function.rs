@@ -92,7 +92,6 @@ pub(crate) struct FunctionLowerer<'a> {
 }
 
 impl<'a> FunctionLowerer<'a> {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         builder: &ModuleBuilder,
         is: &'static EvmInstSet,

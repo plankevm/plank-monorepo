@@ -206,9 +206,6 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         })
     }
 
-    // R*st wants me to *manually* split things to appease the borrow checker and the linter
-    // complains that my function has "too many arguments", ok man, please kys.
-    #[allow(clippy::too_many_arguments)]
     fn runtime_eval_struct_lit(
         &mut self,
         mut validity: MaybePoisoned<()>,

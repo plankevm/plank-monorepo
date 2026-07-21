@@ -15,7 +15,7 @@ pub struct DenseIndexMap<I: Idx, V> {
 impl<I: Idx, V> DenseIndexMap<I, V> {
     /// Creates a new empty `DenseIndexMap`.
     #[inline]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { inner: Vec::new(), _marker: PhantomData }
     }
 

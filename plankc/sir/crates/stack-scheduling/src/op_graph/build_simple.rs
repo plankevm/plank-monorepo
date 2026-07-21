@@ -1,7 +1,6 @@
 use crate::{
     layouts::{Layout, LayoutMember, LayoutsTracker},
     op_graph::{OpGraph, OpGraphBuilder, OpNodeKind},
-    op_model::is_flippable,
 };
 use hashbrown::HashMap;
 use sir_data::{BlockView, ControlView, EthIRProgram, Operation};
@@ -53,7 +52,7 @@ pub fn build_graph_simple<'ir>(
             Some(ret_dest_value)
         };
 
-        let kind = if is_flippable(op.op().kind()) {
+        let kind = if op.op().kind().flippable() {
             OpNodeKind::Flippable(op.id())
         } else {
             OpNodeKind::Normal(op.id())

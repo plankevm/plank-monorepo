@@ -10,17 +10,17 @@ mod indices;
 #[cfg(test)]
 mod tests;
 
-pub struct GreedyShuffler<'a, 'ir, Sink: FnMut(StackOps)> {
+pub struct GreedyShuffler<'a, Sink: FnMut(StackOps)> {
     complete_at_bottom: usize,
-    current: &'a mut TrackedStack<'ir, Sink>,
+    current: &'a mut TrackedStack<Sink>,
     target: &'a [ValueNodeId],
     max_swap_depth: FromTop<CurrentStack>,
     max_dup_depth: FromTop<CurrentStack>,
 }
 
-pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
+pub fn shuffle<'a, Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
-    current: &'a mut TrackedStack<'ir, Sink>,
+    current: &'a mut TrackedStack<Sink>,
     graph: &'a OpGraph,
 ) {
     GreedyShuffler::run(config, current, graph.output_values_fifo());
@@ -28,10 +28,10 @@ pub fn shuffle<'a, 'ir, Sink: FnMut(StackOps)>(
 
 const LIMIT: u32 = 100_000;
 
-impl<'a, 'ir, Sink: FnMut(StackOps)> GreedyShuffler<'a, 'ir, Sink> {
+impl<'a, Sink: FnMut(StackOps)> GreedyShuffler<'a, Sink> {
     pub fn run(
         config: ScheduleConfig,
-        current: &'a mut TrackedStack<'ir, Sink>,
+        current: &'a mut TrackedStack<Sink>,
         target: &'a [ValueNodeId],
     ) {
         let mut this = Self {
