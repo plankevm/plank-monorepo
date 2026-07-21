@@ -64,7 +64,7 @@ const new = fn (comptime R: type, values: $V) infer_slice_type(R, V) {
         @compile_error("`new` cannot construct code slices; use `new_code` to embed compile-time values in code");
     }
     if R == calldata {
-        @compile_error("`new` cannot construct calldata slices because calldata is external read-only input");
+        @compile_error("`new` does not support calldata because calldata is read-only");
     }
 
     let S = comptime { infer_slice_type(R, V) };
@@ -139,7 +139,7 @@ const set = fn (slice: $S, index: u256, value: element_type(S)) void {
     unsafe_mem_write(slice.ptr, offset, value);
 };
 
-const replace = fn (comptime slice: $S, comptime index: u256, comptime value: element_type(S)) S {
+const replace = fn (slice: $S, index: u256, value: element_type(S)) S {
     if region_type(S) != ctime {
         @compile_error("replace requires a ctime slice");
     }

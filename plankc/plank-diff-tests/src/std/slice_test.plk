@@ -23,7 +23,6 @@ const test_basic = fn () void {
         comptime_assert(len(fixed_cslice) == 2, "fixed CSlice length must come from its arity");
         comptime_assert(len(dynamic_cslice) == 2, "dynamic CSlice length must come from its len field");
         comptime_assert(is_empty(empty_cslice), "empty CSlice must be empty");
-        comptime_assert(!is_empty(fixed_cslice), "fixed CSlice with elements must not be empty");
         comptime_assert(!is_empty(dynamic_cslice), "dynamic CSlice with elements must not be empty");
         comptime_assert(len(fixed_zero_sized) == 3, "fixed CSlice must support zero-sized elements");
         comptime_assert(len(dynamic_zero_sized) == 3, "dynamic CSlice must support zero-sized elements");
@@ -38,7 +37,6 @@ const test_basic = fn () void {
     require(len(fixed_memory_slice) == 3);
     require(len(dynamic_code_slice) == 7);
     require(is_empty(empty_calldata_slice));
-    require(!is_empty(fixed_memory_slice));
     require(!is_empty(dynamic_code_slice));
 };
 

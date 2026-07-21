@@ -62,10 +62,10 @@ const unsafe_mem_read = fn (comptime T: type, ptr: u256, offset: u256) T {
             let field_value = unsafe_mem_read(
                 field_type,
                 ptr,
-                offset +% field_offset
+                offset + field_offset
             );
             value = @set_field(value, i, field_value);
-            field_offset = field_offset +% field_size;
+            field_offset = field_offset + field_size;
             i = i + 1;
         }
 
