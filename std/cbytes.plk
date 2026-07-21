@@ -7,7 +7,7 @@ const encode_cbytes = fn (comptime value: $T) cbytes {
         @concat_cbytes((value,))
     } else if T == bool {
         @concat_cbytes((if value { 1 } else { 0 },))
-    } else if @is_struct(T) {
+    } else if @is_struct(T) or @is_tuple(T) {
         let mut encoded = "";
         let mut i = 0;
 
@@ -29,7 +29,7 @@ const unsafe_cbytes_read = fn (comptime T: type, comptime data: cbytes, comptime
         @padded_read_cbytes(data, offset)
     } else if T == bool {
         @padded_read_cbytes(data, offset) != 0
-    } else if @is_struct(T) {
+    } else if @is_struct(T) or @is_tuple(T) {
         let mut value = @uninit(T);
         comptime let mut i = 0;
         comptime let mut field_offset = 0;

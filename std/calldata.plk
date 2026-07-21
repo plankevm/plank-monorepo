@@ -1,7 +1,7 @@
 import std::type::sizeof;
 
-// Reads a value of type T from calldata at `ptr + offset`. For structs, fields
-// are read contiguously in declaration order. No bounds check.
+// Reads a value of type T from calldata at `ptr + offset`. Compound fields are
+// read contiguously in declaration order. No bounds check.
 const unsafe_calldata_read = fn (comptime T: type, ptr: u256, offset: u256) T {
     if T == void {
         ()
@@ -9,7 +9,7 @@ const unsafe_calldata_read = fn (comptime T: type, ptr: u256, offset: u256) T {
         @evm_calldataload(ptr +% offset)
     } else if T == bool {
         @evm_calldataload(ptr +% offset) != 0
-    } else if @is_struct(T) {
+    } else if @is_struct(T) or @is_tuple(T) {
         let mut value = @uninit(T);
         comptime let mut i = 0;
         comptime let mut field_offset = 0;
