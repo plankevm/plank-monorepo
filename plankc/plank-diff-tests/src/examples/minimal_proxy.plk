@@ -31,15 +31,15 @@ const clone_deterministic = fn () never {
 
 const deploy_clone = fn (salt: $SaltT) never {
     let address = @evm_calldataload(4);
-    let len = 32 + 20 + 15;
+    let len = 32 + 20 + 12;
     let buf = @malloc_uninit(len);
-    @mstore32(buf +% (len - 32), 0x5af43d82803e903d91602b57fd5bf3);
-    @mstore32(buf +% (len - 32 - 15), address);
-    @mstore32(buf +% (len - 32 - 15 - 20), 0x3d602d80600a3d3981f3363d3d373d3d3d363d73);
+    @mstore32(buf +% (len - 32), 0x5af43d3d5f5f3e9257fd5bf3);
+    @mstore32(buf +% (len - 32 - 12), address);
+    @mstore32(buf +% (len - 32 - 12 - 20), 0x602c8060095f395ff3365f5f37602a5f5f5f365f73);
     let address = if SaltT == void {
-        @evm_create(0, buf +% (32 - 20), 55)
+        @evm_create(0, buf +% (32 - 21), 53)
     } else if SaltT == u256 {
-        @evm_create2(0, buf +% (32 - 20), 55, salt)
+        @evm_create2(0, buf +% (32 - 21), 53, salt)
     } else {
         @compile_error("unsupported clone salt type")
     };
