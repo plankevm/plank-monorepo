@@ -55,15 +55,3 @@ impl Default for LoopLimit {
         Self::new()
     }
 }
-
-pub trait CheckedConvertTo {
-    fn convert<T>(self) -> T
-    where
-        Self: TryInto<T>,
-        <Self as TryInto<T>>::Error: std::fmt::Debug,
-    {
-        self.try_into().expect("convert failed")
-    }
-}
-
-impl<T> CheckedConvertTo for T {}

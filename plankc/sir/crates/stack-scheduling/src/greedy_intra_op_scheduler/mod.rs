@@ -13,6 +13,10 @@ mod tests;
 const SCHEDULE_MAX_STEPS: usize = 100_000;
 const PERMUTE_PATHS_BUDGET: usize = 100;
 
+fn only_contains_unique(values: &[ValueNodeId]) -> bool {
+    values.iter().enumerate().all(|(i, value)| !values[i + 1..].contains(value))
+}
+
 pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     config: ScheduleConfig,
     stack: &mut TrackedStack<Sink>,
@@ -20,7 +24,7 @@ pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     op_id: OpNodeId,
     complete: OpSet<'_>,
 ) {
-    assert!(is_unique(stack.fifo()), "expecting start stack to be unique");
+    assert!(only_contains_unique(stack.fifo()), "expecting all start stack values to be unique");
 
     let op = graph.get_op(op_id);
 
@@ -51,7 +55,7 @@ enum Status {
     NotDone,
 }
 
-struct ProcessNext;
+struct GoBackToProgressStart;
 
 struct GreedyOperandPreparer<'a, Sink: FnMut(StackOps)> {
     head: u16,
@@ -63,17 +67,13 @@ struct GreedyOperandPreparer<'a, Sink: FnMut(StackOps)> {
     to_push: SmallVec<[ValueNodeId; 32]>,
 }
 
-fn is_unique(values: &[ValueNodeId]) -> bool {
-    values.iter().enumerate().all(|(i, value)| !values[i + 1..].contains(value))
-}
-
 impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
     fn is_complete(&self) -> bool {
         usize::from(self.head) == self.target.len()
             && self.stack.fifo().iter().zip(self.target).all(|(a, b)| a == b)
     }
 
-    fn progress(&mut self) -> Result<Status, ProcessNext> {
+    fn progress(&mut self) -> Result<Status, GoBackToProgressStart> {
         assert!(self.head <= self.stack.len());
 
         if self.is_complete() {
@@ -88,20 +88,15 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         }
 
         let total_left_to_push = self.target.len() - usize::from(self.head);
-        match total_left_to_push {
-            0 => self.permute_until_complete(),
-            1 => {
-                self.push_next_single_best()?;
-                self.permute_until_complete()
-            }
-            _ => {
-                self.push_next_single_best()?;
-                Ok(Status::NotDone)
-            }
+        if total_left_to_push == 0 {
+            self.permute_until_complete()
+        } else {
+            self.push_next_single_best()?;
+            Ok(Status::NotDone)
         }
     }
 
-    fn push_next_single_best(&mut self) -> Result<(), ProcessNext> {
+    fn push_next_single_best(&mut self) -> Result<(), GoBackToProgressStart> {
         let (i, &value) = self
             .to_push
             .iter()
@@ -125,7 +120,7 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         self.try_push(value)
     }
 
-    fn swap_next_best(&mut self) -> Result<bool, ProcessNext> {
+    fn swap_next_best(&mut self) -> Result<bool, GoBackToProgressStart> {
         let swaps = permute::best_permute(
             &self.to_preserve,
             self.last_uses,
@@ -146,7 +141,7 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         Ok(true)
     }
 
-    fn permute_until_complete(&mut self) -> Result<Status, ProcessNext> {
+    fn permute_until_complete(&mut self) -> Result<Status, GoBackToProgressStart> {
         assert_eq!(usize::from(self.head), self.target.len());
         let swaps = permute::best_permute(
             &self.to_preserve,
@@ -189,7 +184,7 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         Self { head, config, stack, target, last_uses, to_preserve, to_push }
     }
 
-    fn try_swap(&mut self, depth: u16) -> Result<(), ProcessNext> {
+    fn try_swap(&mut self, depth: u16) -> Result<(), GoBackToProgressStart> {
         if let Ok(depth) = depth.try_into()
             && depth <= self.config.max_swap_depth
         {
@@ -208,10 +203,10 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
             self.spill_top();
         }
 
-        Err(ProcessNext)
+        Err(GoBackToProgressStart)
     }
 
-    fn try_push(&mut self, value: ValueNodeId) -> Result<(), ProcessNext> {
+    fn try_push(&mut self, value: ValueNodeId) -> Result<(), GoBackToProgressStart> {
         if let Some(pos) = self
             .stack
             .find_first(value)
@@ -236,7 +231,7 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
         self.stack.dup(self.config.max_dup_depth);
         self.head += 1;
 
-        Err(ProcessNext)
+        Err(GoBackToProgressStart)
     }
 
     fn spill_top(&mut self) {
