@@ -30,18 +30,21 @@ const unsafe_cbytes_read = fn (comptime T: type, comptime data: cbytes, comptime
     } else if T == bool {
         @padded_read_cbytes(data, offset) != 0
     } else if @is_struct(T) or @is_tuple(T) {
-        let mut value = @uninit(T);
+        // NOTE: Make all this comptime
+        comptime let mut value = @uninit(T);
         comptime let mut i = 0;
         comptime let mut field_offset = 0;
 
         inline while i < @field_count(T) {
             let field_type = @field_type(T, i);
             let field_size = comptime { sizeof(field_type) };
-            let field_value = unsafe_cbytes_read(
-                field_type,
-                data,
-                offset + field_offset
-            );
+            let field_value = comptime {
+                unsafe_cbytes_read(
+                    field_type,
+                    data,
+                    offset + field_offset
+                )
+            };
             value = @set_field(value, i, field_value);
             field_offset = field_offset + field_size;
             i = i + 1;

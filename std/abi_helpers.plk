@@ -1,4 +1,4 @@
-import std::mem::{unsafe_mem_write_u256, unsafe_mem_read_u256, unsafe_mem_write_bytes};
+import std::mem::unsafe_mem_write_bytes;
 import std::membytes::{membytes, membytes_from_ptr, membytes_read_u256};
 import std::option::unwrap;
 import std::math::ceil32;

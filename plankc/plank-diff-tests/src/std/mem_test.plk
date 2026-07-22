@@ -25,12 +25,11 @@ init {
         tail: 123
     };
     let size = comptime { sizeof(Outer) };
-    let offset = 13;
-    let ptr = @malloc_uninit(offset + size);
+    let ptr = @malloc_uninit(size);
 
-    require(unsafe_mem_write(ptr, offset, expected) == size);
+    unsafe_mem_write(ptr, expected);
 
-    let actual = unsafe_mem_read(Outer, ptr, offset);
+    let actual = unsafe_mem_read(Outer, ptr);
     require(actual.flag == expected.flag);
     require(actual.inner.enabled == expected.inner.enabled);
     require(actual.inner.value == expected.inner.value);
