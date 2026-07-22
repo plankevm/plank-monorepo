@@ -17,8 +17,6 @@ pub fn dumb_schedule(
     config: ScheduleConfig,
     graph: &OpGraph,
 ) {
-    // let mut in_the_way_buf = Vec::with_capacity(4);
-
     let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
     completable_backing.resize(graph.words_per_set() as usize, 0);
     let mut completable = OpSetMut::new(&mut completable_backing, graph.total_ops());
@@ -42,7 +40,6 @@ pub fn dumb_schedule(
             break 'schedule;
         };
         greedy_schedule_op(config, &mut stack, graph, op, complete.as_ref());
-        // dumb_schedule_op(config, &mut stack, graph, op, &mut in_the_way_buf);
         complete.add(op);
     }
 
