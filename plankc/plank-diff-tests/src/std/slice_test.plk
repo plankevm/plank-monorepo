@@ -104,9 +104,9 @@ const test_memory_access = fn () void {
 const test_memory_set = fn () void {
     let pair_size = comptime { sizeof(Pair) };
     let pair_ptr = @malloc_uninit(pair_size * 3);
-    unsafe_mem_write(pair_ptr, 0, Pair { first: 1, second: 2 });
-    unsafe_mem_write(pair_ptr, pair_size, Pair { first: 3, second: 4 });
-    unsafe_mem_write(pair_ptr, pair_size * 2, Pair { first: 5, second: 6 });
+    unsafe_mem_write(pair_ptr, Pair { first: 1, second: 2 });
+    unsafe_mem_write(pair_ptr +% pair_size, Pair { first: 3, second: 4 });
+    unsafe_mem_write(pair_ptr +% (pair_size * 2), Pair { first: 5, second: 6 });
 
     let fixed = Slice(memory, Pair, comptime { Some(3) }) { ptr: pair_ptr };
     set(fixed, 1, Pair { first: 13, second: 14 });

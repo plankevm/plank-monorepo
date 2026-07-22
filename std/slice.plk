@@ -73,7 +73,7 @@ const new = fn (comptime R: type, values: $V) infer_slice_type(R, V) {
     }
 
     let ptr = @malloc_uninit(comptime { sizeof(V) });
-    unsafe_mem_write(ptr, 0, values);
+    unsafe_mem_write(ptr, values);
     S { ptr: ptr }
 };
 
@@ -112,15 +112,15 @@ const get = fn (slice: $S, index: u256) Option(element_type(S)) {
         return Some(unsafe_cbytes_read(T, slice.data, offset));
     }
     if R == memory {
-        return Some(unsafe_mem_read(T, slice.ptr, offset));
+        return Some(unsafe_mem_read(T, slice.ptr +% offset));
     }
     if R == calldata {
-        return Some(unsafe_calldata_read(T, slice.ptr, offset));
+        return Some(unsafe_calldata_read(T, slice.ptr +% offset));
     }
     if R == code {
         let ptr = @malloc_uninit(element_size);
         @evm_codecopy(ptr, slice.ptr +% offset, element_size);
-        return Some(unsafe_mem_read(T, ptr, 0));
+        return Some(unsafe_mem_read(T, ptr));
     }
     @compile_error("invariant: invalid slice region")
 };
@@ -136,7 +136,7 @@ const set = fn (slice: $S, index: u256, value: element_type(S)) void {
     require(index < len(slice));
     let element_size = comptime { sizeof(element_type(S)) };
     let offset = index * element_size;
-    unsafe_mem_write(slice.ptr, offset, value);
+    unsafe_mem_write(slice.ptr +% offset, value);
 };
 
 const replace = fn (slice: $S, index: u256, value: element_type(S)) S {

@@ -1,14 +1,14 @@
 import std::type::sizeof;
 
 // Writes a value of type T at `ptr`. Compound fields are serialized
-// contiguously. No bounds check. Returns bytes written.
+// contiguously. No bounds check.
 const unsafe_mem_write = fn (ptr: u256, value: $T) void {
     if T == void {
         return ();
     } else if T == u256 {
         @mstore32(ptr, value);
     } else if T == bool {
-        unsafe_mem_write_u256(ptr, offset, if value { 1 } else { 0 })
+        @mstore32(ptr, if value { 1 } else { 0 });
     } else if @is_struct(T) or @is_tuple(T) {
         comptime let mut i = 0;
         comptime let mut field_offset = 0;

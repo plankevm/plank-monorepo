@@ -24,7 +24,7 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
     Some(@mload32(buf.ptr +% offset))
 };
 
-// Writes a value of any type T at `offset`. Returns None if out of bounds.
+// Writes a value of any type T at `offset`. Returns false if out of bounds.
 const membytes_write = fn (buf: membytes, offset: u256, value: $T) bool {
     let size = comptime { sizeof(T) };
     if (buf.length < size) | (offset > buf.length -% size) {
