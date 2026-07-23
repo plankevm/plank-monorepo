@@ -254,7 +254,7 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
                 }
                 if is_abi_dynamic(@field_type(T, i)) {
                     // Safe to unwrap: the pre-check above guarantees the entire head section is readable.
-                    let tail_offset = acc.base_offset + unwrap(u256, membytes_read_u256(acc.buf, acc.head_offset));
+                    let tail_offset = acc.base_offset + unwrap(membytes_read_u256(acc.buf, acc.head_offset));
                     let fits = abi_buf_fits(@field_type(T, i), acc.buf, tail_offset);
                     let mut next = acc;
                     next = @set_field(next, 2, acc.head_offset + 32);

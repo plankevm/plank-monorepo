@@ -1,4 +1,4 @@
-import std::option::{Option, Some, None, unwrap};
+import std::option::*;
 import std::membytes::{membytes, membytes_new, membytes_from_ptr};
 import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
 import std::math::ceil32;
@@ -95,7 +95,7 @@ const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
 // Decodes a value of type T from `buf`. Reverts if the buffer
 // is too small to hold the encoding.
 const abi_decode = fn (comptime T: type, buf: membytes) T {
-    unwrap(T, abi_decode_try(T, buf))
+    unwrap(abi_decode_try(T, buf))
 };
 
 const compute_selector = fn (signature: $T) u256 {

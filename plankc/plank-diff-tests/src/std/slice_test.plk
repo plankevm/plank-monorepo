@@ -42,7 +42,7 @@ const test_basic = fn () void {
 
 const test_ctime_access = fn () void {
     comptime {
-        let fixed_cslice = new(ctime, (
+        let fixed_cslice = new_comptime(ctime, (
             Pair { first: 1, second: 2 },
             Pair { first: 3, second: 4 }
         ));
@@ -130,7 +130,7 @@ const test_memory_set = fn () void {
 };
 
 const test_code_access = fn () void {
-    let code_slice = new_code((
+    let code_slice = new_comptime(code, (
         Pair { first: 1, second: 2 },
         Pair { first: 3, second: 4 }
     ));

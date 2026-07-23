@@ -17,11 +17,11 @@ fn test_runtime_slice_rejects_cbytes_elements() {
             "#,
         ),
         &[r#"
-        error: type cannot be embedded as a runtime slice element
-          --> std/slice.plk:19:9
-           |
-        19 |         @compile_error("type cannot be embedded as a runtime slice element");
-           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        error: Slice: type cannot be embedded as a runtime slice element
+         --> std/error.plk:8:5
+          |
+        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -44,11 +44,11 @@ fn test_runtime_slice_rejects_nested_cbytes_elements() {
             "#,
         ),
         &[r#"
-        error: type cannot be embedded as a runtime slice element
-          --> std/slice.plk:19:9
-           |
-        19 |         @compile_error("type cannot be embedded as a runtime slice element");
-           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        error: Slice: type cannot be embedded as a runtime slice element
+         --> std/error.plk:8:5
+          |
+        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -71,9 +71,9 @@ fn test_ctime_slice_rejects_cbytes_elements() {
         ),
         &[r#"
         error: type cannot be embedded as a CSlice element
-          --> std/slice.plk:39:9
+          --> std/slice.plk:40:9
            |
-        39 |         @compile_error("type cannot be embedded as a CSlice element");
+        40 |         @compile_error("type cannot be embedded as a CSlice element");
            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
@@ -94,11 +94,11 @@ fn test_slice_new_rejects_code_region() {
             "#,
         ),
         &[r#"
-        error: `new` cannot construct code slices; use `new_code` to embed compile-time values in code
-          --> std/slice.plk:64:9
+        error: new: cannot construct `code` or `ctime` slices in runtime context; use `new_comptime`
+          --> std/slice.plk:70:13
            |
-        64 |         @compile_error("`new` cannot construct code slices; use `new_code` to embed compile-time values in code");
-           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        70 |             @compile_error("new: cannot construct `code` or `ctime` slices in runtime context; use `new_comptime`");
+           |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -118,11 +118,41 @@ fn test_slice_new_rejects_calldata_region() {
             "#,
         ),
         &[r#"
-        error: `new` does not support calldata because calldata is read-only
-          --> std/slice.plk:67:9
+        error: new: `calldata` not supported because calldata is read-only
+          --> std/slice.plk:65:9
            |
-        67 |         @compile_error("`new` does not support calldata because calldata is read-only");
-           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        65 |         @compile_error("new: `calldata` not supported because calldata is read-only");
+           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_slice_new_ctime_rejects_runtime_values() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            import std::regions::ctime;
+            import std::slice::new;
+
+            init {
+                let value = @evm_calldataload(0);
+                new(ctime, (value,));
+                @evm_stop();
+            }
+            "#,
+        ),
+        &[r#"
+        error: runtime argument to function with comptime-only return type
+         --> main.plk:6:16
+          |
+        6 |     new(ctime, (value,));
+          |     -----------^^^^^^^^-
+          |     |          |
+          |     |          runtime argument here
+          |     function called here
+          |
+          = note: functions with comptime-only return types require all arguments to be known at compile time
         "#],
     );
 }
@@ -142,17 +172,17 @@ fn test_slice_new_rejects_heterogeneous_tuple() {
             "#,
         ),
         &[r#"
-        error: slice constructor elements must all have the same type
-           --> std/slice.plk:211:13
-            |
-        211 |             @compile_error("slice constructor elements must all have the same type");
-            |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
-            |
+        error: new: slice constructor elements must all have the same type
+         --> std/error.plk:8:5
+          |
+        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+          |
         note: called here
-           --> main.plk:5:5
-            |
-          5 |     new(memory, (1, true));
-            |     ^^^^^^^^^^^^^^^^^^^^^^
+         --> main.plk:5:5
+          |
+        5 |     new(memory, (1, true));
+          |     ^^^^^^^^^^^^^^^^^^^^^^
         "#],
     );
 }
@@ -172,17 +202,17 @@ fn test_slice_new_rejects_empty_tuple() {
             "#,
         ),
         &[r#"
-        error: cannot infer a slice element type from an empty tuple; use `empty`
-           --> std/slice.plk:204:9
-            |
-        204 |         @compile_error("cannot infer a slice element type from an empty tuple; use `empty`");
-            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
-            |
+        error: new: cannot infer a slice element type from an empty tuple; use `empty`
+         --> std/error.plk:8:5
+          |
+        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+          |
         note: called here
-           --> main.plk:5:5
-            |
-          5 |     new(memory, ());
-            |     ^^^^^^^^^^^^^^^
+         --> main.plk:5:5
+          |
+        5 |     new(memory, ());
+          |     ^^^^^^^^^^^^^^^
         "#],
     );
 }
@@ -209,9 +239,9 @@ fn test_cslice_rejects_runtime_index() {
         ),
         &[r#"
         error: CSlice access must be evaluated at compile time
-           --> std/slice.plk:101:9
+           --> std/slice.plk:109:9
             |
-        101 |         @compile_error("CSlice access must be evaluated at compile time");
+        109 |         @compile_error("CSlice access must be evaluated at compile time");
             |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
@@ -235,9 +265,9 @@ fn test_slice_set_rejects_non_memory_region() {
         ),
         &[r#"
         error: set mutates backing data in place; calldata and code are immutable, and cbytes-backed slices do not support in-place mutation
-           --> std/slice.plk:134:9
+           --> std/slice.plk:142:9
             |
-        134 | ...   @compile_error("set mutates backing data in place; calldata and code are immutable, and cbytes-backed slices do not support in-place mutation");
+        142 | ...   @compile_error("set mutates backing data in place; calldata and code are immutable, and cbytes-backed slices do not support in-place mutation");
             |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
@@ -263,11 +293,11 @@ fn test_slice_replace_rejects_out_of_bounds_index() {
             "#,
         ),
         &[r#"
-        error: replace index is out of bounds
-           --> std/slice.plk:148:9
+        error: replace: index is out of bounds
+           --> std/slice.plk:156:9
             |
-        148 |         @compile_error("replace index is out of bounds");
-            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        156 |         @compile_error("replace: index is out of bounds");
+            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -290,11 +320,11 @@ fn test_slice_replace_rejects_non_ctime_region() {
             "#,
         ),
         &[r#"
-        error: replace requires a ctime slice
-           --> std/slice.plk:144:9
+        error: replace: requires a ctime slice
+           --> std/slice.plk:152:9
             |
-        144 |         @compile_error("replace requires a ctime slice");
-            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        152 |         @compile_error("replace: requires a ctime slice");
+            |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }

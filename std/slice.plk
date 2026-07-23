@@ -1,6 +1,6 @@
 import std::calldata::unsafe_calldata_read;
 import std::cbytes::{encode_cbytes, unsafe_cbytes_read};
-import std::error::require;
+import std::error::*;
 import std::mem::{unsafe_mem_read, unsafe_mem_write};
 import std::option::{None, Option, Some, unwrap};
 import std::regions::{calldata, code, ctime, embed_as, is_region, memory, region_ptr_type};
@@ -8,16 +8,17 @@ import std::type::sizeof;
 
 const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u256)) type {
     if !is_region(R) {
-        @compile_error("R must be a region type");
+        comptime_caller_error("Slice", "R must be a region type");
     }
 
     if R == ctime {
         return CSlice(T, arity);
     }
 
-    if !can_embed_as_slice_element(T) {
-        @compile_error("type cannot be embedded as a runtime slice element");
-    }
+    comptime_assert(
+        can_embed_as_slice_element(T),
+        ("Slice", "type cannot be embedded as a runtime slice element")
+    );
 
     if arity.is_some {
         struct (R, T, arity.inner) {
@@ -59,27 +60,34 @@ const empty = fn (comptime R: type, comptime T: type) Slice(R, T, Some(0)) {
     Slice(R, T, arity) { ptr: 0 }
 };
 
-const new = fn (comptime R: type, values: $V) infer_slice_type(R, V) {
-    if R == code {
-        @compile_error("`new` cannot construct code slices; use `new_code` to embed compile-time values in code");
-    }
+const new = fn (comptime R: type, values: $V) infer_slice_type("new", R, V) {
     if R == calldata {
-        @compile_error("`new` does not support calldata because calldata is read-only");
+        @compile_error("new: `calldata` not supported because calldata is read-only");
     }
 
-    let S = comptime { infer_slice_type(R, V) };
-    if R == ctime {
-        return S { data: encode_cbytes(values) };
+    if R == ctime or R == code {
+        if !@in_comptime() {
+            @compile_error("new: cannot construct `code` or `ctime` slices in runtime context; use `new_comptime`");
+        }
+        return new_comptime(R, values);
     }
 
+    if R != memory {
+        @compile_error("new: unexpected data region `R`");
+    }
+    let S = comptime { infer_slice_type("new", R, V) };
     let ptr = @malloc_uninit(comptime { sizeof(V) });
     unsafe_mem_write(ptr, values);
+
     S { ptr: ptr }
 };
 
-const new_code = fn (comptime values: $V) infer_slice_type(code, V) {
-    let S = comptime { infer_slice_type(code, V) };
-    let data = embed_as(encode_cbytes(values), code);
+const new_comptime = fn (comptime R: type, comptime values: $V) infer_slice_type("new_comptime", R, V) {
+    let S = comptime { infer_slice_type("new_comptime", R, V) };
+    let data = embed_as(encode_cbytes(values), R);
+    if R == ctime {
+        return S { data: data };
+    }
     S { ptr: data.ptr }
 };
 
@@ -126,7 +134,7 @@ const get = fn (slice: $S, index: u256) Option(element_type(S)) {
 };
 
 const at = fn (slice: $S, index: u256) element_type(S) {
-    unwrap(element_type(S), get(slice, index))
+    unwrap(get(slice, index))
 };
 
 const set = fn (slice: $S, index: u256, value: element_type(S)) void {
@@ -141,11 +149,11 @@ const set = fn (slice: $S, index: u256, value: element_type(S)) void {
 
 const replace = fn (slice: $S, index: u256, value: element_type(S)) S {
     if region_type(S) != ctime {
-        @compile_error("replace requires a ctime slice");
+        @compile_error("replace: requires a ctime slice");
     }
 
     if index >= len(slice) {
-        @compile_error("replace index is out of bounds");
+        @compile_error("replace: index is out of bounds");
     }
 
     let element_size = sizeof(element_type(S));
@@ -196,19 +204,19 @@ const can_embed_as_slice_element = fn (comptime T: type) bool {
     false
 };
 
-const infer_slice_type = fn (comptime R: type, comptime V: type) type {
+const infer_slice_type = fn (comptime caller: cbytes, comptime R: type, comptime V: type) type {
     if !@is_tuple(V) {
-        @compile_error("slice constructors require a tuple of elements");
+        comptime_caller_error(caller, "slice constructors require a tuple of elements")
     }
     if @field_count(V) == 0 {
-        @compile_error("cannot infer a slice element type from an empty tuple; use `empty`");
+        comptime_caller_error(caller, "cannot infer a slice element type from an empty tuple; use `empty`");
     }
 
     let T = @field_type(V, 0);
     let mut i = 1;
     while i < @field_count(V) {
         if @field_type(V, i) != T {
-            @compile_error("slice constructor elements must all have the same type");
+            comptime_caller_error(caller, "slice constructor elements must all have the same type");
         }
         i = i + 1;
     }

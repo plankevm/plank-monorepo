@@ -4,8 +4,22 @@ const require = fn (condition: bool) void {
     }
 };
 
-const comptime_assert = fn (comptime condition: bool, comptime message: cbytes) void {
+const comptime_caller_error = fn (comptime caller: cbytes, comptime message: cbytes) never {
+    @compile_error(@concat_cbytes((caller, ": ", message)));
+};
+
+const comptime_assert = fn (comptime condition: bool, comptime message: $T) void {
+    if !(T == cbytes or T == tuple { cbytes, cbytes }) {
+        comptime_caller_error("comptime_assert", "invalid message type");
+    }
+
     if !condition {
-        @compile_error(message);
+        if T == cbytes {
+            @compile_error(message);
+        } else if T == tuple { cbytes, cbytes } {
+            let caller = @get_field(message, 0);
+            let message = @get_field(message, 1);
+            comptime_caller_error(caller, message);
+        }
     }
 };
