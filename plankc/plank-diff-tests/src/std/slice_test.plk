@@ -1,0 +1,198 @@
+import std::constructor::return_runtime;
+import std::error::{comptime_assert, require};
+import std::mem::unsafe_mem_write;
+import std::option::{None, Some};
+import std::regions::{calldata, code, ctime, memory};
+import std::slice::*;
+import std::type::sizeof;
+
+const Pair = struct { first: u256, second: u256 };
+const Empty = struct {};
+const TuplePair = tuple { u256, u256 };
+const PAIR_DATA = @concat_cbytes((1, 2, 3, 4));
+const REPLACE_DATA = @concat_cbytes((1, 2, 3, 4, 5, 6));
+
+const test_basic = fn () void {
+    comptime {
+        let fixed_cslice = Slice(ctime, Pair, Some(2)) { data: PAIR_DATA };
+        let dynamic_cslice = CSlice(TuplePair, None(u256)) { data: PAIR_DATA, len: 2 };
+        let empty_cslice = empty(ctime, Pair);
+        let fixed_zero_sized = CSlice(Empty, Some(3)) { data: "" };
+        let dynamic_zero_sized = CSlice(Empty, None(u256)) { data: "", len: 3 };
+
+        comptime_assert(len(fixed_cslice) == 2, "fixed CSlice length must come from its arity");
+        comptime_assert(len(dynamic_cslice) == 2, "dynamic CSlice length must come from its len field");
+        comptime_assert(is_empty(empty_cslice), "empty CSlice must be empty");
+        comptime_assert(!is_empty(dynamic_cslice), "dynamic CSlice with elements must not be empty");
+        comptime_assert(len(fixed_zero_sized) == 3, "fixed CSlice must support zero-sized elements");
+        comptime_assert(len(dynamic_zero_sized) == 3, "dynamic CSlice must support zero-sized elements");
+        comptime_assert(get(dynamic_zero_sized, 2).is_some, "zero-sized element must be addressable");
+        comptime_assert(!get(dynamic_zero_sized, 3).is_some, "zero-sized CSlice bounds must use len");
+    }
+
+    let fixed_memory_slice = Slice(memory, u256, comptime { Some(3) }) { ptr: 0 };
+    let dynamic_code_slice = Slice(code, u256, comptime { None(u256) }) { ptr: 0, len: 7 };
+    let empty_calldata_slice = empty(calldata, u256);
+
+    require(len(fixed_memory_slice) == 3);
+    require(len(dynamic_code_slice) == 7);
+    require(is_empty(empty_calldata_slice));
+    require(!is_empty(dynamic_code_slice));
+};
+
+const test_ctime_access = fn () void {
+    comptime {
+        let fixed_cslice = new_comptime(ctime, (
+            Pair { first: 1, second: 2 },
+            Pair { first: 3, second: 4 }
+        ));
+        let dynamic_cslice = CSlice(TuplePair, None(u256)) { data: PAIR_DATA, len: 2 };
+        let first = at(fixed_cslice, 0);
+        let second = at(dynamic_cslice, 1);
+        let missing = get(fixed_cslice, 2);
+
+        comptime_assert(first.first == 1, "first CSlice element has the wrong first field");
+        comptime_assert(first.second == 2, "first CSlice element has the wrong second field");
+        comptime_assert(@get_field(second, 0) == 3, "second CSlice tuple has the wrong first field");
+        comptime_assert(@get_field(second, 1) == 4, "second CSlice tuple has the wrong second field");
+        comptime_assert(!missing.is_some, "out-of-bounds CSlice get must return None");
+    }
+};
+
+const test_ctime_replace = fn () void {
+    comptime {
+        let fixed = Slice(ctime, Pair, Some(3)) { data: REPLACE_DATA };
+        let fixed_replaced = replace(fixed, 1, Pair { first: 13, second: 14 });
+
+        comptime_assert(at(fixed_replaced, 0).first == 1, "replace must preserve preceding elements");
+        comptime_assert(at(fixed_replaced, 1).first == 13, "replace must update the selected element");
+        comptime_assert(at(fixed_replaced, 1).second == 14, "replace must encode the complete element");
+        comptime_assert(at(fixed_replaced, 2).second == 6, "replace must preserve following elements");
+        comptime_assert(at(fixed, 1).first == 3, "replace must not modify the original CSlice");
+        comptime_assert(at(fixed, 1).second == 4, "replace must not modify the original CSlice");
+
+        let dynamic = CSlice(TuplePair, None(u256)) { data: REPLACE_DATA, len: 3 };
+        let dynamic_replaced = replace(dynamic, 2, (15, 16));
+        let zero_sized = CSlice(Empty, None(u256)) { data: "", len: 3 };
+        let zero_sized_replaced = replace(zero_sized, 1, Empty {});
+
+        comptime_assert(len(dynamic_replaced) == 3, "replace must preserve dynamic CSlice length");
+        comptime_assert(@get_field(at(dynamic_replaced, 2), 0) == 15, "replace must support tuples");
+        comptime_assert(@get_field(at(dynamic_replaced, 2), 1) == 16, "replace must support tuples");
+        comptime_assert(len(zero_sized_replaced) == 3, "replace must preserve zero-sized CSlice length");
+    }
+};
+
+const test_memory_access = fn () void {
+    let runtime_value = @evm_calldatasize() </ 16;
+    let memory_slice = new(memory, (
+        Pair { first: 5, second: 6 },
+        Pair { first: 7, second: runtime_value }
+    ));
+    let first = at(memory_slice, 0);
+    let runtime_index = @evm_calldatasize() </ 128;
+    let second = at(memory_slice, runtime_index);
+    let missing = get(memory_slice, 2);
+
+    require(first.first == 5);
+    require(first.second == 6);
+    require(second.first == 7);
+    require(second.second == 8);
+    require(!missing.is_some);
+};
+
+const test_memory_set = fn () void {
+    let pair_size = comptime { sizeof(Pair) };
+    let pair_ptr = @malloc_uninit(pair_size * 3);
+    unsafe_mem_write(pair_ptr, Pair { first: 1, second: 2 });
+    unsafe_mem_write(pair_ptr +% pair_size, Pair { first: 3, second: 4 });
+    unsafe_mem_write(pair_ptr +% (pair_size * 2), Pair { first: 5, second: 6 });
+
+    let fixed = Slice(memory, Pair, comptime { Some(3) }) { ptr: pair_ptr };
+    set(fixed, 1, Pair { first: 13, second: 14 });
+
+    require(at(fixed, 0).first == 1);
+    require(at(fixed, 1).first == 13);
+    require(at(fixed, 1).second == 14);
+    require(at(fixed, 2).second == 6);
+
+    let dynamic = Slice(memory, TuplePair, comptime { None(u256) }) {
+        ptr: pair_ptr,
+        len: 3
+    };
+    set(dynamic, 2, (15, 16));
+
+    require(@get_field(at(dynamic, 1), 0) == 13);
+    require(@get_field(at(dynamic, 2), 0) == 15);
+    require(@get_field(at(dynamic, 2), 1) == 16);
+    require(at(fixed, 2).first == 15);
+    require(at(fixed, 2).second == 16);
+};
+
+const test_code_access = fn () void {
+    let code_slice = new_comptime(code, (
+        Pair { first: 1, second: 2 },
+        Pair { first: 3, second: 4 }
+    ));
+    let code_first = at(code_slice, 0);
+    let runtime_index = @evm_calldatasize() </ 128;
+    let code_second = at(code_slice, runtime_index);
+
+    require(code_first.first == 1);
+    require(code_first.second == 2);
+    require(code_second.first == 3);
+    require(code_second.second == 4);
+};
+
+const test_calldata_access = fn () void {
+    let pair_size = comptime { sizeof(Pair) };
+    let calldata_slice = Slice(calldata, TuplePair, comptime { None(u256) }) {
+        ptr: 0,
+        len: @evm_calldatasize() </ pair_size
+    };
+    let first = at(calldata_slice, 0);
+    let second = at(calldata_slice, 1);
+    let missing = get(calldata_slice, 2);
+
+    require(@get_field(first, 0) == 9);
+    require(@get_field(first, 1) == 10);
+    require(@get_field(second, 0) == 11);
+    require(@get_field(second, 1) == 12);
+    require(!missing.is_some);
+};
+
+const test_access = fn () void {
+    test_ctime_access();
+    test_ctime_replace();
+    test_memory_access();
+    test_memory_set();
+    test_code_access();
+    test_calldata_access();
+};
+
+init {
+    test_basic();
+    return_runtime();
+}
+
+run {
+    let calldata_size = @evm_calldatasize();
+    if calldata_size == 0 {
+        let empty_slice = Slice(calldata, u256, comptime { None(u256) }) {
+            ptr: 0,
+            len: 0
+        };
+        at(empty_slice, 0);
+        @evm_stop();
+    }
+
+    if calldata_size == 32 {
+        let ptr = @malloc_uninit(32);
+        let memory_slice = Slice(memory, u256, comptime { Some(1) }) { ptr: ptr };
+        set(memory_slice, 1, 42);
+        @evm_stop();
+    }
+
+    test_access();
+    @evm_stop();
+}

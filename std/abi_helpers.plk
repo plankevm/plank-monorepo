@@ -1,4 +1,3 @@
-import std::mem::{unsafe_mem_write_u256, unsafe_mem_read_u256, unsafe_mem_write_bytes};
 import std::membytes::{membytes, membytes_from_ptr, membytes_read_u256};
 import std::option::unwrap;
 import std::math::ceil32;
@@ -83,14 +82,14 @@ const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
     if T == void {
         0
     } else if T == u256 {
-        unsafe_mem_write_u256(buf, offset, value);
+        @mstore32(buf +% offset, value);
         32
     } else if T == bool {
-        unsafe_mem_write_u256(buf, offset, if value { 1 } else { 0 });
+        @mstore32(buf +% offset, if value { 1 } else { 0 });
         32
     } else if T == membytes {
-        unsafe_mem_write_u256(buf, offset, value.length);
-        unsafe_mem_write_bytes(buf, offset + 32, value.ptr, value.length);
+        @mstore32(buf +% offset, value.length);
+        @mcopy(buf +% offset +% 32, value.ptr, value.length);
         // padding after value.length is left uninitialized; consumers only read length bytes
         32 + ceil32(value.length)
     } else if @is_struct(T) {
@@ -105,9 +104,8 @@ const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
             @field_count(T),
             fn (comptime i: u256, acc: AbiEncodeAccumulator(T)) AbiEncodeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
-                    unsafe_mem_write_u256(
-                        acc.buf,
-                        acc.head_offset,
+                    @mstore32(
+                        acc.buf +% acc.head_offset,
                         acc.tail_offset - acc.base_offset
                     );
                     let written = unsafe_abi_encode_to(
@@ -160,13 +158,13 @@ const AbiDecodeAccumulator = fn (comptime T: type) type {
 // Caller must ensure `buf` contains valid ABI-encoded data for type `T`.
 const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T {
     if T == void {
-        {}
+        ()
     } else if T == u256 {
-        unsafe_mem_read_u256(buf, offset)
+        @mload32(buf +% offset)
     } else if T == bool {
-        unsafe_mem_read_u256(buf, offset) != 0
+        @mload32(buf +% offset) != 0
     } else if T == membytes {
-        let length = unsafe_mem_read_u256(buf, offset);
+        let length = @mload32(buf +% offset);
         membytes_from_ptr(buf +% offset +% 32, length)
     } else if @is_struct(T) {
         let initial = AbiDecodeAccumulator(T) {
@@ -179,7 +177,7 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T 
             @field_count(T),
             fn (comptime i: u256, acc: AbiDecodeAccumulator(T)) AbiDecodeAccumulator(T) {
                 if is_abi_dynamic(@field_type(T, i)) {
-                    let tail_offset = acc.base_offset + unsafe_mem_read_u256(acc.buf, acc.head_offset);
+                    let tail_offset = acc.base_offset + @mload32(acc.buf +% acc.head_offset);
                     let decoded = unsafe_abi_decode_from(
                         @field_type(T, i),
                         acc.buf,
@@ -256,7 +254,7 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
                 }
                 if is_abi_dynamic(@field_type(T, i)) {
                     // Safe to unwrap: the pre-check above guarantees the entire head section is readable.
-                    let tail_offset = acc.base_offset + unwrap(u256, membytes_read_u256(acc.buf, acc.head_offset));
+                    let tail_offset = acc.base_offset + unwrap(membytes_read_u256(acc.buf, acc.head_offset));
                     let fits = abi_buf_fits(@field_type(T, i), acc.buf, tail_offset);
                     let mut next = acc;
                     next = @set_field(next, 2, acc.head_offset + 32);

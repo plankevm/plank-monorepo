@@ -1,7 +1,6 @@
 import std::core_ops::checked_add;
 import std::option::{Option, Some, None};
 import std::membytes::membytes;
-import std::mem::unsafe_mem_read_u256;
 
 const bytes32 = struct { raw: u256 };
 
@@ -15,6 +14,6 @@ const membytes_read_bytes32 = fn (buf: membytes, offset: u256) Option(bytes32) {
     if (end_offset < offset) | (end_offset > buf.length) {
         return None(bytes32);
     }
-    let raw = unsafe_mem_read_u256(buf.ptr, offset);
+    let raw = @mload32(buf.ptr +% offset);
     Some(bytes32 { raw: raw })
 };
