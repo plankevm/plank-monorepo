@@ -15,7 +15,7 @@
 
 ((identifier) @type.builtin
  (#any-of? @type.builtin "void" "u256" "bool" "type" "function" "never" "cbytes"))
-(self_type) @type.builtin
+(self_type) @type.definition
 
 ; Builtin functions
 

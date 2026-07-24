@@ -6,7 +6,7 @@ const UInt = fn (comptime Size: u256) type {
     }
 
     struct Size {
-        _raw_repr: u256
+        as_u256: u256
     }
 };
 
@@ -73,7 +73,7 @@ const unsafe_from_u256 = fn (comptime T: type, raw_repr: u256) T {
     if T == u256 {
         raw_repr
     } else {
-        T { _raw_repr: raw_repr }
+        T { as_u256: raw_repr }
     }
 };
 
@@ -90,7 +90,7 @@ const cast_uint = fn (src: $T, comptime Dst: type) Dst {
         }
     }
 
-    let repr = if T == u256 { src } else { src._raw_repr };
+    let repr = if T == u256 { src } else { src.as_u256 };
 
     unsafe_from_u256(Dst, repr)
 };

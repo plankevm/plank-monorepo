@@ -1,12 +1,13 @@
 import std::fixedbytes::bytes32;
 import std::regions::{bytes, memory};
 import std::option::{Option, Some, None, unwrap as option_unwrap};
-import std::core::uint::{u160, is_uint, try_cast_uint, cast_uint, unsafe_from_u256 as unsafe_uint_from_u256};
+import std::core::uint::*;
 
 const addr = struct {
-    as_uint: u160,
+    as_u160: u160,
 };
 
+const ADDR_ZERO = addr_from_u256(0);
 
 const addr_eq = fn (a: addr, b: addr) bool {
     cast_addr(a, u256) == cast_addr(b, u256)
@@ -21,27 +22,27 @@ const addr_from_u256 = fn (raw: u256) addr {
             @evm_revert(@malloc_uninit(0), 0);
         }
     }
-    addr { as_uint: res.inner }
+    addr { as_u160: res.inner }
 };
 
 /// Safety: `raw` must be a valid 160-bit value.
-const unsafe_from_u256 = fn (raw: u256) addr {
-    addr { as_uint: unsafe_uint_from_u256(u160, raw) }
+const unsafe_addr_from_u256 = fn (raw: u256) addr {
+    addr { as_u160: unsafe_from_u256(u160, raw) }
 };
 
 const cast_addr = fn (this: addr, comptime Dst: type) Dst {
     if comptime { !is_uint(Dst) } {
         @compile_error("cast_addr: `Dst` not `uN` type");
     }
-    cast_uint(this.as_uint, Dst)
+    cast_uint(this.as_u160, Dst)
 };
 
 const msg_sender = fn () addr {
-    addr { as_uint: unsafe_uint_from_u256(u160, @evm_caller()) }
+    addr { as_u160: unsafe_from_u256(u160, @evm_caller()) }
 };
 
 const tx_origin = fn () addr {
-    addr { as_uint: unsafe_uint_from_u256(u160, @evm_origin()) }
+    addr { as_u160: unsafe_from_u256(u160, @evm_origin()) }
 };
 
 const raw_create = fn (value: u256, code: bytes(memory)) Option(addr) {
@@ -49,7 +50,7 @@ const raw_create = fn (value: u256, code: bytes(memory)) Option(addr) {
     if account == 0 {
         return None(addr);
     }
-    Some(addr { as_uint: unsafe_uint_from_u256(u160, account) })
+    Some(addr { as_u160: unsafe_from_u256(u160, account) })
 };
 
 const raw_create2 = fn (value: u256, code: bytes(memory), salt: bytes32) Option(addr) {
@@ -57,5 +58,5 @@ const raw_create2 = fn (value: u256, code: bytes(memory), salt: bytes32) Option(
     if account == 0 {
         return None(addr);
     }
-    Some(addr { as_uint: unsafe_uint_from_u256(u160, account) })
+    Some(addr { as_u160: unsafe_from_u256(u160, account) })
 };

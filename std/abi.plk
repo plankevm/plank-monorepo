@@ -2,22 +2,7 @@ import std::option::*;
 import std::membytes::{membytes, membytes_new, membytes_from_ptr};
 import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
 import std::math::ceil32;
-import std::utils::fold;
 import std::regions::keccak256;
-
-// Accumulator for computing ABI encoded size of a struct via fold.
-// Runtime value (encoded_value) cannot be captured in closures,
-// so it must be threaded through fold. total_size changes each iteration.
-//
-// Fields:
-//   encoded_value - the value being sized (runtime, read-only in fold)
-//   total_size    - accumulated size; starts from abi_head_size(T), dynamic field sizes are added
-const AbiSizeAccumulator = fn (comptime T: type) type {
-    struct {
-        encoded_value: T,
-        total_size: u256
-    }
-};
 
 // Returns the total byte size of the ABI encoding for a given value.
 const abi_encoded_size = fn (value: $T) u256 {
@@ -31,23 +16,17 @@ const abi_encoded_size = fn (value: $T) u256 {
         32 + ceil32(value.length)
     } else if @is_struct(T) {
         // Start from the head size; non-dynamic fields are already accounted for.
-        let initial = AbiSizeAccumulator(T) {
-            encoded_value: value,
-            total_size: abi_head_size(T)
-        };
-        let result = fold(
-            @field_count(T),
-            fn (comptime i: u256, acc: AbiSizeAccumulator(T)) AbiSizeAccumulator(T) {
-                if is_abi_dynamic(@field_type(T, i)) {
-                    let field_size = abi_encoded_size(@get_field(acc.encoded_value, i));
-                    @set_field(acc, 1, acc.total_size + field_size)
-                } else {
-                    acc
-                }
-            },
-            initial
-        );
-        result.total_size
+        let mut total_size = abi_head_size(T);
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            if is_abi_dynamic(@field_type(T, i)) {
+                total_size = total_size + abi_encoded_size(@get_field(value, i));
+            }
+            i = i + 1;
+        }
+
+        total_size
     } else {
         @compile_error("unsupported type for ABI encoding")
     }
