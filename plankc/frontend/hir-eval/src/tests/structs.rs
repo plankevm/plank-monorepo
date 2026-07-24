@@ -1017,3 +1017,238 @@ fn test_type_index_expr_eagerly_evaluates() {
         "#,
     );
 }
+
+#[test]
+fn test_runtime_method_call() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct {
+            value: u256,
+            fn value_of(pair: Self) u256 { pair.value }
+        };
+
+        init {
+            let pair = Pair { value: @evm_calldataload(0) };
+            let value = pair.value_of();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: Pair) -> u256 {
+            %1 : Pair = %0
+            %2 : u256 = %1.0
+            ret %2
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : Pair = Pair { %1 }
+            %3 : Pair = %2
+            %4 : u256 = call @fn0(%3)
+            %5 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_comptime_method_call() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct {
+            value: u256,
+            fn value_of(pair: Self) u256 { pair.value }
+        };
+        const pair = Pair { value: 42 };
+        const value = pair.value_of();
+
+        init {
+            let result: u256 = value;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_function_field_call() {
+    assert_lowers_to(
+        r#"
+        const Holder = struct { f: function };
+        const identity = fn(value: u256) u256 { value };
+        const holder = Holder { f: identity };
+        const value = holder.f(41);
+
+        init {
+            let result: u256 = value;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_method_returning_self() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct {
+            value: u256,
+            fn clone(pair: Self) Self { pair }
+        };
+
+        init {
+            let pair = Pair { value: @evm_calldataload(0) };
+            let copy = pair.clone();
+            let value = copy.value;
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: Pair) -> Pair {
+            %1 : Pair = %0
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : Pair = Pair { %1 }
+            %3 : Pair = %2
+            %4 : Pair = call @fn0(%3)
+            %5 : Pair = %4
+            %6 : u256 = %5.0
+            %7 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_unknown_method() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct { value: u256 };
+        init {
+            let pair = Pair { value: 0 };
+            pair.unknown();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown method
+         --> main.plk:4:5
+          |
+        4 |     pair.unknown();
+          |     ^^^^^^^^^^^^^^ `Pair` has no method `unknown`
+        "#],
+    );
+}
+
+#[test]
+fn test_method_on_non_struct() {
+    assert_diagnostics(
+        r#"
+        init {
+            let value = 0;
+            value.unknown();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: no methods on type
+         --> main.plk:3:5
+          |
+        3 |     value.unknown();
+          |     ^^^^^ value of type `u256` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_method_arg_count_excludes_receiver() {
+    assert_diagnostics(
+        r#"
+        const Pair = struct {
+            fn value_at(pair: Self, index: u256) u256 { index }
+        };
+        init {
+            let pair = Pair {};
+            pair.value_at();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: wrong number of arguments
+         --> main.plk:6:5
+          |
+        2 |     fn value_at(pair: Self, index: u256) u256 { index }
+          |                ------------------------- defined with 1 parameter
+        ...
+        6 |     pair.value_at();
+          |     ^^^^^^^^^^^^^^^ expected 1 argument, got 0
+        "#],
+    );
+}
+
+#[test]
+fn test_duplicate_method() {
+    assert_diagnostics(
+        r#"
+        const S = struct {
+            fn f(value: Self) void {}
+            fn f(value: Self) void {}
+        };
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: duplicate method name in struct definition
+         --> main.plk:3:8
+          |
+        2 |     fn f(value: Self) void {}
+          |        - first declared here
+        3 |     fn f(value: Self) void {}
+          |        ^ `f` declared more than once
+        "#],
+    );
+}
+
+#[test]
+fn test_method_capture_not_supported() {
+    assert_diagnostics(
+        r#"
+        const Make = fn(comptime tag: u256) type {
+            struct tag {
+                fn tag_of(value: Self) u256 { tag }
+            }
+        };
+        const S = Make(1);
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: method captures are not yet implemented
+         --> main.plk:3:12
+          |
+        3 |         fn tag_of(value: Self) u256 { tag }
+          |            ^^^^^^ method `tag_of` captures an enclosing value
+        "#],
+    );
+}

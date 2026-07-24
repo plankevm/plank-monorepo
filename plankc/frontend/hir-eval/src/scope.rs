@@ -838,7 +838,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             ExprKind::Call { callee, args } => {
                 poison::transpose(self.eval_call(callee, args, expr.span))?
             }
-            ExprKind::MethodCall { .. } => todo!("evaluate method call"),
+            ExprKind::MethodCall { method, args } => {
+                poison::transpose(self.eval_method_call(method, args, expr.span))?
+            }
         };
         Ok(value)
     }

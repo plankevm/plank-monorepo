@@ -1,3 +1,4 @@
+use hashbrown::HashMap;
 use plank_core::{
     DenseIndexMap, IndexVec, dense_index_map::Entry, list_of_lists::ListOfLists, newtype_index,
 };
@@ -58,6 +59,7 @@ pub(crate) struct Evaluator<'a> {
     pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
+    pub methods: HashMap<(TypeId, StrId), ValueId>,
 
     pub operator_table: OperatorTable,
 
@@ -96,6 +98,7 @@ impl<'a> Evaluator<'a> {
             lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
+            methods: HashMap::new(),
 
             operator_table: OperatorTable::new(),
 

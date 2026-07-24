@@ -712,6 +712,76 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_struct_def_duplicate_method(
+        &mut self,
+        source: SourceId,
+        method_name: StrId,
+        first: SourceByteOffset,
+        duplicate: SourceByteOffset,
+    ) {
+        let (name, first) = self.session.lookup_name_spanned(method_name, first);
+        let (_, duplicate) = self.session.lookup_name_spanned(method_name, duplicate);
+        Diagnostic::error("duplicate method name in struct definition")
+            .element(
+                Annotations::new(source)
+                    .primary(duplicate, format!("`{name}` declared more than once"))
+                    .secondary(first, "first declared here"),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_method_capture_not_supported(
+        &mut self,
+        source: SourceId,
+        method_name: StrId,
+        method_offset: SourceByteOffset,
+    ) {
+        let (name, span) = self.session.lookup_name_spanned(method_name, method_offset);
+        Diagnostic::error("method captures are not yet implemented")
+            .primary(source, span, format!("method `{name}` captures an enclosing value"))
+            .emit(self);
+    }
+
+    pub fn emit_method_on_non_struct(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        loc: BindingLoc,
+    ) {
+        let primary_label = format!(
+            "value of type `{}` is not a struct type",
+            self.types.format(self.session, values, ty)
+        );
+        let diag = Diagnostic::error("no methods on type");
+        let diag = match loc.def {
+            None => diag.primary(loc.r#use.source, loc.r#use.span, primary_label),
+            Some(def) => {
+                diag.cross_source_annotations(loc.r#use, primary_label, def, "defined here")
+            }
+        };
+        diag.emit(self);
+    }
+
+    pub fn emit_struct_unknown_method(
+        &mut self,
+        values: &ValueInterner,
+        struct_ty: TypeId,
+        call_loc: SrcLoc,
+        method_name: StrId,
+    ) {
+        Diagnostic::error("unknown method")
+            .primary(
+                call_loc.source,
+                call_loc.span,
+                format!(
+                    "`{}` has no method `{}`",
+                    self.types.format(self.session, values, struct_ty),
+                    self.session.lookup_name(method_name),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_struct_duplicate_field(
         &mut self,
         field_name: StrId,

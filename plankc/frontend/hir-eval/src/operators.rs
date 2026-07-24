@@ -164,6 +164,7 @@ impl crate::scope::Scope<'_, '_> {
                     arg_spans,
                     expr,
                     None,
+                    None,
                     capture_buf_offset,
                     values_buf_offset,
                 );
@@ -224,6 +225,7 @@ impl crate::scope::Scope<'_, '_> {
                     &args,
                     arg_spans,
                     expr,
+                    None,
                     None,
                     capture_buf_offset,
                     values_buf_offset,

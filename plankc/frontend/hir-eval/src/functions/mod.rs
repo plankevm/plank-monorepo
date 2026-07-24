@@ -62,6 +62,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         type_name: Option<StrId>,
+        self_type: Option<TypeId>,
         capture_buf_offset: usize,
         validated: ArgParamComptimenessMatch,
     ) -> (Scope<'s, 'ctx>, Call<'s>, &'s mut ComptimeQuota, &'s mut u32) {
@@ -97,6 +98,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     DefOrigin::Local(def.use_span),
                 ),
             );
+        }
+
+        match (self_type, fn_def.self_type) {
+            (Some(self_type), Some(self_type_local)) => {
+                let self_type_value = fn_scope.eval.values.intern_type(self_type);
+                fn_scope.bindings.insert_no_prev(
+                    self_type_local,
+                    Local::new(
+                        Ok(LocalState::Comptime(self_type_value)),
+                        fn_def.source_span,
+                        DefOrigin::Local(fn_def.source_span),
+                    ),
+                );
+            }
+            (None, None) => {}
+            _ => unreachable!("method calls must match method function definitions"),
         }
 
         for (&param, &arg) in params.iter().zip(args) {
@@ -223,13 +240,32 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args_id: hir::ArgsId,
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let (state, callee_use_span, callee_origin) = self.bindings[callee].poisoned()?;
+        let callee = match state {
+            LocalState::Comptime(value) => EvalValue::Comptime(value),
+            LocalState::Runtime(local) => EvalValue::Runtime {
+                expr: mir::Expr::LocalRef(local),
+                result_type: self.mir_types[local],
+            },
+        };
+        let callee_loc = self.binding_loc(callee_use_span, callee_origin);
+        self.eval_call_value(callee, &self.hir.args[args_id], call_span, None, callee_loc)
+    }
+
+    pub(crate) fn eval_call_value(
+        &mut self,
+        callee: EvalValue,
+        args: &[hir::LocalId],
+        call_span: SourceSpan,
+        self_type: Option<TypeId>,
+        callee_loc: crate::diagnostics::BindingLoc,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
             this.with_maybe_values_buf(|this, values_buf_offset: usize| {
-                let (state, callee_use_span, callee_origin) = this.bindings[callee].poisoned()?;
-                let closure_vid = match state {
-                    LocalState::Comptime(value) => value,
-                    LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_use_span));
+                let closure_vid = match callee {
+                    EvalValue::Comptime(value) => value,
+                    EvalValue::Runtime { .. } => {
+                        this.diag_ctx.emit_call_target_not_comptime(callee_loc.r#use);
                         return Err(Poisoned);
                     }
                 };
@@ -237,11 +273,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     this.eval.values.lookup(closure_vid)
                 else {
                     let ty = this.values.type_of_value(closure_vid);
-                    this.diag_ctx.emit_not_callable(
-                        this.eval.values,
-                        ty,
-                        this.binding_loc(callee_use_span, callee_origin),
-                    );
+                    this.diag_ctx.emit_not_callable(this.eval.values, ty, callee_loc);
                     return Err(Poisoned);
                 };
                 for &capture in captures {
@@ -249,7 +281,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 let type_name = this.values.get_closure_name(closure_vid);
 
-                let args = &this.hir.args[args_id];
                 let arg_spans = this
                     .eval
                     .call_arg_spans
@@ -261,6 +292,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     arg_spans,
                     call_span,
                     type_name,
+                    self_type,
                     capture_buf_offset,
                     values_buf_offset,
                 );
@@ -300,6 +332,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         type_name: Option<StrId>,
+        self_type: Option<TypeId>,
         capture_buf_offset: usize,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
@@ -308,9 +341,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let call_loc = self.loc(call_span);
 
         if params.len() != args.len() {
+            let (expected_count, actual_count) = match self_type {
+                Some(_) => (
+                    params.len().checked_sub(1).expect("method has a receiver parameter"),
+                    args.len().checked_sub(1).expect("method call has a receiver argument"),
+                ),
+                None => (params.len(), args.len()),
+            };
             self.diag_ctx.emit_arg_count_mismatch(
-                params.len(),
-                args.len(),
+                expected_count,
+                actual_count,
                 self.loc(call_span),
                 func.loc(func.param_list_span),
             );
@@ -327,6 +367,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 arg_spans,
                 call_span,
                 type_name,
+                self_type,
                 capture_buf_offset,
                 validated,
             );

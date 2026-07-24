@@ -1,4 +1,7 @@
-use crate::scope::{EvalValue, LocalState, Scope};
+use crate::{
+    diagnostics::BindingLoc,
+    scope::{EvalValue, LocalState, Scope},
+};
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
@@ -59,8 +62,115 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 fields: &this.eval.fields_buf[fields_buf_offset..],
             });
 
-            Ok(TypeId::from_struct(r#struct))
+            let ty = TypeId::from_struct(r#struct);
+            this.register_struct_methods(struct_def, ty)?;
+            Ok(ty)
         })
+    }
+
+    fn register_struct_methods(
+        &mut self,
+        struct_def: hir::StructDef,
+        struct_ty: TypeId,
+    ) -> MaybePoisoned<()> {
+        let methods = &self.hir.methods[struct_def.methods];
+        let mut poisoned = false;
+        for (i, &method) in methods.iter().enumerate() {
+            if let Some(first) = methods[..i].iter().find(|first| first.name == method.name) {
+                self.diag_ctx.emit_struct_def_duplicate_method(
+                    struct_def.source_id,
+                    method.name,
+                    first.name_offset,
+                    method.name_offset,
+                );
+                poisoned = true;
+            }
+            if !self.hir.fn_captures[method.function].is_empty() {
+                self.diag_ctx.emit_method_capture_not_supported(
+                    struct_def.source_id,
+                    method.name,
+                    method.name_offset,
+                );
+                poisoned = true;
+            }
+        }
+        if poisoned {
+            return Err(Poisoned);
+        }
+
+        for &method in methods {
+            let EvalValue::Comptime(closure) = self.eval_fn_def(method.function)? else {
+                unreachable!("function definitions always evaluate to comptime closures")
+            };
+            match self.eval.methods.get(&(struct_ty, method.name)) {
+                Some(previous) => assert_eq!(
+                    *previous, closure,
+                    "method registration changed for the same struct type"
+                ),
+                None => {
+                    self.eval.methods.insert((struct_ty, method.name), closure);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn eval_method_call(
+        &mut self,
+        method: StrId,
+        args_id: hir::ArgsId,
+        call_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, crate::scope::Diverge>> {
+        let args = &self.hir.args[args_id];
+        let (&receiver, explicit_args) = args.split_first().expect("method call has a receiver");
+        let binding = self.bindings[receiver];
+        let (state, use_span, origin) = binding.poisoned()?;
+        let receiver_ty = self.state_type(state);
+        let receiver_loc = self.binding_loc(use_span, origin);
+
+        if receiver_ty == TypeId::CBYTES {
+            let callee = self.eval_struct_member_access(receiver, method, call_span)?;
+            return self.eval_call_value(
+                callee,
+                explicit_args,
+                call_span,
+                None,
+                BindingLoc::inline(self.loc(call_span)),
+            );
+        }
+
+        let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(receiver_ty) else {
+            self.diag_ctx.emit_method_on_non_struct(self.eval.values, receiver_ty, receiver_loc);
+            return Err(Poisoned);
+        };
+
+        if r#struct.fields.iter().any(|field| field.name == method) {
+            let callee = self.eval_struct_member_access(receiver, method, call_span)?;
+            return self.eval_call_value(
+                callee,
+                explicit_args,
+                call_span,
+                None,
+                BindingLoc::inline(self.loc(call_span)),
+            );
+        }
+
+        let Some(&closure) = self.eval.methods.get(&(receiver_ty, method)) else {
+            self.diag_ctx.emit_struct_unknown_method(
+                self.eval.values,
+                receiver_ty,
+                self.loc(call_span),
+                method,
+            );
+            return Err(Poisoned);
+        };
+        self.eval_call_value(
+            EvalValue::Comptime(closure),
+            args,
+            call_span,
+            Some(receiver_ty),
+            BindingLoc::inline(self.loc(call_span)),
+        )
     }
 
     pub(crate) fn eval_struct_member_access(
