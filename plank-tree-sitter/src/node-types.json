@@ -60,6 +60,10 @@
           "named": true
         },
         {
+          "type": "self_type",
+          "named": true
+        },
+        {
           "type": "string_literal",
           "named": true
         },
@@ -144,6 +148,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -335,6 +343,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -420,6 +432,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -514,6 +530,10 @@
           },
           {
             "type": "return",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -635,6 +655,10 @@
           "named": true
         },
         {
+          "type": "self_type",
+          "named": true
+        },
+        {
           "type": "string_literal",
           "named": true
         },
@@ -729,6 +753,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -830,6 +858,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -918,6 +950,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -997,6 +1033,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -1108,6 +1148,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -1193,6 +1237,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -1382,6 +1430,10 @@
           "named": true
         },
         {
+          "type": "self_type",
+          "named": true
+        },
+        {
           "type": "string_literal",
           "named": true
         },
@@ -1469,6 +1521,10 @@
           "named": true
         },
         {
+          "type": "self_type",
+          "named": true
+        },
+        {
           "type": "string_literal",
           "named": true
         },
@@ -1493,6 +1549,128 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "method_def",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "params": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "param_def",
+            "named": true
+          }
+        ]
+      },
+      "return_type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "bin_literal",
+            "named": true
+          },
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "bool_literal",
+            "named": true
+          },
+          {
+            "type": "comptime_block",
+            "named": true
+          },
+          {
+            "type": "dec_literal",
+            "named": true
+          },
+          {
+            "type": "fn_call",
+            "named": true
+          },
+          {
+            "type": "fn_def",
+            "named": true
+          },
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "member",
+            "named": true
+          },
+          {
+            "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_def",
+            "named": true
+          },
+          {
+            "type": "struct_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1586,6 +1764,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -1671,6 +1853,10 @@
         },
         {
           "type": "paren_expr",
+          "named": true
+        },
+        {
+          "type": "self_type",
           "named": true
         },
         {
@@ -1763,6 +1949,10 @@
         },
         {
           "type": "paren_expr",
+          "named": true
+        },
+        {
+          "type": "self_type",
           "named": true
         },
         {
@@ -1925,6 +2115,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -1950,6 +2144,16 @@
           }
         ]
       }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "method_def",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -2020,6 +2224,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -2146,6 +2354,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -2231,6 +2443,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -2340,6 +2556,10 @@
             "named": true
           },
           {
+            "type": "self_type",
+            "named": true
+          },
+          {
             "type": "string_literal",
             "named": true
           },
@@ -2435,6 +2655,10 @@
           },
           {
             "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "self_type",
             "named": true
           },
           {
@@ -2693,6 +2917,10 @@
   {
     "type": "run",
     "named": false
+  },
+  {
+    "type": "self_type",
+    "named": true
   },
   {
     "type": "struct",

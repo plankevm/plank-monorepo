@@ -8,11 +8,14 @@
 (const_def
   (identifier) @type.definition
   [(struct_def) (tuple_type)])
+(method_def
+  name: (identifier) @function.method)
 
 ; Builtin types
 
 ((identifier) @type.builtin
  (#any-of? @type.builtin "void" "u256" "bool" "type" "function" "never" "cbytes"))
+(self_type) @type.builtin
 
 ; Builtin functions
 

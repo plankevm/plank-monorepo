@@ -60,6 +60,62 @@ run {
     (block)))
 
 ================================================================================
+Struct methods
+================================================================================
+
+const Pair = struct {
+    value: u256,
+    fn clone(pair: Self) Self { pair }
+    fn value_of(pair: Self) u256 { pair.value }
+};
+
+init {
+    let pair = Pair { value: 1 };
+    pair.value_of();
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (struct_def
+      (field_def
+        (identifier)
+        (identifier))
+      (method_def
+        (identifier)
+        (param_def
+          (identifier)
+          (self_type))
+        (self_type)
+        (block
+          (identifier)))
+      (method_def
+        (identifier)
+        (param_def
+          (identifier)
+          (self_type))
+        (identifier)
+        (block
+          (member
+            (identifier)
+            (identifier))))))
+  (init
+    (block
+      (let
+        (identifier)
+        (struct_lit
+          (identifier)
+          (field_init
+            (identifier)
+            (dec_literal))))
+      (fn_call
+        (member
+          (identifier)
+          (identifier))))))
+
+================================================================================
 Arithmetic
 ================================================================================
 const x = {

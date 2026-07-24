@@ -63,6 +63,7 @@ module.exports = grammar({
     comptime_block: ($) => seq("comptime", $.block),
     _expr_no_block: ($) => choice(
       $.identifier,
+      $.self_type,
       $._literal,
       $.member,
       $.fn_call,
@@ -141,6 +142,15 @@ module.exports = grammar({
       field("return_type", $._expr),
       field("body", $.block)
     ),
+    method_def: ($) => seq(
+      "fn",
+      field("name", $.identifier),
+      "(",
+      commaSeparated($.param_def, "params"),
+      ")",
+      field("return_type", $._expr),
+      field("body", $.block)
+    ),
     param_def: ($) => seq(
       optional("comptime"),
       field("name", $.identifier),
@@ -154,6 +164,7 @@ module.exports = grammar({
       field("type_index", optional($._expr)),
       "{",
       commaSeparated($.field_def, "fields"),
+      repeat($.method_def),
       "}"
     ),
     field_def: ($) => seq(field("name", $.identifier), ":", field("type", $._expr)),
@@ -193,6 +204,7 @@ module.exports = grammar({
     // Helpers
     block_comment: ($) => seq('/*', $._block_comment_content, '*/'),
     line_comment: (_) => /\/\/[^\n]*/,
+    self_type: (_) => "Self",
     identifier: (_) => /@?[a-zA-Z_][a-zA-Z0-9_]*/,
   },
 });

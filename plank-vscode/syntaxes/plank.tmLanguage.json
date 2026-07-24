@@ -5,6 +5,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#imports" },
+    { "include": "#methodDefinitions" },
     { "include": "#keywords" },
     { "include": "#anyTypes" },
     { "include": "#types" },
@@ -74,6 +75,17 @@
         }
       ]
     },
+    "methodDefinitions": {
+      "patterns": [
+        {
+          "match": "\\b(fn)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "keyword.declaration.plank" },
+            "2": { "name": "entity.name.function.plank" }
+          }
+        }
+      ]
+    },
     "anyTypes": {
       "patterns": [
         {
@@ -90,6 +102,10 @@
         {
           "name": "support.type.primitive.plank",
           "match": "\\b(u256|bool|void|type|function|never|cbytes)\\b"
+        },
+        {
+          "name": "support.type.self.plank",
+          "match": "\\bSelf\\b"
         }
       ]
     },

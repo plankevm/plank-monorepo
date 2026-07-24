@@ -51,13 +51,19 @@ assign = expr "=" expr
 
 # Definitions
 fn_def = "fn" "(" param_def_list? ")" expr block
+method_def = "fn" IDENT "(" param_def_list? ")" expr block
 param_def_list = comma_separated{"comptime"? IDENT ":" param_type}
 param_type = expr | "$" IDENT
 
-struct_def = "struct" expr? "{" comma_separated{IDENT ":" expr}? "}"
+struct_def = "struct" expr? struct_body
+struct_body = "{" comma_separated{field_def}? method_def* "}"
+field_def = IDENT ":" expr
 struct_lit = expr "{" comma_separated{IDENT ":" expr}? "}"
 tuple_type = "tuple" "{" comma_separated{expr}? "}"
 tuple_lit = "(" ")" | "(" expr "," comma_separated{expr}? ")"
+
+# `Self` is reserved for the enclosing struct type in method signatures. A method's first
+# parameter must have type `Self`; all struct fields must be declared before its methods.
 
 # Literals
 literal = bool_literal | hex_literal | bin_literal | dec_literal | bytes_literal
