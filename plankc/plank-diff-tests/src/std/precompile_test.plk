@@ -1,5 +1,6 @@
 import std::abi::abi_encode;
 import std::constructor::return_runtime;
+import std::core::addr::cast_addr;
 import std::membytes::{membytes, membytes_new, membytes_from_ptr};
 import std::precompile::{ecrecover, sha256, ripemd160, modexp};
 
@@ -37,7 +38,7 @@ const call_ecrecover = fn () never {
 
     let addr = ecrecover(hash, v, r, s);
     let out = @malloc_uninit(32);
-    let unwrapped = if addr.is_some { addr.inner.raw } else { 0 };
+    let unwrapped = if addr.is_some { cast_addr(addr.inner, u256) } else { 0 };
     @mstore32(out, unwrapped);
     @evm_return(out, 32);
 };
