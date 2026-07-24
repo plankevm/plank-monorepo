@@ -1142,6 +1142,38 @@ fn test_fn_call_trailing_comma() {
     );
 }
 
+#[test]
+fn test_method_call() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const x = a.do_something(b);
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "x"
+                " "
+                "="
+                " "
+                CallExpr
+                    MemberExpr
+                        Identifier
+                            "a"
+                        "."
+                        Identifier
+                            "do_something"
+                    "("
+                    Identifier
+                        "b"
+                    ")"
+                ";"
+        "#,
+    );
+}
+
 // =============================================================================
 // Function Definitions
 // =============================================================================
@@ -1617,8 +1649,9 @@ fn test_struct_def_zero_fields() {
                 StructDef
                     "struct"
                     " "
-                    "{"
-                    "}"
+                    StructBody
+                        "{"
+                        "}"
                 ";"
         "#,
     );
@@ -1646,17 +1679,18 @@ fn test_struct_def_one_field() {
                     Identifier
                         "I"
                     " "
-                    "{"
-                    " "
-                    FieldDef
-                        Identifier
-                            "x"
-                        ":"
+                    StructBody
+                        "{"
                         " "
-                        Identifier
-                            "T"
-                        " "
-                    "}"
+                        FieldDef
+                            Identifier
+                                "x"
+                            ":"
+                            " "
+                            Identifier
+                                "T"
+                            " "
+                        "}"
                 ";"
         "#,
     );
@@ -1689,26 +1723,27 @@ fn test_struct_def_two_fields() {
                             "34"
                         ")"
                     " "
-                    "{"
-                    " "
-                    FieldDef
-                        Identifier
-                            "x"
-                        ":"
+                    StructBody
+                        "{"
                         " "
-                        Identifier
-                            "T"
-                    ","
-                    " "
-                    FieldDef
-                        Identifier
-                            "y"
-                        ":"
+                        FieldDef
+                            Identifier
+                                "x"
+                            ":"
+                            " "
+                            Identifier
+                                "T"
+                        ","
                         " "
-                        Identifier
-                            "U"
-                        " "
-                    "}"
+                        FieldDef
+                            Identifier
+                                "y"
+                            ":"
+                            " "
+                            Identifier
+                                "U"
+                            " "
+                        "}"
                 ";"
         "#,
     );
@@ -1733,21 +1768,156 @@ fn test_struct_def_trailing_comma() {
                 StructDef
                     "struct"
                     " "
-                    "{"
-                    " "
-                    FieldDef
-                        Identifier
-                            "x"
-                        ":"
+                    StructBody
+                        "{"
                         " "
-                        Identifier
-                            "T"
-                    ","
-                    " "
-                    "}"
+                        FieldDef
+                            Identifier
+                                "x"
+                            ":"
+                            " "
+                            Identifier
+                                "T"
+                        ","
+                        " "
+                        "}"
                 ";"
         "#,
     );
+}
+
+#[test]
+fn test_struct_def_with_method() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const S = struct {
+            value: bool,
+            fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
+        };
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "S"
+                " "
+                "="
+                " "
+                StructDef
+                    "struct"
+                    " "
+                    StructBody
+                        "{"
+                        "\n    "
+                        FieldDef
+                            Identifier
+                                "value"
+                            ":"
+                            " "
+                            Identifier
+                                "bool"
+                        ","
+                        "\n    "
+                        MethodDef
+                            "fn"
+                            " "
+                            Identifier
+                                "is_eq"
+                            ParamList
+                                "("
+                                Parameter
+                                    Identifier
+                                        "lhs"
+                                    ":"
+                                    " "
+                                    SelfType
+                                        "Self"
+                                ","
+                                Parameter
+                                    " "
+                                    Identifier
+                                        "rhs"
+                                    ":"
+                                    " "
+                                    SelfType
+                                        "Self"
+                                ")"
+                            " "
+                            Identifier
+                                "bool"
+                            " "
+                            Block
+                                "{"
+                                StatementsList
+                                    " "
+                                BinaryExpr(DoubleEquals)
+                                    MemberExpr
+                                        Identifier
+                                            "lhs"
+                                        "."
+                                        Identifier
+                                            "value"
+                                    " "
+                                    Operator
+                                        "=="
+                                    " "
+                                    MemberExpr
+                                        Identifier
+                                            "rhs"
+                                        "."
+                                        Identifier
+                                            "value"
+                                    " "
+                                "}"
+                        "\n"
+                        "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_method_only_struct_has_no_index_expr() {
+    use crate::ast::{Expr, TopLevelDef};
+
+    let source = "const S = struct { fn clone(value: Self) Self { value } };";
+    let mut session = plank_session::Session::new();
+    let cst = super::parse_single_source(source, &mut session);
+    assert!(!session.has_errors());
+
+    let Some(TopLevelDef::Const(decl)) = cst.as_file().iter_defs().next() else {
+        panic!("expected const declaration");
+    };
+    let Expr::StructDef(struct_def) = decl.assign else {
+        panic!("expected struct definition");
+    };
+    assert!(struct_def.index_expr().is_none());
+}
+
+#[test]
+fn test_method_ast_exposes_self_types() {
+    use crate::ast::{Expr, TopLevelDef};
+
+    let source = "const S = struct { fn clone(value: Self) Self { value } };";
+    let mut session = plank_session::Session::new();
+    let cst = super::parse_single_source(source, &mut session);
+    assert!(!session.has_errors());
+
+    let Some(TopLevelDef::Const(decl)) = cst.as_file().iter_defs().next() else {
+        panic!("expected const declaration");
+    };
+    let Expr::StructDef(struct_def) = decl.assign else {
+        panic!("expected struct definition");
+    };
+    let method = struct_def.methods().next().expect("expected method").expect("valid method");
+    assert!(matches!(method.return_type(), Expr::SelfType { .. }));
+    let receiver = method.params().next().expect("expected receiver").expect("valid receiver");
+    assert!(matches!(
+        receiver.param_type(),
+        Ok(crate::ast::ParamType::Explicit(Expr::SelfType { .. }))
+    ));
 }
 
 // =============================================================================

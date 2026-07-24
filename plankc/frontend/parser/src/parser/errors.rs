@@ -301,6 +301,14 @@ impl<'a> Parser<'a> {
             .emit(self.session);
     }
 
+    pub(crate) fn emit_struct_field_after_method(&mut self) {
+        let (_, span) = self.tokens.peek();
+        Diagnostic::error("struct field after method")
+            .primary(self.source_id, span, "field declared after method definitions")
+            .help("declare all fields before methods")
+            .emit(self.session);
+    }
+
     pub(super) fn emit_unnecessary_braces(&mut self, brace_start: TokenIdx) {
         let start_span = self.tokens.token_src_span(brace_start);
         let end_span = self.last_src_span;

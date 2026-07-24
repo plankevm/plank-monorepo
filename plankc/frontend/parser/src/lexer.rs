@@ -205,6 +205,8 @@ pub enum Token {
     Run,
     #[token("struct")]
     Struct,
+    #[token("Self")]
+    SelfType,
     #[token("tuple")]
     Tuple,
     #[token("return")]
@@ -359,6 +361,7 @@ impl Token {
             Token::Init => "init",
             Token::Run => "run",
             Token::Struct => "struct",
+            Token::SelfType => "Self",
             Token::Tuple => "tuple",
             Token::Return => "return",
             Token::Comptime => "comptime",
@@ -443,6 +446,7 @@ impl Token {
             Token::Init => "`init`",
             Token::Run => "`run`",
             Token::Struct => "`struct`",
+            Token::SelfType => "`Self`",
             Token::Tuple => "`tuple`",
             Token::Return => "`return`",
             Token::Comptime => "`comptime`",
@@ -640,6 +644,7 @@ mod tests {
         assert_eq!(lex_all("init"), vec![(Token::Init, 0..4, "init")]);
         assert_eq!(lex_all("run"), vec![(Token::Run, 0..3, "run")]);
         assert_eq!(lex_all("struct"), vec![(Token::Struct, 0..6, "struct")]);
+        assert_eq!(lex_all("Self"), vec![(Token::SelfType, 0..4, "Self")]);
         assert_eq!(lex_all("tuple"), vec![(Token::Tuple, 0..5, "tuple")]);
         assert_eq!(lex_all("return"), vec![(Token::Return, 0..6, "return")]);
         assert_eq!(lex_all("comptime"), vec![(Token::Comptime, 0..8, "comptime")]);
@@ -666,8 +671,8 @@ mod tests {
 
     #[test]
     fn test_identifier_not_keyword() {
-        let results = lex_all("ifx elsewhere fns letter mutable constant");
-        assert_eq!(results.len(), 11);
+        let results = lex_all("ifx elsewhere fns letter mutable constant Selfish");
+        assert_eq!(results.len(), 13);
         assert_eq!(results[0], (Token::Identifier, 0..3, "ifx"));
         assert_eq!(results[1], (Token::Whitespace, 3..4, " "));
         assert_eq!(results[2], (Token::Identifier, 4..13, "elsewhere"));
@@ -679,6 +684,8 @@ mod tests {
         assert_eq!(results[8], (Token::Identifier, 25..32, "mutable"));
         assert_eq!(results[9], (Token::Whitespace, 32..33, " "));
         assert_eq!(results[10], (Token::Identifier, 33..41, "constant"));
+        assert_eq!(results[11], (Token::Whitespace, 41..42, " "));
+        assert_eq!(results[12], (Token::Identifier, 42..49, "Selfish"));
     }
 
     #[test]

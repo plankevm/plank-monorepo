@@ -324,7 +324,7 @@ fn test_missing_semicolon() {
              --> test.plk:2:1
               |
             2 | init {
-              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
         "#],
     );
 }
@@ -615,7 +615,7 @@ fn test_const_decl_missing_expr() {
              --> test.plk:2:1
               |
             2 | init { }
-              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              | ^^^^ unexpected `init`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
         "#],
     );
 }
@@ -641,7 +641,7 @@ fn test_name_path_dot_not_followed_by_ident() {
 }
 
 #[test]
-fn test_field_list_garbage_silent_exit() {
+fn test_field_list_garbage_recovery() {
     assert_parser_errors(
         r#"
             const S = struct { x: u32, 123 y: u32 };
@@ -651,7 +651,7 @@ fn test_field_list_garbage_silent_exit() {
              --> test.plk:1:28
               |
             1 | const S = struct { x: u32, 123 y: u32 };
-              |                            ^^^ unexpected decimal literal, expected one of identifier, `}`
+              |                            ^^^ unexpected decimal literal, expected one of `fn`, identifier, `}`
         "#],
     );
 }
@@ -667,7 +667,57 @@ fn test_field_list_multiple_garbage_tokens() {
              --> test.plk:1:28
               |
             1 | const S = struct { x: u32, 123 456 y: u32 };
-              |                            ^^^ unexpected decimal literal, expected one of identifier, `}`
+              |                            ^^^ unexpected decimal literal, expected one of `fn`, identifier, `}`
+        "#],
+    );
+}
+
+#[test]
+fn test_method_missing_name_recovers_signature() {
+    assert_parser_errors(
+        r#"
+            const S = struct { fn(value: Self) Self { value } };
+        "#,
+        &[r#"
+            error: unexpected `(`
+             --> test.plk:1:22
+              |
+            1 | const S = struct { fn(value: Self) Self { value } };
+              |                      ^ unexpected `(`, expected one of identifier, builtin name
+        "#],
+    );
+}
+
+#[test]
+fn test_struct_field_after_method_is_rejected() {
+    assert_parser_errors(
+        r#"
+            const S = struct { fn f(value: Self) Self { value } x: u256 };
+        "#,
+        &[r#"
+            error: struct field after method
+             --> test.plk:1:53
+              |
+            1 | const S = struct { fn f(value: Self) Self { value } x: u256 };
+              |                                                     ^ field declared after method definitions
+              |
+              = help: declare all fields before methods
+        "#],
+    );
+}
+
+#[test]
+fn test_struct_field_requires_comma_before_method() {
+    assert_parser_errors(
+        r#"
+            const S = struct { value: bool fn f(value: Self) Self { value } };
+        "#,
+        &[r#"
+            error: missing `,`
+             --> test.plk:1:31
+              |
+            1 | const S = struct { value: bool fn f(value: Self) Self { value } };
+              |                               ^ missing `,`
         "#],
     );
 }
@@ -683,7 +733,7 @@ fn test_arg_list_empty_after_comma() {
              --> test.plk:1:14
               |
             1 | run { foo(a, , b); }
-              |              ^ unexpected `,`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `)`
+              |              ^ unexpected `,`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `)`
         "#],
     );
 }
@@ -715,7 +765,7 @@ fn test_any_type_not_allowed_in_let_type() {
              --> test.plk:1:14
               |
             1 | run { let x: $T = 1; }
-              |              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
               |
               = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
         "#],
@@ -733,7 +783,7 @@ fn test_any_type_not_allowed_in_const_type() {
              --> test.plk:1:10
               |
             1 | const X: $T = 1;
-              |          ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |          ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
               |
               = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
         "#],
@@ -751,7 +801,7 @@ fn test_any_type_not_allowed_nested_in_param_type() {
              --> test.plk:1:30
               |
             1 | const f = fn(value: Array(4, $T)) void {};
-              |                              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `)`
+              |                              ^ unexpected `$`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`, `)`
               |
               = help: `$T` syntax is only allowed directly as a function parameter type, e.g. `fn(value: $T)`
         "#],
@@ -770,6 +820,22 @@ fn test_member_access_missing_ident() {
               |
             1 | run { foo.; }
               |           ^ unexpected `;`, expected identifier
+        "#],
+    );
+}
+
+#[test]
+fn test_method_call_missing_name_preserves_call() {
+    assert_parser_errors(
+        r#"
+            run { value.(); }
+        "#,
+        &[r#"
+            error: unexpected `(`
+             --> test.plk:1:13
+              |
+            1 | run { value.(); }
+              |             ^ unexpected `(`, expected identifier
         "#],
     );
 }
@@ -817,7 +883,7 @@ fn test_binary_expr_missing_rhs() {
              --> test.plk:1:15
               |
             1 | run { x = 1 + ; }
-              |               ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |               ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
         "#],
     );
 }
@@ -833,7 +899,7 @@ fn test_unary_expr_missing_operand() {
              --> test.plk:1:12
               |
             1 | run { x = -; }
-              |            ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
+              |            ^ unexpected `;`, expected one of `-`, `!`, `~`, `true`, `false`, `Self`, identifier, builtin name, `(`, `comptime`, `fn`, `struct`, `tuple`, `{`, `if`
         "#],
     );
 }

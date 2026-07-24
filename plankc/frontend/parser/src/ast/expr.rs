@@ -21,6 +21,7 @@ pub enum Expr<'cst> {
     BoolLiteral { value: bool, span: TokenSpan },
     NumLiteral { id: NumLitId, span: TokenSpan },
     StringLiteral { value: BytesId, span: TokenSpan },
+    SelfType { span: TokenSpan },
     Ident { name: StrId, span: TokenSpan },
     BuiltinName { name: StrId, span: TokenSpan },
     Error { span: TokenSpan },
@@ -58,7 +59,11 @@ impl<'cst> Expr<'cst> {
                     Err(_) => Expr::Error { span },
                     Ok(None) => unreachable!("invariant: kind already matched MemberExpr"),
                 },
-                NodeKind::StructDef => Expr::StructDef(StructDef { view }),
+                NodeKind::StructDef => match StructDef::try_new(view) {
+                    Ok(Some(struct_def)) => Expr::StructDef(struct_def),
+                    Err(_) => Expr::Error { span },
+                    Ok(None) => unreachable!("invariant: kind already matched StructDef"),
+                },
                 NodeKind::StructLit => Expr::StructLit(StructLit { view }),
                 NodeKind::TupleType => Expr::TupleType(TupleType { view }),
                 NodeKind::TupleLit => Expr::TupleLit(TupleLit { view }),
@@ -77,6 +82,7 @@ impl<'cst> Expr<'cst> {
                 NodeKind::BoolLiteral(value) => Expr::BoolLiteral { value, span },
                 NodeKind::NumLiteral { id } => Expr::NumLiteral { id, span },
                 NodeKind::StringLiteral { value } => Expr::StringLiteral { value, span },
+                NodeKind::SelfType => Expr::SelfType { span },
                 NodeKind::Identifier { ident } => Expr::Ident { name: ident, span },
                 NodeKind::BuiltinName { ident } => Expr::BuiltinName { name: ident, span },
                 NodeKind::Error => Expr::Error { span },
@@ -105,6 +111,7 @@ impl<'cst> Expr<'cst> {
             Expr::BoolLiteral { span, .. }
             | Expr::NumLiteral { span, .. }
             | Expr::StringLiteral { span, .. }
+            | Expr::SelfType { span }
             | Expr::Ident { span, .. }
             | Expr::BuiltinName { span, .. }
             | Expr::Error { span, .. } => *span,
@@ -204,19 +211,36 @@ impl<'cst> MemberExpr<'cst> {
 /// `struct TypeIndex { field1: Type1, ... }`
 #[derive(Debug, Clone, Copy)]
 pub struct StructDef<'cst> {
+    index_node: Option<NodeView<'cst>>,
+    body_node: NodeView<'cst>,
     view: NodeView<'cst>,
 }
 
 impl<'cst> StructDef<'cst> {
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
+        if view.kind() != NodeKind::StructDef {
+            return Ok(None);
+        }
+        let first_child = view.child(0).ok_or(view.span())?;
+        let (index_node, body_node) = if first_child.kind() == NodeKind::StructBody {
+            (None, first_child)
+        } else {
+            let body_node = view.child(1).filter(|child| child.kind() == NodeKind::StructBody);
+            (Some(first_child), body_node.ok_or(view.span())?)
+        };
+        Ok(Some(Self { index_node, body_node, view }))
+    }
+
     pub fn index_expr(&self) -> Option<Expr<'cst>> {
-        self.view.children().next().and_then(|child| match child.kind() {
-            NodeKind::FieldDef => None,
-            _ => Expr::new(child),
-        })
+        self.index_node.map(Expr::new_unwrap)
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Result<FieldDef<'cst>, TokenSpan>> {
-        self.view.children().filter_map(|child| FieldDef::try_new(child).transpose())
+        self.body_node.children().filter_map(|child| FieldDef::try_new(child).transpose())
+    }
+
+    pub fn methods(&self) -> impl Iterator<Item = Result<MethodDef<'cst>, TokenSpan>> {
+        self.body_node.children().filter_map(|child| MethodDef::try_new(child).transpose())
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -434,6 +458,53 @@ impl<'cst> FnDef<'cst> {
 
     pub fn body(&self) -> BlockExpr<'cst> {
         BlockExpr::new(self.body_node)
+    }
+
+    pub fn node(&self) -> NodeView<'cst> {
+        self.view
+    }
+}
+
+/// Method definition within a struct: `fn name(params) return_type { body }`
+#[derive(Debug, Clone, Copy)]
+pub struct MethodDef<'cst> {
+    pub name: StrId,
+    pub name_span: TokenSpan,
+    param_list: NodeView<'cst>,
+    body_node: NodeView<'cst>,
+    view: NodeView<'cst>,
+}
+
+impl<'cst> MethodDef<'cst> {
+    fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
+        if view.kind() != NodeKind::MethodDef {
+            return Ok(None);
+        }
+        let name_node = view.child(0).ok_or(view.span())?;
+        let name = name_node.ident().ok_or(view.span())?;
+        let param_list = view.child(1).ok_or(view.span())?;
+        let body_node = view.child(3).ok_or(view.span())?;
+        Ok(Some(Self { name, name_span: name_node.span(), param_list, body_node, view }))
+    }
+
+    pub fn param_list_span(&self) -> TokenSpan {
+        self.param_list.span()
+    }
+
+    pub fn params(&self) -> impl Iterator<Item = Result<Param<'cst>, TokenSpan>> {
+        self.param_list.children().filter_map(|child| Param::try_new(child).transpose())
+    }
+
+    pub fn return_type(&self) -> Expr<'cst> {
+        self.view.child(2).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
+    }
+
+    pub fn body(&self) -> BlockExpr<'cst> {
+        BlockExpr::new(self.body_node)
+    }
+
+    pub fn name_span(&self) -> TokenSpan {
+        self.name_span
     }
 
     pub fn node(&self) -> NodeView<'cst> {

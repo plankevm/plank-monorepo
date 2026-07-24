@@ -393,6 +393,7 @@ impl BlockLowerer<'_> {
                 let len = u32::try_from(len).expect("source len checked to fit in u32");
                 ExprKind::Value(Ok(self.values.intern_bytes(value, 0, len)))
             }
+            ast::Expr::SelfType { .. } => todo!("lower `Self` type"),
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
                 ExprKind::Member { object, member: member_expr.member }

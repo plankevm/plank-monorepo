@@ -91,6 +91,7 @@ pub enum NodeKind {
     CallExpr,
     MemberExpr,
     StructDef,
+    StructBody,
     StructLit,
     TupleType,
     TupleLit,
@@ -104,11 +105,13 @@ pub enum NodeKind {
     BoolLiteral(bool),
     NumLiteral { id: NumLitId },
     StringLiteral { value: BytesId },
+    SelfType,
     Identifier { ident: StrId },
     BuiltinName { ident: StrId },
 
     // Function Definition
     FnDef,
+    MethodDef,
     ParamList,
     Parameter,
     ComptimeParameter,
@@ -154,6 +157,7 @@ impl std::fmt::Debug for NodeKind {
             Self::CallExpr => write!(f, "CallExpr"),
             Self::MemberExpr => write!(f, "MemberExpr"),
             Self::StructDef => write!(f, "StructDef"),
+            Self::StructBody => write!(f, "StructBody"),
             Self::StructLit => write!(f, "StructLit"),
             Self::TupleType => write!(f, "TupleType"),
             Self::TupleLit => write!(f, "TupleLit"),
@@ -163,9 +167,11 @@ impl std::fmt::Debug for NodeKind {
             Self::BoolLiteral(value) => write!(f, "BoolLiteral({value})"),
             Self::NumLiteral { .. } => write!(f, "NumLiteral"),
             Self::StringLiteral { .. } => write!(f, "StringLiteral"),
+            Self::SelfType => write!(f, "SelfType"),
             Self::Identifier { .. } => write!(f, "Identifier"),
             Self::BuiltinName { .. } => write!(f, "BuiltinName"),
             Self::FnDef => write!(f, "FnDef"),
+            Self::MethodDef => write!(f, "MethodDef"),
             Self::ParamList => write!(f, "ParamList"),
             Self::Parameter => write!(f, "Parameter"),
             Self::ComptimeParameter => write!(f, "ComptimeParameter"),
@@ -197,6 +203,7 @@ impl NodeKind {
             | Self::BoolLiteral(_)
             | Self::NumLiteral { .. }
             | Self::StringLiteral { .. }
+            | Self::SelfType
             | Self::Identifier { .. }
             | Self::BuiltinName { .. } => Some(true),
             _ => None,
