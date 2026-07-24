@@ -1,6 +1,7 @@
 use plank_session::{Diagnostic, Session};
 use plank_source::{
-    FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project, source_fs::InMemoryFs,
+    CORE_OPS_PATH, FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project,
+    source_fs::InMemoryFs,
 };
 use std::path::{Path, PathBuf};
 
@@ -115,7 +116,7 @@ impl TestProject {
 
         walk(&mut self.fs, dir, &prefix);
         self.modules.push(("std".to_string(), prefix.clone()));
-        self.core_ops_path = Some(prefix.join("core_ops.plk"));
+        self.core_ops_path = Some(prefix.join(CORE_OPS_PATH));
         self
     }
 
