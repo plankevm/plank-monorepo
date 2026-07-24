@@ -1,5 +1,8 @@
 # Plank Monorepo
 
+> [!WARNING]
+> The Plank language and compiler are still in-development and **are not yet ready for production use**.
+
 Welcome To Plank's home!
 
 To install the compiler run:
