@@ -168,6 +168,9 @@ impl Session {
 
 impl DiagEmitter for Session {
     fn emit_diagnostic(&mut self, diagnostic: Diagnostic) {
+        if self.diagnostics.contains(&diagnostic) {
+            return;
+        }
         if diagnostic.level == Level::Error {
             self.total_errors += 1;
         }
@@ -178,5 +181,24 @@ impl DiagEmitter for Session {
 impl Default for Session {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identical_diagnostics_are_emitted_once() {
+        let mut session = Session::new();
+        let duplicate = Diagnostic::error("unknown field").note("same details");
+        let distinct = Diagnostic::error("unknown field").note("different details");
+
+        session.emit_diagnostic(duplicate.clone());
+        session.emit_diagnostic(distinct.clone());
+        session.emit_diagnostic(duplicate.clone());
+
+        assert_eq!(session.diagnostics(), [duplicate, distinct]);
+        assert_eq!(session.total_errors(), 2);
     }
 }

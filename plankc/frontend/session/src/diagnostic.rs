@@ -28,20 +28,20 @@ impl From<Level> for snip::Level<'static> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Annotation {
     pub span: SourceSpan,
     pub label: Option<String>,
     pub kind: AnnotationKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Patch {
     pub span: SourceSpan,
     pub replacement: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Element {
     /// `level: None` suppresses the level name prefix in the rendered output.
     Message {
@@ -56,13 +56,13 @@ pub enum Element {
     Padding,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Patches {
     source: SourceId,
     patches: Vec<Patch>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Annotations {
     source: SourceId,
     annotations: Vec<Annotation>,
@@ -145,7 +145,7 @@ impl From<Padding> for Element {
 #[derive(Debug, Clone)]
 pub struct Padding;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Claim {
     pub level: Level,
     pub title: String,
@@ -214,7 +214,7 @@ pub trait DiagEmitter {
     fn emit_diagnostic(&mut self, diagnostic: Diagnostic);
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub level: Level,
     pub title: String,
