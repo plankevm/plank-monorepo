@@ -123,6 +123,36 @@ impl BlockLowerer<'_> {
         diagnostic.help("choose a different parameter name").emit(*self.session.borrow_mut());
     }
 
+    pub(crate) fn error_self_type_outside_method(&self, span: TokenSpan) {
+        Diagnostic::error("`Self` type outside method")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(span),
+                "`Self` is only available in methods",
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_method_missing_self_receiver(&self, method_name_span: TokenSpan) {
+        Diagnostic::error("method missing `Self` receiver")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(method_name_span),
+                "method must declare a first parameter typed `Self`",
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_method_receiver_must_be_self(&self, receiver_span: TokenSpan) {
+        Diagnostic::error("invalid method receiver")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(receiver_span),
+                "first parameter must be typed `Self`",
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
     pub(crate) fn error_unknown_builtin(&self, name: StrId, span: TokenSpan) {
         let source_span = self.lexed.tokens_src_span(span);
         let name_str = self.lookup_name(name);

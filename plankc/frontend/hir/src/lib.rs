@@ -19,6 +19,7 @@ newtype_index! {
     pub struct StructDefId;
     pub struct ArgsId;
     pub struct FieldsId;
+    pub struct MethodsId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +37,10 @@ pub enum ExprKind {
 
     Call {
         callee: LocalId,
+        args: ArgsId,
+    },
+    MethodCall {
+        method: StrId,
         args: ArgsId,
     },
     BuiltinCall {
@@ -182,6 +187,7 @@ pub struct FnDef {
     pub body: BlockId,
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
+    pub self_type: Option<LocalId>,
     pub source: SourceId,
     pub source_span: SourceSpan,
     pub param_list_span: SourceSpan,
@@ -199,6 +205,14 @@ pub struct StructDef {
     pub source_span: SourceSpan,
     pub type_index: LocalId,
     pub fields: FieldsId,
+    pub methods: MethodsId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MethodInfo {
+    pub name: StrId,
+    pub name_offset: SourceByteOffset,
+    pub function: FnDefId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -234,6 +248,7 @@ pub struct Hir {
 
     pub args: ListOfLists<ArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
+    pub methods: ListOfLists<MethodsId, MethodInfo>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
 
     pub fns: IndexVec<FnDefId, FnDef>,

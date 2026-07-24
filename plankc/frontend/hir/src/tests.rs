@@ -379,7 +379,7 @@ fn test_fn_struct_return() {
         }
 
         ==== Structs ====
-        @struct0[index: %1] { a: %2, b: %3 }
+        @struct0[index: %1] { fields: { a: %2, b: %3 } }
 
         ==== Init ====
         %0 = $1
@@ -387,6 +387,62 @@ fn test_fn_struct_return() {
         %2 = 4
         %3 = call %0(%1, %2)
         eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_struct_method_lowering() {
+    assert_lowers_to(
+        r#"
+        const Pair = struct {
+            value: bool,
+
+            fn is_eq(lhs: Self, rhs: Self) bool {
+                lhs.value == rhs.value
+            }
+        };
+
+        init {
+            let pair: Pair = Pair { value: true };
+            pair.is_eq(pair);
+        }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("Pair") result=LocalId(0) {
+            %1 = type:tuple {}
+            %2 = type:bool
+            %0 = struct#0 main.plk:1:14
+        }
+
+        ==== Functions ====
+        @fn0(Self: %0, %2: %1, %4: %3) -> %5 {
+            preamble:
+                %1 = %0
+                param#0 %2 : %1
+                %3 = %0
+                param#1 %4 : %3
+                %5 = type:bool
+            body:
+                %6 = %2
+                %7 = %6.value
+                %8 = %4
+                %9 = %8.value
+                ret (==) %7 %9
+        }
+
+        ==== Structs ====
+        @struct0[index: %1] { fields: { value: %2 } methods: { is_eq: @fn0 } }
+
+        ==== Init ====
+        %0 = $0
+        %1 = $0
+        %2 = true
+        %3 : %0 = %1 { value: %2 }
+        %4 = %3
+        %5 = %3
+        eval method_call is_eq(%4, %5)
         "#,
     );
 }
@@ -451,6 +507,66 @@ fn test_unresolved_identifier_diagnostic() {
           |
         1 | init { x; }
           |        ^ not found in this scope
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_self_type_outside_method_diagnostic() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(value: Self) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: `Self` type outside method
+         --> main.plk:1:21
+          |
+        1 | const f = fn(value: Self) void {};
+          |                     ^^^^ `Self` is only available in methods
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_method_missing_self_receiver_diagnostic() {
+    let rendered = render_diagnostics(
+        r#"
+        const S = struct { fn f() void {} };
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: method missing `Self` receiver
+         --> main.plk:1:23
+          |
+        1 | const S = struct { fn f() void {} };
+          |                       ^ method must declare a first parameter typed `Self`
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_method_receiver_must_be_self_diagnostic() {
+    let rendered = render_diagnostics(
+        r#"
+        const S = struct { fn f(value: u256) void {} };
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: invalid method receiver
+         --> main.plk:1:25
+          |
+        1 | const S = struct { fn f(value: u256) void {} };
+          |                         ^^^^^^^^^^^ first parameter must be typed `Self`
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
