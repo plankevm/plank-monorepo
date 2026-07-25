@@ -8,18 +8,18 @@ const TRANSFER_FROM_SELECTOR = compute_selector("transferFrom(address,address,ui
 const APPROVE_SELECTOR = compute_selector("approve(address,uint256)");
 
 const safe_transfer = fn (token: addr, to: addr, amount: u256) bool {
-    let calldata = @malloc_uninit(32 * 3);
-    @mstore32(calldata +% (0 * 32), TRANSFER_SELECTOR);
-    @mstore32(calldata +% (1 * 32), cast_addr(to, u256));
-    @mstore32(calldata +% (2 * 32), amount);
+    let buf = @malloc_uninit(32 * 3);
+    @mstore32(buf +% (0 * 32), TRANSFER_SELECTOR);
+    @mstore32(buf +% (1 * 32), cast_addr(to, u256));
+    @mstore32(buf +% (2 * 32), amount);
     let value = 0;
     let success = @evm_call(
         @evm_gas(),
         cast_addr(token, u256),
         value,
-        calldata +% (32 - 4),
+        buf +% (32 - 4),
         4 + 2 * 32,
-        calldata,
+        buf,
         32
     );
 
@@ -28,26 +28,26 @@ const safe_transfer = fn (token: addr, to: addr, amount: u256) bool {
     }
 
     success & (
-        (@mload32(calldata) == 1)
+        (@mload32(buf) == 1)
             or ((@evm_extcodesize(cast_addr(token, u256)) != 0) & (@evm_returndatasize() == 0))
     )
 };
 
 
 const safe_transfer_from = fn (token: addr, from: addr, to: addr, amount: u256) bool {
-    let calldata = @malloc_uninit(32 * 4);
-    @mstore32(calldata +% (0 * 32), TRANSFER_FROM_SELECTOR);
-    @mstore32(calldata +% (1 * 32), cast_addr(from, u256));
-    @mstore32(calldata +% (2 * 32), cast_addr(to, u256));
-    @mstore32(calldata +% (3 * 32), amount);
+    let buf = @malloc_uninit(32 * 4);
+    @mstore32(buf +% (0 * 32), TRANSFER_FROM_SELECTOR);
+    @mstore32(buf +% (1 * 32), cast_addr(from, u256));
+    @mstore32(buf +% (2 * 32), cast_addr(to, u256));
+    @mstore32(buf +% (3 * 32), amount);
     let value = 0;
     let success = @evm_call(
         @evm_gas(),
         cast_addr(token, u256),
         value,
-        calldata +% (32 - 4),
+        buf +% (32 - 4),
         4 + 3 * 32,
-        calldata,
+        buf,
         32
     );
 
@@ -56,24 +56,24 @@ const safe_transfer_from = fn (token: addr, from: addr, to: addr, amount: u256) 
     }
 
     success & (
-        (@mload32(calldata) == 1)
+        (@mload32(buf) == 1)
             or ((@evm_extcodesize(cast_addr(token, u256)) != 0) & (@evm_returndatasize() == 0))
     )
 };
 
 const safe_approve = fn (token: addr, spender: addr, amount: u256) bool {
-    let calldata = @malloc_uninit(32 * 3);
-    @mstore32(calldata +% (0 * 32), APPROVE_SELECTOR);
-    @mstore32(calldata +% (1 * 32), cast_addr(spender, u256));
-    @mstore32(calldata +% (2 * 32), amount);
+    let buf = @malloc_uninit(32 * 3);
+    @mstore32(buf +% (0 * 32), APPROVE_SELECTOR);
+    @mstore32(buf +% (1 * 32), cast_addr(spender, u256));
+    @mstore32(buf +% (2 * 32), amount);
     let value = 0;
     let success = @evm_call(
         @evm_gas(),
         cast_addr(token, u256),
         value,
-        calldata +% (32 - 4),
+        buf +% (32 - 4),
         4 + 2 * 32,
-        calldata,
+        buf,
         32
     );
 
@@ -82,7 +82,23 @@ const safe_approve = fn (token: addr, spender: addr, amount: u256) bool {
     }
 
     success & (
-        (@mload32(calldata) == 1)
+        (@mload32(buf) == 1)
             or ((@evm_extcodesize(cast_addr(token, u256)) != 0) & (@evm_returndatasize() == 0))
     )
+};
+
+const decimals = fn (token: addr) u8 {
+    let buf = @malloc_uninit(32);
+    @mstore32(buf, comptime { compute_selector("decimals()") });
+    let success = @evm_staticcall(
+        @evm_gas(),
+        cast_addr(token, u256),
+        buf +% (32 - 4),
+        4,
+        buf,
+        32
+    );
+    let decimals = try_cast_uint(@mload32(buf), u8);
+    require(success & (@evm_returndatasize() >= 32) & decimals.is_some);
+    decimals.inner
 };

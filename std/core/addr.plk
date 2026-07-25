@@ -42,11 +42,11 @@ const addr_this = fn () addr {
 };
 
 const msg_sender = fn () addr {
-    addr { as_u160: unsafe_from_u256(u160, @evm_caller()) }
+    unsafe_addr_from_u256(@evm_caller())
 };
 
 const tx_origin = fn () addr {
-    addr { as_u160: unsafe_from_u256(u160, @evm_origin()) }
+    unsafe_addr_from_u256(@evm_origin())
 };
 
 const raw_create = fn (value: u256, code: bytes(memory)) Option(addr) {
