@@ -1,4 +1,4 @@
-import std::type::sizeof;
+import std::types::sizeof;
 import std::error::comptime_assert;
 
 const encode_cbytes = fn (comptime value: $T) cbytes {

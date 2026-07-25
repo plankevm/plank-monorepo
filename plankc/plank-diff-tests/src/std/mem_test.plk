@@ -1,6 +1,6 @@
 import std::error::require;
 import std::mem::{unsafe_mem_read, unsafe_mem_write};
-import std::type::sizeof;
+import std::types::sizeof;
 
 const Inner = struct {
     marker: void,

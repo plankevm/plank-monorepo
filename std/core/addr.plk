@@ -37,6 +37,10 @@ const cast_addr = fn (this: addr, comptime Dst: type) Dst {
     cast_uint(this.as_u160, Dst)
 };
 
+const addr_this = fn () addr {
+    unsafe_addr_from_u256(@evm_address_this())
+};
+
 const msg_sender = fn () addr {
     addr { as_u160: unsafe_from_u256(u160, @evm_caller()) }
 };

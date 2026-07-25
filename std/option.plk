@@ -21,20 +21,27 @@ const is_none = fn (comptime T: type, opt: Option(T)) bool {
     !opt.is_some
 };
 
-const unwrap = fn (opt: $T) {
-    let err_msg = "unwrap: `opt` not `Option(_)`";
+const option_infer_inner = fn (comptime T: type) Option(type) {
     if !@is_struct(T) {
-        @compile_error(err_msg);
+        return None(type);
     }
     let i = @field_index(T, "inner");
     if i >= @field_count(T) {
-        @compile_error(err_msg);
+        return None(type);
     }
     let inner_type = @field_type(T, i);
     if T != Option(inner_type) {
-        @compile_error(err_msg);
+        return None(type);
     }
-    inner_type
+    Some(inner_type)
+};
+
+const unwrap = fn (opt: $T) {
+    let inner_type = option_infer_inner(T);
+    if !inner_type.is_some {
+        @compile_error("unwrap: `opt` not `Option(_)`");
+    }
+    inner_type.inner
 } {
     if !opt.is_some {
         if @in_comptime() {

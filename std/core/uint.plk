@@ -1,4 +1,5 @@
-import std::option::{Option, None, Some};
+import std::option::{Option, None, Some, unwrap};
+import std::types::type_of;
 
 const UInt = fn (comptime Size: u256) type {
     if Size == 256 {
@@ -42,7 +43,6 @@ const u232 = UInt(232);
 const u240 = UInt(240);
 const u248 = UInt(248);
 
-const _type_of = fn (comptime _x: $T) type { T };
 
 const is_uint = fn (comptime T: type) bool {
     if T == u256 {
@@ -54,7 +54,7 @@ const is_uint = fn (comptime T: type) bool {
     }
 
     let supposed_size = @type_index(T);
-    _type_of(supposed_size) == u256 and UInt(supposed_size) == T
+    type_of(supposed_size) == u256 and UInt(supposed_size) == T
 };
 
 const bit_size = fn (comptime T: type) u256 {
@@ -116,4 +116,19 @@ const try_cast_uint = fn (src: $T, comptime Dst: type) Option(Dst) {
     }
 
     Some(unsafe_from_u256(Dst, raw_repr))
+};
+
+const max_uint = fn (comptime T: type) T {
+    if comptime { !is_uint(T) } {
+        @compile_error("max_uint: `T` not `uN` type");
+    }
+
+    if T == u256 {
+        return ~0;
+    }
+
+    comptime {
+        let max_as_u256 = (1 << bit_size(T)) - 1;
+        unwrap(try_cast_uint(max_as_u256, T))
+    }
 };

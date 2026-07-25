@@ -1,6 +1,6 @@
 import std::mem::unsafe_mem_write;
 import std::option::{Option, Some, None};
-import std::type::sizeof;
+import std::types::sizeof;
 import std::regions::*;
 
 const membytes = bytes(memory);

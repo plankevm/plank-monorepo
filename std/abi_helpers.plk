@@ -1,87 +1,101 @@
-import std::membytes::{membytes, membytes_from_ptr, membytes_read_u256};
+import std::core::uint::*;
+import std::core::addr::*;
+import std::fixedbytes::bytes32;
+import std::membytes::{membytes_from_ptr, membytes_read_u256};
+import std::regions::*;
 import std::option::unwrap;
 import std::math::ceil32;
-import std::utils::fold;
 
 const is_abi_dynamic = fn (comptime T: type) bool {
-    if T == void {
-        false
-    } else if T == u256 {
-        false
-    } else if T == bool {
-        false
-    } else if T == membytes {
-        true
-    } else if @is_struct(T) {
-        fold(
-            @field_count(T),
-            fn (comptime i: u256, has_dynamic: bool) bool {
-                if has_dynamic {
-                        true
-                    } else {
-                        is_abi_dynamic(@field_type(T, i))
-                    }
-                },
-            false
-        )
-    } else {
-        @compile_error("unsupported type for ABI encoding")
+    if comptime { is_uint(T) } {
+        return false;
     }
+    if T == bool or T == addr or T == bytes32 {
+        return false;
+    }
+    if is_bytes(T) {
+        return true;
+    }
+    if @is_struct(T) or @is_tuple(T) {
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            if comptime { is_abi_dynamic(@field_type(T, i)) } {
+                return true;
+            }
+            i = i + 1;
+        }
+
+        return false;
+    }
+
+    @compile_error("is_abi_dynamic: unsupported type for ABI encoding")
 };
 
 const abi_head_size = fn (comptime T: type) u256 {
-    if T == void {
-        0
-    } else if T == u256 {
-        32
-    } else if T == bool {
-        32
-    } else if T == membytes {
-        32
-    } else if @is_struct(T) {
-        fold(
-            @field_count(T),
-            fn (comptime i: u256, total_head_size: u256) u256 {
-                if is_abi_dynamic(@field_type(T, i)) {
-                    total_head_size + 32
-                } else {
-                    total_head_size + abi_head_size(@field_type(T, i))
-                }
-            },
-            0
-        )
-    } else {
-        @compile_error("unsupported type for ABI encoding")
+    if comptime { is_uint(T) } {
+        return 32;
     }
+
+    if T == bool or T == addr or T == bytes32 {
+        return 32;
+    }
+
+    if is_bytes(T) {
+        return 32;
+    }
+
+    if @is_struct(T) or @is_tuple(T) {
+        comptime let mut total_head_size = 0;
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            let field_size = comptime {
+                if is_abi_dynamic(field_type) { 32 } else { abi_head_size(field_type) }
+            };
+            total_head_size = total_head_size + field_size;
+            i = i + 1;
+        }
+
+        return total_head_size;
+    }
+
+    @compile_error("abi_head_size: unsupported type for ABI encoding")
 };
 
 // ABI-encodes `value` of type `T` into `buf` starting at `offset`.
 // Returns the number of bytes written.
 // Caller must ensure `buf` is large enough for the full encoding (use `abi_encoded_size`).
-const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
-    if T == void {
-        0
-    } else if T == u256 {
-        @mstore32(buf +% offset, value);
-        32
-    } else if T == bool {
-        @mstore32(buf +% offset, if value { 1 } else { 0 });
-        32
-    } else if T == membytes {
-        @mstore32(buf +% offset, value.length);
-        @mcopy(buf +% offset +% 32, value.ptr, value.length);
+const unsafe_abi_encode_to = fn (ptr: u256, offset: u256, value: $T) u256 {
+    if comptime { is_uint(T) } {
+        @mstore32(ptr +% offset, cast_uint(value, u256));
+        return 32;
+    }
+    if T == bool {
+        @mstore32(ptr +% offset, if value { 1 } else { 0 });
+        return 32;
+    }
+    if T == addr {
+        @mstore32(ptr +% offset, cast_addr(value, u256));
+        return 32;
+    }
+    if T == bytes(memory) {
+        @mstore32(ptr +% offset, value.length);
+        @mcopy(ptr +% offset +% 32, value.ptr, value.length);
         // padding after value.length is left uninitialized; consumers only read length bytes
-        32 + ceil32(value.length)
-    } else if @is_struct(T) {
+        return 32 + ceil32(value.length);
+    }
+    if @is_struct(T) or @is_tuple(T) {
         let mut head_offset = offset;
         let mut tail_offset = offset + abi_head_size(T);
         comptime let mut i = 0;
 
         inline while i < @field_count(T) {
-            if is_abi_dynamic(@field_type(T, i)) {
-                @mstore32(buf +% head_offset, tail_offset - offset);
+            if comptime { is_abi_dynamic(@field_type(T, i)) } {
+                @mstore32(ptr +% head_offset, tail_offset - offset);
                 let written = unsafe_abi_encode_to(
-                    buf,
+                    ptr,
                     tail_offset,
                     @get_field(value, i)
                 );
@@ -89,7 +103,7 @@ const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
                 tail_offset = tail_offset + written;
             } else {
                 let written = unsafe_abi_encode_to(
-                    buf,
+                    ptr,
                     head_offset,
                     @get_field(value, i)
                 );
@@ -98,28 +112,12 @@ const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
             i = i + 1;
         }
 
-        tail_offset - offset
-    } else {
-        @compile_error("unsupported type for ABI encoding")
+        return tail_offset - offset;
     }
-};
 
-// Accumulator for ABI decoding a struct via fold.
-// Runtime values (buf, base_offset, decoded_value) cannot be captured in closures,
-// so they must be threaded through fold. head_offset changes each iteration.
-//
-// Fields:
-//   buf           - buffer to decode from (runtime, read-only in fold)
-//   base_offset   - start of this struct's encoding; used to resolve relative offset pointers (runtime, read-only in fold)
-//   head_offset   - current position in the head section; advances as fields are processed
-//   decoded_value - the value being decoded; fields are set one by one (runtime, mutated in fold)
-const AbiDecodeAccumulator = fn (comptime T: type) type {
-    struct {
-        buf: u256,
-        base_offset: u256,
-        head_offset: u256,
-        decoded_value: T
-    }
+
+    @compile_log(T);
+    @compile_error("unsafe_abi_encode_to: unsupported type for ABI encoding")
 };
 
 // ABI-decodes a value of type `T` from `buf` starting at `offset`.
@@ -131,75 +129,44 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T 
         @mload32(buf +% offset)
     } else if T == bool {
         @mload32(buf +% offset) != 0
-    } else if T == membytes {
+    } else if T == bytes(memory) {
         let length = @mload32(buf +% offset);
         membytes_from_ptr(buf +% offset +% 32, length)
     } else if @is_struct(T) {
-        let initial = AbiDecodeAccumulator(T) {
-            buf: buf,
-            base_offset: offset,
-            head_offset: offset,
-            decoded_value: @uninit(T)
-        };
-        let result = fold(
-            @field_count(T),
-            fn (comptime i: u256, acc: AbiDecodeAccumulator(T)) AbiDecodeAccumulator(T) {
-                if is_abi_dynamic(@field_type(T, i)) {
-                    let tail_offset = acc.base_offset + @mload32(acc.buf +% acc.head_offset);
-                    let decoded = unsafe_abi_decode_from(
-                        @field_type(T, i),
-                        acc.buf,
-                        tail_offset
-                    );
-                    let mut next = acc;
-                    next = @set_field(next, 2, acc.head_offset + 32);
-                    next = @set_field(next, 3, @set_field(acc.decoded_value, i, decoded));
-                    next
-                } else {
-                    let decoded = unsafe_abi_decode_from(
-                        @field_type(T, i),
-                        acc.buf,
-                        acc.head_offset
-                    );
-                    let mut next = acc;
-                    next = @set_field(next, 2, acc.head_offset + abi_head_size(@field_type(T, i)));
-                    next = @set_field(next, 3, @set_field(acc.decoded_value, i, decoded));
-                    next
-                }
-            },
-            initial
-        );
-        result.decoded_value
+        let mut head_offset = offset;
+        let mut decoded_value = @uninit(T);
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            if comptime { is_abi_dynamic(field_type) } {
+                let tail_offset = offset + @mload32(buf +% head_offset);
+                let decoded = unsafe_abi_decode_from(field_type, buf, tail_offset);
+                head_offset = head_offset + 32;
+                decoded_value = @set_field(decoded_value, i, decoded);
+            } else {
+                let decoded = unsafe_abi_decode_from(field_type, buf, head_offset);
+                head_offset = head_offset + abi_head_size(field_type);
+                decoded_value = @set_field(decoded_value, i, decoded);
+            }
+            i = i + 1;
+        }
+
+        decoded_value
     } else {
         @compile_error("unsupported type for ABI decoding")
     }
 };
 
-// Accumulator for checking if a buffer fits an ABI-encoded struct via fold.
-// Runtime values (buf, base_offset) cannot be captured in closures,
-// so they must be threaded through fold. head_offset changes each iteration.
-//
-// Fields:
-//   buf          - buffer to validate against (runtime, read-only in fold)
-//   base_offset  - start of this struct's encoding; used to resolve relative offset pointers (runtime, read-only in fold)
-//   head_offset  - current position in the head section; advances as fields are processed
-//   fits         - whether the buffer is large enough so far; short-circuits to false on first failure
-const AbiBufFitsAccumulator = struct {
-    buf: membytes,
-    base_offset: u256,
-    head_offset: u256,
-    fits: bool
-};
-
 // Checks whether `buf` starting at `offset` is large enough to hold a valid ABI encoding of type `T`.
-const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
+const abi_buf_fits = fn (comptime T: type, buf: bytes(memory), offset: u256) bool {
     if T == void {
         true
     } else if T == u256 {
         buf.length >= offset + 32
     } else if T == bool {
         buf.length >= offset + 32
-    } else if T == membytes {
+    } else if T == bytes(memory) {
         let len_opt = membytes_read_u256(buf, offset);
         if !len_opt.is_some { return false; }
         let length = len_opt.inner;
@@ -208,35 +175,25 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
         if offset + abi_head_size(T) > buf.length {
             return false;
         } 
-        let initial = AbiBufFitsAccumulator {
-            buf: buf,
-            base_offset: offset,
-            head_offset: offset,
-            fits: true
-        };
-        let result = fold(
-            @field_count(T),
-            fn (comptime i: u256, acc: AbiBufFitsAccumulator) AbiBufFitsAccumulator {
-                if !acc.fits {
-                    return acc;
+        let mut head_offset = offset;
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            if comptime { is_abi_dynamic(field_type) } {
+                // Safe to unwrap: the pre-check above guarantees the entire head section is readable.
+                let tail_offset = offset + unwrap(membytes_read_u256(buf, head_offset));
+                if !abi_buf_fits(field_type, buf, tail_offset) {
+                    return false;
                 }
-                if is_abi_dynamic(@field_type(T, i)) {
-                    // Safe to unwrap: the pre-check above guarantees the entire head section is readable.
-                    let tail_offset = acc.base_offset + unwrap(membytes_read_u256(acc.buf, acc.head_offset));
-                    let fits = abi_buf_fits(@field_type(T, i), acc.buf, tail_offset);
-                    let mut next = acc;
-                    next = @set_field(next, 2, acc.head_offset + 32);
-                    next = @set_field(next, 3, fits);
-                    next
-                } else {
-                    let mut next = acc;
-                    next = @set_field(next, 2, acc.head_offset + abi_head_size(@field_type(T, i)));
-                    next
-                }
-            },
-            initial
-        );
-        result.fits
+                head_offset = head_offset + 32;
+            } else {
+                head_offset = head_offset + abi_head_size(field_type);
+            }
+            i = i + 1;
+        }
+
+        true
     } else {
         @compile_error("unsupported type for ABI decoding")
     }

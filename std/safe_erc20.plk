@@ -1,0 +1,88 @@
+import std::core::addr::*;
+import std::core::uint::*;
+import std::error::*;
+import std::abi::{abi_encode, compute_selector, call_nonpayable};
+
+const TRANSFER_SELECTOR = compute_selector("transfer(address,uint256)");
+const TRANSFER_FROM_SELECTOR = compute_selector("transferFrom(address,address,uint256)");
+const APPROVE_SELECTOR = compute_selector("approve(address,uint256)");
+
+const safe_transfer = fn (token: addr, to: addr, amount: u256) bool {
+    let calldata = @malloc_uninit(32 * 3);
+    @mstore32(calldata +% (0 * 32), TRANSFER_SELECTOR);
+    @mstore32(calldata +% (1 * 32), cast_addr(to, u256));
+    @mstore32(calldata +% (2 * 32), amount);
+    let value = 0;
+    let success = @evm_call(
+        @evm_gas(),
+        cast_addr(token, u256),
+        value,
+        calldata +% (32 - 4),
+        4 + 2 * 32,
+        calldata,
+        32
+    );
+
+    if TRANSFER_SELECTOR & 0xff == 0x01 {
+        @compile_error("last-byte of selector == 0x01, cannot reuse buf for success returndata");
+    }
+
+    success & (
+        (@mload32(calldata) == 1)
+            or ((@evm_extcodesize(cast_addr(token, u256)) != 0) & (@evm_returndatasize() == 0))
+    )
+};
+
+
+const safe_transfer_from = fn (token: addr, from: addr, to: addr, amount: u256) bool {
+    let calldata = @malloc_uninit(32 * 4);
+    @mstore32(calldata +% (0 * 32), TRANSFER_FROM_SELECTOR);
+    @mstore32(calldata +% (1 * 32), cast_addr(from, u256));
+    @mstore32(calldata +% (2 * 32), cast_addr(to, u256));
+    @mstore32(calldata +% (3 * 32), amount);
+    let value = 0;
+    let success = @evm_call(
+        @evm_gas(),
+        cast_addr(token, u256),
+        value,
+        calldata +% (32 - 4),
+        4 + 3 * 32,
+        calldata,
+        32
+    );
+
+    if TRANSFER_FROM_SELECTOR & 0xff == 0x01 {
+        @compile_error("last-byte of selector == 0x01, cannot reuse buf for success returndata");
+    }
+
+    success & (
+        (@mload32(calldata) == 1)
+            or ((@evm_extcodesize(cast_addr(token, u256)) != 0) & (@evm_returndatasize() == 0))
+    )
+};
+
+const safe_approve = fn (token: addr, spender: addr, amount: u256) bool {
+    let calldata = @malloc_uninit(32 * 3);
+    @mstore32(calldata +% (0 * 32), APPROVE_SELECTOR);
+    @mstore32(calldata +% (1 * 32), cast_addr(spender, u256));
+    @mstore32(calldata +% (2 * 32), amount);
+    let value = 0;
+    let success = @evm_call(
+        @evm_gas(),
+        cast_addr(token, u256),
+        value,
+        calldata +% (32 - 4),
+        4 + 2 * 32,
+        calldata,
+        32
+    );
+
+    if APPROVE_SELECTOR & 0xff == 0x01 {
+        @compile_error("last-byte of selector == 0x01, cannot reuse buf for success returndata");
+    }
+
+    success & (
+        (@mload32(calldata) == 1)
+            or ((@evm_extcodesize(cast_addr(token, u256)) != 0) & (@evm_returndatasize() == 0))
+    )
+};

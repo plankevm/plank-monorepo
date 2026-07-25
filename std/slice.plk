@@ -4,7 +4,7 @@ import std::error::*;
 import std::mem::{unsafe_mem_read, unsafe_mem_write};
 import std::option::{None, Option, Some, unwrap};
 import std::regions::{calldata, code, ctime, embed_as, is_region, memory, region_ptr_type};
-import std::type::sizeof;
+import std::types::sizeof;
 
 const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u256)) type {
     if !is_region(R) {

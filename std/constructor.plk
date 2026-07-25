@@ -1,5 +1,14 @@
+import std::regions::*;
+
 const return_runtime = fn () never {
     let buf = @malloc_uninit(@runtime_length());
     @evm_codecopy(buf, @runtime_start_offset(), @runtime_length());
     @evm_return(buf, @runtime_length());
+};
+
+const constructor_arg_data = fn () bytes(code) {
+    bytes(code) {
+        ptr: @init_end_offset(),
+        length: @evm_codesize() - @init_end_offset(),
+    }
 };

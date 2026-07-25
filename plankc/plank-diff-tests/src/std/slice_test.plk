@@ -4,7 +4,7 @@ import std::mem::unsafe_mem_write;
 import std::option::{None, Some};
 import std::regions::{calldata, code, ctime, memory};
 import std::slice::*;
-import std::type::sizeof;
+import std::types::sizeof;
 
 const Pair = struct { first: u256, second: u256 };
 const Empty = struct {};

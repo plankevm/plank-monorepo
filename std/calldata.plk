@@ -1,12 +1,15 @@
-import std::type::sizeof;
+import std::types::sizeof;
+import std::core::uint::*;
+import std::core::addr::*;
+import std::option::*;
 
 // Reads a value of type T from calldata at `ptr`. Compound fields are
 // read contiguously in declaration order. No bounds check.
 const unsafe_calldata_read = fn (comptime T: type, ptr: u256) T {
-    if T == void {
-        ()
-    } else if T == u256 {
-        @evm_calldataload(ptr)
+    if comptime { is_uint(T) } {
+        unwrap(try_cast_uint(@evm_calldataload(ptr), T))
+    } else if T == addr {
+        addr_from_u256(@evm_calldataload(ptr))
     } else if T == bool {
         @evm_calldataload(ptr) != 0
     } else if @is_struct(T) or @is_tuple(T) {

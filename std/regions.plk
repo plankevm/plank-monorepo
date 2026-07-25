@@ -1,5 +1,6 @@
 import std::error::*;
 import std::fixedbytes::bytes32;
+import std::types::type_of;
 
 const memory = struct {};
 const code = struct {};
@@ -28,6 +29,14 @@ const bytes = fn (comptime region: type) type {
         ptr: region_ptr_type(region),
         length: u256,
     };
+};
+
+const is_bytes = fn (comptime T: type) bool {
+    if !@is_struct(T) {
+        return T == cbytes;
+    }
+    let region = @type_index(T);
+    type_of(region) == type and is_region(region) and bytes(region) == T
 };
 
 const embed_as = fn (comptime cb: cbytes, comptime region: type) bytes(region) {

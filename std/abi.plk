@@ -1,20 +1,21 @@
 import std::option::*;
-import std::membytes::{membytes, membytes_new, membytes_from_ptr};
+import std::core::uint::*;
+import std::core::addr::*;
+import std::fixedbytes::bytes32;
+import std::membytes::{membytes_new, membytes_from_ptr};
 import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
 import std::math::ceil32;
-import std::regions::keccak256;
+import std::regions::*;
 
 // Returns the total byte size of the ABI encoding for a given value.
 const abi_encoded_size = fn (value: $T) u256 {
     if T == void {
         0
-    } else if T == u256 {
+    } else if comptime { is_uint(T) } or T == bool or T == addr or T == bytes32 {
         32
-    } else if T == bool {
-        32
-    } else if T == membytes {
+    } else if T == bytes(memory) {
         32 + ceil32(value.length)
-    } else if @is_struct(T) {
+    } else if @is_struct(T) or @is_tuple(T) {
         // Start from the head size; non-dynamic fields are already accounted for.
         let mut total_size = abi_head_size(T);
         comptime let mut i = 0;
@@ -40,7 +41,7 @@ const unsafe_abi_encode = fn (ptr: u256, value: $T) u256 {
 
 // Encodes `value` into `buf`. Returns the number of bytes written,
 // or None if the buffer is too small to hold the encoding.
-const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
+const abi_encode_try = fn (buf: bytes(memory), value: $T) Option(u256) {
     let size = abi_encoded_size(value);
     if size > buf.length {
         return None(u256);
@@ -49,7 +50,7 @@ const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
 };
 
 // Encodes `value`, allocating a new buffer of the exact size needed.
-const abi_encode = fn (value: $T) membytes {
+const abi_encode = fn (value: $T) bytes(memory) {
     let size = abi_encoded_size(value);
     let buf = membytes_new(size);
     unsafe_abi_encode_to(buf.ptr, 0, value);
@@ -64,7 +65,7 @@ const unsafe_abi_decode = fn (comptime T: type, ptr: u256, length: u256) T {
 
 // Decodes a value of type T from `buf`. Returns None if the buffer
 // is too small to hold the encoding.
-const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
+const abi_decode_try = fn (comptime T: type, buf: bytes(memory)) Option(T) {
     if !abi_buf_fits(T, buf, 0) {
         return None(T);
     }
@@ -73,11 +74,27 @@ const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
 
 // Decodes a value of type T from `buf`. Reverts if the buffer
 // is too small to hold the encoding.
-const abi_decode = fn (comptime T: type, buf: membytes) T {
+const abi_decode = fn (comptime T: type, buf: bytes(memory)) T {
     unwrap(abi_decode_try(T, buf))
 };
 
 const compute_selector = fn (signature: $T) u256 {
     let hash = keccak256(signature);
     return hash.raw >> 224;
+};
+
+const call_nonpayable = fn (target: addr, comptime selector: u256, args: $T, retdata_ptr: u256, retdata_size: u256) bool {
+    let buf_size = abi_encoded_size(args) + 32;
+    let buf = @malloc_uninit(buf_size);
+    @mstore32(buf, selector);
+    unsafe_abi_encode_to(buf +% 32, 0, args);
+    @evm_call(
+        @evm_gas(),
+        cast_addr(target, u256),
+        0,
+        buf +% (32 - 4),
+        buf_size -% (32 - 4),
+        retdata_ptr,
+        retdata_size
+    )
 };
