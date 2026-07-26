@@ -841,10 +841,6 @@ impl BlockLowerer<'_> {
                     lower_let(self);
                 }
             }
-            // Only the else-less `if` is checked for value-yielding branches: without an else
-            // its branches can't agree on producing a value, so a value in one is a likely
-            // mistake. Complete expressions (`if…else`, `{ .. }`, `comptime { .. }`) fall through
-            // to the catch-all and deliberately discard their value, same as a discarded call.
             Statement::Expr(ast::Expr::If(if_expr)) if if_expr.else_body().is_none() => {
                 self.check_statement_if_branch_tails(if_expr);
                 let kind = self.lower_if(if_expr, None);
