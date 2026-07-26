@@ -13,6 +13,13 @@ link-dev-local: build-debug
     ln -s "$PWD/../std" "$HOME/.plank/stdlib"
     ln -s "$PWD/target/debug/plank" "$HOME/.plank/bin/plank"
 
+link-release-local:
+    cargo build --profile release-safe -p plank
+    mkdir -p "$HOME/.plank/bin"
+    rm -rf "$HOME/.plank/bin/plank" "$HOME/.plank/stdlib"
+    ln -s "$PWD/../std" "$HOME/.plank/stdlib"
+    ln -s "$PWD/target/release-safe/plank" "$HOME/.plank/bin/plank"
+
 fmt:
     (cd sir/sir-solidity-diff-tests/ && forge fmt)
     (cd plank-diff-tests/ && forge fmt)

@@ -1,0 +1,119 @@
+import std::option::{Option, None, Some};
+
+const UInt = fn (comptime Size: u256) type {
+    if Size == 256 {
+        return u256;
+    }
+
+    struct Size {
+        _raw_repr: u256
+    }
+};
+
+const u8  = UInt(8);
+const u16 = UInt(16);
+const u24 = UInt(24);
+const u32 = UInt(32);
+const u40 = UInt(40);
+const u48 = UInt(48);
+const u56 = UInt(56);
+const u64 = UInt(64);
+const u72 = UInt(72);
+const u80 = UInt(80);
+const u88 = UInt(88);
+const u96 = UInt(96);
+const u104 = UInt(104);
+const u112 = UInt(112);
+const u120 = UInt(120);
+const u128 = UInt(128);
+const u136 = UInt(136);
+const u144 = UInt(144);
+const u152 = UInt(152);
+const u160 = UInt(160);
+const u168 = UInt(168);
+const u176 = UInt(176);
+const u184 = UInt(184);
+const u192 = UInt(192);
+const u200 = UInt(200);
+const u208 = UInt(208);
+const u216 = UInt(216);
+const u224 = UInt(224);
+const u232 = UInt(232);
+const u240 = UInt(240);
+const u248 = UInt(248);
+
+const _type_of = fn (comptime _x: $T) type { T };
+
+const is_uint = fn (comptime T: type) bool {
+    if T == u256 {
+        return true;
+    }
+
+    if !@is_struct(T) {
+        return false;
+    }
+
+    let supposed_size = @type_index(T);
+    _type_of(supposed_size) == u256 and UInt(supposed_size) == T
+};
+
+const bit_size = fn (comptime T: type) u256 {
+    if T == u256 {
+        return 256;
+    }
+
+    if comptime { !is_uint(T) } {
+        @compile_error("bit_size: `T` not `uN` type");
+    }
+
+    @type_index(T)
+};
+
+const unsafe_from_u256 = fn (comptime T: type, raw_repr: u256) T {
+    if T == u256 {
+        raw_repr
+    } else {
+        T { _raw_repr: raw_repr }
+    }
+};
+
+const cast_uint = fn (src: $T, comptime Dst: type) Dst {
+    comptime {
+        if !is_uint(T) {
+            @compile_error("cast_uint: `T` not `uN` type");
+        }
+        if !is_uint(Dst) {
+            @compile_error("cast_uint: `Dst` not `uN` type");
+        }
+        if bit_size(T) > bit_size(Dst) {
+            @compile_error("cast_uint: cannot infalliably cast `src` with larger bit size to `Dst`");
+        }
+    }
+
+    let repr = if T == u256 { src } else { src._raw_repr };
+
+    unsafe_from_u256(Dst, repr)
+};
+
+const try_cast_uint = fn (src: $T, comptime Dst: type) Option(Dst) {
+    comptime {
+        if !is_uint(T) {
+            @compile_error("try_cast_uint: `T` not `uN` type");
+        }
+        if !is_uint(Dst) {
+            @compile_error("try_cast_uint: `Dst` not `uN` type");
+        }
+    }
+
+    let dst_bit_size = comptime { bit_size(Dst) };
+    if comptime { bit_size(T) <= dst_bit_size } {
+        return Some(cast_uint(src, Dst));
+    }
+
+    let raw_repr = cast_uint(src, u256);
+    if (raw_repr >> dst_bit_size) != 0 {
+        return None(Dst);
+    }
+
+    Some(unsafe_from_u256(Dst, raw_repr))
+};

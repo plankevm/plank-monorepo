@@ -4,6 +4,7 @@ mod compile_log;
 mod comptime;
 mod logical_ops;
 mod operators;
+mod std_errors;
 mod structs;
 mod tuples;
 mod types;

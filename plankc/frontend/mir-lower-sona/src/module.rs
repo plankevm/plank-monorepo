@@ -111,7 +111,7 @@ fn declare_runtime_shape(
         PlankType::Primitive(primitive) => match primitive {
             PrimitiveType::Never => None,
             PrimitiveType::Bool => Some(SonaType::I1),
-            PrimitiveType::U256 | PrimitiveType::MemoryPointer => Some(SonaType::I256),
+            PrimitiveType::U256 => Some(SonaType::I256),
             PrimitiveType::Function | PrimitiveType::Type | PrimitiveType::CBytes => {
                 panic!("comptime-only type in MIR: {primitive:?}")
             }

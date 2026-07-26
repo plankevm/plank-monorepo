@@ -73,7 +73,7 @@ impl LowerCtx<'_> {
         match self.mir.types.lookup(ty) {
             Type::Primitive(prim) => match prim {
                 PrimitiveType::Never => 0,
-                PrimitiveType::Bool | PrimitiveType::U256 | PrimitiveType::MemoryPointer => 1,
+                PrimitiveType::Bool | PrimitiveType::U256 => 1,
                 PrimitiveType::Function => unreachable!("function unsizeable in SIR"),
                 PrimitiveType::Type | PrimitiveType::CBytes => {
                     unreachable!("comptime-only primitive unsizeable in SIR")

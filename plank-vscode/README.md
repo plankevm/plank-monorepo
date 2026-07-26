@@ -15,7 +15,7 @@ Syntax highlighting for [Plank](https://github.com/plankevm/plank-monorepo), a p
 ## Supported Syntax
 
 - Keywords: `const`, `let`, `mut`, `fn`, `struct`, `init`, `run`, `if`, `else`, `while`, `return`, `import`, `as`, `comptime`, `inline`, `and`, `or`
-- Primitive types: `u256`, `bool`, `void`, `memptr`, `type`, `function`, `never`
+- Primitive types: `u256`, `bool`, `void`, `type`, `function`, `never`
 - Literals: decimal, hex (`0x`), binary (`0b`), booleans (`true`, `false`)
 - Comments: line (`//`) and block (`/* */`)
 

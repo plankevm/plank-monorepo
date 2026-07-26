@@ -2,7 +2,7 @@ use plank_evm::EvmVersion;
 use plank_hir::lower;
 use plank_session::{Session, SourceId};
 use plank_source::{
-    ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
+    CORE_OPS_PATH, ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
 use plank_values::ValueInterner;
 use sir_passes::{
@@ -69,7 +69,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     }
 
     pub fn load_project(&mut self, entry_path: &Path) -> Option<ParsedProject> {
-        let core_ops_path = self.std_root.as_ref().map(|root| root.join("core_ops.plk"));
+        let core_ops_path = self.std_root.as_ref().map(|root| root.join(CORE_OPS_PATH));
         parse_project(
             entry_path,
             core_ops_path.as_deref(),

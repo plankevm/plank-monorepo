@@ -1,42 +1,54 @@
-import std::utils::fold;
+import std::type::sizeof;
 
-const unsafe_mem_write_u256 = fn (ptr: memptr, offset: u256, value: u256) u256 {
-    @mstore32(ptr +% offset, value);
-    32
-};
-
-const unsafe_mem_read_u256 = fn (ptr: memptr, offset: u256) u256 {
-    @mload32(ptr +% offset)
-};
-
-const unsafe_mem_write_bytes = fn (dst: memptr, dst_offset: u256, src: memptr, len: u256) u256 {
-    @mcopy(dst +% dst_offset, src, len);
-    len
-};
-
-// Writes a value of type T at `offset`. For structs, fields are serialized contiguously.
-// No bounds check. Returns bytes written.
-const unsafe_mem_write = fn (ptr: memptr, offset: u256, value: $T) u256 {
+// Writes a value of type T at `ptr`. Compound fields are serialized
+// contiguously. No bounds check.
+const unsafe_mem_write = fn (ptr: u256, value: $T) void {
     if T == void {
-        0
+        return ();
     } else if T == u256 {
-        unsafe_mem_write_u256(ptr, offset, value)
+        @mstore32(ptr, value);
     } else if T == bool {
-        unsafe_mem_write_u256(ptr, offset, if value { 1 } else { 0 })
-    } else if @is_struct(T) {
-        fold(
-            @field_count(T),
-            fn (comptime i: u256, bytes_written: u256) u256 {
-                let written = unsafe_mem_write(
-                    ptr,
-                    offset + bytes_written,
-                    @get_field(value, i)
-                );
-                bytes_written + written
-            },
-            0
-        )
+        @mstore32(ptr, if value { 1 } else { 0 });
+    } else if @is_struct(T) or @is_tuple(T) {
+        comptime let mut i = 0;
+        comptime let mut field_offset = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            unsafe_mem_write(ptr + field_offset, @get_field(value, i));
+            field_offset = field_offset + comptime { sizeof(field_type) };
+            i = i + 1;
+        }
     } else {
         @compile_error("unsupported type for unsafe_mem_write")
+    }
+};
+
+// Reads a value of type T from memory at `ptr`. Compound fields are read
+// contiguously in declaration order. No bounds check; caller must ensure the
+// region contains a valid representation of T.
+const unsafe_mem_read = fn (comptime T: type, ptr: u256) T {
+    if T == void {
+        ()
+    } else if T == u256 {
+        @mload32(ptr)
+    } else if T == bool {
+        @mload32(ptr) != 0
+    } else if @is_struct(T) or @is_tuple(T) {
+        let mut value = @uninit(T);
+        comptime let mut i = 0;
+        comptime let mut field_offset = 0;
+
+        inline while i < @field_count(T) {
+            let field_type = @field_type(T, i);
+            let field_value = unsafe_mem_read(field_type, ptr + field_offset);
+            value = @set_field(value, i, field_value);
+            field_offset = field_offset + comptime { sizeof(field_type) };
+            i = i + 1;
+        }
+
+        return value;
+    } else {
+        @compile_error("unsupported type for unsafe_mem_read")
     }
 };

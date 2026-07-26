@@ -54,7 +54,6 @@ impl Call<'_> {
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
-    #[allow(clippy::too_many_arguments)]
     fn prepare_new_fn_scope_for_preamble_eval<'s>(
         &'s mut self,
         closure: ValueId,
@@ -293,7 +292,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if comptime_args_poisoned { Err(Poisoned) } else { Ok(ArgParamComptimenessMatch) }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn eval_call_inner(
         &mut self,
         closure: ValueId,

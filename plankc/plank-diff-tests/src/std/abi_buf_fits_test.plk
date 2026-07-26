@@ -1,7 +1,6 @@
 import std::abi_helpers::abi_buf_fits;
-import std::membytes::{membytes, membytes_new, membytes_write_u256};
-import std::option::unwrap;
-import std::math::ceil32;
+import std::error::require;
+import std::membytes::{membytes, membytes_new, membytes_write};
 
 const assert_fits = fn (comptime T: type, buf: membytes, offset: u256, expected: bool) void {
     if abi_buf_fits(T, buf, offset) != expected {
@@ -30,29 +29,29 @@ init {
     assert_fits(bool, buf33, 1, true);
 
     let buf64 = membytes_new(64);
-    unwrap(u256, membytes_write_u256(buf64, 0, 32));
+    require(membytes_write(buf64, 0, 32));
     assert_fits(membytes, buf64, 0, true);
 
-    unwrap(u256, membytes_write_u256(buf64, 1, 32));
+    require(membytes_write(buf64, 1, 32));
     assert_fits(membytes, buf64, 1, false);
 
     let buf65 = membytes_new(65);
-    unwrap(u256, membytes_write_u256(buf65, 0, 33));
+    require(membytes_write(buf65, 0, 33));
     assert_fits(membytes, buf65, 0, false);
 
     let buf96 = membytes_new(96);
-    unwrap(u256, membytes_write_u256(buf96, 0, 33));
+    require(membytes_write(buf96, 0, 33));
     assert_fits(membytes, buf96, 0, true);
 
     // struct with dynamic field: offset pointer + zero-length data = 64 bytes
     let buf64_struct = membytes_new(64);
-    unwrap(u256, membytes_write_u256(buf64_struct, 0, 32));
+    require(membytes_write(buf64_struct, 0, 32));
     assert_fits(struct { data: membytes }, buf64_struct, 0, true);
 
     // struct with dynamic field: offset=32, len=33 at tail, but only 80 bytes total (needs 128)
     let buf80_struct = membytes_new(80);
-    unwrap(u256, membytes_write_u256(buf80_struct, 0, 32));
-    unwrap(u256, membytes_write_u256(buf80_struct, 32, 33));
+    require(membytes_write(buf80_struct, 0, 32));
+    require(membytes_write(buf80_struct, 32, 33));
     assert_fits(struct { data: membytes }, buf80_struct, 0, false);
 
     // struct with only static fields

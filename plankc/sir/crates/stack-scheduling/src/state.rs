@@ -1,4 +1,3 @@
-// TODO: Actually use in new scheduler
 #![allow(unused)]
 
 use crate::op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId};
@@ -113,15 +112,9 @@ impl<'g> ScheduleStateArena<'g> {
     }
 }
 
-impl StateView<'_> {
-    pub fn is_last_use(&self, value: ValueNodeId) -> bool {
-        self.graph.uses_remaining(&self.complete, value) == 1
-    }
-}
-
 pub fn collect_next_completable_into(graph: &OpGraph, complete: OpSet<'_>, out: &mut OpSetMut<'_>) {
     for op in graph.op_ids() {
-        if !complete.contains(op) && complete.is_super(&graph.get_predecessors(op)) {
+        if !complete.contains(op) && complete.is_super(graph.get_predecessors(op)) {
             out.add(op);
         }
     }

@@ -15,11 +15,11 @@ fn test_simple_malloc_mstore_return() {
         ; init
         @fn0() -> never {
             %0 : u256 = 32
-            %1 : memptr = @malloc_uninit(%0)
-            %2 : memptr = %1
+            %1 : u256 = @malloc_uninit(%0)
+            %2 : u256 = %1
             %3 : u256 = 5
             %4 : void = @mstore32(%2, %3)
-            %5 : memptr = %1
+            %5 : u256 = %1
             %6 : u256 = 32
             %7 : never = @evm_return(%5, %6)
         }
@@ -51,7 +51,7 @@ fn test_no_else_if_as_statement() {
             %3 : bool = @evm_iszero(%2)
             if %3 {
                 %4 : u256 = 0
-                %5 : memptr = @malloc_uninit(%4)
+                %5 : u256 = @malloc_uninit(%4)
                 %6 : u256 = 0
                 %7 : never = @evm_revert(%5, %6)
             } else {
@@ -429,15 +429,12 @@ fn test_never_fn_missing_termination() {
         ",
         &[r#"
         error: mismatched types
-         --> main.plk:2:27
+         --> main.plk:3:19
           |
-        2 |       let halt = fn() never {
-          |  _____________________-----_^
-          | |                     |
-          | |                     `never` expected because of this
-        3 | |         let x = 5;
-        4 | |     };
-          | |_____^ expected `never`, got `void`
+        2 |     let halt = fn() never {
+          |                     ----- `never` expected because of this
+        3 |         let x = 5;
+          |                   ^ expected `never`, got `void`
         "#],
     );
 }
@@ -528,7 +525,7 @@ fn test_builtin_call_with_never_arg() {
         ; init
         @fn1() -> never {
             %0 : u256 = 32
-            %1 : memptr = @malloc_uninit(%0)
+            %1 : u256 = @malloc_uninit(%0)
             %2 : never = call @fn0()
         }
         "#,

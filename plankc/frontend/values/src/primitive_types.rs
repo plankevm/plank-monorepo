@@ -2,11 +2,8 @@ bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct TypeFlags: u8 {
         const NONE                = 0;
-        const RUNTIME_ONLY        = 1 << 0;
-        const COMPTIME_ONLY       = 1 << 1;
-        const UNINIT_INCOMPATIBLE = 1 << 2;
-
-        const UNINITIALIZABLE_MIXED = TypeFlags::RUNTIME_ONLY.bits() | TypeFlags::COMPTIME_ONLY.bits();
+        const COMPTIME_ONLY       = 1 << 0;
+        const UNINIT_INCOMPATIBLE = 1 << 1;
     }
 }
 
@@ -15,7 +12,6 @@ bitflags::bitflags! {
 pub enum PrimitiveType {
     U256,
     Bool,
-    MemoryPointer,
     Type,
     Function,
     CBytes,
@@ -28,7 +24,6 @@ impl PrimitiveType {
         match self {
             PrimitiveType::U256 => builtin_names::U256,
             PrimitiveType::Bool => builtin_names::BOOL,
-            PrimitiveType::MemoryPointer => builtin_names::MEMORY_POINTER,
             PrimitiveType::Type => builtin_names::TYPE,
             PrimitiveType::Function => builtin_names::FUNCTION,
             PrimitiveType::CBytes => builtin_names::CBYTES,
@@ -39,7 +34,6 @@ impl PrimitiveType {
     pub const fn flags(self) -> TypeFlags {
         match self {
             PrimitiveType::U256 | PrimitiveType::Bool => TypeFlags::NONE,
-            PrimitiveType::MemoryPointer => TypeFlags::RUNTIME_ONLY,
             PrimitiveType::Type => TypeFlags::COMPTIME_ONLY,
             PrimitiveType::Function => TypeFlags::from_bits_retain(
                 TypeFlags::COMPTIME_ONLY.bits() | TypeFlags::UNINIT_INCOMPATIBLE.bits(),

@@ -1,5 +1,5 @@
 import std::storage::map_slot_hash;
-import std::addr::*;
+import std::core::addr::*;
 import std::precompile::ecrecover;
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
@@ -45,18 +45,14 @@ const PERMIT_EXPIRED = 0x1a15a3cc /* PermitExpired() */;
 const INVALID_PERMIT = 0xddafbaef /* InvalidPermit() */;
 
 const balance_slot = fn (owner: addr) u256 {
-    map_slot_hash(owner.raw, BALANCE_SLOT_BASE)
+    map_slot_hash(cast_addr(owner, u256), BALANCE_SLOT_BASE)
 };
 
 const nonces_slot = fn (owner: addr) u256 {
-    map_slot_hash(owner.raw, NONCES_SLOT_BASE)
+    map_slot_hash(cast_addr(owner, u256), NONCES_SLOT_BASE)
 };
 
 const u8 = struct { raw: u256 };
-
-const addr_eq = fn (a: addr, b: addr) bool {
-    a.raw == b.raw
-};
 
 const allowance_slot = fn (owner: addr, spender: addr) u256 {
     comptime {
@@ -66,21 +62,21 @@ const allowance_slot = fn (owner: addr, spender: addr) u256 {
     }
     let buf = @malloc_uninit(64);
     @mstore32(buf +% 32, ALLOWANCE_SLOT_BASE);
-    @mstore32(buf +% 31, spender.raw);
-    @mstore32(buf +% (31 - 20), owner.raw);
+    @mstore32(buf +% 31, cast_addr(spender, u256));
+    @mstore32(buf +% (31 - 20), cast_addr(owner, u256));
     @evm_keccak256(buf +% (31 - 20 + 12), 20 + 20 + 1)
 };
 
 const emit_transfer = fn (from: addr, to: addr, amount: u256) void {
     let buf = @malloc_uninit(32);
     @mstore32(buf, amount);
-    @evm_log3(buf, 32, TRANSFER_TOPIC, from.raw, to.raw);
+    @evm_log3(buf, 32, TRANSFER_TOPIC, cast_addr(from, u256), cast_addr(to, u256));
 };
 
 const emit_approval = fn (owner: addr, spender: addr, amount: u256) void {
     let buf = @malloc_uninit(32);
     @mstore32(buf, amount);
-    @evm_log3(buf, 32, APPROVAL_TOPIC, owner.raw, spender.raw);
+    @evm_log3(buf, 32, APPROVAL_TOPIC, cast_addr(owner, u256), cast_addr(spender, u256));
 };
 
 const revert_4byte = fn (comptime selector: u256) never {
@@ -99,11 +95,7 @@ const require_4byte = fn (condition: bool, comptime selector: u256) void {
 };
 
 const calldataload_addr = fn (comptime offset: u256) addr {
-    let raw = @evm_calldataload(offset);
-    if raw >= (1 << 160) {
-        @evm_revert(@malloc_uninit(0), 0);
-    }
-    addr { raw: raw }
+    addr_from_u256(@evm_calldataload(offset))
 };
 
 const calldataload_u8 = fn (comptime offset: u256) u8 {
@@ -130,7 +122,7 @@ const compute_domain_separator = fn () u256 {
     @evm_keccak256(buf, 32 * 5)
 };
 
-const copy_domain_separator = fn (dst: memptr) void {
+const copy_domain_separator = fn (dst: u256) void {
     @evm_codecopy(dst, @runtime_length(), 32);
 };
 
@@ -139,7 +131,7 @@ init {
 
     let slot = balance_slot(msg_sender());
     @evm_sstore(slot, TOTAL_SUPPLY);
-    emit_transfer(addr { raw: 0 }, msg_sender(), TOTAL_SUPPLY);
+    emit_transfer(addr_from_u256(0), msg_sender(), TOTAL_SUPPLY);
 
     let domain_separator = compute_domain_separator();
 
@@ -318,8 +310,8 @@ const hash_permit = fn (
 ) u256 {
     let buf = @malloc_uninit(6 * 32);
     @mstore32(buf +% (0 * 32), PERMIT_TYPEHASH);
-    @mstore32(buf +% (1 * 32), owner.raw);
-    @mstore32(buf +% (2 * 32), spender.raw);
+    @mstore32(buf +% (1 * 32), cast_addr(owner, u256));
+    @mstore32(buf +% (2 * 32), cast_addr(spender, u256));
     @mstore32(buf +% (3 * 32), value);
     @mstore32(buf +% (4 * 32), nonce);
     @mstore32(buf +% (5 * 32), deadline);

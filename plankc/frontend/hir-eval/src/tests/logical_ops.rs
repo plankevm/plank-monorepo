@@ -97,7 +97,7 @@ fn test_logical_not_in_if_condition() {
                 %6 : never = @evm_stop()
             } else {
                 %7 : u256 = 0
-                %8 : memptr = @malloc_uninit(%7)
+                %8 : u256 = @malloc_uninit(%7)
                 %9 : u256 = 0
                 %10 : never = @evm_revert(%8, %9)
             }

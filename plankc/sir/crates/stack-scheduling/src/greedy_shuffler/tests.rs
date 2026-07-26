@@ -7,7 +7,7 @@ use StackOps::{Dup, Pop, Swap};
 use plank_core::Idx;
 use proptest::prelude::*;
 use sir_data::StaticAllocId;
-use std::{cell::Cell, collections::HashSet};
+use std::collections::HashSet;
 
 fn assert_shuffle_exists(
     config: ScheduleConfig,
@@ -25,10 +25,10 @@ fn assert_shuffle_exists(
     let outputs = target.iter().copied().collect::<HashSet<_>>();
     assert!(inputs.is_superset(&outputs), "impossible start/target configuration");
 
-    let next_alloc_id = Cell::new(StaticAllocId::ZERO);
     let mut ops = Vec::new();
 
-    let mut stack = TrackedStack::new_from_evm(&next_alloc_id, |op| ops.push(op), evm_stack, 8);
+    let mut stack =
+        TrackedStack::new_from_evm(StaticAllocId::ZERO, |op| ops.push(op), evm_stack, 8);
     GreedyShuffler::run(config, &mut stack, &target);
 
     assert_eq!(stack.stack().fifo(), target, "end != target");
@@ -50,11 +50,11 @@ fn assert_shuffle(
     assert_eq!(ops, expected_ops.as_ref());
 }
 
-fn store(id: u32) -> StackOps {
+const fn store(id: u32) -> StackOps {
     StackOps::Store(StaticAllocId::new(id))
 }
 
-fn load(id: u32) -> StackOps {
+const fn load(id: u32) -> StackOps {
     StackOps::Load(StaticAllocId::new(id))
 }
 

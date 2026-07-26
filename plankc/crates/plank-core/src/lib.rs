@@ -35,11 +35,11 @@ pub struct LoopLimit {
 
 impl LoopLimit {
     /// Initialize a loop limiter with a max of 100M
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { count: 0, max: 100_000_000 }
     }
 
-    pub fn max(max: u32) -> Self {
+    pub const fn max(max: u32) -> Self {
         Self { count: 0, max }
     }
 

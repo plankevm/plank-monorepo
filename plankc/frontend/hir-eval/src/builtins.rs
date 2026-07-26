@@ -200,18 +200,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
-        match builtin {
+        let value = match builtin {
             Builtin::IsStruct => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_struct = ty.is_struct();
-                Ok(Ok(EvalValue::Comptime(is_struct.into())))
+                ty.is_struct().into()
             }
             Builtin::IsTuple => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
-                let is_tuple = ty.is_tuple();
-                Ok(Ok(EvalValue::Comptime(is_tuple.into())))
+                ty.is_tuple().into()
             }
             Builtin::HasPlainName | Builtin::HasParameterizedName => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
@@ -226,7 +224,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     _ => unreachable!("matched above"),
                 };
-                Ok(Ok(EvalValue::Comptime(matches_name_kind.into())))
+                matches_name_kind.into()
             }
             Builtin::TypeName => {
                 let &[ty_local] = args else { unreachable!("arg count checked") };
@@ -235,11 +233,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let name =
                     self.types.format(self.diag_ctx.session, self.eval.values, ty).to_string();
                 let cbytes = self.diag_ctx.session.intern_cbytes(name.as_bytes());
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(
-                    cbytes.contents,
-                    cbytes.start,
-                    cbytes.end,
-                ))))
+                self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end)
             }
             Builtin::FieldName => {
                 let &[ty_local, index_local] = args else { unreachable!("arg count checked") };
@@ -255,7 +249,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let contents = BytesId::from(field.name);
                 let len = u32::try_from(self.diag_ctx.session.lookup_bytes(contents).len())
                     .expect("field name length fits u32");
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(contents, 0, len))))
+                self.eval.values.intern_bytes(contents, 0, len)
             }
             Builtin::FieldIndex => {
                 let &[ty_local, name_local] = args else { unreachable!("arg count checked") };
@@ -265,16 +259,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let index =
                     self.find_struct_field_by_name(r#struct, name).unwrap_or(r#struct.fields.len());
                 let index = U256::from(index);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(index))))
+                self.eval.values.intern_num(index)
             }
             Builtin::FieldCount => {
                 let &[r#struct] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
                 let field_count = self.expect_compound(ty, builtin, expr_span)?.field_count();
                 let count = U256::from(field_count);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(count))))
+                self.eval.values.intern_num(count)
             }
-            Builtin::InComptime => Ok(Ok(EvalValue::Comptime(self.comptime.into()))),
+            Builtin::InComptime => self.comptime.into(),
             Builtin::SetEvalBranchQuota => {
                 let &[quota_arg] = args else { unreachable!("arg count checked") };
                 let binding = self.bindings[quota_arg];
@@ -305,14 +299,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.comptime_quota.raise_limit(requested_quota);
                 self.max_eval_branch_quota_seen =
                     self.max_eval_branch_quota_seen.max(requested_quota);
-                Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
+
+                ValueId::VOID
             }
             Builtin::CompileError => {
                 let &[message] = args else { unreachable!("arg count checked") };
                 let message = self.expect_bytes_arg(message, builtin, expr_span)?;
                 let message = self.diag_ctx.session.lookup_bytes_lossy(message);
                 self.diag_ctx.emit_custom_comptime_error(message, self.loc(expr_span));
-                Ok(Err(Diverge::ControlFlowPoisoned))
+                return Ok(Err(Diverge::ControlFlowPoisoned));
             }
             Builtin::SliceCBytes => {
                 let &[bytes, start, end] = args else { unreachable!("arg count checked") };
@@ -326,11 +321,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 let start = u32::try_from(start).expect("start <= end <= len which fits u32");
                 let end = u32::try_from(end).expect("end <= len which fits u32");
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_bytes(
+                self.eval.values.intern_bytes(
                     bytes.contents,
                     bytes.start + start,
                     bytes.start + end,
-                ))))
+                )
             }
             Builtin::PaddedReadCBytes => {
                 let &[bytes, offset] = args else { unreachable!("arg count checked") };
@@ -356,21 +351,21 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 word[..slice.len()].copy_from_slice(slice);
 
                 let value = U256::from_be_bytes(word);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(value))))
+                self.eval.values.intern_num(value)
             }
             Builtin::Keccak256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(alloy_primitives::keccak256(slice).0);
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+                self.eval.values.intern_num(hash)
             }
             Builtin::Sha256CBytes => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
                 let bytes = self.expect_bytes_arg(bytes, builtin, expr_span)?;
                 let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                 let hash = U256::from_be_bytes(Sha256::digest(slice).into());
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(hash))))
+                self.eval.values.intern_num(hash)
             }
             Builtin::DataOffset => {
                 let &[bytes] = args else { unreachable!("arg count checked") };
@@ -379,17 +374,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_data_offset_in_comptime(expr_loc);
                     return Err(Poisoned);
                 }
-                Ok(Ok(EvalValue::Runtime {
+                return Ok(Ok(EvalValue::Runtime {
                     expr: mir::Expr::DataOffset { contents: bytes.contents, start: bytes.start },
                     result_type: TypeId::U256,
-                }))
+                }));
             }
             Builtin::ActiveEvmVersion => {
                 let evm_version: U256 = self.eval.evm_version.into();
-                Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(evm_version))))
+                self.eval.values.intern_num(evm_version)
             }
             _ => unreachable!("not a comptime builtin: {builtin}"),
-        }
+        };
+
+        Ok(Ok(EvalValue::Comptime(value)))
     }
 
     fn eval_comptime_dynamic_builtin(
@@ -598,14 +595,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         }
 
-        if flags.contains(TypeFlags::RUNTIME_ONLY) {
-            if self.is_comptime() {
-                self.diag_ctx.emit_uninit_memptr_in_comptime(self.loc(expr_span));
-                return Err(Poisoned);
-            }
-            return Ok(Ok(self.emit_uninit_runtime(ty)));
-        }
-
         Ok(Ok(EvalValue::Comptime(build_uninit_comptime(
             ty,
             self.eval.types,
@@ -684,74 +673,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         self.diag_ctx.record_compile_log(self.eval.values, obj_vid, self.loc(expr_span));
         Ok(Ok(EvalValue::Comptime(ValueId::VOID)))
-    }
-
-    /// Emits MIR instructions for a runtime uninit value (memptr or struct containing memptr).
-    fn emit_uninit_runtime(&mut self, ty: TypeId) -> EvalValue {
-        let local = self.emit_uninit_runtime_local(ty);
-        EvalValue::Runtime { expr: mir::Expr::LocalRef(local), result_type: ty }
-    }
-
-    fn emit_uninit_runtime_local(&mut self, ty: TypeId) -> mir::LocalId {
-        match self.eval.types.lookup(ty) {
-            Type::Primitive(PrimitiveType::U256) => {
-                let target = self.mir_types.push(TypeId::U256);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::Const(ValueId::ZERO_NUM),
-                });
-                target
-            }
-            Type::Primitive(PrimitiveType::Bool) => {
-                let target = self.mir_types.push(TypeId::BOOL);
-                self.emit(mir::Instruction::Set { target, expr: mir::Expr::Const(ValueId::FALSE) });
-                target
-            }
-            Type::Primitive(PrimitiveType::MemoryPointer) => {
-                let size_local = self.mir_types.push(TypeId::U256);
-                self.emit(mir::Instruction::Set {
-                    target: size_local,
-                    expr: mir::Expr::Const(ValueId::ZERO_NUM),
-                });
-                let args = self.eval.mir_args.push_copy_slice(&[size_local]);
-                let target = self.mir_types.push(TypeId::MEMORY_POINTER);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::RuntimeBuiltinCall {
-                        builtin: RuntimeBuiltin::DynamicAllocAnyBytes,
-                        args,
-                    },
-                });
-                target
-            }
-            Type::Primitive(
-                PrimitiveType::Type
-                | PrimitiveType::Function
-                | PrimitiveType::CBytes
-                | PrimitiveType::Never,
-            ) => {
-                unreachable!("comptime-only/never types do not produce runtime locals")
-            }
-            Type::Compound(compound) => {
-                let fields: Vec<_> = match compound {
-                    Compound::Struct(r#struct) => r#struct
-                        .fields
-                        .iter()
-                        .map(|field| self.emit_uninit_runtime_local(field.ty))
-                        .collect(),
-                    Compound::Tuple(tuple) => {
-                        tuple.fields.iter().map(|&ty| self.emit_uninit_runtime_local(ty)).collect()
-                    }
-                };
-                let fields = self.eval.mir_args.push_copy_slice(&fields);
-                let target = self.mir_types.push(ty);
-                self.emit(mir::Instruction::Set {
-                    target,
-                    expr: mir::Expr::CompoundLit { ty, fields },
-                });
-                target
-            }
-        }
     }
 
     fn expect_field_index_arg(
@@ -995,6 +916,7 @@ pub(crate) fn fold_runtime_builtin(
                 RuntimeBuiltin::IsZero => U256::from(plank_evm::iszero(a)),
                 RuntimeBuiltin::Not => plank_evm::not(a),
                 RuntimeBuiltin::Clz => plank_evm::clz(a),
+                RuntimeBuiltin::BoolToU256 => a,
                 _ => unreachable!("not a unary foldable builtin: {builtin}"),
             }
         }
@@ -1051,10 +973,8 @@ fn build_uninit_comptime(
         Type::Primitive(PrimitiveType::Bool) => ValueId::FALSE,
         Type::Primitive(PrimitiveType::Type) => values.intern_type(TypeId::VOID),
         Type::Primitive(PrimitiveType::CBytes) => ValueId::BYTES_EMPTY,
-        Type::Primitive(
-            PrimitiveType::MemoryPointer | PrimitiveType::Function | PrimitiveType::Never,
-        ) => {
-            unreachable!("memptr/function/never cannot appear in comptime uninit compound")
+        Type::Primitive(PrimitiveType::Function | PrimitiveType::Never) => {
+            unreachable!("function/never cannot appear in comptime uninit compound")
         }
         Type::Compound(compound) => {
             let buf_offset = buf.len();

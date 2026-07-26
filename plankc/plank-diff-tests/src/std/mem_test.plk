@@ -1,0 +1,39 @@
+import std::error::require;
+import std::mem::{unsafe_mem_read, unsafe_mem_write};
+import std::type::sizeof;
+
+const Inner = struct {
+    marker: void,
+    enabled: bool,
+    value: u256
+};
+
+const Outer = struct {
+    flag: bool,
+    inner: Inner,
+    tail: u256
+};
+
+init {
+    let expected = Outer {
+        flag: false,
+        inner: Inner {
+            marker: (),
+            enabled: true,
+            value: 42
+        },
+        tail: 123
+    };
+    let size = comptime { sizeof(Outer) };
+    let ptr = @malloc_uninit(size);
+
+    unsafe_mem_write(ptr, expected);
+
+    let actual = unsafe_mem_read(Outer, ptr);
+    require(actual.flag == expected.flag);
+    require(actual.inner.enabled == expected.inner.enabled);
+    require(actual.inner.value == expected.inner.value);
+    require(actual.tail == expected.tail);
+
+    @evm_stop();
+}

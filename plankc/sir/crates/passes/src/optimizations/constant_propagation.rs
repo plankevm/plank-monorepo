@@ -285,8 +285,8 @@ impl SCCP {
         if !reachable.contains(to) {
             reachable.add(to);
             self.cfg_worklist.push(to);
-            self.flow_outputs_to(program, from, to);
         }
+        self.flow_outputs_to(program, from, to);
     }
 
     fn flow_outputs_to(&mut self, program: &EthIRProgram, from: BasicBlockId, to: BasicBlockId) {
@@ -664,6 +664,85 @@ mod tests {
 
         assert_eq!(sccp.lattice[LocalId::new(6)], LatticeValue::Overdefined);
         assert_eq!(sccp.lattice[LocalId::new(8)], LatticeValue::Overdefined);
+    }
+
+    #[test]
+    fn test_late_reachable_predecessor_flows_outputs_to_merge() {
+        let input = r#"
+            fn init:
+                entry {
+                    zero = const 0
+                    input = calldataload zero
+                    value = const 2
+                    is_zero = iszero input
+                    => is_zero ? @empty_true : @empty_false
+                }
+                empty_false -> is_zero value {
+                    => @after_empty
+                }
+                empty_true -> is_zero value {
+                    => @after_empty
+                }
+                after_empty is_zero_after value_after {
+                    => is_zero_after ? @assign_zero : @keep_value
+                }
+                keep_value -> value_after {
+                    => @merge
+                }
+                assign_zero -> replacement {
+                    replacement = const 0
+                    => @merge
+                }
+                merge merged {
+                    result = div merged merged
+                    stop
+                }
+        "#;
+
+        let (actual, _sccp) = run_const_prop(input);
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x0
+                    $1 = calldataload $0
+                    $2 = const 0x2
+                    $3 = iszero $1
+                    => $3 ? @2 : @1
+                }
+
+                @1 -> $3 $2 {
+                    => @3
+                }
+
+                @2 -> $3 $2 {
+                    => @3
+                }
+
+                @3 $4 $5 {
+                    => $4 ? @5 : @4
+                }
+
+                @4 -> $5 {
+                    => @6
+                }
+
+                @5 -> $6 {
+                    $6 = const 0x0
+                    => @6
+                }
+
+                @6 $7 {
+                    $8 = div $7 $7
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]

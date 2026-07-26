@@ -30,10 +30,6 @@ pub trait Idx:
     fn from_raw(raw: NonZero<u32>) -> Self;
     fn to_raw(self) -> NonZero<u32>;
 
-    fn max_value() -> Self {
-        Self::from_raw(NonZero::new(u32::MAX).unwrap())
-    }
-
     fn get(self) -> u32 {
         // Safety: `NonZero<u32>` guarantees `.get()` yields a value that's at least 1.
         unsafe { self.to_raw().get().unchecked_sub(1) }
@@ -271,7 +267,6 @@ mod tests {
     fn test_idx_constants() {
         assert_eq!(TestIdx::ZERO.get(), 0);
         assert_eq!(TestIdx::MAX.get(), u32::MAX - 1);
-        assert_eq!(TestIdx::max_value().get(), u32::MAX - 1);
     }
 
     #[test]

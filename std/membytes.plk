@@ -1,10 +1,8 @@
-import std::mem::{unsafe_mem_write_u256, unsafe_mem_read_u256, unsafe_mem_write_bytes, unsafe_mem_write};
+import std::mem::unsafe_mem_write;
 import std::option::{Option, Some, None};
 import std::type::sizeof;
-import std::utils::fold;
 import std::regions::*;
 
-// Invariant: membytes owns the memory region: [ptr, ptr + len).
 const membytes = bytes(memory);
 
 // Allocates a new zero-initialized buffer of `len` bytes.
@@ -14,16 +12,8 @@ const membytes_new = fn (len: u256) membytes {
 
 // Wraps an existing pointer and length into a membytes.
 // Caller must ensure the region [ptr, ptr + len) is valid.
-const membytes_from_ptr = fn (ptr: memptr, len: u256) membytes {
+const membytes_from_ptr = fn (ptr: u256, len: u256) membytes {
     membytes { ptr: ptr, length: len }
-};
-
-// Writes a u256 at `offset`. Returns None if out of bounds.
-const membytes_write_u256 = fn (buf: membytes, offset: u256, value: u256) Option(u256) {
-    if (buf.length < 32) | (offset > buf.length -% 32) {
-        return None(u256);
-    }
-    Some(unsafe_mem_write_u256(buf.ptr, offset, value))
 };
 
 // Reads a u256 from `offset`. Returns None if out of bounds.
@@ -31,14 +21,15 @@ const membytes_read_u256 = fn (buf: membytes, offset: u256) Option(u256) {
     if (buf.length < 32) | (offset > buf.length -% 32)  {
         return None(u256);
     }
-    Some(unsafe_mem_read_u256(buf.ptr, offset))
+    Some(@mload32(buf.ptr +% offset))
 };
 
-// Writes a value of any type T at `offset`. Returns None if out of bounds.
-const membytes_write = fn (buf: membytes, offset: u256, value: $T) Option(u256) {
+// Writes a value of any type T at `offset`. Returns false if out of bounds.
+const membytes_write = fn (buf: membytes, offset: u256, value: $T) bool {
     let size = comptime { sizeof(T) };
     if (buf.length < size) | (offset > buf.length -% size) {
-        return None(u256);
+        return false;
     }
-    Some(unsafe_mem_write(buf.ptr, offset, value))
+    unsafe_mem_write(buf.ptr +% offset, value);
+    true
 };

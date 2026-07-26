@@ -1,11 +1,12 @@
 use plank_core::Idx;
 use plank_test_utils::dedent_preserve_blank_lines;
-use sir_data::{BlockView, ControlView, EthIRProgram, Operation, OperationIdx};
+use sir_data::{BlockView, ControlView, EthIRProgram, Operation, OperationIdx, StaticAllocId};
 use sir_parser::EmitConfig;
 use sir_passes::AnalysesStore;
-use std::fmt::Write;
+use std::{collections::HashSet, fmt::Write};
 
 use super::{
+    ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ScheduleConfig, StackOps},
@@ -24,7 +25,8 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
 
 fn format_scheduled(program: &EthIRProgram, config: ScheduleConfig) -> String {
     let analyses = AnalysesStore::default();
-    let (lowered, layouts) = crate::schedule(program, &analyses, config);
+    let (lowered, layouts, next_alloc_id) = crate::schedule(program, &analyses, config);
+    assert_spill_alloc_invariants(program, &lowered, next_alloc_id);
 
     let mut out = String::new();
     for (block_id, ops) in lowered.enumerate_idx() {
@@ -55,6 +57,39 @@ fn format_scheduled(program: &EthIRProgram, config: ScheduleConfig) -> String {
     out
 }
 
+fn assert_spill_alloc_invariants(
+    program: &EthIRProgram,
+    scheduled: &ScheduledOps,
+    next_alloc_id: StaticAllocId,
+) {
+    let first_spill_alloc_id = program.next_static_alloc_id;
+    let mut all_stores = HashSet::new();
+
+    for (_, ops) in scheduled.enumerate_idx() {
+        let mut block_stores = HashSet::new();
+        for &op in ops {
+            match op {
+                StackOps::Store(id) => {
+                    assert!(id >= first_spill_alloc_id, "spill allocation overlaps IR allocation");
+                    assert!(
+                        id < next_alloc_id,
+                        "spill allocation exceeds returned allocation range"
+                    );
+                    assert!(all_stores.insert(id), "spill allocation reused across blocks");
+                    assert!(block_stores.insert(id));
+                }
+                StackOps::Load(id) => {
+                    assert!(block_stores.contains(&id), "load without preceding block-local store");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let total_stores = u32::try_from(all_stores.len()).expect("overflow");
+    assert_eq!(first_spill_alloc_id + total_stores, next_alloc_id);
+}
+
 fn fmt_layout(out: &mut String, layout: &Layout, block: BlockView<'_>) {
     out.push('[');
     for (idx, &member) in layout.members_fifo().iter().enumerate() {
@@ -82,6 +117,10 @@ fn fmt_stack_op(out: &mut String, program: &EthIRProgram, op: StackOps) {
         StackOps::Swap(depth) => write!(out, "swap {depth}").unwrap(),
         StackOps::Dup(depth) => write!(out, "dup {depth}").unwrap(),
         StackOps::Pop => out.push_str("pop"),
+        StackOps::Flipped(op) => {
+            out.push_str("[flipped] ");
+            fmt_op(out, program, op)
+        }
         StackOps::Op(op) => fmt_op(out, program, op),
         StackOps::CallRetPush(operation) => write!(out, "call_ret_push #{operation}").unwrap(),
         StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),
@@ -210,8 +249,7 @@ fn lowers_terminator_inputs() {
         @0 []
             const 0x1
             const 0x2
-            dup 0
-            dup 2
+            swap 1
             return
             => []
             (return)
@@ -236,8 +274,7 @@ fn lowers_binary_operation_inputs() {
         @0 []
             const 0x1
             const 0x2
-            dup 0
-            dup 2
+            swap 1
             add
             stop
             => []
@@ -274,26 +311,24 @@ fn lowers_memory_hash_and_store() {
             const 0x20
             const 0x40
             const 0x1
-            dup 3
+            swap 3
             calldataload
-            dup 3
-            calldataload
-            dup 3
-            malloc
             dup 2
-            dup 1
+            calldataload
+            dup 2
+            malloc
+            swap 2
+            dup 2
             mstore
-            dup 5
+            swap 3
             dup 1
             add
-            dup 2
-            dup 1
+            swap 1
+            swap 3
+            swap 1
             mstore
-            dup 5
-            dup 2
+            swap 1
             keccak256
-            dup 5
-            dup 1
             sstore
             stop
             => []
@@ -339,14 +374,14 @@ fn lowers_calldata_sum_loop() {
         r#"
         @0 []
             const 0x0
-            dup 0
             calldataload
             const 0x0
             const 0x20
             const 0x0
-            swap 4
-            pop
+            swap 3
+            swap 1
             swap 2
+            swap 1
             => [$1, $2, $3, $4]
             (jmp @1)
         @1 [$5, $6, $7, $8]
@@ -358,37 +393,31 @@ fn lowers_calldata_sum_loop() {
         @2 [$10, $11, $12, $13]
             dup 2
             calldataload
-            dup 0
-            dup 5
+            swap 1
+            swap 4
             add
             const 0x1
-            dup 0
-            dup 5
+            swap 1
+            swap 2
             add
             const 0x20
-            dup 0
-            dup 8
+            swap 1
+            swap 3
             add
-            swap 8
-            pop
-            pop
-            swap 5
-            pop
-            pop
-            swap 5
-            pop
-            pop
+            swap 2
+            swap 1
+            swap 3
             => [$10, $17, $19, $15]
             (jmp @1)
         @3 [$20, $21, $22, $23]
             const 0x20
             dup 0
             malloc
+            swap 5
             dup 5
-            dup 1
             mstore
-            dup 1
-            dup 1
+            swap 1
+            swap 4
             return
             => []
             (return)
@@ -465,11 +494,10 @@ fn simple_icall() {
             caller
             const 0x0
             call_ret_push #2
-            dup 2
-            dup 1
+            swap 1
+            swap 2
+            swap 1
             icall #2
-            dup 2
-            dup 1
             sstore
             stop
             => []
@@ -510,12 +538,68 @@ fn simple_op_use_spill() {
             const 0x0
             store :0
             store :1
-            dup 2
             store :2
-            load :1
-            load :0
-            load :2
+            store :3
+            store :4
+            load :4
             not
+            stop
+            => []
+            (stop)
+        "#,
+    );
+}
+
+#[test]
+fn spill_allocations_are_unique_across_internal_calls() {
+    assert_lowers_to(
+        ScheduleConfig::max_swap_no_exchange(1),
+        r#"
+        fn init:
+            entry {
+                arg = const 1
+                filler0 = const 2
+                caller_live = const 3
+                result = icall @callee arg
+                combined = add caller_live result
+                stop
+            }
+        fn callee:
+            entry input -> output {
+                filler0 = const 4
+                filler1 = const 5
+                output = not input
+                iret
+            }
+        "#,
+        r#"
+        @0 [return_dest, $0]
+            const 0x4
+            const 0x5
+            store :0
+            store :1
+            store :2
+            store :3
+            load :3
+            not
+            load :2
+            => [return_dest | $3]
+            (iret)
+        @1 []
+            const 0x1
+            const 0x2
+            const 0x3
+            call_ret_push #6
+            swap 1
+            store :4
+            store :5
+            store :6
+            store :7
+            load :7
+            load :5
+            icall #6
+            load :4
+            add
             stop
             => []
             (stop)
@@ -566,8 +650,6 @@ fn repeated_input() {
         @0 []
             const 0x3
             const 0x2
-            dup 1
-            dup 1
             dup 1
             addmod
             stop

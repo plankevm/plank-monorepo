@@ -3,9 +3,7 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
-use plank_values::{
-    Compound, Field, MixedComptimeAndRuntime, StructKey, StructView, Type, TypeId, Value,
-};
+use plank_values::{Compound, Field, StructKey, StructView, Type, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -55,20 +53,11 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 return Err(Poisoned);
             }
 
-            let (r#struct, ok) = this.eval.types.intern_struct(StructKey {
+            let r#struct = this.eval.types.intern_struct(StructKey {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
                 fields: &this.eval.fields_buf[fields_buf_offset..],
             });
-
-            if let Err(MixedComptimeAndRuntime) = ok {
-                this.diag_ctx.emit_mixed_struct_type(
-                    this.loc(def_expr_span),
-                    r#struct,
-                    this.eval.values,
-                );
-                return Err(Poisoned);
-            }
 
             Ok(TypeId::from_struct(r#struct))
         })
@@ -217,9 +206,6 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         })
     }
 
-    // R*st wants me to *manually* split things to appease the borrow checker and the linter
-    // complains that my function has "too many arguments", ok man, please kys.
-    #[allow(clippy::too_many_arguments)]
     fn runtime_eval_struct_lit(
         &mut self,
         mut validity: MaybePoisoned<()>,
