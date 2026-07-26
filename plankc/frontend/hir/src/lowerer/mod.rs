@@ -476,12 +476,12 @@ impl BlockLowerer<'_> {
             }
             ast::Expr::FnDef(fn_def) => ExprKind::FnDef(self.lower_fn_def(fn_def)),
             ast::Expr::If(if_expr) => {
-                if if_expr.else_body().is_none() {
+                if let Some(else_body) = if_expr.else_body() {
+                    self.lower_if(if_expr, Some(else_body))
+                } else {
                     self.emit_if_expr_missing_else(if_expr);
                     self.lower_expr_to_local(if_expr.condition());
                     ExprKind::POISON
-                } else {
-                    self.lower_if(if_expr)
                 }
             }
             ast::Expr::ComptimeBlock(block) => {
@@ -566,14 +566,19 @@ impl BlockLowerer<'_> {
         self.expr(kind, expr.span())
     }
 
-    fn lower_if(&mut self, if_expr: ast::IfExpr<'_>) -> ExprKind {
+    fn lower_if<'cst>(
+        &mut self,
+        if_expr: ast::IfExpr<'cst>,
+        else_body: Option<ast::BlockExpr<'cst>>,
+    ) -> ExprKind {
         let result = self.alloc_temp();
         let condition = self.lower_expr_to_local(if_expr.condition());
         let then_block = self.lower_branch_body(if_expr.body(), result);
         let else_block = self.lower_else_chain(
             result,
             if_expr.else_if_branches(),
-            if_expr.else_body().ok_or_else(|| if_expr.body().node().span()),
+            else_body,
+            if_expr.body().node().span(),
         );
         self.emit(InstructionKind::If {
             outer_result: Some(result),
@@ -734,15 +739,16 @@ impl BlockLowerer<'_> {
         &mut self,
         result: LocalId,
         mut branches: impl Iterator<Item = Result<ast::ElseIfBranch<'cst>, TokenSpan>>,
-        else_body: Result<ast::BlockExpr<'cst>, TokenSpan>,
+        else_body: Option<ast::BlockExpr<'cst>>,
+        void_else_span: TokenSpan,
     ) -> BlockId {
         while let Some(next) = branches.next() {
             let Ok(first) = next else { continue };
             return self.create_sub_block(first.node().span(), |this| {
                 let condition = this.lower_expr_to_local(first.condition());
                 let then_block = this.lower_branch_body(first.body(), result);
-                let else_body = else_body.map_err(|_| first.body().node().span());
-                let else_block = this.lower_else_chain(result, branches, else_body);
+                let else_block =
+                    this.lower_else_chain(result, branches, else_body, first.body().node().span());
                 this.emit(InstructionKind::If {
                     outer_result: None,
                     condition,
@@ -752,9 +758,9 @@ impl BlockLowerer<'_> {
             });
         }
         match else_body {
-            Ok(body) => self.lower_branch_body(body, result),
-            Err(empty_else_span) => self.create_sub_block(empty_else_span, |this| {
-                let expr = this.expr(ExprKind::VOID, empty_else_span);
+            Some(body) => self.lower_branch_body(body, result),
+            None => self.create_sub_block(void_else_span, |this| {
+                let expr = this.expr(ExprKind::VOID, void_else_span);
                 this.emit(InstructionKind::BranchSet { local: result, expr });
             }),
         }
@@ -841,7 +847,7 @@ impl BlockLowerer<'_> {
             // to the catch-all and deliberately discard their value, same as a discarded call.
             Statement::Expr(ast::Expr::If(if_expr)) if if_expr.else_body().is_none() => {
                 self.check_statement_if_branch_tails(if_expr);
-                let kind = self.lower_if(if_expr);
+                let kind = self.lower_if(if_expr, None);
                 let value = self.expr(kind, if_expr.node().span());
                 self.emit(InstructionKind::Eval(value));
             }
