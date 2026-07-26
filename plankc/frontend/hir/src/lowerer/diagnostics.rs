@@ -268,6 +268,17 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
+    pub(crate) fn emit_statement_if_branch_yields_value(&self, tail_span: TokenSpan) {
+        Diagnostic::error("branch of statement `if` yields a value")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(tail_span),
+                "an `if` without `else` cannot produce a value",
+            )
+            .help("add an `else` branch that yields a value")
+            .emit(*self.session.borrow_mut());
+    }
+
     pub fn emit_return_not_allowed_here(&self, return_span: TokenSpan) {
         Diagnostic::error("return is not allowed outside of function bodies")
             .element(

@@ -581,6 +581,40 @@ impl BlockLowerer<'_> {
         ExprKind::LocalRef(result)
     }
 
+    fn check_statement_if_branch_tails(&mut self, if_expr: ast::IfExpr<'_>) {
+        let branch_bodies = std::iter::once(if_expr.body())
+            .chain(if_expr.else_if_branches().flatten().map(|branch| branch.body()));
+        for body in branch_bodies {
+            if let Some(tail) = body.end_expr()
+                && !Self::expr_is_void_shaped(tail)
+            {
+                self.emit_statement_if_branch_yields_value(tail.span());
+            }
+        }
+    }
+
+    fn expr_is_void_shaped(expr: ast::Expr<'_>) -> bool {
+        fn block_is_void_shaped(block: ast::BlockExpr<'_>) -> bool {
+            block.end_expr().is_none_or(BlockLowerer::expr_is_void_shaped)
+        }
+
+        match expr {
+            ast::Expr::If(if_expr) => {
+                block_is_void_shaped(if_expr.body())
+                    && if_expr
+                        .else_if_branches()
+                        .flatten()
+                        .all(|branch| block_is_void_shaped(branch.body()))
+                    && if_expr.else_body().is_none_or(block_is_void_shaped)
+            }
+            ast::Expr::Block(block) | ast::Expr::ComptimeBlock(block) => {
+                block_is_void_shaped(block)
+            }
+            ast::Expr::Error { .. } => true,
+            _ => false,
+        }
+    }
+
     fn add_param_to_scope_as_local(&mut self, param: ast::Param<'_>) -> LocalId {
         self.alloc_local(param.name, LocalKind::Immutable, param.name_span())
     }
@@ -798,7 +832,12 @@ impl BlockLowerer<'_> {
                     lower_let(self);
                 }
             }
+            // Only the else-less `if` is checked for value-yielding branches: without an else
+            // its branches can't agree on producing a value, so a value in one is a likely
+            // mistake. Complete expressions (`if…else`, `{ .. }`, `comptime { .. }`) fall through
+            // to the catch-all and deliberately discard their value, same as a discarded call.
             Statement::Expr(ast::Expr::If(if_expr)) if if_expr.else_body().is_none() => {
+                self.check_statement_if_branch_tails(if_expr);
                 let kind = self.lower_if(if_expr);
                 let value = self.expr(kind, if_expr.node().span());
                 self.emit(InstructionKind::Eval(value));

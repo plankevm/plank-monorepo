@@ -1898,30 +1898,92 @@ fn test_while_body_tail_if_without_else_is_legal() {
 }
 
 #[test]
-fn test_statement_if_with_non_void_tail_lowers() {
-    assert_lowers_to(
-        r#"
+fn test_statement_if_with_non_void_tail_errors() {
+    let source = r#"
         init {
             let cond = @evm_iszero(@evm_calldataload(0));
             if cond { 1 };
             @evm_stop();
         }
-        "#,
-        r#"
-        ==== Constants ====
+    "#;
 
-        ==== Init ====
-        %0 = 0
-        %1 = @evm_calldataload(%0)
-        %2 = @evm_iszero(%1)
-        %4 = %2
-        %3 <- if %4 {
-            %3 [br]= 1
-        } else {
-            %3 [br]= type:tuple {}
-        }
-        eval %3
-        eval @evm_stop()
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: branch of statement `if` yields a value
+         --> main.plk:3:15
+          |
+        3 |     if cond { 1 };
+          |               ^ an `if` without `else` cannot produce a value
+          |
+          = help: add an `else` branch that yields a value
         "#,
     );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_value_tail_in_fn_body_errors() {
+    let source = r#"
+        const f = fn (cond: bool) u256 {
+            if cond { 1 }
+        };
+        init {
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: branch of statement `if` yields a value
+         --> main.plk:2:15
+          |
+        2 |     if cond { 1 }
+          |               ^ an `if` without `else` cannot produce a value
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_value_tail_in_block_expr_errors() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            let y = { if cond { 1 } };
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: branch of statement `if` yields a value
+         --> main.plk:3:25
+          |
+        3 |     let y = { if cond { 1 } };
+          |                         ^ an `if` without `else` cannot produce a value
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_with_void_shaped_if_else_tail_is_legal() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond {
+                if @evm_iszero(1) { @evm_sstore(1, 1); } else { @evm_sstore(2, 2); }
+            }
+            @evm_stop();
+        }
+    "#;
+
+    pretty_assertions::assert_str_eq!(render_diagnostics(source).trim(), "");
 }
