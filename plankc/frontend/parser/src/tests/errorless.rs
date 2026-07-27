@@ -1835,46 +1835,46 @@ fn test_struct_lit_in_parenthesized_if() {
                 "{"
                 StatementsList
                     "\n    "
-                If
-                    "if"
-                    " "
-                    ParenExpr
-                        "("
-                        MemberExpr
-                            StructLit
-                                Identifier
-                                    "S"
-                                " "
-                                "{"
-                                " "
-                                FieldAssign
+                    If
+                        "if"
+                        " "
+                        ParenExpr
+                            "("
+                            MemberExpr
+                                StructLit
                                     Identifier
-                                        "b"
-                                    ":"
+                                        "S"
                                     " "
-                                    BoolLiteral(false)
-                                        "false"
+                                    "{"
                                     " "
-                                "}"
-                            "."
-                            Identifier
-                                "b"
-                        ")"
-                    " "
-                    Block
-                        "{"
-                        StatementsList
-                            "\n        "
-                            CallExpr
+                                    FieldAssign
+                                        Identifier
+                                            "b"
+                                        ":"
+                                        " "
+                                        BoolLiteral(false)
+                                            "false"
+                                        " "
+                                    "}"
+                                "."
                                 Identifier
-                                    "wow"
-                                "("
-                                ")"
-                            ";"
-                            "\n    "
-                        "}"
-                    ElseIfBranchList
-                        "\n"
+                                    "b"
+                            ")"
+                        " "
+                        Block
+                            "{"
+                            StatementsList
+                                "\n        "
+                                CallExpr
+                                    Identifier
+                                        "wow"
+                                    "("
+                                    ")"
+                                ";"
+                                "\n    "
+                            "}"
+                        ElseIfBranchList
+                            "\n"
                 "}"
         "#,
     );
@@ -2672,23 +2672,23 @@ fn test_if_stmt_if_only() {
                 "{"
                 StatementsList
                     " "
-                If
-                    "if"
-                    " "
-                    Identifier
-                        "x"
-                    " "
-                    Block
-                        "{"
-                        StatementsList
-                            " "
-                            Identifier
-                                "y"
-                            ";"
-                            " "
-                        "}"
-                    ElseIfBranchList
+                    If
+                        "if"
                         " "
+                        Identifier
+                            "x"
+                        " "
+                        Block
+                            "{"
+                            StatementsList
+                                " "
+                                Identifier
+                                    "y"
+                                ";"
+                                " "
+                            "}"
+                        ElseIfBranchList
+                            " "
                 "}"
         "#,
     );
@@ -2714,41 +2714,41 @@ fn test_if_stmt_if_elseif() {
                 "{"
                 StatementsList
                     "\n    "
-                If
-                    "if"
-                    " "
-                    Identifier
-                        "a"
-                    " "
-                    Block
-                        "{"
-                        StatementsList
-                            "\n        "
-                            Identifier
-                                "b"
-                            ";"
-                            "\n    "
-                        "}"
-                    ElseIfBranchList
+                    If
+                        "if"
                         " "
-                        ElseIfBranch
-                            "else"
+                        Identifier
+                            "a"
+                        " "
+                        Block
+                            "{"
+                            StatementsList
+                                "\n        "
+                                Identifier
+                                    "b"
+                                ";"
+                                "\n    "
+                            "}"
+                        ElseIfBranchList
                             " "
-                            "if"
-                            " "
-                            NumLiteral
-                                "34"
-                            " "
-                            Block
-                                "{"
-                                StatementsList
-                                    "\n        "
-                                    Identifier
-                                        "d"
-                                    ";"
-                                    "\n    "
-                                "}"
-                        "\n"
+                            ElseIfBranch
+                                "else"
+                                " "
+                                "if"
+                                " "
+                                NumLiteral
+                                    "34"
+                                " "
+                                Block
+                                    "{"
+                                    StatementsList
+                                        "\n        "
+                                        Identifier
+                                            "d"
+                                        ";"
+                                        "\n    "
+                                    "}"
+                            "\n"
                 "}"
         "#,
     );

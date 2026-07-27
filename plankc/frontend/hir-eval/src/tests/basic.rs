@@ -28,12 +28,12 @@ fn test_simple_malloc_mstore_return() {
 }
 
 #[test]
-fn test_no_else_if_as_expr() {
+fn test_no_else_if_as_statement() {
     assert_lowers_to(
         "
         init {
             let cond = @evm_calldataload(0);
-            let y = if @evm_iszero(cond) {
+            if @evm_iszero(cond) {
                 @evm_revert(@malloc_uninit(0), 0);
             } else if @evm_gt(cond, 2) {
                 @evm_sstore(3, 4);

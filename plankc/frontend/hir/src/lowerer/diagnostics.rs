@@ -1,4 +1,7 @@
-use plank_parser::lexer::{Token, TokenSpan};
+use plank_parser::{
+    ast,
+    lexer::{Token, TokenSpan},
+};
 use plank_session::{
     Annotations, Builtin, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId,
     SourceSpan, StrId,
@@ -247,6 +250,32 @@ impl BlockLowerer<'_> {
                 "for division rounding towards positive infinity use {}",
                 Token::PlusSlash.name()
             ))
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn emit_if_expr_missing_else(&self, if_expr: ast::IfExpr<'_>) {
+        let start = if_expr.node().span().start;
+        let end = if_expr
+            .else_if_branches()
+            .flatten()
+            .last()
+            .map(|branch| branch.node().span().end)
+            .unwrap_or_else(|| if_expr.body().node().span().end);
+        let source_span = self.lexed.tokens_src_span(TokenSpan::new(start, end));
+        Diagnostic::error("`if` used as an expression is missing an `else` branch")
+            .primary(self.source_id, source_span, "this `if` must produce a value on every path")
+            .help("add an `else` branch that yields a value")
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn emit_statement_if_branch_yields_value(&self, tail_span: TokenSpan) {
+        Diagnostic::error("branch of statement `if` yields a value")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(tail_span),
+                "an `if` without `else` cannot produce a value",
+            )
+            .help("add an `else` branch that yields a value")
             .emit(*self.session.borrow_mut());
     }
 

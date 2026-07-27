@@ -1593,3 +1593,397 @@ fn test_return_outside_function_body() {
     );
     pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
 }
+
+#[test]
+fn test_if_expr_missing_else_in_let() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            let y = if cond { 1 } else if cond { 2 };
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: `if` used as an expression is missing an `else` branch
+         --> main.plk:3:13
+          |
+        3 |     let y = if cond { 1 } else if cond { 2 };
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this `if` must produce a value on every path
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_if_expr_missing_else_in_return() {
+    let source = r#"
+        const f = fn (cond: bool) u256 {
+            return if cond { 1 };
+        };
+        init {
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: `if` used as an expression is missing an `else` branch
+         --> main.plk:2:12
+          |
+        2 |     return if cond { 1 };
+          |            ^^^^^^^^^^^^^ this `if` must produce a value on every path
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_without_else_is_legal() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond {
+                @evm_sstore(1, 1);
+            }
+            if cond {
+                @evm_sstore(2, 2);
+            };
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = @evm_calldataload(%0)
+        %2 = @evm_iszero(%1)
+        %4 = %2
+        %3 <- if %4 {
+            %5 = 1
+            %6 = 1
+            eval @evm_sstore(%5, %6)
+            %3 [br]= type:tuple {}
+        } else {
+            %3 [br]= type:tuple {}
+        }
+        eval %3
+        %8 = %2
+        %7 <- if %8 {
+            %9 = 2
+            %10 = 2
+            eval @evm_sstore(%9, %10)
+            %7 [br]= type:tuple {}
+        } else {
+            %7 [br]= type:tuple {}
+        }
+        eval %7
+        eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_statement_if_without_else_is_legal() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond {
+                if cond {
+                    @evm_sstore(1, 1);
+                }
+            };
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = @evm_calldataload(%0)
+        %2 = @evm_iszero(%1)
+        %4 = %2
+        %3 <- if %4 {
+            %6 = %2
+            %5 <- if %6 {
+                %7 = 1
+                %8 = 1
+                eval @evm_sstore(%7, %8)
+                %5 [br]= type:tuple {}
+            } else {
+                %5 [br]= type:tuple {}
+            }
+            eval %5
+            %3 [br]= type:tuple {}
+        } else {
+            %3 [br]= type:tuple {}
+        }
+        eval %3
+        eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_statement_comptime_tail_if_without_else_is_legal() {
+    assert_lowers_to(
+        r#"
+        init {
+            comptime {
+                if @evm_iszero(0) {
+                    @evm_sstore(1, 1);
+                }
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        comptime {
+            %2 = 0
+            %3 = @evm_iszero(%2)
+            %1 <- if %3 {
+                %4 = 1
+                %5 = 1
+                eval @evm_sstore(%4, %5)
+                %1 [br]= type:tuple {}
+            } else {
+                %1 [br]= type:tuple {}
+            }
+            eval %1
+            %0 = type:tuple {}
+        }
+        eval %0
+        eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_init_body_tail_if_without_else_is_legal() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond {
+                @evm_sstore(1, 1);
+            }
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = @evm_calldataload(%0)
+        %2 = @evm_iszero(%1)
+        %4 = %2
+        %3 <- if %4 {
+            %5 = 1
+            %6 = 1
+            eval @evm_sstore(%5, %6)
+            %3 [br]= type:tuple {}
+        } else {
+            %3 [br]= type:tuple {}
+        }
+        eval %3
+        "#,
+    );
+}
+
+#[test]
+fn test_if_expr_missing_else_inside_discarded_if_branch() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond {
+                let y = if cond { 1 };
+            };
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: `if` used as an expression is missing an `else` branch
+         --> main.plk:4:17
+          |
+        4 |         let y = if cond { 1 };
+          |                 ^^^^^^^^^^^^^ this `if` must produce a value on every path
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_if_expr_missing_else_in_call_argument() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            @evm_sstore(if cond { 1 }, 2);
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: `if` used as an expression is missing an `else` branch
+         --> main.plk:3:17
+          |
+        3 |     @evm_sstore(if cond { 1 }, 2);
+          |                 ^^^^^^^^^^^^^ this `if` must produce a value on every path
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_while_body_tail_if_without_else_is_legal() {
+    assert_lowers_to(
+        r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            while cond {
+                if cond {
+                    @evm_sstore(1, 1);
+                }
+            }
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %1 = @evm_calldataload(%0)
+        %2 = @evm_iszero(%1)
+        while {
+            cond:
+                %3 = %2
+            test %3
+            body:
+                %5 = %2
+                %4 <- if %5 {
+                    %6 = 1
+                    %7 = 1
+                    eval @evm_sstore(%6, %7)
+                    %4 [br]= type:tuple {}
+                } else {
+                    %4 [br]= type:tuple {}
+                }
+                eval %4
+        }
+        eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_statement_if_with_non_void_tail_errors() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond { 1 };
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: branch of statement `if` yields a value
+         --> main.plk:3:15
+          |
+        3 |     if cond { 1 };
+          |               ^ an `if` without `else` cannot produce a value
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_value_tail_in_fn_body_errors() {
+    let source = r#"
+        const f = fn (cond: bool) u256 {
+            if cond { 1 }
+        };
+        init {
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: branch of statement `if` yields a value
+         --> main.plk:2:15
+          |
+        2 |     if cond { 1 }
+          |               ^ an `if` without `else` cannot produce a value
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_value_tail_in_block_expr_errors() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            let y = { if cond { 1 } };
+            @evm_stop();
+        }
+    "#;
+
+    let diagnostics = render_diagnostics(source);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: branch of statement `if` yields a value
+         --> main.plk:3:25
+          |
+        3 |     let y = { if cond { 1 } };
+          |                         ^ an `if` without `else` cannot produce a value
+          |
+          = help: add an `else` branch that yields a value
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
+}
+
+#[test]
+fn test_statement_if_with_void_shaped_if_else_tail_is_legal() {
+    let source = r#"
+        init {
+            let cond = @evm_iszero(@evm_calldataload(0));
+            if cond {
+                if @evm_iszero(1) { @evm_sstore(1, 1); } else { @evm_sstore(2, 2); }
+            }
+            @evm_stop();
+        }
+    "#;
+
+    pretty_assertions::assert_str_eq!(render_diagnostics(source).trim(), "");
+}
