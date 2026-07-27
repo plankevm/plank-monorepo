@@ -619,6 +619,7 @@ impl BlockLowerer<'_> {
                 block_is_void_shaped(block)
             }
             ast::Expr::Error { .. } => true,
+            ast::Expr::Call(_) => true,
             _ => false,
         }
     }
