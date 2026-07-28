@@ -488,6 +488,7 @@ impl BlockLowerer<'_> {
                 let len = u32::try_from(len).expect("source len checked to fit in u32");
                 ExprKind::Value(Ok(self.values.intern_bytes(value, 0, len)))
             }
+            ast::Expr::SelfType { .. } => todo!("Self type lowering"),
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
                 ExprKind::Member { object, member: member_expr.member }
@@ -521,6 +522,9 @@ impl BlockLowerer<'_> {
                 ExprKind::StructLit { ty, fields }
             }
             ast::Expr::StructDef(struct_def) => {
+                for _method in struct_def.methods() {
+                    todo!("method lowering");
+                }
                 let source_id = self.source_id;
                 let span = struct_def.node().span();
                 let source_span = self.lexed.tokens_src_span(span);

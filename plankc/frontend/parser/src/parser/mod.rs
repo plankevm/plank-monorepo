@@ -578,6 +578,10 @@ impl<'a> Parser<'a> {
             return Some(string_lit);
         }
 
+        if self.eat(Token::SelfType) {
+            return Some(self.alloc_last_token_as_node(NodeKind::SelfType));
+        }
+
         if let Some(identifier) = self.try_parse_ident() {
             return Some(identifier);
         }
@@ -651,6 +655,21 @@ impl<'a> Parser<'a> {
 
     fn parse_function_def(&mut self, start: TokenIdx, eager: bool) -> NodeIdx {
         let mut function = self.alloc_node_from(start, NodeKind::FnDef { eager });
+        self.parse_function_signature_and_body(&mut function);
+        self.close_node(function)
+    }
+
+    fn parse_method_def(&mut self) -> NodeIdx {
+        let start = self.current_token_index();
+        assert!(self.eat(Token::Fn));
+        let mut method = self.alloc_node_from(start, NodeKind::MethodDef);
+        let name = self.expect_ident();
+        self.push_child(&mut method, name);
+        self.parse_function_signature_and_body(&mut method);
+        self.close_node(method)
+    }
+
+    fn parse_function_signature_and_body(&mut self, function: &mut UnfinishedNode) {
         let mut parameter_list = self.alloc_node(NodeKind::ParamList);
         self.parse_delimited(Token::LeftRound, Token::RightRound, Token::Comma, |parser| {
             let parameter_start = parser.tokens.current();
@@ -694,15 +713,13 @@ impl<'a> Parser<'a> {
             true
         });
         let parameter_list = self.close_node(parameter_list);
-        self.push_child(&mut function, parameter_list);
+        self.push_child(function, parameter_list);
 
         let return_type = self.parse_expr(ParseExprMode::NoPostFixCurlyBrace);
-        self.push_child(&mut function, return_type);
+        self.push_child(function, return_type);
 
         let body = self.parse_block(self.current_token_index(), NodeKind::Block);
-        self.push_child(&mut function, body);
-
-        self.close_node(function)
+        self.push_child(function, body);
     }
 
     fn parse_struct_def(&mut self, start: TokenIdx) -> NodeIdx {
@@ -713,27 +730,59 @@ impl<'a> Parser<'a> {
             self.push_child(&mut struct_def, type_index);
         }
 
-        self.parse_delimited(Token::LeftCurly, Token::RightCurly, Token::Comma, |parser| {
-            if !parser.check(Token::Identifier) {
-                return false;
+        let mut body = self.alloc_node(NodeKind::StructBody);
+        self.expect(Token::LeftCurly);
+        let mut seen_method = false;
+        loop {
+            if self.eof() || self.check(Token::RightCurly) {
+                break;
             }
 
-            let mut field = parser.alloc_node(NodeKind::FieldDef);
+            if self.check(Token::Fn) {
+                seen_method = true;
+                let method = self.parse_method_def();
+                self.push_child(&mut body, method);
+                continue;
+            }
 
-            let name = parser.try_parse_ident().expect("read ident token, but no ident?");
-            parser.push_child(&mut field, name);
+            if self.check(Token::Identifier) {
+                if seen_method {
+                    self.emit_struct_field_after_method(self.current_token_index());
+                }
+                let field = self.parse_struct_field();
+                self.push_child(&mut body, field);
 
-            parser.expect(Token::Colon);
+                self.skip_trivia();
+                if self.at(Token::RightCurly) || self.at(Token::Eof) || self.at(Token::Fn) {
+                    continue;
+                }
+                self.expect_check_recovery(Token::Comma, &[Token::Identifier, Token::Fn]);
+                continue;
+            }
 
-            let r#type = parser.parse_expr(ParseExprMode::AllowAll);
-            parser.push_child(&mut field, r#type);
+            self.emit_unexpected();
+            let error = self.alloc_node(NodeKind::Error);
+            self.advance();
+            self.skip_until_recovery_token(&[Token::RightCurly, Token::Fn, Token::Identifier]);
+            let error = self.close_node(error);
+            self.push_child(&mut body, error);
+        }
+        self.expect(Token::RightCurly);
 
-            let field = parser.close_node(field);
-            parser.push_child(&mut struct_def, field);
-            true
-        });
+        let body = self.close_node(body);
+        self.push_child(&mut struct_def, body);
 
         self.close_node(struct_def)
+    }
+
+    fn parse_struct_field(&mut self) -> NodeIdx {
+        let mut field = self.alloc_node(NodeKind::FieldDef);
+        let name = self.try_parse_ident().expect("checked identifier token");
+        self.push_child(&mut field, name);
+        self.expect(Token::Colon);
+        let r#type = self.parse_expr(ParseExprMode::AllowAll);
+        self.push_child(&mut field, r#type);
+        self.close_node(field)
     }
 
     fn parse_tuple_type(&mut self, start: TokenIdx) -> NodeIdx {
@@ -799,6 +848,7 @@ impl<'a> Parser<'a> {
                     let error = self.alloc_node(NodeKind::Error);
                     if !self.at(Token::Semicolon)
                         && !self.at(Token::RightCurly)
+                        && !self.at(Token::LeftRound)
                         && !self.at(Token::Eof)
                     {
                         self.advance();
