@@ -1,0 +1,92 @@
+import std::core::regions::*;
+import std::core::uint::*;
+import std::option::*;
+import std::fixedbytes::*;
+
+const is_storage_region = fn (comptime R: type) bool {
+    R == storage or R == transient
+};
+
+const raw_store = fn (comptime R: type, slot: u256, value: u256) void {
+    if R == storage {
+        @evm_sstore(slot, value);
+    } else if R == transient {
+        @evm_tstore(slot, value);
+    } else {
+        @compile_error("raw_store: unexpected region `R`");
+    }
+};
+
+const raw_load = fn (comptime R: type, slot: u256) u256 {
+    if R == storage {
+        @evm_sload(slot)
+    } else if R == transient {
+        @evm_tload(slot)
+    } else {
+        @compile_error("raw_load: unexpected region `R`");
+    }
+};
+
+const _bit_size = fn (comptime T: type) u256 {
+    if is_uint(T) { bit_size(T) }
+    else if T == addr { 160 }
+    else if T == bool { 1 }
+    else if T == bytes32 { 256 }
+    else {
+        @compile_error("_bit_size: not fixed size type")
+    }
+};
+
+const _as_u256 = fn (value: $T) u256 {
+    if comptime { is_uint(T) } { cast_uint(value, u256) }
+    else if T == addr { cast_addr(value, u256) }
+    else if T == bool { @bool_to_u256(value) }
+    else if T == bytes32 { value.raw }
+    else {
+        @compile_error("_as_u256: not fixed size type")
+    }
+};
+
+const store = fn (comptime R: type, start_slot: u256, value: $T) void {
+    let mut slot_buf = 0;
+
+    comptime let mut rel_slot = 0;
+    comptime let mut bit_offset = 0;
+    comptime let mut fi = 0;
+    inline while fi < @field_count(T) {
+        let FieldType = @field_type(T, fi);
+
+        let bit_size = comptime { _bit_size(FieldType) };
+        let field_value = _as_u256(@get_field(value, fi));
+        if comptime { bit_size + bit_offset > 256 } {
+            raw_store(R, start_slot +% rel_slot, slot_buf);
+            rel_slot = rel_slot + 1;
+            slot_buf = field_value;
+            bit_offset = bit_size;
+        } else {
+            slot_buf = slot_buf | (field_value << bit_offset);
+            bit_offset = bit_offset + bit_size;
+        }
+
+
+        fi = fi + 1;
+    }
+
+    if bit_offset > 0 {
+        raw_store(R, start_slot +% rel_slot, slot_buf);
+    }
+};
+
+// const smap = fn (comptime R: type, comptime KeyT: type, comptime ValueT: type) type {
+//     if !comptime { is_region(R) } {
+//         @compile_error("smap: supplied `R` not a valid region");
+//     }
+//     if R != storage and R != transient {
+//         @compile_error("smap: unsupported region kind");
+//     }
+//
+//     struct (R, KeyT, ValueT) {
+//         base_slot: u256,
+//     }
+// };
+//

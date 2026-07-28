@@ -1,0 +1,254 @@
+import std::option::*;
+import std::core::uint::*;
+import std::fixedbytes::bytes32;
+
+// TODO: Replace with real enum.
+const memory    = struct {};
+const code      = struct {};
+const calldata  = struct {};
+const ctime     = struct {};
+const transient = struct {};
+const storage   = struct {};
+
+const is_region = fn (comptime R: $T) bool {
+    if T != type {
+        return false;
+    }
+    R == memory
+    or R == code
+    or R == calldata
+    or R == ctime
+    or R == transient
+    or R == storage
+};
+
+const rawptr = fn (comptime R: type)
+    {
+        if !is_region(R) {
+            @compile_error("`R` is not region");
+        }
+        type
+    }
+{
+    if R == ctime {
+        @compile_error("rawptr: `ctime` doesn't have rawptr representation");
+    }
+
+    if R == memory or R == calldata or R == code {
+        return struct R { raw: u256 };
+    }
+
+    if R == transient or R == storage {
+        return struct R { slot: u256, bit: u8 };
+    }
+
+    @compile_error("rawptr: unexpected region kind `R`")
+};
+
+const rawptr_get_region = fn (comptime T: type) Option(type) {
+    if T == rawptr(memory)    { return Some(memory); }
+    if T == rawptr(calldata)  { return Some(calldata); }
+    if T == rawptr(code)      { return Some(code); }
+    if T == rawptr(storage)   { return Some(storage); }
+    if T == rawptr(transient) { return Some(transient); }
+    None(type)
+};
+
+const malloc_uninit = fn (size: u256) rawptr(memory) {
+    rawptr(memory) { raw: @malloc_uninit(size) }
+};
+
+const malloc_zeroed = fn (size: u256) rawptr(memory) {
+    rawptr(memory) { raw: @malloc_zeroed(size) }
+};
+
+const unsafe_revert = fn (ptr: rawptr(memory), size: u256) never {
+    @evm_revert(ptr.raw, size);
+};
+
+const unsafe_mstore32 = fn (ptr: rawptr(memory), word: u256) void {
+    @mstore32(ptr.raw, word);
+};
+
+const unsafe_mload = fn (ptr: rawptr(memory)) u256 {
+    @mload32(ptr)
+};
+
+const unsafe_keccak256 = fn (ptr: rawptr(memory), size: u256) u256 {
+    @evm_keccak256(ptr.raw, size)
+};
+
+const rawptr_byte_addressable = fn (comptime T: type) bool {
+    T == rawptr(memory) or T == rawptr(calldata) or T == rawptr(code)
+};
+
+const wrapping_add_bytes = fn (ptr: $T, offset: u256)
+    {
+        if !rawptr_byte_addressable(T) {
+            @compile_error("wrapping_add: `ptr` is not a byte-addressable `rawptr(R)`");
+        }
+        T
+    }
+{
+    T { raw: ptr.raw +% offset }
+};
+
+const unsafe_calldatacopy = fn (dst: rawptr(memory), src: rawptr(calldata), size: u256) void {
+    @evm_calldatacopy(dst.raw, src.raw, size);
+};
+
+const unsafe_codecopy = fn (dst: rawptr(memory), src: rawptr(code), size: u256) void {
+    @evm_codecopy(dst.raw, src.raw, size);
+};
+
+const embed_get_ptr = fn (comptime data: cbytes) rawptr(code) {
+    rawptr(code) { raw: @data_offset(data) }
+};
+
+const bytes = fn (comptime R: type) type {
+    if R == ctime {
+        return cbytes;
+    }
+    return struct R {
+        ptr: rawptr(R),
+        length: u256,
+    };
+};
+
+
+const string = fn (comptime R: Region) type {
+    if R == ctime {
+        return struct R { data: cbytes };
+    }
+    return struct R { ptr: rawptr(R), length: u256 };
+};
+
+const unsafe_bytes_from_parts = fn (ptr: $T, length: u256)
+    {
+        let region = rawptr_get_region(T);
+        if !region.is_some {
+            @compile_error("unsafe_bytes_from_parts: `ptr` not a `rawptr(R)`");
+        }
+        bytes(region.inner)
+    }
+{
+    bytes(rawptr_get_region(T)) { ptr: ptr, length: length }
+};
+
+const embed_as = fn (comptime data: cbytes, comptime R: type) bytes(R) {
+    if region == code {
+        return unsafe_bytes_from_parts(embed_get_ptr(data), data.length);
+    }
+    if region == memory {
+        let ptr = malloc_uninit(data.length);
+        unsafe_codecopy(ptr, embed_get_ptr(data), data.length);
+        return unsafe_bytes_from_parts(ptr, data.length);
+    }
+    if region == calldata {
+        @compile_error("cannot convert `cbytes` to a `bytes(calldata)`, calldata is read only");
+    }
+    if region == ctime {
+        return data;
+    }
+    @compile_error("embed_as: unrecognized region type");
+};
+
+const copy_if_not_already_memory = fn (data: $T) bytes(memory) {
+    if T == bytes(ctime) {
+        return embed_as(data, memory);
+    }
+    if T == bytes(calldata) {
+        let ptr = malloc_uninit(data.length);
+        unsafe_calldatacopy(ptr, data.ptr, data.length);
+        return unsafe_bytes_from_parts(ptr, data.length);
+    }
+    if T == bytes(code) {
+        let ptr = malloc_uninit(data.length);
+        unsafe_codecopy(ptr, data.ptr, data.length);
+        return unsafe_bytes_from_parts(ptr, data.length);
+    }
+    if T == bytes(memory) {
+        return data;
+    }
+    @compile_error("copy_if_not_already_memory: type of `data` not supported");
+};
+
+const slice_bytes = fn (data: $T, start: u256, end: u256) T {
+    if T == bytes(ctime) {
+        return @slice_cbytes(data, start, end);
+    }
+
+    if T == bytes(calldata)
+        or T == bytes(code)
+        or T == bytes(memory)
+    {
+        require((start <= end) & (end <= data.length), ());
+        return T {
+            ptr: wrapping_add_bytes(data.ptr, start),
+            length: end -% start
+        };
+    }
+
+    if T == bytes(storage) or T == bytes(transient) {
+        require((start <= end) & (end <= data.length), ());
+    }
+
+    @compile_error("slice_bytes: type of `data` not supported");
+};
+
+const keccak256 = fn (data: $T) bytes32 {
+    let raw_hash = if T == bytes(ctime) {
+        @keccak256_cbytes(data)
+    } else if T == bytes(memory) {
+        unsafe_keccak256(data.ptr, data.length)
+    } else if T == bytes(calldata) {
+        let ptr = malloc_uninit(data.length);
+        unsafe_calldatacopy(ptr, data.ptr, data.length);
+        unsafe_keccak256(ptr, data.length)
+    } else if T == bytes(code) {
+        let ptr = malloc_uninit(data.length);
+        unsafe_codecopy(ptr, data.ptr, data.length);
+        unsafe_keccak256(ptr, data.length)
+    } else {
+        @compile_error("keccak256: unsupported type");
+    };
+    bytes32 { raw: raw_hash }
+};
+
+const bytes_eq = fn (b1: $T1, b2: $T2) bool {
+    if T1 == bytes(ctime) and T2 == bytes(ctime) {
+        return b1 == b2;
+    }
+    if T1 == bytes(ctime) {
+        return comptime { keccak256(b1).raw } == keccak256(b2).raw;
+    }
+    if T2 == bytes(ctime) {
+        return keccak256(b1).raw == comptime { keccak256(b2).raw };
+    }
+    if b1.length != b2.length {
+        return false;
+    }
+    return keccak256(b1).raw == keccak256(b2).raw;
+};
+
+const membytes_new_zeroed = fn (size: u256) bytes(memory) {
+    unsafe_bytes_from_parts(malloc_zeroed(size), size)
+}
+
+// Reads a u256 from `offset`. Returns None if out of bounds.
+const membytes_read_u256 = fn (buf: bytes(memory), offset: u256) Option(u256) {
+    if (buf.length < 32) | (offset > buf.length -% 32)  {
+        return None(u256);
+    }
+    Some(@mload32(buf.ptr +% offset))
+};
+
+// Writes a value of any type T at `offset`. Returns false if out of bounds.
+const membytes_write = fn (buf: membytes, offset: u256, value: $T) bool {
+    let size = comptime { sizeof(T) };
+    if (buf.length < size) | (offset > buf.length -% size) {
+        return false;
+    }
+    unsafe_mem_write(buf.ptr +% offset, value);
+    true
+};

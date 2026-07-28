@@ -1,40 +1,41 @@
 const Option = fn (comptime T: type) type {
     struct {
         inner: T,
-        is_some: bool
+        is_some: bool,
     }
 };
 
 const Some = fn (value: $T) Option(T) {
-    Option(T) { inner: value, is_some: true }
+    Option(T) {
+        inner: value,
+        is_some: true,
+    }
 };
 
 const None = fn (comptime T: type) Option(T) {
-    Option(T) { inner: @uninit(T), is_some: false }
-};
-
-const is_some = fn (comptime T: type, opt: Option(T)) bool {
-    opt.is_some
+    Option(T) {
+        inner: @uninit(T),
+        is_some: false,
+    }
 };
 
 const is_none = fn (comptime T: type, opt: Option(T)) bool {
     !opt.is_some
 };
 
+const get_option_type = fn (comptime T: type) Option(type) {
+    if !@is_struct(T) or @field_count(T) != 2 or Option(@field_type(T, 0)) != T {
+        return None(type);
+    }
+    Some(@field_type(T, 0))
+};
+
 const unwrap = fn (opt: $T) {
-    let err_msg = "unwrap: `opt` not `Option(_)`";
-    if !@is_struct(T) {
-        @compile_error(err_msg);
+    let inner_type = get_option_type(opt);
+    if !opt.is_some {
+        @compile_error("unwrap: `opt` not a `Option(_)`");
     }
-    let i = @field_index(T, "inner");
-    if i >= @field_count(T) {
-        @compile_error(err_msg);
-    }
-    let inner_type = @field_type(T, i);
-    if T != Option(inner_type) {
-        @compile_error(err_msg);
-    }
-    inner_type
+    inner_type.inner
 } {
     if !opt.is_some {
         if @in_comptime() {
