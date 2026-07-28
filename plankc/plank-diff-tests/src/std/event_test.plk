@@ -1,7 +1,3 @@
-// Runtime differential coverage for `std::event`, checked log-for-log against
-// `EventTest.sol`: every `emit` / `emit_anonymous` dispatch arm, every
-// supported field type indexed and not, and the data-section layout edge cases
-// (empty section, mixed static/dynamic, `bytes` length boundaries).
 import std::constructor::return_runtime;
 import std::event::{Indexed, emit, emit_anonymous};
 import std::core::addr::{addr, addr_from_u256};
@@ -42,16 +38,11 @@ const AnonFour = struct {
     e: u256,
 };
 
-// `emit` with exactly one indexed field of a *static* type, so the n == 1 arm
-// (`@evm_log2`) is reached without going through the dynamic topic path.
 const OneIndexed = struct {
     who:   Indexed(addr),
     value: u256,
 };
 
-// `emit_anonymous` at each arity below 4. The anonymous dispatch maps an
-// indexed count of n onto LOGn, one lower than `emit` does, so every arm needs
-// its own case.
 const AnonZero = struct {
     a: u256,
     b: bool,
@@ -75,24 +66,15 @@ const AnonThree = struct {
     d: bool,
 };
 
-// Every field indexed, so the data section is EMPTY: `size` is 0, the buffer
-// comes from `@malloc_uninit(0)`, and the log is emitted with a zero length.
-// No other event here reaches that path.
 const AllIndexed = struct {
     who: Indexed(addr),
 };
 
-// The same empty data section down the anonymous dispatch, where the length is
-// the only operand besides the topics.
 const AnonAllIndexed = struct {
     a: Indexed(u256),
     b: Indexed(u256),
 };
 
-// `bytes32` and `Indexed(bool)` are in the documented type table and asserted
-// at comptime, but nothing emitted them at runtime: `bytes32` is a one-field
-// wrapper struct that must encode as a bare word, and a `bool` topic must be
-// the padded 0/1, not the struct.
 const Flags = struct {
     tag:  Indexed(bytes32),
     on:   Indexed(bool),
@@ -100,9 +82,6 @@ const Flags = struct {
     off:  bool,
 };
 
-// Data section mixing static and dynamic fields, so fixed fields sit between
-// two tail pointers. Also covers uintN widths and `address` in the data
-// section, and a non-indexed `string`.
 const MixedBag = struct {
     id:    Indexed(u256),
     small: u8,
@@ -113,32 +92,20 @@ const MixedBag = struct {
     huge:  u160,
 };
 
-// Indexed `uintN` topics. Solidity left-zero-pads a narrow uint to a full word;
-// `topic_word` unwraps `Indexed(uN)` -> `uN` -> `u256` to the raw value, so the
-// two only agree if no stray high bits survive the unwrap.
 const UintIndexed = struct {
     tier:  Indexed(u8),
     rate:  Indexed(u32),
     payee: Indexed(u160),
     note:  u256,
-    // Non-indexed narrow ints, including the widest `uintN` the ABI names.
     tag:   u8,
     max:   u248,
 };
 
-// Indexed `string` takes the keccak-of-contents topic path, which is distinct
-// from the `membytes` one (it hashes `value.bytes`, not the wrapper).
 const StrIndexed = struct {
     key: Indexed(string),
     val: string,
 };
 
-// `bytes` length edge cases in the data section: empty, exactly one word,
-// spanning multiple words, and a non-word-multiple length within a single
-// word (23 bytes of tail padding — the shape of the zero-padding bug fixed
-// for the generic ABI encoder in `abi_helpers.plk`; `exact`/`over` above are
-// word-aligned or padded only in a trailing word after a full first word, so
-// neither exercised a single word that is mostly padding).
 const BytesEdges = struct {
     empty: membytes,
     exact: membytes,
@@ -146,10 +113,6 @@ const BytesEdges = struct {
     nine:  membytes,
 };
 
-// The same edge cases as topics, so keccak of an empty / word-aligned /
-// multi-word buffer is checked against solc. The data section is all-static
-// even though three fields are dynamic, which is the case the `keep`-aware
-// `is_abi_dynamic_where` fast path in `abi_helpers.plk` exists for.
 const BytesEdgesIndexed = struct {
     empty: Indexed(membytes),
     exact: Indexed(membytes),

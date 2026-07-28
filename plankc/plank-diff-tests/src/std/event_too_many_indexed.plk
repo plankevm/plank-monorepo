@@ -1,13 +1,6 @@
-// Negative fixture: `emit` reserves topic0 for the signature hash, so it
-// allows at most 3 indexed fields. This struct has 4, so this file is
-// expected to FAIL to compile with:
+// Negative fixture: this file is EXPECTED to fail compilation with
 //   emit: event has more than 3 indexed fields
-//
-// `forge test` only compiles the `.plk` files its tests deploy, so this file
-// cannot live in a diff test. It is asserted on instead by
-// `too_many_indexed_event_fields_fails_to_compile` in
-// `plankc/frontend/cli/tests/std_module.rs`, which builds it and checks for a
-// non-zero exit and the message above.
+// Nothing currently asserts this; verify by hand until a test covers it.
 import std::constructor::return_runtime;
 import std::event::{Indexed, emit};
 

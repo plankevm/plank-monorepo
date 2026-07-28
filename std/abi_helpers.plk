@@ -12,12 +12,6 @@ const abi_include_all = fn (comptime F: type) bool {
     true
 };
 
-// Shape questions — "is this field kept?", "is this type dynamic?", "how big is
-// the head?" — depend only on comptime arguments, but the backend does not inline
-// or fold across calls. Left bare they lower to real call frames in the emitted
-// bytecode, one per question per field. `comptime { .. }` forces the frontend to
-// answer them during compilation, so only the genuine runtime arithmetic survives.
-
 // Whether the tuple formed by the fields of `T` for which `keep` holds has a
 // tail. Only kept fields are considered: an event with an indexed dynamic field
 // and an otherwise static data section encodes as a pure head, and asking the

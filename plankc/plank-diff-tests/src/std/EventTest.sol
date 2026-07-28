@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-// Mirrors src/std/event_test.plk field-for-field: same events, same types,
-// same indexed-ness, same values, emitted in the same order.
 contract EventTest {
     event Transfer(address indexed from, address indexed to, uint256 amount);
     event NoIndex(uint256 a, bool b);
@@ -23,8 +21,6 @@ contract EventTest {
     event AnonTwo(address indexed who, uint256 indexed b, uint256 c) anonymous;
     event AnonThree(uint256 indexed a, uint256 indexed b, uint256 indexed c, bool d) anonymous;
 
-    // Empty data sections: every field is indexed, so the log carries zero
-    // bytes of data.
     event AllIndexed(address indexed who);
     event AnonAllIndexed(uint256 indexed a, uint256 indexed b) anonymous;
 
