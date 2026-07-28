@@ -1,0 +1,33 @@
+// Negative fixture: `emit` reserves topic0 for the signature hash, so it
+// allows at most 3 indexed fields. This struct has 4, so this file is
+// expected to FAIL to compile with:
+//   emit: event has more than 3 indexed fields
+//
+// `forge test` only compiles the `.plk` files its tests deploy, so this file
+// cannot live in a diff test. It is asserted on instead by
+// `too_many_indexed_event_fields_fails_to_compile` in
+// `plankc/frontend/cli/tests/std_module.rs`, which builds it and checks for a
+// non-zero exit and the message above.
+import std::constructor::return_runtime;
+import std::event::{Indexed, emit};
+
+const TooMany = struct {
+    a: Indexed(u256),
+    b: Indexed(u256),
+    c: Indexed(u256),
+    d: Indexed(u256),
+    e: u256,
+};
+
+init { return_runtime(); }
+
+run {
+    emit(TooMany {
+        a: Indexed(u256) { inner: 1 },
+        b: Indexed(u256) { inner: 2 },
+        c: Indexed(u256) { inner: 3 },
+        d: Indexed(u256) { inner: 4 },
+        e: 5,
+    });
+    @evm_stop();
+}

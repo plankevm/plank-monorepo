@@ -1,0 +1,259 @@
+import std::core::uint::{is_uint, bit_size};
+import std::core::addr::addr;
+import std::fixedbytes::bytes32;
+import std::membytes::membytes;
+import std::string::string;
+import std::utils::fold;
+import std::regions::keccak256;
+import std::abi_helpers::{abi_head_size_where, abi_encoded_size_where, unsafe_abi_encode_where};
+
+// Marks an event field as indexed (emitted as a topic rather than in the data
+// section). Nominal by construction: struct interning keys on definition site,
+// so a user's own `struct { inner: T }` is a distinct type.
+const Indexed = fn (comptime T: type) type { struct { inner: T } };
+
+const is_indexed = fn (comptime F: type) bool {
+    if !@is_struct(F) { return false; }
+    if @field_count(F) != 1 { return false; }
+    Indexed(@field_type(F, 0)) == F
+};
+
+const indexed_base = fn (comptime F: type) type {
+    if is_indexed(F) { @field_type(F, 0) } else { F }
+};
+
+const digit_char = fn (comptime d: u256) cbytes {
+    if d == 0 { "0" } else if d == 1 { "1" } else if d == 2 { "2" }
+    else if d == 3 { "3" } else if d == 4 { "4" } else if d == 5 { "5" }
+    else if d == 6 { "6" } else if d == 7 { "7" } else if d == 8 { "8" }
+    else { "9" }
+};
+
+const decimal_cbytes = fn (comptime n: u256) cbytes {
+    if n < 10 {
+        digit_char(n)
+    } else {
+        @concat_cbytes((decimal_cbytes(n </ 10), digit_char(n % 10)))
+    }
+};
+
+// `addr` and `bytes32` are checked before `is_uint` because they are structs
+// too; `is_uint` rejects them (their type index is not a u256), but the
+// explicit order keeps the intent obvious.
+const sol_type_name = fn (comptime T: type) cbytes {
+    if T == bool { return "bool"; }
+    if T == addr { return "address"; }
+    if T == bytes32 { return "bytes32"; }
+    if T == string { return "string"; }
+    if T == membytes { return "bytes"; }
+    if T == u256 { return "uint256"; }
+    if is_uint(T) {
+        if comptime { bit_size(T) % 8 != 0 or bit_size(T) < 8 or bit_size(T) > 248 } {
+            @compile_error("event: uintN field width must be a multiple of 8 between 8 and 248");
+        }
+        return @concat_cbytes(("uint", decimal_cbytes(bit_size(T))));
+    }
+    @compile_error("event: field type has no Solidity ABI name")
+};
+
+// `emit` type-checks every field for free: `topic0` -> `event_signature` ->
+// `sol_type_name`, which rejects anything without a Solidity ABI name.
+// `emit_anonymous` has no topic0 and so never builds a signature, leaving its
+// NON-indexed fields unchecked (indexed ones are still caught by `topic_word`).
+// This walk exists purely for `sol_type_name`'s `@compile_error` side effect;
+// the returned name is compared against "" only because a comptime call needs
+// its result used. It builds no signature and hashes nothing — an anonymous
+// event has no topic0 to derive.
+const fields_have_sol_names = fn (comptime T: type) bool {
+    fold(
+        @field_count(T),
+        fn (comptime i: u256, acc: bool) bool {
+            if sol_type_name(indexed_base(@field_type(T, i))) == "" { false } else { acc }
+        },
+        true
+    )
+};
+
+const indexed_count = fn (comptime T: type) u256 {
+    fold(
+        @field_count(T),
+        fn (comptime i: u256, acc: u256) u256 {
+            if is_indexed(@field_type(T, i)) { acc + 1 } else { acc }
+        },
+        0
+    )
+};
+
+// Indexed fields still appear in the signature, in declaration order, exactly
+// as Solidity does.
+const event_signature = fn (comptime T: type) cbytes {
+    if !@is_struct(T) {
+        @compile_error("event: expected a struct type");
+    }
+    if !@has_plain_name(T) {
+        @compile_error("event: event struct must be bound to a named const");
+    }
+    let params = fold(
+        @field_count(T),
+        fn (comptime i: u256, acc: cbytes) cbytes {
+            let name = sol_type_name(indexed_base(@field_type(T, i)));
+            if i == 0 { name } else { @concat_cbytes((acc, ",", name)) }
+        },
+        ""
+    );
+    @concat_cbytes((@type_name(T), "(", params, ")"))
+};
+
+const topic0 = fn (comptime T: type) bytes32 {
+    bytes32 { raw: @keccak256_cbytes(event_signature(T)) }
+};
+
+// Static values recurse through single-field wrapper structs (Indexed, addr,
+// bytes32, UInt(N)) down to the raw word. This is pure field access on
+// flattened locals and emits no EVM operations.
+const topic_word = fn (value: $F) u256 {
+    if F == u256 { return value; }
+    if F == bool { return if value { 1 } else { 0 }; }
+    // Dynamic topics are the keccak of the contents, not the padded value.
+    if F == membytes { return keccak256(value).raw; }
+    if F == string { return keccak256(value.bytes).raw; }
+    if @is_struct(F) {
+        if @field_count(F) == 1 {
+            return topic_word(@get_field(value, 0));
+        }
+    }
+    @compile_error("event: indexed field type cannot be encoded as a topic")
+};
+
+const NthIndexedAcc = struct {
+    seen:   u256,
+    target: u256,
+    found:  u256
+};
+
+// Returns the field index of the k-th indexed field, or `@field_count(T)` as a
+// sentinel when k is out of range.
+const nth_indexed_field = fn (comptime T: type, comptime k: u256) u256 {
+    let result = fold(
+        @field_count(T),
+        fn (comptime i: u256, acc: NthIndexedAcc) NthIndexedAcc {
+            if !is_indexed(@field_type(T, i)) {
+                acc
+            } else if acc.seen == acc.target {
+                NthIndexedAcc { seen: acc.seen + 1, target: acc.target, found: i }
+            } else {
+                NthIndexedAcc { seen: acc.seen + 1, target: acc.target, found: acc.found }
+            }
+        },
+        NthIndexedAcc { seen: 0, target: k, found: @field_count(T) }
+    );
+    result.found
+};
+
+// Returns 0 for out-of-range k so every arm of the dispatch chain stays
+// well-typed regardless of comptime pruning order.
+const topic_at = fn (event: $T, comptime k: u256) u256 {
+    let idx = comptime { nth_indexed_field(T, k) };
+    if comptime { idx >= @field_count(T) } {
+        return 0;
+    }
+    topic_word(@get_field(event, idx))
+};
+
+const is_not_indexed = fn (comptime F: type) bool { !is_indexed(F) };
+
+const event_data_head_size = fn (comptime T: type) u256 {
+    comptime { abi_head_size_where(T, is_not_indexed) }
+};
+
+const event_data_size = fn (value: $T) u256 {
+    abi_encoded_size_where(value, is_not_indexed)
+};
+
+// Offsets are relative to `buf` because the event data section is encoded as a
+// standalone tuple of the non-indexed fields.
+const encode_event_data = fn (buf: u256, value: $T) u256 {
+    unsafe_abi_encode_where(buf, 0, value, is_not_indexed)
+};
+
+// Encoding an event resolves its whole shape — which fields are indexed, which
+// are dynamic, how wide the head is — during compilation, so that none of it
+// survives as runtime code. That trades runtime gas for comptime branches: about
+// a hundred per `emit`, against a default budget of 1000 for the entire enclosing
+// block. A contract with a handful of events would exhaust it. The builtin only
+// ever raises the limit, so this cannot shrink a budget a caller has chosen.
+const EMIT_EVAL_BRANCH_QUOTA = 10000;
+
+const emit = fn (event: $T) void {
+    comptime {
+        @set_eval_branch_quota(EMIT_EVAL_BRANCH_QUOTA);
+        if !@is_struct(T) {
+            @compile_error("emit: expected a struct type");
+        }
+        if indexed_count(T) > 3 {
+            @compile_error(
+                "emit: event has more than 3 indexed fields; "
+                "non-anonymous events reserve topic0 for the signature hash "
+                "(use emit_anonymous for up to 4)"
+            );
+        }
+    }
+    let size = event_data_size(event);
+    let buf = @malloc_uninit(size);
+    encode_event_data(buf, event);
+
+    let t0 = comptime { topic0(T).raw };
+    let n = comptime { indexed_count(T) };
+
+    if n == 0 {
+        @evm_log1(buf, size, t0);
+    } else if n == 1 {
+        @evm_log2(buf, size, t0, topic_at(event, 0));
+    } else if n == 2 {
+        @evm_log3(buf, size, t0, topic_at(event, 0), topic_at(event, 1));
+    } else {
+        @evm_log4(
+            buf, size, t0,
+            topic_at(event, 0), topic_at(event, 1), topic_at(event, 2)
+        );
+    }
+};
+
+const emit_anonymous = fn (event: $T) void {
+    comptime {
+        @set_eval_branch_quota(EMIT_EVAL_BRANCH_QUOTA);
+        if !@is_struct(T) {
+            @compile_error("emit_anonymous: expected a struct type");
+        }
+        if indexed_count(T) > 4 {
+            @compile_error("emit_anonymous: event has more than 4 indexed fields");
+        }
+        if !fields_have_sol_names(T) {
+            @compile_error("emit_anonymous: field type has no Solidity ABI name");
+        }
+    }
+    let size = event_data_size(event);
+    let buf = @malloc_uninit(size);
+    encode_event_data(buf, event);
+
+    let n = comptime { indexed_count(T) };
+
+    if n == 0 {
+        @evm_log0(buf, size);
+    } else if n == 1 {
+        @evm_log1(buf, size, topic_at(event, 0));
+    } else if n == 2 {
+        @evm_log2(buf, size, topic_at(event, 0), topic_at(event, 1));
+    } else if n == 3 {
+        @evm_log3(
+            buf, size,
+            topic_at(event, 0), topic_at(event, 1), topic_at(event, 2)
+        );
+    } else {
+        @evm_log4(
+            buf, size,
+            topic_at(event, 0), topic_at(event, 1),
+            topic_at(event, 2), topic_at(event, 3)
+        );
+    }
+};

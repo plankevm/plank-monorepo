@@ -1,6 +1,7 @@
 import std::storage::map_slot_hash;
 import std::core::addr::*;
 import std::precompile::ecrecover;
+import std::event::{Indexed, emit};
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
@@ -33,9 +34,6 @@ const DOMAIN_TYPEHASH = /* `keccak256("EIP712Domain(string name,string version,u
 const PERMIT_TYPEHASH = /* `keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")` */
     0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
 
-const TRANSFER_TOPIC = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
-const APPROVAL_TOPIC = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
-
 const PERMIT2 = addr_from_u256(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
 const INSUFFICIENT_BALANCE_SELECTOR = 0xf4d678b8 /* InsufficientBalance() */;
@@ -67,16 +65,32 @@ const allowance_slot = fn (owner: addr, spender: addr) u256 {
     @evm_keccak256(buf +% (31 - 20 + 12), 20 + 20 + 1)
 };
 
+const Transfer = struct {
+    from:   Indexed(addr),
+    to:     Indexed(addr),
+    amount: u256,
+};
+
+const Approval = struct {
+    owner:   Indexed(addr),
+    spender: Indexed(addr),
+    amount:  u256,
+};
+
 const emit_transfer = fn (from: addr, to: addr, amount: u256) void {
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, amount);
-    @evm_log3(buf, 32, TRANSFER_TOPIC, cast_addr(from, u256), cast_addr(to, u256));
+    emit(Transfer {
+        from:   Indexed(addr) { inner: from },
+        to:     Indexed(addr) { inner: to },
+        amount: amount,
+    });
 };
 
 const emit_approval = fn (owner: addr, spender: addr, amount: u256) void {
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, amount);
-    @evm_log3(buf, 32, APPROVAL_TOPIC, cast_addr(owner, u256), cast_addr(spender, u256));
+    emit(Approval {
+        owner:   Indexed(addr) { inner: owner },
+        spender: Indexed(addr) { inner: spender },
+        amount:  amount,
+    });
 };
 
 const revert_4byte = fn (comptime selector: u256) never {

@@ -1,0 +1,138 @@
+import std::constructor::return_runtime;
+import std::error::comptime_assert;
+import std::event::{Indexed, is_indexed, indexed_base, decimal_cbytes, sol_type_name, event_signature, topic0, indexed_count, nth_indexed_field, event_data_head_size, is_not_indexed};
+import std::abi_helpers::{is_abi_dynamic, is_abi_dynamic_where};
+import std::core::uint::{u8, u32, u160, UInt};
+import std::core::addr::addr;
+import std::fixedbytes::bytes32;
+import std::membytes::membytes;
+import std::string::string;
+
+const Transfer = struct {
+    from:   Indexed(addr),
+    to:     Indexed(addr),
+    amount: u256,
+};
+
+const Approval = struct {
+    owner:   Indexed(addr),
+    spender: Indexed(addr),
+    amount:  u256,
+};
+
+const NoIndex = struct {
+    a: u256,
+    b: bool,
+};
+
+const Mixed = struct {
+    small: Indexed(u8),
+    blob:  membytes,
+    flag:  Indexed(bool),
+    text:  string,
+};
+
+// Every dynamic field is indexed, so the data section is entirely static even
+// though the struct as a whole is not.
+const IndexedDynOnly = struct {
+    blob: Indexed(membytes),
+    n:    u256,
+};
+
+// Every field is indexed, so the data section is empty.
+const AllIndexed = struct {
+    who: Indexed(addr),
+};
+
+const _tests = comptime {
+    comptime_assert(decimal_cbytes(0) == "0", "decimal_cbytes(0)");
+    comptime_assert(decimal_cbytes(8) == "8", "decimal_cbytes(8)");
+    comptime_assert(decimal_cbytes(248) == "248", "decimal_cbytes(248)");
+
+    comptime_assert(sol_type_name(u256) == "uint256", "u256 name");
+    comptime_assert(sol_type_name(bool) == "bool", "bool name");
+    comptime_assert(sol_type_name(addr) == "address", "addr name");
+    comptime_assert(sol_type_name(bytes32) == "bytes32", "bytes32 name");
+    comptime_assert(sol_type_name(u8) == "uint8", "u8 name");
+    comptime_assert(sol_type_name(u32) == "uint32", "u32 name");
+    comptime_assert(sol_type_name(u160) == "uint160", "u160 name");
+    comptime_assert(sol_type_name(UInt(8)) == "uint8", "UInt(8) name");
+    comptime_assert(sol_type_name(UInt(248)) == "uint248", "UInt(248) name");
+    comptime_assert(sol_type_name(membytes) == "bytes", "membytes name");
+    comptime_assert(sol_type_name(string) == "string", "string name");
+
+    comptime_assert(is_indexed(Indexed(addr)), "Indexed(addr) is indexed");
+    comptime_assert(!is_indexed(u256), "u256 is not indexed");
+    comptime_assert(!is_indexed(addr), "addr is not indexed");
+    // A user struct of identical shape must NOT be mistaken for Indexed.
+    comptime_assert(!is_indexed(struct { inner: addr }), "lookalike is not indexed");
+
+    comptime_assert(indexed_base(Indexed(addr)) == addr, "unwrap Indexed(addr)");
+    comptime_assert(indexed_base(u256) == u256, "passthrough u256");
+
+    // Canonical ERC20 events. topic0 values are the real, on-chain ones.
+    comptime_assert(
+        event_signature(Transfer) == "Transfer(address,address,uint256)",
+        "Transfer signature"
+    );
+    comptime_assert(
+        topic0(Transfer).raw
+            == 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef,
+        "Transfer topic0"
+    );
+    comptime_assert(
+        event_signature(Approval) == "Approval(address,address,uint256)",
+        "Approval signature"
+    );
+    comptime_assert(
+        topic0(Approval).raw
+            == 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925,
+        "Approval topic0"
+    );
+    comptime_assert(indexed_count(Transfer) == 2, "Transfer indexed count");
+    comptime_assert(indexed_count(NoIndex) == 0, "NoIndex indexed count");
+    comptime_assert(
+        event_signature(Mixed) == "Mixed(uint8,bytes,bool,string)",
+        "Mixed signature"
+    );
+
+    comptime_assert(!is_abi_dynamic(u256), "u256 static");
+    comptime_assert(!is_abi_dynamic(addr), "addr static");
+    comptime_assert(!is_abi_dynamic(bytes32), "bytes32 static");
+    comptime_assert(is_abi_dynamic(membytes), "membytes dynamic");
+    comptime_assert(is_abi_dynamic(string), "string dynamic");
+
+    // Transfer: fields 0 and 1 are indexed.
+    comptime_assert(nth_indexed_field(Transfer, 0) == 0, "Transfer idx0");
+    comptime_assert(nth_indexed_field(Transfer, 1) == 1, "Transfer idx1");
+    // Out of range returns the sentinel (== field count).
+    comptime_assert(nth_indexed_field(Transfer, 2) == 3, "Transfer idx2 sentinel");
+    // Mixed: indexed fields are 0 and 2.
+    comptime_assert(nth_indexed_field(Mixed, 0) == 0, "Mixed idx0");
+    comptime_assert(nth_indexed_field(Mixed, 1) == 2, "Mixed idx1");
+    comptime_assert(nth_indexed_field(Mixed, 2) == 4, "Mixed idx2 sentinel");
+
+    // Only non-indexed fields occupy the data section.
+    comptime_assert(event_data_head_size(Transfer) == 32, "Transfer head");
+    comptime_assert(event_data_head_size(NoIndex) == 64, "NoIndex head");
+    // Mixed has two non-indexed fields (blob, text), both dynamic offsets.
+    comptime_assert(event_data_head_size(Mixed) == 64, "Mixed head");
+    // All fields indexed: the data section is empty.
+    comptime_assert(event_data_head_size(AllIndexed) == 0, "AllIndexed head");
+
+    // The unfiltered question ORs over every field, so it reports "dynamic"
+    // because of a field the data section skips. Only the `keep`-aware form
+    // sees that the data section is a single static word — which is what lets
+    // its size be folded at comptime instead of walked at runtime.
+    comptime_assert(is_abi_dynamic(IndexedDynOnly), "unfiltered sees the indexed bytes");
+    comptime_assert(
+        !is_abi_dynamic_where(IndexedDynOnly, is_not_indexed),
+        "IndexedDynOnly data section is static"
+    );
+    comptime_assert(is_abi_dynamic_where(Mixed, is_not_indexed), "Mixed data section is dynamic");
+    comptime_assert(event_data_head_size(IndexedDynOnly) == 32, "IndexedDynOnly head");
+};
+
+init { return_runtime(); }
+
+run { @evm_stop(); }

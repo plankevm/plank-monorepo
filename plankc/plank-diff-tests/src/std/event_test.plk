@@ -1,0 +1,252 @@
+// Runtime differential coverage for `std::event`, checked log-for-log against
+// `EventTest.sol`: every `emit` / `emit_anonymous` dispatch arm, every
+// supported field type indexed and not, and the data-section layout edge cases
+// (empty section, mixed static/dynamic, `bytes` length boundaries).
+import std::constructor::return_runtime;
+import std::event::{Indexed, emit, emit_anonymous};
+import std::core::addr::{addr, addr_from_u256};
+import std::core::uint::{u8, u32, u160, unsafe_from_u256};
+import std::fixedbytes::{bytes32, bytes32_from_u256};
+import std::membytes::{membytes, membytes_from_ptr, membytes_new};
+import std::regions::{embed_as, memory};
+import std::string::string;
+
+const Transfer = struct {
+    from:   Indexed(addr),
+    to:     Indexed(addr),
+    amount: u256,
+};
+
+const NoIndex = struct {
+    a: u256,
+    b: bool,
+};
+
+const ThreeIndexed = struct {
+    a: Indexed(u256),
+    b: Indexed(u256),
+    c: Indexed(u256),
+    d: u256,
+};
+
+const DynIndexed = struct {
+    blob: Indexed(membytes),
+    tail: membytes,
+};
+
+const AnonFour = struct {
+    a: Indexed(u256),
+    b: Indexed(u256),
+    c: Indexed(u256),
+    d: Indexed(u256),
+    e: u256,
+};
+
+// `emit` with exactly one indexed field of a *static* type, so the n == 1 arm
+// (`@evm_log2`) is reached without going through the dynamic topic path.
+const OneIndexed = struct {
+    who:   Indexed(addr),
+    value: u256,
+};
+
+// `emit_anonymous` at each arity below 4. The anonymous dispatch maps an
+// indexed count of n onto LOGn, one lower than `emit` does, so every arm needs
+// its own case.
+const AnonZero = struct {
+    a: u256,
+    b: bool,
+};
+
+const AnonOne = struct {
+    a: Indexed(u256),
+    b: u256,
+};
+
+const AnonTwo = struct {
+    who: Indexed(addr),
+    b:   Indexed(u256),
+    c:   u256,
+};
+
+const AnonThree = struct {
+    a: Indexed(u256),
+    b: Indexed(u256),
+    c: Indexed(u256),
+    d: bool,
+};
+
+// Every field indexed, so the data section is EMPTY: `size` is 0, the buffer
+// comes from `@malloc_uninit(0)`, and the log is emitted with a zero length.
+// No other event here reaches that path.
+const AllIndexed = struct {
+    who: Indexed(addr),
+};
+
+// The same empty data section down the anonymous dispatch, where the length is
+// the only operand besides the topics.
+const AnonAllIndexed = struct {
+    a: Indexed(u256),
+    b: Indexed(u256),
+};
+
+// `bytes32` and `Indexed(bool)` are in the documented type table and asserted
+// at comptime, but nothing emitted them at runtime: `bytes32` is a one-field
+// wrapper struct that must encode as a bare word, and a `bool` topic must be
+// the padded 0/1, not the struct.
+const Flags = struct {
+    tag:  Indexed(bytes32),
+    on:   Indexed(bool),
+    salt: bytes32,
+    off:  bool,
+};
+
+// Data section mixing static and dynamic fields, so fixed fields sit between
+// two tail pointers. Also covers uintN widths and `address` in the data
+// section, and a non-indexed `string`.
+const MixedBag = struct {
+    id:    Indexed(u256),
+    small: u8,
+    text:  string,
+    wide:  u32,
+    who:   addr,
+    blob:  membytes,
+    huge:  u160,
+};
+
+// Indexed `string` takes the keccak-of-contents topic path, which is distinct
+// from the `membytes` one (it hashes `value.bytes`, not the wrapper).
+const StrIndexed = struct {
+    key: Indexed(string),
+    val: string,
+};
+
+// `bytes` length edge cases in the data section: empty, exactly one word,
+// spanning multiple words, and a non-word-multiple length within a single
+// word (23 bytes of tail padding — the shape of the zero-padding bug fixed
+// for the generic ABI encoder in `abi_helpers.plk`; `exact`/`over` above are
+// word-aligned or padded only in a trailing word after a full first word, so
+// neither exercised a single word that is mostly padding).
+const BytesEdges = struct {
+    empty: membytes,
+    exact: membytes,
+    over:  membytes,
+    nine:  membytes,
+};
+
+// The same edge cases as topics, so keccak of an empty / word-aligned /
+// multi-word buffer is checked against solc. The data section is all-static
+// even though three fields are dynamic, which is the case the `keep`-aware
+// `is_abi_dynamic_where` fast path in `abi_helpers.plk` exists for.
+const BytesEdgesIndexed = struct {
+    empty: Indexed(membytes),
+    exact: Indexed(membytes),
+    over:  Indexed(membytes),
+    n:     u256,
+};
+
+init { return_runtime(); }
+
+run {
+    let a = addr_from_u256(0x1111111111111111111111111111111111111111);
+    let b = addr_from_u256(0x2222222222222222222222222222222222222222);
+
+    emit(Transfer {
+        from:   Indexed(addr) { inner: a },
+        to:     Indexed(addr) { inner: b },
+        amount: 42,
+    });
+
+    emit(NoIndex { a: 7, b: true });
+
+    emit(ThreeIndexed {
+        a: Indexed(u256) { inner: 1 },
+        b: Indexed(u256) { inner: 2 },
+        c: Indexed(u256) { inner: 3 },
+        d: 4,
+    });
+
+    let blob = membytes_from_ptr(@malloc_zeroed(5), 5);
+    emit(DynIndexed { blob: Indexed(membytes) { inner: blob }, tail: blob });
+
+    emit_anonymous(AnonFour {
+        a: Indexed(u256) { inner: 10 },
+        b: Indexed(u256) { inner: 20 },
+        c: Indexed(u256) { inner: 30 },
+        d: Indexed(u256) { inner: 40 },
+        e: 50,
+    });
+
+    let c = addr_from_u256(0x3333333333333333333333333333333333333333);
+    emit(OneIndexed { who: Indexed(addr) { inner: c }, value: 99 });
+
+    emit_anonymous(AnonZero { a: 111, b: false });
+
+    emit_anonymous(AnonOne { a: Indexed(u256) { inner: 222 }, b: 333 });
+
+    let d = addr_from_u256(0x4444444444444444444444444444444444444444);
+    emit_anonymous(AnonTwo {
+        who: Indexed(addr) { inner: d },
+        b:   Indexed(u256) { inner: 444 },
+        c:   555,
+    });
+
+    emit_anonymous(AnonThree {
+        a: Indexed(u256) { inner: 666 },
+        b: Indexed(u256) { inner: 777 },
+        c: Indexed(u256) { inner: 888 },
+        d: true,
+    });
+
+    let f = addr_from_u256(0x6666666666666666666666666666666666666666);
+    emit(AllIndexed { who: Indexed(addr) { inner: f } });
+
+    emit_anonymous(AnonAllIndexed {
+        a: Indexed(u256) { inner: 1234567 },
+        b: Indexed(u256) { inner: 7654321 },
+    });
+
+    emit(Flags {
+        tag:  Indexed(bytes32) { inner: bytes32_from_u256(
+            0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+        ) },
+        on:   Indexed(bool) { inner: true },
+        salt: bytes32_from_u256(
+            0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface
+        ),
+        off:  false,
+    });
+
+    let e = addr_from_u256(0x5555555555555555555555555555555555555555);
+    emit(MixedBag {
+        id:    Indexed(u256) { inner: 1001 },
+        small: unsafe_from_u256(u8, 0xab),
+        text:  string { bytes: embed_as("plank", memory) },
+        wide:  unsafe_from_u256(u32, 0xdeadbeef),
+        who:   e,
+        blob:  embed_as("abc", memory),
+        // Deliberately 38 hex digits, not 40: a 40-digit literal is an address
+        // literal in Solidity and would demand a checksummed mixed-case form.
+        huge:  unsafe_from_u256(u160, 0xabcdef1234567890abcdef1234567890abcdef),
+    });
+
+    emit(StrIndexed {
+        key: Indexed(string) { inner: string { bytes: embed_as("key-with-some-length", memory) } },
+        val: string { bytes: embed_as("value string", memory) },
+    });
+
+    let empty = membytes_new(0);
+    let exact = embed_as("0123456789abcdef0123456789abcdef", memory);
+    let over  = embed_as("0123456789abcdef0123456789abcdef01234567", memory);
+    let nine  = embed_as("123456789", memory);
+
+    emit(BytesEdges { empty: empty, exact: exact, over: over, nine: nine });
+
+    emit(BytesEdgesIndexed {
+        empty: Indexed(membytes) { inner: empty },
+        exact: Indexed(membytes) { inner: exact },
+        over:  Indexed(membytes) { inner: over },
+        n:     1234,
+    });
+
+    @evm_stop();
+}
