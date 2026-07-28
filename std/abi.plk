@@ -17,7 +17,7 @@ const unsafe_abi_encode = fn (ptr: u256, value: $T) u256 {
 // Encodes `value` into `buf`. Returns the number of bytes written,
 // or None if the buffer is too small to hold the encoding.
 const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
-    let size = abi_encoded_size(value);
+    let size = abi_encoded_size_where(value, abi_include_all);
     if size > buf.length {
         return None(u256);
     }
@@ -26,7 +26,7 @@ const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
 
 // Encodes `value`, allocating a new buffer of the exact size needed.
 const abi_encode = fn (value: $T) membytes {
-    let size = abi_encoded_size(value);
+    let size = abi_encoded_size_where(value, abi_include_all);
     let buf = membytes_new(size);
     unsafe_abi_encode_where(buf.ptr, 0, value, abi_include_all);
     buf

@@ -5,7 +5,7 @@ import std::membytes::membytes;
 import std::string::string;
 import std::utils::fold;
 import std::regions::keccak256;
-import std::abi_helpers::{abi_head_size_where, abi_encoded_size_where, unsafe_abi_encode_where};
+import std::abi_helpers::{abi_head_size_where, abi_encoded_size_where, unsafe_abi_encode_where, is_abi_dynamic_where};
 
 // Marks an event field as indexed (emitted as a topic rather than in the data
 // section). Nominal by construction: struct interning keys on definition site,
@@ -198,7 +198,13 @@ const emit = fn (event: $T) void {
             );
         }
     }
-    let size = event_data_size(event);
+    // With no dynamic field in the data section the size depends only on `T`,
+    // so fold it rather than walking `value` at runtime.
+    let size = if comptime { !is_abi_dynamic_where(T, is_not_indexed) } {
+        comptime { event_data_head_size(T) }
+    } else {
+        event_data_size(event)
+    };
     let buf = @malloc_uninit(size);
     encode_event_data(buf, event);
 
@@ -232,7 +238,13 @@ const emit_anonymous = fn (event: $T) void {
             @compile_error("emit_anonymous: field type has no Solidity ABI name");
         }
     }
-    let size = event_data_size(event);
+    // With no dynamic field in the data section the size depends only on `T`,
+    // so fold it rather than walking `value` at runtime.
+    let size = if comptime { !is_abi_dynamic_where(T, is_not_indexed) } {
+        comptime { event_data_head_size(T) }
+    } else {
+        event_data_size(event)
+    };
     let buf = @malloc_uninit(size);
     encode_event_data(buf, event);
 
