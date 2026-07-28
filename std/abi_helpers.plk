@@ -2,26 +2,49 @@ import std::membytes::{membytes, membytes_from_ptr, membytes_read_u256};
 import std::option::unwrap;
 import std::math::ceil32;
 import std::utils::fold;
+import std::string::string;
 
-const is_abi_dynamic = fn (comptime T: type) bool {
+// Field predicate that keeps every field. Passed by the unfiltered wrappers and
+// by every recursion into a nested struct: a `keep` predicate describes which of
+// ONE struct's own fields form its tuple, so propagating it downwards would
+// silently drop fields from the nested encoding.
+const abi_include_all = fn (comptime F: type) bool {
+    true
+};
+
+// Shape questions — "is this field kept?", "is this type dynamic?", "how big is
+// the head?" — depend only on comptime arguments, but the backend does not inline
+// or fold across calls. Left bare they lower to real call frames in the emitted
+// bytecode, one per question per field. `comptime { .. }` forces the frontend to
+// answer them during compilation, so only the genuine runtime arithmetic survives.
+
+// Whether the tuple formed by the fields of `T` for which `keep` holds has a
+// tail. Only kept fields are considered: an event with an indexed dynamic field
+// and an otherwise static data section encodes as a pure head, and asking the
+// unfiltered question would wrongly report a tail and force a runtime walk.
+// Recursion into a nested struct uses `abi_include_all` for the same reason
+// `abi_head_size_where` does — `keep` describes one struct's own fields.
+const is_abi_dynamic_where = fn (comptime T: type, comptime keep: function) bool {
     if T == void {
         false
     } else if T == u256 {
         false
     } else if T == bool {
         false
-    } else if T == membytes {
+    } else if T == membytes or T == string {
         true
     } else if @is_struct(T) {
         fold(
             @field_count(T),
             fn (comptime i: u256, has_dynamic: bool) bool {
                 if has_dynamic {
-                        true
-                    } else {
-                        is_abi_dynamic(@field_type(T, i))
-                    }
-                },
+                    true
+                } else if !keep(@field_type(T, i)) {
+                    false
+                } else {
+                    is_abi_dynamic_where(@field_type(T, i), abi_include_all)
+                }
+            },
             false
         )
     } else {
@@ -29,27 +52,100 @@ const is_abi_dynamic = fn (comptime T: type) bool {
     }
 };
 
-const abi_head_size = fn (comptime T: type) u256 {
+const is_abi_dynamic = fn (comptime T: type) bool {
+    comptime { is_abi_dynamic_where(T, abi_include_all) }
+};
+
+// Head size of the tuple formed by the fields of `T` for which `keep` holds.
+const abi_head_size_where = fn (comptime T: type, comptime keep: function) u256 {
     if T == void {
         0
     } else if T == u256 {
         32
     } else if T == bool {
         32
-    } else if T == membytes {
+    } else if T == membytes or T == string {
         32
     } else if @is_struct(T) {
         fold(
             @field_count(T),
             fn (comptime i: u256, total_head_size: u256) u256 {
-                if is_abi_dynamic(@field_type(T, i)) {
+                if !keep(@field_type(T, i)) {
+                    total_head_size
+                } else if is_abi_dynamic(@field_type(T, i)) {
                     total_head_size + 32
                 } else {
-                    total_head_size + abi_head_size(@field_type(T, i))
+                    total_head_size + abi_head_size_where(@field_type(T, i), abi_include_all)
                 }
             },
             0
         )
+    } else {
+        @compile_error("unsupported type for ABI encoding")
+    }
+};
+
+// Wrapped here rather than at each call site so the "shape questions cost
+// nothing at runtime" invariant above is a property of this definition instead
+// of an undocumented convention every caller has to remember.
+const abi_head_size = fn (comptime T: type) u256 {
+    comptime { abi_head_size_where(T, abi_include_all) }
+};
+
+// Accumulator for computing ABI encoded size of a struct via fold.
+// Runtime value (encoded_value) cannot be captured in closures,
+// so it must be threaded through fold. total_size changes each iteration.
+//
+// Fields:
+//   encoded_value - the value being sized (runtime, read-only in fold)
+//   total_size    - accumulated size; starts from the head size, dynamic field sizes are added
+const AbiSizeAccumulator = fn (comptime T: type) type {
+    struct {
+        encoded_value: T,
+        total_size: u256
+    }
+};
+
+// Byte size of the ABI encoding of the fields of `value` for which `keep` holds.
+const abi_encoded_size_where = fn (value: $T, comptime keep: function) u256 {
+    if T == void {
+        0
+    } else if T == u256 {
+        32
+    } else if T == bool {
+        32
+    } else if T == membytes or T == string {
+        let data = if T == membytes { value } else { value.bytes };
+        32 + ceil32(data.length)
+    } else if @is_struct(T) {
+        // With no dynamic field among the KEPT ones there is no tail, so the
+        // encoding is exactly the head and its size is fully comptime. Walking
+        // `value` would only rebuild a number already known here. Asking the
+        // unfiltered `is_abi_dynamic` would miss this for a skipped dynamic
+        // field — e.g. an event whose only dynamic field is indexed.
+        if comptime { !is_abi_dynamic_where(T, keep) } {
+            return comptime { abi_head_size_where(T, keep) };
+        }
+        // Start from the head size; non-dynamic fields are already accounted for.
+        let initial = AbiSizeAccumulator(T) {
+            encoded_value: value,
+            total_size: comptime { abi_head_size_where(T, keep) }
+        };
+        let result = fold(
+            @field_count(T),
+            fn (comptime i: u256, acc: AbiSizeAccumulator(T)) AbiSizeAccumulator(T) {
+                if comptime { !keep(@field_type(T, i)) } {
+                    acc
+                } else if comptime { is_abi_dynamic(@field_type(T, i)) } {
+                    let field_size = abi_encoded_size_where(@get_field(acc.encoded_value, i), abi_include_all);
+                    @set_field(acc, 1, acc.total_size + field_size)
+                } else {
+                    acc
+                }
+            },
+            initial
+        );
+        result.total_size
     } else {
         @compile_error("unsupported type for ABI encoding")
     }
@@ -75,10 +171,10 @@ const AbiEncodeAccumulator = fn (comptime T: type) type {
     }
 };
 
-// ABI-encodes `value` of type `T` into `buf` starting at `offset`.
+// ABI-encodes the fields of `value` for which `keep` holds into `buf` at `offset`.
 // Returns the number of bytes written.
-// Caller must ensure `buf` is large enough for the full encoding (use `abi_encoded_size`).
-const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
+// Caller must ensure `buf` is large enough (use `abi_encoded_size_where`).
+const unsafe_abi_encode_where = fn (buf: u256, offset: u256, value: $T, comptime keep: function) u256 {
     if T == void {
         0
     } else if T == u256 {
@@ -87,41 +183,57 @@ const unsafe_abi_encode_to = fn (buf: u256, offset: u256, value: $T) u256 {
     } else if T == bool {
         @mstore32(buf +% offset, if value { 1 } else { 0 });
         32
-    } else if T == membytes {
-        @mstore32(buf +% offset, value.length);
-        @mcopy(buf +% offset +% 32, value.ptr, value.length);
-        // padding after value.length is left uninitialized; consumers only read length bytes
-        32 + ceil32(value.length)
+    } else if T == membytes or T == string {
+        // `string` is a one-field wrapper over `membytes` and encodes identically
+        // at the EVM level; normalise once rather than delegating, which would
+        // cost a non-inlined call frame.
+        let data = if T == membytes { value } else { value.bytes };
+        @mstore32(buf +% offset, data.length);
+        // Solidity zero-pads the tail to a word boundary and the padding is
+        // observable: logs broadcast it verbatim. Zeroing only the LAST word of
+        // the padded region spans exactly
+        // [offset+ceil32(len), offset+32+ceil32(len)) — ending precisely at the
+        // region end, so it can never touch the following field's tail. Earlier
+        // padded words are covered by the @mcopy below.
+        if data.length != 0 {
+            @mstore32(buf +% offset +% ceil32(data.length), 0);
+        }
+        @mcopy(buf +% offset +% 32, data.ptr, data.length);
+        32 + ceil32(data.length)
     } else if @is_struct(T) {
         let initial = AbiEncodeAccumulator(T) {
             buf: buf,
             base_offset: offset,
             encoded_value: value,
             head_offset: offset,
-            tail_offset: offset + abi_head_size(T)
+            tail_offset: offset + comptime { abi_head_size_where(T, keep) }
         };
         let result = fold(
             @field_count(T),
             fn (comptime i: u256, acc: AbiEncodeAccumulator(T)) AbiEncodeAccumulator(T) {
-                if is_abi_dynamic(@field_type(T, i)) {
+                if comptime { !keep(@field_type(T, i)) } {
+                    acc
+                } else if comptime { is_abi_dynamic(@field_type(T, i)) } {
                     @mstore32(
                         acc.buf +% acc.head_offset,
                         acc.tail_offset - acc.base_offset
                     );
-                    let written = unsafe_abi_encode_to(
+                    let written = unsafe_abi_encode_where(
                         acc.buf,
                         acc.tail_offset,
-                        @get_field(acc.encoded_value, i)
+                        @get_field(acc.encoded_value, i),
+                        abi_include_all
                     );
                     let mut next = acc;
                     next = @set_field(next, 3, acc.head_offset + 32);
                     next = @set_field(next, 4, acc.tail_offset + written);
                     next
                 } else {
-                    let written = unsafe_abi_encode_to(
+                    let written = unsafe_abi_encode_where(
                         acc.buf,
                         acc.head_offset,
-                        @get_field(acc.encoded_value, i)
+                        @get_field(acc.encoded_value, i),
+                        abi_include_all
                     );
                     let mut next = acc;
                     next = @set_field(next, 3, acc.head_offset + written);
@@ -163,9 +275,10 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T 
         @mload32(buf +% offset)
     } else if T == bool {
         @mload32(buf +% offset) != 0
-    } else if T == membytes {
+    } else if T == membytes or T == string {
         let length = @mload32(buf +% offset);
-        membytes_from_ptr(buf +% offset +% 32, length)
+        let data = membytes_from_ptr(buf +% offset +% 32, length);
+        if T == membytes { data } else { string { bytes: data } }
     } else if @is_struct(T) {
         let initial = AbiDecodeAccumulator(T) {
             buf: buf,
@@ -176,7 +289,7 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T 
         let result = fold(
             @field_count(T),
             fn (comptime i: u256, acc: AbiDecodeAccumulator(T)) AbiDecodeAccumulator(T) {
-                if is_abi_dynamic(@field_type(T, i)) {
+                if comptime { is_abi_dynamic(@field_type(T, i)) } {
                     let tail_offset = acc.base_offset + @mload32(acc.buf +% acc.head_offset);
                     let decoded = unsafe_abi_decode_from(
                         @field_type(T, i),
@@ -194,7 +307,7 @@ const unsafe_abi_decode_from = fn (comptime T: type, buf: u256, offset: u256) T 
                         acc.head_offset
                     );
                     let mut next = acc;
-                    next = @set_field(next, 2, acc.head_offset + abi_head_size(@field_type(T, i)));
+                    next = @set_field(next, 2, acc.head_offset + comptime { abi_head_size(@field_type(T, i)) });
                     next = @set_field(next, 3, @set_field(acc.decoded_value, i, decoded));
                     next
                 }
@@ -231,15 +344,15 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
         buf.length >= offset + 32
     } else if T == bool {
         buf.length >= offset + 32
-    } else if T == membytes {
+    } else if T == membytes or T == string {
         let len_opt = membytes_read_u256(buf, offset);
         if !len_opt.is_some { return false; }
         let length = len_opt.inner;
         buf.length >= offset + 32 + ceil32(length)
     } else if @is_struct(T) {
-        if offset + abi_head_size(T) > buf.length {
+        if offset + comptime { abi_head_size(T) } > buf.length {
             return false;
-        } 
+        }
         let initial = AbiBufFitsAccumulator {
             buf: buf,
             base_offset: offset,
@@ -252,7 +365,7 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
                 if !acc.fits {
                     return acc;
                 }
-                if is_abi_dynamic(@field_type(T, i)) {
+                if comptime { is_abi_dynamic(@field_type(T, i)) } {
                     // Safe to unwrap: the pre-check above guarantees the entire head section is readable.
                     let tail_offset = acc.base_offset + unwrap(membytes_read_u256(acc.buf, acc.head_offset));
                     let fits = abi_buf_fits(@field_type(T, i), acc.buf, tail_offset);
@@ -262,7 +375,7 @@ const abi_buf_fits = fn (comptime T: type, buf: membytes, offset: u256) bool {
                     next
                 } else {
                     let mut next = acc;
-                    next = @set_field(next, 2, acc.head_offset + abi_head_size(@field_type(T, i)));
+                    next = @set_field(next, 2, acc.head_offset + comptime { abi_head_size(@field_type(T, i)) });
                     next
                 }
             },

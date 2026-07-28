@@ -1,0 +1,21 @@
+import std::abi::{abi_encode, abi_decode};
+import std::constructor::return_runtime;
+import std::membytes::membytes_from_ptr;
+import std::string::string;
+
+const WithString = struct { a: u256, s: string };
+
+init {
+    return_runtime();
+}
+
+// Mirrors AbiStringTest.sol: a fallback returning `bytes memory` returns those
+// bytes verbatim, so the tuple encoding is the whole return data.
+run {
+    let size = @evm_calldatasize();
+    let ptr = @malloc_zeroed(size);
+    @evm_calldatacopy(ptr, 0, size);
+    let decoded = abi_decode(WithString, membytes_from_ptr(ptr, size));
+    let encoded = abi_encode(decoded);
+    @evm_return(encoded.ptr, encoded.length);
+}
