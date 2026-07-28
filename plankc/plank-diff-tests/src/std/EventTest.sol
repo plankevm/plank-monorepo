@@ -40,6 +40,15 @@ contract EventTest {
         uint160 huge
     );
 
+    event UintIndexed(
+        uint8 indexed tier,
+        uint32 indexed rate,
+        uint160 indexed payee,
+        uint256 note,
+        uint8 tag,
+        uint248 max
+    );
+
     event StrIndexed(string indexed key, string val);
 
     event BytesEdges(bytes empty, bytes exact, bytes over, bytes nine);
@@ -95,6 +104,15 @@ contract EventTest {
             0x5555555555555555555555555555555555555555,
             bytes("abc"),
             uint160(0xabcdef1234567890abcdef1234567890abcdef)
+        );
+
+        emit UintIndexed(
+            uint8(0xff),
+            uint32(0xdeadbeef),
+            uint160(0xabcdef1234567890abcdef1234567890abcdef),
+            7,
+            uint8(0x01),
+            uint248(0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)
         );
 
         emit StrIndexed("key-with-some-length", "value string");

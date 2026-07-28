@@ -5,7 +5,7 @@
 import std::constructor::return_runtime;
 import std::event::{Indexed, emit, emit_anonymous};
 import std::core::addr::{addr, addr_from_u256};
-import std::core::uint::{u8, u32, u160, unsafe_from_u256};
+import std::core::uint::{u8, u32, u160, u248, unsafe_from_u256};
 import std::fixedbytes::{bytes32, bytes32_from_u256};
 import std::membytes::{membytes, membytes_from_ptr, membytes_new};
 import std::regions::{embed_as, memory};
@@ -111,6 +111,19 @@ const MixedBag = struct {
     who:   addr,
     blob:  membytes,
     huge:  u160,
+};
+
+// Indexed `uintN` topics. Solidity left-zero-pads a narrow uint to a full word;
+// `topic_word` unwraps `Indexed(uN)` -> `uN` -> `u256` to the raw value, so the
+// two only agree if no stray high bits survive the unwrap.
+const UintIndexed = struct {
+    tier:  Indexed(u8),
+    rate:  Indexed(u32),
+    payee: Indexed(u160),
+    note:  u256,
+    // Non-indexed narrow ints, including the widest `uintN` the ABI names.
+    tag:   u8,
+    max:   u248,
 };
 
 // Indexed `string` takes the keccak-of-contents topic path, which is distinct
@@ -227,6 +240,15 @@ run {
         // Deliberately 38 hex digits, not 40: a 40-digit literal is an address
         // literal in Solidity and would demand a checksummed mixed-case form.
         huge:  unsafe_from_u256(u160, 0xabcdef1234567890abcdef1234567890abcdef),
+    });
+
+    emit(UintIndexed {
+        tier:  Indexed(u8)   { inner: unsafe_from_u256(u8, 0xff) },
+        rate:  Indexed(u32)  { inner: unsafe_from_u256(u32, 0xdeadbeef) },
+        payee: Indexed(u160) { inner: unsafe_from_u256(u160, 0xabcdef1234567890abcdef1234567890abcdef) },
+        note:  7,
+        tag:   unsafe_from_u256(u8, 0x01),
+        max:   unsafe_from_u256(u248, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),
     });
 
     emit(StrIndexed {
