@@ -3,7 +3,6 @@ mod builtins;
 #[cfg(test)]
 mod tests;
 
-use alloy_primitives::U256;
 use plank_core::{DenseIndexMap, Idx};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::{BytesId, Session};

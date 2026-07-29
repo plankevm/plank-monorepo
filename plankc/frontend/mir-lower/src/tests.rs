@@ -356,7 +356,7 @@ fn test_match() {
             let x = match selector {
                 0x04 => 40,
                 2 => 20,
-                else => 99,
+                else s => s,
             };
             @evm_sstore(0, x);
             @evm_stop();
@@ -391,7 +391,7 @@ fn test_match() {
             }
 
             @3 {
-                $3 = const 0x63
+                $3 = copy $2
                 => @4
             }
 
