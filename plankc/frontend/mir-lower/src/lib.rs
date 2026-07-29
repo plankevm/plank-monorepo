@@ -142,7 +142,7 @@ fn lower_function(
 struct CFGSegment {
     bb_in: sir::BasicBlockId,
     bb_out: sir::BasicBlockId,
-    end_loose: bool,
+    cfg_out_unfinalized: bool,
 }
 
 fn lower_basic_block(
@@ -242,7 +242,7 @@ fn lower_basic_block(
                         return CFGSegment {
                             bb_in: bb_in.unwrap_or(end_id),
                             bb_out: end_id,
-                            end_loose: false,
+                            cfg_out_unfinalized: false,
                         };
                     }
                 }
@@ -273,7 +273,7 @@ fn lower_basic_block(
                         return CFGSegment {
                             bb_in: bb_in.unwrap_or(end_id),
                             bb_out: end_id,
-                            end_loose: false,
+                            cfg_out_unfinalized: false,
                         };
                     }
                 }
@@ -312,7 +312,7 @@ fn lower_basic_block(
                 return CFGSegment {
                     bb_in: bb_in.unwrap_or(end_id),
                     bb_out: end_id,
-                    end_loose: false,
+                    cfg_out_unfinalized: false,
                 };
             }
             Instruction::If { condition, then_block, else_block } => {
@@ -339,12 +339,12 @@ fn lower_basic_block(
                     )
                     .unwrap();
                 let merge_id = continue_bb.id();
-                if then.end_loose {
+                if then.cfg_out_unfinalized {
                     continue_bb
                         .set_fn_control(then.bb_out, Control::ContinuesTo(merge_id))
                         .unwrap();
                 }
-                if r#else.end_loose {
+                if r#else.cfg_out_unfinalized {
                     continue_bb
                         .set_fn_control(r#else.bb_out, Control::ContinuesTo(merge_id))
                         .unwrap();
@@ -385,13 +385,13 @@ fn lower_basic_block(
 
                 // Patch loose arm controls.
                 for (_, arm) in lowered_arms {
-                    if arm.end_loose {
+                    if arm.cfg_out_unfinalized {
                         continue_bb
                             .set_fn_control(arm.bb_out, Control::ContinuesTo(continue_id))
                             .unwrap();
                     }
                 }
-                if fallback.end_loose {
+                if fallback.cfg_out_unfinalized {
                     continue_bb
                         .set_fn_control(fallback.bb_out, Control::ContinuesTo(continue_id))
                         .unwrap();
@@ -414,7 +414,7 @@ fn lower_basic_block(
                     .set_control(loop_entry_id, Control::ContinuesTo(condition_segment.bb_in))
                     .unwrap();
                 let body = lower_basic_block(ctx, values, fn_builder, mir_func, body, false);
-                if body.end_loose {
+                if body.cfg_out_unfinalized {
                     fn_builder
                         .set_control(body.bb_out, Control::ContinuesTo(condition_segment.bb_in))
                         .unwrap();
@@ -423,7 +423,7 @@ fn lower_basic_block(
                 let mut continue_bb = fn_builder.begin_basic_block();
                 let continue_id = continue_bb.id();
 
-                if condition_segment.end_loose {
+                if condition_segment.cfg_out_unfinalized {
                     continue_bb
                         .set_fn_control(
                             condition_segment.bb_out,
@@ -444,12 +444,12 @@ fn lower_basic_block(
     if is_entry {
         current_bb.add_operation(Operation::Invalid(()));
         let bb_out = current_bb.finish_terminating().expect("error despite invalid");
-        return CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: false };
+        return CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, cfg_out_unfinalized: false };
     }
 
     // For non entry segments the parent is responsible for hooking up control flow.
     let bb_out = current_bb.finish_with_placeholder_control();
-    CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, end_loose: true }
+    CFGSegment { bb_in: bb_in.unwrap_or(bb_out), bb_out, cfg_out_unfinalized: true }
 }
 
 fn materialize_constant_compound_literal(
