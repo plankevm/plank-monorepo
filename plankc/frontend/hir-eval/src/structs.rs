@@ -202,12 +202,25 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     self.loc(call_span),
                     method_name,
                 ),
-                MethodKind::Instance => self.diag_ctx.emit_unknown_instance_method(
-                    self.eval.values,
-                    struct_ty,
-                    self.loc(call_span),
-                    method_name,
-                ),
+                MethodKind::Instance => {
+                    if let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(struct_ty)
+                        && let Some(&field) =
+                            r#struct.fields.iter().find(|field| field.name == method_name)
+                    {
+                        self.diag_ctx.emit_field_called_as_method(
+                            r#struct.def_loc.source,
+                            field,
+                            self.loc(call_span),
+                        );
+                    } else {
+                        self.diag_ctx.emit_unknown_instance_method(
+                            self.eval.values,
+                            struct_ty,
+                            self.loc(call_span),
+                            method_name,
+                        );
+                    }
+                }
             }
             return Err(Poisoned);
         };

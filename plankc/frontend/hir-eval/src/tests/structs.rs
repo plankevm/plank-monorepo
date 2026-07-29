@@ -253,6 +253,34 @@ fn test_unknown_instance_method() {
 }
 
 #[test]
+fn test_function_field_called_as_method() {
+    assert_diagnostics(
+        r#"
+        const callback = fn() u256 { 1 };
+        const S = struct { callback: function };
+
+        init {
+            let value: S = S { callback: callback };
+            value.callback();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: field is not a method
+         --> main.plk:6:5
+          |
+        2 | const S = struct { callback: function };
+          |                    ------------------ field declared here
+        ...
+        6 |     value.callback();
+          |     ^^^^^^^^^^^^^^^^ `callback` is a field, not a method
+          |
+          = help: assign function field `callback` to a local before calling it
+        "#],
+    );
+}
+
+#[test]
 fn test_invalid_field_access() {
     assert_diagnostics(
         r#"

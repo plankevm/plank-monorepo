@@ -4,7 +4,7 @@ use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    Compound, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
+    Compound, Field, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
     builtins as builtin_sigs,
 };
 
@@ -756,6 +756,26 @@ impl DiagCtx<'_> {
                 ),
             )
             .emit(self);
+    }
+
+    pub fn emit_field_called_as_method(
+        &mut self,
+        field_source: SourceId,
+        field: Field,
+        call_loc: SrcLoc,
+    ) {
+        let field_name = self.session.lookup_name(field.name);
+        let mut diagnostic = Diagnostic::error("field is not a method").cross_source_annotations(
+            call_loc,
+            format!("`{field_name}` is a field, not a method"),
+            SrcLoc::new(field_source, field.def_span),
+            "field declared here",
+        );
+        if field.ty == TypeId::FUNCTION {
+            diagnostic = diagnostic
+                .help(format!("assign function field `{field_name}` to a local before calling it"));
+        }
+        diagnostic.emit(self);
     }
 
     pub fn emit_struct_def_duplicate_field(

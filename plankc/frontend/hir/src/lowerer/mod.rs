@@ -94,7 +94,6 @@ struct BlockLowerer<'a> {
     fn_captures_start: usize,
     in_function_body: bool,
     next_local_id: LocalId,
-    /// Interned name used for synthetic method-local `Self` bindings.
     self_type_name_id: StrId,
 
     instructions_buf: Vec<Instruction>,
