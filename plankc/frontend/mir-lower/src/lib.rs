@@ -67,7 +67,6 @@ struct LowerCtx<'a> {
     data_segments: HashMap<BytesId, sir::DataId>,
 
     locals_buf: Vec<sir::LocalId>,
-    match_arms_buf: Vec<(U256, CFGSegment)>,
 }
 
 impl LowerCtx<'_> {
@@ -103,7 +102,6 @@ pub fn lower(mir: &Mir, values: &ValueInterner, session: &Session) -> EthIRProgr
         data_segments: HashMap::new(),
 
         locals_buf: Vec::new(),
-        match_arms_buf: Vec::new(),
     };
 
     let init = lower_function(&mut ctx, values, &mut builder, mir.init);
@@ -362,26 +360,25 @@ fn lower_basic_block(
                 let last_end_id = current_bb.finish_with_placeholder_control();
                 bb_in = bb_in.or(Some(last_end_id));
 
-                let match_arms_start = ctx.match_arms_buf.len();
+                let mut lowered_arms = Vec::new();
 
                 // Lower arm bodies.
                 for i in 0..ctx.mir.match_arms[arms].len() {
                     let arm = ctx.mir.match_arms[arms][i];
                     let segment =
                         lower_basic_block(ctx, values, fn_builder, mir_func, arm.body, false);
-                    ctx.match_arms_buf.push((arm.key, segment));
+                    lowered_arms.push((arm.key, segment));
                 }
                 let fallback =
                     lower_basic_block(ctx, values, fn_builder, mir_func, fallback, false);
-                let lowered_arms = &ctx.match_arms_buf[match_arms_start..];
 
                 let mut continue_bb = fn_builder.begin_basic_block();
                 let continue_id = continue_bb.id();
 
                 // Build switch.
                 let mut switch_builder = continue_bb.begin_switch();
-                for &(key, ref arm) in lowered_arms {
-                    switch_builder.push_case(key, arm.bb_in);
+                for (key, arm) in &lowered_arms {
+                    switch_builder.push_case(*key, arm.bb_in);
                 }
                 let switch = switch_builder.finish(subject, Some(fallback.bb_in));
                 continue_bb.set_fn_control(last_end_id, Control::Switch(switch)).unwrap();
@@ -400,7 +397,6 @@ fn lower_basic_block(
                         .unwrap();
                 }
 
-                ctx.match_arms_buf.truncate(match_arms_start);
                 current_bb = continue_bb;
             }
             Instruction::While { condition_block, condition, body } => {
