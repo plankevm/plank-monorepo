@@ -86,6 +86,9 @@
   name: (identifier) @property)
 (field_init
   name: (identifier) @property)
+(method_def
+  name: (identifier) @function.method)
+(self_type) @type
 
 ; Parameters
 

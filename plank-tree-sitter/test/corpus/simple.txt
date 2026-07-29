@@ -140,9 +140,79 @@ init {
       (while
         (identifier)
         (block
-          (assign
+      (assign
+        (identifier)
+        (dec_literal)))))))
+
+================================================================================
+Struct methods
+================================================================================
+
+const S = struct {
+    value: u256,
+    fn new(value: u256) Self { S { value: value } }
+    fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (struct_def
+      (field_def
+        (identifier)
+        (identifier))
+      (method_def
+        (identifier)
+        (param_def
+          (identifier)
+          (identifier))
+        (self_type)
+        (block
+          (struct_lit
             (identifier)
-            (dec_literal)))))))
+            (field_init
+              (identifier)
+              (identifier)))))
+      (method_def
+        (identifier)
+        (param_def
+          (identifier)
+          (self_type))
+        (param_def
+          (identifier)
+          (self_type))
+        (identifier)
+        (block
+          (binary_expr
+            (member
+              (identifier)
+              (identifier))
+            (member
+              (identifier)
+              (identifier))))))))
+
+================================================================================
+Struct methods without fields
+================================================================================
+
+const Factory = struct {
+    fn make() Self { Factory {} }
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_def
+    (identifier)
+    (struct_def
+      (method_def
+        (identifier)
+        (self_type)
+        (block
+          (struct_lit
+            (identifier)))))))
 
 ================================================================================
 Inline while loop

@@ -16,7 +16,7 @@ import_group_item = IDENT ("as" IDENT)?
 # Expressions
 expr = "comptime"? block | if_expr | match_expr | expr_no_block
 expr_no_block =
-    IDENT | BUILTIN_IDENT | literal | member
+    SELF | IDENT | BUILTIN_IDENT | literal | member
     | fn_call | fn_def | struct_def | struct_lit | tuple_type | tuple_lit
     | binary | unary | paren
 binary = expr binary_op expr
@@ -55,13 +55,18 @@ assign = expr "=" expr
 
 # Definitions
 fn_def = "eager"? "fn" "(" param_def_list? ")" expr block
+method_def = "fn" IDENT "(" param_def_list? ")" expr block
 param_def_list = comma_separated{"comptime"? IDENT ":" param_type}
 param_type = expr | "$" IDENT
 
-struct_def = "struct" expr? "{" comma_separated{IDENT ":" expr}? "}"
+struct_def = "struct" expr? "{" struct_field_list? method_def* "}"
+struct_field_list = comma_separated{IDENT ":" expr}
 struct_lit = expr "{" comma_separated{IDENT ":" expr}? "}"
 tuple_type = "tuple" "{" comma_separated{expr}? "}"
 tuple_lit = "(" ")" | "(" expr "," comma_separated{expr}? ")"
+
+# `Self` is valid only in a method definition and denotes the enclosing struct type.
+SELF = "Self"
 
 # Literals
 literal = bool_literal | hex_literal | bin_literal | dec_literal | bytes_literal
