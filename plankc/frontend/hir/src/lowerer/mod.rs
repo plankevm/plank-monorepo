@@ -240,6 +240,13 @@ impl BlockLowerer<'_> {
         local
     }
 
+    fn lower_poison_to_local(&mut self, span: TokenSpan) -> LocalId {
+        let expr = self.expr(ExprKind::POISON, span);
+        let local = self.alloc_temp();
+        self.emit(InstructionKind::Set { local, r#type: None, expr });
+        local
+    }
+
     fn create_sub_block(&mut self, span: TokenSpan, f: impl FnOnce(&mut Self)) -> BlockId {
         self.create_sub_block_with(span, f).0
     }
@@ -397,12 +404,23 @@ impl BlockLowerer<'_> {
                     match_arms.push(MatchArm { key: key_local, body: body_block });
                 }
                 MatchArmKind::Fallback { binding } => {
+                    let duplicate_key = first_fallback.map(|(_, previous_span)| {
+                        (self.lower_poison_to_local(arm.view.span()), previous_span)
+                    });
+                    let binding = binding.map(|name| {
+                        let id = match duplicate_key {
+                            Some(_) => self.lower_poison_to_local(arm.view.span()),
+                            None => subject,
+                        };
+                        (name, id)
+                    });
+
                     let body = ast::Expr::new_unwrap(arm.body);
-                    let fallback = self.create_sub_block(body.span(), |this| {
-                        if let Some(name) = binding {
+                    let body_block = self.create_sub_block(body.span(), |this| {
+                        if let Some((name, id)) = binding {
                             this.scoped_locals_stack.push(ScopedLocal {
                                 name,
-                                id: subject,
+                                id,
                                 kind: LocalKind::Immutable,
                                 span: Some(arm.view.span()),
                             });
@@ -411,10 +429,11 @@ impl BlockLowerer<'_> {
                         this.emit(InstructionKind::BranchSet { local: result, expr });
                     });
 
-                    if let Some((_, previous_span)) =
-                        first_fallback.replace((fallback, arm.view.span()))
-                    {
+                    if let Some((key, previous_span)) = duplicate_key {
                         self.error_multiple_match_else_arms(arm.view.span(), previous_span);
+                        match_arms.push(MatchArm { key, body: body_block });
+                    } else {
+                        first_fallback = Some((body_block, arm.view.span()));
                     }
                 }
             }

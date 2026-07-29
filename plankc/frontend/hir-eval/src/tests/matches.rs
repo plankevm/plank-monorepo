@@ -28,6 +28,31 @@ fn test_comptime_match_selects_arm() {
 }
 
 #[test]
+fn test_comptime_match_evaluates_only_selected_arm() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = match 0 {
+                0 => { let selected: bool = 0; 1 },
+                1 => { let unselected: bool = 0; 2 },
+                else => 3,
+            };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: mismatched types
+         --> main.plk:3:37
+          |
+        3 |         0 => { let selected: bool = 0; 1 },
+          |                              ----   ^ expected `bool`, got `u256`
+          |                              |
+          |                              `bool` expected because of this
+        "#],
+    );
+}
+
+#[test]
 fn test_comptime_match_selects_else() {
     assert_lowers_to(
         r#"
@@ -164,6 +189,78 @@ fn test_runtime_match_arm_type_mismatch() {
           |              --- `u256` expected because of this
         5 |         else => false,
           |                 ^^^^^ expected `u256`, got `bool`
+        "#],
+    );
+}
+
+#[test]
+fn test_additional_else_arm_body_is_typechecked() {
+    assert_diagnostics(
+        r#"
+        init {
+            let subject = @evm_calldataload(0);
+            let x = match subject {
+                else => 1,
+                else other => {
+                    let from_binding: bool = other;
+                    let checked: bool = 0;
+                    2
+                },
+            };
+            @evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: multiple else arms in match
+         --> main.plk:5:9
+          |
+        4 |           else => 1,
+          |           --------- previous else arm
+        5 | /         else other => {
+        6 | |             let from_binding: bool = other;
+        7 | |             let checked: bool = 0;
+        8 | |             2
+        9 | |         },
+          | |_________^ duplicate else arm
+          |
+          = note: a match expression can have only one else arm
+        "#,
+            r#"
+        error: mismatched types
+         --> main.plk:7:33
+          |
+        7 |             let checked: bool = 0;
+          |                          ----   ^ expected `bool`, got `u256`
+          |                          |
+          |                          `bool` expected because of this
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_additional_else_arm_body_is_not_typechecked_for_comptime_subject() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = match 0 {
+                else => 1,
+                else => { let checked: bool = 0; 2 },
+            };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: multiple else arms in match
+         --> main.plk:4:9
+          |
+        3 |         else => 1,
+          |         --------- previous else arm
+        4 |         else => { let checked: bool = 0; 2 },
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ duplicate else arm
+          |
+          = note: a match expression can have only one else arm
         "#],
     );
 }

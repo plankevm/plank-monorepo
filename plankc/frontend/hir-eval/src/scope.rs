@@ -660,14 +660,32 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn get_match_value(&self, local: hir::LocalId) -> MaybePoisoned<MatchValue> {
-        match self.bindings[local].state? {
-            LocalState::Comptime(value) => match self.values.lookup(value) {
-                Value::BigNum(value) => Ok(MatchValue::U256(value)),
-                _ => Ok(MatchValue::Unsupported(value)),
-            },
-            LocalState::Runtime(_) => unreachable!("invariant: expected comptime local"),
+    fn eval_match_key(
+        &mut self,
+        local: hir::LocalId,
+        match_keys_seen: &mut HashMap<U256, SourceSpan>,
+    ) -> MaybePoisoned<U256> {
+        let binding = self.bindings[local];
+        let LocalState::Comptime(value) = binding.state? else {
+            unreachable!("invariant: match key comptime or poisoned");
+        };
+        let Value::BigNum(key) = self.values.lookup(value) else {
+            self.diag_ctx.emit_unsupported_match_value_type(
+                self.eval.values,
+                self.values.type_of_value(value),
+                self.loc(binding.use_span),
+            );
+            return Err(Poisoned);
+        };
+        if let Err(existing) = match_keys_seen.try_insert(key, binding.use_span) {
+            self.diag_ctx.emit_duplicate_match_key(
+                key,
+                self.loc(binding.use_span),
+                self.loc(*existing.entry.get()),
+            );
+            return Err(Poisoned);
         }
+        Ok(key)
     }
 
     fn eval_match(
@@ -676,97 +694,67 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arms: hir::MatchArmsId,
         fallback: hir::BlockId,
     ) -> Result<(), Diverge> {
-        let mut match_keys_seen = HashMap::new();
-        let mut has_invalid_key = false;
-        for arm in &self.hir.match_arms[arms] {
-            let binding = self.bindings[arm.key];
-            let key = match self.get_match_value(arm.key) {
-                Ok(MatchValue::U256(key)) => key,
-                Err(Poisoned) => {
-                    has_invalid_key = true;
-                    continue;
-                }
-                Ok(MatchValue::Unsupported(value)) => {
-                    has_invalid_key = true;
+        let Ok((subject_state, subject_use_span, _)) = self.bindings[subject].poisoned() else {
+            return Err(Diverge::ControlFlowPoisoned);
+        };
+        match subject_state {
+            LocalState::Comptime(value) => {
+                let Value::BigNum(subject) = self.values.lookup(value) else {
                     self.diag_ctx.emit_unsupported_match_value_type(
                         self.eval.values,
                         self.values.type_of_value(value),
-                        self.loc(binding.use_span),
+                        self.loc(subject_use_span),
                     );
-                    continue;
-                }
-            };
-            if let Err(existing) = match_keys_seen.try_insert(key, binding.use_span) {
-                has_invalid_key = true;
-                let previous_span = *existing.entry.get();
-                self.diag_ctx.emit_duplicate_match_key(
-                    key,
-                    self.loc(binding.use_span),
-                    self.loc(previous_span),
-                );
-            }
-        }
-        if has_invalid_key {
-            return Err(Diverge::ControlFlowPoisoned);
-        }
-
-        match self.bindings[subject].state {
-            Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
-            Ok(LocalState::Comptime(_)) => {
-                let subject = match self.get_match_value(subject) {
-                    Ok(MatchValue::U256(subject)) => subject,
-                    Err(Poisoned) => unreachable!("invariant: poisoned subject was handled"),
-                    Ok(MatchValue::Unsupported(value)) => {
-                        self.diag_ctx.emit_unsupported_match_value_type(
-                            self.eval.values,
-                            self.values.type_of_value(value),
-                            self.loc(self.bindings[subject].use_span),
-                        );
-                        return Err(Diverge::ControlFlowPoisoned);
-                    }
+                    return Err(Diverge::ControlFlowPoisoned);
                 };
 
-                let mut body = fallback;
+                let mut match_keys_seen = HashMap::new();
                 for arm in &self.hir.match_arms[arms] {
-                    let Ok(MatchValue::U256(key)) = self.get_match_value(arm.key) else {
-                        unreachable!("invariant: match keys were validated")
+                    let Ok(key) = self.eval_match_key(arm.key, &mut match_keys_seen) else {
+                        return Err(Diverge::ControlFlowPoisoned);
                     };
                     if subject == key {
-                        body = arm.body;
-                        break;
+                        return self.eval_block_inline(arm.body);
                     }
                 }
-                self.eval_block_inline(body)
+                self.eval_block_inline(fallback)
             }
-            Ok(LocalState::Runtime(subject_local)) => {
+            LocalState::Runtime(subject_local) => {
                 if !self.mir_types[subject_local].is_assignable_to(TypeId::U256) {
                     self.diag_ctx.emit_unsupported_match_value_type(
                         self.eval.values,
                         self.mir_types[subject_local],
-                        self.loc(self.bindings[subject].use_span),
+                        self.loc(subject_use_span),
                     );
                     return Err(Diverge::ControlFlowPoisoned);
                 }
+
+                let condition_span = Some(subject_use_span);
+                let mut match_keys_seen = HashMap::new();
+                let mut has_invalid_key = false;
                 let mut match_result = Err(Diverge::BlockEnd(None));
-                let match_arms = self.hir.match_arms[arms]
-                    .iter()
-                    .map(|&arm| {
-                        let Ok(MatchValue::U256(key)) = self.get_match_value(arm.key) else {
-                            unreachable!("invariant: match keys were validated")
-                        };
-                        let (body, branch_result) = self.with_runtime_controlled(
-                            Some(self.bindings[subject].use_span),
-                            |this| this.eval_block_to_mir(arm.body),
-                        );
-                        match_result = join_branch_results(match_result, branch_result);
-                        mir::MatchArm { key, body }
-                    })
-                    .collect::<Vec<_>>();
+                let mut match_arms = Vec::new();
+                for arm in &self.hir.match_arms[arms] {
+                    let key = self.eval_match_key(arm.key, &mut match_keys_seen);
+                    let (body, branch_result) = self
+                        .with_runtime_controlled(condition_span, |this| {
+                            this.eval_block_to_mir(arm.body)
+                        });
+                    match_result = join_branch_results(match_result, branch_result);
+                    match key {
+                        Ok(key) => match_arms.push(mir::MatchArm { key, body }),
+                        Err(Poisoned) => has_invalid_key = true,
+                    }
+                }
                 let (fallback, fallback_result) = self
-                    .with_runtime_controlled(Some(self.bindings[subject].use_span), |this| {
+                    .with_runtime_controlled(condition_span, |this| {
                         this.eval_block_to_mir(fallback)
                     });
                 match_result = join_branch_results(match_result, fallback_result);
+                if has_invalid_key {
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+
                 let arms = self.eval.mir_match_arms.push_iter(match_arms.into_iter());
                 self.emit(mir::Instruction::Match { subject: subject_local, arms, fallback });
                 match_result

@@ -1596,7 +1596,7 @@ fn test_return_outside_function_body() {
 
 #[test]
 fn test_multiple_match_else_arms() {
-    let rendered = render_diagnostics(
+    let (hir, big_nums, session, _project) = try_lower(
         r#"
         init {
             let x = match 0 {
@@ -1606,6 +1606,7 @@ fn test_multiple_match_else_arms() {
         }
         "#,
     );
+    let rendered = format_session_diagnostics(&session);
     let expected = dedent_preserve_blank_lines(
         r#"
         error: multiple else arms in match
@@ -1620,6 +1621,28 @@ fn test_multiple_match_else_arms() {
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+
+    let actual_hir = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
+    let expected_hir = dedent_preserve_blank_lines(
+        r#"
+        ==== Constants ====
+
+        ==== Init ====
+        %0 = 0
+        %2 = <poison>
+        %3 = <poison>
+        match %0 {
+            %2 => {
+                %1 [br]= %3
+            }
+            else => {
+                %1 [br]= 1
+            }
+        }
+        %4 = %1
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(actual_hir.trim(), expected_hir.trim());
 }
 
 #[test]
