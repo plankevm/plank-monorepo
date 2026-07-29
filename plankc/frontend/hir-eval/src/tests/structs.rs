@@ -210,6 +210,37 @@ fn test_instance_method_call() {
 }
 
 #[test]
+fn test_instance_method_self_type_reflection() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn field_count(value: Self) u256 { @field_count(Self) }
+        };
+
+        init {
+            let value: S = S {};
+            let count = value.field_count();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S) -> u256 {
+            %1 : u256 = 0
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {    }
+            %1 : u256 = call @fn0(%0)
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_unknown_static_method() {
     assert_diagnostics(
         r#"
