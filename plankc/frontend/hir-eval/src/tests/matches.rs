@@ -318,6 +318,32 @@ fn test_duplicate_match_key() {
 }
 
 #[test]
+fn test_comptime_match_checks_duplicate_keys_after_selected_arm() {
+    assert_diagnostics(
+        r#"
+        init {
+            let x = match 1 {
+                1 => 1,
+                2 => 2,
+                2 => 3,
+                else => 0,
+            };
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: duplicate match arm key
+         --> main.plk:5:9
+          |
+        4 |         2 => 2,
+          |         - previous key here
+        5 |         2 => 3,
+          |         ^ key `2` is used more than once
+        "#],
+    );
+}
+
+#[test]
 fn test_match_key_must_be_u256() {
     assert_diagnostics(
         r#"

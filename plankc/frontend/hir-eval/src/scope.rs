@@ -77,12 +77,6 @@ pub(crate) enum Diverge {
     BlockEnd(Option<ValueId>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MatchValue {
-    U256(U256),
-    Unsupported(ValueId),
-}
-
 impl Diverge {
     pub const END: Self = Self::BlockEnd(None);
 }
@@ -688,6 +682,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         Ok(key)
     }
 
+    fn eval_match_keys(&mut self, arms: hir::MatchArmsId) -> Vec<MaybePoisoned<U256>> {
+        let mut match_keys_seen = HashMap::new();
+        let mut match_keys = Vec::new();
+        for arm in &self.hir.match_arms[arms] {
+            match_keys.push(self.eval_match_key(arm.key, &mut match_keys_seen));
+        }
+        match_keys
+    }
+
     fn eval_match(
         &mut self,
         subject: hir::LocalId,
@@ -708,12 +711,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Diverge::ControlFlowPoisoned);
                 };
 
-                let mut match_keys_seen = HashMap::new();
-                for arm in &self.hir.match_arms[arms] {
-                    let Ok(key) = self.eval_match_key(arm.key, &mut match_keys_seen) else {
-                        return Err(Diverge::ControlFlowPoisoned);
-                    };
-                    if subject == key {
+                let match_keys = self.eval_match_keys(arms);
+                if match_keys.iter().any(Result::is_err) {
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+                for (&arm, key) in self.hir.match_arms[arms].iter().zip(match_keys) {
+                    if subject == key.expect("match keys were validated") {
                         return self.eval_block_inline(arm.body);
                     }
                 }
@@ -730,12 +733,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
 
                 let condition_span = Some(subject_use_span);
-                let mut match_keys_seen = HashMap::new();
+                let match_keys = self.eval_match_keys(arms);
                 let mut has_invalid_key = false;
                 let mut match_result = Err(Diverge::BlockEnd(None));
                 let mut match_arms = Vec::new();
-                for arm in &self.hir.match_arms[arms] {
-                    let key = self.eval_match_key(arm.key, &mut match_keys_seen);
+                for (&arm, key) in self.hir.match_arms[arms].iter().zip(match_keys) {
                     let (body, branch_result) = self
                         .with_runtime_controlled(condition_span, |this| {
                             this.eval_block_to_mir(arm.body)
