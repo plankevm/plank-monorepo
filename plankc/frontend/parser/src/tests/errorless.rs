@@ -1117,8 +1117,7 @@ fn test_match_expression_bound_fallback() {
                         MatchFallbackArm { binding: true }
                             "else"
                             " "
-                            Identifier
-                                "other"
+                            "other"
                             " "
                             "=>"
                             " "

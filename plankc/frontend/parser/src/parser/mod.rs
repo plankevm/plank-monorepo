@@ -523,20 +523,12 @@ impl<'a> Parser<'a> {
         self.expect(Token::LeftCurly);
 
         while !self.check(Token::RightCurly) && !self.eof() {
+            let arm_start = self.current_token_index();
             let mut arm = if self.eat(Token::Else) {
-                let mut arm = self.alloc_node_from(
-                    self.current_token_index() - 1,
-                    NodeKind::MatchFallbackArm { binding: false },
-                );
-
-                self.skip_trivia();
-                if self.at(Token::Identifier) {
-                    self.update_kind(arm, NodeKind::MatchFallbackArm { binding: true });
-                    let binding = self.try_parse_ident().expect("checked current token is ident");
-                    self.push_child(&mut arm, binding);
-                }
-
-                arm
+                let binding = self
+                    .eat(Token::Identifier)
+                    .then(|| self.intern(self.current_token_index() - 1));
+                self.alloc_node_from(arm_start, NodeKind::MatchFallbackArm { binding })
             } else {
                 let mut arm = self.alloc_node(NodeKind::MatchArm);
                 let key = self.parse_expr(ParseExprMode::AllowAll);

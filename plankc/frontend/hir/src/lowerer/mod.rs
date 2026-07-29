@@ -404,15 +404,12 @@ impl BlockLowerer<'_> {
                 MatchArmKind::Fallback { binding } => {
                     let body = ast::Expr::new_unwrap(arm.body);
                     let fallback = self.create_sub_block(body.span(), |this| {
-                        if let Some(binding) = binding {
-                            let name = binding
-                                .ident()
-                                .expect("invariant: match fallback binding must be an identifier");
+                        if let Some(name) = binding {
                             this.scoped_locals_stack.push(ScopedLocal {
                                 name,
                                 id: subject,
                                 kind: LocalKind::Immutable,
-                                span: Some(binding.span()),
+                                span: Some(arm.view.span()),
                             });
                         }
                         let expr = this.lower_expr(body);
