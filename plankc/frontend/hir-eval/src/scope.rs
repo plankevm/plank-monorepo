@@ -5,6 +5,7 @@ use crate::{
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
 use alloy_primitives::U256;
+use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
@@ -675,7 +676,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         arms: hir::MatchArmsId,
         fallback: hir::BlockId,
     ) -> Result<(), Diverge> {
-        assert!(self.match_keys_seen.is_empty(), "match key scratch buffer must be empty");
+        let mut match_keys_seen = HashMap::new();
         let mut has_invalid_key = false;
         for arm in &self.hir.match_arms[arms] {
             let binding = self.bindings[arm.key];
@@ -695,7 +696,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     continue;
                 }
             };
-            if let Err(existing) = self.match_keys_seen.try_insert(key, binding.use_span) {
+            if let Err(existing) = match_keys_seen.try_insert(key, binding.use_span) {
                 has_invalid_key = true;
                 let previous_span = *existing.entry.get();
                 self.diag_ctx.emit_duplicate_match_key(
@@ -705,7 +706,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 );
             }
         }
-        self.match_keys_seen.clear();
         if has_invalid_key {
             return Err(Diverge::ControlFlowPoisoned);
         }
@@ -747,28 +747,27 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     );
                     return Err(Diverge::ControlFlowPoisoned);
                 }
-                let arm_buf_start = self.match_arms_buf.len();
                 let mut match_result = Err(Diverge::BlockEnd(None));
-                for &arm in &self.hir.match_arms[arms] {
-                    let Ok(MatchValue::U256(key)) = self.get_match_value(arm.key) else {
-                        unreachable!("invariant: match keys were validated")
-                    };
-                    let (body, branch_result) = self
-                        .with_runtime_controlled(Some(self.bindings[subject].use_span), |this| {
-                            this.eval_block_to_mir(arm.body)
-                        });
-                    match_result = join_branch_results(match_result, branch_result);
-                    self.match_arms_buf.push(mir::MatchArm { key, body });
-                }
+                let match_arms = self.hir.match_arms[arms]
+                    .iter()
+                    .map(|&arm| {
+                        let Ok(MatchValue::U256(key)) = self.get_match_value(arm.key) else {
+                            unreachable!("invariant: match keys were validated")
+                        };
+                        let (body, branch_result) = self.with_runtime_controlled(
+                            Some(self.bindings[subject].use_span),
+                            |this| this.eval_block_to_mir(arm.body),
+                        );
+                        match_result = join_branch_results(match_result, branch_result);
+                        mir::MatchArm { key, body }
+                    })
+                    .collect::<Vec<_>>();
                 let (fallback, fallback_result) = self
                     .with_runtime_controlled(Some(self.bindings[subject].use_span), |this| {
                         this.eval_block_to_mir(fallback)
                     });
                 match_result = join_branch_results(match_result, fallback_result);
-                let arms = self
-                    .eval
-                    .mir_match_arms
-                    .push_iter(self.eval.match_arms_buf.drain(arm_buf_start..));
+                let arms = self.eval.mir_match_arms.push_iter(match_arms.into_iter());
                 self.emit(mir::Instruction::Match { subject: subject_local, arms, fallback });
                 match_result
             }
