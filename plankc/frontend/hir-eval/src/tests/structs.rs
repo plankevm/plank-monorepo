@@ -126,6 +126,54 @@ fn test_static_method_call() {
 }
 
 #[test]
+fn test_generic_static_method_self_specialization() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime T: type) type {
+            struct {
+                value: T
+                fn self_type() type { Self }
+                fn new() Self { @uninit(Self) }
+            }
+        };
+        const first = Make(u256).self_type();
+        const second = Make(bool).self_type();
+
+        init {
+            let x: Make(u256) = @uninit(first);
+            let y: Make(bool) = @uninit(second);
+            let a: Make(u256) = Make(u256).new();
+            let b: Make(bool) = Make(bool).new();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> Make(u256) {
+            %0 : Make(u256) = Make(u256) {
+                0,
+            }
+            ret %0
+        }
+
+        @fn1() -> Make(bool) {
+            %0 : Make(bool) = Make(bool) {
+                false,
+            }
+            ret %0
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : Make(u256) = call @fn0()
+            %1 : Make(bool) = call @fn1()
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_instance_method_call() {
     assert_lowers_to(
         r#"

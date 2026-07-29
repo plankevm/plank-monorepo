@@ -45,17 +45,23 @@ pub(crate) enum LoweredFnState {
 pub(crate) struct FunctionKey<'a> {
     pub closure: ValueId,
     pub params: &'a [Param],
+    pub self_value: Option<ValueId>,
 }
 
 impl<'a> FunctionKey<'a> {
-    pub fn new(closure: ValueId, comptime_params: &'a [Param]) -> Self {
-        Self { closure, params: comptime_params }
+    pub fn new(
+        closure: ValueId,
+        comptime_params: &'a [Param],
+        self_value: Option<ValueId>,
+    ) -> Self {
+        Self { closure, params: comptime_params, self_value }
     }
 }
 
 struct LoweredFn {
     state: LoweredFnState,
     closure: ValueId,
+    self_value: Option<ValueId>,
 }
 
 pub(crate) struct LoweredFunctionsCache {
@@ -114,12 +120,18 @@ impl LoweredFunctionsCache {
             hash,
             |&idx| {
                 let closure = self.functions[idx].closure;
-                closure == func.closure && func.params == &self.comptime_params[idx]
+                closure == func.closure
+                    && self.functions[idx].self_value == func.self_value
+                    && func.params == &self.comptime_params[idx]
             },
             |&idx| {
                 let closure = self.functions[idx].closure;
                 let comptime_params = &self.comptime_params[idx];
-                self.hasher.hash_one(FunctionKey { closure, params: comptime_params })
+                self.hasher.hash_one(FunctionKey {
+                    closure,
+                    params: comptime_params,
+                    self_value: self.functions[idx].self_value,
+                })
             },
         );
         match entry {
@@ -134,9 +146,11 @@ impl LoweredFunctionsCache {
                 }
             }
             Entry::Vacant(vacant) => {
-                let new_entry_id = self
-                    .functions
-                    .push(LoweredFn { state: LoweredFnState::InProgress, closure: func.closure });
+                let new_entry_id = self.functions.push(LoweredFn {
+                    state: LoweredFnState::InProgress,
+                    closure: func.closure,
+                    self_value: func.self_value,
+                });
                 let id2 = self.comptime_params.push_copy_slice(func.params);
                 assert_eq!(new_entry_id, id2);
                 vacant.insert(new_entry_id);
@@ -149,18 +163,20 @@ impl LoweredFunctionsCache {
 struct EvaluatedHeader {
     result: Cell<EvaluatedFnState>,
     closure: ValueId,
+    self_value: Option<ValueId>,
     params: u32,
 }
 
 pub(crate) struct EvaluatedFn<'a> {
     pub result: &'a Cell<EvaluatedFnState>,
     pub closure: ValueId,
+    pub self_value: Option<ValueId>,
     pub params: &'a [Param],
 }
 
 impl EvaluatedFn<'_> {
     pub fn key(&self) -> FunctionKey<'_> {
-        FunctionKey { closure: self.closure, params: self.params }
+        FunctionKey { closure: self.closure, params: self.params, self_value: self.self_value }
     }
 }
 
@@ -213,6 +229,7 @@ impl EvaluatedFunctionCache {
                 header.write(EvaluatedHeader {
                     result: Cell::new(EvaluatedFnState::Empty),
                     closure: key.closure,
+                    self_value: key.self_value,
                     params,
                 });
                 let params_start = header.byte_add(HEADER_TO_PARAMS_OFFSET) as *mut Param;
@@ -224,6 +241,7 @@ impl EvaluatedFunctionCache {
                 Err(EvaluatedFn {
                     result: &header.result,
                     closure: header.closure,
+                    self_value: header.self_value,
                     params: core::slice::from_raw_parts(params_start, params as usize),
                 })
             },
@@ -241,6 +259,7 @@ impl EvaluatedFunctionCache {
             EvaluatedFn {
                 result: &header.result,
                 closure: header.closure,
+                self_value: header.self_value,
                 params: core::slice::from_raw_parts(params_start, header.params as usize),
             }
         }
