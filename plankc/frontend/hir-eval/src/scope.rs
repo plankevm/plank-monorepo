@@ -82,8 +82,8 @@ impl Diverge {
 }
 
 pub(crate) enum EvalContext {
-    FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_loc: SrcLoc },
-    FunctionPreamble { arg_spans: CallArgSpansIdx, call_source: SourceId },
+    FunctionBody { ret_type: MaybePoisoned<TypeId>, ret_type_loc: SrcLoc, call_loc: SrcLoc },
+    FunctionPreamble { arg_spans: CallArgSpansIdx, call_loc: SrcLoc },
     Other,
 }
 

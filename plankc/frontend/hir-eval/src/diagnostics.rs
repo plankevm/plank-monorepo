@@ -1,9 +1,10 @@
+use crate::evaluator::EvaluatedMethod;
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    Compound, Type, TypeFlags, TypeId, TypeInterner, ValueId, ValueInterner,
+    Compound, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
     builtins as builtin_sigs,
 };
 
@@ -777,15 +778,39 @@ impl DiagCtx<'_> {
 
     pub fn emit_struct_method_capture_mismatch(
         &mut self,
-        method: hir::MethodDef,
-        source: SourceId,
+        values: &ValueInterner,
+        registered: EvaluatedMethod,
+        evaluated: EvaluatedMethod,
     ) {
-        let (name, span) = self.session.lookup_name_spanned(method.name, method.name_offset);
+        let Value::Closure { captures: registered_captures, .. } =
+            values.lookup(registered.closure)
+        else {
+            unreachable!("invariant: evaluated methods always contain closures")
+        };
+        let Value::Closure { captures: evaluated_captures, .. } = values.lookup(evaluated.closure)
+        else {
+            unreachable!("invariant: evaluated methods always contain closures")
+        };
+        let Some((&(registered_value, _), &(evaluated_value, _))) =
+            registered_captures.iter().zip(evaluated_captures).find(
+                |((registered_value, _), (evaluated_value, _))| registered_value != evaluated_value,
+            )
+        else {
+            unreachable!("invariant: capture mismatch requires differing captures")
+        };
+        let name = self.session.lookup_name(evaluated.method_def.name);
         Diagnostic::error("method captures conflict with struct type")
-            .primary(
-                source,
-                span,
-                format!("method `{name}` captures different values for the same struct type"),
+            .cross_source_annotations(
+                evaluated.registration_loc,
+                format!(
+                    "method `{name}` captures `{}` for this instantiation",
+                    values.format_value(self.session, self.types, evaluated_value),
+                ),
+                registered.registration_loc,
+                format!(
+                    "first registered here with capture `{}`",
+                    values.format_value(self.session, self.types, registered_value),
+                ),
             )
             .help("include the captured value in the struct's type index or fields")
             .emit(self);

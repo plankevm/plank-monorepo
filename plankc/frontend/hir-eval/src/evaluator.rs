@@ -49,6 +49,7 @@ newtype_index! {
 pub(crate) struct EvaluatedMethod {
     pub method_def: hir::MethodDef,
     pub closure: ValueId,
+    pub registration_loc: SrcLoc,
 }
 
 pub(crate) struct CallFrame {

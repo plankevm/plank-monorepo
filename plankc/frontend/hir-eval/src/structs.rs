@@ -1,7 +1,7 @@
 use crate::{
     evaluator::EvaluatedMethod,
     functions::SelfBinding,
-    scope::{EvalValue, LocalState, Scope},
+    scope::{EvalContext, EvalValue, LocalState, Scope},
 };
 use alloy_primitives::U256;
 use plank_hir as hir;
@@ -70,7 +70,12 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             });
 
             let struct_ty = TypeId::from_struct(r#struct);
-            this.eval_struct_methods(struct_def, struct_ty)?;
+            let registration_loc = match this.ctx {
+                EvalContext::FunctionPreamble { call_loc, .. }
+                | EvalContext::FunctionBody { call_loc, .. } => call_loc,
+                EvalContext::Other => this.loc(def_expr_span),
+            };
+            this.eval_struct_methods(struct_def, struct_ty, registration_loc)?;
             Ok(struct_ty)
         })
     }
@@ -79,13 +84,18 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         &mut self,
         struct_def: hir::StructDef,
         struct_ty: TypeId,
+        registration_loc: SrcLoc,
     ) -> MaybePoisoned<()> {
         self.with_methods_buf(|this, method_buf_offset| {
             let mut poisoned = false;
             for &method_def in &this.hir.methods[struct_def.methods] {
                 match this.eval_fn_def(method_def.function) {
                     Ok(EvalValue::Comptime(closure)) => {
-                        this.eval.method_buf.push(EvaluatedMethod { method_def, closure });
+                        this.eval.method_buf.push(EvaluatedMethod {
+                            method_def,
+                            closure,
+                            registration_loc,
+                        });
                     }
                     Ok(EvalValue::Runtime { .. }) => {
                         unreachable!("function definitions always evaluate to comptime closures")
@@ -119,9 +129,11 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                     "the same TypeId must always register methods in the same order"
                 );
                 if registered_method.closure != evaluated_method.closure {
-                    let source = this.hir.fns[evaluated_method.method_def.function].source;
-                    this.diag_ctx
-                        .emit_struct_method_capture_mismatch(evaluated_method.method_def, source);
+                    this.diag_ctx.emit_struct_method_capture_mismatch(
+                        this.eval.values,
+                        registered_method,
+                        evaluated_method,
+                    );
                     captures_mismatch = true;
                 }
             }

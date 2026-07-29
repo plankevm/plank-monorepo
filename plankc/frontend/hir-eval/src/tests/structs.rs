@@ -56,10 +56,12 @@ fn test_struct_method_capture_mismatch() {
         "#,
         &[r#"
         error: method captures conflict with struct type
-         --> main.plk:3:12
+         --> main.plk:9:18
           |
-        3 |         fn get() u256 { value }
-          |            ^^^ method `get` captures different values for the same struct type
+        8 |     let first = Make(1);
+          |                 ------- first registered here with capture `1`
+        9 |     let second = Make(2);
+          |                  ^^^^^^^ method `get` captures `2` for this instantiation
           |
           = help: include the captured value in the struct's type index or fields
         "#],
