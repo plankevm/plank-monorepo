@@ -94,7 +94,6 @@ struct BlockLowerer<'a> {
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
-    match_arm_buf: Vec<MatchArm>,
     param_info_buf: Vec<ParamInfo>,
     captures_buf: Vec<CaptureInfo>,
 
@@ -192,7 +191,6 @@ impl BlockLowerer<'_> {
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
-        debug_assert!(self.match_arm_buf.is_empty());
         debug_assert!(self.param_info_buf.is_empty());
         debug_assert!(self.captures_buf.is_empty());
     }
@@ -371,9 +369,9 @@ impl BlockLowerer<'_> {
     fn lower_match(&mut self, match_expr: ast::MatchExpr<'_>) -> ExprKind {
         let subject = self.lower_expr_to_local(match_expr.subject());
         let result = self.alloc_temp();
-        let arm_buf_start = self.match_arm_buf.len();
 
         let mut first_fallback = None;
+        let mut match_arms = Vec::new();
 
         for arm in match_expr.arms() {
             match arm.kind {
@@ -383,11 +381,8 @@ impl BlockLowerer<'_> {
                     }
 
                     let key = ast::Expr::new_unwrap(key);
-                    let key_local = self.alloc_temp();
-                    let key_block = self.create_sub_block(key.span(), |this| {
-                        let expr = this.lower_expr(key);
-                        this.emit(InstructionKind::Set { local: key_local, r#type: None, expr });
-                    });
+                    let (key_block, key_local) = self
+                        .create_sub_block_with(key.span(), |this| this.lower_expr_to_local(key));
                     self.emit(InstructionKind::ComptimeBlock {
                         body: key_block,
                         reason: ComptimeReason::MatchKey,
@@ -399,7 +394,7 @@ impl BlockLowerer<'_> {
                         this.emit(InstructionKind::BranchSet { local: result, expr });
                     });
 
-                    self.match_arm_buf.push(MatchArm { key: key_local, body: body_block });
+                    match_arms.push(MatchArm { key: key_local, body: body_block });
                 }
                 MatchArmKind::Fallback { binding } => {
                     let body = ast::Expr::new_unwrap(arm.body);
@@ -416,15 +411,15 @@ impl BlockLowerer<'_> {
                         this.emit(InstructionKind::BranchSet { local: result, expr });
                     });
 
-                    if let Some((_, previous_span)) = first_fallback {
+                    if let Some((_, previous_span)) =
+                        first_fallback.replace((fallback, arm.view.span()))
+                    {
                         self.error_multiple_match_else_arms(arm.view.span(), previous_span);
-                    } else {
-                        first_fallback = Some((fallback, arm.view.span()));
                     }
                 }
             }
         }
-        let arms = self.builder.match_arms.push_iter(self.match_arm_buf.drain(arm_buf_start..));
+        let arms = self.builder.match_arms.push_iter(match_arms.into_iter());
         let fallback = match first_fallback {
             Some((fallback, _)) => fallback,
             None => {
@@ -954,7 +949,6 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
-        match_arm_buf: Vec::new(),
         param_info_buf: Vec::new(),
         captures_buf: Vec::new(),
 
