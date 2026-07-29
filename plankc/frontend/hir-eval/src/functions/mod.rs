@@ -51,6 +51,12 @@ struct Call<'a> {
     validated: ArgParamComptimenessMatch,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct SelfBinding {
+    pub local: hir::LocalId,
+    pub value: ValueId,
+}
+
 impl Call<'_> {
     fn loc(&self) -> SrcLoc {
         SrcLoc::new(self.source, self.span)
@@ -80,6 +86,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         type_name: Option<StrId>,
         capture_buf_offset: usize,
         eagerly_comptime: bool,
+        self_binding: Option<SelfBinding>,
         validated: ArgParamComptimenessMatch,
         comptime_quota: ComptimeQuota,
     ) -> (Scope<'s, 'ctx>, Call<'s>) {
@@ -109,6 +116,17 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Ok(LocalState::Comptime(value)),
                     def.use_span,
                     DefOrigin::Local(def.use_span),
+                ),
+            );
+        }
+
+        if let Some(self_binding) = self_binding {
+            fn_scope.bindings.insert_no_prev(
+                self_binding.local,
+                Local::new(
+                    Ok(LocalState::Comptime(self_binding.value)),
+                    fn_def.source_span,
+                    DefOrigin::Local(fn_def.source_span),
                 ),
             );
         }
@@ -238,45 +256,58 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args_id: hir::ArgsId,
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let (state, callee_use_span, callee_origin) = self.bindings[callee].poisoned()?;
+        let closure = match state {
+            LocalState::Comptime(value) => value,
+            LocalState::Runtime(_) => {
+                self.diag_ctx.emit_call_target_not_comptime(self.loc(callee_use_span));
+                return Err(Poisoned);
+            }
+        };
+        if !matches!(self.eval.values.lookup(closure), Value::Closure { .. }) {
+            let ty = self.values.type_of_value(closure);
+            self.diag_ctx.emit_not_callable(
+                self.eval.values,
+                ty,
+                self.binding_loc(callee_use_span, callee_origin),
+            );
+            return Err(Poisoned);
+        }
+        self.eval_closure_call(closure, &self.hir.args[args_id], call_span, None)
+    }
+
+    pub(crate) fn eval_closure_call(
+        &mut self,
+        closure: ValueId,
+        args: &[hir::LocalId],
+        call_span: SourceSpan,
+        self_binding: Option<SelfBinding>,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
             this.with_maybe_values_buf(|this, values_buf_offset: usize| {
-                let (state, callee_use_span, callee_origin) = this.bindings[callee].poisoned()?;
-                let closure_vid = match state {
-                    LocalState::Comptime(value) => value,
-                    LocalState::Runtime(_) => {
-                        this.diag_ctx.emit_call_target_not_comptime(this.loc(callee_use_span));
-                        return Err(Poisoned);
-                    }
-                };
                 let Value::Closure { fn_def: fn_def_id, captures, .. } =
-                    this.eval.values.lookup(closure_vid)
+                    this.eval.values.lookup(closure)
                 else {
-                    let ty = this.values.type_of_value(closure_vid);
-                    this.diag_ctx.emit_not_callable(
-                        this.eval.values,
-                        ty,
-                        this.binding_loc(callee_use_span, callee_origin),
-                    );
-                    return Err(Poisoned);
+                    unreachable!("closure calls always receive Value::Closure")
                 };
                 for &capture in captures {
                     this.eval.captures_buf.push(capture);
                 }
-                let type_name = this.values.get_closure_name(closure_vid);
+                let type_name = this.values.get_closure_name(closure);
 
-                let args = &this.hir.args[args_id];
                 let arg_spans = this
                     .eval
                     .call_arg_spans
                     .push_iter(args.iter().map(|&arg| this.bindings[arg].use_span));
                 let eval_res = this.eval_call_inner(
-                    closure_vid,
+                    closure,
                     fn_def_id,
                     args,
                     arg_spans,
                     call_span,
                     type_name,
                     capture_buf_offset,
+                    self_binding,
                     values_buf_offset,
                 );
                 this.eval.call_arg_spans.pop();
@@ -316,6 +347,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         call_span: SourceSpan,
         type_name: Option<StrId>,
         capture_buf_offset: usize,
+        self_binding: Option<SelfBinding>,
         values_buf_offset: usize,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let func = self.hir.fns[fn_def_id];
@@ -366,6 +398,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             type_name,
             capture_buf_offset,
             eagerly_comptime,
+                self_binding,
             validated,
             child_quota,
         );

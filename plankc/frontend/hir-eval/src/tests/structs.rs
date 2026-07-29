@@ -39,6 +39,170 @@ fn test_struct_field_access() {
 }
 
 #[test]
+fn test_struct_method_capture_mismatch() {
+    assert_diagnostics(
+        r#"
+        const Make = fn(comptime value: u256) type {
+            struct {
+                fn get() u256 { value }
+            }
+        };
+
+        init {
+            let first = Make(1);
+            let second = Make(2);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: method captures conflict with struct type
+         --> main.plk:3:12
+          |
+        3 |         fn get() u256 { value }
+          |            ^^^ method `get` captures different values for the same struct type
+          |
+          = help: include the captured value in the struct's type index or fields
+        "#],
+    );
+}
+
+#[test]
+fn test_struct_method_capture_match() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime value: u256) type {
+            struct {
+                fn get() u256 { value }
+            }
+        };
+
+        init {
+            let first = Make(1);
+            let second = Make(1);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_static_method_call() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn identity(value: u256) u256 { value }
+            fn self_type() type { Self }
+            fn type_via_self() type { Self.self_type() }
+        };
+
+        init {
+            let value = S.identity(2);
+            let ty = S.type_via_self();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 2
+            %1 : u256 = call @fn0(%0)
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_instance_method_call() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn identity(value: Self, input: u256) u256 { input }
+            fn self_type(value: Self) type { Self }
+        };
+
+        init {
+            let value: S = S {};
+            let output = value.identity(2);
+            let ty = value.self_type();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S, %1: u256) -> u256 {
+            %2 : u256 = %1
+            ret %2
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {    }
+            %1 : u256 = 2
+            %2 : u256 = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_unknown_static_method() {
+    assert_diagnostics(
+        r#"
+        const S = struct {};
+
+        init {
+            S.missing();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown static method
+         --> main.plk:4:5
+          |
+        4 |     S.missing();
+          |     ^^^^^^^^^^^ `S` has no static method `missing`
+        "#],
+    );
+}
+
+#[test]
+fn test_unknown_instance_method() {
+    assert_diagnostics(
+        r#"
+        const S = struct {};
+
+        init {
+            let value: S = S {};
+            value.missing();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown instance method
+         --> main.plk:5:5
+          |
+        5 |     value.missing();
+          |     ^^^^^^^^^^^^^^^ `S` has no instance method `missing`
+        "#],
+    );
+}
+
+#[test]
 fn test_invalid_field_access() {
     assert_diagnostics(
         r#"

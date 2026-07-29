@@ -717,6 +717,46 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_unknown_static_method(
+        &mut self,
+        values: &ValueInterner,
+        struct_ty: TypeId,
+        call_loc: SrcLoc,
+        method_name: StrId,
+    ) {
+        Diagnostic::error("unknown static method")
+            .primary(
+                call_loc.source,
+                call_loc.span,
+                format!(
+                    "`{}` has no static method `{}`",
+                    self.types.format(self.session, values, struct_ty),
+                    self.session.lookup_name(method_name),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_unknown_instance_method(
+        &mut self,
+        values: &ValueInterner,
+        struct_ty: TypeId,
+        call_loc: SrcLoc,
+        method_name: StrId,
+    ) {
+        Diagnostic::error("unknown instance method")
+            .primary(
+                call_loc.source,
+                call_loc.span,
+                format!(
+                    "`{}` has no instance method `{}`",
+                    self.types.format(self.session, values, struct_ty),
+                    self.session.lookup_name(method_name),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_struct_def_duplicate_field(
         &mut self,
         source: SourceId,
@@ -732,6 +772,22 @@ impl DiagCtx<'_> {
                     .primary(duplicate, format!("`{name}` assigned more than once"))
                     .secondary(first, "first assigned here"),
             )
+            .emit(self);
+    }
+
+    pub fn emit_struct_method_capture_mismatch(
+        &mut self,
+        method: hir::MethodDef,
+        source: SourceId,
+    ) {
+        let (name, span) = self.session.lookup_name_spanned(method.name, method.name_offset);
+        Diagnostic::error("method captures conflict with struct type")
+            .primary(
+                source,
+                span,
+                format!("method `{name}` captures different values for the same struct type"),
+            )
+            .help("include the captured value in the struct's type index or fields")
             .emit(self);
     }
 
