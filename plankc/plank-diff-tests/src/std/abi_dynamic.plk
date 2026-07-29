@@ -1,15 +1,15 @@
 import std::abi::{unsafe_abi_encode, unsafe_abi_decode, abi_encoded_size};
-import std::membytes::{membytes, membytes_from_ptr};
+import std::core::regions::*;
 
-const WithBytes = struct { id: u256, data: membytes };
+const WithBytes = struct { id: u256, data: bytes(memory) };
 
 init {
     let size = @evm_calldatasize();
-    let ptr = @malloc_zeroed(size);
-    @evm_calldatacopy(ptr, 0, size);
+    let ptr = malloc_zeroed(size);
+    unsafe_calldatacopy(ptr, rawptr(calldata) { raw: 0 }, size);
     let decoded = unsafe_abi_decode(WithBytes, ptr, size);
     let out_size = abi_encoded_size(decoded);
-    let out = @malloc_zeroed(out_size);
+    let out = malloc_zeroed(out_size);
     let written = unsafe_abi_encode(out, decoded);
-    @evm_return(out, written);
+    unsafe_return(out, written);
 }

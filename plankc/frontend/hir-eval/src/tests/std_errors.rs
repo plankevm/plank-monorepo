@@ -6,7 +6,7 @@ fn test_runtime_slice_rejects_cbytes_elements() {
         std_project(
             r#"
             import std::option::None;
-            import std::regions::memory;
+            import std::core::regions::memory;
             import std::slice::Slice;
 
             const InvalidSlice = Slice(memory, cbytes, None(u256));
@@ -18,10 +18,10 @@ fn test_runtime_slice_rejects_cbytes_elements() {
         ),
         &[r#"
         error: Slice: type cannot be embedded as a runtime slice element
-         --> std/error.plk:8:5
-          |
-        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
-          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+          --> std/error.plk:10:5
+           |
+        10 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+           |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -32,7 +32,7 @@ fn test_runtime_slice_rejects_nested_cbytes_elements() {
         std_project(
             r#"
             import std::option::None;
-            import std::regions::memory;
+            import std::core::regions::memory;
             import std::slice::Slice;
 
             const Dynamic = struct { data: cbytes };
@@ -45,10 +45,10 @@ fn test_runtime_slice_rejects_nested_cbytes_elements() {
         ),
         &[r#"
         error: Slice: type cannot be embedded as a runtime slice element
-         --> std/error.plk:8:5
-          |
-        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
-          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+          --> std/error.plk:10:5
+           |
+        10 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+           |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
     );
 }
@@ -59,7 +59,7 @@ fn test_ctime_slice_rejects_cbytes_elements() {
         std_project(
             r#"
             import std::option::None;
-            import std::regions::ctime;
+            import std::core::regions::ctime;
             import std::slice::Slice;
 
             const InvalidSlice = Slice(ctime, cbytes, None(u256));
@@ -84,7 +84,7 @@ fn test_slice_new_rejects_code_region() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::code;
+            import std::core::regions::code;
             import std::slice::new;
 
             init {
@@ -108,7 +108,7 @@ fn test_slice_new_rejects_calldata_region() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::calldata;
+            import std::core::regions::calldata;
             import std::slice::new;
 
             init {
@@ -132,7 +132,7 @@ fn test_slice_new_ctime_rejects_runtime_values() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::ctime;
+            import std::core::regions::ctime;
             import std::slice::new;
 
             init {
@@ -162,7 +162,7 @@ fn test_slice_new_rejects_heterogeneous_tuple() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::memory;
+            import std::core::regions::memory;
             import std::slice::new;
 
             init {
@@ -173,16 +173,16 @@ fn test_slice_new_rejects_heterogeneous_tuple() {
         ),
         &[r#"
         error: new: slice constructor elements must all have the same type
-         --> std/error.plk:8:5
-          |
-        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
-          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
-          |
+          --> std/error.plk:10:5
+           |
+        10 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+           |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+           |
         note: called here
-         --> main.plk:5:5
-          |
-        5 |     new(memory, (1, true));
-          |     ^^^^^^^^^^^^^^^^^^^^^^
+          --> main.plk:5:5
+           |
+         5 |     new(memory, (1, true));
+           |     ^^^^^^^^^^^^^^^^^^^^^^
         "#],
     );
 }
@@ -192,7 +192,7 @@ fn test_slice_new_rejects_empty_tuple() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::memory;
+            import std::core::regions::memory;
             import std::slice::new;
 
             init {
@@ -203,16 +203,16 @@ fn test_slice_new_rejects_empty_tuple() {
         ),
         &[r#"
         error: new: cannot infer a slice element type from an empty tuple; use `empty`
-         --> std/error.plk:8:5
-          |
-        8 |     @compile_error(@concat_cbytes((caller, ": ", message)));
-          |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
-          |
+          --> std/error.plk:10:5
+           |
+        10 |     @compile_error(@concat_cbytes((caller, ": ", message)));
+           |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+           |
         note: called here
-         --> main.plk:5:5
-          |
-        5 |     new(memory, ());
-          |     ^^^^^^^^^^^^^^^
+          --> main.plk:5:5
+           |
+         5 |     new(memory, ());
+           |     ^^^^^^^^^^^^^^^
         "#],
     );
 }
@@ -253,11 +253,11 @@ fn test_slice_set_rejects_non_memory_region() {
         std_project(
             r#"
             import std::option::Some;
-            import std::regions::code;
+            import std::core::regions::{code, rawptr};
             import std::slice::{Slice, set};
 
             init {
-                let slice = Slice(code, u256, comptime { Some(1) }) { ptr: 0 };
+                let slice = Slice(code, u256, comptime { Some(1) }) { ptr: rawptr(code) { raw: 0 } };
                 set(slice, 0, 1);
                 @evm_stop();
             }
@@ -279,7 +279,7 @@ fn test_slice_replace_rejects_out_of_bounds_index() {
         std_project(
             r#"
             import std::option::Some;
-            import std::regions::ctime;
+            import std::core::regions::ctime;
             import std::slice::{Slice, replace};
 
             const VALUES = Slice(ctime, u256, Some(2)) {
@@ -308,11 +308,11 @@ fn test_slice_replace_rejects_non_ctime_region() {
         std_project(
             r#"
             import std::option::Some;
-            import std::regions::memory;
+            import std::core::regions::{memory, rawptr};
             import std::slice::{Slice, replace};
 
             init {
-                let ptr = @evm_calldataload(0);
+                let ptr = rawptr(memory) { raw: @evm_calldataload(0) };
                 let slice = Slice(memory, u256, comptime { Some(1) }) { ptr: ptr };
                 replace(slice, 0, 1);
                 @evm_stop();

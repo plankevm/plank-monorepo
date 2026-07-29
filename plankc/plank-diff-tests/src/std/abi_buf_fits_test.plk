@@ -1,10 +1,11 @@
 import std::abi_helpers::abi_buf_fits;
 import std::error::require;
-import std::membytes::{membytes, membytes_new, membytes_write};
+import std::core::regions::*;
+import std::mem::membytes_write;
 
-const assert_fits = fn (comptime T: type, buf: membytes, offset: u256, expected: bool) void {
+const assert_fits = fn (comptime T: type, buf: bytes(memory), offset: u256, expected: bool) void {
     if abi_buf_fits(T, buf, offset) != expected {
-        @evm_revert(@malloc_uninit(0), 0);
+        unsafe_revert(malloc_uninit(0), 0);
     }
 };
 
@@ -29,37 +30,37 @@ init {
     assert_fits(bool, buf33, 1, true);
 
     let buf64 = membytes_new(64);
-    require(membytes_write(buf64, 0, 32));
-    assert_fits(membytes, buf64, 0, true);
+    require(membytes_write(buf64, 0, 32), ());
+    assert_fits(bytes(memory), buf64, 0, true);
 
-    require(membytes_write(buf64, 1, 32));
-    assert_fits(membytes, buf64, 1, false);
+    require(membytes_write(buf64, 1, 32), ());
+    assert_fits(bytes(memory), buf64, 1, false);
 
     let buf65 = membytes_new(65);
-    require(membytes_write(buf65, 0, 33));
-    assert_fits(membytes, buf65, 0, false);
+    require(membytes_write(buf65, 0, 33), ());
+    assert_fits(bytes(memory), buf65, 0, false);
 
     let buf96 = membytes_new(96);
-    require(membytes_write(buf96, 0, 33));
-    assert_fits(membytes, buf96, 0, true);
+    require(membytes_write(buf96, 0, 33), ());
+    assert_fits(bytes(memory), buf96, 0, true);
 
     // struct with dynamic field: offset pointer + zero-length data = 64 bytes
     let buf64_struct = membytes_new(64);
-    require(membytes_write(buf64_struct, 0, 32));
-    assert_fits(struct { data: membytes }, buf64_struct, 0, true);
+    require(membytes_write(buf64_struct, 0, 32), ());
+    assert_fits(struct { data: bytes(memory) }, buf64_struct, 0, true);
 
     // struct with dynamic field: offset=32, len=33 at tail, but only 80 bytes total (needs 128)
     let buf80_struct = membytes_new(80);
-    require(membytes_write(buf80_struct, 0, 32));
-    require(membytes_write(buf80_struct, 32, 33));
-    assert_fits(struct { data: membytes }, buf80_struct, 0, false);
+    require(membytes_write(buf80_struct, 0, 32), ());
+    require(membytes_write(buf80_struct, 32, 33), ());
+    assert_fits(struct { data: bytes(memory) }, buf80_struct, 0, false);
 
     // struct with only static fields
     let buf64_static = membytes_new(64);
     assert_fits(struct { a: u256, b: u256 }, buf64_static, 0, true);
     assert_fits(struct { a: u256, b: u256 }, buf64_static, 1, false);
 
-    let out_ptr = @malloc_zeroed(32);
-    @mstore32(out_ptr, 1);
-    @evm_return(out_ptr, 32);
+    let out_ptr = malloc_zeroed(32);
+    unsafe_mstore32(out_ptr, 1);
+    unsafe_return(out_ptr, 32);
 }

@@ -1,5 +1,0 @@
-import std::membytes::membytes;
-
-const string = struct {
-    bytes: membytes
-};

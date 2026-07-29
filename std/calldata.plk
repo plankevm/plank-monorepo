@@ -1,29 +1,29 @@
 import std::type::sizeof;
+import std::core::regions::{calldata, rawptr, unsafe_calldataload, wrapping_add_bytes};
 
-// Reads a value of type T from calldata at `ptr`. Compound fields are
-// read contiguously in declaration order. No bounds check.
-const unsafe_calldata_read = fn (comptime T: type, ptr: u256) T {
+// Reads a value of type T from calldata at `ptr`. Compound fields are read
+// contiguously in declaration order. No bounds check.
+const unsafe_calldata_read = fn (comptime T: type, ptr: rawptr(calldata)) T {
     if T == void {
         ()
     } else if T == u256 {
-        @evm_calldataload(ptr)
+        unsafe_calldataload(ptr)
     } else if T == bool {
-        @evm_calldataload(ptr) != 0
+        unsafe_calldataload(ptr) != 0
     } else if @is_struct(T) or @is_tuple(T) {
         let mut value = @uninit(T);
         comptime let mut i = 0;
         comptime let mut field_offset = 0;
 
         inline while i < @field_count(T) {
-            let field_type = @field_type(T, i);
-            let field_size = comptime { sizeof(field_type) };
-            let field_value = unsafe_calldata_read(field_type, ptr + field_offset);
+            let FieldType = @field_type(T, i);
+            let field_value = unsafe_calldata_read(FieldType, wrapping_add_bytes(ptr, field_offset));
             value = @set_field(value, i, field_value);
-            field_offset = field_offset + field_size;
+            field_offset = field_offset + comptime { sizeof(FieldType) };
             i = i + 1;
         }
 
-        value
+        return value;
     } else {
         @compile_error("unsupported type for unsafe_calldata_read")
     }

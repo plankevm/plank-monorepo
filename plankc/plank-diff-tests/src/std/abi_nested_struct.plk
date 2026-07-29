@@ -1,20 +1,20 @@
 import std::abi::{abi_encode, abi_decode, abi_encoded_size};
-import std::membytes::{membytes, membytes_from_ptr};
+import std::core::regions::*;
 
-const Level0 = struct { x: u256, data: membytes };
+const Level0 = struct { x: u256, data: bytes(memory) };
 const Level1 = struct { inner: Level0, flag: bool };
-const Level2 = struct { inner: Level1, y: u256, suffix: membytes };
+const Level2 = struct { inner: Level1, y: u256, suffix: bytes(memory) };
 
 init {
     let size = @evm_calldatasize();
-    let ptr = @malloc_zeroed(size);
-    @evm_calldatacopy(ptr, 0, size);
-    let buf = membytes_from_ptr(ptr, size);
+    let ptr = malloc_zeroed(size);
+    unsafe_calldatacopy(ptr, rawptr(calldata) { raw: 0 }, size);
+    let buf = unsafe_bytes_from_parts(ptr, size);
     let decoded = abi_decode(Level2, buf);
     let esize = abi_encoded_size(decoded);
     let encoded = abi_encode(decoded);
-    let out_ptr = @malloc_zeroed(@evm_add(32, encoded.length));
-    @mstore32(out_ptr, esize);
-    @mcopy(@evm_add(out_ptr, 32), encoded.ptr, encoded.length);
-    @evm_return(out_ptr, @evm_add(32, encoded.length));
+    let out_ptr = malloc_zeroed(32 +% encoded.length);
+    unsafe_mstore32(out_ptr, esize);
+    unsafe_mcopy(wrapping_add_bytes(out_ptr, 32), encoded.ptr, encoded.length);
+    unsafe_return(out_ptr, 32 +% encoded.length);
 }

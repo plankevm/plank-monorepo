@@ -2,7 +2,7 @@ import std::constructor::return_runtime;
 import std::error::{comptime_assert, require};
 import std::mem::unsafe_mem_write;
 import std::option::{None, Some};
-import std::regions::{calldata, code, ctime, memory};
+import std::core::regions::*;
 import std::slice::*;
 import std::type::sizeof;
 
@@ -30,14 +30,14 @@ const test_basic = fn () void {
         comptime_assert(!get(dynamic_zero_sized, 3).is_some, "zero-sized CSlice bounds must use len");
     }
 
-    let fixed_memory_slice = Slice(memory, u256, comptime { Some(3) }) { ptr: 0 };
-    let dynamic_code_slice = Slice(code, u256, comptime { None(u256) }) { ptr: 0, len: 7 };
+    let fixed_memory_slice = Slice(memory, u256, comptime { Some(3) }) { ptr: rawptr(memory) { raw: 0 } };
+    let dynamic_code_slice = Slice(code, u256, comptime { None(u256) }) { ptr: rawptr(code) { raw: 0 }, len: 7 };
     let empty_calldata_slice = empty(calldata, u256);
 
-    require(len(fixed_memory_slice) == 3);
-    require(len(dynamic_code_slice) == 7);
-    require(is_empty(empty_calldata_slice));
-    require(!is_empty(dynamic_code_slice));
+    require(len(fixed_memory_slice) == 3, ());
+    require(len(dynamic_code_slice) == 7, ());
+    require(is_empty(empty_calldata_slice), ());
+    require(!is_empty(dynamic_code_slice), ());
 };
 
 const test_ctime_access = fn () void {
@@ -94,27 +94,27 @@ const test_memory_access = fn () void {
     let second = at(memory_slice, runtime_index);
     let missing = get(memory_slice, 2);
 
-    require(first.first == 5);
-    require(first.second == 6);
-    require(second.first == 7);
-    require(second.second == 8);
-    require(!missing.is_some);
+    require(first.first == 5, ());
+    require(first.second == 6, ());
+    require(second.first == 7, ());
+    require(second.second == 8, ());
+    require(!missing.is_some, ());
 };
 
 const test_memory_set = fn () void {
     let pair_size = comptime { sizeof(Pair) };
-    let pair_ptr = @malloc_uninit(pair_size * 3);
+    let pair_ptr = malloc_uninit(pair_size * 3);
     unsafe_mem_write(pair_ptr, Pair { first: 1, second: 2 });
-    unsafe_mem_write(pair_ptr +% pair_size, Pair { first: 3, second: 4 });
-    unsafe_mem_write(pair_ptr +% (pair_size * 2), Pair { first: 5, second: 6 });
+    unsafe_mem_write(wrapping_add_bytes(pair_ptr, pair_size), Pair { first: 3, second: 4 });
+    unsafe_mem_write(wrapping_add_bytes(pair_ptr, pair_size * 2), Pair { first: 5, second: 6 });
 
     let fixed = Slice(memory, Pair, comptime { Some(3) }) { ptr: pair_ptr };
     set(fixed, 1, Pair { first: 13, second: 14 });
 
-    require(at(fixed, 0).first == 1);
-    require(at(fixed, 1).first == 13);
-    require(at(fixed, 1).second == 14);
-    require(at(fixed, 2).second == 6);
+    require(at(fixed, 0).first == 1, ());
+    require(at(fixed, 1).first == 13, ());
+    require(at(fixed, 1).second == 14, ());
+    require(at(fixed, 2).second == 6, ());
 
     let dynamic = Slice(memory, TuplePair, comptime { None(u256) }) {
         ptr: pair_ptr,
@@ -122,11 +122,11 @@ const test_memory_set = fn () void {
     };
     set(dynamic, 2, (15, 16));
 
-    require(@get_field(at(dynamic, 1), 0) == 13);
-    require(@get_field(at(dynamic, 2), 0) == 15);
-    require(@get_field(at(dynamic, 2), 1) == 16);
-    require(at(fixed, 2).first == 15);
-    require(at(fixed, 2).second == 16);
+    require(@get_field(at(dynamic, 1), 0) == 13, ());
+    require(@get_field(at(dynamic, 2), 0) == 15, ());
+    require(@get_field(at(dynamic, 2), 1) == 16, ());
+    require(at(fixed, 2).first == 15, ());
+    require(at(fixed, 2).second == 16, ());
 };
 
 const test_code_access = fn () void {
@@ -138,27 +138,27 @@ const test_code_access = fn () void {
     let runtime_index = @evm_calldatasize() </ 128;
     let code_second = at(code_slice, runtime_index);
 
-    require(code_first.first == 1);
-    require(code_first.second == 2);
-    require(code_second.first == 3);
-    require(code_second.second == 4);
+    require(code_first.first == 1, ());
+    require(code_first.second == 2, ());
+    require(code_second.first == 3, ());
+    require(code_second.second == 4, ());
 };
 
 const test_calldata_access = fn () void {
     let pair_size = comptime { sizeof(Pair) };
     let calldata_slice = Slice(calldata, TuplePair, comptime { None(u256) }) {
-        ptr: 0,
+        ptr: rawptr(calldata) { raw: 0 },
         len: @evm_calldatasize() </ pair_size
     };
     let first = at(calldata_slice, 0);
     let second = at(calldata_slice, 1);
     let missing = get(calldata_slice, 2);
 
-    require(@get_field(first, 0) == 9);
-    require(@get_field(first, 1) == 10);
-    require(@get_field(second, 0) == 11);
-    require(@get_field(second, 1) == 12);
-    require(!missing.is_some);
+    require(@get_field(first, 0) == 9, ());
+    require(@get_field(first, 1) == 10, ());
+    require(@get_field(second, 0) == 11, ());
+    require(@get_field(second, 1) == 12, ());
+    require(!missing.is_some, ());
 };
 
 const test_access = fn () void {
@@ -179,7 +179,7 @@ run {
     let calldata_size = @evm_calldatasize();
     if calldata_size == 0 {
         let empty_slice = Slice(calldata, u256, comptime { None(u256) }) {
-            ptr: 0,
+            ptr: rawptr(calldata) { raw: 0 },
             len: 0
         };
         at(empty_slice, 0);
@@ -187,7 +187,7 @@ run {
     }
 
     if calldata_size == 32 {
-        let ptr = @malloc_uninit(32);
+        let ptr = malloc_uninit(32);
         let memory_slice = Slice(memory, u256, comptime { Some(1) }) { ptr: ptr };
         set(memory_slice, 1, 42);
         @evm_stop();

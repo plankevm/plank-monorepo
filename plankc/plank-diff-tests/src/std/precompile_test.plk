@@ -1,7 +1,7 @@
 import std::abi::abi_encode;
 import std::constructor::return_runtime;
 import std::core::addr::cast_addr;
-import std::membytes::{membytes, membytes_new, membytes_from_ptr};
+import std::core::regions::*;
 import std::precompile::{ecrecover, sha256, ripemd160, modexp};
 
 const ECRECOVER_SELECTOR = 0xa489405c;
@@ -9,64 +9,64 @@ const RIPEMD160_SELECTOR = 0x31699b64;
 const SHA256_SELECTOR = 0xb32a323d;
 const MODEXP_SELECTOR = 0x725782ca;
 
-const BytesResult = struct { data: membytes };
+const BytesResult = struct { data: bytes(memory) };
 
 init {
     return_runtime();
 }
 
 run {
-    let selector = @evm_shr(224, @evm_calldataload(0));
-    if @evm_eq(selector, ECRECOVER_SELECTOR) {
+    let selector = unsafe_calldataload(rawptr(calldata) { raw: 0 }) >> 224;
+    if selector == ECRECOVER_SELECTOR {
         call_ecrecover();
-    } else if @evm_eq(selector, SHA256_SELECTOR) {
+    } else if selector == SHA256_SELECTOR {
         call_sha256();
-    } else if @evm_eq(selector, RIPEMD160_SELECTOR) {
+    } else if selector == RIPEMD160_SELECTOR {
         call_ripemd160();
-    } else if @evm_eq(selector, MODEXP_SELECTOR) {
+    } else if selector == MODEXP_SELECTOR {
         call_modexp();
     } else {
-        @evm_revert(@malloc_uninit(0), 0);
+        unsafe_revert(malloc_uninit(0), 0);
     }
 }
 
 const call_ecrecover = fn () never {
-    let hash = @evm_calldataload(4);
-    let v = @evm_calldataload(36);
-    let r = @evm_calldataload(68);
-    let s = @evm_calldataload(100);
+    let hash = unsafe_calldataload(rawptr(calldata) { raw: 4 });
+    let v = unsafe_calldataload(rawptr(calldata) { raw: 36 });
+    let r = unsafe_calldataload(rawptr(calldata) { raw: 68 });
+    let s = unsafe_calldataload(rawptr(calldata) { raw: 100 });
 
-    let addr = ecrecover(hash, v, r, s);
-    let out = @malloc_uninit(32);
-    let unwrapped = if addr.is_some { cast_addr(addr.inner, u256) } else { 0 };
-    @mstore32(out, unwrapped);
-    @evm_return(out, 32);
+    let account = ecrecover(hash, v, r, s);
+    let out = malloc_uninit(32);
+    let unwrapped = if account.is_some { cast_addr(account.inner, u256) } else { 0 };
+    unsafe_mstore32(out, unwrapped);
+    unsafe_return(out, 32);
 };
 
 const call_sha256 = fn () never {
-    let offset = @evm_calldataload(4) +% 4;
+    let offset = unsafe_calldataload(rawptr(calldata) { raw: 4 }) +% 4;
     let data = bytes_from_offset(offset);
     let hash = sha256(data);
 
-    let out = @malloc_uninit(32);
-    @mstore32(out, hash);
-    @evm_return(out, 32);
+    let out = malloc_uninit(32);
+    unsafe_mstore32(out, hash);
+    unsafe_return(out, 32);
 };
 
 const call_ripemd160 = fn () never {
-    let offset = @evm_calldataload(4) +% 4;
+    let offset = unsafe_calldataload(rawptr(calldata) { raw: 4 }) +% 4;
     let data = bytes_from_offset(offset);
     let hash = ripemd160(data);
 
-    let out = @malloc_uninit(32);
-    @mstore32(out, hash);
-    @evm_return(out, 32);
+    let out = malloc_uninit(32);
+    unsafe_mstore32(out, hash);
+    unsafe_return(out, 32);
 };
 
 const call_modexp = fn () never {
-    let base_offset = @evm_calldataload(4) +% 4;
-    let exp_offset = @evm_calldataload(36) +% 4;
-    let mod_offset = @evm_calldataload(68) +% 4;
+    let base_offset = unsafe_calldataload(rawptr(calldata) { raw: 4 }) +% 4;
+    let exp_offset = unsafe_calldataload(rawptr(calldata) { raw: 36 }) +% 4;
+    let mod_offset = unsafe_calldataload(rawptr(calldata) { raw: 68 }) +% 4;
 
     let base = bytes_from_offset(base_offset);
     let exp = bytes_from_offset(exp_offset);
@@ -74,13 +74,12 @@ const call_modexp = fn () never {
 
     let result = modexp(base, exp, mod);
     let out = abi_encode(BytesResult { data: result });
-    @evm_return(out.ptr, out.length);
+    unsafe_return(out.ptr, out.length);
 };
 
-const bytes_from_offset = fn (offset: u256) membytes {
-    let length = @evm_calldataload(offset);
+const bytes_from_offset = fn (offset: u256) bytes(memory) {
+    let length = unsafe_calldataload(rawptr(calldata) { raw: offset });
     let out = membytes_new(length);
-    @evm_calldatacopy(out.ptr, offset +% 32, length);
-
+    unsafe_calldatacopy(out.ptr, rawptr(calldata) { raw: offset +% 32 }, length);
     out
 };

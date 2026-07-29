@@ -1,5 +1,5 @@
 import std::error::require;
-import std::membytes::{membytes, membytes_from_ptr};
+import std::core::regions::*;
 import std::option::{Option, Some, None};
 import std::core::addr::*;
 
@@ -11,54 +11,54 @@ const MODEXP_ADDR = addr_from_u256(0x05);
 
 const ecrecover = fn (hash: u256, v: u256, r: u256, s: u256) Option(addr) {
     let length = 128;
-    let buf = @malloc_uninit(length);
-    @mstore32(buf +% 0, hash);
-    @mstore32(buf +% 32, v);
-    @mstore32(buf +% 64, r);
-    @mstore32(buf +% 96, s);
+    let buf = malloc_uninit(length);
+    unsafe_mstore32(wrapping_add_bytes(buf, 0), hash);
+    unsafe_mstore32(wrapping_add_bytes(buf, 32), v);
+    unsafe_mstore32(wrapping_add_bytes(buf, 64), r);
+    unsafe_mstore32(wrapping_add_bytes(buf, 96), s);
 
-    let success = @evm_staticcall(@evm_gas(), cast_addr(ECRECOVER_ADDR, u256), buf, length, buf, 32);
+    let success = unsafe_staticcall(@evm_gas(), cast_addr(ECRECOVER_ADDR, u256), buf, length, buf, 32);
     if success {
-        Some(addr_from_u256(@mload32(buf)))
+        Some(addr_from_u256(unsafe_mload32(buf)))
     } else {
         None(addr)
     }
 };
 
-const sha256 = fn (data: membytes) u256 {
+const sha256 = fn (data: bytes(memory)) u256 {
     let length = 32;
-    let buf = @malloc_uninit(length);
+    let buf = malloc_uninit(length);
 
-    let success = @evm_staticcall(@evm_gas(), cast_addr(SHA256_ADDR, u256), data.ptr, data.length, buf, length);
-    require(success);
+    let success = unsafe_staticcall(@evm_gas(), cast_addr(SHA256_ADDR, u256), data.ptr, data.length, buf, length);
+    require(success, ());
 
-    @mload32(buf)
+    unsafe_mload32(buf)
 };
 
-const ripemd160 = fn (data: membytes) u256 {
+const ripemd160 = fn (data: bytes(memory)) u256 {
     let length = 32;
-    let buf = @malloc_uninit(length);
+    let buf = malloc_uninit(length);
 
-    let success = @evm_staticcall(@evm_gas(), cast_addr(RIPEMD160_ADDR, u256), data.ptr, data.length, buf, length);
-    require(success);
+    let success = unsafe_staticcall(@evm_gas(), cast_addr(RIPEMD160_ADDR, u256), data.ptr, data.length, buf, length);
+    require(success, ());
 
-    @mload32(buf)
+    unsafe_mload32(buf)
 };
 
-const modexp = fn (base: membytes, exp: membytes, mod: membytes) membytes {
+const modexp = fn (base: bytes(memory), exp: bytes(memory), mod: bytes(memory)) bytes(memory) {
     let length = 96 + base.length + exp.length + mod.length;
-    let buf = @malloc_uninit(length);
+    let buf = malloc_uninit(length);
 
-    @mstore32(buf +% 0, base.length);
-    @mstore32(buf +% 32, exp.length);
-    @mstore32(buf +% 64, mod.length);
+    unsafe_mstore32(wrapping_add_bytes(buf, 0), base.length);
+    unsafe_mstore32(wrapping_add_bytes(buf, 32), exp.length);
+    unsafe_mstore32(wrapping_add_bytes(buf, 64), mod.length);
 
-    @mcopy(buf +% 96, base.ptr, base.length);
-    @mcopy(buf +% 96 +% base.length, exp.ptr, exp.length);
-    @mcopy(buf +% 96 +% base.length +% exp.length, mod.ptr, mod.length);
+    unsafe_mcopy(wrapping_add_bytes(buf, 96), base.ptr, base.length);
+    unsafe_mcopy(wrapping_add_bytes(buf, 96 +% base.length), exp.ptr, exp.length);
+    unsafe_mcopy(wrapping_add_bytes(buf, 96 +% base.length +% exp.length), mod.ptr, mod.length);
 
-    let success = @evm_staticcall(@evm_gas(), cast_addr(MODEXP_ADDR, u256), buf, length, buf, mod.length);
-    require(success);
+    let success = unsafe_staticcall(@evm_gas(), cast_addr(MODEXP_ADDR, u256), buf, length, buf, mod.length);
+    require(success, ());
 
-    membytes_from_ptr(buf, mod.length)
+    unsafe_bytes_from_parts(buf, mod.length)
 };

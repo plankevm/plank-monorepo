@@ -22,11 +22,11 @@ const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u25
 
     if arity.is_some {
         struct (R, T, arity.inner) {
-            ptr: region_ptr_type(R)
+            ptr: rawptr(R)
         }
     } else {
         struct (R, T) {
-            ptr: region_ptr_type(R),
+            ptr: rawptr(R),
             len: u256
         }
     }
@@ -57,7 +57,7 @@ const empty = fn (comptime R: type, comptime T: type) Slice(R, T, Some(0)) {
     if R == ctime {
         return Slice(R, T, arity) { data: "" };
     }
-    Slice(R, T, arity) { ptr: 0 }
+    Slice(R, T, arity) { ptr: rawptr(R) { raw: 0 } }
 };
 
 const new = fn (comptime R: type, values: $V) infer_slice_type("new", R, V) {
@@ -76,7 +76,7 @@ const new = fn (comptime R: type, values: $V) infer_slice_type("new", R, V) {
         @compile_error("new: unexpected data region `R`");
     }
     let S = comptime { infer_slice_type("new", R, V) };
-    let ptr = @malloc_uninit(comptime { sizeof(V) });
+    let ptr = malloc_uninit(comptime { sizeof(V) });
     unsafe_mem_write(ptr, values);
 
     S { ptr: ptr }
@@ -92,9 +92,9 @@ const new_comptime = fn (comptime R: type, comptime values: $V) infer_slice_type
 };
 
 const len = fn (slice: $S) u256 {
-    let arity = comptime { slice_arity(@type_index(S)) };
-    if arity.is_some {
-        return arity.inner;
+    let type_index = comptime { @type_index(S) };
+    if comptime { slice_is_fixed(type_index) } {
+        return comptime { slice_fixed_arity(type_index) };
     }
     slice.len
 };
@@ -120,14 +120,14 @@ const get = fn (slice: $S, index: u256) Option(element_type(S)) {
         return Some(unsafe_cbytes_read(T, slice.data, offset));
     }
     if R == memory {
-        return Some(unsafe_mem_read(T, slice.ptr +% offset));
+        return Some(unsafe_mem_read(T, wrapping_add_bytes(slice.ptr, offset)));
     }
     if R == calldata {
-        return Some(unsafe_calldata_read(T, slice.ptr +% offset));
+        return Some(unsafe_calldata_read(T, wrapping_add_bytes(slice.ptr, offset)));
     }
     if R == code {
-        let ptr = @malloc_uninit(element_size);
-        @evm_codecopy(ptr, slice.ptr +% offset, element_size);
+        let ptr = malloc_uninit(element_size);
+        unsafe_codecopy(ptr, wrapping_add_bytes(slice.ptr, offset), element_size);
         return Some(unsafe_mem_read(T, ptr));
     }
     @compile_error("invariant: invalid slice region")
@@ -141,10 +141,10 @@ const set = fn (slice: $S, index: u256, value: element_type(S)) void {
     if region_type(S) != memory {
         @compile_error("set mutates backing data in place; calldata and code are immutable, and cbytes-backed slices do not support in-place mutation");
     }
-    require(index < len(slice));
+    require(index < len(slice), ());
     let element_size = comptime { sizeof(element_type(S)) };
     let offset = index * element_size;
-    unsafe_mem_write(slice.ptr +% offset, value);
+    unsafe_mem_write(wrapping_add_bytes(slice.ptr, offset), value);
 };
 
 const replace = fn (slice: $S, index: u256, value: element_type(S)) S {
@@ -164,7 +164,7 @@ const replace = fn (slice: $S, index: u256, value: element_type(S)) S {
         encode_cbytes(value),
         @slice_cbytes(slice.data, end, slice.data.length)
     ));
-    if slice_arity(@type_index(S)).is_some {
+    if slice_is_fixed(@type_index(S)) {
         return S { data: data };
     }
     S { data: data, len: slice.len }
@@ -179,9 +179,17 @@ const region_type = fn (comptime S: type) type {
     @get_field(@type_index(S), 0)
 };
 
+const slice_is_fixed = fn (comptime type_index: $I) bool {
+    @field_count(I) == 3
+};
+
+const slice_fixed_arity = fn (comptime type_index: $I) u256 {
+    @get_field(type_index, 2)
+};
+
 const slice_arity = fn (comptime type_index: $I) Option(u256) {
-    if @field_count(I) == 3 {
-        Some(@get_field(type_index, 2))
+    if slice_is_fixed(type_index) {
+        Some(slice_fixed_arity(type_index))
     } else {
         None(u256)
     }

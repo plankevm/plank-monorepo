@@ -31,9 +31,9 @@ const get_option_type = fn (comptime T: type) Option(type) {
 };
 
 const unwrap = fn (opt: $T) {
-    let inner_type = get_option_type(opt);
-    if !opt.is_some {
-        @compile_error("unwrap: `opt` not a `Option(_)`");
+    let inner_type = get_option_type(T);
+    if !inner_type.is_some {
+        @compile_error("unwrap: `opt` not an `Option(_)`");
     }
     inner_type.inner
 } {

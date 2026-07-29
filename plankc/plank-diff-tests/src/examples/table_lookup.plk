@@ -1,6 +1,6 @@
 import std::precompile::sha256;
 import std::constructor::*;
-import std::membytes::*;
+import std::core::regions::*;
 
 
 const ZERO_HASHES =
@@ -51,15 +51,15 @@ init {
 }
 
 run {
-    let idx = @evm_calldataload(0);
+    let idx = unsafe_calldataload(rawptr(calldata) { raw: 0 });
     if idx >= TOTAL_HASHES {
-        @evm_revert(@malloc_uninit(0), 0);
+        unsafe_revert(malloc_uninit(0), 0);
     }
 
-    let buf = @malloc_uninit(32);
+    let buf = malloc_uninit(32);
     comptime { HASH_LENGTH * (TOTAL_HASHES - 1) } // max doesn't overflow
     let offset = @data_offset(ZERO_HASHES) +% idx *% HASH_LENGTH;
-    @evm_codecopy(buf, offset, HASH_LENGTH);
+    unsafe_codecopy(buf, rawptr(code) { raw: offset }, HASH_LENGTH);
 
-    @evm_return(buf, 32);
+    unsafe_return(buf, 32);
 }

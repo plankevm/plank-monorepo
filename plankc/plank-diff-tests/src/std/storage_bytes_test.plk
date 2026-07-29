@@ -1,43 +1,42 @@
 import std::storage::{sstore_bytes, sload_bytes};
-import std::membytes::{membytes, membytes_from_ptr};
+import std::core::regions::*;
 import std::abi::abi_encode;
 import std::constructor::return_runtime;
 
 const STORE_SELECTOR = 0xb374012b;
 const LOAD_SELECTOR = 0x86d5c4be;
-
 const DATA_SLOT = 0;
 
-const BytesResult = struct { data: membytes };
+const BytesResult = struct { data: bytes(memory) };
 
 init {
     return_runtime();
 }
 
 run {
-    let selector = @evm_shr(224, @evm_calldataload(0));
-    if @evm_eq(selector, STORE_SELECTOR) {
+    let selector = unsafe_calldataload(rawptr(calldata) { raw: 0 }) >> 224;
+    if selector == STORE_SELECTOR {
         store();
-    } else if @evm_eq(selector, LOAD_SELECTOR) {
+    } else if selector == LOAD_SELECTOR {
         load();
     } else {
-        @evm_revert(@malloc_uninit(0), 0);
+        unsafe_revert(malloc_uninit(0), 0);
     }
 }
 
 // store(bytes)
 const store = fn () never {
-    let offset = @evm_add(4, @evm_calldataload(4));
-    let length = @evm_calldataload(offset);
-    let ptr = @malloc_uninit(length);
-    @evm_calldatacopy(ptr, @evm_add(offset, 32), length);
-    sstore_bytes(DATA_SLOT, membytes_from_ptr(ptr, length));
-    @evm_return(@malloc_uninit(0), 0);
+    let offset = 4 +% unsafe_calldataload(rawptr(calldata) { raw: 4 });
+    let length = unsafe_calldataload(rawptr(calldata) { raw: offset });
+    let ptr = malloc_uninit(length);
+    unsafe_calldatacopy(ptr, rawptr(calldata) { raw: offset +% 32 }, length);
+    sstore_bytes(DATA_SLOT, unsafe_bytes_from_parts(ptr, length));
+    unsafe_return(malloc_uninit(0), 0);
 };
 
 // load() returns (bytes)
 const load = fn () never {
     let data = sload_bytes(DATA_SLOT);
     let encoded = abi_encode(BytesResult { data: data });
-    @evm_return(encoded.ptr, encoded.length);
+    unsafe_return(encoded.ptr, encoded.length);
 };

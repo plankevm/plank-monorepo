@@ -1,3 +1,5 @@
+import std::core::regions::*;
+
 const require = fn (condition: bool, error: $T) void {
     if !condition {
         revert(error);
@@ -36,24 +38,24 @@ const revert = fn (error: $T) never {
     }
 
     if T == void {
-        @evm_revert(@malloc_uninit(0), 0);
+        unsafe_revert(malloc_uninit(0), 0);
     } else if T == cbytes {
         if error.length < 32 {
-            let buf = @malloc_zeroed(32 * 3 + error.length);
-            @mstore32(buf +% 0x00, @keccak256_cbytes("Error(string)") >> 224);
-            @mstore32(buf +% 0x20, 0x20);
+            let buf = malloc_zeroed(32 * 3 + error.length);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x00), @keccak256_cbytes("Error(string)") >> 224);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x20), 0x20);
             let packed_length_data = comptime {
                 (error.length << 248) | (@padded_read_cbytes(error, 0) >> 8)
             };
-            @mstore32(buf +% 0x5f, packed_length_data);
-            @evm_revert(buf + (32 - 4), 4 + 32 * 2 + error.length);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x5f), packed_length_data);
+            unsafe_revert(wrapping_add_bytes(buf, 32 - 4), 4 + 32 * 2 + error.length);
         } else {
-            let buf = @malloc_uninit(32 * 3 + error.length);
-            @mstore32(buf +% 0x00, @keccak256_cbytes("Error(string)") >> 224);
-            @mstore32(buf +% 0x20, 0x20);
-            @mstore32(buf +% 0x40, error.length);
-            @evm_codecopy(buf +% 0x60, @data_offset(error), error.length);
-            @evm_revert(buf + (32 - 4), 4 + 32 * 2 + error.length);
+            let buf = malloc_uninit(32 * 3 + error.length);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x00), @keccak256_cbytes("Error(string)") >> 224);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x20), 0x20);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x40), error.length);
+            unsafe_codecopy(wrapping_add_bytes(buf, 0x60), embed_get_ptr(error), error.length);
+            unsafe_revert(wrapping_add_bytes(buf, 32 - 4), 4 + 32 * 2 + error.length);
         }
     } else {
         @compile_error("revert: unsupported runtime revert error type `T`");

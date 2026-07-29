@@ -1,7 +1,7 @@
 import std::fixedbytes::bytes32;
 import std::core::regions::*;
 import std::option::{Option, Some, None, unwrap as option_unwrap};
-import std::core::uint::{u160, is_uint, try_cast_uint, cast_uint, unsafe_from_u256 as unsafe_uint_from_u256};
+import std::core::uint::*;
 
 const addr = struct {
     as_uint: u160,
@@ -18,7 +18,7 @@ const addr_from_u256 = fn (raw: u256) addr {
         if @in_comptime() {
             @compile_error("address value exceeds 160 bits");
         } else {
-            @evm_revert(@malloc_uninit(0), 0);
+            unsafe_revert(malloc_uninit(0), 0);
         }
     }
     addr { as_uint: res.inner }
@@ -45,7 +45,7 @@ const tx_origin = fn () addr {
 };
 
 const raw_create = fn (value: u256, code: bytes(memory)) Option(addr) {
-    let account = @evm_create(value, code.ptr, code.length);
+    let account = unsafe_create(value, code.ptr, code.length);
     if account == 0 {
         return None(addr);
     }
@@ -53,7 +53,7 @@ const raw_create = fn (value: u256, code: bytes(memory)) Option(addr) {
 };
 
 const raw_create2 = fn (value: u256, code: bytes(memory), salt: bytes32) Option(addr) {
-    let account = @evm_create2(value, code.ptr, code.length, salt.raw);
+    let account = unsafe_create2(value, code.ptr, code.length, salt.raw);
     if account == 0 {
         return None(addr);
     }

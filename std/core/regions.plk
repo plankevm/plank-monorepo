@@ -2,13 +2,14 @@ import std::option::*;
 import std::core::uint::*;
 import std::fixedbytes::bytes32;
 
-// TODO: Replace with real enum.
-const memory    = struct {};
-const code      = struct {};
-const calldata  = struct {};
-const ctime     = struct {};
-const transient = struct {};
-const storage   = struct {};
+// TODO: Replace with a real enum.
+const memory     = struct {};
+const code       = struct {};
+const calldata   = struct {};
+const ctime      = struct {};
+const returndata = struct {};
+const transient  = struct {};
+const storage    = struct {};
 
 const is_region = fn (comptime R: $T) bool {
     if T != type {
@@ -18,23 +19,17 @@ const is_region = fn (comptime R: $T) bool {
     or R == code
     or R == calldata
     or R == ctime
+    or R == returndata
     or R == transient
     or R == storage
 };
 
-const rawptr = fn (comptime R: type)
-    {
-        if !is_region(R) {
-            @compile_error("`R` is not region");
-        }
-        type
-    }
-{
+const rawptr = fn (comptime R: type) type {
     if R == ctime {
-        @compile_error("rawptr: `ctime` doesn't have rawptr representation");
+        @compile_error("rawptr: `ctime` doesn't have a raw pointer representation");
     }
 
-    if R == memory or R == calldata or R == code {
+    if R == memory or R == calldata or R == code or R == returndata {
         return struct R { raw: u256 };
     }
 
@@ -46,11 +41,12 @@ const rawptr = fn (comptime R: type)
 };
 
 const rawptr_get_region = fn (comptime T: type) Option(type) {
-    if T == rawptr(memory)    { return Some(memory); }
-    if T == rawptr(calldata)  { return Some(calldata); }
-    if T == rawptr(code)      { return Some(code); }
-    if T == rawptr(storage)   { return Some(storage); }
-    if T == rawptr(transient) { return Some(transient); }
+    if T == rawptr(memory)     { return Some(memory); }
+    if T == rawptr(calldata)   { return Some(calldata); }
+    if T == rawptr(code)       { return Some(code); }
+    if T == rawptr(returndata) { return Some(returndata); }
+    if T == rawptr(storage)    { return Some(storage); }
+    if T == rawptr(transient)  { return Some(transient); }
     None(type)
 };
 
@@ -66,30 +62,38 @@ const unsafe_revert = fn (ptr: rawptr(memory), size: u256) never {
     @evm_revert(ptr.raw, size);
 };
 
+const unsafe_return = fn (ptr: rawptr(memory), size: u256) never {
+    @evm_return(ptr.raw, size);
+};
+
 const unsafe_mstore32 = fn (ptr: rawptr(memory), word: u256) void {
     @mstore32(ptr.raw, word);
 };
 
-const unsafe_mload = fn (ptr: rawptr(memory)) u256 {
-    @mload32(ptr)
+const unsafe_mload32 = fn (ptr: rawptr(memory)) u256 {
+    @mload32(ptr.raw)
+};
+
+const unsafe_mload1 = fn (ptr: rawptr(memory)) u256 {
+    @mload1(ptr.raw)
 };
 
 const unsafe_keccak256 = fn (ptr: rawptr(memory), size: u256) u256 {
     @evm_keccak256(ptr.raw, size)
 };
 
-const rawptr_byte_addressable = fn (comptime T: type) bool {
-    T == rawptr(memory) or T == rawptr(calldata) or T == rawptr(code)
+const unsafe_calldataload = fn (ptr: rawptr(calldata)) u256 {
+    @evm_calldataload(ptr.raw)
 };
 
-const wrapping_add_bytes = fn (ptr: $T, offset: u256)
-    {
-        if !rawptr_byte_addressable(T) {
-            @compile_error("wrapping_add: `ptr` is not a byte-addressable `rawptr(R)`");
-        }
-        T
-    }
-{
+const rawptr_byte_addressable = fn (comptime T: type) bool {
+    T == rawptr(memory)
+    or T == rawptr(calldata)
+    or T == rawptr(code)
+    or T == rawptr(returndata)
+};
+
+const wrapping_add_bytes = fn (ptr: $T, offset: u256) T {
     T { raw: ptr.raw +% offset }
 };
 
@@ -101,6 +105,53 @@ const unsafe_codecopy = fn (dst: rawptr(memory), src: rawptr(code), size: u256) 
     @evm_codecopy(dst.raw, src.raw, size);
 };
 
+const unsafe_returndatacopy = fn (dst: rawptr(memory), src: rawptr(returndata), size: u256) void {
+    @evm_returndatacopy(dst.raw, src.raw, size);
+};
+
+const unsafe_mcopy = fn (dst: rawptr(memory), src: rawptr(memory), size: u256) void {
+    @mcopy(dst.raw, src.raw, size);
+};
+
+const unsafe_staticcall = fn (
+    gas: u256,
+    account: u256,
+    input: rawptr(memory),
+    input_size: u256,
+    output: rawptr(memory),
+    output_size: u256,
+) bool {
+    @evm_staticcall(gas, account, input.raw, input_size, output.raw, output_size)
+};
+
+const unsafe_create = fn (value: u256, init_code: rawptr(memory), size: u256) u256 {
+    @evm_create(value, init_code.raw, size)
+};
+
+const unsafe_create2 = fn (value: u256, init_code: rawptr(memory), size: u256, salt: u256) u256 {
+    @evm_create2(value, init_code.raw, size, salt)
+};
+
+const unsafe_log0 = fn (data: rawptr(memory), size: u256) void {
+    @evm_log0(data.raw, size);
+};
+
+const unsafe_log1 = fn (data: rawptr(memory), size: u256, topic0: u256) void {
+    @evm_log1(data.raw, size, topic0);
+};
+
+const unsafe_log2 = fn (data: rawptr(memory), size: u256, topic0: u256, topic1: u256) void {
+    @evm_log2(data.raw, size, topic0, topic1);
+};
+
+const unsafe_log3 = fn (data: rawptr(memory), size: u256, topic0: u256, topic1: u256, topic2: u256) void {
+    @evm_log3(data.raw, size, topic0, topic1, topic2);
+};
+
+const unsafe_log4 = fn (data: rawptr(memory), size: u256, topic0: u256, topic1: u256, topic2: u256, topic3: u256) void {
+    @evm_log4(data.raw, size, topic0, topic1, topic2, topic3);
+};
+
 const embed_get_ptr = fn (comptime data: cbytes) rawptr(code) {
     rawptr(code) { raw: @data_offset(data) }
 };
@@ -109,16 +160,18 @@ const bytes = fn (comptime R: type) type {
     if R == ctime {
         return cbytes;
     }
-    return struct R {
-        ptr: rawptr(R),
-        length: u256,
-    };
+    if !is_region(R) {
+        @compile_error("bytes: `R` is not a region");
+    }
+    return struct R { ptr: rawptr(R), length: u256 };
 };
 
-
-const string = fn (comptime R: Region) type {
+const string = fn (comptime R: type) type {
     if R == ctime {
         return struct R { data: cbytes };
+    }
+    if !is_region(R) {
+        @compile_error("string: `R` is not a region");
     }
     return struct R { ptr: rawptr(R), length: u256 };
 };
@@ -127,30 +180,31 @@ const unsafe_bytes_from_parts = fn (ptr: $T, length: u256)
     {
         let region = rawptr_get_region(T);
         if !region.is_some {
-            @compile_error("unsafe_bytes_from_parts: `ptr` not a `rawptr(R)`");
+            @compile_error("unsafe_bytes_from_parts: `ptr` is not a `rawptr(R)`");
         }
         bytes(region.inner)
     }
 {
-    bytes(rawptr_get_region(T)) { ptr: ptr, length: length }
+    let region = comptime { rawptr_get_region(T).inner };
+    bytes(region) { ptr: ptr, length: length }
 };
 
 const embed_as = fn (comptime data: cbytes, comptime R: type) bytes(R) {
-    if region == code {
+    if R == code {
         return unsafe_bytes_from_parts(embed_get_ptr(data), data.length);
     }
-    if region == memory {
+    if R == memory {
         let ptr = malloc_uninit(data.length);
         unsafe_codecopy(ptr, embed_get_ptr(data), data.length);
         return unsafe_bytes_from_parts(ptr, data.length);
     }
-    if region == calldata {
-        @compile_error("cannot convert `cbytes` to a `bytes(calldata)`, calldata is read only");
+    if R == calldata {
+        @compile_error("cannot convert `cbytes` to `bytes(calldata)`; calldata is read-only");
     }
-    if region == ctime {
+    if R == ctime {
         return data;
     }
-    @compile_error("embed_as: unrecognized region type");
+    @compile_error("embed_as: unsupported region type");
 };
 
 const copy_if_not_already_memory = fn (data: $T) bytes(memory) {
@@ -167,10 +221,15 @@ const copy_if_not_already_memory = fn (data: $T) bytes(memory) {
         unsafe_codecopy(ptr, data.ptr, data.length);
         return unsafe_bytes_from_parts(ptr, data.length);
     }
+    if T == bytes(returndata) {
+        let ptr = malloc_uninit(data.length);
+        unsafe_returndatacopy(ptr, data.ptr, data.length);
+        return unsafe_bytes_from_parts(ptr, data.length);
+    }
     if T == bytes(memory) {
         return data;
     }
-    @compile_error("copy_if_not_already_memory: type of `data` not supported");
+    @compile_error("copy_if_not_already_memory: type of `data` is not supported");
 };
 
 const slice_bytes = fn (data: $T, start: u256, end: u256) T {
@@ -180,20 +239,19 @@ const slice_bytes = fn (data: $T, start: u256, end: u256) T {
 
     if T == bytes(calldata)
         or T == bytes(code)
+        or T == bytes(returndata)
         or T == bytes(memory)
     {
-        require((start <= end) & (end <= data.length), ());
+        if !((start <= end) & (end <= data.length)) {
+            unsafe_revert(malloc_uninit(0), 0);
+        }
         return T {
             ptr: wrapping_add_bytes(data.ptr, start),
             length: end -% start
         };
     }
 
-    if T == bytes(storage) or T == bytes(transient) {
-        require((start <= end) & (end <= data.length), ());
-    }
-
-    @compile_error("slice_bytes: type of `data` not supported");
+    @compile_error("slice_bytes: type of `data` is not supported");
 };
 
 const keccak256 = fn (data: $T) bytes32 {
@@ -208,6 +266,10 @@ const keccak256 = fn (data: $T) bytes32 {
     } else if T == bytes(code) {
         let ptr = malloc_uninit(data.length);
         unsafe_codecopy(ptr, data.ptr, data.length);
+        unsafe_keccak256(ptr, data.length)
+    } else if T == bytes(returndata) {
+        let ptr = malloc_uninit(data.length);
+        unsafe_returndatacopy(ptr, data.ptr, data.length);
         unsafe_keccak256(ptr, data.length)
     } else {
         @compile_error("keccak256: unsupported type");
@@ -228,27 +290,9 @@ const bytes_eq = fn (b1: $T1, b2: $T2) bool {
     if b1.length != b2.length {
         return false;
     }
-    return keccak256(b1).raw == keccak256(b2).raw;
+    keccak256(b1).raw == keccak256(b2).raw
 };
 
-const membytes_new_zeroed = fn (size: u256) bytes(memory) {
+const membytes_new = fn (size: u256) bytes(memory) {
     unsafe_bytes_from_parts(malloc_zeroed(size), size)
-}
-
-// Reads a u256 from `offset`. Returns None if out of bounds.
-const membytes_read_u256 = fn (buf: bytes(memory), offset: u256) Option(u256) {
-    if (buf.length < 32) | (offset > buf.length -% 32)  {
-        return None(u256);
-    }
-    Some(@mload32(buf.ptr +% offset))
-};
-
-// Writes a value of any type T at `offset`. Returns false if out of bounds.
-const membytes_write = fn (buf: membytes, offset: u256, value: $T) bool {
-    let size = comptime { sizeof(T) };
-    if (buf.length < size) | (offset > buf.length -% size) {
-        return false;
-    }
-    unsafe_mem_write(buf.ptr +% offset, value);
-    true
 };

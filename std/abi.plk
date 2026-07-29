@@ -1,9 +1,8 @@
 import std::option::*;
-import std::membytes::{membytes, membytes_new, membytes_from_ptr};
+import std::core::regions::*;
 import std::abi_helpers::*;
 import std::math::ceil32;
 import std::utils::fold;
-import std::core::regions::keccak256;
 
 // Accumulator for computing ABI encoded size of a struct via fold.
 // Runtime value (encoded_value) cannot be captured in closures,
@@ -27,7 +26,7 @@ const abi_encoded_size = fn (value: $T) u256 {
         32
     } else if T == bool {
         32
-    } else if T == membytes {
+    } else if T == bytes(memory) {
         32 + ceil32(value.length)
     } else if @is_struct(T) {
         // Start from the head size; non-dynamic fields are already accounted for.
@@ -55,13 +54,13 @@ const abi_encoded_size = fn (value: $T) u256 {
 
 // Encodes `value` into pre-allocated memory at `ptr`. Caller must ensure
 // the region is large enough. Returns the number of bytes written.
-const unsafe_abi_encode = fn (ptr: u256, value: $T) u256 {
+const unsafe_abi_encode = fn (ptr: rawptr(memory), value: $T) u256 {
     unsafe_abi_encode_to(ptr, 0, value)
 };
 
 // Encodes `value` into `buf`. Returns the number of bytes written,
 // or None if the buffer is too small to hold the encoding.
-const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
+const abi_encode_try = fn (buf: bytes(memory), value: $T) Option(u256) {
     let size = abi_encoded_size(value);
     if size > buf.length {
         return None(u256);
@@ -70,7 +69,7 @@ const abi_encode_try = fn (buf: membytes, value: $T) Option(u256) {
 };
 
 // Encodes `value`, allocating a new buffer of the exact size needed.
-const abi_encode = fn (value: $T) membytes {
+const abi_encode = fn (value: $T) bytes(memory) {
     let size = abi_encoded_size(value);
     let buf = membytes_new(size);
     unsafe_abi_encode_to(buf.ptr, 0, value);
@@ -79,13 +78,13 @@ const abi_encode = fn (value: $T) membytes {
 
 // Decodes a value of type T from raw memory. Caller must ensure
 // the region contains valid ABI-encoded data.
-const unsafe_abi_decode = fn (comptime T: type, ptr: u256, length: u256) T {
+const unsafe_abi_decode = fn (comptime T: type, ptr: rawptr(memory), length: u256) T {
     unsafe_abi_decode_from(T, ptr, 0)
 };
 
 // Decodes a value of type T from `buf`. Returns None if the buffer
 // is too small to hold the encoding.
-const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
+const abi_decode_try = fn (comptime T: type, buf: bytes(memory)) Option(T) {
     if !abi_buf_fits(T, buf, 0) {
         return None(T);
     }
@@ -94,7 +93,7 @@ const abi_decode_try = fn (comptime T: type, buf: membytes) Option(T) {
 
 // Decodes a value of type T from `buf`. Reverts if the buffer
 // is too small to hold the encoding.
-const abi_decode = fn (comptime T: type, buf: membytes) T {
+const abi_decode = fn (comptime T: type, buf: bytes(memory)) T {
     unwrap(abi_decode_try(T, buf))
 };
 

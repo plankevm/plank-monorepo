@@ -1,38 +1,37 @@
-import std::membytes::{membytes, membytes_new};
+import std::core::regions::*;
 
 // Hashes a storage slot to derive a base slot for dynamic data.
 const slot_hash = fn (slot: u256) u256 {
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, slot);
-    @evm_keccak256(buf, 32)
+    let buf = malloc_uninit(32);
+    unsafe_mstore32(buf, slot);
+    unsafe_keccak256(buf, 32)
 };
 
 // Hashes a key against a base slot to derive a mapping storage slot.
 // Equivalent to Solidity's mapping slot: keccak256(key, base_slot).
 const map_slot_hash = fn (key: u256, base_slot: u256) u256 {
-    let buf = @malloc_uninit(64);
-    @mstore32(buf, key);
-    @mstore32(buf +% 32, base_slot);
-    @evm_keccak256(buf, 64)
+    let buf = malloc_uninit(64);
+    unsafe_mstore32(buf, key);
+    unsafe_mstore32(wrapping_add_bytes(buf, 32), base_slot);
+    unsafe_keccak256(buf, 64)
 };
 
-// Stores a membytes value into storage at `slot`.
+// Stores memory bytes into storage at `slot`.
 // Length is stored at `slot`, data chunks at keccak256(slot), keccak256(slot)+1, ...
-const sstore_bytes = fn (slot: u256, data: membytes) void {
+const sstore_bytes = fn (slot: u256, data: bytes(memory)) void {
     @evm_sstore(slot, data.length);
     let base_slot = slot_hash(slot);
     let mut i = 0;
     while i * 32 < data.length {
         let chunk_slot = base_slot + i;
-        let chunk = @mload32(data.ptr +% 32 * i);
+        let chunk = unsafe_mload32(wrapping_add_bytes(data.ptr, 32 * i));
         @evm_sstore(chunk_slot, chunk);
         i = i + 1;
     }
 };
 
-// Loads a membytes value from storage at `slot`.
-// Allocates a new buffer and copies the data from storage into it.
-const sload_bytes = fn (slot: u256) membytes {
+// Loads memory bytes from storage at `slot`.
+const sload_bytes = fn (slot: u256) bytes(memory) {
     let length = @evm_sload(slot);
     let data = membytes_new(length);
     let base_slot = slot_hash(slot);
@@ -40,7 +39,7 @@ const sload_bytes = fn (slot: u256) membytes {
     while i * 32 < length {
         let chunk_slot = base_slot + i;
         let chunk = @evm_sload(chunk_slot);
-        @mstore32(data.ptr +% 32 * i, chunk);
+        unsafe_mstore32(wrapping_add_bytes(data.ptr, 32 * i), chunk);
         i = i + 1;
     }
     data

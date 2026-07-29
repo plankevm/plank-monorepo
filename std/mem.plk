@@ -1,22 +1,24 @@
 import std::type::sizeof;
+import std::option::{Option, None, Some};
+import std::core::regions::{bytes, memory, rawptr, unsafe_mload32, unsafe_mstore32, wrapping_add_bytes};
 
 // Writes a value of type T at `ptr`. Compound fields are serialized
 // contiguously. No bounds check.
-const unsafe_mem_write = fn (ptr: u256, value: $T) void {
+const unsafe_mem_write = fn (ptr: rawptr(memory), value: $T) void {
     if T == void {
         return ();
     } else if T == u256 {
-        @mstore32(ptr, value);
+        unsafe_mstore32(ptr, value);
     } else if T == bool {
-        @mstore32(ptr, if value { 1 } else { 0 });
+        unsafe_mstore32(ptr, if value { 1 } else { 0 });
     } else if @is_struct(T) or @is_tuple(T) {
         comptime let mut i = 0;
         comptime let mut field_offset = 0;
 
         inline while i < @field_count(T) {
-            let field_type = @field_type(T, i);
-            unsafe_mem_write(ptr + field_offset, @get_field(value, i));
-            field_offset = field_offset + comptime { sizeof(field_type) };
+            let FieldType = @field_type(T, i);
+            unsafe_mem_write(wrapping_add_bytes(ptr, field_offset), @get_field(value, i));
+            field_offset = field_offset + comptime { sizeof(FieldType) };
             i = i + 1;
         }
     } else {
@@ -25,25 +27,24 @@ const unsafe_mem_write = fn (ptr: u256, value: $T) void {
 };
 
 // Reads a value of type T from memory at `ptr`. Compound fields are read
-// contiguously in declaration order. No bounds check; caller must ensure the
-// region contains a valid representation of T.
-const unsafe_mem_read = fn (comptime T: type, ptr: u256) T {
+// contiguously in declaration order. No bounds check.
+const unsafe_mem_read = fn (comptime T: type, ptr: rawptr(memory)) T {
     if T == void {
         ()
     } else if T == u256 {
-        @mload32(ptr)
+        unsafe_mload32(ptr)
     } else if T == bool {
-        @mload32(ptr) != 0
+        unsafe_mload32(ptr) != 0
     } else if @is_struct(T) or @is_tuple(T) {
         let mut value = @uninit(T);
         comptime let mut i = 0;
         comptime let mut field_offset = 0;
 
         inline while i < @field_count(T) {
-            let field_type = @field_type(T, i);
-            let field_value = unsafe_mem_read(field_type, ptr + field_offset);
+            let FieldType = @field_type(T, i);
+            let field_value = unsafe_mem_read(FieldType, wrapping_add_bytes(ptr, field_offset));
             value = @set_field(value, i, field_value);
-            field_offset = field_offset + comptime { sizeof(field_type) };
+            field_offset = field_offset + comptime { sizeof(FieldType) };
             i = i + 1;
         }
 
@@ -51,4 +52,22 @@ const unsafe_mem_read = fn (comptime T: type, ptr: u256) T {
     } else {
         @compile_error("unsupported type for unsafe_mem_read")
     }
+};
+
+// Reads a u256 from `offset`. Returns None if out of bounds.
+const membytes_read_u256 = fn (buf: bytes(memory), offset: u256) Option(u256) {
+    if (buf.length < 32) | (offset > buf.length -% 32) {
+        return None(u256);
+    }
+    Some(unsafe_mload32(wrapping_add_bytes(buf.ptr, offset)))
+};
+
+// Writes a value at `offset`. Returns false if it does not fit.
+const membytes_write = fn (buf: bytes(memory), offset: u256, value: $T) bool {
+    let size = comptime { sizeof(T) };
+    if (buf.length < size) | (offset > buf.length -% size) {
+        return false;
+    }
+    unsafe_mem_write(wrapping_add_bytes(buf.ptr, offset), value);
+    true
 };
