@@ -367,6 +367,73 @@ fn test_duplicate_runtime_param() {
 }
 
 #[test]
+fn test_self_type_outside_method_diagnostic() {
+    let rendered = render_diagnostics(
+        r#"
+        const f = fn(value: Self) void {};
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: `Self` type outside method
+         --> main.plk:1:21
+          |
+        1 | const f = fn(value: Self) void {};
+          |                     ^^^^ `Self` is only available in methods
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_method_conflicts_with_field_diagnostic() {
+    let rendered = render_diagnostics(
+        r#"
+        const S = struct { f: u256 fn f() void {} };
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: method name conflicts with field name
+         --> main.plk:1:31
+          |
+        1 | const S = struct { f: u256 fn f() void {} };
+          |                    -          ^ method `f` conflicts with a field of the same name
+          |                    |
+          |                    field `f` declared here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_duplicate_method_name_diagnostic() {
+    let rendered = render_diagnostics(
+        r#"
+        const S = struct {
+            fn f() void {}
+            fn f() void {}
+        };
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: duplicate method name
+         --> main.plk:3:8
+          |
+        2 |     fn f() void {}
+          |        - previous method `f` declared here
+        3 |     fn f() void {}
+          |        ^ duplicate method `f`
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_fn_struct_return() {
     assert_lowers_to(
         r#"
@@ -416,6 +483,108 @@ fn test_fn_struct_return() {
         %2 = 4
         %3 = call %0(%1, %2)
         eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_struct_method_lowering() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn make() Self { Self }
+            fn id(value: Self) Self { value }
+        };
+        init {}
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("S") result=LocalId(0) {
+            %1 = type:tuple {}
+            %0 = struct#0 main.plk:1:11
+        }
+
+        ==== Functions ====
+        @fn0() -> %1 {
+            preamble:
+                %1 = %0
+            body:
+                ret %0
+        }
+        @fn1(%2: %1) -> %3 {
+            preamble:
+                %1 = %0
+                param#0 %2 : %1
+                %3 = %0
+            body:
+                ret %2
+        }
+
+        ==== Structs ====
+        @struct0[index: %1] {methods: { make [Self: %0]: @fn0, id [Self: %0]: @fn1 }}
+
+        ==== Init ====
+        "#,
+    );
+}
+
+#[test]
+fn test_method_call_lowering() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn make(value: u256, other: bool) Self { Self }
+            fn id(value: Self, x: u256) Self { value }
+        };
+        init {
+            S.make(1, true);
+            let value: S = S {};
+            value.id(2);
+        }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("S") result=LocalId(0) {
+            %1 = type:tuple {}
+            %0 = struct#0 main.plk:1:11
+        }
+
+        ==== Functions ====
+        @fn0(%2: %1, %4: %3) -> %5 {
+            preamble:
+                %1 = type:u256
+                param#0 %2 : %1
+                %3 = type:bool
+                param#1 %4 : %3
+                %5 = %0
+            body:
+                ret %0
+        }
+        @fn1(%2: %1, %4: %3) -> %5 {
+            preamble:
+                %1 = %0
+                param#0 %2 : %1
+                %3 = type:u256
+                param#1 %4 : %3
+                %5 = %0
+            body:
+                ret %2
+        }
+
+        ==== Structs ====
+        @struct0[index: %1] {methods: { make [Self: %0]: @fn0, id [Self: %0]: @fn1 }}
+
+        ==== Init ====
+        %0 = $0
+        %1 = 1
+        %2 = true
+        eval method_call make %0(%1, %2)
+        %3 = $0
+        %4 = $0
+        %5 : %3 = %4 {}
+        %6 = %5
+        %7 = 2
+        eval method_call id %6(%7)
         "#,
     );
 }

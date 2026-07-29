@@ -4,6 +4,8 @@ use plank_session::{
     SourceSpan, StrId,
 };
 
+use crate::{FieldInfo, MethodDef};
+
 use super::BlockLowerer;
 
 impl BlockLowerer<'_> {
@@ -152,6 +154,61 @@ impl BlockLowerer<'_> {
             );
         }
         diagnostic.help("choose a different parameter name").emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_self_type_outside_method(&self, span: TokenSpan) {
+        Diagnostic::error("`Self` type outside method")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(span),
+                "`Self` is only available in methods",
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_method_conflicts_with_field(
+        &self,
+        method_span: TokenSpan,
+        field: FieldInfo,
+    ) {
+        let (field_name, field_span) = {
+            let session = self.session.borrow();
+            let (field_name, field_span) =
+                session.lookup_name_spanned(field.name, field.name_offset);
+            (field_name.to_owned(), field_span)
+        };
+        Diagnostic::error("method name conflicts with field name")
+            .element(
+                Annotations::new(self.source_id)
+                    .primary(
+                        self.lexed.tokens_src_span(method_span),
+                        format!("method `{field_name}` conflicts with a field of the same name"),
+                    )
+                    .secondary(field_span, format!("field `{field_name}` declared here")),
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_duplicate_method(&self, method_span: TokenSpan, previous: MethodDef) {
+        let (method_name, previous_span) = {
+            let session = self.session.borrow();
+            let (method_name, previous_span) =
+                session.lookup_name_spanned(previous.name, previous.name_offset);
+            (method_name.to_owned(), previous_span)
+        };
+        Diagnostic::error("duplicate method name")
+            .element(
+                Annotations::new(self.source_id)
+                    .primary(
+                        self.lexed.tokens_src_span(method_span),
+                        format!("duplicate method `{method_name}`"),
+                    )
+                    .secondary(
+                        previous_span,
+                        format!("previous method `{method_name}` declared here"),
+                    ),
+            )
+            .emit(*self.session.borrow_mut());
     }
 
     pub(crate) fn error_unknown_builtin(&self, name: StrId, span: TokenSpan) {

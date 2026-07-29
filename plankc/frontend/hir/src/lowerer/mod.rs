@@ -47,6 +47,8 @@ struct HirBuilder {
     args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
     match_arms: ListOfLists<MatchArmsId, MatchArm>,
+    methods: ListOfLists<MethodsId, MethodDef>,
+    method_calls: IndexVec<MethodCallId, MethodCall>,
     struct_defs: IndexVec<StructDefId, StructDef>,
 
     fns: IndexVec<FnDefId, FnDef>,
@@ -62,6 +64,8 @@ impl HirBuilder {
             args: ListOfLists::new(),
             fields: ListOfLists::new(),
             match_arms: ListOfLists::new(),
+            methods: ListOfLists::new(),
+            method_calls: IndexVec::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
@@ -90,10 +94,13 @@ struct BlockLowerer<'a> {
     fn_captures_start: usize,
     in_function_body: bool,
     next_local_id: LocalId,
+    /// Interned name used for synthetic method-local `Self` bindings.
+    self_type_name_id: StrId,
 
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
+    method_buf: Vec<MethodDef>,
     param_info_buf: Vec<ParamInfo>,
     captures_buf: Vec<CaptureInfo>,
 
@@ -191,6 +198,7 @@ impl BlockLowerer<'_> {
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
+        debug_assert!(self.method_buf.is_empty());
         debug_assert!(self.param_info_buf.is_empty());
         debug_assert!(self.captures_buf.is_empty());
     }
@@ -459,6 +467,14 @@ impl BlockLowerer<'_> {
         ExprKind::LocalRef(result)
     }
 
+    fn lower_self_type(&mut self, span: TokenSpan) -> ExprKind {
+        if Self::find_in_scope(&self.scoped_locals_stack, self.self_type_name_id).is_none() {
+            self.error_self_type_outside_method(span);
+            return ExprKind::POISON;
+        }
+        self.resolve_name(self.self_type_name_id, span)
+    }
+
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
@@ -488,7 +504,7 @@ impl BlockLowerer<'_> {
                 let len = u32::try_from(len).expect("source len checked to fit in u32");
                 ExprKind::Value(Ok(self.values.intern_bytes(value, 0, len)))
             }
-            ast::Expr::SelfType { .. } => todo!("Self type lowering"),
+            ast::Expr::SelfType { span } => self.lower_self_type(span),
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
                 ExprKind::Member { object, member: member_expr.member }
@@ -503,6 +519,15 @@ impl BlockLowerer<'_> {
                         self.error_unknown_builtin(name, span);
                         ExprKind::POISON
                     }
+                } else if let ast::Expr::Member(member_expr) = callee {
+                    let receiver = self.lower_expr_to_local(member_expr.object());
+                    let args = self.lower_args(call_expr.args());
+                    let method_call = self.builder.method_calls.push(MethodCall {
+                        receiver,
+                        method: member_expr.member,
+                        args,
+                    });
+                    ExprKind::MethodCall(method_call)
                 } else {
                     let callee = self.lower_expr_to_local(callee);
                     let args = self.lower_args(call_expr.args());
@@ -522,9 +547,6 @@ impl BlockLowerer<'_> {
                 ExprKind::StructLit { ty, fields }
             }
             ast::Expr::StructDef(struct_def) => {
-                for _method in struct_def.methods() {
-                    todo!("method lowering");
-                }
                 let source_id = self.source_id;
                 let span = struct_def.node().span();
                 let source_span = self.lexed.tokens_src_span(span);
@@ -550,18 +572,36 @@ impl BlockLowerer<'_> {
                     }
                 }
                 let buf_start = self.field_buf.len();
-                for result in struct_def.fields() {
-                    let Ok(field) = result else { continue };
+                for field in struct_def.fields().filter_map(Result::ok) {
                     let value = self.lower_expr_to_local(field.type_expr());
                     let name_offset = self.lexed.token_src_span(field.name_span().start).start;
                     self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
+                let methods_start = self.method_buf.len();
+                for method in struct_def.methods().filter_map(Result::ok) {
+                    if let Some(field) =
+                        self.builder.fields[fields].iter().find(|field| field.name == method.name)
+                    {
+                        self.error_method_conflicts_with_field(method.name_span(), *field);
+                    }
+                    if let Some(previous) = self.method_buf[methods_start..]
+                        .iter()
+                        .find(|previous| previous.name == method.name)
+                    {
+                        self.error_duplicate_method(method.name_span(), *previous);
+                    }
+                    let method = self.lower_method_def(method);
+                    self.method_buf.push(method);
+                }
+                let methods =
+                    self.builder.methods.push_iter(self.method_buf.drain(methods_start..));
                 let struct_def_id = self.builder.struct_defs.push(StructDef {
                     source_id,
                     source_span,
                     type_index,
                     fields,
+                    methods,
                 });
                 ExprKind::StructDef(struct_def_id)
             }
@@ -679,17 +719,73 @@ impl BlockLowerer<'_> {
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
+        self.with_function_scope(|this| {
+            this.lower_function_contents(
+                fn_def.params(),
+                fn_def.return_type(),
+                fn_def.body(),
+                fn_def.node().span(),
+                fn_def.param_list_span(),
+            )
+        })
+    }
+
+    fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> MethodDef {
+        self.with_function_scope(|this| {
+            let self_type = this.alloc_anonymous_local(this.self_type_name_id);
+            let is_instance = matches!(
+                method.params().next(),
+                Some(Ok(param))
+                    if matches!(
+                        param.param_type(),
+                        Ok(ast::ParamType::Explicit(ast::Expr::SelfType { .. }))
+                    )
+            );
+            let function = this.lower_function_contents(
+                method.params(),
+                method.return_type(),
+                method.body(),
+                method.node().span(),
+                method.param_list_span(),
+            );
+            let name_offset = this.lexed.token_src_span(method.name_span().start).start;
+            let instance = is_instance.then(|| {
+                this.builder.fn_params[function]
+                    .first()
+                    .expect("invariant: instance method always has a lowered first parameter")
+                    .value
+            });
+            MethodDef { name: method.name, name_offset, function, self_type, instance }
+        })
+    }
+
+    fn with_function_scope<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
         let saved_next_local = std::mem::replace(&mut self.next_local_id, LocalId::ZERO);
         let saved_fn_scope_start =
             std::mem::replace(&mut self.fn_scope_start, self.scoped_locals_stack.len());
         let saved_captures_start =
             std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
+        let result = f(self);
+        self.scoped_locals_stack.truncate(self.fn_scope_start);
+        self.next_local_id = saved_next_local;
+        self.fn_scope_start = saved_fn_scope_start;
+        self.fn_captures_start = saved_captures_start;
+        result
+    }
 
+    fn lower_function_contents<'ast>(
+        &mut self,
+        params: impl Iterator<Item = Result<ast::Param<'ast>, TokenSpan>>,
+        return_type_expr: ast::Expr<'ast>,
+        body_expr: ast::BlockExpr<'ast>,
+        node_span: TokenSpan,
+        param_list_span: TokenSpan,
+    ) -> FnDefId {
         let param_infos_start = self.param_info_buf.len();
         let return_type;
         let type_preamble = {
             let preamble_block_start = self.instructions_buf.len();
-            for (idx, param) in fn_def.params().filter_map(Result::ok).enumerate() {
+            for (idx, param) in params.filter_map(Result::ok).enumerate() {
                 let param_type = match param.param_type() {
                     Ok(ast::ParamType::Explicit(expr)) => {
                         let local = self.lower_expr_to_local(expr);
@@ -730,17 +826,17 @@ impl BlockLowerer<'_> {
                     idx: idx as u32,
                 });
             }
-            return_type = self.lower_expr_to_local(fn_def.return_type());
-            let preamble_span = self.lexed.tokens_src_span(fn_def.param_list_span());
+            return_type = self.lower_expr_to_local(return_type_expr);
+            let preamble_span = self.lexed.tokens_src_span(param_list_span);
             self.flush_instructions_from(preamble_block_start, preamble_span)
         };
 
         let saved_is_function_body = self.in_function_body;
         self.in_function_body = true;
 
-        let body = self.lower_fn_body_block(fn_def.body());
-        let source_span = self.lexed.tokens_src_span(fn_def.node().span());
-        let param_list_span = self.lexed.tokens_src_span(fn_def.param_list_span());
+        let body = self.lower_fn_body_block(body_expr);
+        let source_span = self.lexed.tokens_src_span(node_span);
+        let param_list_span = self.lexed.tokens_src_span(param_list_span);
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,
@@ -758,10 +854,6 @@ impl BlockLowerer<'_> {
         assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
         assert_eq!(fn_def_id, fn_captures_id, "fn and fn_captures out of sync");
 
-        self.scoped_locals_stack.truncate(self.fn_scope_start);
-        self.next_local_id = saved_next_local;
-        self.fn_scope_start = saved_fn_scope_start;
-        self.fn_captures_start = saved_captures_start;
         self.in_function_body = saved_is_function_body;
 
         fn_def_id
@@ -956,6 +1048,7 @@ impl BlockLowerer<'_> {
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
+    let self_type_name_id = session.intern("Self");
 
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
@@ -974,10 +1067,12 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         fn_captures_start: 0,
         in_function_body: false,
         next_local_id: LocalId::ZERO,
+        self_type_name_id,
 
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
+        method_buf: Vec::new(),
         param_info_buf: Vec::new(),
         captures_buf: Vec::new(),
 
@@ -1066,6 +1161,8 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         args: builder.args,
         fields: builder.fields,
         match_arms: builder.match_arms,
+        methods: builder.methods,
+        method_calls: builder.method_calls,
         struct_defs: builder.struct_defs,
 
         fns: builder.fns,

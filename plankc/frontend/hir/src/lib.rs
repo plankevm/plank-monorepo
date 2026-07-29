@@ -20,6 +20,8 @@ newtype_index! {
     pub struct ArgsId;
     pub struct FieldsId;
     pub struct MatchArmsId;
+    pub struct MethodsId;
+    pub struct MethodCallId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -43,6 +45,7 @@ pub enum ExprKind {
         builtin: Builtin,
         args: ArgsId,
     },
+    MethodCall(MethodCallId),
     UnaryOpCall {
         op: operators::UnaryOp,
         input: LocalId,
@@ -214,6 +217,23 @@ pub struct StructDef {
     pub source_span: SourceSpan,
     pub type_index: LocalId,
     pub fields: FieldsId,
+    pub methods: MethodsId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MethodDef {
+    pub name: StrId,
+    pub name_offset: SourceByteOffset,
+    pub function: FnDefId,
+    pub self_type: LocalId,
+    pub instance: Option<LocalId>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MethodCall {
+    pub receiver: LocalId,
+    pub method: StrId,
+    pub args: ArgsId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -250,6 +270,8 @@ pub struct Hir {
     pub args: ListOfLists<ArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
     pub match_arms: ListOfLists<MatchArmsId, MatchArm>,
+    pub methods: ListOfLists<MethodsId, MethodDef>,
+    pub method_calls: IndexVec<MethodCallId, MethodCall>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
 
     pub fns: IndexVec<FnDefId, FnDef>,
