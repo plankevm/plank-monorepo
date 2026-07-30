@@ -104,7 +104,7 @@ pub enum NodeKind {
     Match,
     MatchArmList,
     MatchArm,
-    MatchFallbackArm { binding: Option<StrId> },
+    MatchFallbackArm { binding: bool },
 
     // Atoms
     BoolLiteral(bool),
@@ -170,7 +170,7 @@ impl std::fmt::Debug for NodeKind {
             Self::MatchArmList => write!(f, "MatchArmList"),
             Self::MatchArm => write!(f, "MatchArm"),
             Self::MatchFallbackArm { binding } => {
-                f.debug_struct("MatchFallbackArm").field("binding", &binding.is_some()).finish()
+                f.debug_struct("MatchFallbackArm").field("binding", binding).finish()
             }
             Self::BoolLiteral(value) => write!(f, "BoolLiteral({value})"),
             Self::NumLiteral { .. } => write!(f, "NumLiteral"),

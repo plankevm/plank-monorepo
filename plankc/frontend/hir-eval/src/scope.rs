@@ -572,8 +572,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::If { outer_result, condition, then_block, else_block } => {
                 self.eval_if(outer_result, condition, then_block, else_block)?
             }
-            InstructionKind::Match { subject, arms, fallback } => {
-                self.eval_match(subject, arms, fallback)?
+            InstructionKind::Match { outer_result, subject, arms, fallback } => {
+                self.eval_match(outer_result, subject, arms, fallback)?
             }
             InstructionKind::While { inline, condition_block, condition, body } => {
                 if inline {
@@ -693,10 +693,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn eval_match(
         &mut self,
+        outer_result: hir::LocalId,
         subject: hir::LocalId,
         arms: hir::MatchArmsId,
         fallback: hir::BlockId,
     ) -> Result<(), Diverge> {
+        self.bindings.remove(outer_result);
         let Ok((subject_state, subject_use_span, _)) = self.bindings[subject].poisoned() else {
             return Err(Diverge::ControlFlowPoisoned);
         };

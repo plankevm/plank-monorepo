@@ -525,10 +525,13 @@ impl<'a> Parser<'a> {
         while !self.check(Token::RightCurly) && !self.eof() {
             let arm_start = self.current_token_index();
             let mut arm = if self.eat(Token::Else) {
-                let binding = self
-                    .eat(Token::Identifier)
-                    .then(|| self.intern(self.current_token_index() - 1));
-                self.alloc_node_from(arm_start, NodeKind::MatchFallbackArm { binding })
+                let mut arm =
+                    self.alloc_node_from(arm_start, NodeKind::MatchFallbackArm { binding: false });
+                if let Some(binding) = self.try_parse_ident() {
+                    self.update_kind(arm, NodeKind::MatchFallbackArm { binding: true });
+                    self.push_child(&mut arm, binding);
+                }
+                arm
             } else {
                 let mut arm = self.alloc_node(NodeKind::MatchArm);
                 let key = self.parse_expr(ParseExprMode::AllowAll);

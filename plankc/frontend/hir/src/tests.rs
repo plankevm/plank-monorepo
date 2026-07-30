@@ -1595,6 +1595,31 @@ fn test_return_outside_function_body() {
 }
 
 #[test]
+fn test_match_fallback_cannot_shadow_primitive_type() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            let x = match selector {
+                else u256 => u256,
+            };
+            @evm_stop();
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: shadowing primitive type
+         --> main.plk:4:14
+          |
+        4 |         else u256 => u256,
+          |              ^^^^ 'u256' is a primitive type
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_multiple_match_else_arms() {
     let (hir, big_nums, session, _project) = try_lower(
         r#"

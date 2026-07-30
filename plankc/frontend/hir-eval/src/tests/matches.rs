@@ -392,6 +392,28 @@ fn test_match_subject_must_be_u256() {
 }
 
 #[test]
+fn test_inline_while_resets_match_result_between_iterations() {
+    assert_diagnostics(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            comptime let mut i = 0;
+            inline while i < 2 {
+                let subject = if i == 0 { 0 } else { selector };
+                let x = match subject {
+                    0 => 20,
+                    else => 10,
+                };
+                i = i +% 1;
+            }
+            @evm_stop();
+        }
+        "#,
+        &[],
+    );
+}
+
+#[test]
 fn test_runtime_match_subject_must_be_u256() {
     assert_diagnostics(
         std_project(

@@ -441,7 +441,13 @@ impl<'cst> MatchExpr<'cst> {
 #[derive(Debug, Clone, Copy)]
 pub enum MatchArmKind<'cst> {
     Case { key: NodeView<'cst> },
-    Fallback { binding: Option<StrId> },
+    Fallback { binding: Option<MatchFallbackBinding> },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatchFallbackBinding {
+    pub name: StrId,
+    pub span: TokenSpan,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -459,11 +465,21 @@ impl<'cst> MatchArm<'cst> {
                 body: view.child(1).expect("match arm must have body"),
                 view,
             },
-            NodeKind::MatchFallbackArm { binding } => Self {
-                kind: MatchArmKind::Fallback { binding },
-                body: view.child(0).expect("match fallback arm must have body"),
-                view,
-            },
+            NodeKind::MatchFallbackArm { binding } => {
+                let mut children = view.children();
+                let binding = binding.then(|| {
+                    let binding = children.next().expect("bound match fallback must have binding");
+                    MatchFallbackBinding {
+                        name: binding.ident().expect("match fallback binding must be identifier"),
+                        span: binding.span(),
+                    }
+                });
+                Self {
+                    kind: MatchArmKind::Fallback { binding },
+                    body: children.next().expect("match fallback arm must have body"),
+                    view,
+                }
+            }
             _ => unreachable!("match arm list must contain only match arms"),
         }
     }

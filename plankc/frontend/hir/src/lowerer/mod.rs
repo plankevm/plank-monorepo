@@ -195,10 +195,14 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, kind: LocalKind, span: TokenSpan) -> LocalId {
+    fn validate_local_name(&self, name: StrId, span: TokenSpan) {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         }
+    }
+
+    fn alloc_local(&mut self, name: StrId, kind: LocalKind, span: TokenSpan) -> LocalId {
+        self.validate_local_name(name, span);
 
         let id = self.next_local_id.get_and_inc();
         self.scoped_locals_stack.push(ScopedLocal { name, id, kind, span: Some(span) });
@@ -407,22 +411,23 @@ impl BlockLowerer<'_> {
                     let duplicate_key = first_fallback.map(|(_, previous_span)| {
                         (self.lower_poison_to_local(arm.view.span()), previous_span)
                     });
-                    let binding = binding.map(|name| {
+                    let binding = binding.map(|binding| {
+                        self.validate_local_name(binding.name, binding.span);
                         let id = match duplicate_key {
                             Some(_) => self.lower_poison_to_local(arm.view.span()),
                             None => subject,
                         };
-                        (name, id)
+                        (binding, id)
                     });
 
                     let body = ast::Expr::new_unwrap(arm.body);
                     let body_block = self.create_sub_block(body.span(), |this| {
-                        if let Some((name, id)) = binding {
+                        if let Some((binding, id)) = binding {
                             this.scoped_locals_stack.push(ScopedLocal {
-                                name,
+                                name: binding.name,
                                 id,
                                 kind: LocalKind::Immutable,
-                                span: Some(arm.view.span()),
+                                span: Some(binding.span),
                             });
                         }
                         let expr = this.lower_expr(body);
@@ -450,7 +455,7 @@ impl BlockLowerer<'_> {
                 })
             }
         };
-        self.emit(InstructionKind::Match { subject, arms, fallback });
+        self.emit(InstructionKind::Match { outer_result: result, subject, arms, fallback });
         ExprKind::LocalRef(result)
     }
 

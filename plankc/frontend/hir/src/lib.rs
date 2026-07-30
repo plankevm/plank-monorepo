@@ -116,6 +116,7 @@ pub enum InstructionKind {
         else_block: BlockId,
     },
     Match {
+        outer_result: LocalId,
         subject: LocalId,
         arms: MatchArmsId,
         fallback: BlockId,

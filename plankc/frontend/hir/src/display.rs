@@ -216,7 +216,7 @@ impl<'a> DisplayHir<'a> {
                 self.fmt_block(f, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
-            InstructionKind::Match { subject, arms, fallback } => {
+            InstructionKind::Match { outer_result: _, subject, arms, fallback } => {
                 write!(f, "{pad}")?;
                 write!(f, "match ")?;
                 self.fmt_local(f, subject)?;
