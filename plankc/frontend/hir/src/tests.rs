@@ -90,17 +90,31 @@ fn test_basic_init_builtin_calls() {
 
 #[test]
 fn test_eager_fn_lowering() {
-    let (hir, big_nums, session, _) = try_lower_project(
+    assert_lowers_to(
         r#"
         const f = eager fn(x: u256) u256 { x };
         init { @evm_stop(); }
         "#,
-    );
+        r#"
+        ==== Constants ====
+        ConstId(0) ("f") result=LocalId(0) {
+            %0 = @fn0
+        }
 
-    assert!(session.diagnostics().is_empty());
-    assert!(hir.fns.iter().next().expect("expected eager function").is_eager);
-    let rendered = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
-    assert!(rendered.contains("eager @fn0("));
+        ==== Functions ====
+        eager @fn0(%1: %0) -> %2 {
+            preamble:
+                %0 = type:u256
+                param#0 %1 : %0
+                %2 = type:u256
+            body:
+                ret %1
+        }
+
+        ==== Init ====
+        eval @evm_stop()
+        "#,
+    );
 }
 
 #[test]

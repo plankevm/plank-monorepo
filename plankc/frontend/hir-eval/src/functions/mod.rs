@@ -34,7 +34,7 @@ impl PreambleResult {
 struct Call<'a> {
     source: SourceId,
     caller_comptime: bool,
-    evaluate_comptime: bool,
+    eagerly_comptime: bool,
     caller_bindings: &'a DenseIndexMap<hir::LocalId, Local>,
     caller_mir_types: &'a mut IndexVec<mir::LocalId, TypeId>,
     span: SourceSpan,
@@ -52,6 +52,10 @@ impl Call<'_> {
     fn loc(&self) -> SrcLoc {
         SrcLoc::new(self.source, self.span)
     }
+
+    fn comptime(&self) -> bool {
+        self.caller_comptime || self.eagerly_comptime
+    }
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
@@ -64,13 +68,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         call_span: SourceSpan,
         type_name: Option<StrId>,
         capture_buf_offset: usize,
-        eager_call: bool,
+        eagerly_comptime: bool,
         validated: ArgParamComptimenessMatch,
     ) -> (Scope<'s, 'ctx>, Call<'s>, &'s mut ComptimeQuota, &'s mut u32) {
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
         let caller_comptime = self.is_comptime();
-        let evaluate_comptime = caller_comptime || eager_call;
         let eval_branch_quota_start_loc = self.eval_branch_quota_start_loc;
         let call_source = self.source;
         let comptime_quota = self.comptime_quota;
@@ -116,7 +119,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
 
             let state = 'state: {
-                if param.is_comptime || evaluate_comptime {
+                if param.is_comptime || caller_comptime || eagerly_comptime {
                     let LocalState::Comptime(value) = state else {
                         let ArgParamComptimenessMatch = validated;
                         unreachable!("invariant: already validated");
@@ -147,7 +150,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let call = Call {
             source: call_source,
             caller_comptime,
-            evaluate_comptime,
+            eagerly_comptime,
             caller_bindings,
             caller_mir_types,
             span: call_span,
@@ -322,7 +325,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         let validated = self.validate_args_param_comptimeness_match(func, params, args)?;
-        let eager_call = func.is_eager
+        let eagerly_comptime = func.is_eager
             && args
                 .iter()
                 .all(|&arg| matches!(self.bindings[arg].state, Ok(LocalState::Comptime(_))));
@@ -336,7 +339,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 call_span,
                 type_name,
                 capture_buf_offset,
-                eager_call,
+                eagerly_comptime,
                 validated,
             );
         let result = scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc);
@@ -403,7 +406,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
         }
 
-        if call.evaluate_comptime || preamble.is_comptime_only {
+        if call.comptime() || preamble.is_comptime_only {
             let call_result = self.fold_comptime_call(&call, preamble, values_buf_offset);
             return match call_result {
                 Ok(Ok(result)) => match result.outcome {

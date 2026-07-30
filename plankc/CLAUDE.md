@@ -36,6 +36,10 @@ Cargo workspace with general-purpose crates in `crates/` and frontend crates in 
 
 ## Coding Style
 
+### Tests
+
+Display and lowering tests must assert the complete rendered snapshot; do not use partial assertions.
+
 ### Code QA
 
 All issues raised by the `code-qa` agent MUST BE ADDRESSED, any
