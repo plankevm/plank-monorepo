@@ -725,6 +725,7 @@ impl BlockLowerer<'_> {
                 fn_def.body(),
                 fn_def.node().span(),
                 fn_def.param_list_span(),
+                fn_def.eager,
             )
         })
     }
@@ -746,6 +747,7 @@ impl BlockLowerer<'_> {
                 method.body(),
                 method.node().span(),
                 method.param_list_span(),
+                false,
             );
             let name_offset = this.lexed.token_src_span(method.name_span().start).start;
             let instance = is_instance.then(|| {
@@ -779,6 +781,7 @@ impl BlockLowerer<'_> {
         body_expr: ast::BlockExpr<'ast>,
         node_span: TokenSpan,
         param_list_span: TokenSpan,
+        is_eager: bool,
     ) -> FnDefId {
         let param_infos_start = self.param_info_buf.len();
         let return_type;
@@ -839,7 +842,7 @@ impl BlockLowerer<'_> {
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,
-            is_eager: fn_def.eager,
+            is_eager,
             return_type,
             source: self.source_id,
             source_span,
