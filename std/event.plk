@@ -6,18 +6,8 @@ import std::types::type_of;
 import std::regions::{bytes, memory, keccak256, is_bytes, copy_if_not_already_memory};
 import std::abi_helpers::{is_abi_dynamic, abi_head_size};
 
-// Event markers live in the struct's type index, either alone or in a tuple:
-//
-//     const Transfer = struct indexed(("from", "to")) { ... };
-//     const Transfer = struct (indexed(("from", "to")), anonymous) { ... };
-//
-// A marker is nominal: struct interning keys on definition site, so nothing a
-// user writes can collide with one.
 const anonymous = struct {};
 
-// A single name is normalized by recursing rather than by a second `struct`
-// expression: interning keys on definition site, so two `struct` expressions
-// here would produce markers that never compare equal.
 const indexed = fn (comptime names: $N) type {
     if N == cbytes {
         return indexed((names,));
@@ -208,9 +198,6 @@ const topic_word = fn (value: $F) u256 {
     @compile_error("event: indexed field type cannot be encoded as a topic")
 };
 
-// A `u256` is already its own word, so the `topic_word` call would do nothing —
-// and a call is not free: the backend has no inliner, so every one of them is a
-// jump pair plus stack shuffling.
 const topic_at = fn (event: $T, comptime k: u256) u256 {
     let field = comptime { nth_indexed_field(T, k) };
     if comptime { @field_type(T, field) == u256 } {
@@ -284,7 +271,7 @@ const data_size = fn (event: $T) u256 {
             } else {
                 @get_field(event, i).length
             };
-            size = size +% 32 +% @evm_and(length +% 31, WORD_MASK);
+            size = size +% @evm_and(length +% 63, WORD_MASK);
         }
         i = i + 1;
     }
@@ -320,15 +307,14 @@ const encode_data_section = fn (event: $T) bytes(memory) {
                 } else if comptime { @field_type(T, i) == bytes(memory) } {
                     @get_field(event, i)
                 } else {
-                    
-                    (@get_field(event, i))
+                    copy_if_not_already_memory(@get_field(event, i))
                 };
                 let padded = @evm_and(payload.length +% 31, WORD_MASK);
                 @mstore32(ptr +% tail, payload.length);
                 @mstore32(ptr +% tail +% padded, 0);
                 @mcopy(ptr +% tail +% 32, payload.ptr, payload.length);
                 tail = tail +% 32 +% padded;
-                head = head + 32;
+                head = head +% 32;
             } else {
                 let word = if comptime { F == u256 } {
                     @get_field(event, i)
@@ -340,7 +326,7 @@ const encode_data_section = fn (event: $T) bytes(memory) {
                     topic_word(@get_field(event, i))
                 };
                 @mstore32(slot, word);
-                head = head + comptime { abi_head_size(F) };
+                head = head +% comptime { abi_head_size(F) };
             }
         }
         i = i + 1;
@@ -395,8 +381,10 @@ const assert_event_type = fn (comptime T: type) void {
     }
 };
 
+
 const emit = fn (event: $T) void {
     comptime {
+        @set_eval_branch_quota(1000000);
         assert_event_type(T);
     }
 

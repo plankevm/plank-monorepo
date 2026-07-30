@@ -33,7 +33,6 @@ contract EventTest {
 
     event OutOfOrderMarkers(uint256 indexed a, uint256 b, uint256 indexed c);
 
-
     event CodeRegion(bytes indexed tag, bytes body);
 
     fallback() external {
