@@ -1,0 +1,223 @@
+import std::constructor::return_runtime;
+import std::event::{emit, indexed, anonymous};
+import std::core::addr::{addr, addr_from_u256};
+import std::core::uint::{u8, u32, u160, u248, unsafe_from_u256};
+import std::fixedbytes::{bytes32, bytes32_from_u256};
+import std::membytes::{membytes_from_ptr, membytes_new};
+import std::regions::{bytes, code, embed_as, memory};
+import std::string::string;
+
+const Transfer = struct indexed(("from", "to")) {
+    from:   addr,
+    to:     addr,
+    amount: u256,
+};
+
+const NoIndex = struct {
+    a: u256,
+    b: bool,
+};
+
+const ThreeIndexed = struct indexed(("a", "b", "c")) {
+    a: u256,
+    b: u256,
+    c: u256,
+    d: u256,
+};
+
+const DynIndexed = struct indexed("blob") {
+    blob: bytes(memory),
+    tail: bytes(memory),
+};
+
+const AnonFour = struct (indexed(("a", "b", "c", "d")), anonymous) {
+    a: u256,
+    b: u256,
+    c: u256,
+    d: u256,
+    e: u256,
+};
+
+const OneIndexed = struct indexed("who") {
+    who:   addr,
+    value: u256,
+};
+
+const AnonZero = struct anonymous {
+    a: u256,
+    b: bool,
+};
+
+const AnonOne = struct (indexed("a"), anonymous) {
+    a: u256,
+    b: u256,
+};
+
+const AnonTwo = struct (indexed(("who", "b")), anonymous) {
+    who: addr,
+    b:   u256,
+    c:   u256,
+};
+
+const AnonThree = struct (indexed(("a", "b", "c")), anonymous) {
+    a: u256,
+    b: u256,
+    c: u256,
+    d: bool,
+};
+
+const AllIndexed = struct indexed("who") {
+    who: addr,
+};
+
+const AnonAllIndexed = struct (indexed(("a", "b")), anonymous) {
+    a: u256,
+    b: u256,
+};
+
+const Flags = struct indexed(("tag", "on")) {
+    tag:  bytes32,
+    on:   bool,
+    salt: bytes32,
+    off:  bool,
+};
+
+const MixedBag = struct indexed("id") {
+    id:    u256,
+    small: u8,
+    text:  string,
+    wide:  u32,
+    who:   addr,
+    blob:  bytes(memory),
+    huge:  u160
+};
+
+const UintIndexed = struct indexed(("tier", "rate", "payee")) {
+    tier:  u8,
+    rate:  u32,
+    payee: u160,
+    note:  u256,
+    tag:   u8,
+    max:   u248,
+};
+
+const StrIndexed = struct indexed("key") {
+    key: string,
+    val: string,
+};
+
+const BytesEdges = struct {
+    empty: bytes(memory),
+    exact: bytes(memory),
+    over:  bytes(memory),
+    nine:  bytes(memory),
+};
+
+const BytesEdgesIndexed = struct indexed(("empty", "exact", "over")) {
+    empty: bytes(memory),
+    exact: bytes(memory),
+    over:  bytes(memory),
+    n:     u256,
+};
+
+// Declaration order, not marker order, decides topic order.
+const OutOfOrderMarkers = struct indexed(("c", "a")) {
+    a: u256,
+    b: u256,
+    c: u256,
+};
+
+// A non-memory region encodes exactly like `bytes`: hashed for a topic, copied
+// into memory for the data section.
+const CodeRegion = struct indexed("tag") {
+    tag:  bytes(code),
+    body: bytes(code),
+};
+
+init { return_runtime(); }
+
+run {
+    let a = addr_from_u256(0x1111111111111111111111111111111111111111);
+    let b = addr_from_u256(0x2222222222222222222222222222222222222222);
+
+    emit(Transfer { from: a, to: b, amount: 42 });
+
+    emit(NoIndex { a: 7, b: true });
+
+    emit(ThreeIndexed { a: 1, b: 2, c: 3, d: 4 });
+
+    let blob = membytes_from_ptr(@malloc_zeroed(5), 5);
+    emit(DynIndexed { blob: blob, tail: blob });
+
+    emit(AnonFour { a: 10, b: 20, c: 30, d: 40, e: 50 });
+
+    let c = addr_from_u256(0x3333333333333333333333333333333333333333);
+    emit(OneIndexed { who: c, value: 99 });
+
+    emit(AnonZero { a: 111, b: false });
+
+    emit(AnonOne { a: 222, b: 333 });
+
+    let d = addr_from_u256(0x4444444444444444444444444444444444444444);
+    emit(AnonTwo { who: d, b: 444, c: 555 });
+
+    emit(AnonThree { a: 666, b: 777, c: 888, d: true });
+
+    let f = addr_from_u256(0x6666666666666666666666666666666666666666);
+    emit(AllIndexed { who: f });
+
+    emit(AnonAllIndexed { a: 1234567, b: 7654321 });
+
+    emit(Flags {
+        tag:  bytes32_from_u256(
+            0x00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+        ),
+        on:   true,
+        salt: bytes32_from_u256(
+            0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface
+        ),
+        off:  false,
+    });
+
+    let e = addr_from_u256(0x5555555555555555555555555555555555555555);
+    emit(MixedBag {
+        id:    1001,
+        small: unsafe_from_u256(u8, 0xab),
+        text:  string { bytes: embed_as("plank", memory) },
+        wide:  unsafe_from_u256(u32, 0xdeadbeef),
+        who:   e,
+        blob:  embed_as("abc", memory),
+        // Deliberately 38 hex digits, not 40: a 40-digit literal is an address
+        // literal in Solidity and would demand a checksummed mixed-case form.
+        huge:  unsafe_from_u256(u160, 0xabcdef1234567890abcdef1234567890abcdef),
+    });
+
+    emit(UintIndexed {
+        tier:  unsafe_from_u256(u8, 0xff),
+        rate:  unsafe_from_u256(u32, 0xdeadbeef),
+        payee: unsafe_from_u256(u160, 0xabcdef1234567890abcdef1234567890abcdef),
+        note:  7,
+        tag:   unsafe_from_u256(u8, 0x01),
+        max:   unsafe_from_u256(u248, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff),
+    });
+
+    emit(StrIndexed {
+        key: string { bytes: embed_as("key-with-some-length", memory) },
+        val: string { bytes: embed_as("value string", memory) },
+    });
+
+    let empty = membytes_new(0);
+    let exact = embed_as("0123456789abcdef0123456789abcdef", memory);
+    let over  = embed_as("0123456789abcdef0123456789abcdef01234567", memory);
+    let nine  = embed_as("123456789", memory);
+
+    emit(BytesEdges { empty: empty, exact: exact, over: over, nine: nine });
+
+    emit(BytesEdgesIndexed { empty: empty, exact: exact, over: over, n: 1234 });
+
+    emit(OutOfOrderMarkers { a: 1, b: 2, c: 3 });
+
+    emit(CodeRegion { tag: embed_as("code-tag", code), body: embed_as("code-body", code) });
+
+    @evm_stop();
+}

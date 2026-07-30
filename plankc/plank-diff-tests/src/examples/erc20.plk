@@ -1,6 +1,7 @@
 import std::storage::map_slot_hash;
 import std::core::addr::*;
 import std::precompile::ecrecover;
+import std::event::{emit, indexed};
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
@@ -33,9 +34,6 @@ const DOMAIN_TYPEHASH = /* `keccak256("EIP712Domain(string name,string version,u
 const PERMIT_TYPEHASH = /* `keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")` */
     0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
 
-const TRANSFER_TOPIC = 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef;
-const APPROVAL_TOPIC = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925;
-
 const PERMIT2 = addr_from_u256(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
 const INSUFFICIENT_BALANCE_SELECTOR = 0xf4d678b8 /* InsufficientBalance() */;
@@ -67,16 +65,16 @@ const allowance_slot = fn (owner: addr, spender: addr) u256 {
     @evm_keccak256(buf +% (31 - 20 + 12), 20 + 20 + 1)
 };
 
-const emit_transfer = fn (from: addr, to: addr, amount: u256) void {
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, amount);
-    @evm_log3(buf, 32, TRANSFER_TOPIC, cast_addr(from, u256), cast_addr(to, u256));
+const Transfer = struct indexed(("from", "to")) {
+    from:   addr,
+    to:     addr,
+    amount: u256,
 };
 
-const emit_approval = fn (owner: addr, spender: addr, amount: u256) void {
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, amount);
-    @evm_log3(buf, 32, APPROVAL_TOPIC, cast_addr(owner, u256), cast_addr(spender, u256));
+const Approval = struct indexed(("owner", "spender")) {
+    owner:   addr,
+    spender: addr,
+    amount:  u256,
 };
 
 const revert_4byte = fn (comptime selector: u256) never {
@@ -131,7 +129,8 @@ init {
 
     let slot = balance_slot(msg_sender());
     @evm_sstore(slot, TOTAL_SUPPLY);
-    emit_transfer(addr_from_u256(0), msg_sender(), TOTAL_SUPPLY);
+
+    emit(Transfer { from: addr_from_u256(0), to: msg_sender(), amount: TOTAL_SUPPLY });
 
     let domain_separator = compute_domain_separator();
 
@@ -241,7 +240,11 @@ const approve = fn (spender: addr, amount: u256) never {
     require_4byte(!addr_eq(spender, PERMIT2) or amount == U256_MAX, PERMIT2_ALLOWANCE_FIXED);
 
     @evm_sstore(allowance_slot(msg_sender(), spender), amount);
-    emit_approval(msg_sender(), spender, amount);
+    emit(Approval {
+        owner:   msg_sender(),
+        spender: spender,
+        amount:  amount
+    });
 
     return_word(1);
 };
@@ -298,7 +301,7 @@ const transfer_balance = fn (from: addr, to: addr, amount: u256) void {
     let balance_to = @evm_sload(to_slot);
     @evm_sstore(to_slot, balance_to + amount);
 
-    emit_transfer(from, to, amount);
+    emit(Transfer { from: from, to: to, amount: amount });
 };
 
 const hash_permit = fn (
@@ -348,7 +351,7 @@ const permit = fn (
     require_4byte(recovered.is_some and addr_eq(recovered.inner, owner), INVALID_PERMIT);
 
     @evm_sstore(nonce_slot, nonce +% 1);
-    emit_approval(owner, spender, value);
+    emit(Approval { owner: owner, spender: spender, amount: value });
     @evm_sstore(allowance_slot(owner, spender), value);
 
     @evm_stop();
