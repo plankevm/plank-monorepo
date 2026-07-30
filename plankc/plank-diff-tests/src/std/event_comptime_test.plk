@@ -1,0 +1,166 @@
+import std::constructor::return_runtime;
+import std::error::comptime_assert;
+import std::event::{
+    indexed, anonymous, is_indexed_marker, marker_count, is_anonymous, is_field_indexed,
+    decimal_cbytes, sol_type_name, event_signature, topic0, indexed_count, nth_indexed_field,
+    data_head_size, data_is_dynamic
+};
+import std::abi_helpers::is_abi_dynamic;
+import std::core::uint::{u8, u32, u160, UInt, is_uint};
+import std::core::addr::addr;
+import std::fixedbytes::bytes32;
+import std::regions::{bytes, memory};
+import std::string::string;
+
+const Transfer = struct indexed(("from", "to")) {
+    from:   addr,
+    to:     addr,
+    amount: u256,
+};
+
+const Approval = struct indexed(("owner", "spender")) {
+    owner:   addr,
+    spender: addr,
+    amount:  u256,
+};
+
+const NoIndex = struct {
+    a: u256,
+    b: bool,
+};
+
+const Mixed = struct indexed(("small", "flag")) {
+    small: u8,
+    blob:  bytes(memory),
+    flag:  bool,
+    text:  string,
+};
+
+const IndexedDynOnly = struct indexed("blob") {
+    blob: bytes(memory),
+    n:    u256,
+};
+
+const AllIndexed = struct indexed("who") {
+    who: addr,
+};
+
+const AnonPlain = struct anonymous {
+    a: u256,
+};
+
+const AnonIndexed = struct (indexed("a"), anonymous) {
+    a: u256,
+    b: u256,
+};
+
+// Markers are a set: their order does not affect which fields are indexed.
+const ReversedMarkers = struct (anonymous, indexed("a")) {
+    a: u256,
+    b: u256,
+};
+
+const _tests = comptime {
+    // Only `emit` raises the quota for its callers; this block calls the
+    // underlying helpers directly, many times over, on its own budget.
+    @set_eval_branch_quota(1000000);
+
+    comptime_assert(decimal_cbytes(0) == "0", "decimal_cbytes(0)");
+    comptime_assert(decimal_cbytes(8) == "8", "decimal_cbytes(8)");
+    comptime_assert(decimal_cbytes(248) == "248", "decimal_cbytes(248)");
+    comptime_assert(decimal_cbytes(256) == "256", "decimal_cbytes(256)");
+
+    comptime_assert(sol_type_name(u256) == "uint256", "u256 name");
+    comptime_assert(sol_type_name(bool) == "bool", "bool name");
+    comptime_assert(sol_type_name(addr) == "address", "addr name");
+    comptime_assert(sol_type_name(bytes32) == "bytes32", "bytes32 name");
+    comptime_assert(sol_type_name(u8) == "uint8", "u8 name");
+    comptime_assert(sol_type_name(u32) == "uint32", "u32 name");
+    comptime_assert(sol_type_name(u160) == "uint160", "u160 name");
+    comptime_assert(sol_type_name(UInt(8)) == "uint8", "UInt(8) name");
+    comptime_assert(sol_type_name(UInt(248)) == "uint248", "UInt(248) name");
+    comptime_assert(sol_type_name(UInt(256)) == "uint256", "UInt(256) name");
+    comptime_assert(sol_type_name(bytes(memory)) == "bytes", "bytes(memory) name");
+    comptime_assert(sol_type_name(string) == "string", "string name");
+
+    comptime_assert(is_indexed_marker(indexed("a")), "indexed(\"a\") is a marker");
+    comptime_assert(is_indexed_marker(indexed(("a", "b"))), "indexed tuple is a marker");
+    comptime_assert(indexed("a") == indexed(("a",)), "bare name normalizes to a 1-tuple");
+    comptime_assert(!is_indexed_marker(anonymous), "anonymous is not an indexed marker");
+    comptime_assert(!is_indexed_marker(u256), "u256 is not a marker");
+    comptime_assert(!is_indexed_marker(addr), "addr is not a marker");
+    comptime_assert(!is_indexed_marker(struct {}), "a bare empty struct is not a marker");
+
+    comptime_assert(marker_count(NoIndex) == 0, "NoIndex marker count");
+    comptime_assert(marker_count(Transfer) == 1, "Transfer marker count");
+    comptime_assert(marker_count(AnonIndexed) == 2, "AnonIndexed marker count");
+
+    comptime_assert(!is_anonymous(Transfer), "Transfer is not anonymous");
+    comptime_assert(is_anonymous(AnonPlain), "AnonPlain is anonymous");
+    comptime_assert(is_anonymous(AnonIndexed), "AnonIndexed is anonymous");
+    comptime_assert(is_anonymous(ReversedMarkers), "ReversedMarkers is anonymous");
+    comptime_assert(is_field_indexed(ReversedMarkers, 0), "ReversedMarkers a is indexed");
+    comptime_assert(!is_field_indexed(ReversedMarkers, 1), "ReversedMarkers b is not indexed");
+
+    comptime_assert(is_field_indexed(Transfer, 0), "Transfer from is indexed");
+    comptime_assert(is_field_indexed(Transfer, 1), "Transfer to is indexed");
+    comptime_assert(!is_field_indexed(Transfer, 2), "Transfer amount is not indexed");
+    comptime_assert(!is_field_indexed(NoIndex, 0), "NoIndex a is not indexed");
+
+    comptime_assert(
+        event_signature(Transfer) == "Transfer(address,address,uint256)",
+        "Transfer signature"
+    );
+    comptime_assert(
+        topic0(Transfer)
+            == 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef,
+        "Transfer topic0"
+    );
+    comptime_assert(
+        event_signature(Approval) == "Approval(address,address,uint256)",
+        "Approval signature"
+    );
+    comptime_assert(
+        topic0(Approval)
+            == 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925,
+        "Approval topic0"
+    );
+    comptime_assert(indexed_count(Transfer) == 2, "Transfer indexed count");
+    comptime_assert(indexed_count(NoIndex) == 0, "NoIndex indexed count");
+    comptime_assert(
+        event_signature(Mixed) == "Mixed(uint8,bytes,bool,string)",
+        "Mixed signature"
+    );
+
+    comptime_assert(!is_abi_dynamic(u256), "u256 static");
+    comptime_assert(!is_abi_dynamic(addr), "addr static");
+    comptime_assert(!is_abi_dynamic(bytes32), "bytes32 static");
+
+    // Every `uN` also carries a u256 type index, so the round-trip must reject them.
+    comptime_assert(!is_uint(bytes32), "bytes32 is not a uint");
+    comptime_assert(is_abi_dynamic(bytes(memory)), "bytes(memory) dynamic");
+    comptime_assert(is_abi_dynamic(string), "string dynamic");
+
+    comptime_assert(nth_indexed_field(Transfer, 0) == 0, "Transfer idx0");
+    comptime_assert(nth_indexed_field(Transfer, 1) == 1, "Transfer idx1");
+    comptime_assert(nth_indexed_field(Transfer, 2) == 3, "Transfer idx2 sentinel");
+    comptime_assert(nth_indexed_field(Mixed, 0) == 0, "Mixed idx0");
+    comptime_assert(nth_indexed_field(Mixed, 1) == 2, "Mixed idx1");
+    comptime_assert(nth_indexed_field(Mixed, 2) == 4, "Mixed idx2 sentinel");
+
+    comptime_assert(data_head_size(Transfer) == 32, "Transfer head");
+    comptime_assert(data_head_size(NoIndex) == 64, "NoIndex head");
+    comptime_assert(data_head_size(Mixed) == 64, "Mixed head");
+    comptime_assert(data_head_size(AllIndexed) == 0, "AllIndexed head");
+    comptime_assert(data_head_size(IndexedDynOnly) == 32, "IndexedDynOnly head");
+
+    // The whole struct is dynamic, but its data section is not: the only
+    // dynamic field is indexed, so it never reaches the data section.
+    comptime_assert(is_abi_dynamic(IndexedDynOnly), "IndexedDynOnly is dynamic as a struct");
+    comptime_assert(!data_is_dynamic(IndexedDynOnly), "IndexedDynOnly data section is static");
+    comptime_assert(data_is_dynamic(Mixed), "Mixed data section is dynamic");
+};
+
+init { return_runtime(); }
+
+run { @evm_stop(); }

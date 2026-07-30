@@ -1,0 +1,441 @@
+import std::core::uint::{is_uint, bit_size, cast_uint};
+import std::core::addr::{addr, cast_addr};
+import std::fixedbytes::bytes32;
+import std::string::string;
+import std::types::type_of;
+import std::regions::{bytes, memory, keccak256, is_bytes, copy_if_not_already_memory};
+import std::abi_helpers::{is_abi_dynamic, abi_head_size};
+
+// Event markers live in the struct's type index, either alone or in a tuple:
+//
+//     const Transfer = struct indexed(("from", "to")) { ... };
+//     const Transfer = struct (indexed(("from", "to")), anonymous) { ... };
+//
+// A marker is nominal: struct interning keys on definition site, so nothing a
+// user writes can collide with one.
+const anonymous = struct {};
+
+// A single name is normalized by recursing rather than by a second `struct`
+// expression: interning keys on definition site, so two `struct` expressions
+// here would produce markers that never compare equal.
+const indexed = fn (comptime names: $N) type {
+    if N == cbytes {
+        return indexed((names,));
+    }
+    struct names {}
+};
+
+const is_indexed_marker = fn (comptime M: type) bool {
+    if !@is_struct(M) {
+        return false;
+    }
+    if @field_count(M) != 0 {
+        return false;
+    }
+    indexed(@type_index(M)) == M
+};
+
+const marker_count = fn (comptime T: type) u256 {
+    let I = type_of(@type_index(T));
+    if I == void {
+        return 0;
+    }
+    if I == type {
+        return 1;
+    }
+    if !@is_tuple(I) {
+        @compile_error("event: type index must be a marker or a tuple of markers");
+    }
+    comptime let mut i = 0;
+    inline while i < @field_count(I) {
+        if @field_type(I, i) != type {
+            @compile_error("event: every element of the marker tuple must be a marker");
+        }
+        i = i + 1;
+    }
+    @field_count(I)
+};
+
+const marker_at = fn (comptime T: type, comptime k: u256) type {
+    let index = @type_index(T);
+    if type_of(index) == type {
+        return index;
+    }
+    @get_field(index, k)
+};
+
+const is_anonymous = fn (comptime T: type) bool {
+    let markers = comptime { marker_count(T) };
+    comptime let mut i = 0;
+    inline while i < markers {
+        if marker_at(T, i) == anonymous {
+            return true;
+        }
+        i = i + 1;
+    }
+    false
+};
+
+const is_field_indexed = fn (comptime T: type, comptime field: u256) bool {
+    let markers = comptime { marker_count(T) };
+    comptime let mut i = 0;
+    inline while i < markers {
+        let M = marker_at(T, i);
+        if is_indexed_marker(M) {
+            let names = @type_index(M);
+            comptime let mut n = 0;
+            inline while n < @field_count(type_of(names)) {
+                if @field_index(T, @get_field(names, n)) == field {
+                    return true;
+                }
+                n = n + 1;
+            }
+        }
+        i = i + 1;
+    }
+    false
+};
+
+const indexed_count = fn (comptime T: type) u256 {
+    comptime let mut count = 0;
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        if is_field_indexed(T, i) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    count
+};
+
+const nth_indexed_field = fn (comptime T: type, comptime k: u256) u256 {
+    comptime let mut seen = 0;
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        if is_field_indexed(T, i) {
+            if seen == k {
+                return i;
+            }
+            seen = seen + 1;
+        }
+        i = i + 1;
+    }
+    @field_count(T)
+};
+
+const DIGITS = "0123456789";
+
+const digit_char = fn (comptime d: u256) cbytes {
+    if d > 9 {
+        @compile_error("digit_char: expected a single decimal digit");
+    }
+    @slice_cbytes(DIGITS, d, d + 1)
+};
+
+const decimal_cbytes = fn (comptime n: u256) cbytes {
+    if n < 10 {
+        return digit_char(n);
+    }
+    @concat_cbytes((decimal_cbytes(n </ 10), digit_char(n % 10)))
+};
+
+const sol_type_name = fn (comptime T: type) cbytes {
+    if T == bool {
+        return "bool";
+    }
+    if T == addr {
+        return "address";
+    }
+    if T == bytes32 {
+        return "bytes32";
+    }
+    if T == string {
+        return "string";
+    }
+    if comptime { is_bytes(T) } {
+        return "bytes";
+    }
+    if comptime { is_uint(T) } {
+        let bits = comptime { bit_size(T) };
+        if comptime { bits == 0 or bits > 256 or bits % 8 != 0 } {
+            @compile_error("event: uintN width must be a non-zero multiple of 8 up to 256");
+        }
+        return @concat_cbytes(("uint", decimal_cbytes(bits)));
+    }
+    @compile_error("event: field type has no Solidity ABI name")
+};
+
+// Indexed fields keep their declaration-order slot in the signature, as in Solidity.
+const event_signature = fn (comptime T: type) cbytes {
+    if !@has_plain_name(T) {
+        @compile_error("event: event struct must be bound to a named const");
+    }
+    comptime let mut params = "";
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        let name = sol_type_name(@field_type(T, i));
+        params = if i == 0 { name } else { @concat_cbytes((params, ",", name)) };
+        i = i + 1;
+    }
+    @concat_cbytes((@type_name(T), "(", params, ")"))
+};
+
+const topic0 = fn (comptime T: type) u256 {
+    @keccak256_cbytes(event_signature(T))
+};
+
+const topic_word = fn (value: $F) u256 {
+    if F == bool {
+        return if value { 1 } else { 0 };
+    }
+    if comptime { is_uint(F) } {
+        return cast_uint(value, u256);
+    }
+    if F == addr {
+        return cast_addr(value, u256);
+    }
+    // A `bytes32` already fills the word, so its topic is the raw value.
+    if F == bytes32 {
+        return value.raw;
+    }
+    // Dynamic topics hash the contents rather than padding the value.
+    if comptime { is_bytes(F) } {
+        return keccak256(value).raw;
+    }
+    if F == string {
+        return keccak256(value.bytes).raw;
+    }
+    @compile_error("event: indexed field type cannot be encoded as a topic")
+};
+
+// A `u256` is already its own word, so the `topic_word` call would do nothing —
+// and a call is not free: the backend has no inliner, so every one of them is a
+// jump pair plus stack shuffling.
+const topic_at = fn (event: $T, comptime k: u256) u256 {
+    let field = comptime { nth_indexed_field(T, k) };
+    if comptime { @field_type(T, field) == u256 } {
+        return @get_field(event, field);
+    }
+    if comptime { @field_type(T, field) == bool } {
+        return @bool_to_u256(@get_field(event, field));
+    }
+    if comptime { @field_type(T, field) == bytes32 } {
+        return @get_field(event, field).raw;
+    }
+    topic_word(@get_field(event, field))
+};
+
+
+const abi_payload_type = fn (comptime F: type) type {
+    if F == string or comptime { is_bytes(F) } {
+        return bytes(memory);
+    }
+    F
+};
+
+const abi_payload = fn (value: $F) abi_payload_type(F) {
+    // A `string` already holds `bytes(memory)`, so unwrapping it is the whole job.
+    if F == string {
+        return value.bytes;
+    }
+    if comptime { is_bytes(F) } {
+        return copy_if_not_already_memory(value);
+    }
+    value
+};
+
+const data_head_size = fn (comptime T: type) u256 {
+    comptime let mut size = 0;
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        if !is_field_indexed(T, i) {
+            let F = abi_payload_type(@field_type(T, i));
+            size = size + if is_abi_dynamic(F) { 32 } else { abi_head_size(F) };
+        }
+        i = i + 1;
+    }
+    size
+};
+
+const data_is_dynamic = fn (comptime T: type) bool {
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        if !is_field_indexed(T, i) {
+            if is_abi_dynamic(abi_payload_type(@field_type(T, i))) {
+                return true;
+            }
+        }
+        i = i + 1;
+    }
+    false
+};
+
+const WORD_MASK = 0xffffffffffffffe0;
+
+// A dynamic field is always a `string` or a `bytes(region)`, and both encode as
+// a length word plus padded contents, so the size follows from the length alone.
+const data_size = fn (event: $T) u256 {
+    let mut size = comptime { data_head_size(T) };
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        if comptime { !is_field_indexed(T, i) and is_abi_dynamic(abi_payload_type(@field_type(T, i))) } {
+            let length = if comptime { @field_type(T, i) == string } {
+                @get_field(event, i).bytes.length
+            } else {
+                @get_field(event, i).length
+            };
+            size = size +% 32 +% @evm_and(length +% 31, WORD_MASK);
+        }
+        i = i + 1;
+    }
+    size
+};
+
+const encode_data_section = fn (event: $T) bytes(memory) {
+    if comptime { !data_is_dynamic(T) and data_head_size(T) == 0 } {
+        return bytes(memory) { ptr: 0, length: 0 };
+    }
+
+    let size = if comptime { data_is_dynamic(T) } {
+        data_size(event)
+    } else {
+        comptime { data_head_size(T) }
+    };
+
+    let ptr = @malloc_uninit(size);
+
+    // Every head offset is known at compile time, so `head` stays comptime and
+    // folds into the store addresses. Only tail offsets depend on runtime sizes.
+    comptime let mut head = 0;
+    let mut tail = comptime { data_head_size(T) };
+    comptime let mut i = 0;
+    inline while i < @field_count(T) {
+        if comptime { !is_field_indexed(T, i) } {
+            let F = comptime { abi_payload_type(@field_type(T, i)) };
+            let slot = if comptime { head == 0 } { ptr } else { ptr +% head };
+            if comptime { is_abi_dynamic(F) } {
+                @mstore32(slot, tail);
+                let payload = if comptime { @field_type(T, i) == string } {
+                    @get_field(event, i).bytes
+                } else if comptime { @field_type(T, i) == bytes(memory) } {
+                    @get_field(event, i)
+                } else {
+                    
+                    (@get_field(event, i))
+                };
+                let padded = @evm_and(payload.length +% 31, WORD_MASK);
+                @mstore32(ptr +% tail, payload.length);
+                @mstore32(ptr +% tail +% padded, 0);
+                @mcopy(ptr +% tail +% 32, payload.ptr, payload.length);
+                tail = tail +% 32 +% padded;
+                head = head + 32;
+            } else {
+                let word = if comptime { F == u256 } {
+                    @get_field(event, i)
+                } else if comptime { F == bool } {
+                    @bool_to_u256(@get_field(event, i))
+                } else if comptime { F == bytes32 } {
+                    @get_field(event, i).raw
+                } else {
+                    topic_word(@get_field(event, i))
+                };
+                @mstore32(slot, word);
+                head = head + comptime { abi_head_size(F) };
+            }
+        }
+        i = i + 1;
+    }
+
+    bytes(memory) { ptr: ptr, length: size }
+};
+
+const assert_event_type = fn (comptime T: type) void {
+    if !@is_struct(T) {
+        @compile_error("emit: expected a struct type");
+    }
+
+    // Names are resolved through `@field_index`, which returns `@field_count(T)`
+    // when no field matches, so a typo would silently mark nothing.
+    let markers = marker_count(T);
+    comptime let mut i = 0;
+    inline while i < markers {
+        let M = marker_at(T, i);
+        if M != anonymous and !is_indexed_marker(M) {
+            @compile_error("event: unrecognized marker in type index");
+        }
+        if is_indexed_marker(M) {
+            let names = @type_index(M);
+            comptime let mut n = 0;
+            inline while n < @field_count(type_of(names)) {
+                if @field_index(T, @get_field(names, n)) >= @field_count(T) {
+                    @compile_error("event: indexed() names a field the event does not declare");
+                }
+                n = n + 1;
+            }
+        }
+        i = i + 1;
+    }
+
+    // An anonymous event derives no signature, so this is the only thing that
+    comptime let mut f = 0;
+    inline while f < @field_count(T) {
+        let _name = sol_type_name(@field_type(T, f));
+        f = f + 1;
+    }
+
+    if is_anonymous(T) {
+        if indexed_count(T) > 4 {
+            @compile_error("emit: an anonymous event may index at most 4 fields");
+        }
+    } else if indexed_count(T) > 3 {
+        @compile_error(
+            "emit: a non-anonymous event may index at most 3 fields, because "
+            "topic0 is reserved for the signature hash (mark it `anonymous` for 4)"
+        );
+    }
+};
+
+const emit = fn (event: $T) void {
+    comptime {
+        assert_event_type(T);
+    }
+
+    let data = encode_data_section(event);
+    let topics = comptime { indexed_count(T) };
+
+    if comptime { is_anonymous(T) } {
+        if topics == 0 {
+            @evm_log0(data.ptr, data.length);
+        } else if topics == 1 {
+            @evm_log1(data.ptr, data.length, topic_at(event, 0));
+        } else if topics == 2 {
+            @evm_log2(data.ptr, data.length, topic_at(event, 0), topic_at(event, 1));
+        } else if topics == 3 {
+            @evm_log3(
+                data.ptr, data.length,
+                topic_at(event, 0), topic_at(event, 1), topic_at(event, 2)
+            );
+        } else {
+            @evm_log4(
+                data.ptr, data.length,
+                topic_at(event, 0), topic_at(event, 1),
+                topic_at(event, 2), topic_at(event, 3)
+            );
+        }
+        return ();
+    }
+
+    let t0 = comptime { topic0(T) };
+    if topics == 0 {
+        @evm_log1(data.ptr, data.length, t0);
+    } else if topics == 1 {
+        @evm_log2(data.ptr, data.length, t0, topic_at(event, 0));
+    } else if topics == 2 {
+        @evm_log3(data.ptr, data.length, t0, topic_at(event, 0), topic_at(event, 1));
+    } else {
+        @evm_log4(
+            data.ptr, data.length, t0,
+            topic_at(event, 0), topic_at(event, 1), topic_at(event, 2)
+        );
+    }
+};
