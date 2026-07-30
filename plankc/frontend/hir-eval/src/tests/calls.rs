@@ -2,6 +2,66 @@ use super::*;
 use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
 
 #[test]
+fn test_eager_fn_folds_only_with_all_comptime_inputs() {
+    assert_lowers_to(
+        r#"
+        const probe = eager fn(x: u256) bool { @in_comptime() };
+        const zero = eager fn() bool { @in_comptime() };
+
+        init {
+            let mut folded = probe(7);
+            let mut folded_zero = zero();
+            let input = @evm_calldataload(0);
+            let mut runtime = probe(input);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> bool {
+            %1 : bool = false
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : u256 = 0
+            %3 : u256 = @evm_calldataload(%2)
+            %4 : u256 = %3
+            %5 : bool = call @fn0(%4)
+            %6 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_eager_type_helper_drives_comptime_if_without_explicit_comptime_block() {
+    assert_lowers_to(
+        r#"
+        const is_u256 = eager fn(comptime T: type) bool { T == u256 };
+
+        init {
+            if is_u256(u256) {
+                @evm_stop();
+            } else {
+                @evm_invalid();
+            }
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_preamble_error_per_call_site() {
     assert_diagnostics(
         r#"

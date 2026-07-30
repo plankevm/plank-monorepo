@@ -156,6 +156,7 @@ module.exports = grammar({
 
     // Definitions
     fn_def: ($) => seq(
+      optional("eager"),
       "fn",
       "(",
       commaSeparated($.param_def, "params"),

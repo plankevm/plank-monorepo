@@ -89,6 +89,21 @@ fn test_basic_init_builtin_calls() {
 }
 
 #[test]
+fn test_eager_fn_lowering() {
+    let (hir, big_nums, session, _) = try_lower_project(
+        r#"
+        const f = eager fn(x: u256) u256 { x };
+        init { @evm_stop(); }
+        "#,
+    );
+
+    assert!(session.diagnostics().is_empty());
+    assert!(hir.fns.iter().next().expect("expected eager function").is_eager);
+    let rendered = format!("{}", DisplayHir::new(&hir, &big_nums, &session));
+    assert!(rendered.contains("eager @fn0("));
+}
+
+#[test]
 fn test_inline_closure_lowering() {
     assert_lowers_to(
         r#"
