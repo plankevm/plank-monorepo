@@ -1277,7 +1277,10 @@ fn test_runtime_function_body_inherits_limit_without_raising_caller_limit() {
                 while i < 1500 {
                     i = i + 1;
                 }
-                identity(i)
+                while i < 1501 {
+                    i = i + 1;
+                }
+                i
             };
             @evm_stop();
         }
@@ -1285,10 +1288,10 @@ fn test_runtime_function_body_inherits_limit_without_raising_caller_limit() {
         ),
         &[r#"
         error: comptime branch quota exhausted
-          --> main.plk:21:9
+          --> main.plk:21:15
            |
-        21 |         identity(i)
-           |         ^^^^^^^^^^^ evaluating this call exceeded the comptime branch quota
+        21 |         while i < 1501 {
+           |               ^^^^^^^^^ evaluating this loop exceeded the comptime branch quota
            |
            = note: current eval branch quota is 1500
         note: comptime evaluation began here
@@ -1299,8 +1302,8 @@ fn test_runtime_function_body_inherits_limit_without_raising_caller_limit() {
         15 | |     spend_and_raise();
         16 | |     let mut x: u256 = comptime {
         ...  |
-        23 | |     @evm_stop();
-        24 | | }
+        26 | |     @evm_stop();
+        27 | | }
            | |_^
         "#],
     );
@@ -1393,7 +1396,7 @@ fn test_runtime_lowering_recursion_poison_is_not_marked_retryable() {
 }
 
 #[test]
-fn test_nested_runtime_function_preamble_spending_does_not_reach_outer_caller() {
+fn test_nested_runtime_function_preamble_spending_counts_for_outer_caller() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
     assert_diagnostics(
         std_project(
@@ -1404,29 +1407,39 @@ fn test_nested_runtime_function_preamble_spending_does_not_reach_outer_caller() 
                 i = i + 1;
             }
             void
-        } {
-            f();
-        };
-
-        const identity = fn(x: u256) u256 { x };
+        } { };
 
         init {
             f();
-            let mut x: u256 = comptime {
-                identity(0)
-            };
+            f();
+            comptime {
+                let mut i = 0;
+                while i < 1 { i = i + 1; }
+            }
+
             @evm_stop();
         }
         "#,
         ),
         &[r#"
-        error: runtime recursion not supported
-         --> main.plk:8:5
-          |
-        8 |     f();
-          |     ^^^ runtime call that recurses
-          |
-          = note: recursion is only allowed at compile time to ensure consistent performance and iteration bounds
+        error: comptime branch quota exhausted
+          --> main.plk:14:15
+           |
+        14 |         while i < 1 { i = i + 1; }
+           |               ^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:9:1
+           |
+         9 | / init {
+        10 | |     f();
+        11 | |     f();
+        12 | |     comptime {
+        ...  |
+        17 | |     @evm_stop();
+        18 | | }
+           | |_^
         "#],
     );
 }
