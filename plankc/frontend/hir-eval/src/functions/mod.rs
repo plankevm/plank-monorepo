@@ -418,68 +418,81 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             };
         }
 
-        // Non-comptime params are already bound as Runtime in `create_fn_scope_frame`.
-        let function =
-            FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
+        let caller_comptime_quota = self.comptime_quota;
+        let caller_max_eval_branch_quota_seen = self.max_eval_branch_quota_seen;
+        self.comptime_quota.reset_spent();
 
-        let lowered = match self.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
-            Ok(&mut LoweredFnState::Done(fn_id)) => fn_id,
-            Ok(state @ LoweredFnState::InProgress) => {
-                self.diag_ctx.emit_runtime_call_with_recursion(call_loc);
-                *state = LoweredFnState::Done(Err(Poisoned));
-                return Ok(Err(Diverge::ControlFlowPoisoned));
-            }
-            Ok(LoweredFnState::Empty) => unreachable!("empty lowered entry should be retried"),
-            Err(new_entry_id) => {
-                let fn_id = (|| {
-                    let (body, body_eval_res) = self.eval_block_to_mir(call.func.body);
-                    match body_eval_res {
-                        Ok(()) => unreachable!("lowerer should guarantee return in function body"),
-                        Err(Diverge::BlockEnd(_)) => {}
-                        Err(Diverge::ControlFlowPoisoned) => {
-                            return Err(Poisoned);
+        let result = (|| {
+            // Non-comptime params are already bound as Runtime in `create_fn_scope_frame`.
+            let function =
+                FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
+
+            let lowered = match self.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
+                Ok(&mut LoweredFnState::Done(fn_id)) => fn_id,
+                Ok(state @ LoweredFnState::InProgress) => {
+                    self.diag_ctx.emit_runtime_call_with_recursion(call_loc);
+                    *state = LoweredFnState::Done(Err(Poisoned));
+                    return Ok(Err(Diverge::ControlFlowPoisoned));
+                }
+                Ok(LoweredFnState::Empty) => unreachable!("empty lowered entry should be retried"),
+                Err(new_entry_id) => {
+                    let fn_id = (|| {
+                        let (body, body_eval_res) = self.eval_block_to_mir(call.func.body);
+                        match body_eval_res {
+                            Ok(()) => {
+                                unreachable!("lowerer should guarantee return in function body")
+                            }
+                            Err(Diverge::BlockEnd(_)) => {}
+                            Err(Diverge::ControlFlowPoisoned) => {
+                                return Err(Poisoned);
+                            }
+                            Err(Diverge::ComptimeQuotaExhausted) => {
+                                return Ok(Err(Diverge::ComptimeQuotaExhausted));
+                            }
                         }
-                        Err(Diverge::ComptimeQuotaExhausted) => {
+                        let return_type = preamble.return_type?;
+                        let fn_id1 = self.eval.mir_fn_locals.push_copy_slice(&self.mir_types);
+                        let fn_id2 = self.eval.mir_fns.push(mir::FnDef {
+                            body,
+                            param_count: runtime_param_count,
+                            return_type,
+                        });
+                        assert_eq!(fn_id1, fn_id2);
+                        Ok(Ok(fn_id1))
+                    })();
+                    match fn_id {
+                        Ok(Ok(fn_id)) => {
+                            self.eval.lowered_fns_cache.try_set_lowered(new_entry_id, Ok(fn_id))
+                        }
+                        Ok(Err(Diverge::ComptimeQuotaExhausted)) => {
+                            self.eval.lowered_fns_cache.mark_retryable(new_entry_id);
                             return Ok(Err(Diverge::ComptimeQuotaExhausted));
                         }
-                    }
-                    let return_type = preamble.return_type?;
-                    let fn_id1 = self.eval.mir_fn_locals.push_copy_slice(&self.mir_types);
-                    let fn_id2 = self.eval.mir_fns.push(mir::FnDef {
-                        body,
-                        param_count: runtime_param_count,
-                        return_type,
-                    });
-                    assert_eq!(fn_id1, fn_id2);
-                    Ok(Ok(fn_id1))
-                })();
-                match fn_id {
-                    Ok(Ok(fn_id)) => {
-                        self.eval.lowered_fns_cache.try_set_lowered(new_entry_id, Ok(fn_id))
-                    }
-                    Ok(Err(Diverge::ComptimeQuotaExhausted)) => {
-                        self.eval.lowered_fns_cache.mark_retryable(new_entry_id);
-                        return Ok(Err(Diverge::ComptimeQuotaExhausted));
-                    }
-                    Ok(Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_))) => {
-                        unreachable!(
-                            "invariant: only comptime quota exhaustion is retryable during runtime lowering"
-                        )
-                    }
-                    Err(Poisoned) => {
-                        self.eval.lowered_fns_cache.try_set_lowered(new_entry_id, Err(Poisoned))
+                        Ok(Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_))) => {
+                            unreachable!(
+                                "invariant: only comptime quota exhaustion is retryable during runtime lowering"
+                            )
+                        }
+                        Err(Poisoned) => {
+                            self.eval.lowered_fns_cache.try_set_lowered(new_entry_id, Err(Poisoned))
+                        }
                     }
                 }
-            }
-        };
-        let lowered = match lowered {
-            Ok(lowered) => lowered,
-            Err(Poisoned) => {
-                return preamble.suppress_poison_iff_diverging_return_type();
-            }
-        };
+            };
+            let lowered = match lowered {
+                Ok(lowered) => lowered,
+                Err(Poisoned) => {
+                    return preamble.suppress_poison_iff_diverging_return_type();
+                }
+            };
 
-        self.lower_runtime_call_at_site(&mut call, lowered, preamble)
+            self.lower_runtime_call_at_site(&mut call, lowered, preamble)
+        })();
+
+        self.comptime_quota = caller_comptime_quota;
+        self.max_eval_branch_quota_seen = caller_max_eval_branch_quota_seen;
+
+        result
     }
 
     fn lower_runtime_call_at_site(
