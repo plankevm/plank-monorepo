@@ -128,6 +128,32 @@ fn test_static_method_call() {
 }
 
 #[test]
+fn test_method_nested_fn_captures_self_type() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn self_type() type {
+                let nested = fn() type { Self };
+                nested()
+            }
+        };
+
+        init {
+            let ty = S.self_type();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_generic_static_method_self_specialization() {
     assert_lowers_to(
         r#"

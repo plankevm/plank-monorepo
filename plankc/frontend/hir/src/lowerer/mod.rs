@@ -32,9 +32,15 @@ impl LocalKind {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Binding {
+    Named(StrId),
+    SelfType,
+}
+
 #[derive(Clone, Copy)]
 struct ScopedLocal {
-    name: StrId,
+    binding: Binding,
     id: LocalId,
     kind: LocalKind,
     span: Option<TokenSpan>,
@@ -94,7 +100,6 @@ struct BlockLowerer<'a> {
     fn_captures_start: usize,
     in_function_body: bool,
     next_local_id: LocalId,
-    self_type_name_id: StrId,
 
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
@@ -212,14 +217,19 @@ impl BlockLowerer<'_> {
         self.validate_local_name(name, span);
 
         let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, kind, span: Some(span) });
+        self.scoped_locals_stack.push(ScopedLocal {
+            binding: Binding::Named(name),
+            id,
+            kind,
+            span: Some(span),
+        });
         id
     }
 
-    fn alloc_anonymous_local(&mut self, name: StrId) -> LocalId {
+    fn alloc_anonymous_local(&mut self, binding: Binding) -> LocalId {
         let id = self.next_local_id.get_and_inc();
         self.scoped_locals_stack.push(ScopedLocal {
-            name,
+            binding,
             id,
             kind: LocalKind::Immutable,
             span: None,
@@ -328,17 +338,17 @@ impl BlockLowerer<'_> {
         })
     }
 
-    fn find_in_scope(scope: &[ScopedLocal], name: StrId) -> Option<ScopedLocal> {
-        scope.iter().rev().find(|entry| entry.name == name).copied()
+    fn find_in_scope(scope: &[ScopedLocal], binding: Binding) -> Option<ScopedLocal> {
+        scope.iter().rev().find(|entry| entry.binding == binding).copied()
     }
 
     fn find_local(&self, name: StrId) -> Option<ScopedLocal> {
-        Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
+        Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], Binding::Named(name))
     }
 
-    fn lookup_capture(&mut self, name: StrId, use_span: TokenSpan) -> Option<LocalId> {
+    fn lookup_capture(&mut self, binding: Binding, use_span: TokenSpan) -> Option<LocalId> {
         let outer_local =
-            Self::find_in_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?.id;
+            Self::find_in_scope(&self.scoped_locals_stack[..self.fn_scope_start], binding)?.id;
 
         for capture in &self.captures_buf[self.fn_captures_start..] {
             if capture.outer_local == outer_local {
@@ -347,7 +357,7 @@ impl BlockLowerer<'_> {
         }
 
         let use_span = self.lexed.tokens_src_span(use_span);
-        let inner_local = self.alloc_anonymous_local(name);
+        let inner_local = self.alloc_anonymous_local(binding);
         self.captures_buf.push(CaptureInfo { outer_local, inner_local, use_span });
         Some(inner_local)
     }
@@ -372,7 +382,7 @@ impl BlockLowerer<'_> {
             return ExprKind::LocalRef(entry.id);
         }
 
-        if let Some(capture_local) = self.lookup_capture(name, span) {
+        if let Some(capture_local) = self.lookup_capture(Binding::Named(name), span) {
             return ExprKind::LocalRef(capture_local);
         }
 
@@ -431,7 +441,7 @@ impl BlockLowerer<'_> {
                     let body_block = self.create_sub_block(body.span(), |this| {
                         if let Some((binding, id)) = binding {
                             this.scoped_locals_stack.push(ScopedLocal {
-                                name: binding.name,
+                                binding: Binding::Named(binding.name),
                                 id,
                                 kind: LocalKind::Immutable,
                                 span: Some(binding.span),
@@ -467,11 +477,16 @@ impl BlockLowerer<'_> {
     }
 
     fn lower_self_type(&mut self, span: TokenSpan) -> ExprKind {
-        if Self::find_in_scope(&self.scoped_locals_stack, self.self_type_name_id).is_none() {
-            self.error_self_type_outside_method(span);
-            return ExprKind::POISON;
+        if let Some(entry) =
+            Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], Binding::SelfType)
+        {
+            return ExprKind::LocalRef(entry.id);
         }
-        self.resolve_name(self.self_type_name_id, span)
+        if let Some(capture_local) = self.lookup_capture(Binding::SelfType, span) {
+            return ExprKind::LocalRef(capture_local);
+        }
+        self.error_self_type_outside_method(span);
+        ExprKind::POISON
     }
 
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
@@ -732,7 +747,7 @@ impl BlockLowerer<'_> {
 
     fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> MethodDef {
         self.with_function_scope(|this| {
-            let self_type = this.alloc_anonymous_local(this.self_type_name_id);
+            let self_type = this.alloc_anonymous_local(Binding::SelfType);
             let is_instance = matches!(
                 method.params().next(),
                 Some(Ok(param))
@@ -1050,8 +1065,6 @@ impl BlockLowerer<'_> {
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
-    let self_type_name_id = session.intern("Self");
-
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
     let mut init = None;
@@ -1069,8 +1082,6 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         fn_captures_start: 0,
         in_function_body: false,
         next_local_id: LocalId::ZERO,
-        self_type_name_id,
-
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
