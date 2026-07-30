@@ -5,22 +5,18 @@ const Option = fn (comptime T: type) type {
     }
 };
 
-const Some = fn (value: $T) Option(T) {
+const Some = eager fn (value: $T) Option(T) {
     Option(T) {
         inner: value,
         is_some: true,
     }
 };
 
-const None = fn (comptime T: type) Option(T) {
+const None = eager fn (comptime T: type) Option(T) {
     Option(T) {
         inner: @uninit(T),
         is_some: false,
     }
-};
-
-const is_none = fn (comptime T: type, opt: Option(T)) bool {
-    !opt.is_some
 };
 
 const get_option_type = fn (comptime T: type) Option(type) {
@@ -30,7 +26,7 @@ const get_option_type = fn (comptime T: type) Option(type) {
     Some(@field_type(T, 0))
 };
 
-const unwrap = fn (opt: $T) {
+const unwrap = eager fn (opt: $T) {
     let inner_type = get_option_type(T);
     if !inner_type.is_some {
         @compile_error("unwrap: `opt` not an `Option(_)`");

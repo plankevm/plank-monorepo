@@ -44,7 +44,7 @@ const u248 = UInt(248);
 
 const _type_of = fn (comptime _x: $T) type { T };
 
-const is_uint = fn (comptime T: type) bool {
+const is_uint = eager fn (comptime T: type) bool {
     if T == u256 {
         return true;
     }
@@ -57,7 +57,7 @@ const is_uint = fn (comptime T: type) bool {
     _type_of(supposed_size) == u256 and UInt(supposed_size) == T
 };
 
-const bit_size = fn (comptime T: type) u256 {
+const bit_size = eager fn (comptime T: type) u256 {
     if T == u256 {
         return 256;
     }
@@ -69,7 +69,7 @@ const bit_size = fn (comptime T: type) u256 {
     @type_index(T)
 };
 
-const unsafe_from_u256 = fn (comptime T: type, raw_repr: u256) T {
+const unsafe_uint_from_u256 = eager fn (comptime T: type, raw_repr: u256) T {
     if T == u256 {
         raw_repr
     } else {
@@ -77,7 +77,7 @@ const unsafe_from_u256 = fn (comptime T: type, raw_repr: u256) T {
     }
 };
 
-const cast_uint = fn (src: $T, comptime Dst: type) Dst {
+const cast_uint = eager fn (src: $T, comptime Dst: type) Dst {
     comptime {
         if !is_uint(T) {
             @compile_error("cast_uint: `T` not `uN` type");
@@ -92,10 +92,10 @@ const cast_uint = fn (src: $T, comptime Dst: type) Dst {
 
     let repr = if T == u256 { src } else { src._raw_repr };
 
-    unsafe_from_u256(Dst, repr)
+    unsafe_uint_from_u256(Dst, repr)
 };
 
-const try_cast_uint = fn (src: $T, comptime Dst: type) Option(Dst) {
+const try_cast_uint = eager fn (src: $T, comptime Dst: type) Option(Dst) {
     comptime {
         if !is_uint(T) {
             @compile_error("try_cast_uint: `T` not `uN` type");
@@ -115,5 +115,5 @@ const try_cast_uint = fn (src: $T, comptime Dst: type) Option(Dst) {
         return None(Dst);
     }
 
-    Some(unsafe_from_u256(Dst, raw_repr))
+    Some(unsafe_uint_from_u256(Dst, raw_repr))
 };

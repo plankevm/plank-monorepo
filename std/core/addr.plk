@@ -25,7 +25,7 @@ const addr_from_u256 = fn (raw: u256) addr {
 };
 
 /// Safety: `raw` must be a valid 160-bit value.
-const unsafe_from_u256 = fn (raw: u256) addr {
+const addr_unsafe_from_u256 = fn (raw: u256) addr {
     addr { as_uint: unsafe_uint_from_u256(u160, raw) }
 };
 

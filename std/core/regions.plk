@@ -11,7 +11,7 @@ const returndata = struct {};
 const transient  = struct {};
 const storage    = struct {};
 
-const is_region = fn (comptime R: $T) bool {
+const is_region = eager fn (comptime R: $T) bool {
     if T != type {
         return false;
     }
@@ -24,12 +24,34 @@ const is_region = fn (comptime R: $T) bool {
     or R == storage
 };
 
+const region_is_any_of = eager fn (comptime R1: type, comptime regions: $T) bool {
+    if !is_region(R1) {
+        @compile_error("region_is_any_of: `R1` not region");
+    }
+    if !@is_tuple(T) {
+        @compile_error("region_is_any_of: expects tuple as `regions`");
+    }
+    let mut is_any = false;
+    let mut i = 0;
+    while i < @field_count(T) {
+        let ri = @get_field(regions, i);
+        if !is_region(ri) {
+            @compile_error("region_is_any_of: `regions` contains non-region");
+        }
+        if R1 == ri {
+            is_any = true;
+        }
+        i = i + 1;
+    }
+    is_any
+};
+
 const rawptr = fn (comptime R: type) type {
     if R == ctime {
         @compile_error("rawptr: `ctime` doesn't have a raw pointer representation");
     }
 
-    if R == memory or R == calldata or R == code or R == returndata {
+    if region_is_any_of(R, (memory, calldata, code, returndata)) {
         return struct R { raw: u256 };
     }
 
@@ -86,7 +108,7 @@ const unsafe_calldataload = fn (ptr: rawptr(calldata)) u256 {
     @evm_calldataload(ptr.raw)
 };
 
-const rawptr_byte_addressable = fn (comptime T: type) bool {
+const rawptr_byte_addressable = eager fn (comptime T: type) bool {
     T == rawptr(memory)
     or T == rawptr(calldata)
     or T == rawptr(code)
@@ -254,7 +276,7 @@ const slice_bytes = fn (data: $T, start: u256, end: u256) T {
     @compile_error("slice_bytes: type of `data` is not supported");
 };
 
-const keccak256 = fn (data: $T) bytes32 {
+const keccak256 = eager fn (data: $T) bytes32 {
     let raw_hash = if T == bytes(ctime) {
         @keccak256_cbytes(data)
     } else if T == bytes(memory) {
@@ -277,22 +299,16 @@ const keccak256 = fn (data: $T) bytes32 {
     bytes32 { raw: raw_hash }
 };
 
-const bytes_eq = fn (b1: $T1, b2: $T2) bool {
+const bytes_eq = eager fn (b1: $T1, b2: $T2) bool {
     if T1 == bytes(ctime) and T2 == bytes(ctime) {
         return b1 == b2;
     }
-    if T1 == bytes(ctime) {
-        return comptime { keccak256(b1).raw } == keccak256(b2).raw;
-    }
-    if T2 == bytes(ctime) {
-        return keccak256(b1).raw == comptime { keccak256(b2).raw };
-    }
-    if b1.length != b2.length {
-        return false;
-    }
-    keccak256(b1).raw == keccak256(b2).raw
+    b1.length == b2.length and keccak256(b1).raw == keccak256(b2).raw
 };
 
 const membytes_new = fn (size: u256) bytes(memory) {
     unsafe_bytes_from_parts(malloc_zeroed(size), size)
 };
+
+
+
