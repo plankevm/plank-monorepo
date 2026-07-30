@@ -46,6 +46,7 @@ newtype_index! {
 pub(crate) struct Evaluator<'a> {
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
+    pub mir_match_arms: ListOfLists<mir::MatchArmsId, mir::MatchArm>,
     pub mir_fns: IndexVec<mir::FnId, mir::FnDef>,
     pub mir_fn_locals: ListOfLists<mir::FnId, TypeId>,
     pub types: &'a TypeInterner,
@@ -86,6 +87,7 @@ impl<'a> Evaluator<'a> {
             mir_fns: IndexVec::new(),
             mir_fn_locals: ListOfLists::new(),
             mir_args: ListOfLists::new(),
+            mir_match_arms: ListOfLists::new(),
             types,
 
             evaluated_consts: DenseIndexMap::new(),

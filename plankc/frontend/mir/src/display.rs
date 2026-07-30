@@ -146,6 +146,20 @@ impl<'a> DisplayMir<'a> {
                 self.fmt_block(f, fn_id, else_block, indent + 1)?;
                 writeln!(f, "{pad}}}")
             }
+            Instruction::Match { subject, arms, fallback } => {
+                write!(f, "{pad}match ")?;
+                self.fmt_local(f, subject)?;
+                writeln!(f, " {{")?;
+                for &arm in &self.mir.match_arms[arms] {
+                    writeln!(f, "{pad}{PAD}{:#x} => {{", arm.key)?;
+                    self.fmt_block(f, fn_id, arm.body, indent + 2)?;
+                    writeln!(f, "{pad}{PAD}}}")?;
+                }
+                writeln!(f, "{pad}{PAD}else {{")?;
+                self.fmt_block(f, fn_id, fallback, indent + 2)?;
+                writeln!(f, "{pad}{PAD}}}")?;
+                writeln!(f, "{pad}}}")
+            }
             Instruction::While { condition_block, condition, body } => {
                 writeln!(f, "{pad}while {{")?;
                 writeln!(f, "{pad}    cond:")?;

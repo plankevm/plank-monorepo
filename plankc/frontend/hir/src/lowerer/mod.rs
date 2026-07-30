@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use hashbrown::HashMap;
 use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
 use plank_parser::{
-    ast::{self, Statement, TopLevelDef},
+    ast::{self, MatchArmKind, Statement, TopLevelDef},
     cst::{self, NumLitId},
     lexer::{Lexed, TokenSpan},
 };
@@ -46,6 +46,7 @@ struct HirBuilder {
 
     args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
+    match_arms: ListOfLists<MatchArmsId, MatchArm>,
     struct_defs: IndexVec<StructDefId, StructDef>,
 
     fns: IndexVec<FnDefId, FnDef>,
@@ -60,6 +61,7 @@ impl HirBuilder {
             block_spans: IndexVec::new(),
             args: ListOfLists::new(),
             fields: ListOfLists::new(),
+            match_arms: ListOfLists::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
@@ -193,10 +195,14 @@ impl BlockLowerer<'_> {
         debug_assert!(self.captures_buf.is_empty());
     }
 
-    fn alloc_local(&mut self, name: StrId, kind: LocalKind, span: TokenSpan) -> LocalId {
+    fn validate_local_name(&self, name: StrId, span: TokenSpan) {
         if TypeId::resolve_primitive(name).is_some() {
             self.error_shadowing_primitive_type(name, span);
         }
+    }
+
+    fn alloc_local(&mut self, name: StrId, kind: LocalKind, span: TokenSpan) -> LocalId {
+        self.validate_local_name(name, span);
 
         let id = self.next_local_id.get_and_inc();
         self.scoped_locals_stack.push(ScopedLocal { name, id, kind, span: Some(span) });
@@ -233,6 +239,13 @@ impl BlockLowerer<'_> {
 
     fn lower_expr_to_local(&mut self, expr: ast::Expr<'_>) -> LocalId {
         let expr = self.lower_expr(expr);
+        let local = self.alloc_temp();
+        self.emit(InstructionKind::Set { local, r#type: None, expr });
+        local
+    }
+
+    fn lower_poison_to_local(&mut self, span: TokenSpan) -> LocalId {
+        let expr = self.expr(ExprKind::POISON, span);
         let local = self.alloc_temp();
         self.emit(InstructionKind::Set { local, r#type: None, expr });
         local
@@ -364,6 +377,88 @@ impl BlockLowerer<'_> {
         ExprKind::POISON
     }
 
+    fn lower_match(&mut self, match_expr: ast::MatchExpr<'_>) -> ExprKind {
+        let subject = self.lower_expr_to_local(match_expr.subject());
+        let result = self.alloc_temp();
+
+        let mut first_fallback = None;
+        let mut match_arms = Vec::new();
+
+        for arm in match_expr.arms() {
+            match arm.kind {
+                MatchArmKind::Case { key } => {
+                    if let Some((_, else_span)) = first_fallback {
+                        self.error_match_case_after_else_arm(arm.view.span(), else_span);
+                    }
+
+                    let key = ast::Expr::new_unwrap(key);
+                    let (key_block, key_local) = self
+                        .create_sub_block_with(key.span(), |this| this.lower_expr_to_local(key));
+                    self.emit(InstructionKind::ComptimeBlock {
+                        body: key_block,
+                        reason: ComptimeReason::MatchKey,
+                    });
+
+                    let body = ast::Expr::new_unwrap(arm.body);
+                    let body_block = self.create_sub_block(body.span(), |this| {
+                        let expr = this.lower_expr(body);
+                        this.emit(InstructionKind::BranchSet { local: result, expr });
+                    });
+
+                    match_arms.push(MatchArm { key: key_local, body: body_block });
+                }
+                MatchArmKind::Fallback { binding } => {
+                    let duplicate_key = first_fallback.map(|(_, previous_span)| {
+                        (self.lower_poison_to_local(arm.view.span()), previous_span)
+                    });
+                    let binding = binding.map(|binding| {
+                        self.validate_local_name(binding.name, binding.span);
+                        let id = match duplicate_key {
+                            Some(_) => self.lower_poison_to_local(arm.view.span()),
+                            None => subject,
+                        };
+                        (binding, id)
+                    });
+
+                    let body = ast::Expr::new_unwrap(arm.body);
+                    let body_block = self.create_sub_block(body.span(), |this| {
+                        if let Some((binding, id)) = binding {
+                            this.scoped_locals_stack.push(ScopedLocal {
+                                name: binding.name,
+                                id,
+                                kind: LocalKind::Immutable,
+                                span: Some(binding.span),
+                            });
+                        }
+                        let expr = this.lower_expr(body);
+                        this.emit(InstructionKind::BranchSet { local: result, expr });
+                    });
+
+                    if let Some((key, previous_span)) = duplicate_key {
+                        self.error_multiple_match_else_arms(arm.view.span(), previous_span);
+                        match_arms.push(MatchArm { key, body: body_block });
+                    } else {
+                        first_fallback = Some((body_block, arm.view.span()));
+                    }
+                }
+            }
+        }
+        let arms = self.builder.match_arms.push_iter(match_arms.into_iter());
+        let fallback = match first_fallback {
+            Some((fallback, _)) => fallback,
+            None => {
+                let span = match_expr.node().span();
+                self.error_missing_match_else_arm(span);
+                self.create_sub_block(span, |this| {
+                    let expr = this.expr(ExprKind::POISON, span);
+                    this.emit(InstructionKind::BranchSet { local: result, expr });
+                })
+            }
+        };
+        self.emit(InstructionKind::Match { outer_result: result, subject, arms, fallback });
+        ExprKind::LocalRef(result)
+    }
+
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
@@ -492,6 +587,7 @@ impl BlockLowerer<'_> {
                 });
                 ExprKind::LocalRef(result)
             }
+            ast::Expr::Match(match_expr) => self.lower_match(match_expr),
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
                 let body = self.create_sub_block(block.node().span(), |this| {
@@ -964,6 +1060,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 
         args: builder.args,
         fields: builder.fields,
+        match_arms: builder.match_arms,
         struct_defs: builder.struct_defs,
 
         fns: builder.fns,

@@ -348,6 +348,208 @@ fn test_nested_if_assign() {
 }
 
 #[test]
+fn test_match() {
+    assert_lowers_to(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            let x = match selector {
+                0x04 => 40,
+                2 => 20,
+                else s => s,
+            };
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = copy $1
+                switch $2 {
+                    0x4 => @1,
+                    0x2 => @2,
+                    else => @3
+                }
+
+            }
+
+            @1 {
+                $3 = const 0x28
+                => @4
+            }
+
+            @2 {
+                $3 = const 0x14
+                => @4
+            }
+
+            @3 {
+                $3 = copy $2
+                => @4
+            }
+
+            @4 {
+                $4 = copy $3
+                $5 = copy $4
+                $6 = const 0x0
+                sstore $6 $5
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_nested_match() {
+    assert_lowers_to(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            let x = match selector {
+                1 => match selector {
+                    2 => 20,
+                    else => 10,
+                },
+                3 => 30,
+                else => match 5 {
+                    5 => 99,
+                    else => 0,
+                },
+            };
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = copy $1
+                switch $2 {
+                    0x1 => @1,
+                    0x3 => @5,
+                    else => @6
+                }
+
+            }
+
+            @1 {
+                $3 = copy $1
+                switch $3 {
+                    0x2 => @2,
+                    else => @3
+                }
+
+            }
+
+            @2 {
+                $4 = const 0x14
+                => @4
+            }
+
+            @3 {
+                $4 = const 0xa
+                => @4
+            }
+
+            @4 {
+                $5 = copy $4
+                => @7
+            }
+
+            @5 {
+                $5 = const 0x1e
+                => @7
+            }
+
+            @6 {
+                $6 = const 0x63
+                $5 = copy $6
+                => @7
+            }
+
+            @7 {
+                $7 = copy $5
+                $8 = copy $7
+                $9 = const 0x0
+                sstore $9 $8
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
+fn test_match_with_terminating_arm() {
+    assert_lowers_to(
+        r#"
+        init {
+            let selector = @evm_calldataload(0);
+            let x = match selector {
+                1 => @evm_stop(),
+                2 => 20,
+                else => 99,
+            };
+            @evm_sstore(0, x);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @0
+        Functions:
+            fn @0 -> entry @0  (outputs: 0)
+
+        Basic Blocks:
+            @0 {
+                $0 = const 0x0
+                $1 = calldataload $0
+                $2 = copy $1
+                switch $2 {
+                    0x1 => @1,
+                    0x2 => @2,
+                    else => @3
+                }
+
+            }
+
+            @1 {
+                stop
+            }
+
+            @2 {
+                $3 = const 0x14
+                => @4
+            }
+
+            @3 {
+                $3 = const 0x63
+                => @4
+            }
+
+            @4 {
+                $4 = copy $3
+                $5 = copy $4
+                $6 = const 0x0
+                sstore $6 $5
+                stop
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_while() {
     assert_lowers_to(
         r#"

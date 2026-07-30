@@ -50,6 +50,37 @@ impl BlockLowerer<'_> {
         self.error_multiple_blocks("run", current, previous);
     }
 
+    pub(crate) fn error_multiple_match_else_arms(&self, current: TokenSpan, previous: TokenSpan) {
+        Diagnostic::error("multiple else arms in match")
+            .element(
+                Annotations::new(self.source_id)
+                    .primary(self.lexed.tokens_src_span(current), "duplicate else arm")
+                    .secondary(self.lexed.tokens_src_span(previous), "previous else arm"),
+            )
+            .note("a match expression can have only one else arm")
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_missing_match_else_arm(&self, span: TokenSpan) {
+        Diagnostic::error("missing else arm in match")
+            .primary(
+                self.source_id,
+                self.lexed.tokens_src_span(span),
+                "match expression requires an else arm",
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
+    pub(crate) fn error_match_case_after_else_arm(&self, current: TokenSpan, previous: TokenSpan) {
+        Diagnostic::error("else arm must be last")
+            .element(
+                Annotations::new(self.source_id)
+                    .primary(self.lexed.tokens_src_span(current), "this arm appears after else")
+                    .secondary(self.lexed.tokens_src_span(previous), "else arm starts here"),
+            )
+            .emit(*self.session.borrow_mut());
+    }
+
     fn error_multiple_blocks(&self, kind: &str, current: TokenSpan, previous: TokenSpan) {
         Diagnostic::error(format!("multiple {kind} blocks"))
             .element(

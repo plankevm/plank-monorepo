@@ -52,6 +52,10 @@
           "named": true
         },
         {
+          "type": "match_expr",
+          "named": true
+        },
+        {
           "type": "member",
           "named": true
         },
@@ -136,6 +140,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -327,6 +335,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -412,6 +424,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -502,6 +518,10 @@
           },
           {
             "type": "let",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -627,6 +647,10 @@
           "named": true
         },
         {
+          "type": "match_expr",
+          "named": true
+        },
+        {
           "type": "member",
           "named": true
         },
@@ -721,6 +745,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -822,6 +850,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -910,6 +942,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -989,6 +1025,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -1100,6 +1140,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -1185,6 +1229,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -1374,6 +1422,10 @@
           "named": true
         },
         {
+          "type": "match_expr",
+          "named": true
+        },
+        {
           "type": "member",
           "named": true
         },
@@ -1406,6 +1458,398 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "match_arm",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "bin_literal",
+            "named": true
+          },
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "bool_literal",
+            "named": true
+          },
+          {
+            "type": "comptime_block",
+            "named": true
+          },
+          {
+            "type": "dec_literal",
+            "named": true
+          },
+          {
+            "type": "fn_call",
+            "named": true
+          },
+          {
+            "type": "fn_def",
+            "named": true
+          },
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "member",
+            "named": true
+          },
+          {
+            "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_def",
+            "named": true
+          },
+          {
+            "type": "struct_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      },
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "bin_literal",
+            "named": true
+          },
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "bool_literal",
+            "named": true
+          },
+          {
+            "type": "comptime_block",
+            "named": true
+          },
+          {
+            "type": "dec_literal",
+            "named": true
+          },
+          {
+            "type": "fn_call",
+            "named": true
+          },
+          {
+            "type": "fn_def",
+            "named": true
+          },
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "member",
+            "named": true
+          },
+          {
+            "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_def",
+            "named": true
+          },
+          {
+            "type": "struct_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "match_expr",
+    "named": true,
+    "fields": {
+      "fallback": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "match_fallback_arm",
+            "named": true
+          }
+        ]
+      },
+      "subject": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "bin_literal",
+            "named": true
+          },
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "bool_literal",
+            "named": true
+          },
+          {
+            "type": "comptime_block",
+            "named": true
+          },
+          {
+            "type": "dec_literal",
+            "named": true
+          },
+          {
+            "type": "fn_call",
+            "named": true
+          },
+          {
+            "type": "fn_def",
+            "named": true
+          },
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "member",
+            "named": true
+          },
+          {
+            "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_def",
+            "named": true
+          },
+          {
+            "type": "struct_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "match_arm",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "match_fallback_arm",
+    "named": true,
+    "fields": {
+      "binding": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "bin_literal",
+            "named": true
+          },
+          {
+            "type": "binary_expr",
+            "named": true
+          },
+          {
+            "type": "block",
+            "named": true
+          },
+          {
+            "type": "bool_literal",
+            "named": true
+          },
+          {
+            "type": "comptime_block",
+            "named": true
+          },
+          {
+            "type": "dec_literal",
+            "named": true
+          },
+          {
+            "type": "fn_call",
+            "named": true
+          },
+          {
+            "type": "fn_def",
+            "named": true
+          },
+          {
+            "type": "hex_literal",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
+            "type": "member",
+            "named": true
+          },
+          {
+            "type": "paren_expr",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_def",
+            "named": true
+          },
+          {
+            "type": "struct_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_lit",
+            "named": true
+          },
+          {
+            "type": "tuple_type",
+            "named": true
+          },
+          {
+            "type": "unary_expr",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1458,6 +1902,10 @@
         },
         {
           "type": "if_expr",
+          "named": true
+        },
+        {
+          "type": "match_expr",
           "named": true
         },
         {
@@ -1574,6 +2022,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -1666,6 +2118,10 @@
           "named": true
         },
         {
+          "type": "match_expr",
+          "named": true
+        },
+        {
           "type": "member",
           "named": true
         },
@@ -1755,6 +2211,10 @@
         },
         {
           "type": "if_expr",
+          "named": true
+        },
+        {
+          "type": "match_expr",
           "named": true
         },
         {
@@ -1917,6 +2377,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -2012,6 +2476,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -2138,6 +2606,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -2223,6 +2695,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -2332,6 +2808,10 @@
             "named": true
           },
           {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "member",
             "named": true
           },
@@ -2427,6 +2907,10 @@
           },
           {
             "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -2586,6 +3070,10 @@
     "named": false
   },
   {
+    "type": "=>",
+    "named": false
+  },
+  {
     "type": ">",
     "named": false
   },
@@ -2677,6 +3165,10 @@
     "type": "line_comment",
     "named": true,
     "extra": true
+  },
+  {
+    "type": "match",
+    "named": false
   },
   {
     "type": "mut",

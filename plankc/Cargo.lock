@@ -2107,6 +2107,7 @@ dependencies = [
 name = "plank-mir"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "plank-core",
  "plank-session",
  "plank-values",

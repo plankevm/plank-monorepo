@@ -83,6 +83,9 @@ impl DiagCtx<'_> {
             hir::ComptimeReason::Assign => diagnostic.note(
                 "assignment to value defined as `comptime let mut` must be known at compile time",
             ),
+            hir::ComptimeReason::MatchKey => {
+                diagnostic.note("match arm key must be known at compile time")
+            }
         }
     }
 
@@ -207,6 +210,22 @@ impl DiagCtx<'_> {
         .emit(self);
     }
 
+    pub fn emit_unsupported_match_value_type(
+        &mut self,
+        values: &ValueInterner,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        let (maybe_add_note, primary, _) =
+            self.format_expected_types(values, TypeId::U256, actual_ty);
+        maybe_add_note(
+            Diagnostic::error("unsupported match value type")
+                .primary(loc.source, loc.span, primary)
+                .note("match expressions currently support only `u256` subjects and arm keys"),
+        )
+        .emit(self);
+    }
+
     pub fn emit_not_a_struct_type(&mut self, values: &ValueInterner, ty: TypeId, loc: BindingLoc) {
         let primary_label =
             format!("`{}` is not a struct type", self.types.format(self.session, values, ty));
@@ -275,8 +294,12 @@ impl DiagCtx<'_> {
         let (maybe_add_note, primary_label, expected) =
             self.format_expected_types(values, ty1, ty2);
         let secondary_label = format!("`{expected}` expected because of this");
-        let diagnostic = Diagnostic::error("`if` and `else` have incompatible types")
-            .cross_source_annotations(loc2, primary_label, loc1, secondary_label);
+        let diagnostic = Diagnostic::error("incompatible branch types").cross_source_annotations(
+            loc2,
+            primary_label,
+            loc1,
+            secondary_label,
+        );
         maybe_add_note(diagnostic).emit(self);
     }
 
@@ -728,6 +751,17 @@ impl DiagCtx<'_> {
                 format!("`{field}` assigned more than once"),
                 SrcLoc::new(lit_loc.source, first_span),
                 "first assigned here",
+            )
+            .emit(self);
+    }
+
+    pub fn emit_duplicate_match_key(&mut self, key: U256, duplicate: SrcLoc, previous: SrcLoc) {
+        Diagnostic::error("duplicate match arm key")
+            .cross_source_annotations(
+                duplicate,
+                format!("key `{key}` is used more than once"),
+                previous,
+                "previous key here",
             )
             .emit(self);
     }

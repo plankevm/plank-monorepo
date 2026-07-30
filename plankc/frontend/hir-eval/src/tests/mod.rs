@@ -3,6 +3,7 @@ mod calls;
 mod compile_log;
 mod comptime;
 mod logical_ops;
+mod matches;
 mod operators;
 mod std_errors;
 mod structs;

@@ -59,7 +59,7 @@ module.exports = grammar({
     import_group_item: $ => seq($.identifier, optional(seq("as", $.identifier))),
 
     // Expressions
-    _expr: ($) => choice($.comptime_block, $.block, $.if_expr, $._expr_no_block),
+    _expr: ($) => choice($.comptime_block, $.block, $.if_expr, $.match_expr, $._expr_no_block),
     comptime_block: ($) => seq("comptime", $.block),
     _expr_no_block: ($) => choice(
       $.identifier,
@@ -117,12 +117,34 @@ module.exports = grammar({
       optional(seq("else", field("else", $.block)))
     ),
 
+    match_expr: ($) => seq(
+      "match",
+      field("subject", $._expr),
+      "{",
+      repeat(seq($.match_arm, ",")),
+      field("fallback", $.match_fallback_arm),
+      optional(","),
+      "}"
+    ),
+    match_arm: ($) => seq(
+      field("key", $._expr),
+      "=>",
+      field("body", $._expr)
+    ),
+    match_fallback_arm: ($) => seq(
+      "else",
+      optional(field("binding", $.identifier)),
+      "=>",
+      field("body", $._expr)
+    ),
+
     block: ($) => seq("{", field("stmts", repeat($._stmt)), field("last_expr", optional($._expr)), "}"),
 
     // Statements
     _stmt: ($) => choice(
       seq(choice($._expr_no_block, $.return, $.assign, $.let), ";"),
       seq($.if_expr, optional(";")),
+      seq($.match_expr, optional(";")),
       $.comptime_block,
       $.while
     ),

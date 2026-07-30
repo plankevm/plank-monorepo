@@ -19,6 +19,7 @@ newtype_index! {
     pub struct StructDefId;
     pub struct ArgsId;
     pub struct FieldsId;
+    pub struct MatchArmsId;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -114,6 +115,12 @@ pub enum InstructionKind {
         then_block: BlockId,
         else_block: BlockId,
     },
+    Match {
+        outer_result: LocalId,
+        subject: LocalId,
+        arms: MatchArmsId,
+        fallback: BlockId,
+    },
     While {
         inline: bool,
         condition_block: BlockId,
@@ -132,6 +139,7 @@ pub enum ComptimeReason {
     Explicit,
     LetInitializer,
     Assign,
+    MatchKey,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -172,6 +180,12 @@ pub struct FieldInfo {
     pub name: StrId,
     pub name_offset: SourceByteOffset,
     pub value: LocalId,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MatchArm {
+    pub key: LocalId,
+    pub body: BlockId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -234,6 +248,7 @@ pub struct Hir {
 
     pub args: ListOfLists<ArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
+    pub match_arms: ListOfLists<MatchArmsId, MatchArm>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
 
     pub fns: IndexVec<FnDefId, FnDef>,

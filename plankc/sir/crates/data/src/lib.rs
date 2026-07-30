@@ -349,6 +349,9 @@ impl fmt::Display for EthIRProgram {
                         for (value, bb) in switch.cases() {
                             writeln!(f, "            {:#x} => @bb{}", value, bb)?;
                         }
+                        if let Some(fallback) = switch.fallback() {
+                            writeln!(f, "            else => @bb{}", fallback)?;
+                        }
                         writeln!(f, "    }}")?;
                     }
                 }

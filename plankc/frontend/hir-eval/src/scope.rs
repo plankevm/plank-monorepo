@@ -4,12 +4,37 @@ use crate::{
     evaluator::CallArgSpansIdx,
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
+use alloy_primitives::U256;
+use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec};
 use plank_hir::{self as hir, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
 use std::num::NonZeroU32;
+
+fn join_branch_results(
+    first: Result<(), Diverge>,
+    second: Result<(), Diverge>,
+) -> Result<(), Diverge> {
+    match (first, second) {
+        // Control flow was poisoned in either branch so we have to assume
+        // everything was poisoned and bubble up.
+        // Furthermore if control flow was poisoned there is
+        // no point retrying evaluation if one of the branches failed from
+        // insufficient quota.
+        (Err(Diverge::ControlFlowPoisoned), _) | (_, Err(Diverge::ControlFlowPoisoned)) => {
+            Err(Diverge::ControlFlowPoisoned)
+        }
+        (Err(Diverge::ComptimeQuotaExhausted), _) | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
+            Err(Diverge::ComptimeQuotaExhausted)
+        }
+        (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => Err(Diverge::BlockEnd(None)),
+        (Ok(()), Ok(()))
+        | (Err(Diverge::BlockEnd(_)), Ok(()))
+        | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Local {
@@ -547,6 +572,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             InstructionKind::If { outer_result, condition, then_block, else_block } => {
                 self.eval_if(outer_result, condition, then_block, else_block)?
             }
+            InstructionKind::Match { outer_result, subject, arms, fallback } => {
+                self.eval_match(outer_result, subject, arms, fallback)?
+            }
             InstructionKind::While { inline, condition_block, condition, body } => {
                 if inline {
                     self.eval_inline_while(condition_block, condition, body)?
@@ -608,25 +636,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     then_block: then,
                     else_block: r#else,
                 });
-                match (then_res, else_res) {
-                    // Control flow was poisoned in either branch so we have to assume
-                    // everything was poisoned and bubble up.
-                    // Furthermore if control flow was poisoned there is
-                    // no point retrying evaluation if one of the branches failed from
-                    // insufficient quota.
-                    (Err(Diverge::ControlFlowPoisoned), _)
-                    | (_, Err(Diverge::ControlFlowPoisoned)) => Err(Diverge::ControlFlowPoisoned),
-                    (Err(Diverge::ComptimeQuotaExhausted), _)
-                    | (_, Err(Diverge::ComptimeQuotaExhausted)) => {
-                        Err(Diverge::ComptimeQuotaExhausted)
-                    }
-                    (Err(Diverge::BlockEnd(_)), Err(Diverge::BlockEnd(_))) => {
-                        Err(Diverge::BlockEnd(None))
-                    }
-                    (Ok(()), Ok(()))
-                    | (Err(Diverge::BlockEnd(_)), Ok(()))
-                    | (Ok(()), Err(Diverge::BlockEnd(_))) => Ok(()),
-                }
+                join_branch_results(then_res, else_res)
             }
             Ok(LocalState::Comptime(ValueId::TRUE)) => self.eval_block_inline(then),
             Ok(LocalState::Comptime(ValueId::FALSE)) => self.eval_block_inline(r#else),
@@ -641,6 +651,118 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Diverge::ControlFlowPoisoned)
             }
             Err(Poisoned) => Err(Diverge::ControlFlowPoisoned),
+        }
+    }
+
+    fn eval_match_key(
+        &mut self,
+        local: hir::LocalId,
+        match_keys_seen: &mut HashMap<U256, SourceSpan>,
+    ) -> MaybePoisoned<U256> {
+        let binding = self.bindings[local];
+        let LocalState::Comptime(value) = binding.state? else {
+            unreachable!("invariant: match key comptime or poisoned");
+        };
+        let Value::BigNum(key) = self.values.lookup(value) else {
+            self.diag_ctx.emit_unsupported_match_value_type(
+                self.eval.values,
+                self.values.type_of_value(value),
+                self.loc(binding.use_span),
+            );
+            return Err(Poisoned);
+        };
+        if let Err(existing) = match_keys_seen.try_insert(key, binding.use_span) {
+            self.diag_ctx.emit_duplicate_match_key(
+                key,
+                self.loc(binding.use_span),
+                self.loc(*existing.entry.get()),
+            );
+            return Err(Poisoned);
+        }
+        Ok(key)
+    }
+
+    fn eval_match_keys(&mut self, arms: hir::MatchArmsId) -> Vec<MaybePoisoned<U256>> {
+        let mut match_keys_seen = HashMap::new();
+        let mut match_keys = Vec::new();
+        for arm in &self.hir.match_arms[arms] {
+            match_keys.push(self.eval_match_key(arm.key, &mut match_keys_seen));
+        }
+        match_keys
+    }
+
+    fn eval_match(
+        &mut self,
+        outer_result: hir::LocalId,
+        subject: hir::LocalId,
+        arms: hir::MatchArmsId,
+        fallback: hir::BlockId,
+    ) -> Result<(), Diverge> {
+        self.bindings.remove(outer_result);
+        let Ok((subject_state, subject_use_span, _)) = self.bindings[subject].poisoned() else {
+            return Err(Diverge::ControlFlowPoisoned);
+        };
+        match subject_state {
+            LocalState::Comptime(value) => {
+                let Value::BigNum(subject) = self.values.lookup(value) else {
+                    self.diag_ctx.emit_unsupported_match_value_type(
+                        self.eval.values,
+                        self.values.type_of_value(value),
+                        self.loc(subject_use_span),
+                    );
+                    return Err(Diverge::ControlFlowPoisoned);
+                };
+
+                let match_keys = self.eval_match_keys(arms);
+                if match_keys.iter().any(Result::is_err) {
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+                for (&arm, key) in self.hir.match_arms[arms].iter().zip(match_keys) {
+                    if subject == key.expect("match keys were validated") {
+                        return self.eval_block_inline(arm.body);
+                    }
+                }
+                self.eval_block_inline(fallback)
+            }
+            LocalState::Runtime(subject_local) => {
+                if !self.mir_types[subject_local].is_assignable_to(TypeId::U256) {
+                    self.diag_ctx.emit_unsupported_match_value_type(
+                        self.eval.values,
+                        self.mir_types[subject_local],
+                        self.loc(subject_use_span),
+                    );
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+
+                let condition_span = Some(subject_use_span);
+                let match_keys = self.eval_match_keys(arms);
+                let mut has_invalid_key = false;
+                let mut match_result = Err(Diverge::BlockEnd(None));
+                let mut match_arms = Vec::new();
+                for (&arm, key) in self.hir.match_arms[arms].iter().zip(match_keys) {
+                    let (body, branch_result) = self
+                        .with_runtime_controlled(condition_span, |this| {
+                            this.eval_block_to_mir(arm.body)
+                        });
+                    match_result = join_branch_results(match_result, branch_result);
+                    match key {
+                        Ok(key) => match_arms.push(mir::MatchArm { key, body }),
+                        Err(Poisoned) => has_invalid_key = true,
+                    }
+                }
+                let (fallback, fallback_result) = self
+                    .with_runtime_controlled(condition_span, |this| {
+                        this.eval_block_to_mir(fallback)
+                    });
+                match_result = join_branch_results(match_result, fallback_result);
+                if has_invalid_key {
+                    return Err(Diverge::ControlFlowPoisoned);
+                }
+
+                let arms = self.eval.mir_match_arms.push_iter(match_arms.into_iter());
+                self.emit(mir::Instruction::Match { subject: subject_local, arms, fallback });
+                match_result
+            }
         }
     }
 
