@@ -740,6 +740,7 @@ impl BlockLowerer<'_> {
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,
+            is_eager: fn_def.eager,
             return_type,
             source: self.source_id,
             source_span,

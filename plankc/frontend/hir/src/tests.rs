@@ -89,6 +89,35 @@ fn test_basic_init_builtin_calls() {
 }
 
 #[test]
+fn test_eager_fn_lowering() {
+    assert_lowers_to(
+        r#"
+        const f = eager fn(x: u256) u256 { x };
+        init { @evm_stop(); }
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("f") result=LocalId(0) {
+            %0 = @fn0
+        }
+
+        ==== Functions ====
+        eager @fn0(%1: %0) -> %2 {
+            preamble:
+                %0 = type:u256
+                param#0 %1 : %0
+                %2 = type:u256
+            body:
+                ret %1
+        }
+
+        ==== Init ====
+        eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
 fn test_inline_closure_lowering() {
     assert_lowers_to(
         r#"

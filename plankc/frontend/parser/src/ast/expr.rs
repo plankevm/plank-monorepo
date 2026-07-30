@@ -71,9 +71,9 @@ impl<'cst> Expr<'cst> {
                     Some(arm_list) => Expr::Match(MatchExpr { arm_list, view }),
                     _ => Expr::Error { span },
                 },
-                NodeKind::FnDef => match (view.child(0), view.child(2)) {
+                NodeKind::FnDef { eager } => match (view.child(0), view.child(2)) {
                     (Some(param_list), Some(body_node)) => {
-                        Expr::FnDef(FnDef { param_list, body_node, view })
+                        Expr::FnDef(FnDef { eager, param_list, body_node, view })
                     }
                     _ => Expr::Error { span },
                 },
@@ -485,9 +485,11 @@ impl<'cst> MatchArm<'cst> {
     }
 }
 
-/// Function definition: `fn(params) return_type { body }`
+/// Function definition: `fn(params) return_type { body }` or
+/// `eager fn(params) return_type { body }`
 #[derive(Debug, Clone, Copy)]
 pub struct FnDef<'cst> {
+    pub eager: bool,
     param_list: NodeView<'cst>,
     body_node: NodeView<'cst>,
     view: NodeView<'cst>,

@@ -617,8 +617,13 @@ impl<'a> Parser<'a> {
             return Some(self.parse_block(start, NodeKind::ComptimeBlock));
         }
 
+        if self.eat(Token::Eager) {
+            self.expect(Token::Fn);
+            return Some(self.parse_function_def(start, true));
+        }
+
         if self.eat(Token::Fn) {
-            return Some(self.parse_function_def(start));
+            return Some(self.parse_function_def(start, false));
         }
 
         if self.eat(Token::Struct) {
@@ -644,8 +649,8 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn parse_function_def(&mut self, start: TokenIdx) -> NodeIdx {
-        let mut function = self.alloc_node_from(start, NodeKind::FnDef);
+    fn parse_function_def(&mut self, start: TokenIdx, eager: bool) -> NodeIdx {
+        let mut function = self.alloc_node_from(start, NodeKind::FnDef { eager });
         let mut parameter_list = self.alloc_node(NodeKind::ParamList);
         self.parse_delimited(Token::LeftRound, Token::RightRound, Token::Comma, |parser| {
             let parameter_start = parser.tokens.current();

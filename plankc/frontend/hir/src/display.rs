@@ -297,6 +297,9 @@ impl<'a> DisplayHir<'a> {
         let params = &self.hir.fn_params[fn_def_id];
         let captures = &self.hir.fn_captures[fn_def_id];
 
+        if fn_def.is_eager {
+            write!(f, "eager ")?;
+        }
         write!(f, "@fn{}(", fn_def_id.get())?;
         for (i, param) in params.iter().enumerate() {
             if i > 0 {

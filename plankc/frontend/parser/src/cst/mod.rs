@@ -114,7 +114,7 @@ pub enum NodeKind {
     BuiltinName { ident: StrId },
 
     // Function Definition
-    FnDef,
+    FnDef { eager: bool },
     ParamList,
     Parameter,
     ComptimeParameter,
@@ -177,7 +177,7 @@ impl std::fmt::Debug for NodeKind {
             Self::StringLiteral { .. } => write!(f, "StringLiteral"),
             Self::Identifier { .. } => write!(f, "Identifier"),
             Self::BuiltinName { .. } => write!(f, "BuiltinName"),
-            Self::FnDef => write!(f, "FnDef"),
+            Self::FnDef { eager } => f.debug_struct("FnDef").field("eager", eager).finish(),
             Self::ParamList => write!(f, "ParamList"),
             Self::Parameter => write!(f, "Parameter"),
             Self::ComptimeParameter => write!(f, "ComptimeParameter"),
@@ -201,7 +201,7 @@ impl NodeKind {
             | Self::ParenExpr
             | Self::CallExpr
             | Self::MemberExpr
-            | Self::FnDef
+            | Self::FnDef { .. }
             | Self::StructDef
             | Self::StructLit
             | Self::TupleType

@@ -7,14 +7,9 @@ Plank is a compiler frontend for the Plank programming language that lowers to S
 ```bash
 cargo nextest run -p <crate name> # Run during work on a specific crate for validation
 
-# Run formatter & linter (clippy) at the end of tasks
-just check
-
-# Run all rust tests
-just test
-
-# Run all tests (including SIR solidity diff tests)
-just test-all
+just check # Run formatter & linter
+just test-all # Run all tests (Rust tests, Plank & SIR differential tests)
+just fmt # Run formatter
 ```
 
 ## Workspace Structure
@@ -40,6 +35,10 @@ Cargo workspace with general-purpose crates in `crates/` and frontend crates in 
 
 
 ## Coding Style
+
+### Tests
+
+Display and lowering tests must assert the complete rendered snapshot; do not use partial assertions.
 
 ### Code QA
 

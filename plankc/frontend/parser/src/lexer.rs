@@ -195,6 +195,8 @@ pub enum Token {
     Else,
     #[token("fn")]
     Fn,
+    #[token("eager")]
+    Eager,
     #[token("let")]
     Let,
     #[token("mut")]
@@ -359,6 +361,7 @@ impl Token {
             Token::If => "if",
             Token::Else => "else",
             Token::Fn => "fn",
+            Token::Eager => "eager",
             Token::Let => "let",
             Token::Mut => "mut",
             Token::Const => "const",
@@ -445,6 +448,7 @@ impl Token {
             Token::If => "`if`",
             Token::Else => "`else`",
             Token::Fn => "`fn`",
+            Token::Eager => "`eager`",
             Token::Let => "`let`",
             Token::Mut => "`mut`",
             Token::Const => "`const`",
@@ -642,6 +646,7 @@ mod tests {
         assert_eq!(lex_all("if"), vec![(Token::If, 0..2, "if")]);
         assert_eq!(lex_all("else"), vec![(Token::Else, 0..4, "else")]);
         assert_eq!(lex_all("fn"), vec![(Token::Fn, 0..2, "fn")]);
+        assert_eq!(lex_all("eager"), vec![(Token::Eager, 0..5, "eager")]);
         assert_eq!(lex_all("let"), vec![(Token::Let, 0..3, "let")]);
         assert_eq!(lex_all("mut"), vec![(Token::Mut, 0..3, "mut")]);
         assert_eq!(lex_all("const"), vec![(Token::Const, 0..5, "const")]);

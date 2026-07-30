@@ -1280,7 +1280,43 @@ fn test_fn_def_zero_params() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
+                    "fn"
+                    ParamList
+                        "("
+                        ")"
+                    " "
+                    Identifier
+                        "void"
+                    " "
+                    Block
+                        "{"
+                        StatementsList
+                        "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_eager_fn_def() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        const f = eager fn() void {};
+        "#,
+        r#"
+        File
+            ConstDecl { typed: false }
+                "const"
+                " "
+                Identifier
+                    "f"
+                " "
+                "="
+                " "
+                FnDef { eager: true }
+                    "eager"
+                    " "
                     "fn"
                     ParamList
                         "("
@@ -1314,7 +1350,7 @@ fn test_fn_def_one_param() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1355,7 +1391,7 @@ fn test_fn_def_trailing_comma() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1397,7 +1433,7 @@ fn test_fn_def_two_params() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1452,7 +1488,7 @@ fn test_fn_def_with_return_type() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1491,7 +1527,7 @@ fn test_fn_def_full() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1537,7 +1573,7 @@ fn test_fn_def_one_comptime_param() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1580,7 +1616,7 @@ fn test_fn_def_two_comptime_params() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1634,7 +1670,7 @@ fn test_fn_def_mixed_comptime_and_runtime_params() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("
@@ -1686,7 +1722,7 @@ fn test_fn_def_any_type_param() {
                 " "
                 "="
                 " "
-                FnDef
+                FnDef { eager: false }
                     "fn"
                     ParamList
                         "("

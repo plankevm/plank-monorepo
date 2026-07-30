@@ -194,6 +194,7 @@ pub struct FnDef {
     pub type_preamble: BlockId,
     /// Function body.
     pub body: BlockId,
+    pub is_eager: bool,
     /// Preamble set local that holds the return type expression.
     pub return_type: LocalId,
     pub source: SourceId,

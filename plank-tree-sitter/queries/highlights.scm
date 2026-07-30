@@ -118,6 +118,7 @@
 "comptime" @keyword
 "const" @keyword
 "else" @keyword
+"eager" @keyword
 "fn" @keyword
 "if" @keyword
 "import" @keyword
