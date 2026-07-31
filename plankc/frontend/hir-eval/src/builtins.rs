@@ -296,9 +296,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_eval_branch_quota_too_large(self.loc(arg_use_span));
                     return Err(Poisoned);
                 };
-                self.comptime_quota.raise_limit(requested_quota);
-                self.max_eval_branch_quota_seen =
-                    self.max_eval_branch_quota_seen.max(requested_quota);
+
+                self.frame_mut().set_max_quota(requested_quota);
 
                 ValueId::VOID
             }

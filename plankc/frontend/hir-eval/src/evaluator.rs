@@ -13,7 +13,7 @@ use crate::{
     diagnostics::DiagCtx,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
-    quota::ComptimeQuota,
+    quota::{ComptimeQuota, QuotaExhaustedError},
     scope::{Diverge, EvalContext, LocalState, Scope},
 };
 
@@ -43,10 +43,31 @@ newtype_index! {
     pub(crate) struct CallArgSpansIdx;
 }
 
-pub(crate) struct SuspendedCallFrame {
-    pub fn_def: hir::FnDefId,
+pub(crate) struct CallFrame {
+    pub fn_def: Option<hir::FnDefId>,
     pub quota: ComptimeQuota,
     pub max_eval_branch_quota_seen: u32,
+}
+
+impl CallFrame {
+    pub(crate) fn set_max_quota(&mut self, limit: u32) {
+        self.quota.raise_limit(limit);
+        self.max_eval_branch_quota_seen = self.max_eval_branch_quota_seen.max(limit);
+    }
+
+    pub(crate) fn replay_cached_call(
+        &mut self,
+        branches_consumed: u32,
+        max_eval_branch_quota_seen: u32,
+    ) -> bool {
+        match self.quota.spend(branches_consumed) {
+            Ok(()) => {
+                self.set_max_quota(max_eval_branch_quota_seen);
+                true
+            }
+            Err(QuotaExhaustedError) => false,
+        }
+    }
 }
 
 pub(crate) struct Evaluator<'a> {
@@ -76,7 +97,7 @@ pub(crate) struct Evaluator<'a> {
     pub type_name_args_buf: Vec<ValueId>,
     pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
-    pub suspended_call_frames: Vec<SuspendedCallFrame>,
+    pub call_frames: Vec<CallFrame>,
 
     pub evm_version: EvmVersion,
 }
@@ -116,7 +137,7 @@ impl<'a> Evaluator<'a> {
             type_name_args_buf: Vec::new(),
             fields_buf: Vec::new(),
             captures_buf: Vec::new(),
-            suspended_call_frames: Vec::new(),
+            call_frames: Vec::new(),
 
             evm_version,
         }
@@ -154,11 +175,12 @@ impl<'a> Evaluator<'a> {
         );
         match scope.with_comptime(|this| this.eval_block_inline(const_def.body)) {
             Err(Diverge::ComptimeQuotaExhausted) => {
-                self.evaluated_consts[const_id] = State::Done(ConstEvalResult::QuotaExhausted);
+                scope.eval.evaluated_consts[const_id] =
+                    State::Done(ConstEvalResult::QuotaExhausted);
                 return Err(Poisoned);
             }
             Err(Diverge::ControlFlowPoisoned | Diverge::BlockEnd(_)) => {
-                self.evaluated_consts[const_id] = State::Done(ConstEvalResult::Poisoned);
+                scope.eval.evaluated_consts[const_id] = State::Done(ConstEvalResult::Poisoned);
                 return Err(Poisoned);
             }
             Ok(_) => {}
@@ -175,11 +197,11 @@ impl<'a> Evaluator<'a> {
             Err(Poisoned) => ConstEvalResult::Poisoned,
         };
 
-        match self.evaluated_consts.get_mut(const_id) {
+        match scope.eval.evaluated_consts.get_mut(const_id) {
             Some(State::Done(ConstEvalResult::Poisoned)) => {}
             Some(state @ State::InProgress) => {
                 *state = State::Done(const_result);
-                self.try_name_type(const_def.name, value);
+                scope.eval.try_name_type(const_def.name, value);
             }
             None
             | Some(State::Done(ConstEvalResult::Value(_) | ConstEvalResult::QuotaExhausted)) => {
@@ -230,8 +252,11 @@ impl<'a> Evaluator<'a> {
         let body = scope.eval_entry_point_body(entry_point.body);
 
         let fn_id1 = scope.eval.mir_fn_locals.push_copy_slice(&scope.mir_types);
-        let fn_id2 =
-            self.mir_fns.push(mir::FnDef { body, param_count: 0, return_type: TypeId::NEVER });
+        let fn_id2 = scope.eval.mir_fns.push(mir::FnDef {
+            body,
+            param_count: 0,
+            return_type: TypeId::NEVER,
+        });
         assert_eq!(fn_id1, fn_id2);
 
         fn_id1

@@ -1,7 +1,7 @@
 use crate::{
     Evaluator,
     diagnostics::{BindingLoc, DiagCtx},
-    evaluator::CallArgSpansIdx,
+    evaluator::{CallArgSpansIdx, CallFrame},
     quota::{ComptimeQuota, QuotaExhaustedError},
 };
 use alloy_primitives::U256;
@@ -96,12 +96,21 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub comptime: bool,
     pub if_condition_source: Option<SourceSpan>,
     pub runtime_control_depth: u32,
-    pub comptime_quota: ComptimeQuota,
-    pub current_fn_def: Option<hir::FnDefId>,
-    pub max_eval_branch_quota_seen: u32,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
     pub mir_types: IndexVec<mir::LocalId, TypeId>,
+}
+
+impl<'a, 'ctx> Drop for Scope<'a, 'ctx> {
+    fn drop(&mut self) {
+        let frame = self.eval.call_frames.pop();
+        if !std::thread::panicking() {
+            assert!(
+                frame.is_some(),
+                "every scope should push exactly 1 frame, and then pop one drop, invariant broken"
+            );
+        }
+    }
 }
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
@@ -110,10 +119,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         diag_ctx: &'a mut DiagCtx<'ctx>,
         source: SourceId,
         comptime: bool,
-        comptime_quota: ComptimeQuota,
-        current_fn_def: Option<hir::FnDefId>,
+        quota: ComptimeQuota,
+        fn_def: Option<hir::FnDefId>,
         ctx: EvalContext,
     ) -> Self {
+        eval.call_frames.push(CallFrame {
+            fn_def,
+            quota,
+            max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
+        });
+
         Self {
             eval,
             diag_ctx,
@@ -123,9 +138,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             comptime,
             if_condition_source: None,
             runtime_control_depth: 0,
-            comptime_quota,
-            current_fn_def,
-            max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
 
             bindings: DenseIndexMap::new(),
             mir_types: IndexVec::new(),
@@ -848,13 +860,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(());
             }
 
-            if let Err(QuotaExhaustedError) = self.comptime_quota.spend(1) {
+            if let Err(QuotaExhaustedError) = self.frame_mut().quota.spend(1) {
                 let span =
                     self.hir.block_spans[condition_block].expect("condition block wihtout span");
                 self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
                     self.loc(span),
-                    self.comptime_quota.limit(),
-                    self.comptime_quota.start_loc(),
+                    self.frame().quota.limit(),
+                    self.frame().quota.start_loc(),
                 );
                 return Err(Diverge::ComptimeQuotaExhausted);
             }
@@ -878,13 +890,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(());
             }
 
-            if let Err(QuotaExhaustedError) = self.comptime_quota.spend(1) {
+            if let Err(QuotaExhaustedError) = self.frame_mut().quota.spend(1) {
                 let span =
                     self.hir.block_spans[condition_block].expect("condition block wihtout span");
                 self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
                     self.loc(span),
-                    self.comptime_quota.limit(),
-                    self.comptime_quota.start_loc(),
+                    self.frame().quota.limit(),
+                    self.frame().quota.start_loc(),
                 );
                 return Err(Diverge::ComptimeQuotaExhausted);
             }
