@@ -1,6 +1,10 @@
-import std::option::{Option, None, Some};
+import std::option::*;
 
 const UInt = fn (comptime Size: u256) type {
+    if Size <= 0 or 256 < Size {
+        @compile_error("UInt: `Size` must be between 1-256");
+    }
+
     if Size == 256 {
         return u256;
     }
@@ -62,7 +66,7 @@ const bit_size = eager fn (comptime T: type) u256 {
         return 256;
     }
 
-    if comptime { !is_uint(T) } {
+    if !is_uint(T) {
         @compile_error("bit_size: `T` not `uN` type");
     }
 
@@ -77,17 +81,42 @@ const unsafe_uint_from_u256 = eager fn (comptime T: type, raw_repr: u256) T {
     }
 };
 
+const repr_u256 = fn (comptime x: u256) cbytes {
+    let digit = @slice_cbytes("0123456789", x % 10, x % 10 + 1);
+    let remaining = x -/ 10;
+    if remaining == 0 {
+        return digit;
+    }
+    @concat_cbytes((repr_u256(remaining), digit))
+};
+
+const new_uint = eager fn (comptime T: type, comptime x: u256) T {
+    if !is_uint(T) {
+        @compile_error("new_uint: `T` not `uN` type");
+    }
+    if T == u256 {
+        return x;
+    }
+
+    let size = bit_size(T);
+    if x >= (1 << size) {
+        @compile_error(@concat_cbytes(
+            ("new_uint: ", repr_u256(x), " too large for u", repr_u256(size))
+        ));
+    }
+
+    unwrap(try_cast_uint(x, u8))
+};
+
 const cast_uint = eager fn (src: $T, comptime Dst: type) Dst {
-    comptime {
-        if !is_uint(T) {
-            @compile_error("cast_uint: `T` not `uN` type");
-        }
-        if !is_uint(Dst) {
-            @compile_error("cast_uint: `Dst` not `uN` type");
-        }
-        if bit_size(T) > bit_size(Dst) {
-            @compile_error("cast_uint: cannot infalliably cast `src` with larger bit size to `Dst`");
-        }
+    if !is_uint(T) {
+        @compile_error("cast_uint: `T` not `uN` type");
+    }
+    if !is_uint(Dst) {
+        @compile_error("cast_uint: `Dst` not `uN` type");
+    }
+    if bit_size(T) > bit_size(Dst) {
+        @compile_error("cast_uint: cannot infalliably cast `src` with larger bit size to `Dst`");
     }
 
     let repr = if T == u256 { src } else { src._raw_repr };
@@ -96,17 +125,15 @@ const cast_uint = eager fn (src: $T, comptime Dst: type) Dst {
 };
 
 const try_cast_uint = eager fn (src: $T, comptime Dst: type) Option(Dst) {
-    comptime {
-        if !is_uint(T) {
-            @compile_error("try_cast_uint: `T` not `uN` type");
-        }
-        if !is_uint(Dst) {
-            @compile_error("try_cast_uint: `Dst` not `uN` type");
-        }
+    if !is_uint(T) {
+        @compile_error("try_cast_uint: `T` not `uN` type");
+    }
+    if !is_uint(Dst) {
+        @compile_error("try_cast_uint: `Dst` not `uN` type");
     }
 
     let dst_bit_size = comptime { bit_size(Dst) };
-    if comptime { bit_size(T) <= dst_bit_size } {
+    if bit_size(T) <= dst_bit_size {
         return Some(cast_uint(src, Dst));
     }
 

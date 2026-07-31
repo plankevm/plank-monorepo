@@ -38,7 +38,7 @@ const call_ecrecover = fn () never {
 
     let account = ecrecover(hash, v, r, s);
     let out = malloc_uninit(32);
-    let unwrapped = if account.is_some { cast_addr(account.inner, u256) } else { 0 };
+    let unwrapped = if account.is_some { cast_addr(account.unsafe_unwrapped, u256) } else { 0 };
     unsafe_mstore32(out, unwrapped);
     unsafe_return(out, 32);
 };

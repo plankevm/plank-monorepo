@@ -235,7 +235,7 @@ const abi_buf_fits = fn (comptime T: type, buf: bytes(memory), offset: u256) boo
     } else if T == bytes(memory) {
         let len_opt = membytes_read_u256(buf, offset);
         if !len_opt.is_some { return false; }
-        let length = len_opt.inner;
+        let length = len_opt.unsafe_unwrapped;
         buf.length >= offset + 32 + ceil32(length)
     } else if @is_struct(T) {
         if offset + abi_head_size(T) > buf.length {

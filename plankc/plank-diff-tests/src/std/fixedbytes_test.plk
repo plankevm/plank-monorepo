@@ -13,7 +13,7 @@ init {
     // should read Some(bytes32) from membuf
     let maybe_bytes1 = membytes_read_bytes32(buf, 0);
     require(maybe_bytes1.is_some, ());
-    require(maybe_bytes1.inner.raw == ITEM, ());
+    require(maybe_bytes1.unsafe_unwrapped.raw == ITEM, ());
 
     // OOB: Should read None from membuf
     let maybe_bytes2 = membytes_read_bytes32(buf, 1);

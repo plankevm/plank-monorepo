@@ -204,10 +204,10 @@ const unsafe_bytes_from_parts = fn (ptr: $T, length: u256)
         if !region.is_some {
             @compile_error("unsafe_bytes_from_parts: `ptr` is not a `rawptr(R)`");
         }
-        bytes(region.inner)
+        bytes(region.unsafe_unwrapped)
     }
 {
-    let region = comptime { rawptr_get_region(T).inner };
+    let region = comptime { rawptr_get_region(T).unsafe_unwrapped };
     bytes(region) { ptr: ptr, length: length }
 };
 

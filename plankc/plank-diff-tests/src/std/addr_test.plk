@@ -2,7 +2,7 @@ import std::abi::abi_decode;
 import std::core::addr::{addr, addr_from_u256, cast_addr, raw_create, raw_create2};
 import std::fixedbytes::bytes32_from_u256;
 import std::core::regions::*;
-import std::option::Option;
+import std::option::*;
 import std::error::require;
 
 const SELECTOR_CONVERT = 0;
@@ -22,12 +22,12 @@ init {
         let code = membytes_new(32);
         let maybe_account1 = raw_create(0, code);
         require(maybe_account1.is_some, ());
-        require(cast_addr(maybe_account1.inner, u256) != 0, ());
+        require(cast_addr(unwrap(maybe_account1), u256) != 0, ());
 
         let salt = bytes32_from_u256(0xb5bb9d8014a0f9b1d61e21e796d78dccdf1352f23cd32812f4850b878ae4944c);
         let maybe_account2 = raw_create2(0, code, salt);
         require(maybe_account2.is_some, ());
-        require(cast_addr(maybe_account2.inner, u256) != 0, ());
+        require(cast_addr(unwrap(maybe_account2), u256) != 0, ());
     }
 
     @evm_stop();

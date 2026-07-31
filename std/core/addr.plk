@@ -21,7 +21,7 @@ const addr_from_u256 = fn (raw: u256) addr {
             unsafe_revert(malloc_uninit(0), 0);
         }
     }
-    addr { as_uint: res.inner }
+    addr { as_uint: res.unsafe_unwrapped }
 };
 
 /// Safety: `raw` must be a valid 160-bit value.

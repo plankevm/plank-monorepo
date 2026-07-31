@@ -1,6 +1,7 @@
 import std::storage::map_slot_hash;
 import std::core::addr::*;
 import std::precompile::ecrecover;
+import std::option::unwrap;
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
@@ -345,7 +346,7 @@ const permit = fn (
     let permit_struct_hash = hash_permit(owner, spender, value, nonce, deadline);
     let digest = erc712_digest(permit_struct_hash);
     let recovered = ecrecover(digest, v.raw, r, s);
-    require_4byte(recovered.is_some and addr_eq(recovered.inner, owner), INVALID_PERMIT);
+    require(recovered.is_some and addr_eq(unwrap(recovered), owner), InvalidPermit {});
 
     @evm_sstore(nonce_slot, nonce +% 1);
     emit_approval(owner, spender, value);

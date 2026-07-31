@@ -1,10 +1,11 @@
 import std::core::regions::*;
 import std::core::uint::*;
+import std::core::addr::*;
 import std::option::*;
 import std::fixedbytes::*;
 
-const is_storage_region = fn (comptime R: type) bool {
-    R == storage or R == transient
+const is_storage_region = eager fn (comptime R: type) bool {
+    is_region(R) and region_is_any_of(R, (transient, storage))
 };
 
 const raw_store = fn (comptime R: type, slot: u256, value: u256) void {
@@ -27,66 +28,201 @@ const raw_load = fn (comptime R: type, slot: u256) u256 {
     }
 };
 
-const _bit_size = fn (comptime T: type) u256 {
-    if is_uint(T) { bit_size(T) }
-    else if T == addr { 160 }
-    else if T == bool { 1 }
-    else if T == bytes32 { 256 }
-    else {
-        @compile_error("_bit_size: not fixed size type")
+/// holds value between [1, 256]
+const BitWidth = struct { size: u256 };
+
+const new_bit_width = eager fn (comptime size: u256) BitWidth {
+    if size <= 0 or 256 < size {
+        @compile_error("size not 1-256");
+    }
+    BitWidth { size: size }
+};
+
+const _primitive_bit_size = eager fn (comptime T: type) Option(BitWidth) {
+    if is_uint(T) { Some(new_bit_width(bit_size(T))) }
+    else if T == addr { Some(new_bit_width(160)) }
+    else if T == bool { Some(new_bit_width(1)) }
+    else if T == bytes32 { Some(new_bit_width(256)) }
+    else { None(BitWidth) }
+};
+
+const _as_word = eager fn (value: $T) Option(u256) {
+    let word = if is_uint(T) {
+        cast_uint(value, u256)
+    } else if T == addr {
+        cast_addr(value, u256)
+    } else if T == bool {
+        @bool_to_u256(value)
+    } else if T == bytes32 {
+        value.raw
+    } else {
+        return None(u256);
+    };
+    Some(word)
+};
+
+const StorageOffset = struct { slots: u256, bits: u8 };
+
+const STORAGE_OFFSET_ZERO: StorageOffset = StorageOffset {
+    slots: 0,
+    bits: new_uint(u8, 0)
+};
+
+const add_size = eager fn (s1: StorageOffset, s2: StorageOffset) StorageOffset {
+    let bits = cast_uint(s1.bits, u256) +% cast_uint(s2.bits, u256);
+    StorageOffset {
+        slots: s1.slots +% s2.slots +% @bool_to_u256(bits >= 256),
+        bits: unsafe_uint_from_u256(bits % 256),
     }
 };
 
-const _as_u256 = fn (value: $T) u256 {
-    if comptime { is_uint(T) } { cast_uint(value, u256) }
-    else if T == addr { cast_addr(value, u256) }
-    else if T == bool { @bool_to_u256(value) }
-    else if T == bytes32 { value.raw }
-    else {
-        @compile_error("_as_u256: not fixed size type")
+const add_atom_bits = eager fn (offset: StorageOffset, comptime width: BitWidth) StorageOffset {
+    let offset_bits = cast_uint(offset.bits, u256);
+    if offset_bits +% width.size < 256 {
+        StorageOffset {
+            slots: offset.slots,
+            bits: unsafe_uint_from_u256(u8, offset_bits +% width.size)
+        }
+    } else if offset_bits +% width.size == 256 {
+        StorageOffset { slots: offset.slots +% 1, bits: new_uint(u8, 0) }
+    } else {
+        StorageOffset {
+            slots: offset.slots +% 1 +% @bool_to_u256(width.size == 256),
+            bits: unsafe_uint_from_u256(u8,  width.size % 256),
+        }
     }
 };
 
-const store = fn (comptime R: type, start_slot: u256, value: $T) void {
-    let mut slot_buf = 0;
+const advance_offset = eager fn (
+    comptime offset: StorageOffset,
+    comptime T: type,
+) StorageOffset {
+    let primitive = _primitive_bit_size(T);
+    if primitive.is_some {
+        let bit_size = unwrap(primitive);
+        return add_atom_bits(offset, bit_size);
+    }
 
-    comptime let mut rel_slot = 0;
-    comptime let mut bit_offset = 0;
-    comptime let mut fi = 0;
-    inline while fi < @field_count(T) {
-        let FieldType = @field_type(T, fi);
+    let rawptr_region = rawptr_get_region(T);
+    if rawptr_region.is_some {
+        @compile_error("advance_offset: storing pointers in storage is not yet supported");
+    }
 
-        let bit_size = comptime { _bit_size(FieldType) };
-        let field_value = _as_u256(@get_field(value, fi));
-        if comptime { bit_size + bit_offset > 256 } {
-            raw_store(R, start_slot +% rel_slot, slot_buf);
-            rel_slot = rel_slot + 1;
-            slot_buf = field_value;
-            bit_offset = bit_size;
-        } else {
-            slot_buf = slot_buf | (field_value << bit_offset);
-            bit_offset = bit_offset + bit_size;
+    if @is_struct(T) or @is_tuple(T) {
+        let mut offset = offset;
+        let mut i = 0;
+        while i < @field_count(T) {
+            offset = advance_offset(offset, @field_type(T, i));
+            i = i + 1;
+        }
+        return offset;
+    }
+
+    @compile_error("advance_offset: type unsupported");
+};
+
+const _write_word_to_slot_buf = fn (
+    comptime R: type,
+    buf: u256,
+    word: u256,
+    slot: u256,
+    comptime offset_bits: u256,
+    comptime bits: u256,
+) u256 {
+    if bits + offset_bits < 256 {
+        buf | (word << offset_bits)
+    } else if bits + offset_bits == 256 {
+        raw_store(R, slot, buf | (word << offset_bits));
+        0
+    } else if bits + offset_bits > 256 {
+        raw_store(R, slot, buf);
+        word
+    } else {
+        @compile_error("unreachable");
+    }
+};
+
+const _store = fn (
+    comptime R: type,
+    start_slot: u256,
+    slot_buffer: u256,
+    comptime rel_offset: StorageOffset,
+    value: $T,
+) u256 {
+    let primitive_bit_size = _primitive_bit_size(T);
+    if primitive_bit_size.is_some {
+        let bits = comptime { unwrap(primitive_bit_size) };
+        let word = _as_word(value).unsafe_unwrapped;
+        return _write_word_to_slot_buf(
+            R,
+            slot_buffer,
+            word,
+            start_slot +% rel_offset.slots,
+            cast_uint(rel_offset.bits, u256),
+            bits.size,
+        );
+    }
+
+    let rawptr_region = rawptr_get_region(T);
+    if rawptr_region.is_some {
+        @compile_error("_store: storing pointers in storage is not yet supported");
+    }
+
+    if @is_tuple(T) or @is_struct(T) {
+        let mut slot_buffer = slot_buffer;
+        comptime let mut rel_offset = rel_offset;
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            slot_buffer = _store(
+                R,
+                start_slot,
+                slot_buffer,
+                rel_offset,
+                @get_field(value, i),
+            );
+            rel_offset = advance_offset(rel_offset, @field_type(T, i));
+            i = i + 1;
         }
 
-
-        fi = fi + 1;
-    }
-
-    if bit_offset > 0 {
-        raw_store(R, start_slot +% rel_slot, slot_buf);
+        return slot_buffer;
     }
 };
 
-// const smap = fn (comptime R: type, comptime KeyT: type, comptime ValueT: type) type {
-//     if !comptime { is_region(R) } {
-//         @compile_error("smap: supplied `R` not a valid region");
-//     }
-//     if R != storage and R != transient {
-//         @compile_error("smap: unsupported region kind");
-//     }
-//
-//     struct (R, KeyT, ValueT) {
-//         base_slot: u256,
-//     }
-// };
-//
+const store = fn (
+    comptime R: type,
+    start_slot: u256,
+    value: $T
+) void {
+    if !is_storage_region(R) {
+        @compile_error("store: expected `R` to be valid storage region `storage` or `transient`");
+    }
+    let final_buffer = _store(R, start_slot, 0, STORAGE_OFFSET_ZERO, value);
+    let end_offset = comptime { advance_offset(STORAGE_OFFSET_ZERO, T) };
+    if cast_uint(end_offset.bits, u256) != 0 {
+        raw_store(R, start_slot +% end_offset.slots, final_buffer);
+    }
+};
+
+const Thing = struct {
+    owner: addr,
+    key: u128,
+    value: u96,
+    a: u64,
+    b: u64,
+};
+
+init {
+    store(
+        transient,
+        0,
+        Thing {
+            owner: msg_sender(),
+            value: unwrap(try_cast_uint(@evm_calldataload(0x00), u96)),
+            key: unwrap(try_cast_uint(@evm_calldataload(0x20), u128)),
+            a: unwrap(try_cast_uint(@evm_calldataload(0x40), u64)),
+            b: unwrap(try_cast_uint(@evm_calldataload(0x60), u64)),
+        }
+    );
+    @evm_stop();
+}

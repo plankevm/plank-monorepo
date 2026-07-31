@@ -1,20 +1,20 @@
 const Option = fn (comptime T: type) type {
     struct {
-        inner: T,
+        unsafe_unwrapped: T,
         is_some: bool,
     }
 };
 
 const Some = eager fn (value: $T) Option(T) {
     Option(T) {
-        inner: value,
+        unsafe_unwrapped: value,
         is_some: true,
     }
 };
 
 const None = eager fn (comptime T: type) Option(T) {
     Option(T) {
-        inner: @uninit(T),
+        unsafe_unwrapped: @uninit(T),
         is_some: false,
     }
 };
@@ -31,7 +31,7 @@ const unwrap = eager fn (opt: $T) {
     if !inner_type.is_some {
         @compile_error("unwrap: `opt` not an `Option(_)`");
     }
-    inner_type.inner
+    inner_type.unsafe_unwrapped
 } {
     if !opt.is_some {
         if @in_comptime() {
@@ -40,5 +40,5 @@ const unwrap = eager fn (opt: $T) {
             @evm_revert(@malloc_uninit(0), 0);
         }
     }
-    opt.inner
+    opt.unsafe_unwrapped
 };

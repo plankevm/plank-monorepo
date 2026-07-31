@@ -31,7 +31,7 @@ fn test_compile_log() {
             "42",
             r#""foo""#,
             "u256",
-            "Option(u256) { inner: 42, is_some: true }",
+            "Option(u256) { unsafe_unwrapped: 42, is_some: true }",
             "struct@main.plk:9:22",
         ],
     );

@@ -21,7 +21,7 @@ const Slice = fn (comptime R: type, comptime T: type, comptime arity: Option(u25
     );
 
     if arity.is_some {
-        struct (R, T, arity.inner) {
+        struct (R, T, arity.unsafe_unwrapped) {
             ptr: rawptr(R)
         }
     } else {
@@ -41,7 +41,7 @@ const CSlice = fn (comptime T: type, comptime arity: Option(u256)) type {
     }
 
     if arity.is_some {
-        struct (ctime, T, arity.inner) {
+        struct (ctime, T, arity.unsafe_unwrapped) {
             data: cbytes
         }
     } else {
