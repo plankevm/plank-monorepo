@@ -1693,3 +1693,24 @@ fn test_runtime_forced_comptime_call_entry_after_comptime_quota_reports_eval_sta
         "#],
     );
 }
+
+#[test]
+fn test_mixed_recursion_exhausts_quota() {
+    assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
+    assert_diagnostics(
+        std_project(
+            r#"
+        const stupid = eager fn (comptime N: u256, x: u256) void {
+            stupid(N + 1, x);
+        };
+
+        init {
+            stupid(0, 0);
+            @evm_invalid();
+        }
+        "#,
+        ),
+        &[r#"
+        "#],
+    );
+}
