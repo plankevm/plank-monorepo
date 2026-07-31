@@ -7,7 +7,7 @@ use crate::{
 use alloy_primitives::U256;
 use hashbrown::HashMap;
 use plank_core::{DenseIndexMap, IndexVec};
-use plank_hir::{self as hir, ExprKind, InstructionKind};
+use plank_hir::{self as hir, BlockId, ExprKind, InstructionKind};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, poison};
 use plank_values::{DefOrigin, TypeId, Value, ValueId};
@@ -859,20 +859,22 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if !condition_value {
                 return Ok(());
             }
-
-            if let Err(QuotaExhaustedError) = self.frame_mut().quota.spend(1) {
-                let span =
-                    self.hir.block_spans[condition_block].expect("condition block wihtout span");
-                self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
-                    self.loc(span),
-                    self.frame().quota.limit(),
-                    self.frame().quota.start_loc(),
-                );
-                return Err(Diverge::ComptimeQuotaExhausted);
-            }
-
+            self.charge_branch(condition_block)?;
             self.eval_block_inline(body)?;
         }
+    }
+
+    fn charge_branch(&mut self, condition_block: BlockId) -> Result<(), Diverge> {
+        if let Err(QuotaExhaustedError) = self.frame_mut().quota.spend(1) {
+            let span = self.hir.block_spans[condition_block].expect("condition block wihtout span");
+            self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
+                self.loc(span),
+                self.frame().quota.limit(),
+                self.frame().quota.start_loc(),
+            );
+            return Err(Diverge::ComptimeQuotaExhausted);
+        }
+        Ok(())
     }
 
     fn eval_inline_while(
@@ -889,18 +891,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if !condition_value {
                 return Ok(());
             }
-
-            if let Err(QuotaExhaustedError) = self.frame_mut().quota.spend(1) {
-                let span =
-                    self.hir.block_spans[condition_block].expect("condition block wihtout span");
-                self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
-                    self.loc(span),
-                    self.frame().quota.limit(),
-                    self.frame().quota.start_loc(),
-                );
-                return Err(Diverge::ComptimeQuotaExhausted);
-            }
-
+            self.charge_branch(condition_block)?;
             self.eval_block_inline(body)?;
         }
     }
