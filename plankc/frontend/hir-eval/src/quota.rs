@@ -38,6 +38,20 @@ impl ComptimeQuota {
         Ok(())
     }
 
+    pub(crate) fn replay_cached_call(
+        &mut self,
+        branches_consumed: u32,
+        max_eval_branch_quota_seen: u32,
+    ) -> bool {
+        match self.spend(branches_consumed) {
+            Ok(()) => {
+                self.raise_limit(max_eval_branch_quota_seen);
+                true
+            }
+            Err(QuotaExhaustedError) => false,
+        }
+    }
+
     pub(crate) fn limit(&self) -> u32 {
         self.limit
     }

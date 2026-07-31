@@ -598,11 +598,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Poisoned);
                 }
                 EvaluatedFnState::Done(value) => match value {
-                    Ok(cached) if self.comptime_quota.can_spend(cached.branches_consumed) => {
-                        self.comptime_quota
-                            .spend(cached.branches_consumed)
-                            .expect("capacity checked above");
-                        self.comptime_quota.raise_limit(cached.max_eval_branch_quota_seen);
+                    Ok(cached)
+                        if self.comptime_quota.replay_cached_call(
+                            cached.branches_consumed,
+                            cached.max_eval_branch_quota_seen,
+                        ) =>
+                    {
                         self.max_eval_branch_quota_seen =
                             self.max_eval_branch_quota_seen.max(cached.max_eval_branch_quota_seen);
                         return Ok(Ok(cached));
