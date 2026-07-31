@@ -11,9 +11,12 @@ pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
     evaluator::CallArgSpansIdx,
-    quota::{ComptimeQuota, QuotaExhaustedError},
+    quota::ComptimeQuota,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
+
+const MIN_EVAL_STACK_REMAINING: usize = 128 * 1024;
+const EVAL_STACK_SEGMENT_SIZE: usize = 8 * 1024 * 1024;
 
 /// Empty marker to track the invariant that arg/param comptimeness matching was already checked.
 #[derive(Clone, Copy)]
@@ -70,6 +73,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         capture_buf_offset: usize,
         eagerly_comptime: bool,
         validated: ArgParamComptimenessMatch,
+        comptime_quota: ComptimeQuota,
     ) -> (Scope<'s, 'ctx>, Call<'s>) {
         let fn_def = self.eval.hir.fns[fn_def_id];
         let params = &self.eval.hir.fn_params[fn_def_id];
@@ -83,8 +87,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             self.diag_ctx,
             fn_def.source,
             false,
-            self.comptime_quota,
-            self.eval_branch_quota_start_loc,
+            comptime_quota,
+            Some(fn_def_id),
             EvalContext::FunctionPreamble { arg_spans, call_source },
         );
 
@@ -326,23 +330,71 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .iter()
                 .all(|&arg| matches!(self.bindings[arg].state, Ok(LocalState::Comptime(_))));
 
-        let (mut scope, call) = self.prepare_new_fn_scope_for_preamble_eval(
-            closure,
-            fn_def_id,
-            args,
-            arg_spans,
-            call_span,
-            type_name,
-            capture_buf_offset,
-            eagerly_comptime,
-            validated,
-        );
-        let result = scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc);
+        let child_quota = self.comptime_quota.inherited_for_call(call_loc);
+        let suspended_stack_len = self.eval.suspended_call_frames.len();
+        let saved_root_frame = (self.comptime_quota, self.max_eval_branch_quota_seen);
+        if let Some(current_fn_def) = self.current_fn_def {
+            self.eval.suspended_call_frames.push(crate::evaluator::SuspendedCallFrame {
+                fn_def: current_fn_def,
+                quota: self.comptime_quota,
+                max_eval_branch_quota_seen: self.max_eval_branch_quota_seen,
+            });
+        }
 
-        let new_max_eval_branch_quota_seen = scope.max_eval_branch_quota_seen;
-        self.comptime_quota = scope.comptime_quota;
-        self.max_eval_branch_quota_seen =
-            self.max_eval_branch_quota_seen.max(new_max_eval_branch_quota_seen);
+        let exhausted = self
+            .eval
+            .suspended_call_frames
+            .iter()
+            .rev()
+            .find(|frame| frame.fn_def == fn_def_id && !frame.quota.can_spend(1))
+            .map(|frame| (frame.quota.limit(), frame.quota.start_loc()));
+        if let Some((limit, start_loc)) = exhausted {
+            if let Some(current_fn_def) = self.current_fn_def {
+                let frame = self.eval.suspended_call_frames.pop().expect("caller frame was pushed");
+                assert_eq!(frame.fn_def, current_fn_def);
+                self.comptime_quota = frame.quota;
+                self.max_eval_branch_quota_seen = frame.max_eval_branch_quota_seen;
+            } else {
+                (self.comptime_quota, self.max_eval_branch_quota_seen) = saved_root_frame;
+            }
+            assert_eq!(self.eval.suspended_call_frames.len(), suspended_stack_len);
+            self.diag_ctx.emit_comptime_call_branch_quota_exhausted(call_loc, limit, start_loc);
+            return Ok(Err(Diverge::ComptimeQuotaExhausted));
+        }
+        for frame in
+            self.eval.suspended_call_frames.iter_mut().filter(|frame| frame.fn_def == fn_def_id)
+        {
+            frame.quota.spend(1).expect("capacity checked above");
+        }
+
+        let result = {
+            let (mut scope, call) = self.prepare_new_fn_scope_for_preamble_eval(
+                closure,
+                fn_def_id,
+                args,
+                arg_spans,
+                call_span,
+                type_name,
+                capture_buf_offset,
+                eagerly_comptime,
+                validated,
+                child_quota,
+            );
+            // The language quota, rather than the host thread's stack size, bounds recursion.
+            stacker::maybe_grow(MIN_EVAL_STACK_REMAINING, EVAL_STACK_SEGMENT_SIZE, || {
+                scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc)
+            })
+        };
+
+        if let Some(current_fn_def) = self.current_fn_def {
+            let frame = self.eval.suspended_call_frames.pop().expect("caller frame was pushed");
+            assert_eq!(frame.fn_def, current_fn_def);
+            self.comptime_quota = frame.quota;
+            self.max_eval_branch_quota_seen = frame.max_eval_branch_quota_seen;
+        } else {
+            (self.comptime_quota, self.max_eval_branch_quota_seen) = saved_root_frame;
+        }
+        assert_eq!(self.eval.suspended_call_frames.len(), suspended_stack_len);
 
         result
     }
@@ -533,15 +585,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<ComptimeCallResult, Diverge>> {
         preamble.return_type?;
 
-        if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
-            self.diag_ctx.emit_comptime_call_branch_quota_exhausted(
-                call.loc(),
-                self.comptime_quota.limit(),
-                self.eval_branch_quota_start_loc,
-            );
-            return Ok(Err(Diverge::ComptimeQuotaExhausted));
-        }
-
         let function =
             FunctionKey::new(call.closure, &self.eval.maybe_values_buf[values_buf_offset..]);
         let mut existing_cached_value = None;
@@ -555,12 +598,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Poisoned);
                 }
                 EvaluatedFnState::Done(value) => match value {
-                    Ok(cached)
-                        if self.comptime_quota.replay_cached_call(
-                            cached.branches_consumed,
-                            cached.max_eval_branch_quota_seen,
-                        ) =>
-                    {
+                    Ok(cached) if self.comptime_quota.can_spend(cached.branches_consumed) => {
+                        self.comptime_quota
+                            .spend(cached.branches_consumed)
+                            .expect("capacity checked above");
+                        self.comptime_quota.raise_limit(cached.max_eval_branch_quota_seen);
                         self.max_eval_branch_quota_seen =
                             self.max_eval_branch_quota_seen.max(cached.max_eval_branch_quota_seen);
                         return Ok(Ok(cached));

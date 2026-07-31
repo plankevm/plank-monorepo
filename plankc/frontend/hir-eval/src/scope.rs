@@ -97,7 +97,7 @@ pub(crate) struct Scope<'a, 'ctx> {
     pub if_condition_source: Option<SourceSpan>,
     pub runtime_control_depth: u32,
     pub comptime_quota: ComptimeQuota,
-    pub eval_branch_quota_start_loc: SrcLoc,
+    pub current_fn_def: Option<hir::FnDefId>,
     pub max_eval_branch_quota_seen: u32,
 
     pub bindings: DenseIndexMap<hir::LocalId, Local>,
@@ -111,7 +111,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         source: SourceId,
         comptime: bool,
         comptime_quota: ComptimeQuota,
-        eval_branch_quota_start_loc: SrcLoc,
+        current_fn_def: Option<hir::FnDefId>,
         ctx: EvalContext,
     ) -> Self {
         Self {
@@ -124,7 +124,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             if_condition_source: None,
             runtime_control_depth: 0,
             comptime_quota,
-            eval_branch_quota_start_loc,
+            current_fn_def,
             max_eval_branch_quota_seen: crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA,
 
             bindings: DenseIndexMap::new(),
@@ -848,13 +848,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(());
             }
 
-            if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
+            if let Err(QuotaExhaustedError) = self.comptime_quota.spend(1) {
                 let span =
                     self.hir.block_spans[condition_block].expect("condition block wihtout span");
                 self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
                     self.loc(span),
                     self.comptime_quota.limit(),
-                    self.eval_branch_quota_start_loc,
+                    self.comptime_quota.start_loc(),
                 );
                 return Err(Diverge::ComptimeQuotaExhausted);
             }
@@ -878,13 +878,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 return Ok(());
             }
 
-            if let Err(QuotaExhaustedError) = self.comptime_quota.spend_branch() {
+            if let Err(QuotaExhaustedError) = self.comptime_quota.spend(1) {
                 let span =
                     self.hir.block_spans[condition_block].expect("condition block wihtout span");
                 self.diag_ctx.emit_comptime_loop_branch_quota_exhausted(
                     self.loc(span),
                     self.comptime_quota.limit(),
-                    self.eval_branch_quota_start_loc,
+                    self.comptime_quota.start_loc(),
                 );
                 return Err(Diverge::ComptimeQuotaExhausted);
             }

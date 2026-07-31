@@ -43,6 +43,12 @@ newtype_index! {
     pub(crate) struct CallArgSpansIdx;
 }
 
+pub(crate) struct SuspendedCallFrame {
+    pub fn_def: hir::FnDefId,
+    pub quota: ComptimeQuota,
+    pub max_eval_branch_quota_seen: u32,
+}
+
 pub(crate) struct Evaluator<'a> {
     pub mir_blocks: ListOfLists<mir::BlockId, mir::Instruction>,
     pub mir_args: ListOfLists<mir::ArgsId, mir::LocalId>,
@@ -70,6 +76,7 @@ pub(crate) struct Evaluator<'a> {
     pub type_name_args_buf: Vec<ValueId>,
     pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
+    pub suspended_call_frames: Vec<SuspendedCallFrame>,
 
     pub evm_version: EvmVersion,
 }
@@ -109,6 +116,7 @@ impl<'a> Evaluator<'a> {
             type_name_args_buf: Vec::new(),
             fields_buf: Vec::new(),
             captures_buf: Vec::new(),
+            suspended_call_frames: Vec::new(),
 
             evm_version,
         }
@@ -140,8 +148,8 @@ impl<'a> Evaluator<'a> {
             diag_ctx,
             const_def.source_id,
             true,
-            ComptimeQuota::default(),
-            const_def.loc(),
+            ComptimeQuota::root(const_def.loc()),
+            None,
             EvalContext::Other,
         );
         match scope.with_comptime(|this| this.eval_block_inline(const_def.body)) {
@@ -205,7 +213,7 @@ impl<'a> Evaluator<'a> {
         entry_point: hir::EntryPoint,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> mir::FnId {
-        let eval_branch_quota_start_loc = match self.hir.block_spans[entry_point.body] {
+        let quota_start_loc = match self.hir.block_spans[entry_point.body] {
             Ok(span) => SrcLoc::new(entry_point.source_id, span),
             Err(Poisoned) => SrcLoc::new(entry_point.source_id, ZERO_SPAN),
         };
@@ -214,8 +222,8 @@ impl<'a> Evaluator<'a> {
             diag_ctx,
             entry_point.source_id,
             false,
-            ComptimeQuota::default(),
-            eval_branch_quota_start_loc,
+            ComptimeQuota::root(quota_start_loc),
+            None,
             EvalContext::Other,
         );
 
