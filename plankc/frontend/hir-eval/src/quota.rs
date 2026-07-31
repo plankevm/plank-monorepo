@@ -19,10 +19,6 @@ impl ComptimeQuota {
         self.limit = self.limit.max(limit);
     }
 
-    pub(crate) fn reset_spent(&mut self) {
-        self.spent = 0;
-    }
-
     pub(crate) fn spend_branch(&mut self) -> Result<(), QuotaExhaustedError> {
         assert!(self.spent <= self.limit, "comptime quota overspent elsewhere");
         if self.spent == self.limit {
