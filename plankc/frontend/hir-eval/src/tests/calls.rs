@@ -1142,7 +1142,6 @@ fn test_non_recursive_comptime_calls_do_not_consume_caller_quota() {
 #[test]
 fn test_cached_comptime_function_body_quota_replays_in_fresh_child() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
-    assert_eq!(996, DEFAULT_COMPTIME_BRANCH_QUOTA - 4);
     assert_diagnostics(
         std_project(
             r#"
@@ -1381,27 +1380,49 @@ fn test_nested_runtime_function_preamble_uses_child_quota() {
     assert_diagnostics(
         std_project(
             r#"
-        const f = fn() comptime {
+        const f = fn(comptime N: u256) comptime {
             let mut i = 0;
             while i < 500 {
                 i = i + 1;
             }
             void
-        } { };
+        } {
+            if N == 1 {
+                comptime {
+                    let mut i = 0;
+                    while i < 501 {
+                        i = i + 1;
+                    }
+                }
+            }
+        };
 
         init {
-            f();
-            f();
+            f(0);
             comptime {
                 let mut i = 0;
-                while i < 1 { i = i + 1; }
+                while i < 501 { i = i + 1; }
             }
+            f(1);
 
             @evm_stop();
         }
         "#,
         ),
-        &[],
+        &[r#"
+        error: comptime branch quota exhausted
+          --> main.plk:11:19
+           |
+        11 |             while i < 501 {
+           |                   ^^^^^^^^ evaluating this loop exceeded the comptime branch quota
+           |
+           = note: current eval branch quota is 1000
+        note: comptime evaluation began here
+          --> main.plk:24:5
+           |
+        24 |     f(1);
+           |     ^^^^
+        "#],
     );
 }
 
@@ -1474,8 +1495,6 @@ fn test_nested_runtime_function_preamble_quota_raise_does_not_reach_outer_caller
 #[test]
 fn test_cached_comptime_function_quota_raise_stays_in_child() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
-    assert_eq!(998, DEFAULT_COMPTIME_BRANCH_QUOTA - 2);
-    assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
     assert_diagnostics(
         std_project(
             r#"
@@ -1531,7 +1550,6 @@ fn test_cached_comptime_function_quota_raise_stays_in_child() {
 #[test]
 fn test_comptime_function_preamble_quota_exhaustion_reports_call_site() {
     assert_eq!(1000, DEFAULT_COMPTIME_BRANCH_QUOTA);
-    assert_eq!(1001, DEFAULT_COMPTIME_BRANCH_QUOTA + 1);
     assert_diagnostics(
         std_project(
             r#"
