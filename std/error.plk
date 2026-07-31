@@ -10,6 +10,12 @@ const comptime_caller_error = fn (comptime caller: cbytes, comptime message: cby
     @compile_error(@concat_cbytes((caller, ": ", message)));
 };
 
+const _selector = eager fn (comptime signature: cbytes) u256 {
+    @keccak256_cbytes(signature) >> 224
+};
+
+const SOL_ERROR_STRING_SELECTOR = _selector("Error(string)");
+
 const comptime_assert = fn (comptime condition: bool, comptime message: $T) void {
     if !(T == cbytes or T == tuple { cbytes, cbytes }) {
         comptime_caller_error("comptime_assert", "invalid message type");
@@ -42,7 +48,7 @@ const revert = fn (error: $T) never {
     } else if T == cbytes {
         if error.length < 32 {
             let buf = malloc_zeroed(32 * 3 + error.length);
-            unsafe_mstore32(wrapping_add_bytes(buf, 0x00), @keccak256_cbytes("Error(string)") >> 224);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x00), SOL_ERROR_STRING_SELECTOR);
             unsafe_mstore32(wrapping_add_bytes(buf, 0x20), 0x20);
             let packed_length_data = comptime {
                 (error.length << 248) | (@padded_read_cbytes(error, 0) >> 8)
@@ -51,12 +57,26 @@ const revert = fn (error: $T) never {
             unsafe_revert(wrapping_add_bytes(buf, 32 - 4), 4 + 32 * 2 + error.length);
         } else {
             let buf = malloc_uninit(32 * 3 + error.length);
-            unsafe_mstore32(wrapping_add_bytes(buf, 0x00), @keccak256_cbytes("Error(string)") >> 224);
+            unsafe_mstore32(wrapping_add_bytes(buf, 0x00), SOL_ERROR_STRING_SELECTOR);
             unsafe_mstore32(wrapping_add_bytes(buf, 0x20), 0x20);
             unsafe_mstore32(wrapping_add_bytes(buf, 0x40), error.length);
             unsafe_codecopy(wrapping_add_bytes(buf, 0x60), embed_get_ptr(error), error.length);
             unsafe_revert(wrapping_add_bytes(buf, 32 - 4), 4 + 32 * 2 + error.length);
         }
+    } else if @is_struct(T) {
+        if @field_count(T) != 0 {
+            @compile_error("revert: error types with field not yet supported");
+        }
+        if !@has_plain_name(T) {
+            @compile_error(@concat_cbytes((
+                "revert: type `",
+                @type_name(T),
+                "` with non-plain name not supported"
+            )));
+        }
+        let buf = malloc_uninit(32);
+        unsafe_mstore32(buf, _selector(@concat_cbytes((@type_name(T), "()"))));
+        unsafe_revert(wrapping_add_bytes(buf, 32 - 4), 4);
     } else {
         @compile_error("revert: unsupported runtime revert error type `T`");
     }

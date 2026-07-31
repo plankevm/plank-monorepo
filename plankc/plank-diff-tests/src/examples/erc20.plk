@@ -2,6 +2,7 @@ import std::storage::map_slot_hash;
 import std::core::addr::*;
 import std::precompile::ecrecover;
 import std::option::unwrap;
+import std::error::*;
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
@@ -39,11 +40,11 @@ const APPROVAL_TOPIC = 0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac
 
 const PERMIT2 = addr_from_u256(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
-const INSUFFICIENT_BALANCE_SELECTOR = 0xf4d678b8 /* InsufficientBalance() */;
-const INSUFFICIENT_ALLOWANCE_SELECTOR = 0x13be252b /* InsufficientAllowance() */;
-const PERMIT2_ALLOWANCE_FIXED = 0x3f68539a /* Permit2AllowanceIsFixedAtInfinity() */;
-const PERMIT_EXPIRED = 0x1a15a3cc /* PermitExpired() */;
-const INVALID_PERMIT = 0xddafbaef /* InvalidPermit() */;
+const InsufficientBalance = struct {};
+const InsufficientAllowance = struct {};
+const Permit2AllowanceIsFixedAtInfinity = struct {};
+const PermitExpired = struct {};
+const InvalidPermit = struct {};
 
 const balance_slot = fn (owner: addr) u256 {
     map_slot_hash(cast_addr(owner, u256), BALANCE_SLOT_BASE)
@@ -80,20 +81,6 @@ const emit_approval = fn (owner: addr, spender: addr, amount: u256) void {
     @evm_log3(buf, 32, APPROVAL_TOPIC, cast_addr(owner, u256), cast_addr(spender, u256));
 };
 
-const revert_4byte = fn (comptime selector: u256) never {
-    if selector >= (1 << 32) {
-        @compile_error("error selector must fit in four bytes");
-    }
-    let buf = @malloc_uninit(32);
-    @mstore32(buf, selector);
-    @evm_revert(buf +% (32 - 4), 4);
-};
-
-const require_4byte = fn (condition: bool, comptime selector: u256) void {
-    if !condition {
-        revert_4byte(selector);
-    }
-};
 
 const calldataload_addr = fn (comptime offset: u256) addr {
     addr_from_u256(@evm_calldataload(offset))
@@ -239,7 +226,10 @@ const allowance = fn (owner: addr, spender: addr) never {
 };
 
 const approve = fn (spender: addr, amount: u256) never {
-    require_4byte(!addr_eq(spender, PERMIT2) or amount == U256_MAX, PERMIT2_ALLOWANCE_FIXED);
+    require(
+        !addr_eq(spender, PERMIT2) or amount == U256_MAX,
+        Permit2AllowanceIsFixedAtInfinity {}
+    );
 
     @evm_sstore(allowance_slot(msg_sender(), spender), amount);
     emit_approval(msg_sender(), spender, amount);
@@ -264,7 +254,7 @@ const allowance_consume = fn (owner: addr, amount: u256) bool {
 };
 
 const transfer_from = fn (from: addr, to: addr, amount: u256) never {
-    require_4byte(allowance_consume(from, amount), INSUFFICIENT_ALLOWANCE_SELECTOR);
+    require(allowance_consume(from, amount), InsufficientAllowance {});
 
     transfer_balance(from, to, amount);
 
@@ -292,7 +282,7 @@ const symbol = fn () never {
 const transfer_balance = fn (from: addr, to: addr, amount: u256) void {
     let from_slot = balance_slot(from);
     let balance_from = @evm_sload(from_slot);
-    require_4byte(balance_from >= amount, INSUFFICIENT_BALANCE_SELECTOR);
+    require(balance_from >= amount, InsufficientBalance {});
     @evm_sstore(from_slot, balance_from - amount);
 
     let to_slot = balance_slot(to);
@@ -337,8 +327,8 @@ const permit = fn (
     r: u256,
     s: u256
 ) never {
-    require_4byte(!addr_eq(spender, PERMIT2) or value == U256_MAX, PERMIT2_ALLOWANCE_FIXED);
-    require_4byte(@evm_timestamp() <= deadline, PERMIT_EXPIRED);
+    require(!addr_eq(spender, PERMIT2) or value == U256_MAX, Permit2AllowanceIsFixedAtInfinity {});
+    require(@evm_timestamp() <= deadline, PermitExpired {});
 
     let nonce_slot = nonces_slot(owner);
     let nonce = @evm_sload(nonce_slot);
