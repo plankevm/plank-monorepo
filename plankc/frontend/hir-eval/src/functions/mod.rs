@@ -370,11 +370,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             child_quota,
         );
         // The language quota, rather than the host thread's stack size, bounds recursion.
-        let result = stacker::maybe_grow(MIN_EVAL_STACK_REMAINING, EVAL_STACK_SEGMENT_SIZE, || {
+        stacker::maybe_grow(MIN_EVAL_STACK_REMAINING, EVAL_STACK_SEGMENT_SIZE, || {
             scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc)
-        });
-
-        result
+        })
     }
 
     fn eval_callee_scope(
