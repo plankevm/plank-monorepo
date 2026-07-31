@@ -1,7 +1,8 @@
 use hashbrown::HashMap;
 use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span, index_vec};
 use sir_data::{
-    BasicBlockId, Control, EthIRProgram, FunctionId, LocalId, Operation, OperationIdx,
+    BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, Operation,
+    OperationIdx, Switch,
     operation::{InlineOperands, InternalCallData, OpVisitorMut},
 };
 
@@ -67,7 +68,7 @@ impl Inliner {
             if is_linear {
                 self.inline_linear_callsite(program, block, operation, call);
             } else {
-                self.inline_cfg_callsite(program, function_id, block, operation);
+                self.inline_cfg_callsite(program, block, operation, call);
             }
         }
     }
@@ -75,11 +76,11 @@ impl Inliner {
     fn inline_linear_callsite(
         &mut self,
         program: &mut EthIRProgram,
-        block: BasicBlockId,
+        caller_id: BasicBlockId,
         operation: OperationIdx,
         call: InternalCallData,
     ) {
-        let caller_operations = program.basic_blocks[block].operations;
+        let caller_operations = program.basic_blocks[caller_id].operations;
         let new_operations_start = program.operations.next_idx();
 
         for old_operation in caller_operations.iter() {
@@ -121,29 +122,160 @@ impl Inliner {
                     self.call_blocks
                         .remove(&old_operation)
                         .expect("tracked callsite should have a current block");
-                    self.call_blocks.insert(new_operation, block);
+                    assert!(self.call_blocks.insert(new_operation, caller_id).is_none());
                 }
             }
         }
 
-        program.basic_blocks[block].operations =
+        program.basic_blocks[caller_id].operations =
             Span::new(new_operations_start, program.operations.next_idx());
     }
 
     fn inline_cfg_callsite(
         &mut self,
-        _program: &mut EthIRProgram,
-        _function_id: FunctionId,
-        _block: BasicBlockId,
-        _operation: OperationIdx,
+        program: &mut EthIRProgram,
+        caller_id: BasicBlockId,
+        operation: OperationIdx,
+        call: InternalCallData,
     ) {
-        // Split the caller at the `icall`, move the suffix to a continuation block, and clone the
-        // callee CFG between the prefix and continuation.
-        // Update tracked callsite blocks for calls moved to the continuation.
-        // Map call arguments to cloned callee entry inputs and callee returns to continuation inputs.
-        // Rewrite every cloned `iret` to jump to the continuation.
-        // Leave the original callee and orphaned IR behind for defragmentation.
-        todo!("implement multi-block callsite inlining")
+        let caller = program.basic_blocks[caller_id];
+
+        program.basic_blocks[caller_id].outputs = Span::new(call.ins_start, call.outs_start);
+        program.basic_blocks[caller_id].operations = Span::new(caller.operations.start, operation);
+
+        let return_block = program.basic_blocks.push(BasicBlock {
+            inputs: Span::new(
+                call.outs_start,
+                call.outs_start + program.functions[call.function].get_outputs(),
+            ),
+            outputs: caller.outputs,
+            operations: Span::new(operation + 1, caller.operations.end),
+            control: caller.control,
+        });
+
+        for moved_operation in program.basic_blocks[return_block].operations.iter() {
+            if let Operation::InternalCall(call) = program.operations[moved_operation] {
+                let previous_block = self
+                    .call_blocks
+                    .insert(moved_operation, return_block)
+                    .expect("internal call in moved suffix should have a tracked callsite block");
+                assert_eq!(previous_block, caller_id);
+                assert!(
+                    self.callsites[call.function].contains(&moved_operation),
+                    "internal call in moved suffix should have a tracked callsite"
+                );
+            }
+        }
+
+        let callee_entry = program.functions[call.function].entry();
+        let mut block_map = HashMap::new();
+        let mut callee_locals = HashMap::new();
+        let mut block_worklist = vec![callee_entry];
+        let block_placeholder = BasicBlock {
+            inputs: Span::EMPTY,
+            outputs: Span::EMPTY,
+            operations: Span::EMPTY,
+            control: Control::LastOpTerminates,
+        };
+
+        while let Some(block) = block_worklist.pop() {
+            let remapped_block_id = *block_map
+                .entry(block)
+                .or_insert_with(|| program.basic_blocks.push(block_placeholder));
+
+            let source = program.basic_blocks[block];
+
+            let inputs_start = program.locals.next_idx();
+            for input in source.inputs.iter() {
+                let source_input = program.locals[input];
+                let remapped_input = OperationRemapper { program, locals: &mut callee_locals }
+                    .remap_local(source_input);
+                program.locals.push(remapped_input);
+            }
+            let inputs_end = program.locals.next_idx();
+
+            let operations_start = program.operations.next_idx();
+            for op_id in source.operations.iter() {
+                let mut remapped = program.operations[op_id];
+                remapped
+                    .visit_data_mut(&mut OperationRemapper { program, locals: &mut callee_locals });
+                program.operations.push(remapped);
+            }
+
+            let outputs_start = program.locals.next_idx();
+            for output in source.outputs.iter() {
+                let source_output = program.locals[output];
+                let remapped_output = OperationRemapper { program, locals: &mut callee_locals }
+                    .remap_local(source_output);
+                program.locals.push(remapped_output);
+            }
+            let outputs_end = program.locals.next_idx();
+
+            let control = match source.control {
+                Control::LastOpTerminates => Control::LastOpTerminates,
+                Control::InternalReturn => Control::ContinuesTo(return_block),
+                Control::ContinuesTo(target) => {
+                    let remapped_target = *block_map.entry(target).or_insert_with(|| {
+                        block_worklist.push(target);
+                        program.basic_blocks.push(block_placeholder)
+                    });
+                    Control::ContinuesTo(remapped_target)
+                }
+                Control::Branches(branch) => {
+                    let zero_target = *block_map.entry(branch.zero_target).or_insert_with(|| {
+                        block_worklist.push(branch.zero_target);
+                        program.basic_blocks.push(block_placeholder)
+                    });
+                    let non_zero_target =
+                        *block_map.entry(branch.non_zero_target).or_insert_with(|| {
+                            block_worklist.push(branch.non_zero_target);
+                            program.basic_blocks.push(block_placeholder)
+                        });
+                    Control::Branches(Branch {
+                        condition: callee_locals[&branch.condition],
+                        non_zero_target,
+                        zero_target,
+                    })
+                }
+                Control::Switch(switch) => {
+                    let cases = program.cases[switch.cases];
+                    let targets_start_id = program.cases_bb_ids.next_idx();
+                    for source_target_idx in cases.target_indices().iter() {
+                        let source_target = program.cases_bb_ids[source_target_idx];
+                        let remapped_target =
+                            *block_map.entry(source_target).or_insert_with(|| {
+                                block_worklist.push(source_target);
+                                program.basic_blocks.push(block_placeholder)
+                            });
+                        program.cases_bb_ids.push(remapped_target);
+                    }
+                    let cases = program.cases.push(Cases {
+                        values_start_id: cases.values_start_id,
+                        targets_start_id,
+                        cases_count: cases.cases_count,
+                    });
+                    Control::Switch(Switch {
+                        condition: callee_locals[&switch.condition],
+                        fallback: switch.fallback.map(|target| {
+                            *block_map.entry(target).or_insert_with(|| {
+                                block_worklist.push(target);
+                                program.basic_blocks.push(block_placeholder)
+                            })
+                        }),
+                        cases,
+                    })
+                }
+            };
+
+            program.basic_blocks[remapped_block_id] = BasicBlock {
+                inputs: Span::new(inputs_start, inputs_end),
+                outputs: Span::new(outputs_start, outputs_end),
+                operations: Span::new(operations_start, program.operations.next_idx()),
+                control,
+            };
+        }
+
+        program.basic_blocks[caller_id].control = Control::ContinuesTo(block_map[&callee_entry]);
     }
 }
 
@@ -186,7 +318,6 @@ impl<'d> OpVisitorMut<'d, ()> for &mut OperationRemapper<'_> {
 
     fn visit_static_alloc_mut(self, data: &'d mut sir_data::operation::StaticAllocData) {
         data.ptr_out = self.remap_local(data.ptr_out);
-        data.alloc_id = self.program.next_static_alloc_id.get_and_inc();
     }
 
     fn visit_memory_load_mut(self, data: &'d mut sir_data::operation::MemoryLoadData) {
@@ -291,7 +422,7 @@ enum FunctionState {
 mod tests {
     use super::Inliner;
     use crate::{AnalysesStore, Legalizer, run_pass};
-    use sir_data::assert_ir_display;
+    use sir_data::{Operation, assert_ir_display};
     use sir_parser::{EmitConfig, parse_or_panic};
 
     fn inline(source: &str) -> sir_data::EthIRProgram {
@@ -411,6 +542,53 @@ mod tests {
     }
 
     #[test]
+    fn test_linear_allocated_inputs() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    a = const 2
+                    b = const 3
+                    modulus = const 5
+                    result = icall @add_mod a b modulus
+                    stop
+                }
+
+            fn add_mod:
+                entry a b modulus -> result {
+                    result = addmod a b modulus
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 $1 $2 -> $3 {
+                    $3 = addmod $0 $1 $2
+                    iret
+                }
+
+                @1 {
+                    $4 = const 0x2
+                    $5 = const 0x3
+                    $6 = const 0x5
+                    $8 = addmod $4 $5 $6
+                    $7 = copy $8
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
     fn test_linear_repeated_callsites_in_same_block() {
         let actual = inline(
             r#"
@@ -450,5 +628,213 @@ mod tests {
                 }
             "#,
         );
+    }
+
+    #[test]
+    fn test_cfg_inline_updates_moved_callsite() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    cond = const 1
+                    x = const 7
+                    y = icall @choose cond x
+                    z = icall @id y
+                    stop
+                }
+
+            fn choose:
+                entry cond x -> x {
+                    => cond ? @ret : @zero
+                }
+                ret y -> y {
+                    iret
+                }
+                zero _ -> z {
+                    z = const 0
+                    iret
+                }
+
+            fn id:
+                entry x -> x {
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @2
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @3  (outputs: 1)
+                fn @2 -> entry @4  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 $1 -> $1 {
+                    => $0 ? @1 : @2
+                }
+
+                @1 $2 -> $2 {
+                    iret
+                }
+
+                @2 $3 -> $4 {
+                    $4 = const 0x0
+                    iret
+                }
+
+                @3 $5 -> $5 {
+                    iret
+                }
+
+                @4 -> $6 $7 {
+                    $6 = const 0x1
+                    $7 = const 0x7
+                    => @6
+                }
+
+                @5 $8 {
+                    $9 = copy $8
+                    stop
+                }
+
+                @6 $10 $11 -> $11 {
+                    => $10 ? @8 : @7
+                }
+
+                @7 $13 -> $14 {
+                    $14 = const 0x0
+                    => @5
+                }
+
+                @8 $12 -> $12 {
+                    => @5
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_cfg_inline_switch_loop() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    selector = const 1
+                    x = const 3
+                    y = icall @countdown selector x
+                    stop
+                }
+
+            fn countdown:
+                entry selector x -> selector x {
+                    => @loop
+                }
+                loop loop_selector loop_x -> loop_selector next {
+                    one = const 1
+                    next = sub loop_x one
+                    switch loop_x {
+                        0 => @done
+                        default => @loop
+                    }
+                }
+                done _ done_x -> done_x {
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @3  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 $1 -> $0 $1 {
+                    => @1
+                }
+
+                @1 $2 $3 -> $2 $5 {
+                    $4 = const 0x1
+                    $5 = sub $3 $4
+                    switch $3 {
+                        0x0 => @2,
+                        else => @1
+                    }
+
+                }
+
+                @2 $6 $7 -> $7 {
+                    iret
+                }
+
+                @3 -> $8 $9 {
+                    $8 = const 0x1
+                    $9 = const 0x3
+                    => @5
+                }
+
+                @4 $10 {
+                    stop
+                }
+
+                @5 $11 $12 -> $11 $12 {
+                    => @6
+                }
+
+                @6 $13 $14 -> $13 $16 {
+                    $15 = const 0x1
+                    $16 = sub $14 $15
+                    switch $14 {
+                        0x0 => @7,
+                        else => @6
+                    }
+
+                }
+
+                @7 $17 $18 -> $18 {
+                    => @4
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_inlining_preserves_static_allocation_identity() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    a = icall @alloc
+                    b = icall @alloc
+                    same = eq a b
+                    stop
+                }
+
+            fn alloc:
+                entry -> ptr {
+                    ptr = salloc 32
+                    iret
+                }
+            "#,
+        );
+
+        let alloc_ids = actual
+            .basic_blocks
+            .iter()
+            .flat_map(|block| block.operations.iter())
+            .filter_map(|operation| match actual.operations[operation] {
+                Operation::StaticAllocZeroed(data) => Some(data.alloc_id),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(alloc_ids.len(), 3);
+        assert!(alloc_ids.iter().all(|&alloc_id| alloc_id == alloc_ids[0]));
     }
 }
