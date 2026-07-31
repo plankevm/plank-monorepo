@@ -2101,6 +2101,7 @@ dependencies = [
  "plank-values",
  "pretty_assertions",
  "sha2",
+ "stacker",
 ]
 
 [[package]]
