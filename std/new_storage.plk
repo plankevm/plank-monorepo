@@ -28,15 +28,6 @@ const raw_load = fn (comptime R: type, slot: u256) u256 {
     }
 };
 
-/// holds value between [1, 256]
-const BitWidth = struct { size: u256 };
-
-const new_bit_width = eager fn (comptime size: u256) BitWidth {
-    if size <= 0 or 256 < size {
-        @compile_error("size not 1-256");
-    }
-    BitWidth { size: size }
-};
 
 const _primitive_bit_size = eager fn (comptime T: type) Option(BitWidth) {
     if is_uint(T) { Some(new_bit_width(bit_size(T))) }
@@ -78,17 +69,17 @@ const add_size = eager fn (s1: StorageOffset, s2: StorageOffset) StorageOffset {
 
 const add_atom_bits = eager fn (offset: StorageOffset, comptime width: BitWidth) StorageOffset {
     let offset_bits = cast_uint(offset.bits, u256);
-    if offset_bits +% width.size < 256 {
+    if offset_bits +% width.as_u256 < 256 {
         StorageOffset {
             slots: offset.slots,
-            bits: unsafe_uint_from_u256(u8, offset_bits +% width.size)
+            bits: unsafe_uint_from_u256(u8, offset_bits +% width.as_u256)
         }
-    } else if offset_bits +% width.size == 256 {
+    } else if offset_bits +% width.as_u256 == 256 {
         StorageOffset { slots: offset.slots +% 1, bits: new_uint(u8, 0) }
     } else {
         StorageOffset {
-            slots: offset.slots +% 1 +% @bool_to_u256(width.size == 256),
-            bits: unsafe_uint_from_u256(u8,  width.size % 256),
+            slots: offset.slots +% 1 +% @bool_to_u256(width.as_u256 == 256),
+            bits: unsafe_uint_from_u256(u8,  width.as_u256 % 256),
         }
     }
 };
@@ -136,7 +127,12 @@ const _write_word_to_slot_buf = fn (
         0
     } else if bits + offset_bits > 256 {
         raw_store(R, slot, buf);
-        word
+        if bits == 256 {
+            raw_store(R, slot +% 1, word);
+            0
+        } else {
+            word
+        }
     } else {
         @compile_error("unreachable");
     }
@@ -159,7 +155,7 @@ const _store = fn (
             word,
             start_slot +% rel_offset.slots,
             cast_uint(rel_offset.bits, u256),
-            bits.size,
+            bits.as_u256,
         );
     }
 
@@ -204,25 +200,116 @@ const store = fn (
     }
 };
 
-const Thing = struct {
-    owner: addr,
-    key: u128,
-    value: u96,
-    a: u64,
-    b: u64,
+const unsafe_primitive_from_word = fn (comptime T: type, word: u256) T {
+    if is_uint(T) {
+        unsafe_uint_from_u256(T, word)
+    } else if T == addr {
+        addr_unsafe_from_u256(word)
+    } else if T == bool {
+        word != 0
+    } else if T == bytes32 {
+        bytes32_from_u256(word)
+    } else {
+        @compile_error("unsafe_primitive_from_word: type unsupported");
+    }
 };
 
-init {
-    store(
-        transient,
-        0,
-        Thing {
-            owner: msg_sender(),
-            value: unwrap(try_cast_uint(@evm_calldataload(0x00), u96)),
-            key: unwrap(try_cast_uint(@evm_calldataload(0x20), u128)),
-            a: unwrap(try_cast_uint(@evm_calldataload(0x40), u64)),
-            b: unwrap(try_cast_uint(@evm_calldataload(0x60), u64)),
+const _read_word_from_slot_buffer = fn (
+    slot_buffer: u256,
+    comptime offset_bits: u256,
+    comptime width: BitWidth,
+) u256 {
+    if offset_bits + width.as_u256 > 256 {
+        @compile_error("_read_word_from_slot_buffer: value does not fit in slot");
+    }
+
+    if width.as_u256 == 8 and offset_bits % 8 == 0 {
+        @evm_byte(31 - (offset_bits -/ 8), slot_buffer)
+    } else if offset_bits + width.as_u256 == 256 {
+        // Shifting drops every bit above the value, so no mask is needed.
+        slot_buffer >> offset_bits
+    } else {
+        (slot_buffer >> offset_bits) & ((1 << width.as_u256) - 1)
+    }
+};
+
+const LoadResult = fn (comptime T: type) type {
+    struct {
+        value: T,
+        slot_buffer: u256,
+    }
+};
+
+const _load = fn (
+    comptime R: type,
+    comptime T: type,
+    start_slot: u256,
+    slot_buffer: u256,
+    comptime rel_offset: StorageOffset,
+) LoadResult(T) {
+    let primitive_bit_size = _primitive_bit_size(T);
+    if primitive_bit_size.is_some {
+        let width = comptime { unwrap(primitive_bit_size) };
+        let offset_bits = cast_uint(rel_offset.bits, u256);
+        let fits_current_slot = offset_bits + width.as_u256 <= 256;
+        let slot_buffer = if offset_bits == 0 {
+            raw_load(R, start_slot +% rel_offset.slots)
+        } else if !fits_current_slot {
+            raw_load(R, start_slot +% rel_offset.slots +% 1)
+        } else {
+            slot_buffer
+        };
+        let value_offset_bits = if fits_current_slot { offset_bits } else { 0 };
+        return LoadResult(T) {
+            value: unsafe_primitive_from_word(
+                T,
+                _read_word_from_slot_buffer(slot_buffer, value_offset_bits, width),
+            ),
+            slot_buffer: slot_buffer,
+        };
+    }
+
+    let rawptr_region = rawptr_get_region(T);
+    if rawptr_region.is_some {
+        @compile_error("_load: loading pointers from storage is not yet supported");
+    }
+
+    if @is_tuple(T) or @is_struct(T) {
+        let mut value = @uninit(T);
+        let mut slot_buffer = slot_buffer;
+        comptime let mut rel_offset = rel_offset;
+        comptime let mut i = 0;
+
+        inline while i < @field_count(T) {
+            let field_result = _load(
+                R,
+                @field_type(T, i),
+                start_slot,
+                slot_buffer,
+                rel_offset,
+            );
+            value = @set_field(value, i, field_result.value);
+            slot_buffer = field_result.slot_buffer;
+            rel_offset = advance_offset(rel_offset, @field_type(T, i));
+            i = i + 1;
         }
-    );
-    @evm_stop();
-}
+
+        return LoadResult(T) {
+            value: value,
+            slot_buffer: slot_buffer,
+        };
+    }
+
+    @compile_error("_load: type unsupported");
+};
+
+const load = fn (
+    comptime R: type,
+    comptime T: type,
+    start_slot: u256,
+) T {
+    if !is_storage_region(R) {
+        @compile_error("load: expected `R` to be valid storage region `storage` or `transient`");
+    }
+    _load(R, T, start_slot, 0, STORAGE_OFFSET_ZERO).value
+};

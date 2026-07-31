@@ -73,6 +73,16 @@ const bit_size = eager fn (comptime T: type) u256 {
     @type_index(T)
 };
 
+/// holds value between [1, 256]
+const BitWidth = struct { as_u256: u256 };
+
+const new_bit_width = eager fn (comptime size: u256) BitWidth {
+    if size <= 0 or 256 < size {
+        @compile_error("size not 1-256");
+    }
+    BitWidth { as_u256: size }
+};
+
 const unsafe_uint_from_u256 = eager fn (comptime T: type, raw_repr: u256) T {
     if T == u256 {
         raw_repr
