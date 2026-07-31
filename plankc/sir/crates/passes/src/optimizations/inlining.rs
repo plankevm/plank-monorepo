@@ -15,8 +15,11 @@ pub(crate) struct Inliner {
 }
 
 impl Pass for Inliner {
-    fn run(&mut self, _program: &mut EthIRProgram, _store: &AnalysesStore) {
-        todo!("implement inlining pass")
+    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
+        *self = Self::new(program);
+        for function_id in self.postorder.clone() {
+            self.inline_function(program, function_id);
+        }
     }
 }
 
@@ -76,11 +79,13 @@ impl Inliner {
         operation: OperationIdx,
         call: InternalCallData,
     ) {
+        let caller_operations = program.basic_blocks[block].operations;
         let new_operations_start = program.operations.next_idx();
 
-        for old_operation in program.basic_blocks[block].operations.iter() {
+        for old_operation in caller_operations.iter() {
             if old_operation == operation {
                 let callee_entry = program.functions[call.function].entry();
+                let callee_operations = program.basic_blocks[callee_entry].operations;
                 let callee_inputs = program.block(callee_entry).inputs();
                 let call_inputs = call.get_inputs(program);
                 let mut callee_locals = HashMap::new();
@@ -88,7 +93,7 @@ impl Inliner {
                     callee_locals.insert(callee_inputs[i], call_inputs[i]);
                 }
 
-                for callee_operation in program.basic_blocks[callee_entry].operations.iter() {
+                for callee_operation in callee_operations.iter() {
                     let mut remapped = program.operations[callee_operation];
                     remapped.visit_data_mut(&mut OperationRemapper {
                         program,
@@ -280,4 +285,170 @@ enum FunctionState {
     NotStarted,
     InProgress,
     Complete,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Inliner;
+    use crate::{AnalysesStore, Legalizer, run_pass};
+    use sir_data::assert_ir_display;
+    use sir_parser::{EmitConfig, parse_or_panic};
+
+    fn inline(source: &str) -> sir_data::EthIRProgram {
+        let mut program = parse_or_panic(source, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut Inliner::default(), &mut program, &store);
+        Legalizer::default()
+            .run(&program, &store)
+            .unwrap_or_else(|err| panic!("legalization failed after inlining: {err}\n{program}"));
+        program
+    }
+
+    #[test]
+    fn test_linear_single_callsite() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 2
+                    y = icall @double x
+                    stop
+                }
+
+            fn double:
+                entry x -> y {
+                    y = add x x
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $1 {
+                    $1 = add $0 $0
+                    iret
+                }
+
+                @1 {
+                    $2 = const 0x2
+                    $4 = add $2 $2
+                    $3 = copy $4
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_linear_nested_calls() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 5
+                    y = icall @sum_inc x
+                    stop
+                }
+
+            fn sum_inc:
+                entry x -> y {
+                    one = const 1
+                    inc = icall @add x one
+                    y = add inc x
+                    iret
+                }
+
+            fn add:
+                entry a b -> sum {
+                    sum = add a b
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @2
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 1)
+                fn @2 -> entry @2  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 $1 -> $2 {
+                    $2 = add $0 $1
+                    iret
+                }
+
+                @1 $3 -> $6 {
+                    $4 = const 0x1
+                    $9 = add $3 $4
+                    $5 = copy $9
+                    $6 = add $5 $3
+                    iret
+                }
+
+                @2 {
+                    $7 = const 0x5
+                    $10 = const 0x1
+                    $11 = add $7 $10
+                    $12 = copy $11
+                    $13 = add $12 $7
+                    $8 = copy $13
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_linear_repeated_callsites_in_same_block() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 3
+                    y = icall @id x
+                    z = icall @id y
+                    stop
+                }
+
+            fn id:
+                entry x -> x {
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $0 {
+                    iret
+                }
+
+                @1 {
+                    $1 = const 0x3
+                    $2 = copy $1
+                    $3 = copy $2
+                    stop
+                }
+            "#,
+        );
+    }
 }
