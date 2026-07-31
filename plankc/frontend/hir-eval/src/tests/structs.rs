@@ -39,36 +39,6 @@ fn test_struct_field_access() {
 }
 
 #[test]
-fn test_struct_method_capture_mismatch() {
-    assert_diagnostics(
-        r#"
-        const Make = fn(comptime value: u256) type {
-            struct {
-                fn get() u256 { value }
-            }
-        };
-
-        init {
-            let first = Make(1);
-            let second = Make(2);
-            @evm_stop();
-        }
-        "#,
-        &[r#"
-        error: method captures conflict with struct type
-         --> main.plk:9:18
-          |
-        8 |     let first = Make(1);
-          |                 ------- first registered here with capture `1`
-        9 |     let second = Make(2);
-          |                  ^^^^^^^ method `get` captures `2` for this instantiation
-          |
-          = help: include the captured value in the struct's type index or fields
-        "#],
-    );
-}
-
-#[test]
 fn test_struct_method_capture_match() {
     assert_lowers_to(
         r#"
@@ -95,7 +65,33 @@ fn test_struct_method_capture_match() {
 }
 
 #[test]
-fn test_static_method_call() {
+fn test_struct_method_captures_produce_distinct_types() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime value: u256) type {
+            struct {
+                fn get() u256 { value }
+            }
+        };
+
+        init {
+            let first = Make(1);
+            let second = Make(2);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_type_qualified_method_calls() {
     assert_lowers_to(
         r#"
         const S = struct {
@@ -154,7 +150,7 @@ fn test_method_nested_fn_captures_self_type() {
 }
 
 #[test]
-fn test_generic_static_method_self_specialization() {
+fn test_type_qualified_method_self_specialization() {
     assert_lowers_to(
         r#"
         const Make = fn(comptime T: type) type {
@@ -202,7 +198,7 @@ fn test_generic_static_method_self_specialization() {
 }
 
 #[test]
-fn test_instance_method_call() {
+fn test_value_method_call_injects_receiver() {
     assert_lowers_to(
         r#"
         const S = struct {
@@ -236,7 +232,66 @@ fn test_instance_method_call() {
 }
 
 #[test]
-fn test_instance_method_self_type_reflection() {
+fn test_type_qualified_method_call() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn identity(value: Self, input: u256) u256 { input }
+        };
+
+        init {
+            let value: S = S {};
+            let output = S.identity(value, 2);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S, %1: u256) -> u256 {
+            %2 : u256 = %1
+            ret %2
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {    }
+            %1 : u256 = 2
+            %2 : u256 = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_type_method_call_with_missing_argument() {
+    assert_diagnostics(
+        r#"
+        const S = struct {
+            fn call(value: Self, other: u256) u256 { other }
+        };
+
+        init {
+            let value: S = S {};
+            S.call(value);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: wrong number of arguments
+         --> main.plk:7:5
+          |
+        2 |     fn call(value: Self, other: u256) u256 { other }
+          |            -------------------------- defined with 2 parameters
+        ...
+        7 |     S.call(value);
+          |     ^^^^^^^^^^^^^ expected 2 arguments, got 1
+        "#],
+    );
+}
+
+#[test]
+fn test_value_method_self_type_reflection() {
     assert_lowers_to(
         r#"
         const S = struct {
@@ -267,7 +322,7 @@ fn test_instance_method_self_type_reflection() {
 }
 
 #[test]
-fn test_unknown_static_method() {
+fn test_unknown_method() {
     assert_diagnostics(
         r#"
         const S = struct {};
@@ -278,34 +333,41 @@ fn test_unknown_static_method() {
         }
         "#,
         &[r#"
-        error: unknown static method
+        error: unknown method
          --> main.plk:4:5
           |
         4 |     S.missing();
-          |     ^^^^^^^^^^^ `S` has no static method `missing`
+          |     ^^^^^^^^^^^ `S` has no method `missing`
         "#],
     );
 }
 
 #[test]
-fn test_unknown_instance_method() {
+fn test_non_struct_method_call() {
     assert_diagnostics(
         r#"
-        const S = struct {};
-
         init {
-            let value: S = S {};
-            value.missing();
+            u256.missing();
+            true.missing();
             @evm_stop();
         }
         "#,
-        &[r#"
-        error: unknown instance method
-         --> main.plk:5:5
+        &[
+            r#"
+        error: method call on non-struct
+         --> main.plk:2:5
           |
-        5 |     value.missing();
-          |     ^^^^^^^^^^^^^^^ `S` has no instance method `missing`
-        "#],
+        2 |     u256.missing();
+          |     ^^^^^^^^^^^^^^ `u256` is not a struct type and cannot have methods
+        "#,
+            r#"
+        error: method call on non-struct
+         --> main.plk:3:5
+          |
+        3 |     true.missing();
+          |     ^^^^^^^^^^^^^^ `bool` is not a struct type and cannot have methods
+        "#,
+        ],
     );
 }
 

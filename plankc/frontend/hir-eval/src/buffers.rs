@@ -19,6 +19,5 @@ impl crate::scope::Scope<'_, '_> {
         with_fields_buf => fields_buf;
         with_locals_buf => locals_buf;
         with_captures_buf => captures_buf;
-        with_methods_buf => method_buf;
     }
 }

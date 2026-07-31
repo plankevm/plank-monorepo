@@ -1,19 +1,12 @@
 use crate::{
-    evaluator::EvaluatedMethod,
     functions::SelfBinding,
-    scope::{EvalContext, EvalValue, LocalState, Scope},
+    scope::{EvalValue, LocalState, Scope},
 };
 use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
 use plank_values::{Compound, Field, StructKey, StructView, Type, TypeId, Value};
-
-#[derive(Clone, Copy)]
-enum MethodKind {
-    Static,
-    Instance,
-}
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -63,81 +56,29 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 return Err(Poisoned);
             }
 
+            let mut method_closures = Vec::new();
+            let mut methods_poisoned = false;
+            for &function in &this.hir.methods[struct_def.methods] {
+                match this.eval_fn_def(function) {
+                    Ok(EvalValue::Comptime(closure)) => method_closures.push(closure),
+                    Ok(EvalValue::Runtime { .. }) => {
+                        unreachable!("function definitions always evaluate to comptime closures")
+                    }
+                    Err(Poisoned) => methods_poisoned = true,
+                }
+            }
+            if methods_poisoned {
+                return Err(Poisoned);
+            }
+
             let r#struct = this.eval.types.intern_struct(StructKey {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
                 fields: &this.eval.fields_buf[fields_buf_offset..],
+                methods: &method_closures,
             });
 
-            let struct_ty = TypeId::from_struct(r#struct);
-            let registration_loc = match this.ctx {
-                EvalContext::FunctionPreamble { call_loc, .. }
-                | EvalContext::FunctionBody { call_loc, .. } => call_loc,
-                EvalContext::Other => this.loc(def_expr_span),
-            };
-            this.eval_struct_methods(struct_def, struct_ty, registration_loc)?;
-            Ok(struct_ty)
-        })
-    }
-
-    fn eval_struct_methods(
-        &mut self,
-        struct_def: hir::StructDef,
-        struct_ty: TypeId,
-        registration_loc: SrcLoc,
-    ) -> MaybePoisoned<()> {
-        self.with_methods_buf(|this, method_buf_offset| {
-            let mut poisoned = false;
-            for &method_def in &this.hir.methods[struct_def.methods] {
-                match this.eval_fn_def(method_def.function) {
-                    Ok(EvalValue::Comptime(closure)) => {
-                        this.eval.method_buf.push(EvaluatedMethod {
-                            method_def,
-                            closure,
-                            registration_loc,
-                        });
-                    }
-                    Ok(EvalValue::Runtime { .. }) => {
-                        unreachable!("function definitions always evaluate to comptime closures")
-                    }
-                    Err(Poisoned) => poisoned = true,
-                }
-            }
-            if poisoned {
-                return Err(Poisoned);
-            }
-
-            let evaluated_methods = &this.eval.method_buf[method_buf_offset..];
-            let Some(&methods_id) = this.eval.methods_by_type.get(&struct_ty) else {
-                let methods_id = this.eval.methods.push_iter(evaluated_methods.iter().copied());
-                this.eval.methods_by_type.insert(struct_ty, methods_id);
-                return Ok(());
-            };
-
-            let registered_methods = &this.eval.methods[methods_id];
-            assert_eq!(
-                registered_methods.len(),
-                evaluated_methods.len(),
-                "the same TypeId must always register the same methods"
-            );
-            let mut captures_mismatch = false;
-            for (&registered_method, &evaluated_method) in
-                registered_methods.iter().zip(evaluated_methods)
-            {
-                assert_eq!(
-                    registered_method.method_def.name, evaluated_method.method_def.name,
-                    "the same TypeId must always register methods in the same order"
-                );
-                if registered_method.closure != evaluated_method.closure {
-                    this.diag_ctx.emit_struct_method_capture_mismatch(
-                        this.eval.values,
-                        registered_method,
-                        evaluated_method,
-                    );
-                    captures_mismatch = true;
-                }
-            }
-            if captures_mismatch { Err(Poisoned) } else { Ok(()) }
+            Ok(TypeId::from_struct(r#struct))
         })
     }
 
@@ -147,84 +88,69 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, crate::scope::Diverge>> {
         let method_call = self.hir.method_calls[method_call_id];
-        let (receiver, _, _) = self.bindings[method_call.receiver].poisoned()?;
-        if let LocalState::Comptime(value) = receiver
+        let receiver = self.bindings[method_call.receiver].state?;
+        let struct_ty = if let LocalState::Comptime(value) = receiver
             && let Value::Type(struct_ty) = self.values.lookup(value)
         {
-            let method =
-                self.resolve_method(struct_ty, method_call.method, MethodKind::Static, call_span)?;
-            return self.eval_closure_call(
-                method.closure,
-                &self.hir.args[method_call.args],
-                call_span,
-                Some(SelfBinding { local: method.method_def.self_type, value }),
+            struct_ty
+        } else {
+            self.state_type(receiver)
+        };
+        let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(struct_ty) else {
+            self.diag_ctx.emit_method_call_on_non_struct(
+                self.eval.values,
+                struct_ty,
+                self.loc(call_span),
             );
-        }
-        let struct_ty = self.state_type(receiver);
-        let method =
-            self.resolve_method(struct_ty, method_call.method, MethodKind::Instance, call_span)?;
-        let self_type = self.eval.values.intern_type(struct_ty);
-        let mut method_args = Vec::with_capacity(self.hir.args[method_call.args].len() + 1);
-        method_args.push(method_call.receiver);
-        method_args.extend_from_slice(&self.hir.args[method_call.args]);
-        self.eval_closure_call(
-            method.closure,
-            &method_args,
-            call_span,
-            Some(SelfBinding { local: method.method_def.self_type, value: self_type }),
-        )
-    }
-
-    fn resolve_method(
-        &mut self,
-        struct_ty: TypeId,
-        method_name: StrId,
-        kind: MethodKind,
-        call_span: SourceSpan,
-    ) -> MaybePoisoned<EvaluatedMethod> {
-        let method = self.eval.methods_by_type.get(&struct_ty).and_then(|&methods_id| {
-            self.eval.methods[methods_id]
-                .iter()
-                .find(|method| {
-                    method.method_def.name == method_name
-                        && match kind {
-                            MethodKind::Static => method.method_def.instance.is_none(),
-                            MethodKind::Instance => method.method_def.instance.is_some(),
-                        }
-                })
-                .copied()
-        });
-        let Some(method) = method else {
-            match kind {
-                MethodKind::Static => self.diag_ctx.emit_unknown_static_method(
-                    self.eval.values,
-                    struct_ty,
-                    self.loc(call_span),
-                    method_name,
-                ),
-                MethodKind::Instance => {
-                    if let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(struct_ty)
-                        && let Some(&field) =
-                            r#struct.fields.iter().find(|field| field.name == method_name)
-                    {
-                        self.diag_ctx.emit_field_called_as_method(
-                            r#struct.def_loc.source,
-                            field,
-                            self.loc(call_span),
-                        );
-                    } else {
-                        self.diag_ctx.emit_unknown_instance_method(
-                            self.eval.values,
-                            struct_ty,
-                            self.loc(call_span),
-                            method_name,
-                        );
-                    }
-                }
-            }
             return Err(Poisoned);
         };
-        Ok(method)
+        let Some((method_def, closure)) = r#struct.methods.iter().find_map(|&closure| {
+            let Value::Closure { fn_def, .. } = self.values.lookup(closure) else {
+                unreachable!("invariant: struct methods are closures")
+            };
+            let method_def = self.hir.method_defs[fn_def];
+            (method_def.name == method_call.method).then_some((method_def, closure))
+        }) else {
+            if !matches!(receiver, LocalState::Comptime(value) if matches!(self.values.lookup(value), Value::Type(_)))
+                && let Some(&field) =
+                    r#struct.fields.iter().find(|field| field.name == method_call.method)
+            {
+                self.diag_ctx.emit_field_called_as_method(
+                    r#struct.def_loc.source,
+                    field,
+                    self.loc(call_span),
+                );
+                return Err(Poisoned);
+            }
+            self.diag_ctx.emit_unknown_method(
+                self.eval.values,
+                struct_ty,
+                self.loc(call_span),
+                method_call.method,
+            );
+            return Err(Poisoned);
+        };
+        let mut method_args = Vec::new();
+        let args;
+        let self_type_value;
+        match receiver {
+            LocalState::Comptime(value) if matches!(self.values.lookup(value), Value::Type(_)) => {
+                args = &self.hir.args[method_call.args];
+                self_type_value = value;
+            }
+            LocalState::Comptime(_) | LocalState::Runtime(_) => {
+                self_type_value = self.eval.values.intern_type(struct_ty);
+                method_args.push(method_call.receiver);
+                method_args.extend_from_slice(&self.hir.args[method_call.args]);
+                args = &method_args;
+            }
+        }
+        self.eval_closure_call(
+            closure,
+            args,
+            call_span,
+            Some(SelfBinding { local: method_def.self_type, value: self_type_value }),
+        )
     }
 
     pub(crate) fn eval_struct_member_access(

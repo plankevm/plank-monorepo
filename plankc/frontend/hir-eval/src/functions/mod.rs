@@ -104,10 +104,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             false,
             comptime_quota,
             Some(fn_def_id),
-            EvalContext::FunctionPreamble {
-                arg_spans,
-                call_loc: SrcLoc::new(call_source, call_span),
-            },
+            EvalContext::FunctionPreamble { arg_spans, call_source },
         );
 
         let captured_values = &fn_scope.eval.captures_buf[capture_buf_offset..];
@@ -198,9 +195,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         fn_def_id: hir::FnDefId,
     ) -> Result<MaybePoisoned<PreambleResult>, Diverge> {
-        let EvalContext::FunctionPreamble { call_loc, .. } = self.ctx else {
-            unreachable!("invariant: function preamble evaluated outside of a function call")
-        };
         let fn_def = self.hir.fns[fn_def_id];
         match self.with_comptime(|this| this.eval_block_inline(fn_def.type_preamble)) {
             Ok(()) => {}
@@ -213,7 +207,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
         let return_type = self.expect_type(fn_def.return_type);
         let ret_type_loc = self.origin_loc(self.bindings[fn_def.return_type].origin);
-        self.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_loc, call_loc };
+        self.ctx = EvalContext::FunctionBody { ret_type: return_type, ret_type_loc };
         let is_comptime_only = return_type.is_ok_and(|ty| self.types.is_comptime_only(ty));
         Ok(Ok(PreambleResult { return_type, is_comptime_only }))
     }
@@ -792,12 +786,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         param_kind: hir::ParamType,
         idx: u32,
     ) {
-        let EvalContext::FunctionPreamble { arg_spans, call_loc } = self.ctx else {
+        let EvalContext::FunctionPreamble { arg_spans, call_source } = self.ctx else {
             unreachable!("invariant: param instr outside of fn preamable")
         };
 
         let arg_span = self.eval.call_arg_spans[arg_spans][idx as usize];
-        let arg_loc = SrcLoc::new(call_loc.source, arg_span);
+        let arg_loc = SrcLoc::new(call_source, arg_span);
 
         match param_kind {
             hir::ParamType::Explicit(local_id) => {
@@ -859,7 +853,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     pub fn eval_return(&mut self, expr: hir::Expr) -> Result<(), Diverge> {
-        let EvalContext::FunctionBody { ret_type, ret_type_loc, .. } = self.ctx else {
+        let EvalContext::FunctionBody { ret_type, ret_type_loc } = self.ctx else {
             unreachable!("return outside of function body not filtered out by hir-lowerer")
         };
         let value = self.eval_expr(expr)?;

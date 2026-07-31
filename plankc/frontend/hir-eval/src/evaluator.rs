@@ -1,4 +1,3 @@
-use hashbrown::HashMap;
 use plank_core::{
     DenseIndexMap, IndexVec, dense_index_map::Entry, list_of_lists::ListOfLists, newtype_index,
 };
@@ -42,14 +41,6 @@ impl ConstEvalResult {
 
 newtype_index! {
     pub(crate) struct CallArgSpansIdx;
-    pub(crate) struct MethodsId;
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct EvaluatedMethod {
-    pub method_def: hir::MethodDef,
-    pub closure: ValueId,
-    pub registration_loc: SrcLoc,
 }
 
 pub(crate) struct CallFrame {
@@ -95,8 +86,6 @@ pub(crate) struct Evaluator<'a> {
     pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
-    pub methods: ListOfLists<MethodsId, EvaluatedMethod>,
-    pub methods_by_type: HashMap<TypeId, MethodsId>,
 
     pub operator_table: OperatorTable,
 
@@ -109,8 +98,6 @@ pub(crate) struct Evaluator<'a> {
     pub fields_buf: Vec<Field>,
     pub captures_buf: Vec<(ValueId, DefOrigin)>,
     pub call_frames: Vec<CallFrame>,
-
-    pub method_buf: Vec<EvaluatedMethod>,
 
     pub evm_version: EvmVersion,
 }
@@ -139,8 +126,6 @@ impl<'a> Evaluator<'a> {
             lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
-            methods: ListOfLists::new(),
-            methods_by_type: HashMap::new(),
 
             operator_table: OperatorTable::new(),
 
@@ -153,8 +138,6 @@ impl<'a> Evaluator<'a> {
             fields_buf: Vec::new(),
             captures_buf: Vec::new(),
             call_frames: Vec::new(),
-
-            method_buf: Vec::new(),
 
             evm_version,
         }

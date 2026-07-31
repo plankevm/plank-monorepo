@@ -1,5 +1,6 @@
 use plank_core::{
-    IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
+    DenseIndexMap, IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists,
+    newtype_index,
 };
 use plank_session::{
     Builtin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId,
@@ -224,9 +225,7 @@ pub struct StructDef {
 pub struct MethodDef {
     pub name: StrId,
     pub name_offset: SourceByteOffset,
-    pub function: FnDefId,
     pub self_type: LocalId,
-    pub instance: Option<LocalId>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -270,7 +269,8 @@ pub struct Hir {
     pub args: ListOfLists<ArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
     pub match_arms: ListOfLists<MatchArmsId, MatchArm>,
-    pub methods: ListOfLists<MethodsId, MethodDef>,
+    pub methods: ListOfLists<MethodsId, FnDefId>,
+    pub method_defs: DenseIndexMap<FnDefId, MethodDef>,
     pub method_calls: IndexVec<MethodCallId, MethodCall>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
 

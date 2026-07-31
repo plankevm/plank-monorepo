@@ -373,14 +373,15 @@ impl<'a> DisplayHir<'a> {
         }
         if !methods.is_empty() {
             write!(f, "methods: {{")?;
-            for (i, method) in methods.iter().enumerate() {
+            for (i, &function) in methods.iter().enumerate() {
                 if i > 0 {
                     write!(f, ",")?;
                 }
+                let method = self.hir.method_defs[function];
                 write!(f, " {} [Self: ", self.session.lookup_name(method.name))?;
                 self.fmt_local(f, method.self_type)?;
                 write!(f, "]: ")?;
-                self.fmt_fn_ref(f, method.function)?;
+                self.fmt_fn_ref(f, function)?;
             }
             write!(f, " }}")?;
         }

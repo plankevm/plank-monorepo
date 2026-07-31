@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
+use plank_core::{DenseIndexMap, Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
     cst::{self, NumLitId},
@@ -53,7 +53,8 @@ struct HirBuilder {
     args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
     match_arms: ListOfLists<MatchArmsId, MatchArm>,
-    methods: ListOfLists<MethodsId, MethodDef>,
+    methods: ListOfLists<MethodsId, FnDefId>,
+    method_defs: DenseIndexMap<FnDefId, MethodDef>,
     method_calls: IndexVec<MethodCallId, MethodCall>,
     struct_defs: IndexVec<StructDefId, StructDef>,
 
@@ -71,6 +72,7 @@ impl HirBuilder {
             fields: ListOfLists::new(),
             match_arms: ListOfLists::new(),
             methods: ListOfLists::new(),
+            method_defs: DenseIndexMap::new(),
             method_calls: IndexVec::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
@@ -104,7 +106,7 @@ struct BlockLowerer<'a> {
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
-    method_buf: Vec<MethodDef>,
+    method_buf: Vec<FnDefId>,
     param_info_buf: Vec<ParamInfo>,
     captures_buf: Vec<CaptureInfo>,
 
@@ -599,11 +601,12 @@ impl BlockLowerer<'_> {
                     {
                         self.error_method_conflicts_with_field(method.name_span(), *field);
                     }
-                    if let Some(previous) = self.method_buf[methods_start..]
+                    if let Some(&previous_function) = self.method_buf[methods_start..]
                         .iter()
-                        .find(|previous| previous.name == method.name)
+                        .find(|&&function| self.builder.method_defs[function].name == method.name)
                     {
-                        self.error_duplicate_method(method.name_span(), *previous);
+                        let previous = self.builder.method_defs[previous_function];
+                        self.error_duplicate_method(method.name_span(), previous);
                     }
                     let method = self.lower_method_def(method);
                     self.method_buf.push(method);
@@ -745,17 +748,9 @@ impl BlockLowerer<'_> {
         })
     }
 
-    fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> MethodDef {
+    fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> FnDefId {
         self.with_function_scope(|this| {
             let self_type = this.alloc_anonymous_local(Binding::SelfType);
-            let is_instance = matches!(
-                method.params().next(),
-                Some(Ok(param))
-                    if matches!(
-                        param.param_type(),
-                        Ok(ast::ParamType::Explicit(ast::Expr::SelfType { .. }))
-                    )
-            );
             let function = this.lower_function_contents(
                 method.params(),
                 method.return_type(),
@@ -765,13 +760,9 @@ impl BlockLowerer<'_> {
                 false,
             );
             let name_offset = this.lexed.token_src_span(method.name_span().start).start;
-            let instance = is_instance.then(|| {
-                this.builder.fn_params[function]
-                    .first()
-                    .expect("invariant: instance method always has a lowered first parameter")
-                    .value
-            });
-            MethodDef { name: method.name, name_offset, function, self_type, instance }
+            let method_def = MethodDef { name: method.name, name_offset, self_type };
+            this.builder.method_defs.insert_no_prev(function, method_def);
+            function
         })
     }
 
@@ -1175,6 +1166,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         fields: builder.fields,
         match_arms: builder.match_arms,
         methods: builder.methods,
+        method_defs: builder.method_defs,
         method_calls: builder.method_calls,
         struct_defs: builder.struct_defs,
 

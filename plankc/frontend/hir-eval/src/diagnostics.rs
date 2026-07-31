@@ -1,10 +1,9 @@
-use crate::evaluator::EvaluatedMethod;
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    Compound, Field, Type, TypeFlags, TypeId, TypeInterner, Value, ValueId, ValueInterner,
+    Compound, Field, Type, TypeFlags, TypeId, TypeInterner, ValueId, ValueInterner,
     builtins as builtin_sigs,
 };
 
@@ -718,19 +717,19 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_unknown_static_method(
+    pub fn emit_unknown_method(
         &mut self,
         values: &ValueInterner,
         struct_ty: TypeId,
         call_loc: SrcLoc,
         method_name: StrId,
     ) {
-        Diagnostic::error("unknown static method")
+        Diagnostic::error("unknown method")
             .primary(
                 call_loc.source,
                 call_loc.span,
                 format!(
-                    "`{}` has no static method `{}`",
+                    "`{}` has no method `{}`",
                     self.types.format(self.session, values, struct_ty),
                     self.session.lookup_name(method_name),
                 ),
@@ -738,21 +737,19 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_unknown_instance_method(
+    pub fn emit_method_call_on_non_struct(
         &mut self,
         values: &ValueInterner,
-        struct_ty: TypeId,
+        ty: TypeId,
         call_loc: SrcLoc,
-        method_name: StrId,
     ) {
-        Diagnostic::error("unknown instance method")
+        Diagnostic::error("method call on non-struct")
             .primary(
                 call_loc.source,
                 call_loc.span,
                 format!(
-                    "`{}` has no instance method `{}`",
-                    self.types.format(self.session, values, struct_ty),
-                    self.session.lookup_name(method_name),
+                    "`{}` is not a struct type and cannot have methods",
+                    self.types.format(self.session, values, ty),
                 ),
             )
             .emit(self);
@@ -793,46 +790,6 @@ impl DiagCtx<'_> {
                     .primary(duplicate, format!("`{name}` assigned more than once"))
                     .secondary(first, "first assigned here"),
             )
-            .emit(self);
-    }
-
-    pub fn emit_struct_method_capture_mismatch(
-        &mut self,
-        values: &ValueInterner,
-        registered: EvaluatedMethod,
-        evaluated: EvaluatedMethod,
-    ) {
-        let Value::Closure { captures: registered_captures, .. } =
-            values.lookup(registered.closure)
-        else {
-            unreachable!("invariant: evaluated methods always contain closures")
-        };
-        let Value::Closure { captures: evaluated_captures, .. } = values.lookup(evaluated.closure)
-        else {
-            unreachable!("invariant: evaluated methods always contain closures")
-        };
-        let Some((&(registered_value, _), &(evaluated_value, _))) =
-            registered_captures.iter().zip(evaluated_captures).find(
-                |((registered_value, _), (evaluated_value, _))| registered_value != evaluated_value,
-            )
-        else {
-            unreachable!("invariant: capture mismatch requires differing captures")
-        };
-        let name = self.session.lookup_name(evaluated.method_def.name);
-        Diagnostic::error("method captures conflict with struct type")
-            .cross_source_annotations(
-                evaluated.registration_loc,
-                format!(
-                    "method `{name}` captures `{}` for this instantiation",
-                    values.format_value(self.session, self.types, evaluated_value),
-                ),
-                registered.registration_loc,
-                format!(
-                    "first registered here with capture `{}`",
-                    values.format_value(self.session, self.types, registered_value),
-                ),
-            )
-            .help("include the captured value in the struct's type index or fields")
             .emit(self);
     }
 
