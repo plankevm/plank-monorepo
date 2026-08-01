@@ -1,5 +1,5 @@
 import std::core::addr::{addr, addr_unsafe_from_u256, cast_addr};
-import std::core::regions::{storage_r, transient_r};
+import std::core::regions::{storage as storage_r, transient as transient_r};
 import std::core::uint::*;
 import std::error::require;
 import std::fixedbytes::{bytes32, bytes32_from_u256};

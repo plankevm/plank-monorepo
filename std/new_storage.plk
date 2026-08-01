@@ -92,7 +92,7 @@ const add_atom_bits = eager fn (offset: StorageOffset, comptime width: BitWidth)
 const min_start_size = eager fn (comptime T: type) Option(BitWidth) {
     let primitive = _primitive_bit_size(T);
     if primitive.is_some {
-        return primitve;
+        return primitive;
     }
 
     let rawptr_region = rawptr_get_region(T);

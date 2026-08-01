@@ -1,0 +1,81 @@
+import std::core::uint::*;
+import std::error::require;
+import std::fixedbytes::bytes32;
+import std::new_storage::{layout_v1, storage, transient};
+
+const Nested = struct {
+    enabled: bool,
+    values: tuple { u64, u8 },
+};
+
+const EmptyFirst = struct {
+    empty: void,
+    value: u64,
+};
+
+const TestLayout = struct {
+    s_byte: storage(u8),
+    t_word: transient(bytes32),
+    s_edge: storage(u248),
+    t_byte: transient(u8),
+    s_word: storage(bytes32),
+    s_prefix: storage(u16),
+    s_aligned: storage(u248),
+    t_nested: transient(Nested),
+    s_empty: storage(void),
+    s_tail: storage(u8),
+    t_leaves_bit: transient(UInt(255)),
+    t_empty_first: transient(EmptyFirst),
+    s_next: storage(u8),
+    t_after_empty_first: transient(bool),
+};
+
+const TEST_LAYOUT = layout_v1(TestLayout);
+
+const assert_is_at = fn (ptr: $T, expected: $E) void {
+    assert_is_at_with(ptr, expected, ());
+};
+
+const assert_is_at_with = fn (ptr: $T, expected: $E, err: $Err) void {
+    if @field_count(T) == 0 {
+        if E != void {
+            @compile_error("unexpected `expected` type");
+        }
+    } else if @field_count(T) == 1 {
+        if E != u256 {
+            @compile_error("unexpected `expected` type");
+        }
+        require(ptr.slot == expected, err);
+    } else if @field_count(T) == 2 {
+        if E != tuple {u256, u256} {
+            @compile_error("unexpected `expected` type");
+        }
+        require(ptr.slot == @get_field(expected, 0), err);
+        require(cast_uint(ptr.bit, u256) == @get_field(expected, 1), err);
+    }
+};
+
+init {
+    assert_is_at(TEST_LAYOUT.t_word, 0);
+    assert_is_at(TEST_LAYOUT.t_byte, (1, 0));
+    // Storage and transient offsets advance independently. Nested values use
+    // the offset of their first non-empty primitive.
+    assert_is_at(TEST_LAYOUT.t_nested, (1, 8));
+    assert_is_at(TEST_LAYOUT.t_leaves_bit, (2, 0));
+    assert_is_at(TEST_LAYOUT.t_empty_first, (3, 0));
+    assert_is_at(TEST_LAYOUT.t_after_empty_first, (3, 64));
+
+    assert_is_at(TEST_LAYOUT.s_byte, (0, 0));
+    assert_is_at(TEST_LAYOUT.s_edge, (0, 8));
+    assert_is_at(TEST_LAYOUT.s_word, 1);
+    assert_is_at(TEST_LAYOUT.s_prefix, (2, 0));
+    // u248 does not fit after u16, so it starts at the next slot.
+    assert_is_at(TEST_LAYOUT.s_aligned, (3, 0));
+    // An empty value consumes no space, so the following byte fills the final
+    // byte of the u248 slot.
+    assert_is_at(TEST_LAYOUT.s_empty, ());
+    assert_is_at(TEST_LAYOUT.s_tail, (3, 248));
+    assert_is_at(TEST_LAYOUT.s_next, (4, 0));
+
+    @evm_stop();
+}
