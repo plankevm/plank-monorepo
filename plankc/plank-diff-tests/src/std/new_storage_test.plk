@@ -1,0 +1,101 @@
+import std::core::addr::{addr, addr_unsafe_from_u256, cast_addr};
+import std::core::regions::{storage_r, transient_r};
+import std::core::uint::*;
+import std::error::require;
+import std::fixedbytes::{bytes32, bytes32_from_u256};
+import std::new_storage::{load, store};
+
+const Nested = struct {
+    enabled: bool,
+    values: tuple { u64, u8 },
+};
+
+const Value = struct {
+    leading_byte: u8,
+    owner: addr,
+    edge: u88,
+    prefix: u8,
+    full_word: bytes32,
+    nested: Nested,
+};
+
+const assert_value_eq = fn (actual: Value, expected: Value) void {
+    require(
+        cast_uint(actual.leading_byte, u256) == cast_uint(expected.leading_byte, u256),
+        (),
+    );
+    require(cast_addr(actual.owner, u256) == cast_addr(expected.owner, u256), ());
+    require(cast_uint(actual.edge, u256) == cast_uint(expected.edge, u256), ());
+    require(cast_uint(actual.prefix, u256) == cast_uint(expected.prefix, u256), ());
+    require(actual.full_word.raw == expected.full_word.raw, ());
+    require(actual.nested.enabled == expected.nested.enabled, ());
+    require(
+        cast_uint(@get_field(actual.nested.values, 0), u256)
+            == cast_uint(@get_field(expected.nested.values, 0), u256),
+        (),
+    );
+    require(
+        cast_uint(@get_field(actual.nested.values, 1), u256)
+            == cast_uint(@get_field(expected.nested.values, 1), u256),
+        (),
+    );
+};
+
+const assert_storage_layout = fn (start_slot: u256, expected: Value) void {
+    let slot0 = cast_uint(expected.leading_byte, u256)
+        | (cast_addr(expected.owner, u256) << 8)
+        | (cast_uint(expected.edge, u256) << 168);
+    let slot3 = @bool_to_u256(expected.nested.enabled)
+        | (cast_uint(@get_field(expected.nested.values, 0), u256) << 1)
+        | (cast_uint(@get_field(expected.nested.values, 1), u256) << 65);
+
+    require(@evm_sload(start_slot) == slot0, ());
+    require(@evm_sload(start_slot +% 1) == cast_uint(expected.prefix, u256), ());
+    require(@evm_sload(start_slot +% 2) == expected.full_word.raw, ());
+    require(@evm_sload(start_slot +% 3) == slot3, ());
+};
+
+const assert_transient_layout = fn (start_slot: u256, expected: Value) void {
+    let slot0 = cast_uint(expected.leading_byte, u256)
+        | (cast_addr(expected.owner, u256) << 8)
+        | (cast_uint(expected.edge, u256) << 168);
+    let slot3 = @bool_to_u256(expected.nested.enabled)
+        | (cast_uint(@get_field(expected.nested.values, 0), u256) << 1)
+        | (cast_uint(@get_field(expected.nested.values, 1), u256) << 65);
+
+    require(@evm_tload(start_slot) == slot0, ());
+    require(@evm_tload(start_slot +% 1) == cast_uint(expected.prefix, u256), ());
+    require(@evm_tload(start_slot +% 2) == expected.full_word.raw, ());
+    require(@evm_tload(start_slot +% 3) == slot3, ());
+};
+
+init {
+    let expected = Value {
+        leading_byte: unsafe_uint_from_u256(u8, 0xab),
+        owner: addr_unsafe_from_u256(0x1234567890abcdef1234567890abcdef12345678),
+        edge: unsafe_uint_from_u256(u88, 0x112233445566778899aabb),
+        prefix: unsafe_uint_from_u256(u8, 0xcd),
+        full_word: bytes32_from_u256(
+            0xfeedface0123456789abcdef00112233445566778899aabbccddeeffcafebabe
+        ),
+        nested: Nested {
+            enabled: true,
+            values: (
+                unsafe_uint_from_u256(u64, 0x0123456789abcdef),
+                unsafe_uint_from_u256(u8, 0x42),
+            ),
+        },
+    };
+
+    let storage_slot = 17;
+    store(storage_r, storage_slot, expected);
+    assert_storage_layout(storage_slot, expected);
+    assert_value_eq(load(storage_r, Value, storage_slot), expected);
+
+    let transient_slot = 91;
+    store(transient_r, transient_slot, expected);
+    assert_transient_layout(transient_slot, expected);
+    assert_value_eq(load(transient_r, Value, transient_slot), expected);
+
+    @evm_stop();
+}
