@@ -1,17 +1,22 @@
-import std::core::regions::*;
+import std::core::regions::{
+    storage as storage_r,
+    transient as transient_r,
+    rawptr, region_is_any_of, is_region, rawptr_get_region
+};
 import std::core::uint::*;
 import std::core::addr::*;
 import std::option::*;
 import std::fixedbytes::*;
+import std::types::*;
 
 const is_storage_region = eager fn (comptime R: type) bool {
-    is_region(R) and region_is_any_of(R, (transient, storage))
+    is_region(R) and region_is_any_of(R, (transient_r, storage_r))
 };
 
 const raw_store = fn (comptime R: type, slot: u256, value: u256) void {
-    if R == storage {
+    if R == storage_r {
         @evm_sstore(slot, value);
-    } else if R == transient {
+    } else if R == transient_r {
         @evm_tstore(slot, value);
     } else {
         @compile_error("raw_store: unexpected region `R`");
@@ -19,9 +24,9 @@ const raw_store = fn (comptime R: type, slot: u256, value: u256) void {
 };
 
 const raw_load = fn (comptime R: type, slot: u256) u256 {
-    if R == storage {
+    if R == storage_r {
         @evm_sload(slot)
-    } else if R == transient {
+    } else if R == transient_r {
         @evm_tload(slot)
     } else {
         @compile_error("raw_load: unexpected region `R`");
@@ -52,35 +57,83 @@ const _as_word = eager fn (value: $T) Option(u256) {
     Some(word)
 };
 
-const StorageOffset = struct { slots: u256, bits: u8 };
+const StorageOffset = struct { slot: u256, bit: u8 };
 
 const STORAGE_OFFSET_ZERO: StorageOffset = StorageOffset {
-    slots: 0,
-    bits: new_uint(u8, 0)
+    slot: 0,
+    bit: new_uint(u8, 0)
 };
 
 const add_size = eager fn (s1: StorageOffset, s2: StorageOffset) StorageOffset {
-    let bits = cast_uint(s1.bits, u256) +% cast_uint(s2.bits, u256);
+    let bit = cast_uint(s1.bit, u256) +% cast_uint(s2.bit, u256);
     StorageOffset {
-        slots: s1.slots +% s2.slots +% @bool_to_u256(bits >= 256),
-        bits: unsafe_uint_from_u256(bits % 256),
+        slot: s1.slot +% s2.slot +% @bool_to_u256(bit >= 256),
+        bit: unsafe_uint_from_u256(bit % 256),
     }
 };
 
 const add_atom_bits = eager fn (offset: StorageOffset, comptime width: BitWidth) StorageOffset {
-    let offset_bits = cast_uint(offset.bits, u256);
+    let offset_bits = cast_uint(offset.bit, u256);
     if offset_bits +% width.as_u256 < 256 {
         StorageOffset {
-            slots: offset.slots,
-            bits: unsafe_uint_from_u256(u8, offset_bits +% width.as_u256)
+            slot: offset.slot,
+            bit: unsafe_uint_from_u256(u8, offset_bits +% width.as_u256)
         }
     } else if offset_bits +% width.as_u256 == 256 {
-        StorageOffset { slots: offset.slots +% 1, bits: new_uint(u8, 0) }
+        StorageOffset { slot: offset.slot +% 1, bit: new_uint(u8, 0) }
     } else {
         StorageOffset {
-            slots: offset.slots +% 1 +% @bool_to_u256(width.as_u256 == 256),
-            bits: unsafe_uint_from_u256(u8,  width.as_u256 % 256),
+            slot: offset.slot +% 1 +% @bool_to_u256(width.as_u256 == 256),
+            bit: unsafe_uint_from_u256(u8,  width.as_u256 % 256),
         }
+    }
+};
+
+const min_start_size = eager fn (comptime T: type) Option(BitWidth) {
+    let primitive = _primitive_bit_size(T);
+    if primitive.is_some {
+        return primitve;
+    }
+
+    let rawptr_region = rawptr_get_region(T);
+    if rawptr_region.is_some {
+        @compile_error("min_start_size: storing pointers in storage not yet supported");
+    }
+
+    if !@is_struct(T) and !@is_tuple(T) {
+        @compile_error("min_start_size: unsupported type");
+    }
+
+    let mut i = 0;
+    while i < @field_count(T) {
+        let size = min_start_size(@field_type(T, i));
+        if size.is_some {
+            return size;
+        }
+        i = i + 1;
+    }
+
+    return None(BitWidth);
+};
+
+const align_to_start = eager fn (
+    offset: StorageOffset,
+    comptime T: type
+) StorageOffset {
+    let min_start_size = min_start_size(T);
+    let min_start_size = if min_start_size.is_some {
+        unwrap(min_start_size).as_u256
+    } else {
+        0
+    };
+
+    if cast_uint(offset.bit, u256) + min_start_size <= 256 {
+        return offset;
+    }
+
+    StorageOffset {
+        slot: offset.slot + 1,
+        bit: new_uint(u8, 0),
     }
 };
 
@@ -118,16 +171,16 @@ const _write_word_to_slot_buf = fn (
     word: u256,
     slot: u256,
     comptime offset_bits: u256,
-    comptime bits: u256,
+    comptime bit: u256,
 ) u256 {
-    if bits + offset_bits < 256 {
+    if bit + offset_bits < 256 {
         buf | (word << offset_bits)
-    } else if bits + offset_bits == 256 {
+    } else if bit + offset_bits == 256 {
         raw_store(R, slot, buf | (word << offset_bits));
         0
-    } else if bits + offset_bits > 256 {
+    } else if bit + offset_bits > 256 {
         raw_store(R, slot, buf);
-        if bits == 256 {
+        if bit == 256 {
             raw_store(R, slot +% 1, word);
             0
         } else {
@@ -147,21 +200,21 @@ const _store = fn (
 ) u256 {
     let primitive_bit_size = _primitive_bit_size(T);
     if primitive_bit_size.is_some {
-        let bits = comptime { unwrap(primitive_bit_size) };
+        let bit = comptime { unwrap(primitive_bit_size) };
         let word = _as_word(value).unsafe_unwrapped;
         return _write_word_to_slot_buf(
             R,
             slot_buffer,
             word,
-            start_slot +% rel_offset.slots,
-            cast_uint(rel_offset.bits, u256),
-            bits.as_u256,
+            start_slot +% rel_offset.slot,
+            cast_uint(rel_offset.bit, u256),
+            bit.as_u256,
         );
     }
 
     let rawptr_region = rawptr_get_region(T);
     if rawptr_region.is_some {
-        @compile_error("_store: storing pointers in storage is not yet supported");
+        @compile_error("_store: storing pointers in storage_r is not yet supported");
     }
 
     if @is_tuple(T) or @is_struct(T) {
@@ -191,12 +244,12 @@ const store = fn (
     value: $T
 ) void {
     if !is_storage_region(R) {
-        @compile_error("store: expected `R` to be valid storage region `storage` or `transient`");
+        @compile_error("store: expected `R` to be valid storage_r region `storage_r` or `transient_r`");
     }
     let final_buffer = _store(R, start_slot, 0, STORAGE_OFFSET_ZERO, value);
     let end_offset = comptime { advance_offset(STORAGE_OFFSET_ZERO, T) };
-    if cast_uint(end_offset.bits, u256) != 0 {
-        raw_store(R, start_slot +% end_offset.slots, final_buffer);
+    if cast_uint(end_offset.bit, u256) != 0 {
+        raw_store(R, start_slot +% end_offset.slot, final_buffer);
     }
 };
 
@@ -250,12 +303,12 @@ const _load = fn (
     let primitive_bit_size = _primitive_bit_size(T);
     if primitive_bit_size.is_some {
         let width = comptime { unwrap(primitive_bit_size) };
-        let offset_bits = cast_uint(rel_offset.bits, u256);
+        let offset_bits = cast_uint(rel_offset.bit, u256);
         let fits_current_slot = offset_bits + width.as_u256 <= 256;
         let slot_buffer = if offset_bits == 0 {
-            raw_load(R, start_slot +% rel_offset.slots)
+            raw_load(R, start_slot +% rel_offset.slot)
         } else if !fits_current_slot {
-            raw_load(R, start_slot +% rel_offset.slots +% 1)
+            raw_load(R, start_slot +% rel_offset.slot +% 1)
         } else {
             slot_buffer
         };
@@ -271,7 +324,7 @@ const _load = fn (
 
     let rawptr_region = rawptr_get_region(T);
     if rawptr_region.is_some {
-        @compile_error("_load: loading pointers from storage is not yet supported");
+        @compile_error("_load: loading pointers from storage_r is not yet supported");
     }
 
     if @is_tuple(T) or @is_struct(T) {
@@ -312,4 +365,128 @@ const load = fn (
         @compile_error("load: expected `R` to be valid storage region `storage` or `transient`");
     }
     _load(R, T, start_slot, 0, STORAGE_OFFSET_ZERO).value
+};
+
+const storage_offset_to_sptr = eager fn (
+    comptime R: type,
+    comptime T: type,
+    comptime offset: StorageOffset
+) sptr(R, T) {
+    if !is_storage_region(R) {
+        @compile_error("storage_offset_to_sptr: unrecognized storage region `R`");
+    }
+
+    let size = min_start_size(T);
+    let size = if size.is_some { unwrap(size) } else {
+        return sptr(R, T) {};
+    };
+
+    let aligned = align_to_start(offset, T);
+
+    if size.as_u256 == 256 {
+        if cast_uint(aligned.bit, u256) != 0 {
+            @compile_error("[BUG] invalid `align_to_start`");
+        }
+        return sptr(R, T) { slot: aligned.slot };
+    }
+
+    sptr(R, T) {
+        slot: aligned.slot,
+        bit: aligned.bit,
+    }
+};
+
+const sptr = fn (comptime R: type, comptime T: type) type {
+    if !is_storage_region(R) {
+        @compile_error("sptr: `R` not a valid storage region");
+    }
+
+    let size = min_start_size(T);
+    let size = if size.is_some {
+        unwrap(size)
+    } else {
+        return struct (R, T) {};
+    };
+
+    if size.as_u256 == 256 {
+        struct (R, T) {
+            slot: u256,
+        }
+    } else {
+        struct (R, T) {
+            slot: u256,
+            bit: u8,
+        }
+    }
+};
+
+const is_sptr = fn (comptime T: type) Option(tuple { type, type }) {
+    let none = None(tuple { type, type });
+    if !@is_struct(T) {
+        return none;
+    }
+
+    if comptime_type_of(@type_index(T)) != tuple { type, type } {
+        return none;
+    }
+
+    let region: type = @get_field(@type_index(T), 0);
+    let inner: type = @get_field(@type_index(T), 1);
+
+    if !is_storage_region(region) or sptr(region, inner) != T {
+        return none;
+    }
+
+    Some((region, inner))
+};
+
+const storage = fn (comptime T: type) type { sptr(storage_r, T) };
+const transient = fn (comptime T: type) type { sptr(transient_r, T) };
+
+
+const layout_v1 = eager fn (comptime T: type) T {
+    if !@is_struct(T) {
+        @compile_error("layout_v1: expected struct");
+    }
+
+    let mut layout = @uninit(T);
+    let mut i = 0;
+
+    let mut t_offset = STORAGE_OFFSET_ZERO;
+    let mut s_offset = STORAGE_OFFSET_ZERO;
+
+    while i < @field_count(T) {
+        let region_inner_t = is_sptr(@field_type(T, i));
+        let region_inner_t = if region_inner_t.is_some { unwrap(region_inner_t) } else {
+            @compile_error(@concat_cbytes((
+                "layout_v1: field ",
+                repr_u256(i),
+                " is not a `storage(_)` or `transient(_)`"
+            )));
+        };
+
+        let region: type = @get_field(region_inner_t, 0);
+        let inner_type: type = @get_field(region_inner_t, 1);
+
+        let offset = if region == storage_r {
+            s_offset
+        } else if region == transient_r {
+            t_offset
+        } else {
+            @compile_error("[BUG] unexpected region kind in layout_v1");
+        };
+        layout = @set_field(layout, i, storage_offset_to_sptr(region, inner_type, offset));
+
+        if region == storage_r {
+            s_offset = advance_offset(s_offset, inner_type);
+        } else if region == transient_r {
+            t_offset = advance_offset(t_offset, inner_type);
+        } else {
+            @compile_error("[BUG] unexpected region kind in layout_v1")
+        };
+
+        i = i + 1;
+    }
+
+    layout
 };
