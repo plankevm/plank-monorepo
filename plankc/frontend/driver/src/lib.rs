@@ -141,7 +141,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     ) -> Result<Vec<u8>, String> {
         let mut program = plank_mir_lower::lower(mir, &self.values, &self.session);
         if show_sir_in {
-            print_backend_ir("SIR IN", disp_needs_separators, &program);
+            print_ir("SIR IN", disp_needs_separators, &program);
         }
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
@@ -151,7 +151,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         }
         let analyses = pass_manager.into_store();
         if show_sir_last {
-            print_backend_ir("SIR LAST", disp_needs_separators, &program);
+            print_ir("SIR LAST", disp_needs_separators, &program);
         }
 
         let mut bytecode = Vec::with_capacity(0x6000);
@@ -174,7 +174,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     ) -> Result<Vec<u8>, String> {
         let opt_level = parse_sona_opt_level(optimizations)?;
         if show_sir_in {
-            print_backend_ir(
+            print_ir(
                 "SONA IR",
                 disp_needs_separators,
                 plank_mir_lower_sona::emit_ir(
@@ -187,7 +187,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
             );
         }
         if show_sir_last {
-            print_backend_ir(
+            print_ir(
                 "SONA IR OPT",
                 disp_needs_separators,
                 plank_mir_lower_sona::emit_ir(mir, &self.values, &self.session, opt_level)
@@ -217,7 +217,7 @@ fn parse_sona_opt_level(
     }
 }
 
-fn print_backend_ir(title: &str, disp_needs_separators: bool, ir: impl Display) {
+pub fn print_ir(title: &str, disp_needs_separators: bool, ir: impl Display) {
     if disp_needs_separators {
         eprintln!("\n");
         eprintln!("////////////////////////////////////////////////////////////////");

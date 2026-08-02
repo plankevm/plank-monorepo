@@ -5,7 +5,7 @@ use tempfile as _;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
-use plank_driver::{BackendKind, Driver};
+use plank_driver::{BackendKind, Driver, print_ir};
 use plank_evm::EvmVersion;
 use plank_hir::display::DisplayHir;
 use plank_mir::{Mir, display::DisplayMir};
@@ -325,26 +325,15 @@ fn run_frontend<F: SourceFs>(
     let hir = driver.lower_hir(&project);
 
     if inspect_args.show_hir {
-        eprintln!("\n");
-        if inspect_args.needs_separators() {
-            eprintln!("////////////////////////////////////////////////////////////////");
-            eprintln!("//                            HIR                             //");
-            eprintln!("////////////////////////////////////////////////////////////////");
-        }
-        eprintln!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
+        print_ir("HIR", inspect_args.needs_separators(), DisplayHir::new(&hir, &driver.values, &driver.session));
     }
 
     let mir = driver.evaluate_hir(&hir, project.core_ops_source, common_args.evm_version.into());
-
+    
     if inspect_args.show_mir {
-        if inspect_args.needs_separators() {
-            eprintln!("\n");
-            eprintln!("////////////////////////////////////////////////////////////////");
-            eprintln!("//                            MIR                             //");
-            eprintln!("////////////////////////////////////////////////////////////////");
-        }
-        eprintln!("{}", DisplayMir::new(&mir, &driver.values, &driver.session));
+        print_ir("MIR",  inspect_args.needs_separators(), DisplayMir::new(&mir, &driver.values, &driver.session));
     }
 
     if driver.session.has_errors() { None } else { Some(mir) }
 }
+
