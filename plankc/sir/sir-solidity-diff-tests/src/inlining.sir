@@ -1,0 +1,30 @@
+fn init:
+    entry {
+        zero = const 0
+        word = const 32
+        selector = calldataload zero
+        value = calldataload word
+        result = icall @choose_and_double selector value
+        output = sallocany 32
+        mstore256 output result
+        return output word
+    }
+
+fn choose_and_double:
+    entry selector value -> value {
+        => selector ? @double_value : @zero
+    }
+    double_value double_input -> doubled {
+        doubled = icall @double double_input
+        iret
+    }
+    zero _ -> zero_result {
+        zero_result = const 0
+        iret
+    }
+
+fn double:
+    entry value -> result {
+        result = add value value
+        iret
+    }

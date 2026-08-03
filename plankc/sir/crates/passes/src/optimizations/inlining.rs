@@ -491,7 +491,7 @@ enum FunctionState {
 #[cfg(test)]
 mod tests {
     use super::{DefaultHeuristic, Inliner};
-    use crate::{AnalysesStore, Legalizer, run_pass};
+    use crate::{AnalysesStore, Defragmenter, Legalizer, run_pass};
     use sir_data::{Operation, assert_ir_display};
     use sir_parser::{EmitConfig, parse_or_panic};
 
@@ -549,8 +549,8 @@ mod tests {
     }
 
     #[test]
-    fn test_linear_nested_calls() {
-        let actual = inline(
+    fn test_nested_linear_inlining_and_defragmentation() {
+        let mut actual = inline(
             r#"
             fn init:
                 entry {
@@ -609,6 +609,32 @@ mod tests {
                 }
             "#,
         );
+
+        let store = AnalysesStore::default();
+        run_pass(&mut Defragmenter::default(), &mut actual, &store);
+        Legalizer::default().run(&actual, &store).unwrap_or_else(|err| {
+            panic!("legalization failed after defragmentation: {err}\n{actual}")
+        });
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x5
+                    $1 = const 0x1
+                    $2 = add $0 $1
+                    $3 = copy $2
+                    $4 = add $3 $0
+                    $5 = copy $4
+                    stop
+                }
+            "#,
+        );
     }
 
     #[test]
@@ -653,6 +679,76 @@ mod tests {
                     $8 = addmod $4 $5 $6
                     $7 = copy $8
                     stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_inlining_remaps_memory_operations() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    value = const 7
+                    loaded = icall @round_trip value
+                    stop
+                }
+
+            fn round_trip:
+                entry value -> value {
+                    => @access_memory
+                }
+                access_memory memory_value -> loaded {
+                    size = const 32
+                    ptr = malloc size
+                    mstore256 ptr memory_value
+                    loaded = mload256 ptr
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @2  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $0 {
+                    => @1
+                }
+
+                @1 $1 -> $4 {
+                    $2 = const 0x20
+                    $3 = malloc $2
+                    mstore256 $3 $1
+                    $4 = mload256 $3
+                    iret
+                }
+
+                @2 -> $5 {
+                    $5 = const 0x7
+                    => @4
+                }
+
+                @3 $6 {
+                    stop
+                }
+
+                @4 $7 -> $7 {
+                    => @5
+                }
+
+                @5 $8 -> $11 {
+                    $9 = const 0x20
+                    $10 = malloc $9
+                    mstore256 $10 $8
+                    $11 = mload256 $10
+                    => @3
                 }
             "#,
         );
@@ -761,6 +857,87 @@ mod tests {
     }
 
     #[test]
+    fn test_inlining_remaps_retained_internal_call() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 1
+                    wrapped = icall @wrapper x
+                    direct = icall @large wrapped
+                    stop
+                }
+
+            fn wrapper:
+                entry x -> x {
+                    => @call_large
+                }
+                call_large call_x -> result {
+                    result = icall @large call_x
+                    iret
+                }
+
+            fn large:
+                entry x -> result {
+                    a = add x x
+                    b = add a x
+                    c = add b x
+                    result = add c x
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @2
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 1)
+                fn @2 -> entry @3  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $4 {
+                    $1 = add $0 $0
+                    $2 = add $1 $0
+                    $3 = add $2 $0
+                    $4 = add $3 $0
+                    iret
+                }
+
+                @1 $5 -> $5 {
+                    => @2
+                }
+
+                @2 $6 -> $7 {
+                    $7 = icall @0 $6
+                    iret
+                }
+
+                @3 -> $8 {
+                    $8 = const 0x1
+                    => @5
+                }
+
+                @4 $9 {
+                    $10 = icall @0 $9
+                    stop
+                }
+
+                @5 $11 -> $11 {
+                    => @6
+                }
+
+                @6 $12 -> $13 {
+                    $13 = icall @0 $12
+                    => @4
+                }
+            "#,
+        );
+    }
+
+    #[test]
     fn test_multiple_callsites_at_size_threshold_are_inlined() {
         let actual = inline(
             r#"
@@ -857,6 +1034,71 @@ mod tests {
     }
 
     #[test]
+    fn test_shared_callee_is_inlined_in_init_and_main() {
+        let mut actual = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    x = const 1
+                    y = icall @shared x
+                    stop
+                }
+
+            fn main:
+                entry {
+                    x = const 2
+                    y = icall @shared x
+                    stop
+                }
+
+            fn shared:
+                entry x -> result {
+                    result = add x x
+                    iret
+                }
+            "#,
+            EmitConfig::default(),
+        );
+        let store = AnalysesStore::default();
+        run_pass(&mut Inliner::new(DefaultHeuristic::new(4)), &mut actual, &store);
+        Legalizer::default()
+            .run(&actual, &store)
+            .unwrap_or_else(|err| panic!("legalization failed after inlining: {err}\n{actual}"));
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Run: @2
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+                fn @2 -> entry @2  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $1 {
+                    $1 = add $0 $0
+                    iret
+                }
+
+                @1 {
+                    $2 = const 0x1
+                    $7 = add $2 $2
+                    $3 = copy $7
+                    stop
+                }
+
+                @2 {
+                    $4 = const 0x2
+                    $6 = add $4 $4
+                    $5 = copy $6
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
     fn test_cfg_repeated_callsites_in_same_block() {
         let actual = inline(
             r#"
@@ -945,8 +1187,10 @@ mod tests {
                     x = const 7
                     y = icall @choose cond x
                     z = icall @id y
-                    stop
+                    => cond ? @yes : @no
                 }
+                yes { stop }
+                no { stop }
 
             fn choose:
                 entry cond x -> x {
@@ -997,25 +1241,33 @@ mod tests {
                 @4 -> $6 $7 {
                     $6 = const 0x1
                     $7 = const 0x7
-                    => @6
+                    => @8
                 }
 
-                @5 $8 {
-                    $9 = copy $8
+                @5 {
                     stop
                 }
 
-                @6 $10 $11 -> $11 {
-                    => $10 ? @8 : @7
+                @6 {
+                    stop
                 }
 
-                @7 $13 -> $14 {
+                @7 $8 {
+                    $9 = copy $8
+                    => $6 ? @5 : @6
+                }
+
+                @8 $10 $11 -> $11 {
+                    => $10 ? @10 : @9
+                }
+
+                @9 $13 -> $14 {
                     $14 = const 0x0
-                    => @5
+                    => @7
                 }
 
-                @8 $12 -> $12 {
-                    => @5
+                @10 $12 -> $12 {
+                    => @7
                 }
             "#,
         );
@@ -1029,7 +1281,8 @@ mod tests {
                 entry {
                     selector = const 1
                     x = const 3
-                    y = icall @countdown selector x
+                    returned_selector y = icall @countdown selector x
+                    difference = sub y returned_selector
                     stop
                 }
 
@@ -1045,7 +1298,7 @@ mod tests {
                         default => @loop
                     }
                 }
-                done _ done_x -> done_x {
+                done done_selector done_x -> done_selector done_x {
                     iret
                 }
             "#,
@@ -1056,7 +1309,7 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 1)
+                fn @0 -> entry @0  (outputs: 2)
                 fn @1 -> entry @3  (outputs: 0)
 
             Basic Blocks:
@@ -1074,7 +1327,7 @@ mod tests {
 
                 }
 
-                @2 $6 $7 -> $7 {
+                @2 $6 $7 -> $6 $7 {
                     iret
                 }
 
@@ -1084,25 +1337,26 @@ mod tests {
                     => @5
                 }
 
-                @4 $10 {
+                @4 $10 $11 {
+                    $12 = sub $11 $10
                     stop
                 }
 
-                @5 $11 $12 -> $11 $12 {
+                @5 $13 $14 -> $13 $14 {
                     => @6
                 }
 
-                @6 $13 $14 -> $13 $16 {
-                    $15 = const 0x1
-                    $16 = sub $14 $15
-                    switch $14 {
+                @6 $15 $16 -> $15 $18 {
+                    $17 = const 0x1
+                    $18 = sub $16 $17
+                    switch $16 {
                         0x0 => @7,
                         else => @6
                     }
 
                 }
 
-                @7 $17 $18 -> $18 {
+                @7 $19 $20 -> $19 $20 {
                     => @4
                 }
             "#,

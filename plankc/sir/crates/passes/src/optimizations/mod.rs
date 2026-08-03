@@ -86,6 +86,46 @@ mod tests {
     "#;
 
     #[test]
+    fn test_inlining_copy_propagation_and_defragmentation() {
+        let actual = optimize(
+            r#"
+            fn init:
+                entry {
+                    x = const 2
+                    result = icall @double x
+                    used = add result x
+                    stop
+                }
+
+            fn double:
+                entry x -> result {
+                    result = add x x
+                    iret
+                }
+            "#,
+            "icd",
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x2
+                    $1 = add $0 $0
+                    $2 = copy $1
+                    $3 = add $1 $0
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
     fn test_csud() {
         let actual = optimize(SWITCH_ON_COPY_WITH_DEAD_CODE, "csud");
         assert_ir_display(
