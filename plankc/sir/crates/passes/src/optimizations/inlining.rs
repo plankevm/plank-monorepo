@@ -8,49 +8,69 @@ use sir_data::{
 
 use crate::{AnalysesStore, Pass};
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct Inliner {
+pub(crate) const DEFAULT_INLINE_SIZE_THRESHOLD: u32 = 8;
+
+#[derive(Debug, Clone)]
+pub(crate) struct Inliner<H> {
+    heuristic: H,
     postorder: Vec<FunctionId>,
     callsites: IndexVec<FunctionId, Vec<OperationIdx>>,
     call_blocks: HashMap<OperationIdx, BasicBlockId>,
 }
 
-impl Pass for Inliner {
+impl<H: InlineHeuristic> Pass for Inliner<H> {
     fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
-        *self = Self::new(program);
+        self.build_call_graph(program);
         for function_id in self.postorder.clone() {
-            self.inline_function(program, function_id);
+            let callsite_count = self.callsites[function_id].len();
+            let should_inline = match callsite_count {
+                0 => false,
+                1 => true,
+                _ => self.heuristic.should_inline(program, function_id),
+            };
+            if should_inline {
+                self.inline_function(program, function_id);
+            }
         }
     }
 }
 
-impl Inliner {
-    pub(crate) fn new(program: &EthIRProgram) -> Self {
-        let mut callsites = index_vec![Vec::new(); program.functions.len()];
-        let mut call_blocks = HashMap::new();
-        let mut postorder = Vec::new();
+impl<H: InlineHeuristic> Inliner<H> {
+    pub(crate) fn new(heuristic: H) -> Self {
+        Self {
+            heuristic,
+            postorder: Vec::new(),
+            callsites: IndexVec::new(),
+            call_blocks: HashMap::new(),
+        }
+    }
+
+    fn build_call_graph(&mut self, program: &EthIRProgram) {
+        self.postorder.clear();
+        self.callsites.clear();
+        self.callsites.resize_with(program.functions.len(), Vec::new);
+        self.call_blocks.clear();
+
         let mut function_states = index_vec![FunctionState::NotStarted; program.functions.len()];
 
         walk_call_graph(
             program,
             program.init_entry,
             &mut function_states,
-            &mut postorder,
-            &mut callsites,
-            &mut call_blocks,
+            &mut self.postorder,
+            &mut self.callsites,
+            &mut self.call_blocks,
         );
         if let Some(main_entry) = program.main_entry {
             walk_call_graph(
                 program,
                 main_entry,
                 &mut function_states,
-                &mut postorder,
-                &mut callsites,
-                &mut call_blocks,
+                &mut self.postorder,
+                &mut self.callsites,
+                &mut self.call_blocks,
             );
         }
-
-        Self { postorder, callsites, call_blocks }
     }
 
     fn inline_function(&mut self, program: &mut EthIRProgram, function_id: FunctionId) {
@@ -279,6 +299,47 @@ impl Inliner {
     }
 }
 
+pub(crate) trait InlineHeuristic {
+    fn should_inline(&mut self, program: &EthIRProgram, function_id: FunctionId) -> bool;
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DefaultHeuristic {
+    size_threshold: u32,
+    visited_blocks: DenseIndexSet<BasicBlockId>,
+    block_worklist: Vec<BasicBlockId>,
+}
+
+impl DefaultHeuristic {
+    pub(crate) fn new(size_threshold: u32) -> Self {
+        Self { size_threshold, visited_blocks: DenseIndexSet::new(), block_worklist: Vec::new() }
+    }
+}
+
+impl InlineHeuristic for DefaultHeuristic {
+    fn should_inline(&mut self, program: &EthIRProgram, function_id: FunctionId) -> bool {
+        let mut size = 0;
+        self.visited_blocks.clear();
+        self.block_worklist.clear();
+        self.block_worklist.push(program.functions[function_id].entry());
+
+        while let Some(block) = self.block_worklist.pop() {
+            if !self.visited_blocks.add(block) {
+                continue;
+            }
+
+            size += program.basic_blocks[block].operations.len() + 1;
+            if size > self.size_threshold {
+                return false;
+            }
+
+            self.block_worklist.extend(program.basic_blocks[block].control.iter_outgoing(program));
+        }
+
+        true
+    }
+}
+
 struct OperationRemapper<'a> {
     program: &'a mut EthIRProgram,
     locals: &'a mut HashMap<LocalId, LocalId>,
@@ -420,7 +481,7 @@ enum FunctionState {
 
 #[cfg(test)]
 mod tests {
-    use super::Inliner;
+    use super::{DefaultHeuristic, Inliner};
     use crate::{AnalysesStore, Legalizer, run_pass};
     use sir_data::{Operation, assert_ir_display};
     use sir_parser::{EmitConfig, parse_or_panic};
@@ -428,7 +489,7 @@ mod tests {
     fn inline(source: &str) -> sir_data::EthIRProgram {
         let mut program = parse_or_panic(source, EmitConfig::init_only());
         let store = AnalysesStore::default();
-        run_pass(&mut Inliner::default(), &mut program, &store);
+        run_pass(&mut Inliner::new(DefaultHeuristic::new(4)), &mut program, &store);
         Legalizer::default()
             .run(&program, &store)
             .unwrap_or_else(|err| panic!("legalization failed after inlining: {err}\n{program}"));
@@ -582,6 +643,162 @@ mod tests {
                     $6 = const 0x5
                     $8 = addmod $4 $5 $6
                     $7 = copy $8
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_single_callsite_ignores_size_threshold() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 1
+                    result = icall @large x
+                    stop
+                }
+
+            fn large:
+                entry x -> result {
+                    a = add x x
+                    b = add a x
+                    c = add b x
+                    result = add c x
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $4 {
+                    $1 = add $0 $0
+                    $2 = add $1 $0
+                    $3 = add $2 $0
+                    $4 = add $3 $0
+                    iret
+                }
+
+                @1 {
+                    $5 = const 0x1
+                    $7 = add $5 $5
+                    $8 = add $7 $5
+                    $9 = add $8 $5
+                    $10 = add $9 $5
+                    $6 = copy $10
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_multiple_callsites_over_size_threshold_are_not_inlined() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 1
+                    a = icall @large x
+                    b = icall @large a
+                    stop
+                }
+
+            fn large:
+                entry x -> result {
+                    a = add x x
+                    b = add a x
+                    c = add b x
+                    result = add c x
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $4 {
+                    $1 = add $0 $0
+                    $2 = add $1 $0
+                    $3 = add $2 $0
+                    $4 = add $3 $0
+                    iret
+                }
+
+                @1 {
+                    $5 = const 0x1
+                    $6 = icall @0 $5
+                    $7 = icall @0 $6
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_multiple_callsites_at_size_threshold_are_inlined() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 1
+                    a = icall @small x
+                    b = icall @small a
+                    stop
+                }
+
+            fn small:
+                entry x -> result {
+                    a = add x x
+                    b = add a x
+                    result = add b x
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $3 {
+                    $1 = add $0 $0
+                    $2 = add $1 $0
+                    $3 = add $2 $0
+                    iret
+                }
+
+                @1 {
+                    $4 = const 0x1
+                    $10 = add $4 $4
+                    $11 = add $10 $4
+                    $12 = add $11 $4
+                    $5 = copy $12
+                    $7 = add $5 $5
+                    $8 = add $7 $5
+                    $9 = add $8 $5
+                    $6 = copy $9
                     stop
                 }
             "#,

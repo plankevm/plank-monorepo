@@ -3,8 +3,11 @@ pub mod optimizations;
 pub mod transforms;
 
 use optimizations::{
-    constant_propagation::SCCP, copy_propagation::CopyPropagation, inlining::Inliner,
-    switch_peephole::SwitchPeephole, unused_operation_elimination::UnusedOperationElimination,
+    constant_propagation::SCCP,
+    copy_propagation::CopyPropagation,
+    inlining::{DEFAULT_INLINE_SIZE_THRESHOLD, DefaultHeuristic, Inliner},
+    switch_peephole::SwitchPeephole,
+    unused_operation_elimination::UnusedOperationElimination,
 };
 use sir_data::EthIRProgram;
 
@@ -39,7 +42,7 @@ pub struct PassManager<'a> {
     unused_elim: Option<UnusedOperationElimination>,
     defragmenter: Option<Defragmenter>,
     switch_peephole: Option<SwitchPeephole>,
-    inliner: Option<Inliner>,
+    inliner: Option<Inliner<DefaultHeuristic>>,
 }
 
 impl<'a> PassManager<'a> {
@@ -91,9 +94,13 @@ impl<'a> PassManager<'a> {
                     self.program,
                     &self.store,
                 ),
-                OptimizationPass::Inlining => {
-                    run_pass(self.inliner.get_or_insert_default(), self.program, &self.store)
-                }
+                OptimizationPass::Inlining => run_pass(
+                    self.inliner.get_or_insert_with(|| {
+                        Inliner::new(DefaultHeuristic::new(DEFAULT_INLINE_SIZE_THRESHOLD))
+                    }),
+                    self.program,
+                    &self.store,
+                ),
             }
         }
         debug_assert!(self.run_legalize().is_ok(), "optimized IR is illegal");
