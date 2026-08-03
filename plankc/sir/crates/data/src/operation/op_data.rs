@@ -1,7 +1,7 @@
 use super::op_visitor::{OpVisitor, OpVisitorMut};
 use crate::{EthIRProgram, builder::EthIRBuilder, index::*};
 use alloy_primitives::{U256, ruint::FromUintError};
-use plank_core::Idx;
+use plank_core::{Idx, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpExtraData {
@@ -270,12 +270,19 @@ impl InternalCallData {
     }
 
     pub fn get_inputs<'ir>(&self, ir: &'ir EthIRProgram) -> &'ir [LocalId] {
-        &ir.locals[self.ins_start..self.outs_start]
+        &ir.locals[self.inputs_span()]
     }
 
     pub fn get_outputs<'ir>(&self, ir: &'ir EthIRProgram) -> &'ir [LocalId] {
-        let fn_output_count = ir.functions[self.function].outputs;
-        &ir.locals[self.outs_start..self.outs_start + fn_output_count]
+        &ir.locals[self.outputs_span(ir)]
+    }
+
+    pub fn inputs_span(&self) -> Span<LocalIdx> {
+        Span::new(self.ins_start, self.outs_start)
+    }
+
+    pub fn outputs_span(&self, ir: &EthIRProgram) -> Span<LocalIdx> {
+        Span::new(self.outs_start, self.outs_start + ir.functions[self.function].outputs)
     }
 }
 

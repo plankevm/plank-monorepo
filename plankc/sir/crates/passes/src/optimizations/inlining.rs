@@ -15,15 +15,15 @@ pub(crate) struct Inliner<H> {
     heuristic: H,
     postorder: Vec<FunctionId>,
     callsites: IndexVec<FunctionId, Vec<OperationIdx>>,
-    call_blocks: HashMap<OperationIdx, BasicBlockId>,
+    callsite_blocks: HashMap<OperationIdx, BasicBlockId>,
+    remapped_locals: HashMap<LocalId, LocalId>,
 }
 
 impl<H: InlineHeuristic> Pass for Inliner<H> {
     fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
         self.build_call_graph(program);
-        for function_id in self.postorder.clone() {
-            let callsite_count = self.callsites[function_id].len();
-            let should_inline = match callsite_count {
+        for function_id in std::mem::take(&mut self.postorder) {
+            let should_inline = match self.callsites[function_id].len() {
                 0 => false,
                 1 => true,
                 _ => self.heuristic.should_inline(program, function_id),
@@ -41,7 +41,8 @@ impl<H: InlineHeuristic> Inliner<H> {
             heuristic,
             postorder: Vec::new(),
             callsites: IndexVec::new(),
-            call_blocks: HashMap::new(),
+            callsite_blocks: HashMap::new(),
+            remapped_locals: HashMap::new(),
         }
     }
 
@@ -49,7 +50,7 @@ impl<H: InlineHeuristic> Inliner<H> {
         self.postorder.clear();
         self.callsites.clear();
         self.callsites.resize_with(program.functions.len(), Vec::new);
-        self.call_blocks.clear();
+        self.callsite_blocks.clear();
 
         let mut function_states = index_vec![FunctionState::NotStarted; program.functions.len()];
 
@@ -59,7 +60,7 @@ impl<H: InlineHeuristic> Inliner<H> {
             &mut function_states,
             &mut self.postorder,
             &mut self.callsites,
-            &mut self.call_blocks,
+            &mut self.callsite_blocks,
         );
         if let Some(main_entry) = program.main_entry {
             walk_call_graph(
@@ -68,7 +69,7 @@ impl<H: InlineHeuristic> Inliner<H> {
                 &mut function_states,
                 &mut self.postorder,
                 &mut self.callsites,
-                &mut self.call_blocks,
+                &mut self.callsite_blocks,
             );
         }
     }
@@ -76,19 +77,19 @@ impl<H: InlineHeuristic> Inliner<H> {
     fn inline_function(&mut self, program: &mut EthIRProgram, function_id: FunctionId) {
         let entry = program.functions[function_id].entry();
         let is_linear = matches!(program.basic_blocks[entry].control, Control::InternalReturn);
-        while let Some(operation) = self.callsites[function_id].pop() {
-            let block = self
-                .call_blocks
-                .remove(&operation)
+        while let Some(callsite_operation) = self.callsites[function_id].pop() {
+            let callsite_block = self
+                .callsite_blocks
+                .remove(&callsite_operation)
                 .expect("tracked callsite should have a current block");
-            let Operation::InternalCall(call) = program.operations[operation] else {
+            let Operation::InternalCall(call) = program.operations[callsite_operation] else {
                 unreachable!("tracked callsite should point to an internal call")
             };
             assert_eq!(call.function, function_id);
             if is_linear {
-                self.inline_linear_callsite(program, block, operation, call);
+                self.inline_linear_callsite(program, callsite_block, callsite_operation, call);
             } else {
-                self.inline_cfg_callsite(program, block, operation, call);
+                self.inline_cfg_callsite(program, callsite_block, callsite_operation, call);
             }
         }
     }
@@ -96,193 +97,198 @@ impl<H: InlineHeuristic> Inliner<H> {
     fn inline_linear_callsite(
         &mut self,
         program: &mut EthIRProgram,
-        caller_id: BasicBlockId,
-        operation: OperationIdx,
+        callsite_block: BasicBlockId,
+        callsite_operation: OperationIdx,
         call: InternalCallData,
     ) {
-        let caller_operations = program.basic_blocks[caller_id].operations;
+        let old_operations = program.basic_blocks[callsite_block].operations;
         let new_operations_start = program.operations.next_idx();
+        self.remapped_locals.clear();
 
-        for old_operation in caller_operations.iter() {
-            if old_operation == operation {
+        for old_operation in old_operations.iter() {
+            if old_operation == callsite_operation {
                 let callee_entry = program.functions[call.function].entry();
                 let callee_operations = program.basic_blocks[callee_entry].operations;
                 let callee_inputs = program.block(callee_entry).inputs();
                 let call_inputs = call.get_inputs(program);
-                let mut callee_locals = HashMap::new();
-                for i in 0..callee_inputs.len() {
-                    callee_locals.insert(callee_inputs[i], call_inputs[i]);
+                for input_index in 0..callee_inputs.len() {
+                    self.remapped_locals
+                        .insert(callee_inputs[input_index], call_inputs[input_index]);
                 }
 
                 for callee_operation in callee_operations.iter() {
-                    let mut remapped = program.operations[callee_operation];
-                    remapped.visit_data_mut(&mut OperationRemapper {
+                    let mut remapped_operation = program.operations[callee_operation];
+                    remapped_operation.visit_data_mut(&mut OperationRemapper {
                         program,
-                        locals: &mut callee_locals,
+                        remapped_locals: &mut self.remapped_locals,
                     });
-                    program.operations.push(remapped);
+                    program.operations.push(remapped_operation);
                 }
 
-                for i in 0..program.block(callee_entry).outputs().len() {
-                    let return_id = program.block(callee_entry).outputs()[i];
-                    let call_output = call.get_outputs(program)[i];
+                for output_index in 0..program.block(callee_entry).outputs().len() {
+                    let callee_output = program.block(callee_entry).outputs()[output_index];
+                    let call_output = call.get_outputs(program)[output_index];
                     program.operations.push(Operation::SetCopy(InlineOperands {
-                        ins: [callee_locals[&return_id]],
+                        ins: [self.remapped_locals[&callee_output]],
                         outs: [call_output],
                     }));
                 }
             } else {
-                let new_operation = program.operations.push(program.operations[old_operation]);
-                if let Operation::InternalCall(call) = program.operations[old_operation] {
-                    let callsite = self.callsites[call.function]
+                let relocated_operation =
+                    program.operations.push(program.operations[old_operation]);
+                if let Operation::InternalCall(relocated_call) = program.operations[old_operation] {
+                    let tracked_callsite_operation = self.callsites[relocated_call.function]
                         .iter_mut()
                         .find(|callsite| **callsite == old_operation)
                         .expect("internal call should have a tracked callsite");
-                    *callsite = new_operation;
-                    self.call_blocks
+                    *tracked_callsite_operation = relocated_operation;
+                    self.callsite_blocks
                         .remove(&old_operation)
                         .expect("tracked callsite should have a current block");
-                    assert!(self.call_blocks.insert(new_operation, caller_id).is_none());
+                    assert!(
+                        self.callsite_blocks.insert(relocated_operation, callsite_block).is_none()
+                    );
                 }
             }
         }
 
-        program.basic_blocks[caller_id].operations =
+        program.basic_blocks[callsite_block].operations =
             Span::new(new_operations_start, program.operations.next_idx());
     }
 
     fn inline_cfg_callsite(
         &mut self,
         program: &mut EthIRProgram,
-        caller_id: BasicBlockId,
-        operation: OperationIdx,
+        callsite_block: BasicBlockId,
+        callsite_operation: OperationIdx,
         call: InternalCallData,
     ) {
-        let caller = program.basic_blocks[caller_id];
+        let original_callsite_block = program.basic_blocks[callsite_block];
 
-        program.basic_blocks[caller_id].outputs = Span::new(call.ins_start, call.outs_start);
-        program.basic_blocks[caller_id].operations = Span::new(caller.operations.start, operation);
+        program.basic_blocks[callsite_block].outputs = call.inputs_span();
+        program.basic_blocks[callsite_block].operations =
+            Span::new(original_callsite_block.operations.start, callsite_operation);
 
-        let return_block = program.basic_blocks.push(BasicBlock {
-            inputs: Span::new(
-                call.outs_start,
-                call.outs_start + program.functions[call.function].get_outputs(),
-            ),
-            outputs: caller.outputs,
-            operations: Span::new(operation + 1, caller.operations.end),
-            control: caller.control,
+        let join_block = program.basic_blocks.push(BasicBlock {
+            inputs: call.outputs_span(program),
+            outputs: original_callsite_block.outputs,
+            operations: Span::new(callsite_operation + 1, original_callsite_block.operations.end),
+            control: original_callsite_block.control,
         });
 
-        for moved_operation in program.basic_blocks[return_block].operations.iter() {
-            if let Operation::InternalCall(call) = program.operations[moved_operation] {
-                let previous_block = self
-                    .call_blocks
-                    .insert(moved_operation, return_block)
-                    .expect("internal call in moved suffix should have a tracked callsite block");
-                assert_eq!(previous_block, caller_id);
+        for moved_operation in program.basic_blocks[join_block].operations.iter() {
+            if let Operation::InternalCall(moved_call) = program.operations[moved_operation] {
+                let previous_callsite_block = self
+                    .callsite_blocks
+                    .insert(moved_operation, join_block)
+                    .expect("internal call should have a tracked block");
+                assert_eq!(previous_callsite_block, callsite_block);
                 assert!(
-                    self.callsites[call.function].contains(&moved_operation),
-                    "internal call in moved suffix should have a tracked callsite"
+                    self.callsites[moved_call.function].contains(&moved_operation),
+                    "internal call should be a tracked callsite"
                 );
             }
         }
 
         let callee_entry = program.functions[call.function].entry();
-        let mut block_map = HashMap::new();
-        let mut callee_locals = HashMap::new();
-        let mut block_worklist = vec![callee_entry];
-        let block_placeholder = BasicBlock {
+        let mut remapped_blocks = HashMap::new();
+        self.remapped_locals.clear();
+        let mut callee_block_worklist = vec![callee_entry];
+        let remapped_block_placeholder = BasicBlock {
             inputs: Span::EMPTY,
             outputs: Span::EMPTY,
             operations: Span::EMPTY,
             control: Control::LastOpTerminates,
         };
 
-        while let Some(block) = block_worklist.pop() {
-            let remapped_block_id = *block_map
-                .entry(block)
-                .or_insert_with(|| program.basic_blocks.push(block_placeholder));
+        while let Some(callee_block_id) = callee_block_worklist.pop() {
+            let remapped_block_id = *remapped_blocks
+                .entry(callee_block_id)
+                .or_insert_with(|| program.basic_blocks.push(remapped_block_placeholder));
 
-            let source = program.basic_blocks[block];
+            let callee_block = program.basic_blocks[callee_block_id];
 
             let inputs_start = program.locals.next_idx();
-            for input in source.inputs.iter() {
-                let source_input = program.locals[input];
-                let remapped_input = OperationRemapper { program, locals: &mut callee_locals }
-                    .remap_local(source_input);
+            for input_idx in callee_block.inputs.iter() {
+                let callee_input = program.locals[input_idx];
+                let remapped_input = remap_local(program, &mut self.remapped_locals, callee_input);
                 program.locals.push(remapped_input);
             }
             let inputs_end = program.locals.next_idx();
 
             let operations_start = program.operations.next_idx();
-            for op_id in source.operations.iter() {
-                let mut remapped = program.operations[op_id];
-                remapped
-                    .visit_data_mut(&mut OperationRemapper { program, locals: &mut callee_locals });
-                program.operations.push(remapped);
+            for callee_operation in callee_block.operations.iter() {
+                let mut remapped_operation = program.operations[callee_operation];
+                remapped_operation.visit_data_mut(&mut OperationRemapper {
+                    program,
+                    remapped_locals: &mut self.remapped_locals,
+                });
+                program.operations.push(remapped_operation);
             }
 
             let outputs_start = program.locals.next_idx();
-            for output in source.outputs.iter() {
-                let source_output = program.locals[output];
-                let remapped_output = OperationRemapper { program, locals: &mut callee_locals }
-                    .remap_local(source_output);
+            for output_idx in callee_block.outputs.iter() {
+                let callee_output = program.locals[output_idx];
+                let remapped_output =
+                    remap_local(program, &mut self.remapped_locals, callee_output);
                 program.locals.push(remapped_output);
             }
             let outputs_end = program.locals.next_idx();
 
-            let control = match source.control {
+            let remapped_control = match callee_block.control {
                 Control::LastOpTerminates => Control::LastOpTerminates,
-                Control::InternalReturn => Control::ContinuesTo(return_block),
-                Control::ContinuesTo(target) => {
-                    let remapped_target = *block_map.entry(target).or_insert_with(|| {
-                        block_worklist.push(target);
-                        program.basic_blocks.push(block_placeholder)
-                    });
+                Control::InternalReturn => Control::ContinuesTo(join_block),
+                Control::ContinuesTo(callee_target) => {
+                    let remapped_target =
+                        *remapped_blocks.entry(callee_target).or_insert_with(|| {
+                            callee_block_worklist.push(callee_target);
+                            program.basic_blocks.push(remapped_block_placeholder)
+                        });
                     Control::ContinuesTo(remapped_target)
                 }
                 Control::Branches(branch) => {
-                    let zero_target = *block_map.entry(branch.zero_target).or_insert_with(|| {
-                        block_worklist.push(branch.zero_target);
-                        program.basic_blocks.push(block_placeholder)
-                    });
-                    let non_zero_target =
-                        *block_map.entry(branch.non_zero_target).or_insert_with(|| {
-                            block_worklist.push(branch.non_zero_target);
-                            program.basic_blocks.push(block_placeholder)
+                    let remapped_zero_target =
+                        *remapped_blocks.entry(branch.zero_target).or_insert_with(|| {
+                            callee_block_worklist.push(branch.zero_target);
+                            program.basic_blocks.push(remapped_block_placeholder)
+                        });
+                    let remapped_non_zero_target =
+                        *remapped_blocks.entry(branch.non_zero_target).or_insert_with(|| {
+                            callee_block_worklist.push(branch.non_zero_target);
+                            program.basic_blocks.push(remapped_block_placeholder)
                         });
                     Control::Branches(Branch {
-                        condition: callee_locals[&branch.condition],
-                        non_zero_target,
-                        zero_target,
+                        condition: self.remapped_locals[&branch.condition],
+                        non_zero_target: remapped_non_zero_target,
+                        zero_target: remapped_zero_target,
                     })
                 }
                 Control::Switch(switch) => {
-                    let cases = program.cases[switch.cases];
+                    let callee_cases = program.cases[switch.cases];
                     let targets_start_id = program.cases_bb_ids.next_idx();
-                    for source_target_idx in cases.target_indices().iter() {
-                        let source_target = program.cases_bb_ids[source_target_idx];
+                    for callee_target_idx in callee_cases.target_indices().iter() {
+                        let callee_target = program.cases_bb_ids[callee_target_idx];
                         let remapped_target =
-                            *block_map.entry(source_target).or_insert_with(|| {
-                                block_worklist.push(source_target);
-                                program.basic_blocks.push(block_placeholder)
+                            *remapped_blocks.entry(callee_target).or_insert_with(|| {
+                                callee_block_worklist.push(callee_target);
+                                program.basic_blocks.push(remapped_block_placeholder)
                             });
                         program.cases_bb_ids.push(remapped_target);
                     }
-                    let cases = program.cases.push(Cases {
-                        values_start_id: cases.values_start_id,
+                    let remapped_cases = program.cases.push(Cases {
+                        values_start_id: callee_cases.values_start_id,
                         targets_start_id,
-                        cases_count: cases.cases_count,
+                        cases_count: callee_cases.cases_count,
                     });
                     Control::Switch(Switch {
-                        condition: callee_locals[&switch.condition],
-                        fallback: switch.fallback.map(|target| {
-                            *block_map.entry(target).or_insert_with(|| {
-                                block_worklist.push(target);
-                                program.basic_blocks.push(block_placeholder)
+                        condition: self.remapped_locals[&switch.condition],
+                        fallback: switch.fallback.map(|callee_target| {
+                            *remapped_blocks.entry(callee_target).or_insert_with(|| {
+                                callee_block_worklist.push(callee_target);
+                                program.basic_blocks.push(remapped_block_placeholder)
                             })
                         }),
-                        cases,
+                        cases: remapped_cases,
                     })
                 }
             };
@@ -291,11 +297,12 @@ impl<H: InlineHeuristic> Inliner<H> {
                 inputs: Span::new(inputs_start, inputs_end),
                 outputs: Span::new(outputs_start, outputs_end),
                 operations: Span::new(operations_start, program.operations.next_idx()),
-                control,
+                control: remapped_control,
             };
         }
 
-        program.basic_blocks[caller_id].control = Control::ContinuesTo(block_map[&callee_entry]);
+        program.basic_blocks[callsite_block].control =
+            Control::ContinuesTo(remapped_blocks[&callee_entry]);
     }
 }
 
@@ -342,13 +349,7 @@ impl InlineHeuristic for DefaultHeuristic {
 
 struct OperationRemapper<'a> {
     program: &'a mut EthIRProgram,
-    locals: &'a mut HashMap<LocalId, LocalId>,
-}
-
-impl OperationRemapper<'_> {
-    fn remap_local(&mut self, local: LocalId) -> LocalId {
-        *self.locals.entry(local).or_insert_with(|| self.program.next_free_local_id.get_and_inc())
-    }
+    remapped_locals: &'a mut HashMap<LocalId, LocalId>,
 }
 
 impl<'d> OpVisitorMut<'d, ()> for &mut OperationRemapper<'_> {
@@ -357,7 +358,7 @@ impl<'d> OpVisitorMut<'d, ()> for &mut OperationRemapper<'_> {
         data: &'d mut sir_data::operation::InlineOperands<INS, OUTS>,
     ) {
         for local in data.ins.iter_mut().chain(data.outs.iter_mut()) {
-            *local = self.remap_local(*local);
+            *local = remap_local(self.program, self.remapped_locals, *local);
         }
     }
 
@@ -365,63 +366,71 @@ impl<'d> OpVisitorMut<'d, ()> for &mut OperationRemapper<'_> {
         self,
         data: &'d mut sir_data::operation::AllocatedIns<INS, OUTS>,
     ) {
-        let inputs = data.get_inputs(self.program).to_vec();
+        let callee_inputs = data.get_inputs(self.program).to_vec();
         data.ins_start = self.program.locals.next_idx();
-        for input in inputs {
-            let input = self.remap_local(input);
-            self.program.locals.push(input);
+        for callee_input in callee_inputs {
+            let remapped_input = remap_local(self.program, self.remapped_locals, callee_input);
+            self.program.locals.push(remapped_input);
         }
 
         for output in &mut data.outs {
-            *output = self.remap_local(*output);
+            *output = remap_local(self.program, self.remapped_locals, *output);
         }
     }
 
     fn visit_static_alloc_mut(self, data: &'d mut sir_data::operation::StaticAllocData) {
-        data.ptr_out = self.remap_local(data.ptr_out);
+        data.ptr_out = remap_local(self.program, self.remapped_locals, data.ptr_out);
     }
 
     fn visit_memory_load_mut(self, data: &'d mut sir_data::operation::MemoryLoadData) {
-        data.out = self.remap_local(data.out);
-        data.ptr = self.remap_local(data.ptr);
+        data.out = remap_local(self.program, self.remapped_locals, data.out);
+        data.ptr = remap_local(self.program, self.remapped_locals, data.ptr);
     }
 
     fn visit_memory_store_mut(self, data: &'d mut sir_data::operation::MemoryStoreData) {
         for local in &mut data.ins {
-            *local = self.remap_local(*local);
+            *local = remap_local(self.program, self.remapped_locals, *local);
         }
     }
 
     fn visit_set_small_const_mut(self, data: &'d mut sir_data::operation::SetSmallConstData) {
-        data.sets = self.remap_local(data.sets);
+        data.sets = remap_local(self.program, self.remapped_locals, data.sets);
     }
 
     fn visit_set_large_const_mut(self, data: &'d mut sir_data::operation::SetLargeConstData) {
-        data.sets = self.remap_local(data.sets);
+        data.sets = remap_local(self.program, self.remapped_locals, data.sets);
     }
 
     fn visit_set_data_offset_mut(self, data: &'d mut sir_data::operation::SetDataOffsetData) {
-        data.sets = self.remap_local(data.sets);
+        data.sets = remap_local(self.program, self.remapped_locals, data.sets);
     }
 
     fn visit_icall_mut(self, data: &'d mut sir_data::operation::InternalCallData) {
-        let inputs = data.get_inputs(self.program).to_vec();
-        let outputs = data.get_outputs(self.program).to_vec();
+        let callee_inputs = data.get_inputs(self.program).to_vec();
+        let callee_outputs = data.get_outputs(self.program).to_vec();
 
         data.ins_start = self.program.locals.next_idx();
-        for input in inputs {
-            let input = self.remap_local(input);
-            self.program.locals.push(input);
+        for callee_input in callee_inputs {
+            let remapped_input = remap_local(self.program, self.remapped_locals, callee_input);
+            self.program.locals.push(remapped_input);
         }
 
         data.outs_start = self.program.locals.next_idx();
-        for output in outputs {
-            let output = self.remap_local(output);
-            self.program.locals.push(output);
+        for callee_output in callee_outputs {
+            let remapped_output = remap_local(self.program, self.remapped_locals, callee_output);
+            self.program.locals.push(remapped_output);
         }
     }
 
     fn visit_void_mut(self) {}
+}
+
+fn remap_local(
+    program: &mut EthIRProgram,
+    remapped_locals: &mut HashMap<LocalId, LocalId>,
+    local: LocalId,
+) -> LocalId {
+    *remapped_locals.entry(local).or_insert_with(|| program.next_free_local_id.get_and_inc())
 }
 
 fn walk_call_graph(
@@ -430,7 +439,7 @@ fn walk_call_graph(
     function_states: &mut IndexVec<FunctionId, FunctionState>,
     postorder: &mut Vec<FunctionId>,
     callsites: &mut IndexVec<FunctionId, Vec<OperationIdx>>,
-    call_blocks: &mut HashMap<OperationIdx, BasicBlockId>,
+    callsite_blocks: &mut HashMap<OperationIdx, BasicBlockId>,
 ) {
     match function_states[function_id] {
         FunctionState::Complete => return,
@@ -450,17 +459,17 @@ fn walk_call_graph(
             continue;
         }
 
-        for op_id in program.basic_blocks[block].operations.iter() {
-            if let Operation::InternalCall(data) = program.operations[op_id] {
-                callsites[data.function].push(op_id);
-                call_blocks.insert(op_id, block);
+        for operation_id in program.basic_blocks[block].operations.iter() {
+            if let Operation::InternalCall(call) = program.operations[operation_id] {
+                callsites[call.function].push(operation_id);
+                callsite_blocks.insert(operation_id, block);
                 walk_call_graph(
                     program,
-                    data.function,
+                    call.function,
                     function_states,
                     postorder,
                     callsites,
-                    call_blocks,
+                    callsite_blocks,
                 );
             }
         }
@@ -603,7 +612,7 @@ mod tests {
     }
 
     #[test]
-    fn test_linear_allocated_inputs() {
+    fn test_linear_inlining_remaps_allocated_operation_inputs() {
         let actual = inline(
             r#"
             fn init:
@@ -848,7 +857,86 @@ mod tests {
     }
 
     #[test]
-    fn test_cfg_inline_updates_moved_callsite() {
+    fn test_cfg_repeated_callsites_in_same_block() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    x = const 3
+                    y = icall @increment x
+                    z = icall @increment y
+                    stop
+                }
+
+            fn increment:
+                entry x -> x {
+                    => @add_one
+                }
+                add_one add_one_x -> result {
+                    one = const 1
+                    result = add add_one_x one
+                    iret
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @2  (outputs: 0)
+
+            Basic Blocks:
+                @0 $0 -> $0 {
+                    => @1
+                }
+
+                @1 $1 -> $3 {
+                    $2 = const 0x1
+                    $3 = add $1 $2
+                    iret
+                }
+
+                @2 -> $4 {
+                    $4 = const 0x3
+                    => @7
+                }
+
+                @3 $6 {
+                    stop
+                }
+
+                @4 $7 -> $7 {
+                    => @5
+                }
+
+                @5 $8 -> $10 {
+                    $9 = const 0x1
+                    $10 = add $8 $9
+                    => @3
+                }
+
+                @6 $5 -> $5 {
+                    => @4
+                }
+
+                @7 $11 -> $11 {
+                    => @8
+                }
+
+                @8 $12 -> $14 {
+                    $13 = const 0x1
+                    $14 = add $12 $13
+                    => @6
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_cfg_inlining_updates_moved_callsite_tracking() {
         let actual = inline(
             r#"
             fn init:
@@ -934,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cfg_inline_switch_loop() {
+    fn test_cfg_inlining_handles_switch_loop() {
         let actual = inline(
             r#"
             fn init:
@@ -1022,7 +1110,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inlining_preserves_static_allocation_identity() {
+    fn test_cfg_inlining_preserves_static_allocation_identity() {
         let actual = inline(
             r#"
             fn init:
@@ -1036,6 +1124,9 @@ mod tests {
             fn alloc:
                 entry -> ptr {
                     ptr = salloc 32
+                    => @done
+                }
+                done returned_ptr -> returned_ptr {
                     iret
                 }
             "#,
