@@ -1,8 +1,8 @@
 use hashbrown::HashMap;
 use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span, index_vec};
 use sir_data::{
-    BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, Operation,
-    OperationIdx, Switch, operation::InternalCallData,
+    BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, LocalIdx,
+    Operation, OperationIdx, Switch, operation::InternalCallData,
 };
 
 use crate::{AnalysesStore, Pass, analyses::ReversePostOrder};
@@ -15,7 +15,6 @@ pub(crate) struct Inliner {
     postorder: Vec<FunctionId>,
     callsites: IndexVec<FunctionId, Vec<OperationIdx>>,
     callsite_blocks: HashMap<OperationIdx, BasicBlockId>,
-    remapped_locals: HashMap<LocalId, LocalId>,
 }
 
 impl Pass for Inliner {
@@ -44,7 +43,6 @@ impl Inliner {
             postorder: Vec::new(),
             callsites: IndexVec::new(),
             callsite_blocks: HashMap::new(),
-            remapped_locals: HashMap::new(),
         }
     }
 
@@ -127,136 +125,136 @@ impl Inliner {
         }
 
         let callee_entry = program.functions[call.function].entry();
-        let mut remapped_blocks = HashMap::new();
-        self.remapped_locals.clear();
-        let mut callee_block_worklist = vec![callee_entry];
-        let remapped_block_placeholder = BasicBlock {
+        let mut block_cloner = BlockCloner::new(program, join_block);
+        let cloned_entry = block_cloner.remap_block(callee_entry);
+        while let Some(source_block) = block_cloner.block_worklist.pop() {
+            block_cloner.clone_block(source_block);
+        }
+        program.basic_blocks[callsite_block].control = Control::ContinuesTo(cloned_entry);
+    }
+}
+
+struct BlockCloner<'a> {
+    program: &'a mut EthIRProgram,
+    return_target: BasicBlockId,
+    remapped_blocks: HashMap<BasicBlockId, BasicBlockId>,
+    remapped_locals: HashMap<LocalId, LocalId>,
+    block_worklist: Vec<BasicBlockId>,
+}
+
+impl<'a> BlockCloner<'a> {
+    fn new(program: &'a mut EthIRProgram, return_target: BasicBlockId) -> Self {
+        Self {
+            program,
+            return_target,
+            remapped_blocks: HashMap::new(),
+            remapped_locals: HashMap::new(),
+            block_worklist: Vec::new(),
+        }
+    }
+
+    fn remap_block(&mut self, source: BasicBlockId) -> BasicBlockId {
+        if let Some(&destination) = self.remapped_blocks.get(&source) {
+            return destination;
+        }
+
+        let destination = self.program.basic_blocks.push(BasicBlock {
             inputs: Span::EMPTY,
             outputs: Span::EMPTY,
             operations: Span::EMPTY,
             control: Control::LastOpTerminates,
+        });
+        self.remapped_blocks.insert(source, destination);
+        self.block_worklist.push(source);
+        destination
+    }
+
+    fn clone_block(&mut self, source_id: BasicBlockId) {
+        let destination_id = self.remapped_blocks[&source_id];
+        let source = self.program.basic_blocks[source_id];
+        let cloned = BasicBlock {
+            inputs: self.clone_locals(source.inputs),
+            operations: self.clone_operations(source.operations),
+            outputs: self.clone_locals(source.outputs),
+            control: self.clone_control(source.control),
         };
 
-        while let Some(callee_block_id) = callee_block_worklist.pop() {
-            let remapped_block_id = *remapped_blocks
-                .entry(callee_block_id)
-                .or_insert_with(|| program.basic_blocks.push(remapped_block_placeholder));
+        self.program.basic_blocks[destination_id] = cloned;
+    }
 
-            let callee_block = program.basic_blocks[callee_block_id];
-
-            let inputs_start = program.locals.next_idx();
-            for input_idx in callee_block.inputs.iter() {
-                let callee_input = program.locals[input_idx];
-                let remapped_input = remap_local(
-                    &mut self.remapped_locals,
-                    &mut program.next_free_local_id,
-                    callee_input,
-                );
-                program.locals.push(remapped_input);
-            }
-            let inputs_end = program.locals.next_idx();
-
-            let operations_start = program.operations.next_idx();
-            for callee_operation in callee_block.operations.iter() {
-                let cloned_operation = program.clone_operation(callee_operation);
-                let mut operation = program.operations[cloned_operation];
-                for input in operation.inputs_mut(&mut program.locals) {
-                    *input = remap_local(
-                        &mut self.remapped_locals,
-                        &mut program.next_free_local_id,
-                        *input,
-                    );
-                }
-                for output in operation.outputs_mut(&mut program.locals, &program.functions) {
-                    *output = remap_local(
-                        &mut self.remapped_locals,
-                        &mut program.next_free_local_id,
-                        *output,
-                    );
-                }
-                program.operations[cloned_operation] = operation;
-            }
-
-            let outputs_start = program.locals.next_idx();
-            for output_idx in callee_block.outputs.iter() {
-                let callee_output = program.locals[output_idx];
-                let remapped_output = remap_local(
-                    &mut self.remapped_locals,
-                    &mut program.next_free_local_id,
-                    callee_output,
-                );
-                program.locals.push(remapped_output);
-            }
-            let outputs_end = program.locals.next_idx();
-
-            let remapped_control = match callee_block.control {
-                Control::LastOpTerminates => Control::LastOpTerminates,
-                Control::InternalReturn => Control::ContinuesTo(join_block),
-                Control::ContinuesTo(callee_target) => {
-                    let remapped_target =
-                        *remapped_blocks.entry(callee_target).or_insert_with(|| {
-                            callee_block_worklist.push(callee_target);
-                            program.basic_blocks.push(remapped_block_placeholder)
-                        });
-                    Control::ContinuesTo(remapped_target)
-                }
-                Control::Branches(branch) => {
-                    let remapped_zero_target =
-                        *remapped_blocks.entry(branch.zero_target).or_insert_with(|| {
-                            callee_block_worklist.push(branch.zero_target);
-                            program.basic_blocks.push(remapped_block_placeholder)
-                        });
-                    let remapped_non_zero_target =
-                        *remapped_blocks.entry(branch.non_zero_target).or_insert_with(|| {
-                            callee_block_worklist.push(branch.non_zero_target);
-                            program.basic_blocks.push(remapped_block_placeholder)
-                        });
-                    Control::Branches(Branch {
-                        condition: self.remapped_locals[&branch.condition],
-                        non_zero_target: remapped_non_zero_target,
-                        zero_target: remapped_zero_target,
-                    })
-                }
-                Control::Switch(switch) => {
-                    let callee_cases = program.cases[switch.cases];
-                    let targets_start_id = program.cases_bb_ids.next_idx();
-                    for callee_target_idx in callee_cases.target_indices().iter() {
-                        let callee_target = program.cases_bb_ids[callee_target_idx];
-                        let remapped_target =
-                            *remapped_blocks.entry(callee_target).or_insert_with(|| {
-                                callee_block_worklist.push(callee_target);
-                                program.basic_blocks.push(remapped_block_placeholder)
-                            });
-                        program.cases_bb_ids.push(remapped_target);
-                    }
-                    let remapped_cases = program.cases.push(Cases {
-                        values_start_id: callee_cases.values_start_id,
-                        targets_start_id,
-                        cases_count: callee_cases.cases_count,
-                    });
-                    Control::Switch(Switch {
-                        condition: self.remapped_locals[&switch.condition],
-                        fallback: switch.fallback.map(|callee_target| {
-                            *remapped_blocks.entry(callee_target).or_insert_with(|| {
-                                callee_block_worklist.push(callee_target);
-                                program.basic_blocks.push(remapped_block_placeholder)
-                            })
-                        }),
-                        cases: remapped_cases,
-                    })
-                }
-            };
-
-            program.basic_blocks[remapped_block_id] = BasicBlock {
-                inputs: Span::new(inputs_start, inputs_end),
-                outputs: Span::new(outputs_start, outputs_end),
-                operations: Span::new(operations_start, program.operations.next_idx()),
-                control: remapped_control,
-            };
+    fn clone_locals(&mut self, source: Span<LocalIdx>) -> Span<LocalIdx> {
+        let start = self.program.locals.next_idx();
+        for source_idx in source.iter() {
+            let source_local = self.program.locals[source_idx];
+            let cloned_local = remap_local(
+                &mut self.remapped_locals,
+                &mut self.program.next_free_local_id,
+                source_local,
+            );
+            self.program.locals.push(cloned_local);
         }
+        Span::new(start, self.program.locals.next_idx())
+    }
 
-        program.basic_blocks[callsite_block].control =
-            Control::ContinuesTo(remapped_blocks[&callee_entry]);
+    fn clone_operations(&mut self, source: Span<OperationIdx>) -> Span<OperationIdx> {
+        let start = self.program.operations.next_idx();
+        for source_operation in source.iter() {
+            let cloned_operation = self.program.clone_operation(source_operation);
+            let mut operation = self.program.operations[cloned_operation];
+            for input in operation.inputs_mut(&mut self.program.locals) {
+                *input = remap_local(
+                    &mut self.remapped_locals,
+                    &mut self.program.next_free_local_id,
+                    *input,
+                );
+            }
+            for output in operation.outputs_mut(&mut self.program.locals, &self.program.functions) {
+                *output = remap_local(
+                    &mut self.remapped_locals,
+                    &mut self.program.next_free_local_id,
+                    *output,
+                );
+            }
+            self.program.operations[cloned_operation] = operation;
+        }
+        Span::new(start, self.program.operations.next_idx())
+    }
+
+    fn clone_control(&mut self, source: Control) -> Control {
+        match source {
+            Control::LastOpTerminates => Control::LastOpTerminates,
+            Control::InternalReturn => Control::ContinuesTo(self.return_target),
+            Control::ContinuesTo(target) => Control::ContinuesTo(self.remap_block(target)),
+            Control::Branches(branch) => {
+                let zero_target = self.remap_block(branch.zero_target);
+                let non_zero_target = self.remap_block(branch.non_zero_target);
+                Control::Branches(Branch {
+                    condition: self.remapped_locals[&branch.condition],
+                    non_zero_target,
+                    zero_target,
+                })
+            }
+            Control::Switch(switch) => {
+                let source_cases = self.program.cases[switch.cases];
+                let targets_start_id = self.program.cases_bb_ids.next_idx();
+                for source_target_idx in source_cases.target_indices().iter() {
+                    let source_target = self.program.cases_bb_ids[source_target_idx];
+                    let cloned_target = self.remap_block(source_target);
+                    self.program.cases_bb_ids.push(cloned_target);
+                }
+                let cases = self.program.cases.push(Cases {
+                    values_start_id: source_cases.values_start_id,
+                    targets_start_id,
+                    cases_count: source_cases.cases_count,
+                });
+                let fallback = switch.fallback.map(|target| self.remap_block(target));
+                Control::Switch(Switch {
+                    condition: self.remapped_locals[&switch.condition],
+                    fallback,
+                    cases,
+                })
+            }
+        }
     }
 }
 
