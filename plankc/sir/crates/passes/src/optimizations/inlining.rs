@@ -2,8 +2,7 @@ use hashbrown::HashMap;
 use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span, index_vec};
 use sir_data::{
     BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, Operation,
-    OperationIdx, Switch,
-    operation::{InternalCallData, OpVisitorMut},
+    OperationIdx, Switch, operation::InternalCallData,
 };
 
 use crate::{AnalysesStore, Pass, analyses::ReversePostOrder};
@@ -148,26 +147,44 @@ impl Inliner {
             let inputs_start = program.locals.next_idx();
             for input_idx in callee_block.inputs.iter() {
                 let callee_input = program.locals[input_idx];
-                let remapped_input = remap_local(program, &mut self.remapped_locals, callee_input);
+                let remapped_input = remap_local(
+                    &mut self.remapped_locals,
+                    &mut program.next_free_local_id,
+                    callee_input,
+                );
                 program.locals.push(remapped_input);
             }
             let inputs_end = program.locals.next_idx();
 
             let operations_start = program.operations.next_idx();
             for callee_operation in callee_block.operations.iter() {
-                let mut remapped_operation = program.operations[callee_operation];
-                remapped_operation.visit_data_mut(&mut OperationRemapper {
-                    program,
-                    remapped_locals: &mut self.remapped_locals,
-                });
-                program.operations.push(remapped_operation);
+                let cloned_operation = program.clone_operation(callee_operation);
+                let mut operation = program.operations[cloned_operation];
+                for input in operation.inputs_mut(&mut program.locals) {
+                    *input = remap_local(
+                        &mut self.remapped_locals,
+                        &mut program.next_free_local_id,
+                        *input,
+                    );
+                }
+                for output in operation.outputs_mut(&mut program.locals, &program.functions) {
+                    *output = remap_local(
+                        &mut self.remapped_locals,
+                        &mut program.next_free_local_id,
+                        *output,
+                    );
+                }
+                program.operations[cloned_operation] = operation;
             }
 
             let outputs_start = program.locals.next_idx();
             for output_idx in callee_block.outputs.iter() {
                 let callee_output = program.locals[output_idx];
-                let remapped_output =
-                    remap_local(program, &mut self.remapped_locals, callee_output);
+                let remapped_output = remap_local(
+                    &mut self.remapped_locals,
+                    &mut program.next_free_local_id,
+                    callee_output,
+                );
                 program.locals.push(remapped_output);
             }
             let outputs_end = program.locals.next_idx();
@@ -278,90 +295,12 @@ impl DefaultHeuristic {
     }
 }
 
-struct OperationRemapper<'a> {
-    program: &'a mut EthIRProgram,
-    remapped_locals: &'a mut HashMap<LocalId, LocalId>,
-}
-
-impl<'d> OpVisitorMut<'d, ()> for &mut OperationRemapper<'_> {
-    fn visit_inline_operands_mut<const INS: usize, const OUTS: usize>(
-        self,
-        data: &'d mut sir_data::operation::InlineOperands<INS, OUTS>,
-    ) {
-        for local in data.ins.iter_mut().chain(data.outs.iter_mut()) {
-            *local = remap_local(self.program, self.remapped_locals, *local);
-        }
-    }
-
-    fn visit_allocated_ins_mut<const INS: usize, const OUTS: usize>(
-        self,
-        data: &'d mut sir_data::operation::AllocatedIns<INS, OUTS>,
-    ) {
-        let callee_inputs = data.get_inputs(self.program).to_vec();
-        data.ins_start = self.program.locals.next_idx();
-        for callee_input in callee_inputs {
-            let remapped_input = remap_local(self.program, self.remapped_locals, callee_input);
-            self.program.locals.push(remapped_input);
-        }
-
-        for output in &mut data.outs {
-            *output = remap_local(self.program, self.remapped_locals, *output);
-        }
-    }
-
-    fn visit_static_alloc_mut(self, data: &'d mut sir_data::operation::StaticAllocData) {
-        data.ptr_out = remap_local(self.program, self.remapped_locals, data.ptr_out);
-    }
-
-    fn visit_memory_load_mut(self, data: &'d mut sir_data::operation::MemoryLoadData) {
-        data.out = remap_local(self.program, self.remapped_locals, data.out);
-        data.ptr = remap_local(self.program, self.remapped_locals, data.ptr);
-    }
-
-    fn visit_memory_store_mut(self, data: &'d mut sir_data::operation::MemoryStoreData) {
-        for local in &mut data.ins {
-            *local = remap_local(self.program, self.remapped_locals, *local);
-        }
-    }
-
-    fn visit_set_small_const_mut(self, data: &'d mut sir_data::operation::SetSmallConstData) {
-        data.sets = remap_local(self.program, self.remapped_locals, data.sets);
-    }
-
-    fn visit_set_large_const_mut(self, data: &'d mut sir_data::operation::SetLargeConstData) {
-        data.sets = remap_local(self.program, self.remapped_locals, data.sets);
-    }
-
-    fn visit_set_data_offset_mut(self, data: &'d mut sir_data::operation::SetDataOffsetData) {
-        data.sets = remap_local(self.program, self.remapped_locals, data.sets);
-    }
-
-    fn visit_icall_mut(self, data: &'d mut sir_data::operation::InternalCallData) {
-        let callee_inputs = data.get_inputs(self.program).to_vec();
-        let callee_outputs = data.get_outputs(self.program).to_vec();
-
-        data.ins_start = self.program.locals.next_idx();
-        for callee_input in callee_inputs {
-            let remapped_input = remap_local(self.program, self.remapped_locals, callee_input);
-            self.program.locals.push(remapped_input);
-        }
-
-        data.outs_start = self.program.locals.next_idx();
-        for callee_output in callee_outputs {
-            let remapped_output = remap_local(self.program, self.remapped_locals, callee_output);
-            self.program.locals.push(remapped_output);
-        }
-    }
-
-    fn visit_void_mut(self) {}
-}
-
 fn remap_local(
-    program: &mut EthIRProgram,
     remapped_locals: &mut HashMap<LocalId, LocalId>,
+    next_free_local_id: &mut LocalId,
     local: LocalId,
 ) -> LocalId {
-    *remapped_locals.entry(local).or_insert_with(|| program.next_free_local_id.get_and_inc())
+    *remapped_locals.entry(local).or_insert_with(|| next_free_local_id.get_and_inc())
 }
 
 fn walk_call_graph(
