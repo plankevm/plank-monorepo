@@ -599,7 +599,7 @@ impl BlockLowerer<'_> {
                     if let Some(field) =
                         self.builder.fields[fields].iter().find(|field| field.name == method.name)
                     {
-                        self.error_method_conflicts_with_field(method.name_span(), *field);
+                        self.error_duplicate_struct_member(method.name_span(), *field);
                     }
                     if let Some(&previous_function) = self.method_buf[methods_start..]
                         .iter()

@@ -175,13 +175,9 @@ module.exports = grammar({
 
     struct_def: ($) => seq(
       "struct",
-      field("type_index", optional($._expr)),
+      optional(field("type_index", $._expr)),
       "{",
-      optional(seq(
-        field("fields", $.field_def),
-        repeat(seq(",", field("fields", $.field_def))),
-        optional(","),
-      )),
+      commaSeparated($.field_def, "fields"),
       repeat(field("methods", $.method_def)),
       "}"
     ),

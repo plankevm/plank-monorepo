@@ -145,7 +145,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 args = &method_args;
             }
         }
-        self.eval_closure_call(
+        self.eval_call(
             closure,
             args,
             call_span,

@@ -166,11 +166,7 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn error_method_conflicts_with_field(
-        &self,
-        method_span: TokenSpan,
-        field: FieldInfo,
-    ) {
+    pub(crate) fn error_duplicate_struct_member(&self, method_span: TokenSpan, field: FieldInfo) {
         let (field_name, field_span) = {
             let session = self.session.borrow();
             let (field_name, field_span) =
@@ -182,7 +178,7 @@ impl BlockLowerer<'_> {
                 Annotations::new(self.source_id)
                     .primary(
                         self.lexed.tokens_src_span(method_span),
-                        format!("method `{field_name}` conflicts with a field of the same name"),
+                        format!("method `{field_name}` has the same name as a field"),
                     )
                     .secondary(field_span, format!("field `{field_name}` declared here")),
             )

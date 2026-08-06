@@ -1557,20 +1557,20 @@
           "value": "struct"
         },
         {
-          "type": "FIELD",
-          "name": "type_index",
-          "content": {
-            "type": "CHOICE",
-            "members": [
-              {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "FIELD",
+              "name": "type_index",
+              "content": {
                 "type": "SYMBOL",
                 "name": "_expr"
-              },
-              {
-                "type": "BLANK"
               }
-            ]
-          }
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
         },
         {
           "type": "STRING",

@@ -39,7 +39,7 @@ fn test_struct_field_access() {
 }
 
 #[test]
-fn test_struct_method_capture_match() {
+fn test_struct_method_captures_affect_specialization() {
     assert_lowers_to(
         r#"
         const Make = fn(comptime value: u256) type {
@@ -49,42 +49,30 @@ fn test_struct_method_capture_match() {
         };
 
         init {
-            let first = Make(1);
-            let second = Make(1);
+            let first = Make(1).get();
+            let duplicate = Make(1).get();
+            let second = Make(2).get();
             @evm_stop();
         }
         "#,
         r#"
         ==== Functions ====
-        ; init
-        @fn0() -> never {
-            %0 : never = @evm_stop()
+        @fn0() -> u256 {
+            %0 : u256 = 1
+            ret %0
         }
-        "#,
-    );
-}
 
-#[test]
-fn test_struct_method_captures_produce_distinct_types() {
-    assert_lowers_to(
-        r#"
-        const Make = fn(comptime value: u256) type {
-            struct {
-                fn get() u256 { value }
-            }
-        };
-
-        init {
-            let first = Make(1);
-            let second = Make(2);
-            @evm_stop();
+        @fn1() -> u256 {
+            %0 : u256 = 2
+            ret %0
         }
-        "#,
-        r#"
-        ==== Functions ====
+
         ; init
-        @fn0() -> never {
-            %0 : never = @evm_stop()
+        @fn2() -> never {
+            %0 : u256 = call @fn0()
+            %1 : u256 = call @fn0()
+            %2 : u256 = call @fn1()
+            %3 : never = @evm_stop()
         }
         "#,
     );
@@ -103,6 +91,7 @@ fn test_type_qualified_method_calls() {
         init {
             let value = S.identity(2);
             let ty = S.type_via_self();
+            let instance: S = @uninit(ty);
             @evm_stop();
         }
         "#,
@@ -136,6 +125,7 @@ fn test_method_nested_fn_captures_self_type() {
 
         init {
             let ty = S.self_type();
+            let instance: S = @uninit(ty);
             @evm_stop();
         }
         "#,
@@ -198,73 +188,7 @@ fn test_type_qualified_method_self_specialization() {
 }
 
 #[test]
-fn test_value_method_call_injects_receiver() {
-    assert_lowers_to(
-        r#"
-        const S = struct {
-            fn identity(value: Self, input: u256) u256 { input }
-            fn self_type(value: Self) type { Self }
-        };
-
-        init {
-            let value: S = S {};
-            let output = value.identity(2);
-            let ty = value.self_type();
-            @evm_stop();
-        }
-        "#,
-        r#"
-        ==== Functions ====
-        @fn0(%0: S, %1: u256) -> u256 {
-            %2 : u256 = %1
-            ret %2
-        }
-
-        ; init
-        @fn1() -> never {
-            %0 : S = S {    }
-            %1 : u256 = 2
-            %2 : u256 = call @fn0(%0, %1)
-            %3 : never = @evm_stop()
-        }
-        "#,
-    );
-}
-
-#[test]
-fn test_type_qualified_method_call() {
-    assert_lowers_to(
-        r#"
-        const S = struct {
-            fn identity(value: Self, input: u256) u256 { input }
-        };
-
-        init {
-            let value: S = S {};
-            let output = S.identity(value, 2);
-            @evm_stop();
-        }
-        "#,
-        r#"
-        ==== Functions ====
-        @fn0(%0: S, %1: u256) -> u256 {
-            %2 : u256 = %1
-            ret %2
-        }
-
-        ; init
-        @fn1() -> never {
-            %0 : S = S {    }
-            %1 : u256 = 2
-            %2 : u256 = call @fn0(%0, %1)
-            %3 : never = @evm_stop()
-        }
-        "#,
-    );
-}
-
-#[test]
-fn test_type_method_call_with_missing_argument() {
+fn test_type_qualified_method_does_not_inject_receiver() {
     assert_diagnostics(
         r#"
         const S = struct {
@@ -295,27 +219,33 @@ fn test_value_method_self_type_reflection() {
     assert_lowers_to(
         r#"
         const S = struct {
-            fn field_count(value: Self) u256 { @field_count(Self) }
+            first: u256,
+            second: bool,
+            fn field_count(value: Self, marker: u256) u256 { @field_count(Self) }
         };
 
         init {
-            let value: S = S {};
-            let count = value.field_count();
+            let value: S = S { first: 1, second: true };
+            let count = value.field_count(9);
             @evm_stop();
         }
         "#,
         r#"
         ==== Functions ====
-        @fn0(%0: S) -> u256 {
-            %1 : u256 = 0
-            ret %1
+        @fn0(%0: S, %1: u256) -> u256 {
+            %2 : u256 = 2
+            ret %2
         }
 
         ; init
         @fn1() -> never {
-            %0 : S = S {    }
-            %1 : u256 = call @fn0(%0)
-            %2 : never = @evm_stop()
+            %0 : S = S {
+                1,
+                true,
+            }
+            %1 : u256 = 9
+            %2 : u256 = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
         }
         "#,
     );
@@ -329,16 +259,27 @@ fn test_unknown_method() {
 
         init {
             S.missing();
+            let value: S = S {};
+            value.missing();
             @evm_stop();
         }
         "#,
-        &[r#"
+        &[
+            r#"
         error: unknown method
          --> main.plk:4:5
           |
         4 |     S.missing();
           |     ^^^^^^^^^^^ `S` has no method `missing`
-        "#],
+        "#,
+            r#"
+        error: unknown method
+         --> main.plk:6:5
+          |
+        6 |     value.missing();
+          |     ^^^^^^^^^^^^^^^ `S` has no method `missing`
+        "#,
+        ],
     );
 }
 

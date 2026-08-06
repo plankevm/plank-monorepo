@@ -387,7 +387,7 @@ fn test_self_type_outside_method_diagnostic() {
 }
 
 #[test]
-fn test_method_conflicts_with_field_diagnostic() {
+fn test_duplicate_struct_member_name_diagnostic() {
     let rendered = render_diagnostics(
         r#"
         const S = struct { f: u256 fn f() void {} };
@@ -400,7 +400,7 @@ fn test_method_conflicts_with_field_diagnostic() {
          --> main.plk:1:31
           |
         1 | const S = struct { f: u256 fn f() void {} };
-          |                    -          ^ method `f` conflicts with a field of the same name
+          |                    -          ^ method `f` has the same name as a field
           |                    |
           |                    field `f` declared here
         "#,

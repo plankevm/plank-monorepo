@@ -150,7 +150,7 @@ Struct methods
 
 const S = struct {
     value: u256,
-    fn new(value: u256) Self { S { value: value } }
+    fn new(value: u256) Self { Self { value: value } }
     fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
 };
 
@@ -171,7 +171,7 @@ const S = struct {
         (self_type)
         (block
           (struct_lit
-            (identifier)
+            (self_type)
             (field_init
               (identifier)
               (identifier)))))

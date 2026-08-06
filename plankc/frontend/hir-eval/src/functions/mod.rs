@@ -250,7 +250,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         })
     }
 
-    pub(crate) fn eval_call(
+    pub(crate) fn eval_call_expr(
         &mut self,
         callee: hir::LocalId,
         args_id: hir::ArgsId,
@@ -273,10 +273,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
             return Err(Poisoned);
         }
-        self.eval_closure_call(closure, &self.hir.args[args_id], call_span, None)
+        self.eval_call(closure, &self.hir.args[args_id], call_span, None)
     }
 
-    pub(crate) fn eval_closure_call(
+    pub(crate) fn eval_call(
         &mut self,
         closure: ValueId,
         args: &[hir::LocalId],
