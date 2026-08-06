@@ -3,25 +3,28 @@ use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span, index_vec};
 use sir_data::{
     BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, Operation,
     OperationIdx, Switch,
-    operation::{InlineOperands, InternalCallData, OpVisitorMut},
+    operation::{InternalCallData, OpVisitorMut},
 };
 
-use crate::{AnalysesStore, Pass};
+use crate::{AnalysesStore, Pass, analyses::ReversePostOrder};
 
 pub(crate) const DEFAULT_INLINE_SIZE_THRESHOLD: u32 = 8;
 
 #[derive(Debug, Clone)]
-pub(crate) struct Inliner<H> {
-    heuristic: H,
+pub(crate) struct Inliner {
+    heuristic: DefaultHeuristic,
     postorder: Vec<FunctionId>,
     callsites: IndexVec<FunctionId, Vec<OperationIdx>>,
     callsite_blocks: HashMap<OperationIdx, BasicBlockId>,
     remapped_locals: HashMap<LocalId, LocalId>,
 }
 
-impl<H: InlineHeuristic> Pass for Inliner<H> {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
-        self.build_call_graph(program);
+impl Pass for Inliner {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        {
+            let rpo = store.reverse_post_order(program);
+            self.build_call_graph(program, &rpo);
+        }
         for function_id in std::mem::take(&mut self.postorder) {
             let should_inline = match self.callsites[function_id].len() {
                 0 => false,
@@ -35,10 +38,10 @@ impl<H: InlineHeuristic> Pass for Inliner<H> {
     }
 }
 
-impl<H: InlineHeuristic> Inliner<H> {
-    pub(crate) fn new(heuristic: H) -> Self {
+impl Inliner {
+    pub(crate) fn new(size_threshold: u32) -> Self {
         Self {
-            heuristic,
+            heuristic: DefaultHeuristic::new(size_threshold),
             postorder: Vec::new(),
             callsites: IndexVec::new(),
             callsite_blocks: HashMap::new(),
@@ -46,7 +49,7 @@ impl<H: InlineHeuristic> Inliner<H> {
         }
     }
 
-    fn build_call_graph(&mut self, program: &EthIRProgram) {
+    fn build_call_graph(&mut self, program: &EthIRProgram, rpo: &ReversePostOrder) {
         self.postorder.clear();
         self.callsites.clear();
         self.callsites.resize_with(program.functions.len(), Vec::new);
@@ -56,6 +59,7 @@ impl<H: InlineHeuristic> Inliner<H> {
 
         walk_call_graph(
             program,
+            rpo,
             program.init_entry,
             &mut function_states,
             &mut self.postorder,
@@ -65,6 +69,7 @@ impl<H: InlineHeuristic> Inliner<H> {
         if let Some(main_entry) = program.main_entry {
             walk_call_graph(
                 program,
+                rpo,
                 main_entry,
                 &mut function_states,
                 &mut self.postorder,
@@ -75,8 +80,6 @@ impl<H: InlineHeuristic> Inliner<H> {
     }
 
     fn inline_function(&mut self, program: &mut EthIRProgram, function_id: FunctionId) {
-        let entry = program.functions[function_id].entry();
-        let is_linear = matches!(program.basic_blocks[entry].control, Control::InternalReturn);
         while let Some(callsite_operation) = self.callsites[function_id].pop() {
             let callsite_block = self
                 .callsite_blocks
@@ -86,77 +89,11 @@ impl<H: InlineHeuristic> Inliner<H> {
                 unreachable!("tracked callsite should point to an internal call")
             };
             assert_eq!(call.function, function_id);
-            if is_linear {
-                self.inline_linear_callsite(program, callsite_block, callsite_operation, call);
-            } else {
-                self.inline_cfg_callsite(program, callsite_block, callsite_operation, call);
-            }
+            self.inline_callsite(program, callsite_block, callsite_operation, call);
         }
     }
 
-    fn inline_linear_callsite(
-        &mut self,
-        program: &mut EthIRProgram,
-        callsite_block: BasicBlockId,
-        callsite_operation: OperationIdx,
-        call: InternalCallData,
-    ) {
-        let old_operations = program.basic_blocks[callsite_block].operations;
-        let new_operations_start = program.operations.next_idx();
-        self.remapped_locals.clear();
-
-        for old_operation in old_operations.iter() {
-            if old_operation == callsite_operation {
-                let callee_entry = program.functions[call.function].entry();
-                let callee_operations = program.basic_blocks[callee_entry].operations;
-                let callee_inputs = program.block(callee_entry).inputs();
-                let call_inputs = call.get_inputs(program);
-                for input_index in 0..callee_inputs.len() {
-                    self.remapped_locals
-                        .insert(callee_inputs[input_index], call_inputs[input_index]);
-                }
-
-                for callee_operation in callee_operations.iter() {
-                    let mut remapped_operation = program.operations[callee_operation];
-                    remapped_operation.visit_data_mut(&mut OperationRemapper {
-                        program,
-                        remapped_locals: &mut self.remapped_locals,
-                    });
-                    program.operations.push(remapped_operation);
-                }
-
-                for output_index in 0..program.block(callee_entry).outputs().len() {
-                    let callee_output = program.block(callee_entry).outputs()[output_index];
-                    let call_output = call.get_outputs(program)[output_index];
-                    program.operations.push(Operation::SetCopy(InlineOperands {
-                        ins: [self.remapped_locals[&callee_output]],
-                        outs: [call_output],
-                    }));
-                }
-            } else {
-                let relocated_operation =
-                    program.operations.push(program.operations[old_operation]);
-                if let Operation::InternalCall(relocated_call) = program.operations[old_operation] {
-                    let tracked_callsite_operation = self.callsites[relocated_call.function]
-                        .iter_mut()
-                        .find(|callsite| **callsite == old_operation)
-                        .expect("internal call should have a tracked callsite");
-                    *tracked_callsite_operation = relocated_operation;
-                    self.callsite_blocks
-                        .remove(&old_operation)
-                        .expect("tracked callsite should have a current block");
-                    assert!(
-                        self.callsite_blocks.insert(relocated_operation, callsite_block).is_none()
-                    );
-                }
-            }
-        }
-
-        program.basic_blocks[callsite_block].operations =
-            Span::new(new_operations_start, program.operations.next_idx());
-    }
-
-    fn inline_cfg_callsite(
+    fn inline_callsite(
         &mut self,
         program: &mut EthIRProgram,
         callsite_block: BasicBlockId,
@@ -306,10 +243,6 @@ impl<H: InlineHeuristic> Inliner<H> {
     }
 }
 
-pub(crate) trait InlineHeuristic {
-    fn should_inline(&mut self, program: &EthIRProgram, function_id: FunctionId) -> bool;
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct DefaultHeuristic {
     size_threshold: u32,
@@ -321,9 +254,7 @@ impl DefaultHeuristic {
     pub(crate) fn new(size_threshold: u32) -> Self {
         Self { size_threshold, visited_blocks: DenseIndexSet::new(), block_worklist: Vec::new() }
     }
-}
 
-impl InlineHeuristic for DefaultHeuristic {
     fn should_inline(&mut self, program: &EthIRProgram, function_id: FunctionId) -> bool {
         let mut size = 0;
         self.visited_blocks.clear();
@@ -435,6 +366,7 @@ fn remap_local(
 
 fn walk_call_graph(
     program: &EthIRProgram,
+    rpo: &ReversePostOrder,
     function_id: FunctionId,
     function_states: &mut IndexVec<FunctionId, FunctionState>,
     postorder: &mut Vec<FunctionId>,
@@ -451,20 +383,14 @@ fn walk_call_graph(
 
     function_states[function_id] = FunctionState::InProgress;
 
-    let mut visited_blocks = DenseIndexSet::new();
-    let mut worklist = vec![program.functions[function_id].entry()];
-
-    while let Some(block) = worklist.pop() {
-        if !visited_blocks.add(block) {
-            continue;
-        }
-
+    for &block in rpo.function_rpo(function_id) {
         for operation_id in program.basic_blocks[block].operations.iter() {
             if let Operation::InternalCall(call) = program.operations[operation_id] {
                 callsites[call.function].push(operation_id);
                 callsite_blocks.insert(operation_id, block);
                 walk_call_graph(
                     program,
+                    rpo,
                     call.function,
                     function_states,
                     postorder,
@@ -473,8 +399,6 @@ fn walk_call_graph(
                 );
             }
         }
-
-        worklist.extend(program.basic_blocks[block].control.iter_outgoing(program));
     }
 
     function_states[function_id] = FunctionState::Complete;
@@ -490,7 +414,7 @@ enum FunctionState {
 
 #[cfg(test)]
 mod tests {
-    use super::{DefaultHeuristic, Inliner};
+    use super::Inliner;
     use crate::{AnalysesStore, Defragmenter, Legalizer, run_pass};
     use sir_data::{Operation, assert_ir_display};
     use sir_parser::{EmitConfig, parse_or_panic};
@@ -498,7 +422,7 @@ mod tests {
     fn inline(source: &str) -> sir_data::EthIRProgram {
         let mut program = parse_or_panic(source, EmitConfig::init_only());
         let store = AnalysesStore::default();
-        run_pass(&mut Inliner::new(DefaultHeuristic::new(4)), &mut program, &store);
+        run_pass(&mut Inliner::new(4), &mut program, &store);
         Legalizer::default()
             .run(&program, &store)
             .unwrap_or_else(|err| panic!("legalization failed after inlining: {err}\n{program}"));
@@ -506,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn test_linear_single_callsite() {
+    fn test_single_callsite() {
         let actual = inline(
             r#"
             fn init:
@@ -538,18 +462,25 @@ mod tests {
                     iret
                 }
 
-                @1 {
+                @1 -> $2 {
                     $2 = const 0x2
-                    $4 = add $2 $2
-                    $3 = copy $4
+                    => @3
+                }
+
+                @2 $3 {
                     stop
+                }
+
+                @3 $4 -> $5 {
+                    $5 = add $4 $4
+                    => @2
                 }
             "#,
         );
     }
 
     #[test]
-    fn test_nested_linear_inlining_and_defragmentation() {
+    fn test_nested_inlining_and_defragmentation() {
         let mut actual = inline(
             r#"
             fn init:
@@ -590,22 +521,43 @@ mod tests {
                     iret
                 }
 
-                @1 $3 -> $6 {
+                @1 $3 -> $3 $4 {
                     $4 = const 0x1
-                    $9 = add $3 $4
-                    $5 = copy $9
+                    => @4
+                }
+
+                @2 -> $7 {
+                    $7 = const 0x5
+                    => @6
+                }
+
+                @3 $5 -> $6 {
                     $6 = add $5 $3
                     iret
                 }
 
-                @2 {
-                    $7 = const 0x5
-                    $10 = const 0x1
-                    $11 = add $7 $10
-                    $12 = copy $11
-                    $13 = add $12 $7
-                    $8 = copy $13
+                @4 $9 $10 -> $11 {
+                    $11 = add $9 $10
+                    => @3
+                }
+
+                @5 $8 {
                     stop
+                }
+
+                @6 $12 -> $12 $13 {
+                    $13 = const 0x1
+                    => @7
+                }
+
+                @7 $14 $15 -> $16 {
+                    $16 = add $14 $15
+                    => @8
+                }
+
+                @8 $17 -> $18 {
+                    $18 = add $17 $12
+                    => @5
                 }
             "#,
         );
@@ -624,13 +576,27 @@ mod tests {
                 fn @0 -> entry @0  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 -> $0 {
                     $0 = const 0x5
-                    $1 = const 0x1
-                    $2 = add $0 $1
-                    $3 = copy $2
-                    $4 = add $3 $0
-                    $5 = copy $4
+                    => @1
+                }
+
+                @1 $1 -> $1 $2 {
+                    $2 = const 0x1
+                    => @2
+                }
+
+                @2 $3 $4 -> $5 {
+                    $5 = add $3 $4
+                    => @3
+                }
+
+                @3 $6 -> $7 {
+                    $7 = add $6 $1
+                    => @4
+                }
+
+                @4 $8 {
                     stop
                 }
             "#,
@@ -638,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn test_linear_inlining_remaps_allocated_operation_inputs() {
+    fn test_inlining_remaps_allocated_operation_inputs() {
         let actual = inline(
             r#"
             fn init:
@@ -672,13 +638,20 @@ mod tests {
                     iret
                 }
 
-                @1 {
+                @1 -> $4 $5 $6 {
                     $4 = const 0x2
                     $5 = const 0x3
                     $6 = const 0x5
-                    $8 = addmod $4 $5 $6
-                    $7 = copy $8
+                    => @3
+                }
+
+                @2 $7 {
                     stop
+                }
+
+                @3 $8 $9 $10 -> $11 {
+                    $11 = addmod $8 $9 $10
+                    => @2
                 }
             "#,
         );
@@ -793,14 +766,21 @@ mod tests {
                     iret
                 }
 
-                @1 {
+                @1 -> $5 {
                     $5 = const 0x1
-                    $7 = add $5 $5
-                    $8 = add $7 $5
-                    $9 = add $8 $5
-                    $10 = add $9 $5
-                    $6 = copy $10
+                    => @3
+                }
+
+                @2 $6 {
                     stop
+                }
+
+                @3 $7 -> $11 {
+                    $8 = add $7 $7
+                    $9 = add $8 $7
+                    $10 = add $9 $7
+                    $11 = add $10 $7
+                    => @2
                 }
             "#,
         );
@@ -975,59 +955,31 @@ mod tests {
                     iret
                 }
 
-                @1 {
+                @1 -> $4 {
                     $4 = const 0x1
-                    $10 = add $4 $4
-                    $11 = add $10 $4
-                    $12 = add $11 $4
-                    $5 = copy $12
-                    $7 = add $5 $5
-                    $8 = add $7 $5
-                    $9 = add $8 $5
-                    $6 = copy $9
-                    stop
+                    => @5
                 }
-            "#,
-        );
-    }
 
-    #[test]
-    fn test_linear_repeated_callsites_in_same_block() {
-        let actual = inline(
-            r#"
-            fn init:
-                entry {
-                    x = const 3
-                    y = icall @id x
-                    z = icall @id y
+                @2 $6 {
                     stop
                 }
 
-            fn id:
-                entry x -> x {
-                    iret
-                }
-            "#,
-        );
-
-        assert_ir_display(
-            &actual,
-            r#"
-            Init: @1
-            Functions:
-                fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
-
-            Basic Blocks:
-                @0 $0 -> $0 {
-                    iret
+                @3 $7 -> $10 {
+                    $8 = add $7 $7
+                    $9 = add $8 $7
+                    $10 = add $9 $7
+                    => @2
                 }
 
-                @1 {
-                    $1 = const 0x3
-                    $2 = copy $1
-                    $3 = copy $2
-                    stop
+                @4 $5 -> $5 {
+                    => @3
+                }
+
+                @5 $11 -> $14 {
+                    $12 = add $11 $11
+                    $13 = add $12 $11
+                    $14 = add $13 $11
+                    => @4
                 }
             "#,
         );
@@ -1060,7 +1012,7 @@ mod tests {
             EmitConfig::default(),
         );
         let store = AnalysesStore::default();
-        run_pass(&mut Inliner::new(DefaultHeuristic::new(4)), &mut actual, &store);
+        run_pass(&mut Inliner::new(4), &mut actual, &store);
         Legalizer::default()
             .run(&actual, &store)
             .unwrap_or_else(|err| panic!("legalization failed after inlining: {err}\n{actual}"));
@@ -1081,25 +1033,39 @@ mod tests {
                     iret
                 }
 
-                @1 {
+                @1 -> $2 {
                     $2 = const 0x1
-                    $7 = add $2 $2
-                    $3 = copy $7
+                    => @6
+                }
+
+                @2 -> $4 {
+                    $4 = const 0x2
+                    => @4
+                }
+
+                @3 $5 {
                     stop
                 }
 
-                @2 {
-                    $4 = const 0x2
-                    $6 = add $4 $4
-                    $5 = copy $6
+                @4 $6 -> $7 {
+                    $7 = add $6 $6
+                    => @3
+                }
+
+                @5 $3 {
                     stop
+                }
+
+                @6 $8 -> $9 {
+                    $9 = add $8 $8
+                    => @5
                 }
             "#,
         );
     }
 
     #[test]
-    fn test_cfg_repeated_callsites_in_same_block() {
+    fn test_repeated_callsites_in_same_block() {
         let actual = inline(
             r#"
             fn init:
@@ -1178,7 +1144,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cfg_inlining_updates_moved_callsite_tracking() {
+    fn test_inlining_updates_moved_callsite_tracking() {
         let actual = inline(
             r#"
             fn init:
@@ -1252,9 +1218,8 @@ mod tests {
                     stop
                 }
 
-                @7 $8 {
-                    $9 = copy $8
-                    => $6 ? @5 : @6
+                @7 $8 -> $8 {
+                    => @12
                 }
 
                 @8 $10 $11 -> $11 {
@@ -1269,12 +1234,20 @@ mod tests {
                 @10 $12 -> $12 {
                     => @7
                 }
+
+                @11 $9 {
+                    => $6 ? @5 : @6
+                }
+
+                @12 $15 -> $15 {
+                    => @11
+                }
             "#,
         );
     }
 
     #[test]
-    fn test_cfg_inlining_handles_switch_loop() {
+    fn test_inlining_handles_switch_loop() {
         let actual = inline(
             r#"
             fn init:
@@ -1364,7 +1337,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cfg_inlining_preserves_static_allocation_identity() {
+    fn test_inlining_preserves_static_allocation_identity() {
         let actual = inline(
             r#"
             fn init:

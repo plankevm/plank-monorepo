@@ -5,7 +5,7 @@ pub mod transforms;
 use optimizations::{
     constant_propagation::SCCP,
     copy_propagation::CopyPropagation,
-    inlining::{DEFAULT_INLINE_SIZE_THRESHOLD, DefaultHeuristic, Inliner},
+    inlining::{DEFAULT_INLINE_SIZE_THRESHOLD, Inliner},
     switch_peephole::SwitchPeephole,
     unused_operation_elimination::UnusedOperationElimination,
 };
@@ -42,7 +42,7 @@ pub struct PassManager<'a> {
     unused_elim: Option<UnusedOperationElimination>,
     defragmenter: Option<Defragmenter>,
     switch_peephole: Option<SwitchPeephole>,
-    inliner: Option<Inliner<DefaultHeuristic>>,
+    inliner: Option<Inliner>,
 }
 
 impl<'a> PassManager<'a> {
@@ -95,9 +95,7 @@ impl<'a> PassManager<'a> {
                     &self.store,
                 ),
                 OptimizationPass::Inlining => run_pass(
-                    self.inliner.get_or_insert_with(|| {
-                        Inliner::new(DefaultHeuristic::new(DEFAULT_INLINE_SIZE_THRESHOLD))
-                    }),
+                    self.inliner.get_or_insert_with(|| Inliner::new(DEFAULT_INLINE_SIZE_THRESHOLD)),
                     self.program,
                     &self.store,
                 ),

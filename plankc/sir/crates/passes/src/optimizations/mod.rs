@@ -114,11 +114,18 @@ mod tests {
                 fn @0 -> entry @0  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 -> $0 {
                     $0 = const 0x2
-                    $1 = add $0 $0
-                    $2 = copy $1
-                    $3 = add $1 $0
+                    => @1
+                }
+
+                @1 $1 -> $2 {
+                    $2 = add $1 $1
+                    => @2
+                }
+
+                @2 $3 {
+                    $4 = add $3 $0
                     stop
                 }
             "#,
