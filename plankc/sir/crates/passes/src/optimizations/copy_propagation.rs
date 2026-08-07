@@ -56,6 +56,7 @@ impl Pass for CopyPropagation {
             | AnalysesMask::DominanceFrontiers
             | AnalysesMask::BasicBlockOwnership
             | AnalysesMask::ReachableBlocks
+            | AnalysesMask::ReachableFunctions
     }
 }
 

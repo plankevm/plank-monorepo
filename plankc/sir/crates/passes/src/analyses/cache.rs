@@ -1,4 +1,4 @@
-use crate::analyses::{function_effects::FunctionEffects, *};
+use crate::analyses::{function_effects::FunctionEffects, reachability::ReachableFunctions, *};
 use sir_data::EthIRProgram;
 use std::cell::{Ref, RefCell, RefMut};
 
@@ -101,6 +101,7 @@ define_analyses! {
     AllocationLiveness => allocation_liveness: AllocationLiveness,
     LocalLiveness => local_liveness: LocalLiveness,
     ReachableBlocks => reachable_blocks: ReachableBlocks,
+    ReachableFunctions => reachable_functions: ReachableFunctions,
     ReversePostOrder => reverse_post_order: ReversePostOrder,
     FunctionEffects => function_effects: FunctionEffects,
 }
@@ -128,6 +129,7 @@ mod tests {
             defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
         },
         run_pass,
+        transforms::SSATransform,
     };
     use sir_parser::{EmitConfig, parse_or_panic};
 
@@ -189,5 +191,50 @@ mod tests {
         // Unused elim uses def_use_mut: computes DefUse then marks it invalid
         run_pass(&mut UnusedOperationElimination::default(), &mut program, &store);
         assert!(!store.def_use.is_valid());
+    }
+
+    #[test]
+    fn test_ssa_transform_preserves_recomputed_analyses() {
+        let mut program = parse_or_panic(
+            r#"
+                fn init:
+                    entry {
+                        cond = const 1
+                        => cond ? @entry : @exit
+                    }
+                    exit { stop }
+                    orphan { stop }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let store = AnalysesStore::default();
+        store.predecessors(&program);
+        store.reverse_post_order(&program);
+
+        run_pass(&mut SSATransform, &mut program, &store);
+
+        assert!(store.predecessors.is_valid());
+        assert!(store.reachable_blocks.is_valid());
+        assert!(store.reverse_post_order.is_valid());
+
+        let snapshot = |store: &AnalysesStore| {
+            let predecessors = store.predecessors(&program);
+            let reachable_blocks = store.reachable_blocks(&program);
+            let reverse_post_order = store.reverse_post_order(&program);
+            (
+                predecessors
+                    .enumerate()
+                    .map(|(block, predecessors)| (block, predecessors.to_vec()))
+                    .collect::<Vec<_>>(),
+                program
+                    .basic_blocks
+                    .iter_idx()
+                    .filter(|&block| reachable_blocks.contains(block))
+                    .collect::<Vec<_>>(),
+                reverse_post_order.global_rpo().to_vec(),
+            )
+        };
+        let recomputed_store = AnalysesStore::default();
+        assert_eq!(snapshot(&store), snapshot(&recomputed_store));
     }
 }
