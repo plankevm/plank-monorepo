@@ -1909,12 +1909,12 @@ fn test_struct_def_trailing_comma() {
 }
 
 #[test]
-fn test_struct_def_with_method() {
+fn test_struct_def_with_eager_method() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
         const S = struct {
             value: bool
-            fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
+            eager fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
         };
         "#,
         r#"
@@ -1941,7 +1941,9 @@ fn test_struct_def_with_method() {
                             Identifier
                                 "bool"
                             "\n    "
-                        MethodDef
+                        MethodDef { eager: true }
+                            "eager"
+                            " "
                             "fn"
                             " "
                             Identifier

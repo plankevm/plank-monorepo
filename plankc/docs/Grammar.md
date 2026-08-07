@@ -55,7 +55,7 @@ assign = expr "=" expr
 
 # Definitions
 fn_def = "eager"? "fn" "(" param_def_list? ")" expr block
-method_def = "fn" IDENT "(" param_def_list? ")" expr block
+method_def = "eager"? "fn" IDENT "(" param_def_list? ")" expr block
 param_def_list = comma_separated{"comptime"? IDENT ":" param_type}
 param_type = expr | "$" IDENT
 

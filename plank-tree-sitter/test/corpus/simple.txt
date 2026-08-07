@@ -151,7 +151,7 @@ Struct methods
 const S = struct {
     value: u256,
     fn new(value: u256) Self { Self { value: value } }
-    fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
+    eager fn is_eq(lhs: Self, rhs: Self) bool { lhs.value == rhs.value }
 };
 
 --------------------------------------------------------------------------------

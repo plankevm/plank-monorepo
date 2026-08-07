@@ -543,8 +543,11 @@ impl<'cst> FnDef<'cst> {
     }
 }
 
+/// Method definition: `fn name(params) return_type { body }` or
+/// `eager fn name(params) return_type { body }`
 #[derive(Debug, Clone, Copy)]
 pub struct MethodDef<'cst> {
+    pub eager: bool,
     pub name: StrId,
     pub name_span: TokenSpan,
     param_list: NodeView<'cst>,
@@ -554,14 +557,12 @@ pub struct MethodDef<'cst> {
 
 impl<'cst> MethodDef<'cst> {
     fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
-        if view.kind() != NodeKind::MethodDef {
-            return Ok(None);
-        }
+        let NodeKind::MethodDef { eager } = view.kind() else { return Ok(None) };
         let name_node = view.child(0).ok_or(view.span())?;
         let name = name_node.ident().ok_or(view.span())?;
         let param_list = view.child(1).ok_or(view.span())?;
         let body_node = view.child(3).ok_or(view.span())?;
-        Ok(Some(Self { name, name_span: name_node.span(), param_list, body_node, view }))
+        Ok(Some(Self { eager, name, name_span: name_node.span(), param_list, body_node, view }))
     }
 
     pub fn param_list_span(&self) -> TokenSpan {

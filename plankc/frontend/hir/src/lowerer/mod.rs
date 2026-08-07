@@ -808,7 +808,7 @@ impl BlockLowerer<'_> {
                 method.body(),
                 method.node().span(),
                 method.param_list_span(),
-                false,
+                method.eager,
             );
             let name_offset = this.lexed.token_src_span(method.name_span().start).start;
             let method_def = MethodDef { name: method.name, name_offset, self_type };

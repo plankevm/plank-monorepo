@@ -117,7 +117,7 @@ pub enum NodeKind {
 
     // Function Definition
     FnDef { eager: bool },
-    MethodDef,
+    MethodDef { eager: bool },
     ParamList,
     Parameter,
     ComptimeParameter,
@@ -183,7 +183,7 @@ impl std::fmt::Debug for NodeKind {
             Self::Identifier { .. } => write!(f, "Identifier"),
             Self::BuiltinName { .. } => write!(f, "BuiltinName"),
             Self::FnDef { eager } => f.debug_struct("FnDef").field("eager", eager).finish(),
-            Self::MethodDef => write!(f, "MethodDef"),
+            Self::MethodDef { eager } => f.debug_struct("MethodDef").field("eager", eager).finish(),
             Self::ParamList => write!(f, "ParamList"),
             Self::Parameter => write!(f, "Parameter"),
             Self::ComptimeParameter => write!(f, "ComptimeParameter"),

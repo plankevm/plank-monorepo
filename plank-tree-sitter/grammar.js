@@ -183,6 +183,7 @@ module.exports = grammar({
     ),
     field_def: ($) => seq(field("name", $.identifier), ":", field("type", $._expr)),
     method_def: ($) => seq(
+      optional("eager"),
       "fn",
       field("name", $.identifier),
       "(",

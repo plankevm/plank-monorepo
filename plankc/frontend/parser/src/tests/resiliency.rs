@@ -699,7 +699,7 @@ fn test_field_list_garbage_silent_exit() {
              --> test.plk:1:28
               |
             1 | const S = struct { x: u32, 123 y: u32 };
-              |                            ^^^ unexpected decimal literal, expected one of `}`, `fn`, identifier
+              |                            ^^^ unexpected decimal literal, expected one of `}`, `eager`, `fn`, identifier
         "#],
     );
 }
@@ -715,7 +715,7 @@ fn test_field_list_multiple_garbage_tokens() {
              --> test.plk:1:28
               |
             1 | const S = struct { x: u32, 123 456 y: u32 };
-              |                            ^^^ unexpected decimal literal, expected one of `}`, `fn`, identifier
+              |                            ^^^ unexpected decimal literal, expected one of `}`, `eager`, `fn`, identifier
         "#],
     );
 }
@@ -732,6 +732,22 @@ fn test_method_missing_name_recovers_signature() {
               |
             1 | const S = struct { fn(value: Self) Self { value } };
               |                      ^ unexpected `(`, expected one of identifier, builtin name
+        "#],
+    );
+}
+
+#[test]
+fn test_eager_method_missing_fn_keyword() {
+    assert_parser_errors(
+        r#"
+            const S = struct { eager name() void {} };
+        "#,
+        &[r#"
+            error: unexpected identifier
+             --> test.plk:1:26
+              |
+            1 | const S = struct { eager name() void {} };
+              |                          ^^^^ unexpected identifier, expected `fn`
         "#],
     );
 }

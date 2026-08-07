@@ -113,6 +113,47 @@ fn test_type_qualified_method_calls() {
 }
 
 #[test]
+fn test_eager_method_folds_only_with_comptime_receiver() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            value: u256
+            eager fn probe(value: Self) bool { @in_comptime() }
+        };
+
+        init {
+            let known = S { value: 7 };
+            let mut folded = known.probe();
+
+            let input = @evm_calldataload(0);
+            let unknown = S { value: input };
+            let mut runtime = unknown.probe();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S) -> bool {
+            %1 : bool = false
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : bool = true
+            %1 : u256 = 0
+            %2 : u256 = @evm_calldataload(%1)
+            %3 : u256 = %2
+            %4 : S = S { %3 }
+            %5 : S = %4
+            %6 : bool = call @fn0(%5)
+            %7 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_method_nested_fn_captures_self_type() {
     assert_lowers_to(
         r#"

@@ -661,8 +661,9 @@ impl<'a> Parser<'a> {
 
     fn parse_method_def(&mut self) -> NodeIdx {
         let start = self.current_token_index();
-        assert!(self.eat(Token::Fn));
-        let mut method = self.alloc_node_from(start, NodeKind::MethodDef);
+        let eager = self.eat(Token::Eager);
+        self.expect(Token::Fn);
+        let mut method = self.alloc_node_from(start, NodeKind::MethodDef { eager });
         let name = self.expect_ident();
         self.push_child(&mut method, name);
         self.parse_function_signature_and_body(&mut method);
@@ -738,7 +739,7 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            if self.check(Token::Fn) {
+            if self.check(Token::Eager) || self.check(Token::Fn) {
                 seen_method = true;
                 let method = self.parse_method_def();
                 self.push_child(&mut body, method);
@@ -753,17 +754,29 @@ impl<'a> Parser<'a> {
                 self.push_child(&mut body, field);
 
                 self.skip_trivia();
-                if self.at(Token::RightCurly) || self.at(Token::Eof) || self.at(Token::Fn) {
+                if self.at(Token::RightCurly)
+                    || self.at(Token::Eof)
+                    || self.at(Token::Eager)
+                    || self.at(Token::Fn)
+                {
                     continue;
                 }
-                self.expect_check_recovery(Token::Comma, &[Token::Identifier, Token::Fn]);
+                self.expect_check_recovery(
+                    Token::Comma,
+                    &[Token::Identifier, Token::Eager, Token::Fn],
+                );
                 continue;
             }
 
             self.emit_unexpected();
             let error = self.alloc_node(NodeKind::Error);
             self.advance();
-            self.skip_until_recovery_token(&[Token::RightCurly, Token::Fn, Token::Identifier]);
+            self.skip_until_recovery_token(&[
+                Token::RightCurly,
+                Token::Eager,
+                Token::Fn,
+                Token::Identifier,
+            ]);
             let error = self.close_node(error);
             self.push_child(&mut body, error);
         }
