@@ -1,3 +1,4 @@
+pub(crate) mod basic_block_merging;
 pub(crate) mod constant_propagation;
 pub(crate) mod copy_propagation;
 pub(crate) mod defragmenter;

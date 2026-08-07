@@ -18,15 +18,15 @@ impl Pass for SCCP {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let rpo = store.reverse_post_order(program);
         let uses = store.def_use(program);
-        let mut reachability = store.reachability_mut(program, false);
-        self.analysis(program, &uses, rpo.functions_rpo(), reachability.set_mut());
-        self.apply(program, reachability.set_mut());
-        drop(reachability);
-        store.reachability.mark_valid();
+        let mut reachable_blocks = store.reachable_blocks_mut(program, false);
+        self.analysis(program, &uses, rpo.functions_rpo(), reachable_blocks.set_mut());
+        self.apply(program, reachable_blocks.set_mut());
+        drop(reachable_blocks);
+        store.reachable_blocks.mark_valid();
     }
 
     fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::Reachability
+        AnalysesMask::ReachableBlocks
     }
 }
 
@@ -1473,13 +1473,13 @@ mod tests {
         let store = AnalysesStore::default();
         run_pass(&mut SCCP::default(), &mut ir, &store);
 
-        let reachability = store.reachability(&ir);
+        let reachable_blocks = store.reachable_blocks(&ir);
         assert!(
-            reachability.contains(BasicBlockId::new(5)),
+            reachable_blocks.contains(BasicBlockId::new(5)),
             "true_target (@5) should be reachable"
         );
         assert!(
-            reachability.contains(BasicBlockId::new(6)),
+            reachable_blocks.contains(BasicBlockId::new(6)),
             "false_target (@6) should be reachable"
         );
     }
@@ -1531,9 +1531,9 @@ mod tests {
         let store = AnalysesStore::default();
         run_pass(&mut SCCP::default(), &mut ir, &store);
 
-        let reachability = store.reachability(&ir);
-        assert!(!reachability.contains(BasicBlockId::new(6)), "yes (@6) should be unreachable");
-        assert!(reachability.contains(BasicBlockId::new(7)), "no (@7) should be reachable");
+        let reachable_blocks = store.reachable_blocks(&ir);
+        assert!(!reachable_blocks.contains(BasicBlockId::new(6)), "yes (@6) should be unreachable");
+        assert!(reachable_blocks.contains(BasicBlockId::new(7)), "no (@7) should be reachable");
     }
 
     #[test]

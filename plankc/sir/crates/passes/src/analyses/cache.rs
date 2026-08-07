@@ -100,7 +100,7 @@ define_analyses! {
     BasicBlockOwnership => basic_block_ownership: BasicBlockOwnershipAndReachability,
     AllocationLiveness => allocation_liveness: AllocationLiveness,
     LocalLiveness => local_liveness: LocalLiveness,
-    Reachability => reachability: Reachability,
+    ReachableBlocks => reachable_blocks: ReachableBlocks,
     ReversePostOrder => reverse_post_order: ReversePostOrder,
     FunctionEffects => function_effects: FunctionEffects,
 }
@@ -110,12 +110,12 @@ impl AnalysesStore {
         self.def_use.get_mut(program, self, true)
     }
 
-    pub fn reachability_mut(
+    pub fn reachable_blocks_mut(
         &self,
         program: &EthIRProgram,
         compute: bool,
-    ) -> RefMut<'_, Reachability> {
-        self.reachability.get_mut(program, self, compute)
+    ) -> RefMut<'_, ReachableBlocks> {
+        self.reachable_blocks.get_mut(program, self, compute)
     }
 }
 
@@ -164,19 +164,19 @@ mod tests {
         assert!(store.dominance_frontiers.is_valid());
 
         // SCCP invalidates DefUse, Predecessors (cascades to Dominators, DominanceFrontiers),
-        // BasicBlockOwnership, CfgInOutBundling — and populates reachability
+        // BasicBlockOwnership, CfgInOutBundling — and populates reachable_blocks
         run_pass(&mut SCCP::default(), &mut program, &store);
         assert!(!store.def_use.is_valid());
         assert!(!store.predecessors.is_valid());
         assert!(!store.dominators.is_valid());
         assert!(!store.dominance_frontiers.is_valid());
         assert!(!store.basic_block_ownership.is_valid());
-        assert!(store.reachability.is_valid());
+        assert!(store.reachable_blocks.is_valid());
 
-        // Defragmenter consumes reachability and invalidates it
+        // Defragmenter consumes reachable_blocks analysis and invalidates it
         let mut defrag = Defragmenter::default();
         run_pass(&mut defrag, &mut program, &store);
-        assert!(!store.reachability.is_valid());
+        assert!(!store.reachable_blocks.is_valid());
 
         // Copy prop invalidates DefUse
         run_pass(&mut CopyPropagation::default(), &mut program, &store);

@@ -2,7 +2,7 @@ use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::{Idx, Span, span::IncIterable};
 use sir_data::*;
 
-use crate::{AnalysesStore, Pass, analyses::Reachability};
+use crate::{AnalysesStore, Pass, analyses::ReachableBlocks};
 
 #[derive(Default)]
 pub struct Defragmenter {
@@ -14,12 +14,12 @@ impl Pass for Defragmenter {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         self.state.clear();
         self.scratch.clear();
-        let reachability = store.reachability(program);
+        let reachable_blocks = store.reachable_blocks(program);
         Rewriter {
             state: &mut self.state,
             src: program,
             dst: &mut self.scratch,
-            reachability: &reachability,
+            reachable_blocks: &reachable_blocks,
         }
         .rewrite();
         std::mem::swap(program, &mut self.scratch);
@@ -55,7 +55,7 @@ struct Rewriter<'a> {
     state: &'a mut DefragmenterState,
     src: &'a EthIRProgram,
     dst: &'a mut EthIRProgram,
-    reachability: &'a Reachability,
+    reachable_blocks: &'a ReachableBlocks,
 }
 
 impl<'a> Rewriter<'a> {
@@ -112,7 +112,7 @@ impl<'a> Rewriter<'a> {
     }
 
     fn emit_block(&mut self, old_id: BasicBlockId) {
-        if !self.reachability.contains(old_id) {
+        if !self.reachable_blocks.contains(old_id) {
             return;
         }
 
@@ -226,7 +226,7 @@ impl<'a> Rewriter<'a> {
     }
 
     fn push_block(&mut self, bb: BasicBlockId) {
-        debug_assert!(self.reachability.contains(bb), "successor {bb:?} should be reachable");
+        debug_assert!(self.reachable_blocks.contains(bb), "successor {bb:?} should be reachable");
         if !self.state.block_map.contains_key(&bb) {
             self.state.block_worklist.push(bb);
         }

@@ -9,7 +9,7 @@ pub struct Predecessors {
 
 impl Analysis for Predecessors {
     fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
-        let reachability = store.reachability(program);
+        let reachable_blocks = store.reachable_blocks(program);
 
         for pred in self.inner.iter_mut() {
             pred.clear();
@@ -17,7 +17,7 @@ impl Analysis for Predecessors {
         self.inner.resize(program.basic_blocks.len(), Vec::new());
 
         for block in program.blocks() {
-            if !reachability.contains(block.id()) {
+            if !reachable_blocks.contains(block.id()) {
                 continue;
             }
             for successor in block.successors() {

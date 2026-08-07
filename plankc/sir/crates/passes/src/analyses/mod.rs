@@ -21,5 +21,5 @@ pub use function_effects::FunctionEffects;
 pub use legalizer::{Legalizer, LegalizerError};
 pub use local_liveness::{Interval, IntervalEnd, IntervalStart, LocalIntervals, LocalLiveness};
 pub use predecessors::Predecessors;
-pub use reachability::Reachability;
+pub use reachability::ReachableBlocks;
 pub use reverse_post_order::ReversePostOrder;

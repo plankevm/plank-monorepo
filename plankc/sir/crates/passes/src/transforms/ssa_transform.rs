@@ -13,7 +13,7 @@ impl Pass for SSATransform {
         run_pass(&mut PreSSAFunctionEntryRegularizer, program, store);
 
         let predecessors = store.predecessors(program);
-        let reachability = store.reachability(program);
+        let reachable_blocks = store.reachable_blocks(program);
 
         let mut unfilled_until_sealed = HashMap::new();
         for bb in program.basic_blocks.iter_idx() {
@@ -102,7 +102,7 @@ impl Pass for SSATransform {
         }
 
         for bb in t.program.basic_blocks.iter_idx() {
-            if !reachability.contains(bb) {
+            if !reachable_blocks.contains(bb) {
                 continue;
             }
             let BasicBlock { inputs, outputs, .. } = t.program.basic_blocks[bb];
