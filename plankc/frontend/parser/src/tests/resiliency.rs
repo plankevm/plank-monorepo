@@ -655,6 +655,40 @@ fn test_name_path_dot_not_followed_by_ident() {
 }
 
 #[test]
+fn test_missing_member_name_preserves_call_expression() {
+    assert_parses_to_cst_with_errors(
+        "run { foo.(); }",
+        &[r#"
+        error: unexpected `(`
+         --> test.plk:1:11
+          |
+        1 | run { foo.(); }
+          |           ^ unexpected `(`, expected identifier
+        "#],
+        r#"
+        File
+            RunBlock
+                "run"
+                " "
+                "{"
+                StatementsList
+                    " "
+                    CallExpr
+                        MemberExpr
+                            Identifier
+                                "foo"
+                            "."
+                            Error
+                        "("
+                        ")"
+                    ";"
+                    " "
+                "}"
+        "#,
+    );
+}
+
+#[test]
 fn test_field_list_garbage_silent_exit() {
     assert_parser_errors(
         r#"

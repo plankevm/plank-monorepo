@@ -788,7 +788,7 @@ impl BlockLowerer<'_> {
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
         self.with_function_scope(|this| {
-            this.lower_function_contents(
+            this.lower_function(
                 fn_def.params(),
                 fn_def.return_type(),
                 fn_def.body(),
@@ -802,7 +802,7 @@ impl BlockLowerer<'_> {
     fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> FnDefId {
         self.with_function_scope(|this| {
             let self_type = this.alloc_anonymous_local(Binding::SelfType);
-            let function = this.lower_function_contents(
+            let function = this.lower_function(
                 method.params(),
                 method.return_type(),
                 method.body(),
@@ -824,7 +824,7 @@ impl BlockLowerer<'_> {
         result
     }
 
-    fn lower_function_contents<'ast>(
+    fn lower_function<'ast>(
         &mut self,
         params: impl Iterator<Item = Result<ast::Param<'ast>, TokenSpan>>,
         return_type_expr: ast::Expr<'ast>,

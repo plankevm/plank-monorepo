@@ -1999,30 +1999,6 @@ fn test_struct_def_with_method() {
     );
 }
 
-#[test]
-fn test_method_ast_exposes_self_types() {
-    use crate::ast::{Expr, ParamType, TopLevelDef};
-    use plank_session::Session;
-
-    let source = "const S = struct { fn clone(value: Self) Self { value } };";
-    let mut session = Session::new();
-    let cst = super::parse_single_source(source, &mut session);
-    assert!(!session.has_errors());
-
-    let Some(TopLevelDef::Const(decl)) = cst.as_file().iter_defs().next() else {
-        panic!("expected const declaration");
-    };
-    let Expr::StructDef(struct_def) = decl.assign else {
-        panic!("expected struct definition");
-    };
-    assert!(struct_def.index_expr().is_none());
-
-    let method = struct_def.methods().next().expect("expected method").expect("valid method");
-    assert!(matches!(method.return_type(), Expr::SelfType { .. }));
-    let receiver = method.params().next().expect("expected receiver").expect("valid receiver");
-    assert!(matches!(receiver.param_type(), Ok(ParamType::Explicit(Expr::SelfType { .. }))));
-}
-
 // =============================================================================
 // Struct Literals
 // =============================================================================

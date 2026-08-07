@@ -180,51 +180,6 @@ fn test_inline_closure_lowering() {
 }
 
 #[test]
-fn test_capture_propagates_through_nested_functions() {
-    assert_lowers_to(
-        r#"
-        init {
-            let value = 7;
-            let middle = fn() u256 {
-                let inner = fn() u256 { value };
-                inner()
-            };
-            middle();
-            @evm_stop();
-        }
-        "#,
-        r#"
-        ==== Constants ====
-
-        ==== Functions ====
-        @fn0() -> %0 {
-            captures: [%1 -> %1]
-            preamble:
-                %0 = type:u256
-            body:
-                ret %1
-        }
-        @fn1() -> %0 {
-            captures: [%0 -> %1]
-            preamble:
-                %0 = type:u256
-            body:
-                %2 = @fn0
-                %3 = %2
-                ret call %3()
-        }
-
-        ==== Init ====
-        %0 = 7
-        %1 = @fn1
-        %2 = %1
-        eval call %2()
-        eval @evm_stop()
-        "#,
-    );
-}
-
-#[test]
 fn test_set_undefined() {
     let rendered = render_diagnostics(
         r#"

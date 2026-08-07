@@ -7,7 +7,7 @@ fn test_captured_value_propagates_through_nested_functions() {
         r#"
         const Make = fn(comptime value: u256) u256 {
             let middle = fn() u256 {
-                let decoy = 11;
+                let unrelated = 11;
                 let inner = fn() u256 { value };
                 inner()
             };
