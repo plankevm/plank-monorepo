@@ -140,6 +140,36 @@ fn test_method_nested_fn_captures_self_type() {
 }
 
 #[test]
+fn test_self_type_capture_propagates_through_nested_functions() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn self_type() type {
+                let middle = fn() type {
+                    let inner = fn() type { Self };
+                    inner()
+                };
+                middle()
+            }
+        };
+
+        init {
+            let ty = S.self_type();
+            let instance: S = @uninit(ty);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_type_qualified_method_self_specialization() {
     assert_lowers_to(
         r#"

@@ -180,6 +180,51 @@ fn test_inline_closure_lowering() {
 }
 
 #[test]
+fn test_capture_propagates_through_nested_functions() {
+    assert_lowers_to(
+        r#"
+        init {
+            let value = 7;
+            let middle = fn() u256 {
+                let inner = fn() u256 { value };
+                inner()
+            };
+            middle();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Constants ====
+
+        ==== Functions ====
+        @fn0() -> %0 {
+            captures: [%1 -> %1]
+            preamble:
+                %0 = type:u256
+            body:
+                ret %1
+        }
+        @fn1() -> %0 {
+            captures: [%0 -> %1]
+            preamble:
+                %0 = type:u256
+            body:
+                %2 = @fn0
+                %3 = %2
+                ret call %3()
+        }
+
+        ==== Init ====
+        %0 = 7
+        %1 = @fn1
+        %2 = %1
+        eval call %2()
+        eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
 fn test_set_undefined() {
     let rendered = render_diagnostics(
         r#"
@@ -217,6 +262,37 @@ fn test_assign_to_immutable_let() {
           |         - declared here
         3 |     x = 2;
           |     ^ assignment to immutable variable
+          |
+          = help: consider declaring it with `let mut`
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_capture_declaration_span_propagates_through_nested_functions() {
+    let rendered = render_diagnostics(
+        r#"
+        init {
+            let x = 1;
+            let middle = fn() void {
+                let inner = fn() void {
+                    x = 2;
+                };
+            };
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: variable 'x' was not declared mutable
+         --> main.plk:5:13
+          |
+        2 |     let x = 1;
+          |         - declared here
+        ...
+        5 |             x = 2;
+          |             ^ assignment to immutable variable
           |
           = help: consider declaring it with `let mut`
         "#,

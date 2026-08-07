@@ -2,6 +2,41 @@ use super::*;
 use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
 
 #[test]
+fn test_captured_value_propagates_through_nested_functions() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime value: u256) u256 {
+            let middle = fn() u256 {
+                let decoy = 11;
+                let inner = fn() u256 { value };
+                inner()
+            };
+            middle()
+        };
+        const RESULT = Make(7);
+
+        init {
+            let input = @evm_calldataload(0);
+            let observed = @evm_add(input, RESULT);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = %1
+            %3 : u256 = 7
+            %4 : u256 = @evm_add(%2, %3)
+            %5 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_eager_fn_folds_only_with_all_comptime_inputs() {
     assert_lowers_to(
         r#"
