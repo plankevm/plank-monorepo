@@ -118,6 +118,10 @@ impl AnalysesStore {
     ) -> RefMut<'_, ReachableBlocks> {
         self.reachable_blocks.get_mut(program, self, compute)
     }
+
+    pub fn predecessors_mut(&self, program: &EthIRProgram) -> RefMut<'_, Predecessors> {
+        self.predecessors.get_mut(program, self, true)
+    }
 }
 
 #[cfg(test)]
@@ -231,7 +235,7 @@ mod tests {
                     .iter_idx()
                     .filter(|&block| reachable_blocks.contains(block))
                     .collect::<Vec<_>>(),
-                reverse_post_order.global_rpo().to_vec(),
+                reverse_post_order.blocks_rpo().copied().collect::<Vec<_>>(),
             )
         };
         let recomputed_store = AnalysesStore::default();

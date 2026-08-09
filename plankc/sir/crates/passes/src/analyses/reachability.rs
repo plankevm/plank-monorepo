@@ -47,6 +47,10 @@ impl Analysis for ReachableFunctions {
 }
 
 impl ReachableFunctions {
+    pub fn iter(&self) -> impl Iterator<Item = FunctionId> + '_ {
+        self.functions.iter()
+    }
+
     fn mark_reachable(&mut self, program: &EthIRProgram, function: FunctionId) {
         if !self.functions.add(function) {
             return;

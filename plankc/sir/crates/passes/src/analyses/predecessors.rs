@@ -32,6 +32,24 @@ impl Predecessors {
         &self.inner[bb]
     }
 
+    /// Replaces one incoming edge. Call once per edge when the predecessor occurs multiple times.
+    pub fn replace_predecessor_edge(
+        &mut self,
+        bb: BasicBlockId,
+        old: BasicBlockId,
+        new: BasicBlockId,
+    ) {
+        let predecessor = self.inner[bb]
+            .iter_mut()
+            .find(|predecessor| **predecessor == old)
+            .expect("old predecessor should exist");
+        *predecessor = new;
+    }
+
+    pub fn clear_predecessors(&mut self, bb: BasicBlockId) {
+        self.inner[bb].clear();
+    }
+
     pub fn enumerate(&self) -> impl Iterator<Item = (BasicBlockId, &[BasicBlockId])> {
         self.inner.enumerate_idx().map(|(bb, preds)| (bb, preds.as_slice()))
     }
