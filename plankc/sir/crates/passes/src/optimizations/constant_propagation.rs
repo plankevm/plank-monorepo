@@ -16,9 +16,10 @@ pub struct SCCP {
 
 impl Pass for SCCP {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let rpo = store.reverse_post_order(program);
         let uses = store.def_use(program);
         let mut reachability = store.reachability_mut(program, false);
-        self.analysis(program, &uses, reachability.set_mut());
+        self.analysis(program, &uses, rpo.functions_rpo(), reachability.set_mut());
         self.apply(program, reachability.set_mut());
         drop(reachability);
         store.reachability.mark_valid();
@@ -30,17 +31,28 @@ impl Pass for SCCP {
 }
 
 impl SCCP {
-    fn reset(&mut self, program: &EthIRProgram, reachable: &mut DenseIndexSet<BasicBlockId>) {
+    fn reset(
+        &mut self,
+        program: &EthIRProgram,
+        functions_rpo: &[FunctionId],
+        reachable: &mut DenseIndexSet<BasicBlockId>,
+    ) {
         self.lattice.clear();
         self.lattice.resize(program.next_free_local_id.idx(), LatticeValue::Unknown);
         reachable.clear();
         self.cfg_worklist.clear();
         self.values_worklist.clear();
-        self.init_state(program, reachable);
+        self.init_state(program, functions_rpo, reachable);
     }
 
-    fn init_state(&mut self, program: &EthIRProgram, reachable: &mut DenseIndexSet<BasicBlockId>) {
-        for func in program.functions_iter() {
+    fn init_state(
+        &mut self,
+        program: &EthIRProgram,
+        functions_rpo: &[FunctionId],
+        reachable: &mut DenseIndexSet<BasicBlockId>,
+    ) {
+        for &function in functions_rpo {
+            let func = program.function(function);
             let entry_id = func.entry().id();
             reachable.add(entry_id);
             self.cfg_worklist.push(entry_id);
@@ -54,9 +66,10 @@ impl SCCP {
         &mut self,
         program: &EthIRProgram,
         defuse: &DefUse,
+        functions_rpo: &[FunctionId],
         reachable: &mut DenseIndexSet<BasicBlockId>,
     ) {
-        self.reset(program, reachable);
+        self.reset(program, functions_rpo, reachable);
         while let Some(bb_id) = self.cfg_worklist.pop() {
             self.process_block(program, bb_id, defuse, reachable);
         }
@@ -527,10 +540,11 @@ mod tests {
     fn run_analysis(source: &str) -> (SCCP, DenseIndexSet<BasicBlockId>) {
         let ir = parse_or_panic(source, EmitConfig::init_only());
         let store = AnalysesStore::default();
+        let rpo = store.reverse_post_order(&ir);
         let defuse = store.def_use(&ir);
         let mut sccp = SCCP::default();
         let mut reachable = DenseIndexSet::new();
-        sccp.analysis(&ir, &defuse, &mut reachable);
+        sccp.analysis(&ir, &defuse, rpo.functions_rpo(), &mut reachable);
         (sccp, reachable)
     }
 
@@ -547,6 +561,7 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    icall @caller
                     stop
                 }
 
@@ -568,25 +583,26 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @2
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 2)
+                fn @0 -> entry @0  (outputs: 2)
+                fn @1 -> entry @1  (outputs: 0)
                 fn @2 -> entry @2  (outputs: 0)
 
             Basic Blocks:
-                @0 {
-                    stop
-                }
-
-                @1 -> $0 $1 {
+                @0 -> $0 $1 {
                     $0 = const 0x1
                     $1 = const 0x2
                     iret
                 }
 
+                @1 {
+                    $2 $3 = icall @0
+                    stop
+                }
+
                 @2 {
-                    $2 $3 = icall @1
+                    icall @1
                     stop
                 }
             "#,
@@ -601,6 +617,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    arg = address
+                    icall @test arg
                     stop
                 }
             fn test:
@@ -628,35 +646,37 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @4  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 $0 {
+                    => $0 ? @1 : @2
+                }
+
+                @1 -> $1 $2 {
+                    $1 = const 0x2a
+                    $2 = const 0xa
+                    => @3
+                }
+
+                @2 -> $3 $4 {
+                    $3 = const 0x2a
+                    $4 = const 0x14
+                    => @3
+                }
+
+                @3 $5 $6 {
+                    $7 = const 0x54
+                    $8 = add $5 $6
                     stop
                 }
 
-                @1 $0 {
-                    => $0 ? @2 : @3
-                }
-
-                @2 -> $1 $2 {
-                    $1 = const 0x2a
-                    $2 = const 0xa
-                    => @4
-                }
-
-                @3 -> $3 $4 {
-                    $3 = const 0x2a
-                    $4 = const 0x14
-                    => @4
-                }
-
-                @4 $5 $6 {
-                    $7 = const 0x54
-                    $8 = add $5 $6
+                @4 {
+                    $9 = address
+                    icall @0 $9
                     stop
                 }
             "#,
@@ -912,6 +932,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    arg = address
+                    icall @helper arg
                     stop
                 }
 
@@ -932,26 +954,28 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @3  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 $0 -> $0 {
+                    => @1
+                }
+
+                @1 $1 -> $2 {
+                    $2 = const 0x0
+                    => $1 ? @2 : @1
+                }
+
+                @2 $3 {
                     stop
                 }
 
-                @1 $0 -> $0 {
-                    => @2
-                }
-
-                @2 $1 -> $2 {
-                    $2 = const 0x0
-                    => $1 ? @3 : @2
-                }
-
-                @3 $3 {
+                @3 {
+                    $4 = address
+                    icall @0 $4
                     stop
                 }
             "#,
@@ -1342,6 +1366,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    arg = address
+                    icall @test arg
                     stop
                 }
             fn test:
@@ -1377,6 +1403,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    arg = address
+                    icall @test arg
                     stop
                 }
             fn test:
@@ -1402,32 +1430,32 @@ mod tests {
         assert_ir_display(
             &ir,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @6  (outputs: 0)
 
             Basic Blocks:
-                @0 {
-                    stop
+                @0 $0 {
+                    => $0 ? @1 : @2
                 }
 
-                @1 $0 {
-                    => $0 ? @2 : @3
-                }
-
-                @2 -> $1 {
+                @1 -> $1 {
                     $1 = const 0x1
-                    => @4
+                    => @3
                 }
 
-                @3 -> $2 {
+                @2 -> $2 {
                     $2 = const 0x0
-                    => @4
+                    => @3
                 }
 
-                @4 $3 {
-                    => $3 ? @5 : @6
+                @3 $3 {
+                    => $3 ? @4 : @5
+                }
+
+                @4 {
+                    stop
                 }
 
                 @5 {
@@ -1435,6 +1463,8 @@ mod tests {
                 }
 
                 @6 {
+                    $4 = address
+                    icall @0 $4
                     stop
                 }
             "#,
@@ -1511,6 +1541,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    arg = address
+                    icall @test arg
                     stop
                 }
             fn test:
@@ -1537,35 +1569,37 @@ mod tests {
         assert_ir_display(
             &ir,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @5  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 $0 {
+                    => $0 ? @1 : @2
+                }
+
+                @1 -> $1 {
+                    $1 = const 0x5
+                    => @3
+                }
+
+                @2 -> $2 {
+                    $2 = const 0xa
+                    => @3
+                }
+
+                @3 $3 -> $3 {
+                    => @4
+                }
+
+                @4 $4 {
                     stop
                 }
 
-                @1 $0 {
-                    => $0 ? @2 : @3
-                }
-
-                @2 -> $1 {
-                    $1 = const 0x5
-                    => @4
-                }
-
-                @3 -> $2 {
-                    $2 = const 0xa
-                    => @4
-                }
-
-                @4 $3 -> $3 {
-                    => @5
-                }
-
-                @5 $4 {
+                @5 {
+                    $5 = address
+                    icall @0 $5
                     stop
                 }
             "#,

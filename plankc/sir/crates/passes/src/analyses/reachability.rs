@@ -8,26 +8,16 @@ pub struct Reachability {
 }
 
 impl Analysis for Reachability {
-    fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
         self.reachable.clear();
 
-        for func in program.functions_iter() {
-            self.mark_reachable(program, func.entry().id());
+        for &block in store.reverse_post_order(program).blocks_rpo() {
+            self.reachable.add(block);
         }
     }
 }
 
 impl Reachability {
-    fn mark_reachable(&mut self, program: &EthIRProgram, block: BasicBlockId) {
-        if !self.reachable.add(block) {
-            return;
-        }
-
-        for successor in program.block(block).successors() {
-            self.mark_reachable(program, successor);
-        }
-    }
-
     pub fn contains(&self, block: BasicBlockId) -> bool {
         self.reachable.contains(block)
     }

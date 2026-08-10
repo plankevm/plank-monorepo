@@ -35,7 +35,7 @@ impl Pass for SSATransform {
         let mut tmp_locals = SmallVec::<[LocalId; 32]>::new();
 
         // Use RPO so that only loop back edges require incomplete phis.
-        for &bb in store.reverse_post_order(t.program).global_rpo() {
+        for &bb in store.reverse_post_order(t.program).blocks_rpo() {
             for block_input in &mut t.program.locals[t.program.basic_blocks[bb].inputs] {
                 let new_out = t.program.next_free_local_id.get_and_inc();
                 let original = std::mem::replace(block_input, new_out);
@@ -134,11 +134,12 @@ impl Pass for SSATransform {
 struct PreSSAFunctionEntryRegularizer;
 
 impl Pass for PreSSAFunctionEntryRegularizer {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let mut worklist = SmallVec::<[BasicBlockId; 64]>::new();
         let mut enqueued = DenseIndexSet::new();
+        let rpo = store.reverse_post_order(program);
 
-        for func_id in program.functions.iter_idx() {
+        for &func_id in rpo.functions_rpo() {
             let mut entry_has_pred = false;
 
             let entry = program.functions[func_id].entry();
@@ -324,6 +325,34 @@ mod tests {
                 bb3 -> v4 {
                     v5 = copy v4
                     => @bb4
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_unreachable_function_is_not_transformed_to_ssa() {
+        assert_transforms_to(
+            r#"
+            fn init:
+                entry {
+                    stop
+                }
+
+            fn unreachable:
+                entry {
+                    x = const 1
+                    => @next
+                }
+                next {
+                    x = const 2
+                    stop
+                }
+            "#,
+            r#"
+            fn init:
+                bb0 {
+                    stop
                 }
             "#,
         );

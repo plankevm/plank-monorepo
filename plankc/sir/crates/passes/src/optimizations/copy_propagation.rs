@@ -11,8 +11,10 @@ pub struct CopyPropagation {
 }
 
 impl Pass for CopyPropagation {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
-        for bb in program.basic_blocks.iter_mut() {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let rpo = store.reverse_post_order(program);
+        for &bb_id in rpo.blocks_rpo() {
+            let bb = &mut program.basic_blocks[bb_id];
             self.copy_map.clear();
 
             let ops_span = bb.operations;
@@ -74,6 +76,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    b = const 0
+                    icall @test b
                     stop
                 }
             fn test:
@@ -91,22 +95,24 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
                 fn @1 -> entry @1  (outputs: 0)
 
             Basic Blocks:
-                @0 {
-                    stop
-                }
-
-                @1 $0 {
+                @0 $0 {
                     $1 = copy $0
                     $2 = copy $0
                     $3 = copy $0
                     $4 = copy $0
                     $5 = add $0 $0
+                    stop
+                }
+
+                @1 {
+                    $6 = const 0x0
+                    icall @0 $6
                     stop
                 }
             "#,
@@ -118,6 +124,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    b = const 0
+                    icall @test b
                     stop
                 }
             fn test:
@@ -136,24 +144,26 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @2  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 $0 -> $0 {
+                    $1 = copy $0
+                    $2 = copy $0
+                    => @1
+                }
+
+                @1 $3 {
+                    $4 = add $3 $3
                     stop
                 }
 
-                @1 $0 -> $0 {
-                    $1 = copy $0
-                    $2 = copy $0
-                    => @2
-                }
-
-                @2 $3 {
-                    $4 = add $3 $3
+                @2 {
+                    $5 = const 0x0
+                    icall @0 $5
                     stop
                 }
             "#,
@@ -165,6 +175,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    x = const 0
+                    icall @test x
                     stop
                 }
             fn test:
@@ -184,19 +196,19 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @3  (outputs: 0)
 
             Basic Blocks:
-                @0 {
-                    stop
+                @0 $0 {
+                    $1 = copy $0
+                    => $0 ? @1 : @2
                 }
 
-                @1 $0 {
-                    $1 = copy $0
-                    => $0 ? @2 : @3
+                @1 {
+                    stop
                 }
 
                 @2 {
@@ -204,6 +216,8 @@ mod tests {
                 }
 
                 @3 {
+                    $2 = const 0x0
+                    icall @0 $2
                     stop
                 }
             "#,
@@ -215,6 +229,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    x = const 0
+                    icall @test x
                     stop
                 }
             fn test:
@@ -237,23 +253,23 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @3  (outputs: 0)
 
             Basic Blocks:
-                @0 {
-                    stop
-                }
-
-                @1 $0 {
+                @0 $0 {
                     $1 = copy $0
                     switch $0 {
-                        0x0 => @2,
-                        else => @3
+                        0x0 => @1,
+                        else => @2
                     }
 
+                }
+
+                @1 {
+                    stop
                 }
 
                 @2 {
@@ -261,6 +277,8 @@ mod tests {
                 }
 
                 @3 {
+                    $2 = const 0x0
+                    icall @0 $2
                     stop
                 }
             "#,
@@ -272,6 +290,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    b = const 0
+                    icall @caller b
                     stop
                 }
             fn callee:
@@ -291,25 +311,27 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @2
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 1)
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (outputs: 0)
                 fn @2 -> entry @2  (outputs: 0)
 
             Basic Blocks:
-                @0 {
-                    stop
-                }
-
-                @1 $0 -> $1 {
+                @0 $0 -> $1 {
                     $1 = add $0 $0
                     iret
                 }
 
-                @2 $2 {
+                @1 $2 {
                     $3 = copy $2
-                    $4 = icall @1 $2
+                    $4 = icall @0 $2
+                    stop
+                }
+
+                @2 {
+                    $5 = const 0x0
+                    icall @1 $5
                     stop
                 }
             "#,
@@ -321,6 +343,8 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
+                    b = const 0
+                    icall @test b
                     stop
                 }
             fn test:
@@ -338,23 +362,25 @@ mod tests {
         assert_ir_display(
             &actual,
             r#"
-            Init: @0
+            Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @2  (outputs: 0)
 
             Basic Blocks:
-                @0 {
+                @0 $0 -> $0 $0 {
+                    $1 = copy $0
+                    => @1
+                }
+
+                @1 $2 $3 {
+                    $4 = add $2 $3
                     stop
                 }
 
-                @1 $0 -> $0 $0 {
-                    $1 = copy $0
-                    => @2
-                }
-
-                @2 $2 $3 {
-                    $4 = add $2 $3
+                @2 {
+                    $5 = const 0x0
+                    icall @0 $5
                     stop
                 }
             "#,

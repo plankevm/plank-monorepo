@@ -7,9 +7,10 @@ pub struct CriticalEdgeSplitting;
 
 impl Pass for CriticalEdgeSplitting {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let rpo = store.reverse_post_order(program);
         let predecessors = store.predecessors(program);
 
-        for bb in program.basic_blocks.iter_idx() {
+        for &bb in rpo.blocks_rpo() {
             match program.basic_blocks[bb].control {
                 Control::Branches(Branch { condition, non_zero_target, zero_target }) => {
                     program.basic_blocks[bb].control = Control::Branches(Branch {

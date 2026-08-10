@@ -8,12 +8,18 @@ pub struct BasicBlockOwnershipAndReachability {
 }
 
 impl Analysis for BasicBlockOwnershipAndReachability {
-    fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
         self.ownership.clear();
         self.ownership.resize(program.basic_blocks.len(), None);
 
-        for func in program.functions_iter() {
-            Self::mark_reachable_blocks(&mut self.ownership, program, func.entry().id(), func.id());
+        let rpo = store.reverse_post_order(program);
+        for &function in rpo.functions_rpo() {
+            for &block in rpo
+                .function_blocks_rpo(function)
+                .expect("reachable function should have an associated block RPO")
+            {
+                self.ownership[block] = Some(function);
+            }
         }
     }
 }
@@ -22,23 +28,6 @@ impl Analysis for BasicBlockOwnershipAndReachability {
 pub struct Unreachable;
 
 impl BasicBlockOwnershipAndReachability {
-    fn mark_reachable_blocks(
-        ownership: &mut IndexVec<BasicBlockId, Option<FunctionId>>,
-        program: &EthIRProgram,
-        current: BasicBlockId,
-        owner: FunctionId,
-    ) {
-        if ownership[current].is_some() {
-            return;
-        }
-
-        ownership[current] = Some(owner);
-
-        for successor in program.block(current).successors() {
-            Self::mark_reachable_blocks(ownership, program, successor, owner);
-        }
-    }
-
     pub fn get_owner(&self, block: BasicBlockId) -> Result<FunctionId, Unreachable> {
         self.ownership[block].ok_or(Unreachable)
     }
@@ -184,7 +173,7 @@ mod tests {
         let bb2_id = bb2.finish_with_internal_return().unwrap();
         let func1_id = func1.finish(bb2_id);
 
-        let program = builder.build(func0_id, None);
+        let program = builder.build(func0_id, Some(func1_id));
 
         let store = AnalysesStore::default();
         let analysis = store.basic_block_ownership(&program);

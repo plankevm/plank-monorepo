@@ -1,6 +1,7 @@
 pub(crate) mod constant_propagation;
 pub(crate) mod copy_propagation;
 pub(crate) mod defragmenter;
+pub(crate) mod inlining;
 pub(crate) mod switch_peephole;
 pub(crate) mod unused_operation_elimination;
 
@@ -13,6 +14,7 @@ pub enum OptimizationPass {
     UnusedElimination,
     Defragment,
     SwitchPeephole,
+    Inlining,
 }
 
 impl OptimizationPass {
@@ -23,6 +25,7 @@ impl OptimizationPass {
             'u' => Some(Self::UnusedElimination),
             'd' => Some(Self::Defragment),
             'l' => Some(Self::SwitchPeephole),
+            'i' => Some(Self::Inlining),
             _ => None,
         }
     }
@@ -32,15 +35,16 @@ pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each chara
     s = SCCP (constant propagation),\n\
     c = copy propagation,\n\
     u = unused operation elimination,\n\
-    d = defragment.\n\
-    l = switch peephole \n\
-    Example: -O csud";
+    d = defragment,\n\
+    l = switch peephole,\n\
+    i = inlining.\n\
+    Example: -O csudi";
 
 pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
     for c in s.chars() {
         if OptimizationPass::from_char(c).is_none() {
             return Err(format!(
-                "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment)",
+                "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment), l (switch peephole), i (inlining)",
                 c
             ));
         }
@@ -80,6 +84,53 @@ mod tests {
             }
             other_yes { stop }
     "#;
+
+    #[test]
+    fn test_inlining_copy_propagation_and_defragmentation() {
+        let actual = optimize(
+            r#"
+            fn init:
+                entry {
+                    x = const 2
+                    result = icall @double x
+                    used = add result x
+                    stop
+                }
+
+            fn double:
+                entry x -> result {
+                    result = add x x
+                    iret
+                }
+            "#,
+            "icd",
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 -> $0 {
+                    $0 = const 0x2
+                    => @1
+                }
+
+                @1 $1 -> $2 {
+                    $2 = add $1 $1
+                    => @2
+                }
+
+                @2 $3 {
+                    $4 = add $3 $0
+                    stop
+                }
+            "#,
+        );
+    }
 
     #[test]
     fn test_csud() {
