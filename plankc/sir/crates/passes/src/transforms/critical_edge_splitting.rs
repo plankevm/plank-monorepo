@@ -41,7 +41,7 @@ impl Pass for CriticalEdgeSplitting {
     }
 
     fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::FunctionEffects | AnalysesMask::ReachableFunctions
+        AnalysesMask::FunctionEffects
     }
 }
 

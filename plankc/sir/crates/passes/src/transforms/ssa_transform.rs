@@ -130,7 +130,6 @@ impl Pass for SSATransform {
         AnalysesMask::FunctionEffects
             | AnalysesMask::Predecessors
             | AnalysesMask::ReachableBlocks
-            | AnalysesMask::ReachableFunctions
             | AnalysesMask::ReversePostOrder
     }
 }
@@ -190,7 +189,7 @@ impl Pass for PreSSAFunctionEntryRegularizer {
     }
 
     fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::FunctionEffects | AnalysesMask::ReachableFunctions
+        AnalysesMask::FunctionEffects
     }
 }
 

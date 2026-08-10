@@ -1,4 +1,4 @@
-use crate::analyses::{function_effects::FunctionEffects, reachability::ReachableFunctions, *};
+use crate::analyses::{function_effects::FunctionEffects, *};
 use sir_data::EthIRProgram;
 use std::cell::{Ref, RefCell, RefMut};
 
@@ -101,7 +101,6 @@ define_analyses! {
     AllocationLiveness => allocation_liveness: AllocationLiveness,
     LocalLiveness => local_liveness: LocalLiveness,
     ReachableBlocks => reachable_blocks: ReachableBlocks,
-    ReachableFunctions => reachable_functions: ReachableFunctions,
     ReversePostOrder => reverse_post_order: ReversePostOrder,
     FunctionEffects => function_effects: FunctionEffects,
 }

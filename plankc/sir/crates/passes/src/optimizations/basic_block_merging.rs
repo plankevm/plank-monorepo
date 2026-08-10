@@ -1,96 +1,52 @@
 use hashbrown::HashMap;
 use plank_core::{DenseIndexSet, Span};
-use sir_data::{BasicBlockId, Control, EthIRProgram, FunctionId, LocalId, Operation};
+use sir_data::{BasicBlockId, Control, EthIRProgram, LocalId};
 
-use crate::{AnalysesMask, AnalysesStore, Pass, Predecessors, analyses::ReachableBlocks};
+use crate::{AnalysesMask, AnalysesStore, Pass, Predecessors};
 
 pub struct BasicBlockMerger {
     entries: DenseIndexSet<BasicBlockId>,
-    visited_blocks: DenseIndexSet<BasicBlockId>,
-    visited_functions: DenseIndexSet<FunctionId>,
-    worklist: Vec<BasicBlockId>,
     input_remap: HashMap<LocalId, LocalId>,
 }
 
 impl Pass for BasicBlockMerger {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
-        self.visited_blocks.clear();
-        self.visited_functions.clear();
-        assert!(self.worklist.is_empty());
         self.entries.clear();
-        for function in program.functions.iter() {
-            self.entries.add(function.entry());
+        let rpo = store.reverse_post_order(program);
+        for &fn_id in rpo.functions_rpo() {
+            self.entries.add(program.functions[fn_id].entry());
         }
         let mut predecessors = store.predecessors_mut(program);
-        let mut reachable_blocks = store.reachable_blocks_mut(program, true);
 
-        self.visit_function(program.init_entry, program, &mut predecessors, &mut reachable_blocks);
-        if let Some(main_entry) = program.main_entry {
-            self.visit_function(main_entry, program, &mut predecessors, &mut reachable_blocks);
-        }
-
-        drop(predecessors);
-        drop(reachable_blocks);
-        store.predecessors.mark_valid();
-        store.reachable_blocks.mark_valid();
-    }
-
-    fn preserves(&self) -> AnalysesMask {
-        AnalysesMask::FunctionEffects
-            | AnalysesMask::Predecessors
-            | AnalysesMask::ReachableBlocks
-            | AnalysesMask::ReachableFunctions
-    }
-}
-
-impl BasicBlockMerger {
-    fn visit_function(
-        &mut self,
-        fn_id: FunctionId,
-        program: &mut EthIRProgram,
-        predecessors: &mut Predecessors,
-        reachable_blocks: &mut ReachableBlocks,
-    ) {
-        if !self.visited_functions.add(fn_id) {
-            return;
-        }
-
-        self.worklist.push(program.functions[fn_id].entry());
-        while let Some(curr) = self.worklist.pop() {
-            if !self.visited_blocks.add(curr) {
-                continue;
-            }
-
-            for op_id in program.basic_blocks[curr].operations {
-                if let Operation::InternalCall(data) = program.operations[op_id] {
-                    self.visit_function(data.function, program, predecessors, reachable_blocks);
-                }
-            }
-
+        for &curr in rpo.blocks_postorder() {
             match program.basic_blocks[curr].control {
                 Control::ContinuesTo(succ)
                     if curr != succ
                         && predecessors.of(succ) == [curr]
                         && !self.entries.contains(succ) =>
                 {
-                    self.merge_blocks(curr, succ, program, predecessors, reachable_blocks);
-                    assert!(self.visited_blocks.remove(curr));
-                    self.worklist.push(curr);
+                    self.merge_blocks(curr, succ, program, &mut predecessors);
                 }
-                _ => {
-                    self.worklist.extend(program.block(curr).successors());
-                }
+                _ => {}
             }
         }
+
+        drop(predecessors);
+        store.predecessors.mark_valid();
     }
 
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::FunctionEffects | AnalysesMask::Predecessors
+    }
+}
+
+impl BasicBlockMerger {
     fn merge_blocks(
         &mut self,
         pred: BasicBlockId,
         succ: BasicBlockId,
         program: &mut EthIRProgram,
         predecessors: &mut Predecessors,
-        reachable_blocks: &mut ReachableBlocks,
     ) {
         self.input_remap.clear();
         for (&succ_input, &pred_output) in
@@ -142,6 +98,5 @@ impl BasicBlockMerger {
             predecessors.replace_predecessor_edge(s, succ, pred);
         }
         predecessors.clear_predecessors(succ);
-        assert!(reachable_blocks.set_mut().remove(succ), "merged block should be reachable");
     }
 }

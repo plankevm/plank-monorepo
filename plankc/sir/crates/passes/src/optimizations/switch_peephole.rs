@@ -49,7 +49,6 @@ impl Pass for SwitchPeephole {
             | AnalysesMask::LocalLiveness
             | AnalysesMask::Predecessors
             | AnalysesMask::ReachableBlocks
-            | AnalysesMask::ReachableFunctions
             | AnalysesMask::ReversePostOrder
     }
 }
