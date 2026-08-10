@@ -31,14 +31,15 @@ pub struct DefUse {
 }
 
 impl Analysis for DefUse {
-    fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
         let num_locals = program.next_free_local_id.idx();
         for vec in self.uses.iter_mut() {
             vec.clear();
         }
         self.uses.resize_with(num_locals, Vec::new);
 
-        for block in program.blocks() {
+        for &block_id in store.reverse_post_order(program).blocks_rpo() {
+            let block = program.block(block_id);
             for op in block.operations() {
                 for &input in op.inputs() {
                     self.uses[input].push(UseLocation {

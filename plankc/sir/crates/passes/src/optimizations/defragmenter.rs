@@ -409,7 +409,7 @@ mod tests {
                 }
 
                 @4 {
-                    noop
+                    $13 = data_offset .0
                     $14 = const 0x63
                     $15 = const 0x64
                     $16 $17 = icall @1 $14 $15

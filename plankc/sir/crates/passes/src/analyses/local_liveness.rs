@@ -91,7 +91,7 @@ impl Analysis for LocalLiveness {
         let rpo = store.reverse_post_order(program);
 
         self.compute_liveness(program, &predecessors, &rpo);
-        self.compute_intervals(program);
+        self.compute_intervals(program, &rpo);
     }
 }
 
@@ -117,7 +117,7 @@ impl LocalLiveness {
         let mut changed = true;
         while changed {
             changed = false;
-            for bb_id in rpo.global_post_order() {
+            for &bb_id in rpo.blocks_postorder() {
                 Self::compute_liveness_at_block_entry(
                     program.block(bb_id),
                     &self.locals_live_at_exit[bb_id],
@@ -187,12 +187,12 @@ impl LocalLiveness {
         changed
     }
 
-    fn compute_intervals(&mut self, program: &EthIRProgram) {
+    fn compute_intervals(&mut self, program: &EthIRProgram, rpo: &ReversePostOrder) {
         let mut local_interval_ends: HashMap<LocalId, IntervalEnd> = HashMap::new();
 
-        for block in program.blocks() {
+        for &bb_id in rpo.blocks_rpo() {
             debug_assert!(local_interval_ends.is_empty());
-            let bb_id = block.id();
+            let block = program.block(bb_id);
 
             for local in &self.locals_live_at_exit[bb_id] {
                 local_interval_ends.insert(*local, IntervalEnd::BlockEnd);

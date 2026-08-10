@@ -25,7 +25,7 @@ impl ControlFlowGraphInOutBundling {
         let rpo = analyses.reverse_post_order(program);
         let preds = analyses.predecessors(program);
 
-        for &bb_id in rpo.global_rpo() {
+        for &bb_id in rpo.blocks_rpo() {
             worklist.push(bb_id);
             while let Some(bb_id) = worklist.pop() {
                 let group_id = program
@@ -48,8 +48,10 @@ impl ControlFlowGraphInOutBundling {
             }
         }
 
-        for function in program.functions.iter() {
-            in_group.entry(function.entry()).or_insert_with(|| next_group_id.get_and_inc());
+        for &function in rpo.functions_rpo() {
+            in_group
+                .entry(program.functions[function].entry())
+                .or_insert_with(|| next_group_id.get_and_inc());
         }
 
         Self { out_group, in_group, next_group_id }

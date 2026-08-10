@@ -1,6 +1,6 @@
 use crate::analyses::{
-    AnalysesStore, DefUse, Interval, IntervalEnd, IntervalStart, LocalLiveness, UseKind,
-    cache::Analysis,
+    AnalysesStore, DefUse, Interval, IntervalEnd, IntervalStart, LocalLiveness, ReversePostOrder,
+    UseKind, cache::Analysis,
 };
 use plank_core::{DenseIndexMap, IndexVec, newtype_index};
 use sir_data::{
@@ -39,8 +39,9 @@ impl Analysis for AllocationLiveness {
         self.allocations.clear();
         self.local_to_alloc.clear();
 
+        let rpo = store.reverse_post_order(program);
         let def_use = store.def_use(program);
-        self.discover_allocations(program, &def_use);
+        self.discover_allocations(program, &rpo, &def_use);
         if self.allocations.is_empty() {
             return;
         }
@@ -177,9 +178,14 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
 }
 
 impl AllocationLiveness {
-    fn discover_allocations(&mut self, program: &EthIRProgram, def_use: &DefUse) {
-        for block in program.blocks() {
-            let bb_id = block.id();
+    fn discover_allocations(
+        &mut self,
+        program: &EthIRProgram,
+        rpo: &ReversePostOrder,
+        def_use: &DefUse,
+    ) {
+        for &bb_id in rpo.blocks_rpo() {
+            let block = program.block(bb_id);
             for op in block.operations() {
                 let (alloc_id, base_ptr) = match op.op() {
                     Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => {

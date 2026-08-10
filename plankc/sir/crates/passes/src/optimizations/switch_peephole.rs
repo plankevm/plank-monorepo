@@ -5,8 +5,9 @@ use sir_data::{Branch, Control, EthIRProgram, Switch};
 pub struct SwitchPeephole;
 
 impl Pass for SwitchPeephole {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
-        for bb in program.basic_blocks.iter_idx() {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let rpo = store.reverse_post_order(program);
+        for &bb in rpo.blocks_rpo() {
             let Control::Switch(Switch { cases, fallback, condition }) =
                 program.basic_blocks[bb].control
             else {

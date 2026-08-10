@@ -1,29 +1,38 @@
 use hashbrown::HashMap;
-use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span, index_vec};
+use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span};
 use sir_data::{
     BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, LocalIdx,
     Operation, OperationIdx, Switch, operation::InternalCallData,
 };
 
-use crate::{AnalysesStore, Pass, analyses::ReversePostOrder};
+use crate::{AnalysesStore, Pass};
 
 pub(crate) const DEFAULT_INLINE_SIZE_THRESHOLD: u32 = 8;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Inliner {
     heuristic: DefaultHeuristic,
-    postorder: Vec<FunctionId>,
     callsites: IndexVec<FunctionId, Vec<OperationIdx>>,
     callsite_blocks: HashMap<OperationIdx, BasicBlockId>,
 }
 
 impl Pass for Inliner {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
-        {
-            let rpo = store.reverse_post_order(program);
-            self.build_call_graph(program, &rpo);
+        let rpo = store.reverse_post_order(program);
+        self.callsites.clear();
+        self.callsites.resize_with(program.functions.len(), Vec::new);
+        self.callsite_blocks.clear();
+
+        for &block in rpo.blocks_rpo() {
+            for operation_id in program.basic_blocks[block].operations.iter() {
+                if let Operation::InternalCall(call) = program.operations[operation_id] {
+                    self.callsites[call.function].push(operation_id);
+                    self.callsite_blocks.insert(operation_id, block);
+                }
+            }
         }
-        for function_id in std::mem::take(&mut self.postorder) {
+
+        for &function_id in rpo.functions_postorder() {
             let should_inline = match self.callsites[function_id].len() {
                 0 => false,
                 1 => true,
@@ -40,39 +49,8 @@ impl Inliner {
     pub(crate) fn new(size_threshold: u32) -> Self {
         Self {
             heuristic: DefaultHeuristic::new(size_threshold),
-            postorder: Vec::new(),
             callsites: IndexVec::new(),
             callsite_blocks: HashMap::new(),
-        }
-    }
-
-    fn build_call_graph(&mut self, program: &EthIRProgram, rpo: &ReversePostOrder) {
-        self.postorder.clear();
-        self.callsites.clear();
-        self.callsites.resize_with(program.functions.len(), Vec::new);
-        self.callsite_blocks.clear();
-
-        let mut function_states = index_vec![FunctionState::NotStarted; program.functions.len()];
-
-        walk_call_graph(
-            program,
-            rpo,
-            program.init_entry,
-            &mut function_states,
-            &mut self.postorder,
-            &mut self.callsites,
-            &mut self.callsite_blocks,
-        );
-        if let Some(main_entry) = program.main_entry {
-            walk_call_graph(
-                program,
-                rpo,
-                main_entry,
-                &mut function_states,
-                &mut self.postorder,
-                &mut self.callsites,
-                &mut self.callsite_blocks,
-            );
         }
     }
 
@@ -299,54 +277,6 @@ fn remap_local(
     local: LocalId,
 ) -> LocalId {
     *remapped_locals.entry(local).or_insert_with(|| next_free_local_id.get_and_inc())
-}
-
-fn walk_call_graph(
-    program: &EthIRProgram,
-    rpo: &ReversePostOrder,
-    function_id: FunctionId,
-    function_states: &mut IndexVec<FunctionId, FunctionState>,
-    postorder: &mut Vec<FunctionId>,
-    callsites: &mut IndexVec<FunctionId, Vec<OperationIdx>>,
-    callsite_blocks: &mut HashMap<OperationIdx, BasicBlockId>,
-) {
-    match function_states[function_id] {
-        FunctionState::Complete => return,
-        FunctionState::InProgress => {
-            unreachable!("recursive calls should be rejected before inlining")
-        }
-        FunctionState::NotStarted => {}
-    }
-
-    function_states[function_id] = FunctionState::InProgress;
-
-    for &block in rpo.function_rpo(function_id) {
-        for operation_id in program.basic_blocks[block].operations.iter() {
-            if let Operation::InternalCall(call) = program.operations[operation_id] {
-                callsites[call.function].push(operation_id);
-                callsite_blocks.insert(operation_id, block);
-                walk_call_graph(
-                    program,
-                    rpo,
-                    call.function,
-                    function_states,
-                    postorder,
-                    callsites,
-                    callsite_blocks,
-                );
-            }
-        }
-    }
-
-    function_states[function_id] = FunctionState::Complete;
-    postorder.push(function_id);
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FunctionState {
-    NotStarted,
-    InProgress,
-    Complete,
 }
 
 #[cfg(test)]
@@ -972,15 +902,15 @@ mod tests {
 
                 @1 -> $2 {
                     $2 = const 0x1
-                    => @6
+                    => @4
                 }
 
                 @2 -> $4 {
                     $4 = const 0x2
-                    => @4
+                    => @6
                 }
 
-                @3 $5 {
+                @3 $3 {
                     stop
                 }
 
@@ -989,7 +919,7 @@ mod tests {
                     => @3
                 }
 
-                @5 $3 {
+                @5 $5 {
                     stop
                 }
 
