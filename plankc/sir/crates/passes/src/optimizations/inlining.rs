@@ -125,16 +125,16 @@ impl Inliner {
         }
 
         let callee_entry = program.functions[call.function].entry();
-        let mut block_cloner = BlockCloner::new(program, join_block);
-        let cloned_entry = block_cloner.remap_block(callee_entry);
-        while let Some(source_block) = block_cloner.block_worklist.pop() {
-            block_cloner.clone_block(source_block);
+        let mut block_remapper = BlockRemapper::new(program, join_block);
+        let remapped_entry = block_remapper.remap_block_id(callee_entry);
+        while let Some(source_block) = block_remapper.block_worklist.pop() {
+            block_remapper.remap_block(source_block);
         }
-        program.basic_blocks[callsite_block].control = Control::ContinuesTo(cloned_entry);
+        program.basic_blocks[callsite_block].control = Control::ContinuesTo(remapped_entry);
     }
 }
 
-struct BlockCloner<'a> {
+struct BlockRemapper<'a> {
     program: &'a mut EthIRProgram,
     return_target: BasicBlockId,
     remapped_blocks: HashMap<BasicBlockId, BasicBlockId>,
@@ -142,7 +142,7 @@ struct BlockCloner<'a> {
     block_worklist: Vec<BasicBlockId>,
 }
 
-impl<'a> BlockCloner<'a> {
+impl<'a> BlockRemapper<'a> {
     fn new(program: &'a mut EthIRProgram, return_target: BasicBlockId) -> Self {
         Self {
             program,
@@ -153,7 +153,7 @@ impl<'a> BlockCloner<'a> {
         }
     }
 
-    fn remap_block(&mut self, source: BasicBlockId) -> BasicBlockId {
+    fn remap_block_id(&mut self, source: BasicBlockId) -> BasicBlockId {
         if let Some(&destination) = self.remapped_blocks.get(&source) {
             return destination;
         }
@@ -169,34 +169,34 @@ impl<'a> BlockCloner<'a> {
         destination
     }
 
-    fn clone_block(&mut self, source_id: BasicBlockId) {
+    fn remap_block(&mut self, source_id: BasicBlockId) {
         let destination_id = self.remapped_blocks[&source_id];
         let source = self.program.basic_blocks[source_id];
-        let cloned = BasicBlock {
-            inputs: self.clone_locals(source.inputs),
-            operations: self.clone_operations(source.operations),
-            outputs: self.clone_locals(source.outputs),
-            control: self.clone_control(source.control),
+        let remapped = BasicBlock {
+            inputs: self.remap_locals(source.inputs),
+            operations: self.remap_operations(source.operations),
+            outputs: self.remap_locals(source.outputs),
+            control: self.remap_control(source.control),
         };
 
-        self.program.basic_blocks[destination_id] = cloned;
+        self.program.basic_blocks[destination_id] = remapped;
     }
 
-    fn clone_locals(&mut self, source: Span<LocalIdx>) -> Span<LocalIdx> {
+    fn remap_locals(&mut self, source: Span<LocalIdx>) -> Span<LocalIdx> {
         let start = self.program.locals.next_idx();
         for source_idx in source.iter() {
             let source_local = self.program.locals[source_idx];
-            let cloned_local = remap_local(
+            let remapped_local = remap_local(
                 &mut self.remapped_locals,
                 &mut self.program.next_free_local_id,
                 source_local,
             );
-            self.program.locals.push(cloned_local);
+            self.program.locals.push(remapped_local);
         }
         Span::new(start, self.program.locals.next_idx())
     }
 
-    fn clone_operations(&mut self, source: Span<OperationIdx>) -> Span<OperationIdx> {
+    fn remap_operations(&mut self, source: Span<OperationIdx>) -> Span<OperationIdx> {
         let start = self.program.operations.next_idx();
         for source_operation in source.iter() {
             let cloned_operation = self.program.clone_operation(source_operation);
@@ -220,14 +220,14 @@ impl<'a> BlockCloner<'a> {
         Span::new(start, self.program.operations.next_idx())
     }
 
-    fn clone_control(&mut self, source: Control) -> Control {
+    fn remap_control(&mut self, source: Control) -> Control {
         match source {
             Control::LastOpTerminates => Control::LastOpTerminates,
             Control::InternalReturn => Control::ContinuesTo(self.return_target),
-            Control::ContinuesTo(target) => Control::ContinuesTo(self.remap_block(target)),
+            Control::ContinuesTo(target) => Control::ContinuesTo(self.remap_block_id(target)),
             Control::Branches(branch) => {
-                let zero_target = self.remap_block(branch.zero_target);
-                let non_zero_target = self.remap_block(branch.non_zero_target);
+                let zero_target = self.remap_block_id(branch.zero_target);
+                let non_zero_target = self.remap_block_id(branch.non_zero_target);
                 Control::Branches(Branch {
                     condition: self.remapped_locals[&branch.condition],
                     non_zero_target,
@@ -239,15 +239,15 @@ impl<'a> BlockCloner<'a> {
                 let targets_start_id = self.program.cases_bb_ids.next_idx();
                 for source_target_idx in source_cases.target_indices().iter() {
                     let source_target = self.program.cases_bb_ids[source_target_idx];
-                    let cloned_target = self.remap_block(source_target);
-                    self.program.cases_bb_ids.push(cloned_target);
+                    let remapped_target = self.remap_block_id(source_target);
+                    self.program.cases_bb_ids.push(remapped_target);
                 }
                 let cases = self.program.cases.push(Cases {
                     values_start_id: source_cases.values_start_id,
                     targets_start_id,
                     cases_count: source_cases.cases_count,
                 });
-                let fallback = switch.fallback.map(|target| self.remap_block(target));
+                let fallback = switch.fallback.map(|target| self.remap_block_id(target));
                 Control::Switch(Switch {
                     condition: self.remapped_locals[&switch.condition],
                     fallback,
