@@ -18,16 +18,18 @@ impl Pass for BasicBlockMerger {
 
         let mut predecessors = store.predecessors_mut(program);
 
-        for &curr in rpo.blocks_postorder() {
-            match program.basic_blocks[curr].control {
-                Control::ContinuesTo(succ)
-                    if curr != succ
-                        && predecessors.of(succ) == [curr]
-                        && !self.entries.contains(succ) =>
-                {
-                    self.merge_blocks(curr, succ, program, &mut predecessors);
-                }
-                _ => {}
+        for &curr in rpo.blocks_rpo() {
+            // skip blocks that have been merged
+            if predecessors.of(curr).is_empty() && !self.entries.contains(curr) {
+                continue;
+            }
+
+            if let Control::ContinuesTo(succ) = program.basic_blocks[curr].control
+                && curr != succ
+                && predecessors.of(succ) == [curr]
+                && !self.entries.contains(succ)
+            {
+                self.merge_chain(curr, program, &mut predecessors);
             }
         }
 
@@ -41,43 +43,54 @@ impl Pass for BasicBlockMerger {
 }
 
 impl BasicBlockMerger {
-    fn merge_blocks(
+    fn merge_chain(
         &mut self,
         pred: BasicBlockId,
-        succ: BasicBlockId,
         program: &mut EthIRProgram,
         predecessors: &mut Predecessors,
     ) {
         let operations_start = program.operations.next_idx();
-        for op in program.basic_blocks[pred].operations {
-            program.clone_operation(op);
+        let mut current = pred;
+        loop {
+            for op in program.basic_blocks[current].operations {
+                program.clone_operation(op);
+            }
+
+            let Control::ContinuesTo(succ) = program.basic_blocks[current].control else {
+                break;
+            };
+            if current == succ || predecessors.of(succ) != [current] || self.entries.contains(succ)
+            {
+                break;
+            }
+
+            for (succ_input, current_output) in program.basic_blocks[succ]
+                .inputs
+                .into_iter()
+                .zip(program.basic_blocks[current].outputs)
+            {
+                program.operations.push(Operation::SetCopy(InlineOperands {
+                    ins: [program.locals[current_output]],
+                    outs: [program.locals[succ_input]],
+                }));
+            }
+            predecessors.clear_predecessors(succ);
+            current = succ;
         }
-        for (succ_input, pred_output) in
-            program.basic_blocks[succ].inputs.into_iter().zip(program.basic_blocks[pred].outputs)
-        {
-            program.operations.push(Operation::SetCopy(InlineOperands {
-                ins: [program.locals[pred_output]],
-                outs: [program.locals[succ_input]],
-            }));
-        }
-        for op in program.basic_blocks[succ].operations {
-            program.clone_operation(op);
-        }
+
         program.basic_blocks[pred].operations =
             Span::new(operations_start, program.operations.next_idx());
 
         let outputs_start = program.locals.next_idx();
-        for idx in program.basic_blocks[succ].outputs {
+        for idx in program.basic_blocks[current].outputs {
             program.locals.push(program.locals[idx]);
         }
         program.basic_blocks[pred].outputs = Span::new(outputs_start, program.locals.next_idx());
+        program.basic_blocks[pred].control = program.basic_blocks[current].control;
 
-        program.basic_blocks[pred].control = program.basic_blocks[succ].control;
-
-        for bb in program.block(succ).successors() {
-            predecessors.replace_predecessor_edge(bb, succ, pred);
+        for bb in program.block(current).successors() {
+            predecessors.replace_predecessor_edge(bb, current, pred);
         }
-        predecessors.clear_predecessors(succ);
     }
 }
 
@@ -137,12 +150,10 @@ mod tests {
                     stop
                 }
 
-                @1 $1 {
+                @1 $1 -> $3 {
                     $2 = const 0x2
                     $3 = add $1 $2
-                    $4 = copy $3
-                    $5 = mul $4 $4
-                    stop
+                    => @2
                 }
 
                 @2 $4 {
@@ -376,11 +387,13 @@ mod tests {
             r#"
             fn init:
                 entry {
-                    => @backedge
+                    condition = const 0
+                    => condition ? @backedge : @exit
                 }
                 backedge {
                     => @entry
                 }
+                exit { stop }
             "#,
         );
 
@@ -393,11 +406,16 @@ mod tests {
 
             Basic Blocks:
                 @0 {
-                    => @0
+                    $0 = const 0x0
+                    => $0 ? @1 : @2
                 }
 
                 @1 {
                     => @0
+                }
+
+                @2 {
+                    stop
                 }
             "#,
         );
