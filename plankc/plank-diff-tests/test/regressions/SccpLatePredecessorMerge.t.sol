@@ -7,21 +7,21 @@ contract SccpLatePredecessorMergeTest is BaseTest {
     string constant SOURCE = "src/regressions/sccp_late_predecessor_merge.plk";
 
     address sirDebug = makeAddr("sccp-late-predecessor-merge-sir-debug");
-    address sirReleaseCsuid = makeAddr("sccp-late-predecessor-merge-sir-release-csuid");
+    address sirReleaseCsuimd = makeAddr("sccp-late-predecessor-merge-sir-release-csuimd");
 
     function setUp() public {
         vm.etch(sirDebug, plankBuild(SOURCE, baseBuildOptions().withBackend("sir-debug").disableOptimizations()));
         vm.etch(
-            sirReleaseCsuid,
-            plankBuild(SOURCE, baseBuildOptions().withBackend("sir-release").withOptimizations("csuid"))
+            sirReleaseCsuimd,
+            plankBuild(SOURCE, baseBuildOptions().withBackend("sir-release").withOptimizations("csuimd"))
         );
     }
 
-    function test_sirReleaseCsuidMatchesSirDebugForLatePredecessorMerge() public {
+    function test_sirReleaseCsuimdMatchesSirDebugForLatePredecessorMerge() public {
         bytes memory data = hex"0000000000000000000000000000000000000000000000000000000000000001";
 
         bytes memory expected = callAndReturn(sirDebug, data);
-        bytes memory actual = callAndReturn(sirReleaseCsuid, data);
+        bytes memory actual = callAndReturn(sirReleaseCsuimd, data);
 
         assertEq(abi.decode(expected, (uint256)), 1);
         assertEq(actual, expected);

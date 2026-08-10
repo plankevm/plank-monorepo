@@ -16,6 +16,7 @@ pub enum OptimizationPass {
     Defragment,
     SwitchPeephole,
     Inlining,
+    BasicBlockMerging,
 }
 
 impl OptimizationPass {
@@ -27,6 +28,7 @@ impl OptimizationPass {
             'd' => Some(Self::Defragment),
             'l' => Some(Self::SwitchPeephole),
             'i' => Some(Self::Inlining),
+            'm' => Some(Self::BasicBlockMerging),
             _ => None,
         }
     }
@@ -38,14 +40,15 @@ pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each chara
     u = unused operation elimination,\n\
     d = defragment,\n\
     l = switch peephole,\n\
-    i = inlining.\n\
-    Example: -O csudi";
+    i = inlining,\n\
+    m = basic block merging.\n\
+    Example: -O csuimd";
 
 pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
     for c in s.chars() {
         if OptimizationPass::from_char(c).is_none() {
             return Err(format!(
-                "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment), l (switch peephole), i (inlining)",
+                "invalid optimization pass '{}', valid passes: s (SCCP), c (copy propagation), u (unused elimination), d (defragment), l (switch peephole), i (inlining), m (basic block merging)",
                 c
             ));
         }

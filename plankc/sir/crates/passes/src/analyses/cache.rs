@@ -128,8 +128,9 @@ mod tests {
     use super::*;
     use crate::{
         optimizations::{
-            constant_propagation::SCCP, copy_propagation::CopyPropagation,
-            defragmenter::Defragmenter, unused_operation_elimination::UnusedOperationElimination,
+            basic_block_merging::BasicBlockMerger, constant_propagation::SCCP,
+            copy_propagation::CopyPropagation, defragmenter::Defragmenter,
+            unused_operation_elimination::UnusedOperationElimination,
         },
         run_pass,
         transforms::SSATransform,
@@ -239,5 +240,48 @@ mod tests {
         };
         let recomputed_store = AnalysesStore::default();
         assert_eq!(snapshot(&store), snapshot(&recomputed_store));
+    }
+
+    #[test]
+    fn test_basic_block_merger_preserves_recomputed_predecessors() {
+        let mut program = parse_or_panic(
+            r#"
+                fn init:
+                    entry {
+                        condition = const 1
+                        => condition ? @other : @pred
+                    }
+                    succ {
+                        selector = const 0
+                        switch selector {
+                            0 => @target
+                            1 => @target
+                            default => @target
+                        }
+                    }
+                    target { stop }
+                    other { => @target }
+                    pred { => @succ }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let snapshot = |program: &EthIRProgram, store: &AnalysesStore| {
+            store
+                .predecessors(program)
+                .enumerate()
+                .map(|(block, predecessors)| {
+                    let mut predecessors = predecessors.to_vec();
+                    predecessors.sort_unstable();
+                    (block, predecessors)
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let store = AnalysesStore::default();
+        run_pass(&mut BasicBlockMerger::default(), &mut program, &store);
+
+        assert!(store.predecessors.is_valid());
+        let recomputed_store = AnalysesStore::default();
+        assert_eq!(snapshot(&program, &store), snapshot(&program, &recomputed_store));
     }
 }

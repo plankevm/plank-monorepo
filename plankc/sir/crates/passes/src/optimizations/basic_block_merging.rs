@@ -1,12 +1,11 @@
-use hashbrown::HashMap;
 use plank_core::{DenseIndexSet, Span};
-use sir_data::{BasicBlockId, Control, EthIRProgram, LocalId};
+use sir_data::{BasicBlockId, Control, EthIRProgram, Operation, operation::InlineOperands};
 
 use crate::{AnalysesMask, AnalysesStore, Pass, Predecessors};
 
+#[derive(Default)]
 pub struct BasicBlockMerger {
     entries: DenseIndexSet<BasicBlockId>,
-    input_remap: HashMap<LocalId, LocalId>,
 }
 
 impl Pass for BasicBlockMerger {
@@ -16,6 +15,7 @@ impl Pass for BasicBlockMerger {
         for &fn_id in rpo.functions_rpo() {
             self.entries.add(program.functions[fn_id].entry());
         }
+
         let mut predecessors = store.predecessors_mut(program);
 
         for &curr in rpo.blocks_postorder() {
@@ -48,55 +48,358 @@ impl BasicBlockMerger {
         program: &mut EthIRProgram,
         predecessors: &mut Predecessors,
     ) {
-        self.input_remap.clear();
-        for (&succ_input, &pred_output) in
-            program.block(succ).inputs().iter().zip(program.block(pred).outputs())
-        {
-            assert!(self.input_remap.insert(succ_input, pred_output).is_none());
-        }
-
         let operations_start = program.operations.next_idx();
         for op in program.basic_blocks[pred].operations {
             program.clone_operation(op);
         }
+        for (succ_input, pred_output) in
+            program.basic_blocks[succ].inputs.into_iter().zip(program.basic_blocks[pred].outputs)
+        {
+            program.operations.push(Operation::SetCopy(InlineOperands {
+                ins: [program.locals[pred_output]],
+                outs: [program.locals[succ_input]],
+            }));
+        }
         for op in program.basic_blocks[succ].operations {
-            let new_idx = program.clone_operation(op);
-            let operation = &mut program.operations[new_idx];
-            for input in operation.inputs_mut(&mut program.locals) {
-                if let Some(&replacement) = self.input_remap.get(input) {
-                    *input = replacement;
-                }
-            }
+            program.clone_operation(op);
         }
         program.basic_blocks[pred].operations =
             Span::new(operations_start, program.operations.next_idx());
 
         let outputs_start = program.locals.next_idx();
         for idx in program.basic_blocks[succ].outputs {
-            let output = program.locals[idx];
-            let remapped = self.input_remap.get(&output).copied().unwrap_or(output);
-            program.locals.push(remapped);
+            program.locals.push(program.locals[idx]);
         }
         program.basic_blocks[pred].outputs = Span::new(outputs_start, program.locals.next_idx());
 
-        let control = match program.basic_blocks[succ].control {
-            Control::Branches(mut branch) => {
-                branch.condition =
-                    self.input_remap.get(&branch.condition).copied().unwrap_or(branch.condition);
-                Control::Branches(branch)
-            }
-            Control::Switch(mut switch) => {
-                switch.condition =
-                    self.input_remap.get(&switch.condition).copied().unwrap_or(switch.condition);
-                Control::Switch(switch)
-            }
-            control => control,
-        };
-        program.basic_blocks[pred].control = control;
+        program.basic_blocks[pred].control = program.basic_blocks[succ].control;
 
-        for s in program.block(succ).successors() {
-            predecessors.replace_predecessor_edge(s, succ, pred);
+        for bb in program.block(succ).successors() {
+            predecessors.replace_predecessor_edge(bb, succ, pred);
         }
         predecessors.clear_predecessors(succ);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BasicBlockMerger;
+    use crate::{AnalysesStore, Legalizer, run_pass};
+    use sir_data::{EthIRProgram, assert_ir_display};
+    use sir_parser::{EmitConfig, parse_or_panic};
+
+    fn merge(source: &str) -> EthIRProgram {
+        let mut program = parse_or_panic(source, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut BasicBlockMerger::default(), &mut program, &store);
+        Legalizer::default().run(&program, &store).unwrap_or_else(|err| {
+            panic!("legalization failed after block merging: {err}\n{program}")
+        });
+        program
+    }
+
+    #[test]
+    fn merges_linear_chain() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry -> entry_out {
+                    entry_out = const 1
+                    => @middle
+                }
+                middle middle_in -> middle_out {
+                    two = const 2
+                    middle_out = add middle_in two
+                    => @exit
+                }
+                exit exit_in {
+                    result = mul exit_in exit_in
+                    stop
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    $2 = const 0x2
+                    $3 = add $1 $2
+                    $4 = copy $3
+                    $5 = mul $4 $4
+                    stop
+                }
+
+                @1 $1 {
+                    $2 = const 0x2
+                    $3 = add $1 $2
+                    $4 = copy $3
+                    $5 = mul $4 $4
+                    stop
+                }
+
+                @2 $4 {
+                    $5 = mul $4 $4
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn merges_branch() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry -> condition {
+                    condition = const 1
+                    => @dispatch
+                }
+                dispatch dispatch_condition {
+                    => dispatch_condition ? @nonzero : @zero
+                }
+                nonzero { stop }
+                zero { stop }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    => $1 ? @2 : @3
+                }
+
+                @1 $1 {
+                    => $1 ? @2 : @3
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn merges_switch() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry -> selector {
+                    selector = const 1
+                    => @dispatch
+                }
+                dispatch dispatch_selector {
+                    switch dispatch_selector {
+                        0 => @zero
+                        1 => @one
+                        default => @fallback
+                    }
+                }
+                zero { stop }
+                one { stop }
+                fallback { stop }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    switch $1 {
+                        0x0 => @2,
+                        0x1 => @3,
+                        else => @4
+                    }
+
+                }
+
+                @1 $1 {
+                    switch $1 {
+                        0x0 => @2,
+                        0x1 => @3,
+                        else => @4
+                    }
+
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+
+                @4 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn merges_block_with_descendant_use() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry -> value {
+                    value = const 1
+                    => @dispatch
+                }
+                dispatch dispatch_value {
+                    condition = const 0
+                    => condition ? @use_value : @done
+                }
+                use_value {
+                    result = add dispatch_value dispatch_value
+                    stop
+                }
+                done { stop }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    $2 = const 0x0
+                    => $2 ? @2 : @3
+                }
+
+                @1 $1 {
+                    $2 = const 0x0
+                    => $2 ? @2 : @3
+                }
+
+                @2 {
+                    $3 = add $1 $1
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn does_not_merge_block_with_multiple_predecessors() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry {
+                    condition = const 1
+                    => condition ? @left : @right
+                }
+                left -> left_out {
+                    left_out = const 2
+                    => @join
+                }
+                right -> right_out {
+                    right_out = const 3
+                    => @join
+                }
+                join input {
+                    stop
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    => $0 ? @1 : @2
+                }
+
+                @1 -> $1 {
+                    $1 = const 0x2
+                    => @3
+                }
+
+                @2 -> $2 {
+                    $2 = const 0x3
+                    => @3
+                }
+
+                @3 $3 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn does_not_merge_function_entry() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry {
+                    => @backedge
+                }
+                backedge {
+                    => @entry
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    => @0
+                }
+
+                @1 {
+                    => @0
+                }
+            "#,
+        );
     }
 }

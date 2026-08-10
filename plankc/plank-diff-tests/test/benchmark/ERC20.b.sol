@@ -112,7 +112,7 @@ contract ERC20PlankRelease is ERC20BenchmarkBase {
     function compile() internal override returns (bytes memory) {
         return
             plankBuild(
-                "src/examples/erc20.plk", baseBuildOptions().withBackend("sir-release").withOptimizations("csuid")
+                "src/examples/erc20.plk", baseBuildOptions().withBackend("sir-release").withOptimizations("csuimd")
             );
     }
 }
