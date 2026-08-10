@@ -7,7 +7,7 @@ use sir_data::{
 
 use crate::{AnalysesStore, Pass};
 
-pub(crate) const DEFAULT_INLINE_SIZE_THRESHOLD: u32 = 8;
+pub(crate) const DEFAULT_INLINE_SIZE_THRESHOLD: u32 = 12;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Inliner {
