@@ -1,7 +1,7 @@
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     op_graph::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, OpSet, ValueNodeId},
-    stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
+    stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
 use StackOps::*;
 use plank_core::Idx;
@@ -54,7 +54,7 @@ fn build_graph(
 }
 
 fn assert_intra_op_schedule_exists(
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     start_stack: impl AsRef<[u32]>,
     start_spilled: impl AsRef<[u32]>,
     target_inputs: impl AsRef<[u32]>,
@@ -115,7 +115,7 @@ fn assert_intra_op_schedule_exists(
 }
 
 fn assert_intra_op_schedule(
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     start_stack: impl AsRef<[u32]>,
     start_spilled: impl AsRef<[u32]>,
     target_inputs: impl AsRef<[u32]>,
@@ -150,14 +150,14 @@ const fn load(id: u32) -> StackOps {
 }
 
 struct AssertScheduleBuilder {
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     spilled: Vec<u32>,
     last_uses: Vec<u32>,
 }
 
 impl AssertScheduleBuilder {
     fn max_swap_depth(mut self, depth: u8) -> Self {
-        self.config = ScheduleConfig::max_swap_no_exchange(depth);
+        self.config = ShuffleConfig::max_swap_no_exchange(depth);
         self
     }
 
@@ -190,7 +190,7 @@ impl AssertScheduleBuilder {
 
 fn opts() -> AssertScheduleBuilder {
     AssertScheduleBuilder {
-        config: ScheduleConfig::default(),
+        config: ShuffleConfig::default(),
         spilled: Vec::new(),
         last_uses: Vec::new(),
     }
@@ -342,7 +342,7 @@ proptest! {
     fn generated_operand_schedules_are_correct(
         (max_swap_depth, last_uses, spilled, stack, target) in generated_schedule(),
     ) {
-        let config = ScheduleConfig::max_swap_no_exchange(max_swap_depth);
+        let config = ShuffleConfig::max_swap_no_exchange(max_swap_depth);
         assert_intra_op_schedule_exists(config, stack, spilled, target, last_uses);
     }
 }

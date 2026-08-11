@@ -127,7 +127,7 @@ impl std::fmt::Display for StackOps {
 }
 
 impl StackOps {
-    pub fn is_valid(self, config: ScheduleConfig) -> bool {
+    pub fn is_valid(self, config: ShuffleConfig) -> bool {
         match self {
             StackOps::Swap(depth) => depth <= config.max_swap_depth,
             StackOps::Dup(depth) => depth <= config.max_dup_depth,
@@ -145,7 +145,7 @@ impl StackOps {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ScheduleConfig {
+pub struct ShuffleConfig {
     pub max_swap_depth: u8,
     pub max_dup_depth: u8,
     /// Given 0-indexed stack depths `m`, `n`, the `max_exchange_range` represents the constraints
@@ -154,7 +154,7 @@ pub struct ScheduleConfig {
     pub exchange_cost: u8,
 }
 
-impl ScheduleConfig {
+impl ShuffleConfig {
     pub const PRE_AMSTERDAM: Self = Self::max_swap_no_exchange(16);
 
     pub const fn max_swap_no_exchange(max_swap_depth: u8) -> Self {
@@ -167,7 +167,7 @@ impl ScheduleConfig {
     }
 }
 
-impl Default for ScheduleConfig {
+impl Default for ShuffleConfig {
     fn default() -> Self {
         Self::PRE_AMSTERDAM
     }

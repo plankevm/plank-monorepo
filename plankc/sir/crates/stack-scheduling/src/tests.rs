@@ -9,11 +9,11 @@ use super::{
     ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
-    stack::{ScheduleConfig, StackOps},
+    stack::{ShuffleConfig, StackOps},
 };
 
 #[track_caller]
-fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
+fn assert_lowers_to(config: ShuffleConfig, source: &str, expected: &str) {
     let source = dedent_preserve_blank_lines(source);
     let program = sir_parser::parse_or_panic(&source, EmitConfig::init_only());
 
@@ -23,7 +23,7 @@ fn assert_lowers_to(config: ScheduleConfig, source: &str, expected: &str) {
     pretty_assertions::assert_str_eq!(actual.trim(), expected.trim());
 }
 
-fn format_scheduled(program: &EthIRProgram, config: ScheduleConfig) -> String {
+fn format_scheduled(program: &EthIRProgram, config: ShuffleConfig) -> String {
     let analyses = AnalysesStore::default();
     let (lowered, layouts, next_alloc_id) = crate::schedule(program, &analyses, config);
     assert_spill_alloc_invariants(program, &lowered, next_alloc_id);
@@ -236,7 +236,7 @@ fn fmt_control(out: &mut String, block: BlockView<'_>) {
 #[test]
 fn lowers_terminator_inputs() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry {
@@ -260,7 +260,7 @@ fn lowers_terminator_inputs() {
 #[test]
 fn lowers_binary_operation_inputs() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry {
@@ -286,7 +286,7 @@ fn lowers_binary_operation_inputs() {
 #[test]
 fn lowers_memory_hash_and_store() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry {
@@ -340,7 +340,7 @@ fn lowers_memory_hash_and_store() {
 #[test]
 fn lowers_calldata_sum_loop() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry -> len0 idx0 off0 sum0 {
@@ -428,7 +428,7 @@ fn lowers_calldata_sum_loop() {
 #[test]
 fn lowers_branch_layouts() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry -> zero value {
@@ -471,7 +471,7 @@ fn lowers_branch_layouts() {
 #[test]
 fn simple_icall() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry {
@@ -509,7 +509,7 @@ fn simple_icall() {
 #[test]
 fn simple_op_use_spill() {
     assert_lowers_to(
-        ScheduleConfig {
+        ShuffleConfig {
             max_swap_depth: 3,
             max_dup_depth: 2,
             max_exchange_range: 3,
@@ -553,7 +553,7 @@ fn simple_op_use_spill() {
 #[test]
 fn spill_allocations_are_unique_across_internal_calls() {
     assert_lowers_to(
-        ScheduleConfig::max_swap_no_exchange(1),
+        ShuffleConfig::max_swap_no_exchange(1),
         r#"
         fn init:
             entry {
@@ -610,7 +610,7 @@ fn spill_allocations_are_unique_across_internal_calls() {
 #[test]
 fn unreachable() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry {
@@ -636,7 +636,7 @@ fn unreachable() {
 #[test]
 fn repeated_input() {
     assert_lowers_to(
-        ScheduleConfig::default(),
+        ShuffleConfig::default(),
         r#"
         fn init:
             entry {

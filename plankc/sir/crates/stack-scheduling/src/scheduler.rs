@@ -2,7 +2,7 @@ use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpSetMut},
-    stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
+    stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
@@ -13,7 +13,7 @@ pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
     next_alloc_id: StaticAllocId,
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     graph: &OpGraph,
 ) -> StaticAllocId {
     let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
