@@ -25,7 +25,6 @@ impl Pass for BasicBlockMerger {
             }
 
             if let Control::ContinuesTo(succ) = program.basic_blocks[curr].control
-                && curr != succ
                 && predecessors.of(succ) == [curr]
                 && !self.entries.contains(succ)
             {
@@ -45,12 +44,12 @@ impl Pass for BasicBlockMerger {
 impl BasicBlockMerger {
     fn merge_chain(
         &mut self,
-        pred: BasicBlockId,
+        head: BasicBlockId,
         program: &mut EthIRProgram,
         predecessors: &mut Predecessors,
     ) {
         let operations_start = program.operations.next_idx();
-        let mut current = pred;
+        let mut current = head;
         loop {
             for op in program.basic_blocks[current].operations {
                 program.clone_operation(op);
@@ -59,8 +58,7 @@ impl BasicBlockMerger {
             let Control::ContinuesTo(succ) = program.basic_blocks[current].control else {
                 break;
             };
-            if current == succ || predecessors.of(succ) != [current] || self.entries.contains(succ)
-            {
+            if predecessors.of(succ) != [current] || self.entries.contains(succ) {
                 break;
             }
 
@@ -78,18 +76,18 @@ impl BasicBlockMerger {
             current = succ;
         }
 
-        program.basic_blocks[pred].operations =
+        program.basic_blocks[head].operations =
             Span::new(operations_start, program.operations.next_idx());
 
         let outputs_start = program.locals.next_idx();
         for idx in program.basic_blocks[current].outputs {
             program.locals.push(program.locals[idx]);
         }
-        program.basic_blocks[pred].outputs = Span::new(outputs_start, program.locals.next_idx());
-        program.basic_blocks[pred].control = program.basic_blocks[current].control;
+        program.basic_blocks[head].outputs = Span::new(outputs_start, program.locals.next_idx());
+        program.basic_blocks[head].control = program.basic_blocks[current].control;
 
         for bb in program.block(current).successors() {
-            predecessors.replace_predecessor_edge(bb, current, pred);
+            predecessors.replace_predecessor_edge(bb, current, head);
         }
     }
 }
@@ -416,6 +414,35 @@ mod tests {
 
                 @2 {
                     stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn merges_cycle_into_self_loop() {
+        let actual = merge(
+            r#"
+            fn init:
+                entry { => @cycle }
+                cycle { => @entry }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    => @0
+                }
+
+                @1 {
+                    => @0
                 }
             "#,
         );
