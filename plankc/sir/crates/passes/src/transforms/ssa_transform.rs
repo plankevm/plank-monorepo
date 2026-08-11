@@ -1,4 +1,6 @@
-use crate::{AnalysesStore, Pass, Predecessors, run_pass, transforms::CriticalEdgeSplitting};
+use crate::{
+    AnalysesMask, AnalysesStore, Pass, Predecessors, run_pass, transforms::CriticalEdgeSplitting,
+};
 use hashbrown::{HashMap, HashSet};
 use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span, index_vec};
 use sir_data::{BasicBlock, BasicBlockId, Control, ControlView, EthIRProgram, Function, LocalId};
@@ -13,7 +15,7 @@ impl Pass for SSATransform {
         run_pass(&mut PreSSAFunctionEntryRegularizer, program, store);
 
         let predecessors = store.predecessors(program);
-        let reachability = store.reachability(program);
+        let reachable_blocks = store.reachable_blocks(program);
 
         let mut unfilled_until_sealed = HashMap::new();
         for bb in program.basic_blocks.iter_idx() {
@@ -102,7 +104,7 @@ impl Pass for SSATransform {
         }
 
         for bb in t.program.basic_blocks.iter_idx() {
-            if !reachability.contains(bb) {
+            if !reachable_blocks.contains(bb) {
                 continue;
             }
             let BasicBlock { inputs, outputs, .. } = t.program.basic_blocks[bb];
@@ -124,8 +126,12 @@ impl Pass for SSATransform {
         }
     }
 
-    // TODO: Implement `preserves`. to-SSA only affects locals & block inputs so CFG remains
-    // unchanged, we have perf to spare so conservatively omitting for now.
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::FunctionEffects
+            | AnalysesMask::Predecessors
+            | AnalysesMask::ReachableBlocks
+            | AnalysesMask::ReversePostOrder
+    }
 }
 
 /// Checks that only function entry points have inputs and `iret` blocks have outputs in pre-SSA
@@ -180,6 +186,10 @@ impl Pass for PreSSAFunctionEntryRegularizer {
                 );
             }
         }
+    }
+
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::FunctionEffects
     }
 }
 

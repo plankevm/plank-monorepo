@@ -62,7 +62,7 @@ impl Pass for UnusedOperationElimination {
             | AnalysesMask::Dominators
             | AnalysesMask::DominanceFrontiers
             | AnalysesMask::BasicBlockOwnership
-            | AnalysesMask::Reachability
+            | AnalysesMask::ReachableBlocks
     }
 }
 

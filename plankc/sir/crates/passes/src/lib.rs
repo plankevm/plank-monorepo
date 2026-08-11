@@ -3,6 +3,7 @@ pub mod optimizations;
 pub mod transforms;
 
 use optimizations::{
+    basic_block_merging::BasicBlockMerger,
     constant_propagation::SCCP,
     copy_propagation::CopyPropagation,
     inlining::{DEFAULT_INLINE_SIZE_THRESHOLD, Inliner},
@@ -43,6 +44,7 @@ pub struct PassManager<'a> {
     defragmenter: Option<Defragmenter>,
     switch_peephole: Option<SwitchPeephole>,
     inliner: Option<Inliner>,
+    basic_block_merger: Option<BasicBlockMerger>,
 }
 
 impl<'a> PassManager<'a> {
@@ -57,6 +59,7 @@ impl<'a> PassManager<'a> {
             defragmenter: None,
             switch_peephole: None,
             inliner: None,
+            basic_block_merger: None,
         }
     }
 
@@ -96,6 +99,11 @@ impl<'a> PassManager<'a> {
                 ),
                 OptimizationPass::Inlining => run_pass(
                     self.inliner.get_or_insert_with(|| Inliner::new(DEFAULT_INLINE_SIZE_THRESHOLD)),
+                    self.program,
+                    &self.store,
+                ),
+                OptimizationPass::BasicBlockMerging => run_pass(
+                    self.basic_block_merger.get_or_insert_default(),
                     self.program,
                     &self.store,
                 ),
