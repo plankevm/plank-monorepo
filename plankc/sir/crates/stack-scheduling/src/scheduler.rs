@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 
-pub fn dumb_schedule(
+pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
     next_alloc_id: &mut StaticAllocId,
