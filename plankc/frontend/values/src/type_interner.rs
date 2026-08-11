@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    ValueId, ValueInterner,
+    LocalId, ValueId, ValueInterner,
     primitive_types::{PrimitiveType, TypeFlags},
 };
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
@@ -28,7 +28,7 @@ const fn const_max(lhs: usize, rhs: usize) -> usize {
 }
 
 const MIN_COMPOUND_ALIGN: usize = const_max(
-    const_max(align_of::<StructHeader>(), align_of::<Field>()),
+    const_max(const_max(align_of::<StructHeader>(), align_of::<Field>()), align_of::<Method>()),
     const_max(align_of::<TupleHeader>(), align_of::<TypeId>()),
 );
 
@@ -37,6 +37,13 @@ pub struct Field {
     pub name: StrId,
     pub ty: TypeId,
     pub def_span: SourceSpan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Method {
+    pub name: StrId,
+    pub closure: ValueId,
+    pub self_type: LocalId,
 }
 
 struct StructHeader {
@@ -55,7 +62,7 @@ pub struct StructView<'a> {
     pub type_index: ValueId,
     pub name: &'a Cell<Option<TypeName>>,
     pub fields: &'a [Field],
-    pub methods: &'a [ValueId],
+    pub methods: &'a [Method],
 }
 
 impl<'a> StructView<'a> {
@@ -74,7 +81,7 @@ pub struct StructKey<'a> {
     pub type_index: ValueId,
     pub def_loc: SrcLoc,
     pub fields: &'a [Field],
-    pub methods: &'a [ValueId],
+    pub methods: &'a [Method],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -383,7 +390,7 @@ impl TypeInterner {
             let header_ptr = self.arena.get(r#struct.0.offset()) as *const StructHeader;
             let header = &(*header_ptr);
             let fields_start = header_ptr.add(1) as *const Field;
-            let methods_start = fields_start.add(header.total_fields as usize) as *const ValueId;
+            let methods_start = fields_start.add(header.total_fields as usize) as *const Method;
 
             StructView {
                 def_loc: header.def_loc,
@@ -517,7 +524,7 @@ impl TypeInterner {
             assert!(align_of::<StructHeader>() <= MIN_COMPOUND_ALIGN);
             assert!(align_of::<Field>() <= MIN_COMPOUND_ALIGN);
             assert!(align_of::<Field>() <= size_of::<StructHeader>());
-            assert!(align_of::<ValueId>() <= MIN_COMPOUND_ALIGN);
+            assert!(align_of::<Method>() <= MIN_COMPOUND_ALIGN);
         }
 
         unsafe {
@@ -530,7 +537,7 @@ impl TypeInterner {
                 field_ptr = field_ptr.add(1);
             }
 
-            let methods_start = field_ptr as *mut ValueId;
+            let methods_start = field_ptr as *mut Method;
             let mut method_ptr = methods_start;
             for &method in r#struct.methods {
                 method_ptr.write(method);
@@ -647,6 +654,7 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plank_core::Idx;
     use plank_session::{SourceId, SrcLoc, ZERO_SPAN, builtins};
 
     fn dummy_src_loc(id: u32) -> SrcLoc {
@@ -683,8 +691,10 @@ mod tests {
     fn struct_method_closures_affect_interning() {
         let interner = TypeInterner::new();
         let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
-        let first_methods = [ValueId::ZERO_NUM];
-        let second_methods = [ValueId::ONE_NUM];
+        let first_methods =
+            [Method { name: builtins::U256, closure: ValueId::ZERO_NUM, self_type: LocalId::ZERO }];
+        let second_methods =
+            [Method { name: builtins::U256, closure: ValueId::ONE_NUM, self_type: LocalId::ZERO }];
 
         let first = interner.intern_struct(StructKey {
             type_index: ValueId::VOID,

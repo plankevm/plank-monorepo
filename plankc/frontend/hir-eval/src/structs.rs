@@ -6,7 +6,7 @@ use alloy_primitives::U256;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
-use plank_values::{Compound, Field, StructKey, StructView, Type, TypeId, Value};
+use plank_values::{Compound, Field, Method, StructKey, StructView, Type, TypeId, Value};
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -56,11 +56,15 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 return Err(Poisoned);
             }
 
-            let mut method_closures = Vec::new();
+            let mut methods = Vec::new();
             let mut methods_poisoned = false;
-            for &function in &this.hir.methods[struct_def.methods] {
-                match this.eval_fn_def(function) {
-                    Ok(EvalValue::Comptime(closure)) => method_closures.push(closure),
+            for method in &this.hir.methods[struct_def.methods] {
+                match this.eval_fn_def(method.function) {
+                    Ok(EvalValue::Comptime(closure)) => methods.push(Method {
+                        name: method.name,
+                        closure,
+                        self_type: method.self_type,
+                    }),
                     Ok(EvalValue::Runtime { .. }) => {
                         unreachable!("function definitions always evaluate to comptime closures")
                     }
@@ -75,7 +79,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
                 fields: &this.eval.fields_buf[fields_buf_offset..],
-                methods: &method_closures,
+                methods: &methods,
             });
 
             Ok(TypeId::from_struct(r#struct))
@@ -104,13 +108,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             );
             return Err(Poisoned);
         };
-        let Some((method_def, closure)) = r#struct.methods.iter().find_map(|&closure| {
-            let Value::Closure { fn_def, .. } = self.values.lookup(closure) else {
-                unreachable!("invariant: struct methods are closures")
-            };
-            let method_def = self.hir.method_defs[fn_def];
-            (method_def.name == method_call.method).then_some((method_def, closure))
-        }) else {
+        let Some(method) = r#struct.methods.iter().find(|method| method.name == method_call.method)
+        else {
             if !matches!(receiver, LocalState::Comptime(value) if matches!(self.values.lookup(value), Value::Type(_)))
                 && let Some(&field) =
                     r#struct.fields.iter().find(|field| field.name == method_call.method)
@@ -130,26 +129,23 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             );
             return Err(Poisoned);
         };
+        let method_closure = method.closure;
         let mut method_args = Vec::new();
-        let args;
-        let self_type_value;
-        match receiver {
+        let args = match receiver {
             LocalState::Comptime(value) if matches!(self.values.lookup(value), Value::Type(_)) => {
-                args = &self.hir.args[method_call.args];
-                self_type_value = value;
+                &self.hir.args[method_call.args]
             }
             LocalState::Comptime(_) | LocalState::Runtime(_) => {
-                self_type_value = self.eval.values.intern_type(struct_ty);
                 method_args.push(method_call.receiver);
                 method_args.extend_from_slice(&self.hir.args[method_call.args]);
-                args = &method_args;
+                &method_args
             }
-        }
+        };
         self.eval_call(
-            closure,
+            method_closure,
             args,
             call_span,
-            Some(SelfBinding { local: method_def.self_type, value: self_type_value }),
+            Some(SelfBinding { local: method.self_type, ty: struct_ty }),
         )
     }
 

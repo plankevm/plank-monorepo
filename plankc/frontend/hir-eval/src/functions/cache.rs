@@ -7,6 +7,7 @@ use plank_core::{
 use plank_hir::ValueId;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned};
+use plank_values::TypeId;
 
 newtype_index! {
     pub(crate) struct LoweredFnIdx;
@@ -45,23 +46,19 @@ pub(crate) enum LoweredFnState {
 pub(crate) struct FunctionKey<'a> {
     pub closure: ValueId,
     pub params: &'a [Param],
-    pub self_value: Option<ValueId>,
+    pub self_type: Option<TypeId>,
 }
 
 impl<'a> FunctionKey<'a> {
-    pub fn new(
-        closure: ValueId,
-        comptime_params: &'a [Param],
-        self_value: Option<ValueId>,
-    ) -> Self {
-        Self { closure, params: comptime_params, self_value }
+    pub fn new(closure: ValueId, comptime_params: &'a [Param], self_type: Option<TypeId>) -> Self {
+        Self { closure, params: comptime_params, self_type }
     }
 }
 
 struct LoweredFn {
     state: LoweredFnState,
     closure: ValueId,
-    self_value: Option<ValueId>,
+    self_type: Option<TypeId>,
 }
 
 pub(crate) struct LoweredFunctionsCache {
@@ -121,7 +118,7 @@ impl LoweredFunctionsCache {
             |&idx| {
                 let closure = self.functions[idx].closure;
                 closure == func.closure
-                    && self.functions[idx].self_value == func.self_value
+                    && self.functions[idx].self_type == func.self_type
                     && func.params == &self.comptime_params[idx]
             },
             |&idx| {
@@ -130,7 +127,7 @@ impl LoweredFunctionsCache {
                 self.hasher.hash_one(FunctionKey {
                     closure,
                     params: comptime_params,
-                    self_value: self.functions[idx].self_value,
+                    self_type: self.functions[idx].self_type,
                 })
             },
         );
@@ -149,7 +146,7 @@ impl LoweredFunctionsCache {
                 let new_entry_id = self.functions.push(LoweredFn {
                     state: LoweredFnState::InProgress,
                     closure: func.closure,
-                    self_value: func.self_value,
+                    self_type: func.self_type,
                 });
                 let id2 = self.comptime_params.push_copy_slice(func.params);
                 assert_eq!(new_entry_id, id2);
@@ -163,20 +160,20 @@ impl LoweredFunctionsCache {
 struct EvaluatedHeader {
     result: Cell<EvaluatedFnState>,
     closure: ValueId,
-    self_value: Option<ValueId>,
+    self_type: Option<TypeId>,
     params: u32,
 }
 
 pub(crate) struct EvaluatedFn<'a> {
     pub result: &'a Cell<EvaluatedFnState>,
     pub closure: ValueId,
-    pub self_value: Option<ValueId>,
+    pub self_type: Option<TypeId>,
     pub params: &'a [Param],
 }
 
 impl EvaluatedFn<'_> {
     pub fn key(&self) -> FunctionKey<'_> {
-        FunctionKey { closure: self.closure, params: self.params, self_value: self.self_value }
+        FunctionKey { closure: self.closure, params: self.params, self_type: self.self_type }
     }
 }
 
@@ -229,7 +226,7 @@ impl EvaluatedFunctionCache {
                 header.write(EvaluatedHeader {
                     result: Cell::new(EvaluatedFnState::Empty),
                     closure: key.closure,
-                    self_value: key.self_value,
+                    self_type: key.self_type,
                     params,
                 });
                 let params_start = header.byte_add(HEADER_TO_PARAMS_OFFSET) as *mut Param;
@@ -241,7 +238,7 @@ impl EvaluatedFunctionCache {
                 Err(EvaluatedFn {
                     result: &header.result,
                     closure: header.closure,
-                    self_value: header.self_value,
+                    self_type: header.self_type,
                     params: core::slice::from_raw_parts(params_start, params as usize),
                 })
             },
@@ -259,7 +256,7 @@ impl EvaluatedFunctionCache {
             EvaluatedFn {
                 result: &header.result,
                 closure: header.closure,
-                self_value: header.self_value,
+                self_type: header.self_type,
                 params: core::slice::from_raw_parts(params_start, header.params as usize),
             }
         }

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use hashbrown::HashMap;
-use plank_core::{DenseIndexMap, Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
+use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
     cst::{self, NumLitId},
@@ -118,8 +118,7 @@ struct HirBuilder {
     args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
     match_arms: ListOfLists<MatchArmsId, MatchArm>,
-    methods: ListOfLists<MethodsId, FnDefId>,
-    method_defs: DenseIndexMap<FnDefId, MethodDef>,
+    methods: ListOfLists<MethodsId, MethodInfo>,
     method_calls: IndexVec<MethodCallId, MethodCall>,
     struct_defs: IndexVec<StructDefId, StructDef>,
 
@@ -137,7 +136,6 @@ impl HirBuilder {
             fields: ListOfLists::new(),
             match_arms: ListOfLists::new(),
             methods: ListOfLists::new(),
-            method_defs: DenseIndexMap::new(),
             method_calls: IndexVec::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
@@ -168,7 +166,7 @@ struct BlockLowerer<'a> {
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
-    method_buf: Vec<FnDefId>,
+    method_buf: Vec<MethodInfo>,
     param_info_buf: Vec<ParamInfo>,
 
     lexed: &'a Lexed,
@@ -652,12 +650,15 @@ impl BlockLowerer<'_> {
                     {
                         self.error_duplicate_struct_member(method.name_span(), *field);
                     }
-                    if let Some(&previous_function) = self.method_buf[methods_start..]
+                    if let Some(previous) = self.method_buf[methods_start..]
                         .iter()
-                        .find(|&&function| self.builder.method_defs[function].name == method.name)
+                        .find(|previous| previous.name == method.name)
                     {
-                        let previous = self.builder.method_defs[previous_function];
-                        self.error_duplicate_method(method.name_span(), previous);
+                        self.error_duplicate_method(
+                            method.name,
+                            method.name_span(),
+                            previous.name_span,
+                        );
                     }
                     let method = self.lower_method_def(method);
                     self.method_buf.push(method);
@@ -799,7 +800,7 @@ impl BlockLowerer<'_> {
         })
     }
 
-    fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> FnDefId {
+    fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> MethodInfo {
         self.with_function_scope(|this| {
             let self_type = this.alloc_anonymous_local(Binding::SelfType);
             let function = this.lower_function(
@@ -810,10 +811,8 @@ impl BlockLowerer<'_> {
                 method.param_list_span(),
                 method.eager,
             );
-            let name_offset = this.lexed.token_src_span(method.name_span().start).start;
-            let method_def = MethodDef { name: method.name, name_offset, self_type };
-            this.builder.method_defs.insert_no_prev(function, method_def);
-            function
+            let name_span = this.lexed.tokens_src_span(method.name_span());
+            MethodInfo { name: method.name, name_span, function, self_type }
         })
     }
 
@@ -1212,7 +1211,6 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         fields: builder.fields,
         match_arms: builder.match_arms,
         methods: builder.methods,
-        method_defs: builder.method_defs,
         method_calls: builder.method_calls,
         struct_defs: builder.struct_defs,
 

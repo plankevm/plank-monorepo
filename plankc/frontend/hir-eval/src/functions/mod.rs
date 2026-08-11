@@ -54,7 +54,7 @@ struct Call<'a> {
 #[derive(Clone, Copy)]
 pub(crate) struct SelfBinding {
     pub local: hir::LocalId,
-    pub value: ValueId,
+    pub ty: TypeId,
 }
 
 impl Call<'_> {
@@ -121,10 +121,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         if let Some(self_binding) = self_binding {
+            let self_type_value = fn_scope.eval.values.intern_type(self_binding.ty);
             fn_scope.bindings.insert_no_prev(
                 self_binding.local,
                 Local::new(
-                    Ok(LocalState::Comptime(self_binding.value)),
+                    Ok(LocalState::Comptime(self_type_value)),
                     fn_def.source_span,
                     DefOrigin::Local(fn_def.source_span),
                 ),
@@ -389,7 +390,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 .iter()
                 .all(|&arg| matches!(self.bindings[arg].state, Ok(LocalState::Comptime(_))));
 
-        let self_value = self_binding.map(|binding| binding.value);
+        let self_type = self_binding.map(|binding| binding.ty);
         let (mut scope, call) = self.prepare_new_fn_scope_for_preamble_eval(
             closure,
             fn_def_id,
@@ -405,7 +406,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         );
         // The language quota, rather than the host thread's stack size, bounds recursion.
         stacker::maybe_grow(MIN_EVAL_STACK_REMAINING, EVAL_STACK_SEGMENT_SIZE, || {
-            scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc, self_value)
+            scope.eval_callee_scope(fn_def_id, call, values_buf_offset, call_loc, self_type)
         })
     }
 
@@ -415,7 +416,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         mut call: Call<'_>,
         values_buf_offset: usize,
         call_loc: SrcLoc,
-        self_value: Option<ValueId>,
+        self_type: Option<TypeId>,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let preamble = {
             let restore = self.diag_ctx.set_preamble_call_site(call.loc());
@@ -467,7 +468,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         if call.comptime() || preamble.is_comptime_only {
             let call_result =
-                self.fold_comptime_call(&call, preamble, values_buf_offset, self_value);
+                self.fold_comptime_call(&call, preamble, values_buf_offset, self_type);
             return match call_result {
                 Ok(Ok(result)) => match result.outcome {
                     ComptimeCallOutcome::Value(value) => Ok(Ok(EvalValue::Comptime(value))),
@@ -482,7 +483,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let function = FunctionKey::new(
             call.closure,
             &self.eval.maybe_values_buf[values_buf_offset..],
-            self_value,
+            self_type,
         );
 
         let lowered = match self.eval.lowered_fns_cache.retrieve_or_create_entry(function) {
@@ -597,14 +598,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         call: &Call<'_>,
         preamble: PreambleResult,
         values_buf_offset: usize,
-        self_value: Option<ValueId>,
+        self_type: Option<TypeId>,
     ) -> MaybePoisoned<Result<ComptimeCallResult, Diverge>> {
         preamble.return_type?;
 
         let function = FunctionKey::new(
             call.closure,
             &self.eval.maybe_values_buf[values_buf_offset..],
-            self_value,
+            self_type,
         );
         let mut existing_cached_value = None;
         let cache_state = match self.eval.evaluated_fns_cache.lookup(function) {

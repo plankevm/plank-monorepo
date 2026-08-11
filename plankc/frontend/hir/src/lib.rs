@@ -1,6 +1,5 @@
 use plank_core::{
-    DenseIndexMap, IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists,
-    newtype_index,
+    IndexVec, const_print::const_assert_mem_size, list_of_lists::ListOfLists, newtype_index,
 };
 use plank_session::{
     Builtin, MaybePoisoned, Poisoned, SourceByteOffset, SourceId, SourceSpan, SrcLoc, StrId,
@@ -11,10 +10,9 @@ mod lowerer;
 pub mod operators;
 
 pub use lowerer::lower;
-pub use plank_values::{ConstId, FnDefId, ValueId};
+pub use plank_values::{ConstId, FnDefId, LocalId, ValueId};
 
 newtype_index! {
-    pub struct LocalId;
     pub struct BlockId;
     pub struct EntryPointId;
     pub struct StructDefId;
@@ -222,9 +220,10 @@ pub struct StructDef {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct MethodDef {
+pub struct MethodInfo {
     pub name: StrId,
-    pub name_offset: SourceByteOffset,
+    pub name_span: SourceSpan,
+    pub function: FnDefId,
     pub self_type: LocalId,
 }
 
@@ -269,8 +268,7 @@ pub struct Hir {
     pub args: ListOfLists<ArgsId, LocalId>,
     pub fields: ListOfLists<FieldsId, FieldInfo>,
     pub match_arms: ListOfLists<MatchArmsId, MatchArm>,
-    pub methods: ListOfLists<MethodsId, FnDefId>,
-    pub method_defs: DenseIndexMap<FnDefId, MethodDef>,
+    pub methods: ListOfLists<MethodsId, MethodInfo>,
     pub method_calls: IndexVec<MethodCallId, MethodCall>,
     pub struct_defs: IndexVec<StructDefId, StructDef>,
 

@@ -4,7 +4,7 @@ use plank_session::{
     SourceSpan, StrId,
 };
 
-use crate::{FieldInfo, MethodDef};
+use crate::FieldInfo;
 
 use super::BlockLowerer;
 
@@ -185,13 +185,13 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn error_duplicate_method(&self, method_span: TokenSpan, previous: MethodDef) {
-        let (method_name, previous_span) = {
-            let session = self.session.borrow();
-            let (method_name, previous_span) =
-                session.lookup_name_spanned(previous.name, previous.name_offset);
-            (method_name.to_owned(), previous_span)
-        };
+    pub(crate) fn error_duplicate_method(
+        &self,
+        name: StrId,
+        method_span: TokenSpan,
+        previous_span: SourceSpan,
+    ) {
+        let method_name = self.lookup_name(name);
         Diagnostic::error("duplicate method name")
             .element(
                 Annotations::new(self.source_id)
