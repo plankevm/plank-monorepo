@@ -584,7 +584,7 @@ impl BlockLowerer<'_> {
                         self.error_unknown_builtin(name, span);
                         ExprKind::POISON
                     }
-                } else if let ast::Expr::Member(member_expr) = callee {
+                } else if let Some(member_expr) = call_expr.direct_member_callee() {
                     let receiver = self.lower_expr_to_local(member_expr.object());
                     let args = self.lower_args(call_expr.args());
                     let method_call = self.builder.method_calls.push(MethodCall {

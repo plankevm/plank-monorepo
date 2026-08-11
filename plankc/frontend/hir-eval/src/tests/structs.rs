@@ -356,6 +356,91 @@ fn test_non_struct_method_call() {
 }
 
 #[test]
+fn test_parenthesized_method_call() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn identity(value: Self, input: u256) u256 { input }
+        };
+
+        init {
+            let value: S = S {};
+            let result = (value.identity(2));
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S, %1: u256) -> u256 {
+            %2 : u256 = %1
+            ret %2
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {    }
+            %1 : u256 = 2
+            %2 : u256 = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_parenthesized_function_field_call() {
+    assert_lowers_to(
+        r#"
+        const callback = fn() u256 { 1 };
+        const S = struct { callback: function };
+
+        init {
+            let value: S = S { callback: callback };
+            let result = (value.callback)();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> u256 {
+            %0 : u256 = 1
+            ret %0
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = call @fn0()
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_parenthesized_method_is_not_a_function_field() {
+    assert_diagnostics(
+        r#"
+        const S = struct {
+            fn identity(value: Self) Self { value }
+        };
+
+        init {
+            let value: S = S {};
+            (value.identity)();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:7:6
+          |
+        7 |     (value.identity)();
+          |      ^^^^^^^^^^^^^^ `S` has no field `identity`
+        "#],
+    );
+}
+
+#[test]
 fn test_function_field_called_as_method() {
     assert_diagnostics(
         r#"
@@ -378,7 +463,7 @@ fn test_function_field_called_as_method() {
         6 |     value.callback();
           |     ^^^^^^^^^^^^^^^^ `callback` is a field, not a method
           |
-          = help: assign function field `callback` to a local before calling it
+          = help: wrap the field access in parentheses before calling it, e.g. `(value.callback)()`
         "#],
     );
 }

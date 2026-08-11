@@ -769,8 +769,9 @@ impl DiagCtx<'_> {
             "field declared here",
         );
         if field.ty == TypeId::FUNCTION {
-            diagnostic = diagnostic
-                .help(format!("assign function field `{field_name}` to a local before calling it"));
+            diagnostic = diagnostic.help(format!(
+                "wrap the field access in parentheses before calling it, e.g. `(value.{field_name})()`"
+            ));
         }
         diagnostic.emit(self);
     }

@@ -178,6 +178,11 @@ impl<'cst> CallExpr<'cst> {
         self.view.child(0).map(Expr::new_unwrap).unwrap_or(Expr::Error { span: self.view.span() })
     }
 
+    /// Returns the callee if it is an unparenthesized `MemberExpr`.
+    pub fn direct_member_callee(&self) -> Option<MemberExpr<'cst>> {
+        self.view.child(0).and_then(|callee| MemberExpr::try_new(callee).ok().flatten())
+    }
+
     pub fn args(&self) -> impl Iterator<Item = Expr<'cst>> {
         self.view.children().skip(1).map(Expr::new_unwrap)
     }
