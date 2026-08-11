@@ -13,7 +13,6 @@ mod greedy_shuffler;
 mod layouts;
 mod scheduler;
 pub mod stack;
-mod state;
 
 newtype_index! {
     pub struct StackOpIdx;
@@ -62,9 +61,10 @@ pub fn schedule<'ir>(
 
         let graph =
             build_graph_effectful(program, block, &layouts, input_layout, output_layout, analyses);
-        let ops_idx = ops.push_with(|mut pusher| {
-            greedy_schedule(|op| pusher.push(op), block, &mut next_alloc_id, config, &graph);
+        let (ops_idx, new_next_alloc_id) = ops.push_with_res(|mut pusher| {
+            greedy_schedule(|op| pusher.push(op), block, next_alloc_id, config, &graph)
         });
+        next_alloc_id = new_next_alloc_id;
         bb_to_ops.insert(block.id(), ops_idx);
     }
 
