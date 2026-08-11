@@ -1,11 +1,12 @@
-use plank_core::{DenseIndexSet, Span};
+use hashbrown::HashSet;
+use plank_core::Span;
 use sir_data::{BasicBlockId, Control, EthIRProgram, Operation, operation::InlineOperands};
 
 use crate::{AnalysesMask, AnalysesStore, Pass, Predecessors};
 
 #[derive(Default)]
 pub struct BasicBlockMerger {
-    entries: DenseIndexSet<BasicBlockId>,
+    entries: HashSet<BasicBlockId>,
 }
 
 impl Pass for BasicBlockMerger {
@@ -13,20 +14,20 @@ impl Pass for BasicBlockMerger {
         self.entries.clear();
         let rpo = store.reverse_post_order(program);
         for &fn_id in rpo.functions_rpo() {
-            self.entries.add(program.functions[fn_id].entry());
+            self.entries.insert(program.functions[fn_id].entry());
         }
 
         let mut predecessors = store.predecessors_mut(program);
 
         for &curr in rpo.blocks_rpo() {
             // skip blocks that have been merged
-            if predecessors.of(curr).is_empty() && !self.entries.contains(curr) {
+            if predecessors.of(curr).is_empty() && !self.entries.contains(&curr) {
                 continue;
             }
 
             if let Control::ContinuesTo(succ) = program.basic_blocks[curr].control
                 && predecessors.of(succ) == [curr]
-                && !self.entries.contains(succ)
+                && !self.entries.contains(&succ)
             {
                 self.merge_chain(curr, program, &mut predecessors);
             }
@@ -58,7 +59,7 @@ impl BasicBlockMerger {
             let Control::ContinuesTo(succ) = program.basic_blocks[current].control else {
                 break;
             };
-            if predecessors.of(succ) != [current] || self.entries.contains(succ) {
+            if predecessors.of(succ) != [current] || self.entries.contains(&succ) {
                 break;
             }
 
