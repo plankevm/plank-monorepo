@@ -6,7 +6,7 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ScheduleConfig;
 pub mod op_graph;
 
-use crate::{op_graph::build_graph_effectful, scheduler::dumb_schedule, stack::StackOps};
+use crate::{op_graph::build_graph_effectful, scheduler::greedy_schedule, stack::StackOps};
 
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
@@ -63,7 +63,7 @@ pub fn schedule<'ir>(
         let graph =
             build_graph_effectful(program, block, &layouts, input_layout, output_layout, analyses);
         let ops_idx = ops.push_with(|mut pusher| {
-            dumb_schedule(|op| pusher.push(op), block, &mut next_alloc_id, config, &graph);
+            greedy_schedule(|op| pusher.push(op), block, &mut next_alloc_id, config, &graph);
         });
         bb_to_ops.insert(block.id(), ops_idx);
     }
