@@ -3,7 +3,6 @@ use crate::{
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpSetMut},
     stack::{EvmStack, ScheduleConfig, StackOps, TrackedStack},
-    state::collect_next_completable_into,
 };
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
@@ -13,10 +12,10 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),
     block: BlockView<'_>,
-    next_alloc_id: &mut StaticAllocId,
+    next_alloc_id: StaticAllocId,
     config: ScheduleConfig,
     graph: &OpGraph,
-) {
+) -> StaticAllocId {
     let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
     completable_backing.resize(graph.words_per_set() as usize, 0);
     let mut completable = OpSetMut::new(&mut completable_backing, graph.total_ops());
@@ -30,12 +29,12 @@ pub fn greedy_schedule(
         for input in graph.input_values_fifo().iter().rev() {
             inner.push(input);
         }
-        TrackedStack::new_from_evm(*next_alloc_id, ops_sink, inner, 8)
+        TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
     };
 
     'schedule: loop {
         completable.clear();
-        collect_next_completable_into(graph, complete.as_ref(), &mut completable);
+        graph.collect_next_completable_into(complete.as_ref(), &mut completable);
         let Some(op) = completable.iter().next() else {
             break 'schedule;
         };
@@ -47,5 +46,5 @@ pub fn greedy_schedule(
         greedy_shuffler::shuffle(config, &mut stack, graph);
     }
 
-    *next_alloc_id = stack.into_next_alloc_id();
+    stack.into_next_alloc_id()
 }

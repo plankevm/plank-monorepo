@@ -131,6 +131,14 @@ impl OpGraph {
             kind: op.kind,
         }
     }
+
+    pub fn collect_next_completable_into(&self, complete: OpSet<'_>, out: &mut OpSetMut<'_>) {
+        for op in self.op_ids() {
+            if !complete.contains(op) && complete.is_super(self.get_predecessors(op)) {
+                out.add(op);
+            }
+        }
+    }
 }
 
 pub struct OpView<'a> {
