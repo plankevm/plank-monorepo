@@ -3,7 +3,7 @@ use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
-pub use stack::ScheduleConfig;
+pub use stack::ShuffleConfig;
 pub mod op_graph;
 
 use crate::{op_graph::build_graph_effectful, scheduler::greedy_schedule, stack::StackOps};
@@ -39,7 +39,7 @@ impl ScheduledOps {
 pub fn schedule<'ir>(
     program: &'ir EthIRProgram,
     analyses: &AnalysesStore,
-    config: ScheduleConfig,
+    config: ShuffleConfig,
 ) -> (ScheduledOps, LayoutsTracker<'ir>, StaticAllocId) {
     let in_out_bundling = ControlFlowGraphInOutBundling::new(program, analyses);
     let layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);

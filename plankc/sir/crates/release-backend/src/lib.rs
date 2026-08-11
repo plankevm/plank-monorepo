@@ -2,7 +2,7 @@ use crate::codegen_orchestrator::InitcodeEmitted;
 use plank_core::Idx;
 use sir_data::EthIRProgram;
 use sir_passes::AnalysesStore;
-use sir_stack_scheduling::{self, ScheduleConfig};
+use sir_stack_scheduling::{self, ShuffleConfig};
 use sir_static_memory_allocator::BumpAllocateAll;
 
 mod code_to_asm;
@@ -26,7 +26,7 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
     }
 
     let (stack_ops, _layouts, last_alloc_id) =
-        sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
+        sir_stack_scheduling::schedule(program, analyses, ShuffleConfig::PRE_AMSTERDAM);
     let init_memory_layout =
         BumpAllocateAll::generate(program, program.init_entry, &stack_ops, last_alloc_id.idx());
 

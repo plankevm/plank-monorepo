@@ -1,6 +1,6 @@
 use crate::{
     op_graph::*,
-    stack::{ScheduleConfig, StackOps, TrackedStack},
+    stack::{ShuffleConfig, StackOps, TrackedStack},
 };
 use indices::*;
 use plank_core::{IncIterable, LoopLimit, Span, span::ToUsize};
@@ -19,7 +19,7 @@ pub struct GreedyShuffler<'a, Sink: FnMut(StackOps)> {
 }
 
 pub fn shuffle<'a, Sink: FnMut(StackOps)>(
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     current: &'a mut TrackedStack<Sink>,
     graph: &'a OpGraph,
 ) {
@@ -30,7 +30,7 @@ const LIMIT: u32 = 100_000;
 
 impl<'a, Sink: FnMut(StackOps)> GreedyShuffler<'a, Sink> {
     pub fn run(
-        config: ScheduleConfig,
+        config: ShuffleConfig,
         current: &'a mut TrackedStack<Sink>,
         target: &'a [ValueNodeId],
     ) {

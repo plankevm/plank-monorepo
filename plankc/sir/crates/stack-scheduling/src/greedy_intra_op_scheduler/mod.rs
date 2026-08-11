@@ -2,7 +2,7 @@ use smallvec::SmallVec;
 
 use crate::{
     op_graph::{OpGraph, OpNodeId, OpSet, ValueNodeId},
-    stack::{ScheduleConfig, StackOps, TrackedStack},
+    stack::{ShuffleConfig, StackOps, TrackedStack},
 };
 
 mod permute;
@@ -18,7 +18,7 @@ fn only_contains_unique(values: &[ValueNodeId]) -> bool {
 }
 
 pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     stack: &mut TrackedStack<Sink>,
     graph: &OpGraph,
     op_id: OpNodeId,
@@ -59,7 +59,7 @@ struct GoBackToProgressStart;
 
 struct GreedyOperandPreparer<'a, Sink: FnMut(StackOps)> {
     head: u16,
-    config: ScheduleConfig,
+    config: ShuffleConfig,
     stack: &'a mut TrackedStack<Sink>,
     target: &'a [ValueNodeId],
     last_uses: &'a [ValueNodeId],
@@ -162,7 +162,7 @@ impl<'a, Sink: FnMut(StackOps)> GreedyOperandPreparer<'a, Sink> {
 
     fn new(
         head: u16,
-        config: ScheduleConfig,
+        config: ShuffleConfig,
         stack: &'a mut TrackedStack<Sink>,
         target: &'a [ValueNodeId],
         last_uses: &'a [ValueNodeId],
