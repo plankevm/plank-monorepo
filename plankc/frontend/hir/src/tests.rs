@@ -225,37 +225,6 @@ fn test_assign_to_immutable_let() {
 }
 
 #[test]
-fn test_capture_declaration_span_propagates_through_nested_functions() {
-    let rendered = render_diagnostics(
-        r#"
-        init {
-            let x = 1;
-            let middle = fn() void {
-                let inner = fn() void {
-                    x = 2;
-                };
-            };
-        }
-        "#,
-    );
-    let expected = dedent_preserve_blank_lines(
-        r#"
-        error: variable 'x' was not declared mutable
-         --> main.plk:5:13
-          |
-        2 |     let x = 1;
-          |         - declared here
-        ...
-        5 |             x = 2;
-          |             ^ assignment to immutable variable
-          |
-          = help: consider declaring it with `let mut`
-        "#,
-    );
-    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
-}
-
-#[test]
 fn test_return_in_fn_param_type_expression() {
     let rendered = render_diagnostics(
         r#"

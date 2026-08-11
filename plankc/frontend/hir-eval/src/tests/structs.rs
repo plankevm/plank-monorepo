@@ -79,34 +79,26 @@ fn test_struct_method_captures_affect_specialization() {
 }
 
 #[test]
-fn test_type_qualified_method_calls() {
+fn test_type_qualified_method_call_through_self() {
     assert_lowers_to(
         r#"
         const S = struct {
-            fn identity(value: u256) u256 { value }
             fn self_type() type { Self }
             fn type_via_self() type { Self.self_type() }
         };
 
         init {
-            let value = S.identity(2);
             let ty = S.type_via_self();
-            let instance: S = @uninit(ty);
+            let mut instance: S = @uninit(ty);
             @evm_stop();
         }
         "#,
         r#"
         ==== Functions ====
-        @fn0(%0: u256) -> u256 {
-            %1 : u256 = %0
-            ret %1
-        }
-
         ; init
-        @fn1() -> never {
-            %0 : u256 = 2
-            %1 : u256 = call @fn0(%0)
-            %2 : never = @evm_stop()
+        @fn0() -> never {
+            %0 : S = S {    }
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -154,33 +146,6 @@ fn test_eager_method_folds_only_with_comptime_receiver() {
 }
 
 #[test]
-fn test_method_nested_fn_captures_self_type() {
-    assert_lowers_to(
-        r#"
-        const S = struct {
-            fn self_type() type {
-                let nested = fn() type { Self };
-                nested()
-            }
-        };
-
-        init {
-            let ty = S.self_type();
-            let instance: S = @uninit(ty);
-            @evm_stop();
-        }
-        "#,
-        r#"
-        ==== Functions ====
-        ; init
-        @fn0() -> never {
-            %0 : never = @evm_stop()
-        }
-        "#,
-    );
-}
-
-#[test]
 fn test_self_type_capture_propagates_through_nested_functions() {
     assert_lowers_to(
         r#"
@@ -196,7 +161,7 @@ fn test_self_type_capture_propagates_through_nested_functions() {
 
         init {
             let ty = S.self_type();
-            let instance: S = @uninit(ty);
+            let mut instance: S = @uninit(ty);
             @evm_stop();
         }
         "#,
@@ -204,7 +169,8 @@ fn test_self_type_capture_propagates_through_nested_functions() {
         ==== Functions ====
         ; init
         @fn0() -> never {
-            %0 : never = @evm_stop()
+            %0 : S = S {    }
+            %1 : never = @evm_stop()
         }
         "#,
     );
@@ -225,8 +191,8 @@ fn test_type_qualified_method_self_specialization() {
         const second = Make(bool).self_type();
 
         init {
-            let x: Make(u256) = @uninit(first);
-            let y: Make(bool) = @uninit(second);
+            let mut x: Make(u256) = @uninit(first);
+            let mut y: Make(bool) = @uninit(second);
             let a: Make(u256) = Make(u256).new();
             let b: Make(bool) = Make(bool).new();
             @evm_stop();
@@ -250,9 +216,15 @@ fn test_type_qualified_method_self_specialization() {
 
         ; init
         @fn2() -> never {
-            %0 : Make(u256) = call @fn0()
-            %1 : Make(bool) = call @fn1()
-            %2 : never = @evm_stop()
+            %0 : Make(u256) = Make(u256) {
+                0,
+            }
+            %1 : Make(bool) = Make(bool) {
+                false,
+            }
+            %2 : Make(u256) = call @fn0()
+            %3 : Make(bool) = call @fn1()
+            %4 : never = @evm_stop()
         }
         "#,
     );

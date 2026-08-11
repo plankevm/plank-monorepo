@@ -531,23 +531,26 @@ fn test_builtin_wrong_arg_count() {
 }
 
 #[test]
-fn test_closure_capture_not_comptime() {
+fn test_nested_closure_capture_not_comptime() {
     assert_diagnostics(
         r#"
         init {
             let x = @evm_calldataload(0);
-            let f = fn() u256 { x };
+            let middle = fn() void {
+                let inner = fn() u256 { x };
+            };
             @evm_stop();
         }
         "#,
         &[r#"
         error: closure capture must be known at compile time
-         --> main.plk:3:25
+         --> main.plk:4:33
           |
         2 |     let x = @evm_calldataload(0);
           |             -------------------- defined here
-        3 |     let f = fn() u256 { x };
-          |                         ^ capture of runtime value
+        3 |     let middle = fn() void {
+        4 |         let inner = fn() u256 { x };
+          |                                 ^ capture of runtime value
           |
           = note: closures can only capture values known at compile time
         "#],
