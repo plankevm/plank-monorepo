@@ -6,11 +6,11 @@ use crate::{
 };
 
 pub struct ScheduleSearchState {
-    complete: Box<[BitsetWord]>,
-    executed: Box<[StackOps]>,
-    executed_cost: u32,
-    values: Box<[ValueNodeId]>,
-    stack_end: usize,
+    pub(crate) complete: Box<[BitsetWord]>,
+    pub(crate) executed: Box<[StackOps]>,
+    pub(crate) executed_cost: u32,
+    pub(crate) values: Box<[ValueNodeId]>,
+    pub(crate) stack_end: usize,
 }
 
 impl ScheduleSearchState {
