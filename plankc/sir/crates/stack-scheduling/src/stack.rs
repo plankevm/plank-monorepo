@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
 use plank_core::Idx;
 use sir_data::{OperationIdx, StaticAllocId};

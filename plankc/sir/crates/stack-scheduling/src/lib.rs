@@ -14,6 +14,8 @@ mod layouts;
 mod scheduler;
 pub mod stack;
 
+mod beam_searching;
+
 newtype_index! {
     pub struct StackOpIdx;
 }
