@@ -16,7 +16,7 @@ mod state;
 mod tests;
 
 pub struct ScheduleConfig {
-    beam_width: NonZero<usize>,
+    pub beam_width: NonZero<usize>,
 }
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;

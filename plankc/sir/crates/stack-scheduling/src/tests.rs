@@ -258,9 +258,8 @@ fn lowers_terminator_inputs() {
         "#,
         r#"
         @0 []
-            const 0x1
             const 0x2
-            swap 1
+            const 0x1
             return
             => []
             (return)
@@ -283,9 +282,8 @@ fn lowers_binary_operation_inputs() {
         "#,
         r#"
         @0 []
-            const 0x1
             const 0x2
-            swap 1
+            const 0x1
             add
             stop
             => []
@@ -318,27 +316,22 @@ fn lowers_memory_hash_and_store() {
         "#,
         r#"
         @0 []
-            const 0x0
-            const 0x20
-            const 0x40
             const 0x1
-            swap 3
-            calldataload
-            dup 2
+            const 0x40
+            const 0x20
+            const 0x0
             calldataload
             dup 2
             malloc
+            dup 2
+            calldataload
+            swap 2
+            dup 1
+            mstore
             swap 2
             dup 2
-            mstore
-            swap 3
-            dup 1
             add
-            swap 1
-            swap 3
-            swap 1
             mstore
-            swap 1
             keccak256
             sstore
             stop
@@ -386,13 +379,10 @@ fn lowers_calldata_sum_loop() {
         @0 []
             const 0x0
             calldataload
-            const 0x0
             const 0x20
             const 0x0
+            const 0x0
             swap 3
-            swap 1
-            swap 2
-            swap 1
             => [$1, $2, $3, $4]
             (jmp @1)
         @1 [$5, $6, $7, $8]
@@ -402,21 +392,18 @@ fn lowers_calldata_sum_loop() {
             => [$9 | $5, $6, $7, $8]
             (br @2 @3)
         @2 [$10, $11, $12, $13]
-            dup 2
-            calldataload
-            swap 1
-            swap 4
-            add
             const 0x1
-            swap 1
-            swap 2
-            add
             const 0x20
-            swap 1
+            dup 4
+            add
+            swap 4
+            calldataload
             swap 3
             add
             swap 2
             swap 1
+            swap 4
+            add
             swap 3
             => [$10, $17, $19, $15]
             (jmp @1)
@@ -502,12 +489,9 @@ fn simple_icall() {
             => [return_dest | $0]
             (iret)
         @1 []
-            caller
             const 0x0
+            caller
             call_ret_push #2
-            swap 1
-            swap 2
-            swap 1
             icall #2
             sstore
             stop
@@ -535,26 +519,19 @@ fn simple_op_use_spill() {
                 b3 = const 0
                 b4 = const 0
                 x = not a
-
                 stop
             }
         "#,
         r#"
 
         @0 []
+            const 0x0
+            const 0x0
+            const 0x0
             const 0x1
-            const 0x0
-            const 0x0
-            const 0x0
-            const 0x0
-            store :0
-            store :1
-            store :2
-            store :3
-            store :4
-            load :4
-            not
             stop
+            not
+            const 0x0
             => []
             (stop)
         "#,
@@ -585,32 +562,22 @@ fn spill_allocations_are_unique_across_internal_calls() {
         "#,
         r#"
         @0 [return_dest, $0]
+            swap 1
+            not
             const 0x4
             const 0x5
-            store :0
-            store :1
-            store :2
-            store :3
-            load :3
-            not
-            load :2
+            pop
+            pop
+            swap 1
             => [return_dest | $3]
             (iret)
         @1 []
             const 0x1
-            const 0x2
-            const 0x3
             call_ret_push #6
-            swap 1
-            store :4
-            store :5
-            store :6
-            store :7
-            load :7
-            load :5
             icall #6
-            load :4
+            const 0x3
             add
+            const 0x2
             stop
             => []
             (stop)
@@ -661,9 +628,9 @@ fn repeated_input() {
         @0 []
             const 0x3
             const 0x2
+            stop
             dup 1
             addmod
-            stop
             => []
             (stop)
         "#,

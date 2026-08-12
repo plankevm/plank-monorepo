@@ -1,3 +1,5 @@
+use std::num::NonZero;
+
 use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
 use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
@@ -6,7 +8,10 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{op_graph::build_graph_effectful, scheduler::greedy_schedule, stack::StackOps};
+use crate::{
+    beam_searching::ScheduleConfig, op_graph::build_graph_effectful, scheduler::greedy_schedule,
+    stack::StackOps,
+};
 
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
@@ -21,6 +26,7 @@ newtype_index! {
 }
 
 const AVG_OPS_PER_BLOCK: usize = 20;
+const DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH: usize = 16;
 
 #[derive(Debug)]
 pub struct ScheduledOps {
@@ -64,7 +70,17 @@ pub fn schedule<'ir>(
         let graph =
             build_graph_effectful(program, block, &layouts, input_layout, output_layout, analyses);
         let (ops_idx, new_next_alloc_id) = ops.push_with_res(|mut pusher| {
-            greedy_schedule(|op| pusher.push(op), block, next_alloc_id, config, &graph)
+            // greedy_schedule(|op| pusher.push(op), block, next_alloc_id, config, &graph)
+            beam_searching::searching_schedule(
+                |op| pusher.push(op),
+                block,
+                next_alloc_id,
+                config,
+                ScheduleConfig {
+                    beam_width: NonZero::new(DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH).unwrap(),
+                },
+                &graph,
+            )
         });
         next_alloc_id = new_next_alloc_id;
         bb_to_ops.insert(block.id(), ops_idx);
