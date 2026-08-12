@@ -42,7 +42,11 @@ impl EffectOrderTracker {
         // Terminating commits all prior side effects and prevents all subsequent ones from
         // occurring, so a terminating operation must be ordered relative to every channel.
         let effect = if effect.contains(Effect::TERMINATE) {
-            effect | Effect::MAJOR | Effect::LOGS
+            effect
+                | Effect::ACCOUNTS_READ
+                | Effect::PERSISTENT_READ
+                | Effect::TRANSIENT_READ
+                | Effect::LOGS
         } else {
             effect
         };
@@ -307,7 +311,7 @@ mod tests {
                 #3 mload [#0, #2]
                 #4 mload [#0, #2]
                 #5 mstore [#0, #2, #3, #4]
-                #6 stop [#5]
+                #6 stop []
             "#,
         );
     }
@@ -333,7 +337,7 @@ mod tests {
                 #2 sload [#0]
                 #3 sstore [#0, #1, #2]
                 #4 sload [#0, #3]
-                #5 stop [#3, #4]
+                #5 stop [#3]
             "#,
         );
     }
@@ -357,7 +361,7 @@ mod tests {
                 #1 const []
                 #2 log0 [#0, #1]
                 #3 log0 [#0, #1, #2]
-                #4 return [#0, #1, #2, #3]
+                #4 return [#0, #1, #3]
             "#,
         );
     }
@@ -435,10 +439,10 @@ mod tests {
                 #0 const []
                 #1 sload [#0]
                 #2 ret_dest_push []
-                #3 icall [#0, #1, #2]
-                #4 sload [#0, #3]
+                #3 icall [#0, #2]
+                #4 sload [#0]
                 #5 log0 [#0, #3]
-                #6 stop [#3, #4, #5]
+                #6 stop [#3, #5]
             "#,
         );
     }
@@ -629,7 +633,7 @@ mod tests {
                 #3 ret_dest_push []
                 #4 icall [#0, #2, #3]
                 #5 sload [#0, #4]
-                #6 stop [#2, #4, #5]
+                #6 stop [#2, #4]
             "#,
         );
     }
@@ -657,7 +661,7 @@ mod tests {
                 #3 sstore [#0]
                 #4 tstore [#0, #1, #2]
                 #5 tload [#0, #4]
-                #6 stop [#3, #4, #5]
+                #6 stop [#3, #4]
             "#,
         );
     }
@@ -683,7 +687,7 @@ mod tests {
                 #2 returndatasize [#1]
                 #3 returndatasize [#1]
                 #4 staticcall [#0, #1, #2, #3]
-                #5 stop [#1, #4]
+                #5 stop []
             "#,
         );
     }
@@ -723,7 +727,7 @@ mod tests {
                 #12 const []
                 #13 malloc [#4, #12]
                 #14 mload [#10, #13]
-                #15 stop [#4, #10, #11, #13, #14]
+                #15 stop []
             "#,
         );
     }

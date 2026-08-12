@@ -265,24 +265,26 @@ fn preserves_effect_order() {
             first = mload32 ptr
             second = mload32 ptr
             mstore256 ptr second
-            stop
+            return 0 0
         }
         "#,
         r#"
         @0 []
             const 0x0
+            const 0x0
+            const 0x0
             const 0x1
-            dup 1
+            dup 3
             mstore
-            dup 0
+            dup 2
             mload
-            dup 1
+            dup 3
             mload
-            swap 2
+            swap 4
             mstore
-            stop
+            return
             => []
-            (stop)
+            (return)
         "#,
     );
 }
