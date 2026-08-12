@@ -179,6 +179,10 @@ impl<'a> OpSet<'a> {
     pub fn iter(self) -> impl Iterator<Item = OpNodeId> + 'a {
         (0..self.total_ops).map(OpNodeId::new).filter(move |&op| self.contains(op))
     }
+
+    pub fn clone_backing(&self) -> Vec<BitsetWord> {
+        self.words.to_vec()
+    }
 }
 
 impl<'a> OpSetMut<'a> {
