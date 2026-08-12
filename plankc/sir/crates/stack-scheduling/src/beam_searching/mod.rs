@@ -1,3 +1,5 @@
+use std::num::NonZero;
+
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
@@ -11,7 +13,7 @@ use state::ScheduleSearchState;
 mod state;
 
 pub struct ScheduleConfig {
-    beam_width: usize,
+    beam_width: NonZero<usize>,
 }
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
@@ -25,7 +27,7 @@ pub fn searching_schedule(
     schedule: ScheduleConfig,
     graph: &OpGraph,
 ) -> StaticAllocId {
-    let beam_capacity = schedule.beam_width.max(1) * graph.total_ops().div_ceil(2) as usize;
+    let beam_capacity = schedule.beam_width.get() * graph.total_ops().div_ceil(2) as usize;
     let mut beam = Vec::with_capacity(beam_capacity);
     beam.push(ScheduleSearchState::start(graph));
     let mut next_beam = Vec::with_capacity(beam_capacity);
@@ -77,7 +79,7 @@ pub fn searching_schedule(
         }
 
         next_beam.sort_unstable_by_key(|beam| beam.executed_cost);
-        next_beam.truncate(schedule.beam_width);
+        next_beam.truncate(schedule.beam_width.get());
 
         std::mem::swap(&mut beam, &mut next_beam);
     }
