@@ -30,30 +30,41 @@ fn format_scheduled(program: &EthIRProgram, config: ShuffleConfig) -> String {
 
     let mut out = String::new();
     for (block_id, ops) in lowered.enumerate_idx() {
-        let Some((input_layout, output_layout)) = layouts.get_input_output(block_id) else {
-            continue;
-        };
-        let block = program.block(block_id);
-        let graph = build_graph_simple(program, block, &layouts, input_layout, output_layout);
+        out.push_str(&format_scheduled_block(program, &layouts, block_id, ops));
+    }
+    out
+}
 
-        write!(out, "@{block_id} ").unwrap();
-        fmt_layout(&mut out, layouts.get_input_layout(block_id), block);
-        writeln!(out).unwrap();
+pub(crate) fn format_scheduled_block(
+    program: &EthIRProgram,
+    layouts: &super::layouts::LayoutsTracker<'_>,
+    block_id: sir_data::BasicBlockId,
+    ops: &[StackOps],
+) -> String {
+    let Some((input_layout, output_layout)) = layouts.get_input_output(block_id) else {
+        return String::new();
+    };
+    let block = program.block(block_id);
+    let graph = build_graph_simple(program, block, layouts, input_layout, output_layout);
+    let mut out = String::new();
 
-        for &op in ops {
-            write!(out, "    ").unwrap();
-            fmt_stack_op(&mut out, program, op);
-            writeln!(out).unwrap();
-        }
+    write!(out, "@{block_id} ").unwrap();
+    fmt_layout(&mut out, layouts.get_input_layout(block_id), block);
+    writeln!(out).unwrap();
 
-        write!(out, "    => ").unwrap();
-        fmt_end_stack_layout(&mut out, program, &graph, layouts.get_input_layout(block_id), block);
-        writeln!(out).unwrap();
-
+    for &op in ops {
         write!(out, "    ").unwrap();
-        fmt_control(&mut out, block);
+        fmt_stack_op(&mut out, program, op);
         writeln!(out).unwrap();
     }
+
+    write!(out, "    => ").unwrap();
+    fmt_end_stack_layout(&mut out, program, &graph, layouts.get_input_layout(block_id), block);
+    writeln!(out).unwrap();
+
+    write!(out, "    ").unwrap();
+    fmt_control(&mut out, block);
+    writeln!(out).unwrap();
     out
 }
 

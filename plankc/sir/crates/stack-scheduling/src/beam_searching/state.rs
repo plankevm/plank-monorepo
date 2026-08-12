@@ -1,7 +1,5 @@
 use crate::{
-    ShuffleConfig,
-    beam_searching::ScheduleConfig,
-    op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId},
+    op_graph::{BitsetWord, OpGraph, OpSet, ValueNodeId},
     stack::StackOps,
 };
 
