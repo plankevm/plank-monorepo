@@ -27,6 +27,20 @@ pub fn searching_schedule(
     schedule: ScheduleConfig,
     graph: &OpGraph,
 ) -> StaticAllocId {
+    if graph.total_ops() == 0 {
+        let mut inner = EvmStack::new();
+        for input in graph.input_values_fifo().iter().rev() {
+            inner.push(input);
+        }
+        let mut stack = TrackedStack::new_from_evm(next_alloc_id, result_ops_sink, inner, 8);
+
+        if !matches!(block.control(), ControlView::LastOpTerminates) {
+            greedy_shuffler::shuffle(shuffle, &mut stack, graph);
+        }
+
+        return stack.into_next_alloc_id();
+    }
+
     let beam_capacity = schedule.beam_width.get() * graph.total_ops().div_ceil(2) as usize;
     let mut beam = Vec::with_capacity(beam_capacity);
     beam.push(ScheduleSearchState::start(graph));
@@ -36,7 +50,9 @@ pub fn searching_schedule(
     completable_backing.resize(graph.words_per_set() as usize, 0);
     let mut completable = OpSetMut::new(&mut completable_backing, graph.total_ops());
 
-    for _ in 0..graph.total_ops() {
+    for op_idx in 0..graph.total_ops() {
+        let is_last = op_idx == graph.total_ops() - 1;
+
         for state in beam.drain(..) {
             completable.clear();
             let complete = state.complete(graph.total_ops());
@@ -57,6 +73,10 @@ pub fn searching_schedule(
                 );
 
                 greedy_schedule_op(shuffle, &mut stack, graph, op, complete);
+
+                if is_last && !matches!(block.control(), ControlView::LastOpTerminates) {
+                    greedy_shuffler::shuffle(shuffle, &mut stack, graph);
+                }
 
                 let values = [stack.fifo(), stack.underlying_spilled()].concat();
                 let stack_end = stack.fifo().len();
@@ -79,26 +99,36 @@ pub fn searching_schedule(
         }
 
         next_beam.sort_unstable_by_key(|beam| beam.executed_cost);
-        next_beam.truncate(schedule.beam_width.get());
+
+        let max_candidate_count = if is_last { 1 } else { schedule.beam_width.get() };
+        let mut deduplicated_len = 0;
+
+        for candidate_idx in 0..next_beam.len() {
+            if deduplicated_len == max_candidate_count {
+                break;
+            }
+
+            let is_redundant = next_beam[..deduplicated_len]
+                .iter()
+                .any(|retained| retained.is_redundant(&next_beam[candidate_idx]));
+            if is_redundant {
+                continue;
+            }
+
+            next_beam.swap(deduplicated_len, candidate_idx);
+            deduplicated_len += 1;
+        }
+        next_beam.truncate(deduplicated_len);
 
         std::mem::swap(&mut beam, &mut next_beam);
     }
 
-    let best = beam.first().expect("beam empty");
+    let [best] = beam.as_slice() else {
+        unreachable!("last loop should leave just the one best candidate")
+    };
 
     for &op in &best.executed {
         result_ops_sink(op);
-    }
-
-    if !matches!(block.control(), ControlView::LastOpTerminates) {
-        let mut stack = TrackedStack::new_from_parts(
-            next_alloc_id,
-            result_ops_sink,
-            best.stack_fifo(),
-            best.spilled().to_vec(),
-        );
-        greedy_shuffler::shuffle(shuffle, &mut stack, graph);
-        return stack.into_next_alloc_id();
     }
 
     next_alloc_id + u32::try_from(best.spilled().len()).expect("overflow")
