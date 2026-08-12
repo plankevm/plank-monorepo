@@ -3,7 +3,7 @@ use std::num::NonZero;
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut},
+    op_graph::{BitsetWord, OpGraph, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
 use sir_data::{BlockView, ControlView, StaticAllocId};
@@ -11,6 +11,9 @@ use smallvec::SmallVec;
 use state::ScheduleSearchState;
 
 mod state;
+
+#[cfg(test)]
+mod tests;
 
 pub struct ScheduleConfig {
     beam_width: NonZero<usize>,
