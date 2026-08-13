@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
