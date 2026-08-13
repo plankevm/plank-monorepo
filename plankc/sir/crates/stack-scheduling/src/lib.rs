@@ -8,10 +8,7 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{
-    beam_searching::ScheduleConfig, op_graph::build_graph_effectful, scheduler::greedy_schedule,
-    stack::StackOps,
-};
+use crate::{beam_searching::ScheduleConfig, op_graph::build_graph_effectful, stack::StackOps};
 
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
