@@ -23,7 +23,7 @@ newtype_index! {
 }
 
 const AVG_OPS_PER_BLOCK: usize = 20;
-const DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH: usize = 16;
+const DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH: usize = 32;
 
 #[derive(Debug)]
 pub struct ScheduledOps {

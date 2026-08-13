@@ -6,6 +6,7 @@ use crate::{
     op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
+use hashbrown::HashSet;
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
 use state::ScheduleSearchState;
@@ -21,6 +22,8 @@ pub struct ScheduleConfig {
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 const ESTIMATED_STACK_OPS_PER_GRAPH_OP: usize = 8;
+
+const BASE_COST_FACTOR: u32 = 100;
 
 pub fn searching_schedule(
     mut result_ops_sink: impl FnMut(StackOps),
@@ -96,7 +99,7 @@ pub fn searching_schedule(
                 next_beam.push(ScheduleSearchState {
                     complete,
                     executed: new_executed.as_slice().into(),
-                    executed_cost: state.executed_cost + new_cost,
+                    executed_cost: state.executed_cost + new_cost * BASE_COST_FACTOR,
                     estimated_remaining_cost,
                     values: values.into_boxed_slice(),
                     stack_end,
@@ -142,16 +145,29 @@ pub fn searching_schedule(
 
 fn remaining_cost_heuristic(complete: &[BitsetWord], graph: &OpGraph) -> u32 {
     let complete = OpSet::new(complete, graph.total_ops());
-    let average_gas_per_operand = 3;
+    let average_gas_per_operand = 300;
+    let no_last_use_extra_cost = -50;
+    let mut checked_values = HashSet::new();
 
-    graph
+    let cost = graph
         .op_ids()
         .filter(|&op| !complete.contains(op))
         .map(|op| {
-            u32::try_from(graph.get_op(op).inputs_fifo.len()).expect("overflow")
-                * average_gas_per_operand
+            let op = graph.get_op(op);
+            op.inputs_fifo
+                .iter()
+                .map(|&inp| {
+                    if checked_values.insert(inp) && graph.output_values_fifo().contains(&inp) {
+                        average_gas_per_operand + no_last_use_extra_cost
+                    } else {
+                        average_gas_per_operand
+                    }
+                })
+                .sum::<isize>()
         })
-        .sum()
+        .sum::<isize>();
+
+    cost.max(0).try_into().expect("overflow")
 }
 
 fn op_cost_model(op: StackOps, config: ShuffleConfig) -> u8 {

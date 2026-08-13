@@ -188,10 +188,6 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
         Self { start_alloc_id, ops_sink, spilled: Vec::with_capacity(spilled_capacity), inner }
     }
 
-    pub(crate) fn start_alloc_id(&self) -> StaticAllocId {
-        self.start_alloc_id
-    }
-
     pub(crate) fn underlying_spilled(&self) -> &[ValueNodeId] {
         &self.spilled
     }
