@@ -4,11 +4,12 @@ use crate::{
 };
 
 pub struct ScheduleSearchState {
-    pub(crate) complete: Box<[BitsetWord]>,
-    pub(crate) executed: Box<[StackOps]>,
-    pub(crate) executed_cost: u32,
-    pub(crate) values: Box<[ValueNodeId]>,
-    pub(crate) stack_end: usize,
+    pub complete: Box<[BitsetWord]>,
+    pub executed: Box<[StackOps]>,
+    pub executed_cost: u32,
+    pub estimated_remaining_cost: u32,
+    pub values: Box<[ValueNodeId]>,
+    pub stack_end: usize,
 }
 
 impl ScheduleSearchState {
@@ -17,9 +18,14 @@ impl ScheduleSearchState {
             complete: vec![0; graph.words_per_set() as usize].into(),
             executed: Box::new([]),
             executed_cost: 0,
+            estimated_remaining_cost: 0,
             values: graph.input_values_fifo().iter().collect(),
             stack_end: graph.input_values_fifo().len() as usize,
         }
+    }
+
+    pub fn cost(&self) -> u32 {
+        self.executed_cost + self.estimated_remaining_cost
     }
 
     pub fn complete(&self, total_ops: u32) -> OpSet<'_> {

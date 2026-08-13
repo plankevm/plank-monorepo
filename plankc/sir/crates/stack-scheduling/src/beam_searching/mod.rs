@@ -3,7 +3,7 @@ use std::num::NonZero;
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpSetMut},
+    op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
 use sir_data::{BlockView, ControlView, StaticAllocId};
@@ -85,23 +85,26 @@ pub fn searching_schedule(
                 let stack_end = stack.fifo().len();
                 let new_cost = new_executed[state.executed.len()..]
                     .iter()
-                    .map(|&op| u32::from(op_cost(op, shuffle)))
+                    .map(|&op| u32::from(op_cost_model(op, shuffle)))
                     .sum::<u32>();
+                let complete = {
+                    let mut backing = complete.clone_backing();
+                    OpSetMut::new(&mut backing, graph.total_ops()).add(op);
+                    backing.into_boxed_slice()
+                };
+                let estimated_remaining_cost = remaining_cost_heuristic(&complete, &graph);
                 next_beam.push(ScheduleSearchState {
-                    complete: {
-                        let mut backing = complete.clone_backing();
-                        OpSetMut::new(&mut backing, graph.total_ops()).add(op);
-                        backing.into_boxed_slice()
-                    },
+                    complete,
                     executed: new_executed.as_slice().into(),
                     executed_cost: state.executed_cost + new_cost,
+                    estimated_remaining_cost,
                     values: values.into_boxed_slice(),
                     stack_end,
                 });
             }
         }
 
-        next_beam.sort_unstable_by_key(|beam| beam.executed_cost);
+        next_beam.sort_unstable_by_key(ScheduleSearchState::cost);
 
         let max_candidate_count = if is_last { 1 } else { schedule.beam_width.get() };
         let mut deduplicated_len = 0;
@@ -137,7 +140,21 @@ pub fn searching_schedule(
     next_alloc_id + u32::try_from(best.spilled().len()).expect("overflow")
 }
 
-fn op_cost(op: StackOps, config: ShuffleConfig) -> u8 {
+fn remaining_cost_heuristic(complete: &[BitsetWord], graph: &OpGraph) -> u32 {
+    let complete = OpSet::new(complete, graph.total_ops());
+    let average_gas_per_operand = 3;
+
+    graph
+        .op_ids()
+        .filter(|&op| !complete.contains(op))
+        .map(|op| {
+            u32::try_from(graph.get_op(op).inputs_fifo.len()).expect("overflow")
+                * average_gas_per_operand
+        })
+        .sum()
+}
+
+fn op_cost_model(op: StackOps, config: ShuffleConfig) -> u8 {
     match op {
         // These represent necessary basic block operations and therefore shouldn't be
         StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
