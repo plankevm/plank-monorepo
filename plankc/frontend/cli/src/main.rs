@@ -12,7 +12,6 @@ use plank_mir::display::DisplayMir;
 use plank_parser::cst::display::DisplayCST;
 use plank_session::SourceId;
 use plank_source::source_fs::RealFs;
-use sir_passes::PASSES_HELP;
 use std::{
     path::{Path, PathBuf},
     process,
@@ -71,7 +70,7 @@ struct BuildArgs {
     #[arg(short = 'O', long = "optimize", help = optimize_help())]
     optimize: Option<String>,
 
-    #[arg(long = "backend", value_enum, default_value_t = BackendArg::SirDebug)]
+    #[arg(long = "backend", value_enum, default_value_t = BackendArg::Sir)]
     backend: BackendArg,
 
     #[arg(long = "module-name")]
@@ -106,27 +105,24 @@ impl From<EvmVersionArg> for EvmVersion {
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum BackendArg {
-    SirDebug,
-    SirRelease,
+    Sir,
     Sona,
 }
 
 impl From<BackendArg> for BackendKind {
     fn from(value: BackendArg) -> Self {
         match value {
-            BackendArg::SirDebug => BackendKind::SirDebug,
-            BackendArg::SirRelease => BackendKind::SirRelease,
+            BackendArg::Sir => BackendKind::Sir,
             BackendArg::Sona => BackendKind::Sona,
         }
     }
 }
 
-fn optimize_help() -> String {
-    format!(
-        "{PASSES_HELP}\n\n\
-        Sonatina backend optimization levels: O0, O1, Os, O2. Default is O0.\n\
-        Examples: --backend sona -O1, --backend sona -O2"
-    )
+fn optimize_help() -> &'static str {
+    "SIR backend optimization levels: O0, O2. Default is O0.\n\
+    Examples: [--backend sir] -O0, [--backend sir] -O2\n\n\
+    Sonatina backend optimization levels: O0, O1, Os, O2. Default is O0.\n\
+    Examples: --backend sona -O1, --backend sona -O2"
 }
 
 fn parse_dep(s: &str) -> Result<(String, PathBuf), String> {

@@ -7,6 +7,46 @@ pub(crate) mod switch_peephole;
 pub(crate) mod unused_operation_elimination;
 
 pub use defragmenter::Defragmenter;
+use std::str::FromStr;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OptimizationLevel {
+    #[default]
+    O0,
+    O2,
+}
+
+impl OptimizationLevel {
+    pub const fn passes(self) -> Option<&'static str> {
+        match self {
+            Self::O0 => None,
+            Self::O2 => Some(O2_PASSES),
+        }
+    }
+}
+
+impl FromStr for OptimizationLevel {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.to_ascii_lowercase().as_str() {
+            "0" | "o0" => Ok(Self::O0),
+            "2" | "o2" => Ok(Self::O2),
+            _ => Err(format!("invalid SIR optimization level '{value}', valid levels: O0, O2")),
+        }
+    }
+}
+
+// O2 is split into cleanup stages around transformations that expose new opportunities:
+// - `cslud`: copy propagation, SCCP, switch peephole, unused-operation elimination, and
+//   defragmentation simplify and compact functions before inlining.
+// - `i`: inlining runs after cleanup so its size heuristic sees accurate function sizes.
+// - `su`: SCCP specializes inlined code, then unused-operation elimination removes dead work.
+// - `m`: basic-block merging collapses newly linear control flow.
+// - `csud`: copy propagation removes copies introduced by merging, SCCP finds newly exposed
+//   constants, unused-operation elimination removes dead work, and defragmentation performs final
+//   compaction.
+const O2_PASSES: &str = "csludisumcsud";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptimizationPass {
@@ -42,7 +82,7 @@ pub const PASSES_HELP: &str = "Optimization passes to run in order. Each charact
     l = switch peephole,\n\
     i = inlining,\n\
     m = basic block merging.\n\
-    Example: -O csuimd";
+    Example: --passes csuimd";
 
 pub fn parse_passes(s: &str) -> Result<String, String> {
     for c in s.chars() {

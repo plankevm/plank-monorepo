@@ -2031,7 +2031,6 @@ dependencies = [
  "plank-session",
  "plank-source",
  "plank-test-utils",
- "sir-passes",
  "tempfile",
 ]
 
