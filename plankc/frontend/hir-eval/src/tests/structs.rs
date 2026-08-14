@@ -231,6 +231,47 @@ fn test_type_qualified_method_self_specialization() {
 }
 
 #[test]
+fn qualified_method_with_self_arg() {
+    assert_lowers_to(
+        r#"
+        const Centimeter = struct {
+            cm: u256,
+
+            fn add(self: Self, other: u256) Self {
+                Self { cm: @evm_add(self.cm, other) }
+            }
+        };
+
+        init {
+            let mut y = Centimeter.add(Centimeter { cm: 67 }, 3);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: Centimeter, %1: u256) -> Centimeter {
+            %2 : Centimeter = %0
+            %3 : u256 = %2.0
+            %4 : u256 = %1
+            %5 : u256 = @evm_add(%3, %4)
+            %6 : Centimeter = Centimeter { %5 }
+            ret %6
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : Centimeter = Centimeter {
+                67,
+            }
+            %1 : u256 = 3
+            %2 : Centimeter = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_type_qualified_method_does_not_inject_receiver() {
     assert_diagnostics(
         r#"
