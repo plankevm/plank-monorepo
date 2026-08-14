@@ -18,7 +18,7 @@ pub use analyses::{
     DefUse, DominanceFrontiers, Dominators, InOutGroupId, Legalizer, Predecessors, UseKind,
     UseLocation,
 };
-pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
+pub use optimizations::{Defragmenter, PASSES_HELP, parse_passes};
 
 pub trait Pass {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);

@@ -34,7 +34,7 @@ impl OptimizationPass {
     }
 }
 
-pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each character is a pass:\n\
+pub const PASSES_HELP: &str = "Optimization passes to run in order. Each character is a pass:\n\
     s = SCCP (constant propagation),\n\
     c = copy propagation,\n\
     u = unused operation elimination,\n\
@@ -44,7 +44,7 @@ pub const OPTIMIZE_HELP: &str = "Optimization passes to run in order. Each chara
     m = basic block merging.\n\
     Example: -O csuimd";
 
-pub fn parse_optimizations_string(s: &str) -> Result<String, String> {
+pub fn parse_passes(s: &str) -> Result<String, String> {
     for c in s.chars() {
         if OptimizationPass::from_char(c).is_none() {
             return Err(format!(

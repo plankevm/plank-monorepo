@@ -5,9 +5,7 @@ use plank_source::{
     CORE_OPS_PATH, ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
 use plank_values::ValueInterner;
-use sir_passes::{
-    PassManager, parse_optimizations_string, run_pass, transforms::CriticalEdgeSplitting,
-};
+use sir_passes::{PassManager, parse_passes, run_pass, transforms::CriticalEdgeSplitting};
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
@@ -146,7 +144,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
         if let Some(passes) = optimizations {
-            parse_optimizations_string(passes)?;
+            parse_passes(passes)?;
             pass_manager.run_optimizations(passes);
         }
         let analyses = pass_manager.into_store();

@@ -12,7 +12,7 @@ use plank_mir::display::DisplayMir;
 use plank_parser::cst::display::DisplayCST;
 use plank_session::SourceId;
 use plank_source::source_fs::RealFs;
-use sir_passes::OPTIMIZE_HELP;
+use sir_passes::PASSES_HELP;
 use std::{
     path::{Path, PathBuf},
     process,
@@ -123,7 +123,7 @@ impl From<BackendArg> for BackendKind {
 
 fn optimize_help() -> String {
     format!(
-        "{OPTIMIZE_HELP}\n\n\
+        "{PASSES_HELP}\n\n\
         Sonatina backend optimization levels: O0, O1, Os, O2. Default is O0.\n\
         Examples: --backend sona -O1, --backend sona -O2"
     )

@@ -1,8 +1,7 @@
 use clap::Parser;
 use sir_parser::{EmitConfig, parse_or_panic};
 use sir_passes::{
-    OPTIMIZE_HELP, PassManager, parse_optimizations_string, run_pass,
-    transforms::CriticalEdgeSplitting,
+    PASSES_HELP, PassManager, parse_passes, run_pass, transforms::CriticalEdgeSplitting,
 };
 use std::{
     fs,
@@ -30,8 +29,11 @@ struct Cli {
     #[arg(long, default_value = "main")]
     main_name: String,
 
-    #[arg(short = 'O', long = "optimize", help = OPTIMIZE_HELP, value_parser = parse_optimizations_string)]
+    #[arg(short = 'O', long, conflicts_with = "passes")]
     optimize: Option<String>,
+
+    #[arg(long, help = PASSES_HELP, value_parser = parse_passes, conflicts_with = "optimize")]
+    passes: Option<String>,
 
     #[arg(long, help = "enables the release backend")]
     release: bool,
@@ -70,7 +72,7 @@ fn main() {
     // Parse IR to EthIRProgram
     let mut program = parse_or_panic(&source, config);
 
-    let analyses = match cli.optimize {
+    let analyses = match cli.passes {
         Some(passes) => {
             let mut pass_manager = PassManager::new(&mut program);
             pass_manager.run_optimizations(&passes);
@@ -89,4 +91,16 @@ fn main() {
 
     // Format and print output
     println!("{:#}", alloy_primitives::hex::display(bytecode));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::error::ErrorKind;
+
+    #[test]
+    fn passes_and_optimize_are_mutually_exclusive() {
+        let error = Cli::try_parse_from(["sir", "-O", "c", "--passes", "i"]).err().unwrap();
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
 }
