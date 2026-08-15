@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use hashbrown::HashMap;
+use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
@@ -177,6 +177,20 @@ enum ShortCircuitOp {
 }
 
 impl BlockLowerer<'_> {
+    fn try_insert_import(
+        &mut self,
+        imported_as: StrId,
+        binding: ScopedConst,
+    ) -> Result<(), ScopedConst> {
+        match self.consts.entry(imported_as) {
+            Entry::Occupied(occupied) => Err(*occupied.get()),
+            Entry::Vacant(vacant) => {
+                vacant.insert(binding);
+                Ok(())
+            }
+        }
+    }
+
     fn build_file_scope(
         &mut self,
         source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
@@ -212,13 +226,13 @@ impl BlockLowerer<'_> {
                         );
                         continue;
                     };
-                    let entry = ScopedConst {
+                    let binding = ScopedConst {
                         const_id,
                         source_id: import_source_id,
                         span: import_source_span,
                         imported: true,
                     };
-                    let Some(prev) = self.consts.insert(imported_as, entry) else { continue };
+                    let Err(prev) = self.try_insert_import(imported_as, binding) else { continue };
                     self.error_import_collision(
                         imported_as,
                         import.span,
@@ -230,13 +244,13 @@ impl BlockLowerer<'_> {
                 }
                 ImportKind::All => {
                     for &(name, const_id) in &source_consts[import.target_source] {
-                        let entry = ScopedConst {
+                        let binding = ScopedConst {
                             const_id,
                             source_id: import_source_id,
                             span: import_source_span,
                             imported: true,
                         };
-                        let Some(prev) = self.consts.insert(name, entry) else { continue };
+                        let Err(prev) = self.try_insert_import(name, binding) else { continue };
                         let def = &const_defs[const_id];
                         self.error_import_collision(
                             name,
