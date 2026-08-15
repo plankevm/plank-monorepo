@@ -46,7 +46,7 @@ impl FromStr for OptimizationLevel {
 // - `csud`: copy propagation removes copies introduced by merging, SCCP finds newly exposed
 //   constants, unused-operation elimination removes dead work, and defragmentation performs final
 //   compaction.
-const O2_PASSES: &str = "csludisumcsud";
+const O2_PASSES: &str = "csludisumcsludisumcsud";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptimizationPass {
