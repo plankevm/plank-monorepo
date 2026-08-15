@@ -6,7 +6,7 @@ import {BaseTest} from "./BaseTest.sol";
 contract InliningTest is BaseTest {
     function test_inlining() public {
         bytes memory codeWithout = sir(abi.encode("src/inlining.sir", "--init-only"));
-        bytes memory codeWith = sir(abi.encode("src/inlining.sir", "--init-only", "-O", "i"));
+        bytes memory codeWith = sir(abi.encode("src/inlining.sir", "--init-only", "--passes", "i"));
 
         address implWithout = makeAddr("without-inlining");
         address implWith = makeAddr("with-inlining");

@@ -5,9 +5,7 @@ use plank_source::{
     CORE_OPS_PATH, ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
 use plank_values::ValueInterner;
-use sir_passes::{
-    PassManager, parse_optimizations_string, run_pass, transforms::CriticalEdgeSplitting,
-};
+use sir_passes::{OptimizationLevel, PassManager};
 use std::{
     fmt::Display,
     path::{Path, PathBuf},
@@ -16,8 +14,7 @@ use std::{
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BackendKind {
     #[default]
-    SirDebug,
-    SirRelease,
+    Sir,
     Sona,
 }
 
@@ -107,37 +104,37 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         show_sir_last: bool,
         backend: BackendKind,
     ) -> Result<Vec<u8>, String> {
-        let is_sir_debug = match backend {
-            BackendKind::Sona => {
-                return self.emit_sona_bytecode(
+        match backend {
+            BackendKind::Sona => self.emit_sona_bytecode(
+                mir,
+                optimizations,
+                disp_needs_separators,
+                show_sir_in,
+                show_sir_last,
+            ),
+            BackendKind::Sir => {
+                let optimization_level = match optimizations {
+                    Some(level) => level.parse()?,
+                    None => OptimizationLevel::default(),
+                };
+                self.emit_sir_bytecode(
                     mir,
-                    optimizations,
+                    optimization_level,
                     disp_needs_separators,
                     show_sir_in,
                     show_sir_last,
-                );
+                )
             }
-            BackendKind::SirDebug => true,
-            BackendKind::SirRelease => false,
-        };
-        self.emit_sir_bytecode(
-            mir,
-            optimizations,
-            disp_needs_separators,
-            show_sir_in,
-            show_sir_last,
-            is_sir_debug,
-        )
+        }
     }
 
     fn emit_sir_bytecode(
         &self,
         mir: &plank_mir::Mir,
-        optimizations: Option<&str>,
+        optimization_level: OptimizationLevel,
         disp_needs_separators: bool,
         show_sir_in: bool,
         show_sir_last: bool,
-        is_sir_debug_backend: bool,
     ) -> Result<Vec<u8>, String> {
         let mut program = plank_mir_lower::lower(mir, &self.values, &self.session);
         if show_sir_in {
@@ -145,8 +142,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         }
         let mut pass_manager = PassManager::new(&mut program);
         pass_manager.run_ssa_transform();
-        if let Some(passes) = optimizations {
-            parse_optimizations_string(passes)?;
+        if let Some(passes) = optimization_level.passes() {
             pass_manager.run_optimizations(passes);
         }
         let analyses = pass_manager.into_store();
@@ -155,11 +151,11 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         }
 
         let mut bytecode = Vec::with_capacity(0x6000);
-        if is_sir_debug_backend {
-            run_pass(&mut CriticalEdgeSplitting, &mut program, &analyses);
-            sir_debug_backend::ir_to_bytecode(&program, &mut bytecode);
-        } else {
-            sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode);
+        match optimization_level {
+            OptimizationLevel::O0 => sir_debug_backend::ir_to_bytecode(&program, &mut bytecode),
+            OptimizationLevel::O2 => {
+                sir_release_backend::ir_to_bytecode(&program, &analyses, &mut bytecode)
+            }
         }
         Ok(bytecode)
     }
