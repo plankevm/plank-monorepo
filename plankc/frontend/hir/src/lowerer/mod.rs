@@ -82,7 +82,6 @@ impl LocalFrame {
         }
         self.captures
             .iter()
-            .rev()
             .find(|capture| capture.binding == binding)
             .map(CaptureBinding::scoped_local)
     }

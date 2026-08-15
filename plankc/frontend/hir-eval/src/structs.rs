@@ -3,10 +3,11 @@ use crate::{
     scope::{EvalValue, LocalState, Scope},
 };
 use alloy_primitives::U256;
-use plank_hir as hir;
+use plank_hir::{self as hir, LocalId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
 use plank_values::{Compound, Field, Method, StructKey, StructView, Type, TypeId, Value};
+use smallvec::SmallVec;
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     pub(crate) fn eval_struct_def(
@@ -91,8 +92,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         method_call_id: hir::MethodCallId,
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, crate::scope::Diverge>> {
-        let method_call = self.hir.method_calls[method_call_id];
-        let receiver = self.bindings[method_call.receiver].state?;
+        let call = self.hir.method_calls[method_call_id];
+        let receiver = self.bindings[call.receiver].state?;
         let struct_ty = if let LocalState::Comptime(value) = receiver
             && let Value::Type(struct_ty) = self.values.lookup(value)
         {
@@ -108,41 +109,35 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             );
             return Err(Poisoned);
         };
-        let Some(method) = r#struct.methods.iter().find(|method| method.name == method_call.method)
-        else {
-            if !matches!(receiver, LocalState::Comptime(value) if matches!(self.values.lookup(value), Value::Type(_)))
-                && let Some(&field) =
-                    r#struct.fields.iter().find(|field| field.name == method_call.method)
-            {
-                self.diag_ctx.emit_field_called_as_method(
+        let Some(method) = r#struct.methods.iter().find(|method| method.name == call.method) else {
+            match r#struct.fields.iter().find(|field| field.name == call.method) {
+                Some(&field) => self.diag_ctx.emit_field_called_as_method(
                     r#struct.def_loc.source,
                     field,
                     self.loc(call_span),
-                );
-                return Err(Poisoned);
+                ),
+                None => self.diag_ctx.emit_unknown_method(
+                    self.eval.values,
+                    struct_ty,
+                    self.loc(call_span),
+                    call.method,
+                ),
             }
-            self.diag_ctx.emit_unknown_method(
-                self.eval.values,
-                struct_ty,
-                self.loc(call_span),
-                method_call.method,
-            );
             return Err(Poisoned);
         };
-        let method_closure = method.closure;
-        let mut method_args = Vec::new();
+        let mut method_args = SmallVec::<[LocalId; 16]>::new();
         let args = match receiver {
             LocalState::Comptime(value) if matches!(self.values.lookup(value), Value::Type(_)) => {
-                &self.hir.args[method_call.args]
+                &self.hir.args[call.args]
             }
             LocalState::Comptime(_) | LocalState::Runtime(_) => {
-                method_args.push(method_call.receiver);
-                method_args.extend_from_slice(&self.hir.args[method_call.args]);
+                method_args.push(call.receiver);
+                method_args.extend_from_slice(&self.hir.args[call.args]);
                 &method_args
             }
         };
         self.eval_call(
-            method_closure,
+            method.closure,
             args,
             call_span,
             Some(SelfBinding { local: method.self_type, ty: struct_ty }),
