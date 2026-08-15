@@ -3,7 +3,7 @@ use std::num::NonZero;
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut},
+    op_graph::{BitsetWord, OpGraph, OpSet, OpSetMut, ValueNodeId},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
 use hashbrown::HashSet;
@@ -95,7 +95,12 @@ pub fn searching_schedule(
                     OpSetMut::new(&mut backing, graph.total_ops()).add(op);
                     backing.into_boxed_slice()
                 };
-                let estimated_remaining_cost = remaining_cost_heuristic(&complete, graph);
+                let estimated_remaining_cost = remaining_cost_heuristic(
+                    &complete,
+                    &values[..stack_end],
+                    &values[stack_end..],
+                    graph,
+                );
                 next_beam.push(ScheduleSearchState {
                     complete,
                     executed: new_executed.as_slice().into(),
@@ -143,25 +148,46 @@ pub fn searching_schedule(
     next_alloc_id + u32::try_from(best.spilled().len()).expect("overflow")
 }
 
-fn remaining_cost_heuristic(complete: &[BitsetWord], graph: &OpGraph) -> u32 {
+fn remaining_cost_heuristic(
+    complete: &[BitsetWord],
+    stack: &[ValueNodeId],
+    spilled: &[ValueNodeId],
+    graph: &OpGraph,
+) -> u32 {
     const STACK_ACCESS_COST: u32 = 3 * BASE_COST_FACTOR;
 
     let complete = OpSet::new(complete, graph.total_ops());
     let mut remaining_operands = 0u32;
+    let mut needed_values = HashSet::new();
     let mut live_exit_values = HashSet::new();
 
     for op in graph.op_ids().filter(|&op| !complete.contains(op)) {
         for &input in graph.get_op(op).inputs_fifo {
             remaining_operands += 1;
+            needed_values.insert(input);
             if graph.output_values_fifo().contains(&input) {
                 live_exit_values.insert(input);
             }
         }
     }
+    needed_values.extend(graph.output_values_fifo().iter().copied());
 
-    // Exit values cannot earn the final-use credit because they remain live after all operations.
-    (remaining_operands - u32::try_from(live_exit_values.len()).expect("overflow"))
-        * STACK_ACCESS_COST
+    // Exit values never have a last use, so they cannot earn the live-range-closing credit.
+    let operand_cost = (remaining_operands
+        - u32::try_from(live_exit_values.len()).expect("overflow"))
+        * STACK_ACCESS_COST;
+    // The operand estimate already budgets one stack access. A value available only through a
+    // spill therefore owes the remaining half of a LOAD. Exit values owe the full LOAD because
+    // their final-use credit was removed above.
+    let forced_load_cost = needed_values
+        .iter()
+        .filter(|&&value| !stack.contains(&value) && spilled.contains(&value))
+        .map(|value| {
+            (1 + u32::from(graph.output_values_fifo().contains(value))) * STACK_ACCESS_COST
+        })
+        .sum::<u32>();
+
+    operand_cost + forced_load_cost
 }
 
 fn op_cost_model(op: StackOps, config: ShuffleConfig) -> u8 {
