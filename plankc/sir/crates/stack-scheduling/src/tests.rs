@@ -316,19 +316,18 @@ fn lowers_memory_hash_and_store() {
         "#,
         r#"
         @0 []
-            const 0x1
-            const 0x40
             const 0x20
+            const 0x40
+            dup 0
+            malloc
             const 0x0
             calldataload
-            dup 2
-            malloc
-            dup 2
-            calldataload
-            swap 2
             dup 1
             mstore
-            swap 2
+            dup 2
+            calldataload
+            const 0x1
+            swap 4
             dup 2
             add
             mstore
@@ -378,11 +377,10 @@ fn lowers_calldata_sum_loop() {
         r#"
         @0 []
             const 0x0
-            calldataload
             const 0x20
             const 0x0
             const 0x0
-            swap 3
+            calldataload
             => [$1, $2, $3, $4]
             (jmp @1)
         @1 [$5, $6, $7, $8]
@@ -526,12 +524,12 @@ fn simple_op_use_spill() {
 
         @0 []
             const 0x0
-            const 0x0
-            const 0x0
             const 0x1
-            stop
             not
             const 0x0
+            const 0x0
+            const 0x0
+            stop
             => []
             (stop)
         "#,
@@ -577,8 +575,8 @@ fn spill_allocations_are_unique_across_internal_calls() {
             icall #6
             const 0x3
             add
-            const 0x2
             stop
+            const 0x2
             => []
             (stop)
         "#,
@@ -628,9 +626,9 @@ fn repeated_input() {
         @0 []
             const 0x3
             const 0x2
-            stop
             dup 1
             addmod
+            stop
             => []
             (stop)
         "#,

@@ -271,17 +271,17 @@ fn preserves_effect_order() {
         r#"
         @0 []
             const 0x0
-            const 0x0
-            const 0x0
             const 0x1
-            dup 3
+            dup 1
             mstore
-            dup 2
+            dup 0
             mload
-            dup 3
+            dup 1
             mload
-            swap 4
+            swap 2
             mstore
+            const 0x0
+            const 0x0
             return
             => []
             (return)

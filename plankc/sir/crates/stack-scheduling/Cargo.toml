@@ -10,6 +10,7 @@ sir-passes.workspace = true
 plank-core.workspace = true
 hashbrown.workspace = true
 smallvec.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 plank-test-utils.workspace = true

@@ -1,6 +1,7 @@
 use std::num::NonZero;
 
 use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
+use rayon::prelude::*;
 use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
@@ -8,8 +9,9 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{beam_searching::ScheduleConfig, op_graph::build_graph_effectful, stack::StackOps};
+use crate::{op_graph::build_graph_effectful, stack::StackOps};
 
+mod exhaustive_searching;
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
@@ -24,6 +26,8 @@ newtype_index! {
 
 const AVG_OPS_PER_BLOCK: usize = 20;
 const DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH: usize = 32;
+const DEFAULT_MAX_EXHAUSTIVE_CANDIDATES: usize = 10_000;
+const BLOCK_SCHEDULING_THREADS: usize = 6;
 
 #[derive(Debug)]
 pub struct ScheduledOps {
@@ -59,28 +63,57 @@ pub fn schedule<'ir>(
         program.basic_blocks.len() * AVG_OPS_PER_BLOCK,
     );
 
-    for block in program.blocks() {
-        let Some((input_layout, output_layout)) = layouts.get_input_output(block.id()) else {
-            continue;
-        };
-
-        let graph =
-            build_graph_effectful(program, block, &layouts, input_layout, output_layout, analyses);
-        let (ops_idx, new_next_alloc_id) = ops.push_with_res(|mut pusher| {
-            // greedy_schedule(|op| pusher.push(op), block, next_alloc_id, config, &graph)
-            beam_searching::searching_schedule(
-                |op| pusher.push(op),
+    let block_graphs = program
+        .blocks()
+        .filter_map(|block| {
+            let (input_layout, output_layout) = layouts.get_input_output(block.id())?;
+            let graph = build_graph_effectful(
+                program,
                 block,
-                next_alloc_id,
-                config,
-                ScheduleConfig {
-                    beam_width: NonZero::new(DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH).unwrap(),
-                },
-                &graph,
-            )
-        });
-        next_alloc_id = new_next_alloc_id;
-        bb_to_ops.insert(block.id(), ops_idx);
+                &layouts,
+                input_layout,
+                output_layout,
+                analyses,
+            );
+            Some((block, graph))
+        })
+        .collect::<Vec<_>>();
+    // Blocks share a temporary spill base while scheduling so they can run independently. Their
+    // block-local spill IDs are rebased after the parallel search finishes.
+    let local_alloc_start = next_alloc_id;
+    let scheduling_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(BLOCK_SCHEDULING_THREADS)
+        .build()
+        .expect("failed to create block scheduling thread pool");
+    let block_schedules = scheduling_pool.install(|| {
+        block_graphs
+            .into_par_iter()
+            .map(|(block, graph)| {
+                let result = exhaustive_searching::searching_schedule(
+                    block,
+                    local_alloc_start,
+                    config,
+                    exhaustive_searching::SearchConfig {
+                        max_candidates: NonZero::new(DEFAULT_MAX_EXHAUSTIVE_CANDIDATES).unwrap(),
+                        incumbent_beam_width: NonZero::new(DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH)
+                            .unwrap(),
+                    },
+                    &graph,
+                );
+                (block.id(), result)
+            })
+            .collect::<Vec<_>>()
+    });
+
+    for (block_id, schedule) in block_schedules {
+        let alloc_offset = next_alloc_id - local_alloc_start;
+        let ops_idx = ops.push_iter(schedule.ops.into_iter().map(|op| match op {
+            StackOps::Store(id) => StackOps::Store(id + alloc_offset),
+            StackOps::Load(id) => StackOps::Load(id + alloc_offset),
+            op => op,
+        }));
+        next_alloc_id += schedule.spill_count;
+        bb_to_ops.insert(block_id, ops_idx);
     }
 
     (ScheduledOps { bb_to_ops, ops }, layouts, next_alloc_id)

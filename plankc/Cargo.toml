@@ -55,6 +55,7 @@ allocator-api2 = "0.4"
 stumpalo = { git = "https://codeberg.org/philogy/stumpalo.git", features = ["allocator-api2"] }
 hashbrown = { version = "0.16.0", features = ["allocator-api2"] }
 smallvec = "1.15.1"
+rayon = "1.12.0"
 alloy-primitives = "1.1.2"
 sha2 = "0.10.9"
 thiserror = "2.0.17"
