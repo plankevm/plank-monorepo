@@ -190,7 +190,7 @@ fn remaining_cost_heuristic(
     operand_cost + forced_load_cost
 }
 
-fn op_cost_model(op: StackOps, config: ShuffleConfig) -> u8 {
+pub(crate) fn op_cost_model(op: StackOps, config: ShuffleConfig) -> u8 {
     match op {
         // These represent necessary basic block operations and therefore shouldn't be
         StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
