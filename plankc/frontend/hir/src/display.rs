@@ -360,30 +360,40 @@ impl<'a> DisplayHir<'a> {
         write!(f, "@struct{}[index: ", struct_def_id.get())?;
         self.fmt_local(f, struct_def.type_index)?;
         write!(f, "] {{")?;
-        for (i, field) in fields.iter().enumerate() {
-            if i > 0 {
-                write!(f, ",")?;
-            }
-            let name = self.session.lookup_name(field.name);
-            write!(f, " {name}: ")?;
-            self.fmt_local(f, field.value)?;
-        }
-        if !fields.is_empty() {
-            write!(f, " ")?;
-        }
-        if !methods.is_empty() {
-            write!(f, "methods: {{")?;
-            for (i, method) in methods.iter().enumerate() {
+        if methods.is_empty() {
+            for (i, field) in fields.iter().enumerate() {
                 if i > 0 {
                     write!(f, ",")?;
                 }
-                write!(f, " {} [Self: ", self.session.lookup_name(method.name))?;
-                self.fmt_local(f, method.self_type)?;
-                write!(f, "]: ")?;
-                self.fmt_fn_ref(f, method.function)?;
+                let name = self.session.lookup_name(field.name);
+                write!(f, " {name}: ")?;
+                self.fmt_local(f, field.value)?;
             }
-            write!(f, " }}")?;
+            if !fields.is_empty() {
+                write!(f, " ")?;
+            }
+            return writeln!(f, "}}");
         }
+
+        writeln!(f)?;
+        for field in fields {
+            let name = self.session.lookup_name(field.name);
+            write!(f, "    {name}: ")?;
+            self.fmt_local(f, field.value)?;
+            writeln!(f, ",")?;
+        }
+        writeln!(f, "    methods: {{")?;
+        for (i, method) in methods.iter().enumerate() {
+            write!(f, "        {} [Self: ", self.session.lookup_name(method.name))?;
+            self.fmt_local(f, method.self_type)?;
+            write!(f, "]: ")?;
+            self.fmt_fn_ref(f, method.function)?;
+            if i + 1 < methods.len() {
+                write!(f, ",")?;
+            }
+            writeln!(f)?;
+        }
+        writeln!(f, "    }}")?;
         writeln!(f, "}}")
     }
 }

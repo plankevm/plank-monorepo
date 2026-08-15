@@ -521,7 +521,12 @@ fn test_struct_method_lowering() {
         }
 
         ==== Structs ====
-        @struct0[index: %1] {methods: { make [Self: %0]: @fn0, id [Self: %0]: @fn1 }}
+        @struct0[index: %1] {
+            methods: {
+                make [Self: %0]: @fn0,
+                id [Self: %0]: @fn1
+            }
+        }
 
         ==== Init ====
         "#,
@@ -572,7 +577,12 @@ fn test_method_call_lowering() {
         }
 
         ==== Structs ====
-        @struct0[index: %1] {methods: { make [Self: %0]: @fn0, id [Self: %0]: @fn1 }}
+        @struct0[index: %1] {
+            methods: {
+                make [Self: %0]: @fn0,
+                id [Self: %0]: @fn1
+            }
+        }
 
         ==== Init ====
         %0 = $0
