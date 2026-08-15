@@ -90,6 +90,13 @@ impl<'a> DisplayHir<'a> {
                 write!(f, "{builtin}")?;
                 self.fmt_args(f, args)
             }
+            Expr::MethodCall(method_call_id) => {
+                let method_call = self.hir.method_calls[method_call_id];
+                write!(f, "method_call {}", self.session.lookup_name(method_call.method))?;
+                write!(f, " ")?;
+                self.fmt_local(f, method_call.receiver)?;
+                self.fmt_args(f, method_call.args)
+            }
             Expr::Member { object, member, .. } => {
                 self.fmt_local(f, object)?;
                 let name = &self.session.lookup_name(member);
@@ -348,21 +355,45 @@ impl<'a> DisplayHir<'a> {
     fn fmt_struct_def(&self, f: &mut Formatter<'_>, struct_def_id: StructDefId) -> fmt::Result {
         let struct_def = &self.hir.struct_defs[struct_def_id];
         let fields = &self.hir.fields[struct_def.fields];
+        let methods = &self.hir.methods[struct_def.methods];
 
         write!(f, "@struct{}[index: ", struct_def_id.get())?;
         self.fmt_local(f, struct_def.type_index)?;
         write!(f, "] {{")?;
-        for (i, field) in fields.iter().enumerate() {
-            if i > 0 {
+        if methods.is_empty() {
+            for (i, field) in fields.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                let name = self.session.lookup_name(field.name);
+                write!(f, " {name}: ")?;
+                self.fmt_local(f, field.value)?;
+            }
+            if !fields.is_empty() {
+                write!(f, " ")?;
+            }
+            return writeln!(f, "}}");
+        }
+
+        writeln!(f)?;
+        for field in fields {
+            let name = self.session.lookup_name(field.name);
+            write!(f, "    {name}: ")?;
+            self.fmt_local(f, field.value)?;
+            writeln!(f, ",")?;
+        }
+        writeln!(f, "    methods: {{")?;
+        for (i, method) in methods.iter().enumerate() {
+            write!(f, "        {} [Self: ", self.session.lookup_name(method.name))?;
+            self.fmt_local(f, method.self_type)?;
+            write!(f, "]: ")?;
+            self.fmt_fn_ref(f, method.function)?;
+            if i + 1 < methods.len() {
                 write!(f, ",")?;
             }
-            let name = self.session.lookup_name(field.name);
-            write!(f, " {name}: ")?;
-            self.fmt_local(f, field.value)?;
+            writeln!(f)?;
         }
-        if !fields.is_empty() {
-            write!(f, " ")?;
-        }
+        writeln!(f, "    }}")?;
         writeln!(f, "}}")
     }
 }

@@ -62,6 +62,7 @@ module.exports = grammar({
     _expr: ($) => choice($.comptime_block, $.block, $.if_expr, $.match_expr, $._expr_no_block),
     comptime_block: ($) => seq("comptime", $.block),
     _expr_no_block: ($) => choice(
+      $.self_type,
       $.identifier,
       $._literal,
       $.member,
@@ -174,12 +175,23 @@ module.exports = grammar({
 
     struct_def: ($) => seq(
       "struct",
-      field("type_index", optional($._expr)),
+      optional(field("type_index", $._expr)),
       "{",
       commaSeparated($.field_def, "fields"),
+      repeat(field("methods", $.method_def)),
       "}"
     ),
     field_def: ($) => seq(field("name", $.identifier), ":", field("type", $._expr)),
+    method_def: ($) => seq(
+      optional("eager"),
+      "fn",
+      field("name", $.identifier),
+      "(",
+      commaSeparated($.param_def, "params"),
+      ")",
+      field("return_type", $._expr),
+      field("body", $.block)
+    ),
 
     tuple_type: ($) => seq("tuple", "{", commaSeparated($._expr, "elements"), "}"),
     tuple_lit: ($) => seq(
@@ -202,6 +214,7 @@ module.exports = grammar({
       $.string_literal,
     ),
     bool_literal: (_) => choice("true", "false"),
+    self_type: (_) => "Self",
     hex_literal: (_) => /0x[0-9A-Fa-f][0-9A-Fa-f_]*/,
     bin_literal: (_) => /0b[01][01_]*/,
     dec_literal: (_) => /[0-9][0-9_]*/,

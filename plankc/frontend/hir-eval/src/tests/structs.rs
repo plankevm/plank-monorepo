@@ -39,6 +39,507 @@ fn test_struct_field_access() {
 }
 
 #[test]
+fn test_struct_method_captures_affect_specialization() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime value: u256) type {
+            struct {
+                fn get() u256 { value }
+            }
+        };
+
+        init {
+            let first = Make(1).get();
+            let duplicate = Make(1).get();
+            let second = Make(2).get();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> u256 {
+            %0 : u256 = 1
+            ret %0
+        }
+
+        @fn1() -> u256 {
+            %0 : u256 = 2
+            ret %0
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : u256 = call @fn0()
+            %1 : u256 = call @fn0()
+            %2 : u256 = call @fn1()
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_type_qualified_method_call_through_self() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn self_type() type { Self }
+            fn type_via_self() type { Self.self_type() }
+        };
+
+        init {
+            let ty = S.type_via_self();
+            let mut instance: S = @uninit(ty);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : S = S {    }
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_eager_method_folds_only_with_comptime_receiver() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            value: u256
+            eager fn probe(value: Self) bool { @in_comptime() }
+        };
+
+        init {
+            let known = S { value: 7 };
+            let mut folded = known.probe();
+
+            let input = @evm_calldataload(0);
+            let unknown = S { value: input };
+            let mut runtime = unknown.probe();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S) -> bool {
+            %1 : bool = false
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : bool = true
+            %1 : u256 = 0
+            %2 : u256 = @evm_calldataload(%1)
+            %3 : u256 = %2
+            %4 : S = S { %3 }
+            %5 : S = %4
+            %6 : bool = call @fn0(%5)
+            %7 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_self_type_capture_propagates_through_nested_functions() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn self_type() type {
+                let middle = fn() type {
+                    let inner = fn() type { Self };
+                    inner()
+                };
+                middle()
+            }
+        };
+
+        init {
+            let ty = S.self_type();
+            let mut instance: S = @uninit(ty);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : S = S {    }
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_type_qualified_method_self_specialization() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime T: type) type {
+            struct {
+                value: T
+                fn self_type() type { Self }
+                fn new() Self { @uninit(Self) }
+            }
+        };
+        const first = Make(u256).self_type();
+        const second = Make(bool).self_type();
+
+        init {
+            let mut x: Make(u256) = @uninit(first);
+            let mut y: Make(bool) = @uninit(second);
+            let a: Make(u256) = Make(u256).new();
+            let b: Make(bool) = Make(bool).new();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> Make(u256) {
+            %0 : Make(u256) = Make(u256) {
+                0,
+            }
+            ret %0
+        }
+
+        @fn1() -> Make(bool) {
+            %0 : Make(bool) = Make(bool) {
+                false,
+            }
+            ret %0
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : Make(u256) = Make(u256) {
+                0,
+            }
+            %1 : Make(bool) = Make(bool) {
+                false,
+            }
+            %2 : Make(u256) = call @fn0()
+            %3 : Make(bool) = call @fn1()
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn qualified_method_with_self_arg() {
+    assert_lowers_to(
+        r#"
+        const Centimeter = struct {
+            cm: u256,
+
+            fn add(self: Self, other: u256) Self {
+                Self { cm: @evm_add(self.cm, other) }
+            }
+        };
+
+        init {
+            let mut y = Centimeter.add(Centimeter { cm: 67 }, 3);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: Centimeter, %1: u256) -> Centimeter {
+            %2 : Centimeter = %0
+            %3 : u256 = %2.0
+            %4 : u256 = %1
+            %5 : u256 = @evm_add(%3, %4)
+            %6 : Centimeter = Centimeter { %5 }
+            ret %6
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : Centimeter = Centimeter {
+                67,
+            }
+            %1 : u256 = 3
+            %2 : Centimeter = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+/// This is not yet supported, would require a rework of how Self is lowered in HIR
+#[test]
+fn qualified_method_as_function_value() {
+    assert_diagnostics(
+        r#"
+        const S = struct {
+            fn ze_method(self: Self) u256 { 3 }
+        };
+
+        init {
+            let x: function = S.ze_method;
+            let mut y = x(S {});
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: no fields on type
+         --> main.plk:6:23
+          |
+        1 | / const S = struct {
+        2 | |     fn ze_method(self: Self) u256 { 3 }
+        3 | | };
+          | |__- defined here
+        ...
+        6 |       let x: function = S.ze_method;
+          |                         ^ value of type `type` is not a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_type_qualified_method_does_not_inject_receiver() {
+    assert_diagnostics(
+        r#"
+        const S = struct {
+            fn call(value: Self, other: u256) u256 { other }
+        };
+
+        init {
+            let value: S = S {};
+            S.call(value);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: wrong number of arguments
+         --> main.plk:7:5
+          |
+        2 |     fn call(value: Self, other: u256) u256 { other }
+          |            -------------------------- defined with 2 parameters
+        ...
+        7 |     S.call(value);
+          |     ^^^^^^^^^^^^^ expected 2 arguments, got 1
+        "#],
+    );
+}
+
+#[test]
+fn test_value_method_self_type_reflection() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            first: u256,
+            second: bool,
+            fn field_count(value: Self, marker: u256) u256 { @field_count(Self) }
+        };
+
+        init {
+            let value: S = S { first: 1, second: true };
+            let count = value.field_count(9);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S, %1: u256) -> u256 {
+            %2 : u256 = 2
+            ret %2
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {
+                1,
+                true,
+            }
+            %1 : u256 = 9
+            %2 : u256 = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_unknown_method() {
+    assert_diagnostics(
+        r#"
+        const S = struct {};
+
+        init {
+            S.missing();
+            let value: S = S {};
+            value.missing();
+            @evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: unknown method
+         --> main.plk:4:5
+          |
+        4 |     S.missing();
+          |     ^^^^^^^^^^^ `S` has no method `missing`
+        "#,
+            r#"
+        error: unknown method
+         --> main.plk:6:5
+          |
+        6 |     value.missing();
+          |     ^^^^^^^^^^^^^^^ `S` has no method `missing`
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_non_struct_method_call() {
+    assert_diagnostics(
+        r#"
+        init {
+            u256.missing();
+            true.missing();
+            @evm_stop();
+        }
+        "#,
+        &[
+            r#"
+        error: method call on non-struct
+         --> main.plk:2:5
+          |
+        2 |     u256.missing();
+          |     ^^^^^^^^^^^^^^ `u256` is not a struct type and cannot have methods
+        "#,
+            r#"
+        error: method call on non-struct
+         --> main.plk:3:5
+          |
+        3 |     true.missing();
+          |     ^^^^^^^^^^^^^^ `bool` is not a struct type and cannot have methods
+        "#,
+        ],
+    );
+}
+
+#[test]
+fn test_parenthesized_method_call() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn identity(value: Self, input: u256) u256 { input }
+        };
+
+        init {
+            let value: S = S {};
+            let result = (value.identity(2));
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: S, %1: u256) -> u256 {
+            %2 : u256 = %1
+            ret %2
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {    }
+            %1 : u256 = 2
+            %2 : u256 = call @fn0(%0, %1)
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_parenthesized_function_field_call() {
+    assert_lowers_to(
+        r#"
+        const callback = fn() u256 { 1 };
+        const S = struct { callback: function };
+
+        init {
+            let value: S = S { callback: callback };
+            let result = (value.callback)();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> u256 {
+            %0 : u256 = 1
+            ret %0
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = call @fn0()
+            %1 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_parenthesized_method_is_not_a_function_field() {
+    assert_diagnostics(
+        r#"
+        const S = struct {
+            fn identity(value: Self) Self { value }
+        };
+
+        init {
+            let value: S = S {};
+            (value.identity)();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown field
+         --> main.plk:7:6
+          |
+        7 |     (value.identity)();
+          |      ^^^^^^^^^^^^^^ `S` has no field `identity`
+        "#],
+    );
+}
+
+#[test]
+fn test_function_field_called_as_method() {
+    assert_diagnostics(
+        r#"
+        const callback = fn() u256 { 1 };
+        const S = struct { callback: function };
+
+        init {
+            let value: S = S { callback: callback };
+            value.callback();
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: field is not a method
+         --> main.plk:6:5
+          |
+        2 | const S = struct { callback: function };
+          |                    ------------------ field declared here
+        ...
+        6 |     value.callback();
+          |     ^^^^^^^^^^^^^^^^ `callback` is a field, not a method
+          |
+          = help: wrap the field access in parentheses before calling it, e.g. `(value.callback)()`
+        "#],
+    );
+}
+
+#[test]
 fn test_invalid_field_access() {
     assert_diagnostics(
         r#"

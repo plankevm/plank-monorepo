@@ -233,6 +233,8 @@ pub enum Token {
     As,
     #[token("match")]
     Match,
+    #[token("Self")]
+    SelfType,
 
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Identifier,
@@ -380,6 +382,7 @@ impl Token {
             Token::Import => "import",
             Token::As => "as",
             Token::Match => "match",
+            Token::SelfType => "Self",
 
             Token::Identifier
             | Token::BuiltinName
@@ -467,6 +470,7 @@ impl Token {
             Token::Import => "`import`",
             Token::As => "`as`",
             Token::Match => "`match`",
+            Token::SelfType => "`Self`",
             Token::Identifier => "identifier",
             Token::BuiltinName => "builtin name",
             Token::DecimalLiteral => "decimal literal",

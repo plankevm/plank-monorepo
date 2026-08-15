@@ -961,7 +961,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
             ExprKind::FnDef(fn_def_id) => self.eval_fn_def(fn_def_id),
             ExprKind::Call { callee, args } => {
-                poison::transpose(self.eval_call(callee, args, expr.span))?
+                poison::transpose(self.eval_call_expr(callee, args, expr.span))?
+            }
+            ExprKind::MethodCall(method_call) => {
+                poison::transpose(self.eval_method_call(method_call, expr.span))?
             }
         };
         Ok(value)

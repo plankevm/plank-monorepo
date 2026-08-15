@@ -2,6 +2,41 @@ use super::*;
 use crate::quota::DEFAULT_COMPTIME_BRANCH_QUOTA;
 
 #[test]
+fn test_captured_value_propagates_through_nested_functions() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime value: u256) u256 {
+            let middle = fn() u256 {
+                let unrelated = 11;
+                let inner = fn() u256 { value };
+                inner()
+            };
+            middle()
+        };
+        const RESULT = Make(7);
+
+        init {
+            let input = @evm_calldataload(0);
+            let observed = @evm_add(input, RESULT);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = @evm_calldataload(%0)
+            %2 : u256 = %1
+            %3 : u256 = 7
+            %4 : u256 = @evm_add(%2, %3)
+            %5 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_eager_fn_folds_only_with_all_comptime_inputs() {
     assert_lowers_to(
         r#"
@@ -496,23 +531,26 @@ fn test_builtin_wrong_arg_count() {
 }
 
 #[test]
-fn test_closure_capture_not_comptime() {
+fn test_nested_closure_capture_not_comptime() {
     assert_diagnostics(
         r#"
         init {
             let x = @evm_calldataload(0);
-            let f = fn() u256 { x };
+            let middle = fn() void {
+                let inner = fn() u256 { x };
+            };
             @evm_stop();
         }
         "#,
         &[r#"
         error: closure capture must be known at compile time
-         --> main.plk:3:25
+         --> main.plk:4:33
           |
         2 |     let x = @evm_calldataload(0);
           |             -------------------- defined here
-        3 |     let f = fn() u256 { x };
-          |                         ^ capture of runtime value
+        3 |     let middle = fn() void {
+        4 |         let inner = fn() u256 { x };
+          |                                 ^ capture of runtime value
           |
           = note: closures can only capture values known at compile time
         "#],
