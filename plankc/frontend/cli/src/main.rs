@@ -244,7 +244,7 @@ fn check(plank_dir: Option<PathBuf>, args: CheckArg) {
 
     let common_args = args.common_args;
     let frontend_display_args = args.frontend_display_args;
-    setup_module(&mut driver, &common_args, plank_dir);
+    register_modules(&mut driver, &common_args, plank_dir);
     if run_frontend(&mut driver, &common_args, &frontend_display_args).is_none() {
         driver.render_diagnostics_and_exit()
     }
@@ -255,7 +255,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     let common_args = args.common_args;
     let frontend_display_args = args.frontend_display_args;
     let backend_display_args =args.backend_display_args;
-    setup_module(&mut driver, &common_args, plank_dir);
+    register_modules(&mut driver, &common_args, plank_dir);
 
     match run_frontend(&mut driver, &common_args, &frontend_display_args) {
         None => driver.render_diagnostics_and_exit(),
@@ -276,7 +276,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     };
 }
 
-fn setup_module<F: SourceFs>(
+fn register_modules<F: SourceFs>(
     driver: &mut Driver<F>,
     common_args: &ProjectArgs,
     plank_dir: Option<PathBuf>,
