@@ -105,7 +105,7 @@ struct BuildArgs {
 
     #[command(flatten)]
     frontend_display_args: FrontendDisplayArgs,
-    
+
     #[command(flatten)]
     backend_display_args: BackendDisplayArgs,
 
@@ -115,22 +115,6 @@ struct BuildArgs {
 
     #[arg(long = "backend", value_enum, default_value_t = BackendArg::SirDebug)]
     backend: BackendArg,
-}
-
-impl FrontendDisplayArgs {
-    fn needs_separators(&self) -> bool {
-        (self.show_hir as u32)
-            + (self.show_mir as u32)
-            >= 2
-    }
-}
-
-impl BackendDisplayArgs {
-    fn needs_separators(&self) -> bool {
-             (self.show_sir_in as u32)
-            + (self.show_sir_last as u32)
-            >= 2
-    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -254,7 +238,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
     let common_args = args.common_args;
     let frontend_display_args = args.frontend_display_args;
-    let backend_display_args =args.backend_display_args;
+    let backend_display_args = args.backend_display_args;
     register_modules(&mut driver, &common_args, plank_dir);
 
     match run_frontend(&mut driver, &common_args, &frontend_display_args) {
@@ -264,7 +248,6 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
                 .emit_bytecode_with_backend(
                     &mir,
                     args.optimize.as_deref(),
-                    backend_display_args.needs_separators(),
                     backend_display_args.show_sir_in,
                     backend_display_args.show_sir_last,
                     args.backend.into(),
@@ -337,21 +320,13 @@ fn run_frontend<F: SourceFs>(
     let hir = driver.lower_hir(&project);
 
     if frontend_display_args.show_hir {
-        print_ir(
-            "HIR",
-            frontend_display_args.needs_separators(),
-            DisplayHir::new(&hir, &driver.values, &driver.session),
-        );
+        print_ir("HIR", DisplayHir::new(&hir, &driver.values, &driver.session));
     }
 
     let mir = driver.evaluate_hir(&hir, project.core_ops_source, common_args.evm_version.into());
 
     if frontend_display_args.show_mir {
-        print_ir(
-            "MIR",
-            frontend_display_args.needs_separators(),
-            DisplayMir::new(&mir, &driver.values, &driver.session),
-        );
+        print_ir("MIR", DisplayMir::new(&mir, &driver.values, &driver.session));
     }
 
     if driver.session.has_errors() { None } else { Some(mir) }

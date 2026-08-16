@@ -184,11 +184,9 @@ fn plank_cli_check_return_errors() {
         .env("PLANK_DIR", plank_dir.path())
         .output()
         .unwrap();
-    
+
     assert!(!output.status.success());
     let diag = String::from_utf8_lossy(&output.stderr);
 
-    assert!(diag.contains("missing init block"), "Failed for an unexpected reason: {}", &diag);
-
+    assert!(diag.contains("missing init block"), "Failed for an unexpected reason: {diag}");
 }
-
