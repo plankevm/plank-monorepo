@@ -75,7 +75,10 @@ struct FrontendDisplayArgs {
 
     #[arg(short = 'm', long = "show-mir", help = "show MIR")]
     show_mir: bool,
+}
 
+#[derive(Parser)]
+struct BackendDisplayArgs {
     #[arg(
         long = "show-sir-first",
         help = "show the selected backend IR before backend optimizations"
@@ -102,6 +105,9 @@ struct BuildArgs {
 
     #[command(flatten)]
     frontend_display_args: FrontendDisplayArgs,
+    
+    #[command(flatten)]
+    backend_display_args: BackendDisplayArgs,
 
     // backend specify
     #[arg(short = 'O', long = "optimize", help = optimize_help())]
@@ -115,7 +121,13 @@ impl FrontendDisplayArgs {
     fn needs_separators(&self) -> bool {
         (self.show_hir as u32)
             + (self.show_mir as u32)
-            + (self.show_sir_in as u32)
+            >= 2
+    }
+}
+
+impl BackendDisplayArgs {
+    fn needs_separators(&self) -> bool {
+             (self.show_sir_in as u32)
             + (self.show_sir_last as u32)
             >= 2
     }
@@ -242,7 +254,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
     let common_args = args.common_args;
     let frontend_display_args = args.frontend_display_args;
-
+    let backend_display_args =args.backend_display_args;
     setup_module(&mut driver, &common_args, plank_dir);
 
     match run_frontend(&mut driver, &common_args, &frontend_display_args) {
@@ -252,9 +264,9 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
                 .emit_bytecode_with_backend(
                     &mir,
                     args.optimize.as_deref(),
-                    frontend_display_args.needs_separators(),
-                    frontend_display_args.show_sir_in,
-                    frontend_display_args.show_sir_last,
+                    backend_display_args.needs_separators(),
+                    backend_display_args.show_sir_in,
+                    backend_display_args.show_sir_last,
                     args.backend.into(),
                 )
                 .unwrap_or_else(|err| cli_error_and_exit(err));
