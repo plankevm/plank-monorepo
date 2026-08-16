@@ -9,7 +9,7 @@ pub struct Predecessors {
 
 impl Analysis for Predecessors {
     fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
-        let reachability = store.reachability(program);
+        let reachable_blocks = store.reachable_blocks(program);
 
         for pred in self.inner.iter_mut() {
             pred.clear();
@@ -17,7 +17,7 @@ impl Analysis for Predecessors {
         self.inner.resize(program.basic_blocks.len(), Vec::new());
 
         for block in program.blocks() {
-            if !reachability.contains(block.id()) {
+            if !reachable_blocks.contains(block.id()) {
                 continue;
             }
             for successor in block.successors() {
@@ -30,6 +30,24 @@ impl Analysis for Predecessors {
 impl Predecessors {
     pub fn of(&self, bb: BasicBlockId) -> &[BasicBlockId] {
         &self.inner[bb]
+    }
+
+    /// Replaces one incoming edge. Call once per edge when the predecessor occurs multiple times.
+    pub fn replace_predecessor_edge(
+        &mut self,
+        bb: BasicBlockId,
+        old: BasicBlockId,
+        new: BasicBlockId,
+    ) {
+        let predecessor = self.inner[bb]
+            .iter_mut()
+            .find(|predecessor| **predecessor == old)
+            .expect("old predecessor should exist");
+        *predecessor = new;
+    }
+
+    pub fn clear_predecessors(&mut self, bb: BasicBlockId) {
+        self.inner[bb].clear();
     }
 
     pub fn enumerate(&self) -> impl Iterator<Item = (BasicBlockId, &[BasicBlockId])> {

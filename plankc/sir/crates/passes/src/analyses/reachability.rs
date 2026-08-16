@@ -3,36 +3,26 @@ use plank_core::DenseIndexSet;
 use sir_data::{BasicBlockId, EthIRProgram};
 
 #[derive(Debug, Clone, Default)]
-pub struct Reachability {
-    reachable: DenseIndexSet<BasicBlockId>,
+pub struct ReachableBlocks {
+    blocks: DenseIndexSet<BasicBlockId>,
 }
 
-impl Analysis for Reachability {
-    fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
-        self.reachable.clear();
+impl Analysis for ReachableBlocks {
+    fn compute(&mut self, program: &EthIRProgram, store: &AnalysesStore) {
+        self.blocks.clear();
 
-        for func in program.functions_iter() {
-            self.mark_reachable(program, func.entry().id());
+        for &block in store.reverse_post_order(program).blocks_rpo() {
+            self.blocks.add(block);
         }
     }
 }
 
-impl Reachability {
-    fn mark_reachable(&mut self, program: &EthIRProgram, block: BasicBlockId) {
-        if !self.reachable.add(block) {
-            return;
-        }
-
-        for successor in program.block(block).successors() {
-            self.mark_reachable(program, successor);
-        }
-    }
-
+impl ReachableBlocks {
     pub fn contains(&self, block: BasicBlockId) -> bool {
-        self.reachable.contains(block)
+        self.blocks.contains(block)
     }
 
     pub fn set_mut(&mut self) -> &mut DenseIndexSet<BasicBlockId> {
-        &mut self.reachable
+        &mut self.blocks
     }
 }

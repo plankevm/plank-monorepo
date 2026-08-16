@@ -1,12 +1,13 @@
-use crate::{AnalysesStore, Pass};
+use crate::{AnalysesMask, AnalysesStore, Pass};
 use sir_data::{Branch, Control, EthIRProgram, Switch};
 
 #[derive(Default)]
 pub struct SwitchPeephole;
 
 impl Pass for SwitchPeephole {
-    fn run(&mut self, program: &mut EthIRProgram, _store: &AnalysesStore) {
-        for bb in program.basic_blocks.iter_idx() {
+    fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let rpo = store.reverse_post_order(program);
+        for &bb in rpo.blocks_rpo() {
             let Control::Switch(Switch { cases, fallback, condition }) =
                 program.basic_blocks[bb].control
             else {
@@ -36,6 +37,19 @@ impl Pass for SwitchPeephole {
                 zero_target: target,
             });
         }
+    }
+
+    fn preserves(&self) -> AnalysesMask {
+        AnalysesMask::AllocationLiveness
+            | AnalysesMask::BasicBlockOwnership
+            | AnalysesMask::DefUse
+            | AnalysesMask::DominanceFrontiers
+            | AnalysesMask::Dominators
+            | AnalysesMask::FunctionEffects
+            | AnalysesMask::LocalLiveness
+            | AnalysesMask::Predecessors
+            | AnalysesMask::ReachableBlocks
+            | AnalysesMask::ReversePostOrder
     }
 }
 

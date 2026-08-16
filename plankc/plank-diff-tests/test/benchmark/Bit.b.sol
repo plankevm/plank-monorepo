@@ -34,7 +34,7 @@ contract ClzFallback is ClzBenchmarkBase {
     function compile() internal override returns (bytes memory) {
         return plankBuild(
             "src/std/bit_test.plk",
-            baseBuildOptions().withBackend("sir-release").withOptimizations("csud").withEvmVersion("prague")
+            baseBuildOptions().withBackend("sir").withOptimizations("O2").withEvmVersion("prague")
         );
     }
 }
@@ -48,7 +48,7 @@ contract ClzNative is ClzBenchmarkBase {
     function compile() internal override returns (bytes memory) {
         return plankBuild(
             "src/std/bit_test.plk",
-            baseBuildOptions().withBackend("sir-release").withOptimizations("csud").withEvmVersion("osaka")
+            baseBuildOptions().withBackend("sir").withOptimizations("O2").withEvmVersion("osaka")
         );
     }
 }

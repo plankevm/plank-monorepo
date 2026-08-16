@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    ValueId, ValueInterner,
+    LocalId, ValueId, ValueInterner,
     primitive_types::{PrimitiveType, TypeFlags},
 };
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
@@ -28,7 +28,7 @@ const fn const_max(lhs: usize, rhs: usize) -> usize {
 }
 
 const MIN_COMPOUND_ALIGN: usize = const_max(
-    const_max(align_of::<StructHeader>(), align_of::<Field>()),
+    const_max(const_max(align_of::<StructHeader>(), align_of::<Field>()), align_of::<Method>()),
     const_max(align_of::<TupleHeader>(), align_of::<TypeId>()),
 );
 
@@ -39,12 +39,20 @@ pub struct Field {
     pub def_span: SourceSpan,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Method {
+    pub name: StrId,
+    pub closure: ValueId,
+    pub self_type: LocalId,
+}
+
 struct StructHeader {
     def_loc: SrcLoc,
     flags: TypeFlags,
     type_index: ValueId,
     name: Cell<Option<TypeName>>,
     total_fields: u32,
+    total_methods: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,11 +62,17 @@ pub struct StructView<'a> {
     pub type_index: ValueId,
     pub name: &'a Cell<Option<TypeName>>,
     pub fields: &'a [Field],
+    pub methods: &'a [Method],
 }
 
 impl<'a> StructView<'a> {
     fn as_key(self) -> StructKey<'a> {
-        StructKey { def_loc: self.def_loc, type_index: self.type_index, fields: self.fields }
+        StructKey {
+            def_loc: self.def_loc,
+            type_index: self.type_index,
+            fields: self.fields,
+            methods: self.methods,
+        }
     }
 }
 
@@ -67,6 +81,7 @@ pub struct StructKey<'a> {
     pub type_index: ValueId,
     pub def_loc: SrcLoc,
     pub fields: &'a [Field],
+    pub methods: &'a [Method],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -375,6 +390,7 @@ impl TypeInterner {
             let header_ptr = self.arena.get(r#struct.0.offset()) as *const StructHeader;
             let header = &(*header_ptr);
             let fields_start = header_ptr.add(1) as *const Field;
+            let methods_start = fields_start.add(header.total_fields as usize) as *const Method;
 
             StructView {
                 def_loc: header.def_loc,
@@ -382,6 +398,7 @@ impl TypeInterner {
                 type_index: header.type_index,
                 name: &header.name,
                 fields: core::slice::from_raw_parts(fields_start, header.total_fields as usize),
+                methods: core::slice::from_raw_parts(methods_start, header.total_methods as usize),
             }
         }
     }
@@ -494,8 +511,9 @@ impl TypeInterner {
     }
 
     fn push_struct(&self, r#struct: StructKey<'_>) -> StructRef {
-        let required_space =
-            std::mem::size_of::<StructHeader>() + std::mem::size_of_val(r#struct.fields);
+        let required_space = std::mem::size_of::<StructHeader>()
+            + std::mem::size_of_val(r#struct.fields)
+            + std::mem::size_of_val(r#struct.methods);
 
         let flags = r#struct
             .fields
@@ -505,7 +523,8 @@ impl TypeInterner {
         const {
             assert!(align_of::<StructHeader>() <= MIN_COMPOUND_ALIGN);
             assert!(align_of::<Field>() <= MIN_COMPOUND_ALIGN);
-            assert!(align_of::<Field>() <= size_of::<StructHeader>())
+            assert!(align_of::<Field>() <= size_of::<StructHeader>());
+            assert!(align_of::<Method>() <= MIN_COMPOUND_ALIGN);
         }
 
         unsafe {
@@ -518,6 +537,13 @@ impl TypeInterner {
                 field_ptr = field_ptr.add(1);
             }
 
+            let methods_start = field_ptr as *mut Method;
+            let mut method_ptr = methods_start;
+            for &method in r#struct.methods {
+                method_ptr.write(method);
+                method_ptr = method_ptr.add(1);
+            }
+
             let header_ptr = new_struct_ptr as *mut StructHeader;
             header_ptr.write(StructHeader {
                 def_loc: r#struct.def_loc,
@@ -525,6 +551,7 @@ impl TypeInterner {
                 type_index: r#struct.type_index,
                 name: Cell::new(None),
                 total_fields: r#struct.fields.len() as u32,
+                total_methods: r#struct.methods.len() as u32,
             });
 
             debug_assert!(offset.is_multiple_of(MIN_COMPOUND_ALIGN as u32));
@@ -627,6 +654,7 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plank_core::Idx;
     use plank_session::{SourceId, SrcLoc, ZERO_SPAN, builtins};
 
     fn dummy_src_loc(id: u32) -> SrcLoc {
@@ -634,7 +662,7 @@ mod tests {
     }
 
     fn dummy_struct_info(fields: &[Field]) -> StructKey<'_> {
-        StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields }
+        StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields, methods: &[] }
     }
 
     #[test]
@@ -657,6 +685,39 @@ mod tests {
         let different = [Field { name: builtins::BOOL, ty: TypeId::BOOL, def_span: ZERO_SPAN }];
         let c = interner.intern_struct(dummy_struct_info(&different));
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn struct_method_closures_affect_interning() {
+        let interner = TypeInterner::new();
+        let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
+        let first_methods =
+            [Method { name: builtins::U256, closure: ValueId::ZERO_NUM, self_type: LocalId::ZERO }];
+        let second_methods =
+            [Method { name: builtins::U256, closure: ValueId::ONE_NUM, self_type: LocalId::ZERO }];
+
+        let first = interner.intern_struct(StructKey {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields: &fields,
+            methods: &first_methods,
+        });
+        let duplicate = interner.intern_struct(StructKey {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields: &fields,
+            methods: &first_methods,
+        });
+        let second = interner.intern_struct(StructKey {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields: &fields,
+            methods: &second_methods,
+        });
+
+        assert_eq!(first, duplicate);
+        assert_ne!(first, second);
+        assert_eq!(interner.lookup_struct(first).methods, first_methods);
     }
 
     #[test]
@@ -683,10 +744,18 @@ mod tests {
         let interner = TypeInterner::new();
         let fields = [Field { name: builtins::U256, ty: TypeId::U256, def_span: ZERO_SPAN }];
 
-        let a_info =
-            StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields: &fields };
-        let b_info =
-            StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(1), fields: &fields };
+        let a_info = StructKey {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields: &fields,
+            methods: &[],
+        };
+        let b_info = StructKey {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(1),
+            fields: &fields,
+            methods: &[],
+        };
 
         let a = interner.intern_struct(a_info);
         let b = interner.intern_struct(b_info);

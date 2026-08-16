@@ -1,67 +1,83 @@
 use crate::analyses::{AnalysesStore, cache::Analysis};
-use plank_core::{DenseIndexSet, IndexVec};
-use sir_data::{BasicBlockId, EthIRProgram, FunctionId};
+use plank_core::{DenseIndexMap, DenseIndexSet, dense_index_map::Entry};
+use sir_data::{BasicBlockId, EthIRProgram, FunctionId, Operation};
 
 #[derive(Debug, Clone, Default)]
 pub struct ReversePostOrder {
-    visited: DenseIndexSet<BasicBlockId>,
-    global_rpo: Vec<BasicBlockId>,
-    function_to_start_pre_rev: IndexVec<FunctionId, u32>,
+    visited_blocks: DenseIndexSet<BasicBlockId>,
+    function_blocks_rpo: DenseIndexMap<FunctionId, Vec<BasicBlockId>>,
+    functions_rpo: Vec<FunctionId>,
 }
 
 impl Analysis for ReversePostOrder {
     fn compute(&mut self, program: &EthIRProgram, _store: &AnalysesStore) {
-        fn dfs_postorder(
-            program: &EthIRProgram,
-            entry: BasicBlockId,
-            visited: &mut DenseIndexSet<BasicBlockId>,
-            postorder: &mut Vec<BasicBlockId>,
-        ) {
-            if !visited.add(entry) {
-                return;
-            }
+        self.visited_blocks.clear();
+        self.function_blocks_rpo.clear();
+        self.functions_rpo.clear();
+        self.functions_rpo.reserve_exact(program.functions.len());
 
-            for succ in program.block(entry).successors() {
-                dfs_postorder(program, succ, visited, postorder);
-            }
-            postorder.push(entry);
+        self.visit_function(program, program.init_entry);
+        if let Some(main_entry) = program.main_entry {
+            self.visit_function(program, main_entry);
         }
-
-        self.global_rpo.clear();
-        self.visited.clear();
-        self.function_to_start_pre_rev.clear();
-
-        self.global_rpo.reserve_exact(program.basic_blocks.len());
-        self.function_to_start_pre_rev.reserve_exact(program.functions.len());
-
-        for func in program.functions_iter() {
-            let start = self.global_rpo.len() as u32;
-            let id = self.function_to_start_pre_rev.push(start);
-            assert_eq!(id, func.id());
-            dfs_postorder(program, func.entry().id(), &mut self.visited, &mut self.global_rpo);
-        }
-        self.global_rpo.reverse();
+        self.functions_rpo.reverse();
     }
 }
 
 impl ReversePostOrder {
-    pub fn global_rpo(&self) -> &[BasicBlockId] {
-        &self.global_rpo
+    fn visit_function(&mut self, program: &EthIRProgram, function: FunctionId) {
+        let Entry::Vacant(entry) = self.function_blocks_rpo.entry(function) else {
+            return;
+        };
+
+        entry.insert(Vec::new());
+        self.visit_block(program, function, program.functions[function].entry());
+        self.function_blocks_rpo
+            .get_mut(function)
+            .expect("visited function should have an associated block postorder")
+            .reverse();
+        self.functions_rpo.push(function);
     }
 
-    pub fn function_rpo(&self, func: FunctionId) -> &[BasicBlockId] {
-        // The offsets in `function_to_start_pre_rev` are computed relative to the `global_rpo`
-        // *before* it's `.reverse()`'d so we need to compute the reverse indices and flip
-        // start/end.
-        let start = self
-            .function_to_start_pre_rev
-            .get(func + 1)
-            .map_or(0, |&start| self.global_rpo.len() - start as usize);
-        let end = self.global_rpo.len() - self.function_to_start_pre_rev[func] as usize;
-        &self.global_rpo[start..end]
+    fn visit_block(&mut self, program: &EthIRProgram, function: FunctionId, block: BasicBlockId) {
+        if !self.visited_blocks.add(block) {
+            return;
+        }
+
+        for operation in program.basic_blocks[block].operations.iter() {
+            if let Operation::InternalCall(call) = program.operations[operation] {
+                self.visit_function(program, call.function);
+            }
+        }
+        for successor in program.block(block).successors() {
+            self.visit_block(program, function, successor);
+        }
+        self.function_blocks_rpo
+            .get_mut(function)
+            .expect("visited function should have an associated block postorder")
+            .push(block);
     }
 
-    pub fn global_post_order(&self) -> impl Iterator<Item = BasicBlockId> {
-        self.global_rpo.iter().rev().copied()
+    pub fn blocks_rpo(&self) -> impl Iterator<Item = &BasicBlockId> {
+        self.functions_rpo.iter().flat_map(|&function| self.function_blocks_rpo[function].iter())
+    }
+
+    pub fn function_blocks_rpo(&self, function: FunctionId) -> Option<&[BasicBlockId]> {
+        self.function_blocks_rpo.get(function).map(Vec::as_slice)
+    }
+
+    pub fn blocks_postorder(&self) -> impl Iterator<Item = &BasicBlockId> {
+        self.functions_rpo
+            .iter()
+            .rev()
+            .flat_map(|&function| self.function_blocks_rpo[function].iter().rev())
+    }
+
+    pub fn functions_rpo(&self) -> &[FunctionId] {
+        &self.functions_rpo
+    }
+
+    pub fn functions_postorder(&self) -> impl Iterator<Item = &FunctionId> {
+        self.functions_rpo.iter().rev()
     }
 }

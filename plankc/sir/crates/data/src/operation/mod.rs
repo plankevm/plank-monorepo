@@ -483,12 +483,13 @@ impl OperationKind {
 
 use crate::{
     Function,
-    index::{FunctionId, LocalIdx},
+    index::{FunctionId, LocalIdx, OperationIdx},
 };
 use op_visitor::{
-    AllocatedSpansGetter, InputsGetter, InputsMutGetter, OutputsGetter, OutputsMutGetter,
+    AllocatedSpansGetter, InputsGetter, InputsMutGetter, OperationCloner, OutputsGetter,
+    OutputsMutGetter,
 };
-use plank_core::IndexVec;
+use plank_core::{IndexVec, Span};
 
 impl Operation {
     pub fn inputs<'a>(&'a self, ir: &'a EthIRProgram) -> &'a [LocalId] {
@@ -519,12 +520,99 @@ impl Operation {
     }
 }
 
+impl EthIRProgram {
+    /// Returns a copy of `operation` whose arena-backed data is stored in `destination`.
+    pub fn clone_operation_into(
+        &self,
+        operation: OperationIdx,
+        destination: &mut EthIRProgram,
+    ) -> Operation {
+        let mut cloned = self.operations[operation];
+        cloned.visit_data_mut(&mut OperationCloner::new(
+            &self.functions,
+            |span: Span<LocalIdx>| {
+                let start = destination.locals.next_idx();
+                destination.locals.extend(self.locals[span].iter().copied());
+                start
+            },
+        ));
+        cloned
+    }
+
+    /// Clones an operation and its arena-backed operands within the same `EthIRProgram`.
+    pub fn clone_operation(&mut self, operation: OperationIdx) -> OperationIdx {
+        let mut cloned = self.operations[operation];
+        cloned.visit_data_mut(&mut OperationCloner::new(
+            &self.functions,
+            |span: Span<LocalIdx>| {
+                let start = self.locals.next_idx();
+                self.locals.extend_from_within(span.usize_range());
+                start
+            },
+        ));
+        self.operations.push(cloned)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BasicBlockId, Function};
+    use plank_core::{Idx, Span};
 
     #[test]
     fn test_kind_maps_to_mnemonic() {
         verify_kind_maps_to_mnemonic();
+    }
+
+    #[test]
+    fn clone_operation_copies_allocated_inputs() {
+        let mut program = EthIRProgram::default();
+        program.locals.extend([LocalId::new(0), LocalId::new(1), LocalId::new(2)]);
+        let original = program.operations.push(Operation::AddMod(AllocatedIns {
+            ins_start: LocalIdx::ZERO,
+            outs: [LocalId::new(3)],
+        }));
+
+        let cloned = program.clone_operation(original);
+        let original_inputs = program.operations[original].allocated_spans(&program).input.unwrap();
+        let cloned_inputs = program.operations[cloned].allocated_spans(&program).input.unwrap();
+
+        assert_ne!(original_inputs, cloned_inputs);
+        assert_eq!(program.locals[original_inputs], program.locals[cloned_inputs]);
+
+        program.locals[cloned_inputs.start] = LocalId::new(4);
+        assert_eq!(program.locals[original_inputs.start], LocalId::new(0));
+    }
+
+    #[test]
+    fn clone_operation_into_copies_internal_call_operands() {
+        let mut source = EthIRProgram::default();
+        let function = source.functions.push(Function::new(BasicBlockId::ZERO, 2, None));
+        source.locals.extend([LocalId::new(0), LocalId::new(1), LocalId::new(2), LocalId::new(3)]);
+        let original = source.operations.push(Operation::InternalCall(InternalCallData {
+            function,
+            ins_start: LocalIdx::ZERO,
+            outs_start: LocalIdx::new(2),
+        }));
+        let mut destination = EthIRProgram::default();
+        destination.locals.push(LocalId::new(4));
+
+        let cloned = source.clone_operation_into(original, &mut destination);
+
+        let Operation::InternalCall(data) = cloned else { unreachable!() };
+        let cloned_inputs = data.inputs_span();
+        let cloned_outputs = Span::new(data.outs_start, data.outs_start + 2);
+        assert_eq!(data.ins_start, LocalIdx::new(1));
+        assert_eq!(cloned_inputs.end, cloned_outputs.start);
+        assert_eq!(
+            destination.locals[Span::new(cloned_inputs.start, cloned_outputs.end)],
+            source.locals[Span::new(LocalIdx::ZERO, LocalIdx::new(4))]
+        );
+
+        destination.locals[cloned_inputs.start] = LocalId::new(5);
+        destination.locals[cloned_outputs.start] = LocalId::new(6);
+        assert_eq!(source.locals[LocalIdx::ZERO], LocalId::new(0));
+        assert_eq!(source.locals[LocalIdx::new(2)], LocalId::new(2));
     }
 }

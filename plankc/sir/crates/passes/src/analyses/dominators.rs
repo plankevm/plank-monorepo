@@ -15,12 +15,13 @@ impl Analysis for Dominators {
         let predecessors = store.predecessors(program);
         let rpo = store.reverse_post_order(program);
         self.inner.clear();
-        for func in program.functions_iter() {
+        for &function in rpo.functions_rpo() {
             compute_function_dominators(
                 program,
-                func,
+                program.function(function),
                 &predecessors,
-                rpo.function_rpo(func.id()),
+                rpo.function_blocks_rpo(function)
+                    .expect("function in RPO should have an associated block RPO"),
                 &mut self.inner,
             );
         }
@@ -408,7 +409,7 @@ mod tests {
                 b {
                     stop
                 }
-            fn other:
+            fn main:
                 c {
                     => @d
                 }
@@ -416,14 +417,14 @@ mod tests {
                     stop
                 }
             "#,
-            EmitConfig::init_only(),
+            EmitConfig::default(),
         );
 
         let store = make_store(&program);
         let dominators = store.dominators(&program);
         assert_eq!(dominators.of(bb(0)), Some(bb(0))); // idom(A) = A
         assert_eq!(dominators.of(bb(1)), Some(bb(0))); // idom(B) = A
-        assert_eq!(dominators.of(bb(2)), Some(bb(2))); // idom(C) = C (entry of other)
+        assert_eq!(dominators.of(bb(2)), Some(bb(2))); // idom(C) = C (entry of main)
         assert_eq!(dominators.of(bb(3)), Some(bb(2))); // idom(D) = C
         let df = store.dominance_frontiers(&program);
         assert_eq!(frontier_to_vec(df.of(bb(0))), vec![]); // DF(A) = {}

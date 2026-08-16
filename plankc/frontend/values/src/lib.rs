@@ -14,6 +14,7 @@ pub use value_interner::*;
 newtype_index! {
     pub struct ValueId;
     pub struct FnDefId;
+    pub struct LocalId;
     pub struct ConstId;
 }
 

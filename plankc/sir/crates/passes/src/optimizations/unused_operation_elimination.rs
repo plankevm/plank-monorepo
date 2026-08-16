@@ -12,19 +12,22 @@ pub struct UnusedOperationElimination {
 
 impl Pass for UnusedOperationElimination {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
+        let rpo = store.reverse_post_order(program);
         let mut uses = store.def_use_mut(program);
 
         self.def_sites.clear();
         self.def_sites.resize(program.next_free_local_id.idx(), None);
         self.pending_removals.clear();
 
-        for op in program.operations() {
-            for out in op.outputs() {
-                self.def_sites[*out] = Some(op.id());
-            }
+        for &block in rpo.blocks_rpo() {
+            for op in program.block(block).operations() {
+                for out in op.outputs() {
+                    self.def_sites[*out] = Some(op.id());
+                }
 
-            if is_removable(&op.op(), program, &uses) {
-                self.pending_removals.push(op.id());
+                if is_removable(&op.op(), program, &uses) {
+                    self.pending_removals.push(op.id());
+                }
             }
         }
 
@@ -59,7 +62,7 @@ impl Pass for UnusedOperationElimination {
             | AnalysesMask::Dominators
             | AnalysesMask::DominanceFrontiers
             | AnalysesMask::BasicBlockOwnership
-            | AnalysesMask::Reachability
+            | AnalysesMask::ReachableBlocks
     }
 }
 

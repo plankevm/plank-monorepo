@@ -104,16 +104,13 @@ abstract contract ERC20BenchmarkBase is BaseTest {
 }
 
 /// forge-config: default.isolate = true
-contract ERC20PlankRelease is ERC20BenchmarkBase {
+contract ERC20PlankO2 is ERC20BenchmarkBase {
     function group() internal pure override returns (string memory) {
-        return "plank-release";
+        return "plank-o2";
     }
 
     function compile() internal override returns (bytes memory) {
-        return
-            plankBuild(
-                "src/examples/erc20.plk", baseBuildOptions().withBackend("sir-release").withOptimizations("csud")
-            );
+        return plankBuild("src/examples/erc20.plk", baseBuildOptions().withBackend("sir").withOptimizations("O2"));
     }
 }
 

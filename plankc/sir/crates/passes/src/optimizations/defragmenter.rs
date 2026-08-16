@@ -1,8 +1,8 @@
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::{Idx, Span, span::IncIterable};
-use sir_data::{operation::OpVisitorMut, *};
+use sir_data::*;
 
-use crate::{AnalysesStore, Pass, analyses::Reachability};
+use crate::{AnalysesStore, Pass, analyses::ReachableBlocks};
 
 #[derive(Default)]
 pub struct Defragmenter {
@@ -14,12 +14,12 @@ impl Pass for Defragmenter {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         self.state.clear();
         self.scratch.clear();
-        let reachability = store.reachability(program);
+        let reachable_blocks = store.reachable_blocks(program);
         Rewriter {
             state: &mut self.state,
             src: program,
             dst: &mut self.scratch,
-            reachability: &reachability,
+            reachable_blocks: &reachable_blocks,
         }
         .rewrite();
         std::mem::swap(program, &mut self.scratch);
@@ -55,7 +55,7 @@ struct Rewriter<'a> {
     state: &'a mut DefragmenterState,
     src: &'a EthIRProgram,
     dst: &'a mut EthIRProgram,
-    reachability: &'a Reachability,
+    reachable_blocks: &'a ReachableBlocks,
 }
 
 impl<'a> Rewriter<'a> {
@@ -79,14 +79,14 @@ impl<'a> Rewriter<'a> {
         let old_func = self.src.function(old_id);
         let old_entry_id = old_func.entry().id();
 
-        // We check block_map instead of function_map because visit_icall eagerly
-        // reserves function IDs before the function is emitted. Entry block being
-        // emitted implies the function has been fully processed.
+        // We check block_map instead of function_map because internal calls eagerly reserve
+        // function IDs before the function is emitted. Entry block being emitted implies it has
+        // been fully processed.
         if self.state.block_map.contains_key(&old_entry_id) {
             return;
         }
 
-        let (new_id, _) = self.reserve_function_id(old_id);
+        let new_id = self.reserve_function_id(old_id);
 
         self.push_block(old_entry_id);
         while let Some(bb) = self.state.block_worklist.pop() {
@@ -97,22 +97,22 @@ impl<'a> Rewriter<'a> {
             Function::new(new_entry, old_func.num_outputs(), old_func.source());
     }
 
-    fn reserve_function_id(&mut self, old_id: FunctionId) -> (FunctionId, bool) {
+    fn reserve_function_id(&mut self, old_id: FunctionId) -> FunctionId {
         match self.state.function_map.entry(old_id) {
-            Entry::Occupied(entry) => (*entry.get(), false),
+            Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => {
                 let old_func = self.src.function(old_id);
                 let placeholder =
                     Function::new(BasicBlockId::ZERO, old_func.num_outputs(), old_func.source());
                 let new_id = self.dst.functions.push(placeholder);
                 entry.insert(new_id);
-                (new_id, true)
+                new_id
             }
         }
     }
 
     fn emit_block(&mut self, old_id: BasicBlockId) {
-        if !self.reachability.contains(old_id) {
+        if !self.reachable_blocks.contains(old_id) {
             return;
         }
 
@@ -147,11 +147,7 @@ impl<'a> Rewriter<'a> {
     }
 
     fn emit_local(&mut self, local: LocalId) -> LocalId {
-        *self
-            .state
-            .local_map
-            .entry(local)
-            .or_insert_with(|| self.dst.next_free_local_id.get_and_inc())
+        remap_local(&mut self.state.local_map, &mut self.dst.next_free_local_id, local)
     }
 
     fn emit_block_operations(&mut self, block: BlockView<'_>) -> Span<OperationIdx> {
@@ -161,15 +157,47 @@ impl<'a> Rewriter<'a> {
             if matches!(operation, Operation::Noop(())) {
                 continue;
             }
-            let remapped = self.remap_operation(operation);
+            let remapped = self.remap_operation(op.id());
             self.dst.operations.push(remapped);
         }
         Span::new(start, self.dst.operations.next_idx())
     }
 
-    fn remap_operation(&mut self, mut op: Operation) -> Operation {
-        op.visit_data_mut(self);
-        op
+    fn remap_operation(&mut self, operation: OperationIdx) -> Operation {
+        let mut operation = self.src.clone_operation_into(operation, self.dst);
+
+        match &mut operation {
+            Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => {
+                data.alloc_id = self.emit_static_alloc(data.alloc_id);
+            }
+            Operation::SetLargeConst(data) => {
+                data.value = self.emit_large_const(data.value);
+            }
+            Operation::SetDataOffset(data) => {
+                data.segment_id = self.emit_data(data.segment_id);
+            }
+            Operation::InternalCall(data) => {
+                let old_function = data.function;
+                if let Some(&new_function) = self.state.function_map.get(&old_function) {
+                    data.function = new_function;
+                } else {
+                    self.state.func_worklist.push(old_function);
+                    data.function = self.reserve_function_id(old_function);
+                }
+            }
+            _ => {}
+        }
+
+        for input in operation.inputs_mut(&mut self.dst.locals) {
+            *input =
+                remap_local(&mut self.state.local_map, &mut self.dst.next_free_local_id, *input);
+        }
+        for output in operation.outputs_mut(&mut self.dst.locals, &self.dst.functions) {
+            *output =
+                remap_local(&mut self.state.local_map, &mut self.dst.next_free_local_id, *output);
+        }
+
+        operation
     }
 
     fn discover_successors(&mut self, block: BlockView<'_>) {
@@ -198,7 +226,7 @@ impl<'a> Rewriter<'a> {
     }
 
     fn push_block(&mut self, bb: BasicBlockId) {
-        debug_assert!(self.reachability.contains(bb), "successor {bb:?} should be reachable");
+        debug_assert!(self.reachable_blocks.contains(bb), "successor {bb:?} should be reachable");
         if !self.state.block_map.contains_key(&bb) {
             self.state.block_worklist.push(bb);
         }
@@ -275,86 +303,12 @@ impl<'a> Rewriter<'a> {
     }
 }
 
-impl<'a> OpVisitorMut<'_, ()> for &mut Rewriter<'a> {
-    fn visit_inline_operands_mut<const INS: usize, const OUTS: usize>(
-        self,
-        data: &mut sir_data::operation::InlineOperands<INS, OUTS>,
-    ) {
-        for local in data.ins.iter_mut().chain(data.outs.iter_mut()) {
-            *local = self.emit_local(*local);
-        }
-    }
-
-    fn visit_allocated_ins_mut<const INS: usize, const OUTS: usize>(
-        self,
-        data: &mut sir_data::operation::AllocatedIns<INS, OUTS>,
-    ) {
-        let new_ins_start = self.dst.locals.next_idx();
-        for old_local in data.get_inputs(self.src) {
-            let new_local = self.emit_local(*old_local);
-            self.dst.locals.push(new_local);
-        }
-        data.ins_start = new_ins_start;
-
-        for local in &mut data.outs {
-            *local = self.emit_local(*local);
-        }
-    }
-
-    fn visit_static_alloc_mut(self, data: &mut sir_data::operation::StaticAllocData) {
-        data.ptr_out = self.emit_local(data.ptr_out);
-        data.alloc_id = self.emit_static_alloc(data.alloc_id);
-    }
-
-    fn visit_memory_load_mut(self, data: &mut sir_data::operation::MemoryLoadData) {
-        data.out = self.emit_local(data.out);
-        data.ptr = self.emit_local(data.ptr);
-    }
-
-    fn visit_memory_store_mut(self, data: &mut sir_data::operation::MemoryStoreData) {
-        for local in &mut data.ins {
-            *local = self.emit_local(*local);
-        }
-    }
-
-    fn visit_set_small_const_mut(self, data: &mut sir_data::operation::SetSmallConstData) {
-        data.sets = self.emit_local(data.sets);
-    }
-
-    fn visit_set_large_const_mut(self, data: &mut sir_data::operation::SetLargeConstData) {
-        data.sets = self.emit_local(data.sets);
-        data.value = self.emit_large_const(data.value);
-    }
-
-    fn visit_set_data_offset_mut(self, data: &mut sir_data::operation::SetDataOffsetData) {
-        data.sets = self.emit_local(data.sets);
-        data.segment_id = self.emit_data(data.segment_id);
-    }
-
-    fn visit_icall_mut(self, data: &mut sir_data::operation::InternalCallData) {
-        let (new_func_id, is_new) = self.reserve_function_id(data.function);
-        if is_new {
-            self.state.func_worklist.push(data.function);
-        }
-
-        let new_ins_start = self.dst.locals.next_idx();
-        for old_local in data.get_inputs(self.src) {
-            let new_local = self.emit_local(*old_local);
-            self.dst.locals.push(new_local);
-        }
-
-        let new_outs_start = self.dst.locals.next_idx();
-        for old_local in data.get_outputs(self.src) {
-            let new_local = self.emit_local(*old_local);
-            self.dst.locals.push(new_local);
-        }
-
-        data.function = new_func_id;
-        data.ins_start = new_ins_start;
-        data.outs_start = new_outs_start;
-    }
-
-    fn visit_void_mut(self) {}
+fn remap_local(
+    local_map: &mut HashMap<LocalId, LocalId>,
+    next_free_local_id: &mut LocalId,
+    local: LocalId,
+) -> LocalId {
+    *local_map.entry(local).or_insert_with(|| next_free_local_id.get_and_inc())
 }
 
 #[cfg(test)]
@@ -455,7 +409,7 @@ mod tests {
                 }
 
                 @4 {
-                    noop
+                    $13 = data_offset .0
                     $14 = const 0x63
                     $15 = const 0x64
                     $16 $17 = icall @1 $14 $15

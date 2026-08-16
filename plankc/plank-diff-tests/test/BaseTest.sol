@@ -80,7 +80,7 @@ abstract contract BaseTest is Test, PlankDeployer {
     }
 
     function plank(string memory sourcePath, string memory evmVersionOverride) internal returns (bytes memory) {
-        string memory backend = vm.envOr("PLANK_BACKEND", string("sir-debug"));
+        string memory backend = vm.envOr("PLANK_BACKEND", string("sir"));
         string memory optimize = vm.envOr("PLANK_OPTIMIZE", string(""));
 
         BuildOptions memory options = baseBuildOptions().withBackend(backend);

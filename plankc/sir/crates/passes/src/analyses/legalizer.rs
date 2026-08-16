@@ -1,4 +1,7 @@
-use crate::{AnalysesStore, UseKind};
+use crate::{
+    AnalysesStore, UseKind,
+    analyses::{Dominators, ReversePostOrder},
+};
 use plank_core::{DenseIndexSet, Idx, IndexVec, index_vec};
 use sir_data::{
     BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, LargeConstId, LocalId,
@@ -93,8 +96,10 @@ impl Legalizer {
 
         self.validate_entry_points(program)?;
         self.validate_blocks(program)?;
-        self.validate_cfg(program)?;
-        self.validate_local_ids(program, store)
+        let rpo = store.reverse_post_order(program);
+        self.validate_cfg(program, &rpo)?;
+        let dominators = store.dominators(program);
+        self.validate_local_ids(program, &rpo, &dominators)
     }
 
     fn validate_entry_points(&self, program: &EthIRProgram) -> Result<(), LegalizerError> {
@@ -255,16 +260,29 @@ impl Legalizer {
         Ok(())
     }
 
-    fn validate_cfg(&mut self, program: &EthIRProgram) -> Result<(), LegalizerError> {
+    fn validate_cfg(
+        &mut self,
+        program: &EthIRProgram,
+        rpo: &ReversePostOrder,
+    ) -> Result<(), LegalizerError> {
         let mut visited = DenseIndexSet::new();
-        for (fn_id, function) in program.functions.enumerate_idx() {
+        for &fn_id in rpo.functions_rpo() {
             visited.clear();
-            self.validate_cfg_visit_block(program, fn_id, function.entry(), &mut visited)?;
+            self.validate_cfg_visit_block(
+                program,
+                fn_id,
+                program.functions[fn_id].entry(),
+                &mut visited,
+            )?;
         }
-        self.validate_call_graph(program)
+        self.validate_call_graph(program, rpo.functions_rpo())
     }
 
-    fn validate_call_graph(&self, program: &EthIRProgram) -> Result<(), LegalizerError> {
+    fn validate_call_graph(
+        &self,
+        program: &EthIRProgram,
+        functions_rpo: &[FunctionId],
+    ) -> Result<(), LegalizerError> {
         let mut callees: IndexVec<FunctionId, Vec<FunctionId>> =
             index_vec![Vec::new(); program.functions.len()];
         for (caller, callee) in &self.call_edges {
@@ -297,7 +315,7 @@ impl Legalizer {
         }
 
         let mut visit_state = index_vec![VisitState::Unvisited; program.functions.len()];
-        for fn_id in program.functions.iter_idx() {
+        for &fn_id in functions_rpo {
             if visit_state[fn_id] == VisitState::Unvisited {
                 detect_cycle(fn_id, &callees, &mut visit_state)?;
             }
@@ -359,15 +377,20 @@ impl Legalizer {
     fn validate_local_ids(
         &self,
         program: &EthIRProgram,
-        store: &AnalysesStore,
+        rpo: &ReversePostOrder,
+        dominators: &Dominators,
     ) -> Result<(), LegalizerError> {
-        Self::validate_single_assignment(program)?;
-        self.validate_scope(program, store)
+        Self::validate_single_assignment(program, rpo)?;
+        self.validate_scope(program, rpo, dominators)
     }
 
-    fn validate_single_assignment(program: &EthIRProgram) -> Result<(), LegalizerError> {
+    fn validate_single_assignment(
+        program: &EthIRProgram,
+        rpo: &ReversePostOrder,
+    ) -> Result<(), LegalizerError> {
         let mut defs = DenseIndexSet::new();
-        for bb in program.basic_blocks.iter() {
+        for &bb_id in rpo.blocks_rpo() {
+            let bb = &program.basic_blocks[bb_id];
             for local in program.locals[bb.inputs].iter() {
                 if !defs.add(*local) {
                     return Err(LegalizerError::DoubleDefinition(*local));
@@ -387,15 +410,13 @@ impl Legalizer {
     fn validate_scope(
         &self,
         program: &EthIRProgram,
-        store: &AnalysesStore,
+        rpo: &ReversePostOrder,
+        dominators: &Dominators,
     ) -> Result<(), LegalizerError> {
-        let dominators = store.dominators(program);
-
         let mut dom_children: IndexVec<BasicBlockId, Vec<BasicBlockId>> =
             index_vec![Vec::new(); program.basic_blocks.len()];
 
-        for block in program.blocks() {
-            let bb_id = block.id();
+        for &bb_id in rpo.blocks_rpo() {
             let idom = dominators.of(bb_id);
             if let Some(parent) = idom
                 && parent != bb_id
@@ -406,11 +427,11 @@ impl Legalizer {
 
         let mut in_scope = DenseIndexSet::new();
         let mut added = Vec::new();
-        for function in program.functions.iter() {
+        for &function in rpo.functions_rpo() {
             in_scope.clear();
             Self::validate_block_scope(
                 program,
-                function.entry(),
+                program.functions[function].entry(),
                 &mut in_scope,
                 &mut added,
                 &dom_children,
@@ -750,6 +771,42 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
+    }
+
+    #[test]
+    fn test_unreachable_function_is_not_checked_for_local_scope() {
+        let program = parse_without_legalization(
+            r#"
+            fn init:
+                entry {
+                    stop
+                }
+
+            fn unreachable:
+                entry {
+                    x = gas
+                    => x ? @left : @right
+                }
+                left {
+                    c = gas
+                    => c ? @left_inner : @left_exit
+                }
+                left_inner {
+                    y = const 1
+                    stop
+                }
+                left_exit {
+                    stop
+                }
+                right {
+                    z = iszero y
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+
         assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
@@ -1266,10 +1323,11 @@ mod tests {
         let mut program = builder.build(func_a_id, None);
 
         let func_b_id = program.functions.push(sir_data::Function::new(bb_shared_id, 0, None));
+        program.main_entry = Some(func_b_id);
 
         assert_eq!(
             Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
-            LegalizerError::SharedBasicBlock(bb_shared_id, func_a_id, func_b_id)
+            LegalizerError::SharedBasicBlock(bb_shared_id, func_b_id, func_a_id)
         );
     }
 

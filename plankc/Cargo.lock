@@ -2031,7 +2031,6 @@ dependencies = [
  "plank-session",
  "plank-source",
  "plank-test-utils",
- "sir-passes",
  "tempfile",
 ]
 
@@ -2101,6 +2100,7 @@ dependencies = [
  "plank-values",
  "pretty_assertions",
  "sha2",
+ "smallvec",
  "stacker",
 ]
 

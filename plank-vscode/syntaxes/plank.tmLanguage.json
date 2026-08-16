@@ -88,6 +88,10 @@
     "types": {
       "patterns": [
         {
+          "name": "support.type.self.plank",
+          "match": "\\bSelf\\b"
+        },
+        {
           "name": "support.type.primitive.plank",
           "match": "\\b(u256|bool|void|type|function|never|cbytes)\\b"
         }

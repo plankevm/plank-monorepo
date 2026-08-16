@@ -163,6 +163,57 @@ pub(crate) struct InputsMutGetter<'a> {
     pub(crate) locals: &'a mut IndexVec<LocalIdx, LocalId>,
 }
 
+pub(super) struct OperationCloner<'a, F> {
+    functions: &'a IndexVec<FunctionId, crate::Function>,
+    clone_span: F,
+}
+
+impl<'a, F> OperationCloner<'a, F> {
+    pub(super) fn new(functions: &'a IndexVec<FunctionId, crate::Function>, clone_span: F) -> Self {
+        Self { functions, clone_span }
+    }
+}
+
+impl<F: FnMut(Span<LocalIdx>) -> LocalIdx> OpVisitorMut<'_, ()> for &mut OperationCloner<'_, F> {
+    fn visit_inline_operands_mut<const INS: usize, const OUTS: usize>(
+        self,
+        _data: &mut InlineOperands<INS, OUTS>,
+    ) {
+    }
+
+    fn visit_allocated_ins_mut<const INS: usize, const OUTS: usize>(
+        self,
+        data: &mut AllocatedIns<INS, OUTS>,
+    ) {
+        let old_inputs = Span::new(data.ins_start, data.ins_start + INS as u32);
+        data.ins_start = (self.clone_span)(old_inputs);
+    }
+
+    fn visit_static_alloc_mut(self, _data: &mut StaticAllocData) {}
+
+    fn visit_memory_load_mut(self, _data: &mut MemoryLoadData) {}
+
+    fn visit_memory_store_mut(self, _data: &mut MemoryStoreData) {}
+
+    fn visit_set_small_const_mut(self, _data: &mut SetSmallConstData) {}
+
+    fn visit_set_large_const_mut(self, _data: &mut SetLargeConstData) {}
+
+    fn visit_set_data_offset_mut(self, _data: &mut SetDataOffsetData) {}
+
+    fn visit_icall_mut(self, data: &mut InternalCallData) {
+        let input_count = data.outs_start - data.ins_start;
+        let old_operands = Span::new(
+            data.ins_start,
+            data.outs_start + self.functions[data.function].get_outputs(),
+        );
+        data.ins_start = (self.clone_span)(old_operands);
+        data.outs_start = data.ins_start + input_count;
+    }
+
+    fn visit_void_mut(self) {}
+}
+
 impl<'a> OpVisitorMut<'a, &'a mut [LocalId]> for InputsMutGetter<'a> {
     fn visit_inline_operands_mut<const INS: usize, const OUTS: usize>(
         self,
@@ -310,11 +361,7 @@ impl<'a> OpVisitor<'a, AllocatedSpans> for AllocatedSpansGetter<'a> {
         AllocatedSpans::NONE
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> AllocatedSpans {
-        let fn_outputs = self.ir.functions[data.function].outputs;
-        AllocatedSpans {
-            input: Some(Span::new(data.ins_start, data.outs_start)),
-            output: Some(Span::new(data.outs_start, data.outs_start + fn_outputs)),
-        }
+        AllocatedSpans { input: Some(data.inputs_span()), output: Some(data.outputs_span(self.ir)) }
     }
     fn visit_void(&mut self) -> AllocatedSpans {
         AllocatedSpans::NONE

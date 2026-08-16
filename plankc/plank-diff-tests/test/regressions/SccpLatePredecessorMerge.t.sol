@@ -6,21 +6,19 @@ import {BaseTest} from "test/BaseTest.sol";
 contract SccpLatePredecessorMergeTest is BaseTest {
     string constant SOURCE = "src/regressions/sccp_late_predecessor_merge.plk";
 
-    address sirDebug = makeAddr("sccp-late-predecessor-merge-sir-debug");
-    address sirReleaseCsud = makeAddr("sccp-late-predecessor-merge-sir-release-csud");
+    address sirO0 = makeAddr("sccp-late-predecessor-merge-sir-o0");
+    address sirO2 = makeAddr("sccp-late-predecessor-merge-sir-o2");
 
     function setUp() public {
-        vm.etch(sirDebug, plankBuild(SOURCE, baseBuildOptions().withBackend("sir-debug").disableOptimizations()));
-        vm.etch(
-            sirReleaseCsud, plankBuild(SOURCE, baseBuildOptions().withBackend("sir-release").withOptimizations("csud"))
-        );
+        vm.etch(sirO0, plankBuild(SOURCE, baseBuildOptions().withBackend("sir").withOptimizations("O0")));
+        vm.etch(sirO2, plankBuild(SOURCE, baseBuildOptions().withBackend("sir").withOptimizations("O2")));
     }
 
-    function test_sirReleaseCsudMatchesSirDebugForLatePredecessorMerge() public {
+    function test_sirO2MatchesSirO0ForLatePredecessorMerge() public {
         bytes memory data = hex"0000000000000000000000000000000000000000000000000000000000000001";
 
-        bytes memory expected = callAndReturn(sirDebug, data);
-        bytes memory actual = callAndReturn(sirReleaseCsud, data);
+        bytes memory expected = callAndReturn(sirO0, data);
+        bytes memory actual = callAndReturn(sirO2, data);
 
         assertEq(abi.decode(expected, (uint256)), 1);
         assertEq(actual, expected);

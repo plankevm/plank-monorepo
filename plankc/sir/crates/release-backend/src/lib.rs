@@ -11,15 +11,15 @@ mod mark_map;
 
 pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode: &mut Vec<u8>) {
     if cfg!(debug_assertions) {
-        let reachability = analyses.reachability(program);
+        let reachable_blocks = analyses.reachable_blocks(program);
         let preds = analyses.predecessors(program);
         for bb in program.blocks() {
-            if !reachability.contains(bb.id()) {
+            if !reachable_blocks.contains(bb.id()) {
                 continue;
             }
-            let succesor_count = bb.successors().count();
+            let successor_count = bb.successors().count();
             assert!(
-                succesor_count <= 1 || bb.successors().all(|succ| preds.of(succ).len() <= 1),
+                successor_count <= 1 || bb.successors().all(|succ| preds.of(succ).len() <= 1),
                 "release backend expects SIR without critical edges"
             );
         }

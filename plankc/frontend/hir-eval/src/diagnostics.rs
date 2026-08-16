@@ -3,7 +3,7 @@ use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{self as hir, operators::BinaryOp};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
-    Compound, Type, TypeFlags, TypeId, TypeInterner, ValueId, ValueInterner,
+    Compound, Field, Type, TypeFlags, TypeId, TypeInterner, ValueId, ValueInterner,
     builtins as builtin_sigs,
 };
 
@@ -715,6 +715,65 @@ impl DiagCtx<'_> {
                 ),
             )
             .emit(self);
+    }
+
+    pub fn emit_unknown_method(
+        &mut self,
+        values: &ValueInterner,
+        struct_ty: TypeId,
+        call_loc: SrcLoc,
+        method_name: StrId,
+    ) {
+        Diagnostic::error("unknown method")
+            .primary(
+                call_loc.source,
+                call_loc.span,
+                format!(
+                    "`{}` has no method `{}`",
+                    self.types.format(self.session, values, struct_ty),
+                    self.session.lookup_name(method_name),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_method_call_on_non_struct(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        call_loc: SrcLoc,
+    ) {
+        Diagnostic::error("method call on non-struct")
+            .primary(
+                call_loc.source,
+                call_loc.span,
+                format!(
+                    "`{}` is not a struct type and cannot have methods",
+                    self.types.format(self.session, values, ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_field_called_as_method(
+        &mut self,
+        field_source: SourceId,
+        field: Field,
+        call_loc: SrcLoc,
+    ) {
+        let field_name = self.session.lookup_name(field.name);
+        let mut diagnostic = Diagnostic::error("field is not a method").cross_source_annotations(
+            call_loc,
+            format!("`{field_name}` is a field, not a method"),
+            SrcLoc::new(field_source, field.def_span),
+            "field declared here",
+        );
+        if field.ty == TypeId::FUNCTION {
+            diagnostic = diagnostic.help(format!(
+                "wrap the field access in parentheses before calling it, e.g. `(value.{field_name})()`"
+            ));
+        }
+        diagnostic.emit(self);
     }
 
     pub fn emit_struct_def_duplicate_field(

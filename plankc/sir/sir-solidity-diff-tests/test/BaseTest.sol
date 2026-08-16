@@ -15,18 +15,7 @@ abstract contract BaseTest is Test {
     }
 
     function sir(bytes memory encodedSirArgs) internal returns (bytes memory) {
-        bool releaseBackendEnabled;
-        {
-            string memory releaseBackendEnabledStr = vm.envOr(string("SIR_RELEASE_BACKEND"), string("false"));
-            bytes32 releaseBackendEnabledHash = keccak256(bytes(releaseBackendEnabledStr));
-            if (releaseBackendEnabledHash == keccak256("true") || releaseBackendEnabledHash == keccak256("1")) {
-                releaseBackendEnabled = true;
-            } else if (releaseBackendEnabledHash == keccak256("false") || releaseBackendEnabledHash == keccak256("0")) {
-                releaseBackendEnabled = false;
-            } else {
-                revert(string.concat("unexpected/invalid SIR_RELEASE_BACKEND value '", releaseBackendEnabledStr, "'"));
-            }
-        }
+        string memory optimizationLevel = vm.envOr(string("SIR_OPTIMIZE"), string(""));
 
         uint256 totalArgs;
         assembly ("memory-safe") {
@@ -36,12 +25,22 @@ abstract contract BaseTest is Test {
         string[] memory sirArgs =
             abi.decode(bytes.concat(bytes32(uint256(0x20)), bytes32(totalArgs), encodedSirArgs), (string[]));
 
+        bool hasCustomPasses;
+        bytes32 passesArgHash = keccak256(bytes("--passes"));
+        for (uint256 i = 0; i < sirArgs.length; i++) {
+            if (keccak256(bytes(sirArgs[i])) == passesArgHash) {
+                hasCustomPasses = true;
+                break;
+            }
+        }
+
         string[] memory args = new string[](300);
 
         uint256 argLen = 0;
         args[argLen++] = "../../target/debug/sir";
-        if (releaseBackendEnabled) {
-            args[argLen++] = "--release";
+        if (!hasCustomPasses && bytes(optimizationLevel).length != 0) {
+            args[argLen++] = "-O";
+            args[argLen++] = optimizationLevel;
         }
         for (uint256 i = 0; i < sirArgs.length; i++) {
             args[argLen++] = sirArgs[i];

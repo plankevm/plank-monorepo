@@ -3,7 +3,11 @@ pub mod optimizations;
 pub mod transforms;
 
 use optimizations::{
-    constant_propagation::SCCP, copy_propagation::CopyPropagation, switch_peephole::SwitchPeephole,
+    basic_block_merging::BasicBlockMerger,
+    constant_propagation::SCCP,
+    copy_propagation::CopyPropagation,
+    inlining::{DEFAULT_INLINE_SIZE_THRESHOLD, Inliner},
+    switch_peephole::SwitchPeephole,
     unused_operation_elimination::UnusedOperationElimination,
 };
 use sir_data::EthIRProgram;
@@ -14,7 +18,7 @@ pub use analyses::{
     DefUse, DominanceFrontiers, Dominators, InOutGroupId, Legalizer, Predecessors, UseKind,
     UseLocation,
 };
-pub use optimizations::{Defragmenter, OPTIMIZE_HELP, parse_optimizations_string};
+pub use optimizations::{Defragmenter, OptimizationLevel, PASSES_HELP, parse_passes};
 
 pub trait Pass {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore);
@@ -39,6 +43,8 @@ pub struct PassManager<'a> {
     unused_elim: Option<UnusedOperationElimination>,
     defragmenter: Option<Defragmenter>,
     switch_peephole: Option<SwitchPeephole>,
+    inliner: Option<Inliner>,
+    basic_block_merger: Option<BasicBlockMerger>,
 }
 
 impl<'a> PassManager<'a> {
@@ -52,6 +58,8 @@ impl<'a> PassManager<'a> {
             unused_elim: None,
             defragmenter: None,
             switch_peephole: None,
+            inliner: None,
+            basic_block_merger: None,
         }
     }
 
@@ -86,6 +94,16 @@ impl<'a> PassManager<'a> {
                 }
                 OptimizationPass::SwitchPeephole => run_pass(
                     self.switch_peephole.get_or_insert_default(),
+                    self.program,
+                    &self.store,
+                ),
+                OptimizationPass::Inlining => run_pass(
+                    self.inliner.get_or_insert_with(|| Inliner::new(DEFAULT_INLINE_SIZE_THRESHOLD)),
+                    self.program,
+                    &self.store,
+                ),
+                OptimizationPass::BasicBlockMerging => run_pass(
+                    self.basic_block_merger.get_or_insert_default(),
                     self.program,
                     &self.store,
                 ),

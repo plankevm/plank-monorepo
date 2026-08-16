@@ -32,12 +32,82 @@ impl LocalKind {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Binding {
+    Named(StrId),
+    SelfType,
+}
+
 #[derive(Clone, Copy)]
 struct ScopedLocal {
-    name: StrId,
+    binding: Binding,
     id: LocalId,
     kind: LocalKind,
     span: Option<TokenSpan>,
+}
+
+#[derive(Clone, Copy)]
+struct CaptureBinding {
+    binding: Binding,
+    info: CaptureInfo,
+    declaration_span: Option<TokenSpan>,
+}
+
+impl CaptureBinding {
+    fn scoped_local(&self) -> ScopedLocal {
+        ScopedLocal {
+            binding: self.binding,
+            id: self.info.inner_local,
+            kind: LocalKind::Immutable,
+            span: self.declaration_span,
+        }
+    }
+}
+
+struct LocalFrame {
+    scoped_locals: Vec<ScopedLocal>,
+    captures: Vec<CaptureBinding>,
+    next_local_id: LocalId,
+}
+
+impl LocalFrame {
+    fn new() -> Self {
+        Self { scoped_locals: Vec::new(), captures: Vec::new(), next_local_id: LocalId::ZERO }
+    }
+
+    fn find_binding(&self, binding: Binding) -> Option<ScopedLocal> {
+        if let Some(local) = self.scoped_locals.iter().rev().find(|entry| entry.binding == binding)
+        {
+            return Some(*local);
+        }
+        self.captures
+            .iter()
+            .find(|capture| capture.binding == binding)
+            .map(CaptureBinding::scoped_local)
+    }
+
+    fn capture_binding(&mut self, outer_local: ScopedLocal, use_span: SourceSpan) -> ScopedLocal {
+        if let Some(capture) =
+            self.captures.iter().find(|capture| capture.info.outer_local == outer_local.id)
+        {
+            debug_assert!(capture.binding == outer_local.binding);
+            return capture.scoped_local();
+        }
+
+        let inner_local = self.alloc_local_id();
+        let capture = CaptureBinding {
+            binding: outer_local.binding,
+            info: CaptureInfo { outer_local: outer_local.id, inner_local, use_span },
+            declaration_span: outer_local.span,
+        };
+        let local = capture.scoped_local();
+        self.captures.push(capture);
+        local
+    }
+
+    fn alloc_local_id(&mut self) -> LocalId {
+        self.next_local_id.get_and_inc()
+    }
 }
 
 struct HirBuilder {
@@ -47,6 +117,8 @@ struct HirBuilder {
     args: ListOfLists<ArgsId, LocalId>,
     fields: ListOfLists<FieldsId, FieldInfo>,
     match_arms: ListOfLists<MatchArmsId, MatchArm>,
+    methods: ListOfLists<MethodsId, MethodInfo>,
+    method_calls: IndexVec<MethodCallId, MethodCall>,
     struct_defs: IndexVec<StructDefId, StructDef>,
 
     fns: IndexVec<FnDefId, FnDef>,
@@ -62,6 +134,8 @@ impl HirBuilder {
             args: ListOfLists::new(),
             fields: ListOfLists::new(),
             match_arms: ListOfLists::new(),
+            methods: ListOfLists::new(),
+            method_calls: IndexVec::new(),
             fns: IndexVec::new(),
             fn_params: ListOfLists::new(),
             fn_captures: ListOfLists::new(),
@@ -85,17 +159,14 @@ struct BlockLowerer<'a> {
 
     values: &'a mut ValueInterner,
     builder: &'a mut HirBuilder,
-    scoped_locals_stack: Vec<ScopedLocal>,
-    fn_scope_start: usize,
-    fn_captures_start: usize,
+    local_frames: Vec<LocalFrame>,
     in_function_body: bool,
-    next_local_id: LocalId,
 
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
     field_buf: Vec<FieldInfo>,
+    method_buf: Vec<MethodInfo>,
     param_info_buf: Vec<ParamInfo>,
-    captures_buf: Vec<CaptureInfo>,
 
     lexed: &'a Lexed,
     source_id: SourceId,
@@ -182,17 +253,14 @@ impl BlockLowerer<'_> {
     }
 
     fn reset_scope(&mut self) {
-        self.next_local_id = LocalId::ZERO;
-        self.scoped_locals_stack.clear();
-
-        debug_assert_eq!(self.fn_scope_start, 0);
-        debug_assert_eq!(self.fn_captures_start, 0);
+        debug_assert_eq!(self.local_frames.len(), 1);
+        self.local_frames[0] = LocalFrame::new();
         debug_assert!(!self.in_function_body);
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
+        debug_assert!(self.method_buf.is_empty());
         debug_assert!(self.param_info_buf.is_empty());
-        debug_assert!(self.captures_buf.is_empty());
     }
 
     fn validate_local_name(&self, name: StrId, span: TokenSpan) {
@@ -204,15 +272,20 @@ impl BlockLowerer<'_> {
     fn alloc_local(&mut self, name: StrId, kind: LocalKind, span: TokenSpan) -> LocalId {
         self.validate_local_name(name, span);
 
-        let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal { name, id, kind, span: Some(span) });
+        let id = self.alloc_temp();
+        self.current_frame_mut().scoped_locals.push(ScopedLocal {
+            binding: Binding::Named(name),
+            id,
+            kind,
+            span: Some(span),
+        });
         id
     }
 
-    fn alloc_anonymous_local(&mut self, name: StrId) -> LocalId {
-        let id = self.next_local_id.get_and_inc();
-        self.scoped_locals_stack.push(ScopedLocal {
-            name,
+    fn alloc_anonymous_local(&mut self, binding: Binding) -> LocalId {
+        let id = self.alloc_temp();
+        self.current_frame_mut().scoped_locals.push(ScopedLocal {
+            binding,
             id,
             kind: LocalKind::Immutable,
             span: None,
@@ -221,7 +294,15 @@ impl BlockLowerer<'_> {
     }
 
     fn alloc_temp(&mut self) -> LocalId {
-        self.next_local_id.get_and_inc()
+        self.current_frame_mut().alloc_local_id()
+    }
+
+    fn current_frame(&self) -> &LocalFrame {
+        self.local_frames.last().expect("missing root local frame")
+    }
+
+    fn current_frame_mut(&mut self) -> &mut LocalFrame {
+        self.local_frames.last_mut().expect("missing root local frame")
     }
 
     fn expr(&self, kind: ExprKind, span: TokenSpan) -> Expr {
@@ -321,28 +402,23 @@ impl BlockLowerer<'_> {
         })
     }
 
-    fn find_in_scope(scope: &[ScopedLocal], name: StrId) -> Option<ScopedLocal> {
-        scope.iter().rev().find(|entry| entry.name == name).copied()
-    }
-
-    fn find_local(&self, name: StrId) -> Option<ScopedLocal> {
-        Self::find_in_scope(&self.scoped_locals_stack[self.fn_scope_start..], name)
-    }
-
-    fn lookup_capture(&mut self, name: StrId, use_span: TokenSpan) -> Option<LocalId> {
-        let outer_local =
-            Self::find_in_scope(&self.scoped_locals_stack[..self.fn_scope_start], name)?.id;
-
-        for capture in &self.captures_buf[self.fn_captures_start..] {
-            if capture.outer_local == outer_local {
-                return Some(capture.inner_local);
+    fn resolve_binding(&mut self, binding: Binding, use_span: TokenSpan) -> Option<ScopedLocal> {
+        fn resolve_binding_in_frames(
+            frames: &mut [LocalFrame],
+            binding: Binding,
+            use_span: SourceSpan,
+        ) -> Option<ScopedLocal> {
+            let (current, outer_frames) = frames.split_last_mut()?;
+            if let Some(local) = current.find_binding(binding) {
+                return Some(local);
             }
+
+            let outer_local = resolve_binding_in_frames(outer_frames, binding, use_span)?;
+            Some(current.capture_binding(outer_local, use_span))
         }
 
         let use_span = self.lexed.tokens_src_span(use_span);
-        let inner_local = self.alloc_anonymous_local(name);
-        self.captures_buf.push(CaptureInfo { outer_local, inner_local, use_span });
-        Some(inner_local)
+        resolve_binding_in_frames(&mut self.local_frames, binding, use_span)
     }
 
     fn emit(&mut self, kind: InstructionKind) {
@@ -361,12 +437,8 @@ impl BlockLowerer<'_> {
             return ExprKind::Value(Ok(self.values.intern_type(ty)));
         }
 
-        if let Some(entry) = self.find_local(name) {
-            return ExprKind::LocalRef(entry.id);
-        }
-
-        if let Some(capture_local) = self.lookup_capture(name, span) {
-            return ExprKind::LocalRef(capture_local);
+        if let Some(local) = self.resolve_binding(Binding::Named(name), span) {
+            return ExprKind::LocalRef(local.id);
         }
 
         if let Some(entry) = self.consts.get(&name) {
@@ -423,8 +495,8 @@ impl BlockLowerer<'_> {
                     let body = ast::Expr::new_unwrap(arm.body);
                     let body_block = self.create_sub_block(body.span(), |this| {
                         if let Some((binding, id)) = binding {
-                            this.scoped_locals_stack.push(ScopedLocal {
-                                name: binding.name,
+                            this.current_frame_mut().scoped_locals.push(ScopedLocal {
+                                binding: Binding::Named(binding.name),
                                 id,
                                 kind: LocalKind::Immutable,
                                 span: Some(binding.span),
@@ -459,6 +531,14 @@ impl BlockLowerer<'_> {
         ExprKind::LocalRef(result)
     }
 
+    fn lower_self_type(&mut self, span: TokenSpan) -> ExprKind {
+        if let Some(local) = self.resolve_binding(Binding::SelfType, span) {
+            return ExprKind::LocalRef(local.id);
+        }
+        self.error_self_type_outside_method(span);
+        ExprKind::POISON
+    }
+
     fn lower_expr(&mut self, expr: ast::Expr<'_>) -> Expr {
         let kind = match expr {
             ast::Expr::Block(block) => return self.lower_scope(block),
@@ -488,6 +568,7 @@ impl BlockLowerer<'_> {
                 let len = u32::try_from(len).expect("source len checked to fit in u32");
                 ExprKind::Value(Ok(self.values.intern_bytes(value, 0, len)))
             }
+            ast::Expr::SelfType { span } => self.lower_self_type(span),
             ast::Expr::Member(member_expr) => {
                 let object = self.lower_expr_to_local(member_expr.object());
                 ExprKind::Member { object, member: member_expr.member }
@@ -502,6 +583,15 @@ impl BlockLowerer<'_> {
                         self.error_unknown_builtin(name, span);
                         ExprKind::POISON
                     }
+                } else if let Some(member_expr) = call_expr.direct_member_callee() {
+                    let receiver = self.lower_expr_to_local(member_expr.object());
+                    let args = self.lower_args(call_expr.args());
+                    let method_call = self.builder.method_calls.push(MethodCall {
+                        receiver,
+                        method: member_expr.member,
+                        args,
+                    });
+                    ExprKind::MethodCall(method_call)
                 } else {
                     let callee = self.lower_expr_to_local(callee);
                     let args = self.lower_args(call_expr.args());
@@ -546,18 +636,40 @@ impl BlockLowerer<'_> {
                     }
                 }
                 let buf_start = self.field_buf.len();
-                for result in struct_def.fields() {
-                    let Ok(field) = result else { continue };
+                for field in struct_def.fields().filter_map(Result::ok) {
                     let value = self.lower_expr_to_local(field.type_expr());
                     let name_offset = self.lexed.token_src_span(field.name_span().start).start;
                     self.field_buf.push(FieldInfo { name: field.name, name_offset, value });
                 }
                 let fields = self.builder.fields.push_iter(self.field_buf.drain(buf_start..));
+                let methods_start = self.method_buf.len();
+                for method in struct_def.methods().filter_map(Result::ok) {
+                    if let Some(field) =
+                        self.builder.fields[fields].iter().find(|field| field.name == method.name)
+                    {
+                        self.error_duplicate_struct_member(method.name_span(), *field);
+                    }
+                    if let Some(previous) = self.method_buf[methods_start..]
+                        .iter()
+                        .find(|previous| previous.name == method.name)
+                    {
+                        self.error_duplicate_method(
+                            method.name,
+                            method.name_span(),
+                            previous.name_span,
+                        );
+                    }
+                    let method = self.lower_method_def(method);
+                    self.method_buf.push(method);
+                }
+                let methods =
+                    self.builder.methods.push_iter(self.method_buf.drain(methods_start..));
                 let struct_def_id = self.builder.struct_defs.push(StructDef {
                     source_id,
                     source_span,
                     type_index,
                     fields,
+                    methods,
                 });
                 ExprKind::StructDef(struct_def_id)
             }
@@ -675,24 +787,63 @@ impl BlockLowerer<'_> {
     }
 
     fn lower_fn_def(&mut self, fn_def: ast::FnDef<'_>) -> FnDefId {
-        let saved_next_local = std::mem::replace(&mut self.next_local_id, LocalId::ZERO);
-        let saved_fn_scope_start =
-            std::mem::replace(&mut self.fn_scope_start, self.scoped_locals_stack.len());
-        let saved_captures_start =
-            std::mem::replace(&mut self.fn_captures_start, self.captures_buf.len());
+        self.with_function_scope(|this| {
+            this.lower_function(
+                fn_def.params(),
+                fn_def.return_type(),
+                fn_def.body(),
+                fn_def.node().span(),
+                fn_def.param_list_span(),
+                fn_def.eager,
+            )
+        })
+    }
 
+    fn lower_method_def(&mut self, method: ast::MethodDef<'_>) -> MethodInfo {
+        self.with_function_scope(|this| {
+            let self_type = this.alloc_anonymous_local(Binding::SelfType);
+            let function = this.lower_function(
+                method.params(),
+                method.return_type(),
+                method.body(),
+                method.node().span(),
+                method.param_list_span(),
+                method.eager,
+            );
+            let name_span = this.lexed.tokens_src_span(method.name_span());
+            MethodInfo { name: method.name, name_span, function, self_type }
+        })
+    }
+
+    fn with_function_scope<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.local_frames.push(LocalFrame::new());
+        let result = f(self);
+        self.local_frames.pop().expect("missing local frame");
+        result
+    }
+
+    fn lower_function<'ast>(
+        &mut self,
+        params: impl Iterator<Item = Result<ast::Param<'ast>, TokenSpan>>,
+        return_type_expr: ast::Expr<'ast>,
+        body_expr: ast::BlockExpr<'ast>,
+        node_span: TokenSpan,
+        param_list_span: TokenSpan,
+        is_eager: bool,
+    ) -> FnDefId {
         let param_infos_start = self.param_info_buf.len();
         let return_type;
         let type_preamble = {
             let preamble_block_start = self.instructions_buf.len();
-            for (idx, param) in fn_def.params().filter_map(Result::ok).enumerate() {
+            for (idx, param) in params.filter_map(Result::ok).enumerate() {
                 let param_type = match param.param_type() {
                     Ok(ast::ParamType::Explicit(expr)) => {
                         let local = self.lower_expr_to_local(expr);
                         ParamType::Explicit(local)
                     }
                     Ok(ast::ParamType::Any { name, name_span }) => {
-                        if let Some(prev) = self.find_local(name) {
+                        if let Some(prev) = self.current_frame().find_binding(Binding::Named(name))
+                        {
                             self.error_duplicate_param_any_type_capture(name, name_span, prev.span);
                             ParamType::Poisoned
                         } else {
@@ -702,7 +853,9 @@ impl BlockLowerer<'_> {
                     }
                     Err(_span) => ParamType::Poisoned,
                 };
-                let param_value = if let Some(prev) = self.find_local(param.name) {
+                let param_value = if let Some(prev) =
+                    self.current_frame().find_binding(Binding::Named(param.name))
+                {
                     self.error_duplicate_function_parameter(
                         param.name,
                         param.name_span(),
@@ -726,21 +879,21 @@ impl BlockLowerer<'_> {
                     idx: idx as u32,
                 });
             }
-            return_type = self.lower_expr_to_local(fn_def.return_type());
-            let preamble_span = self.lexed.tokens_src_span(fn_def.param_list_span());
+            return_type = self.lower_expr_to_local(return_type_expr);
+            let preamble_span = self.lexed.tokens_src_span(param_list_span);
             self.flush_instructions_from(preamble_block_start, preamble_span)
         };
 
         let saved_is_function_body = self.in_function_body;
         self.in_function_body = true;
 
-        let body = self.lower_fn_body_block(fn_def.body());
-        let source_span = self.lexed.tokens_src_span(fn_def.node().span());
-        let param_list_span = self.lexed.tokens_src_span(fn_def.param_list_span());
+        let body = self.lower_fn_body_block(body_expr);
+        let source_span = self.lexed.tokens_src_span(node_span);
+        let param_list_span = self.lexed.tokens_src_span(param_list_span);
         let fn_def_id = self.builder.fns.push(FnDef {
             type_preamble,
             body,
-            is_eager: fn_def.eager,
+            is_eager,
             return_type,
             source: self.source_id,
             source_span,
@@ -749,24 +902,23 @@ impl BlockLowerer<'_> {
 
         let fn_params_id =
             self.builder.fn_params.push_iter(self.param_info_buf.drain(param_infos_start..));
+        let captures = &self.local_frames.last().expect("missing local frame").captures;
         let fn_captures_id =
-            self.builder.fn_captures.push_iter(self.captures_buf.drain(self.fn_captures_start..));
+            self.builder.fn_captures.push_iter(captures.iter().map(|capture| capture.info));
         assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
         assert_eq!(fn_def_id, fn_captures_id, "fn and fn_captures out of sync");
 
-        self.scoped_locals_stack.truncate(self.fn_scope_start);
-        self.next_local_id = saved_next_local;
-        self.fn_scope_start = saved_fn_scope_start;
-        self.fn_captures_start = saved_captures_start;
         self.in_function_body = saved_is_function_body;
 
         fn_def_id
     }
 
     fn scoped<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
-        let scope_start = self.scoped_locals_stack.len();
+        let frame_depth = self.local_frames.len();
+        let scope_start = self.current_frame().scoped_locals.len();
         let result = f(self);
-        self.scoped_locals_stack.truncate(scope_start);
+        debug_assert_eq!(self.local_frames.len(), frame_depth);
+        self.current_frame_mut().scoped_locals.truncate(scope_start);
         result
     }
 
@@ -905,7 +1057,7 @@ impl BlockLowerer<'_> {
                 let ast::Expr::Ident { name, span } = assign_stmt.target() else {
                     panic!("complex assignment targets not yet supported")
                 };
-                let Some(entry) = self.find_local(name) else {
+                let Some(entry) = self.resolve_binding(Binding::Named(name), span) else {
                     self.error_unresolved_identifier(name, span);
                     return;
                 };
@@ -952,7 +1104,6 @@ impl BlockLowerer<'_> {
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
     let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
-
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
     let mut init = None;
@@ -965,17 +1116,13 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 
         values,
         builder: &mut builder,
-        scoped_locals_stack: Vec::new(),
-        fn_scope_start: 0,
-        fn_captures_start: 0,
+        local_frames: vec![LocalFrame::new()],
         in_function_body: false,
-        next_local_id: LocalId::ZERO,
-
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),
+        method_buf: Vec::new(),
         param_info_buf: Vec::new(),
-        captures_buf: Vec::new(),
 
         lexed: &project.parsed_sources[SourceId::ROOT].lexed,
         source_id: SourceId::ROOT,
@@ -1062,6 +1209,8 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         args: builder.args,
         fields: builder.fields,
         match_arms: builder.match_arms,
+        methods: builder.methods,
+        method_calls: builder.method_calls,
         struct_defs: builder.struct_defs,
 
         fns: builder.fns,
