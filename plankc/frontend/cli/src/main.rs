@@ -49,7 +49,7 @@ enum Action {
 }
 
 #[derive(Parser)]
-struct CommonArgs {
+struct ProjectArgs {
     file_path: String,
 
     #[arg(long = "module-name")]
@@ -66,7 +66,7 @@ struct CommonArgs {
 }
 
 #[derive(Parser)]
-struct InspectArgs {
+struct FrontendDisplayArgs {
     #[arg(short = 'c', long = "show-cst", help = "show CST")]
     show_cst: bool,
 
@@ -89,19 +89,19 @@ struct InspectArgs {
 #[derive(Parser)]
 struct CheckArg {
     #[command(flatten)]
-    common_args: CommonArgs,
+    common_args: ProjectArgs,
 
     #[command(flatten)]
-    inspect_args: InspectArgs,
+    frontend_display_args: FrontendDisplayArgs,
 }
 
 #[derive(Parser)]
 struct BuildArgs {
     #[command(flatten)]
-    common_args: CommonArgs,
+    common_args: ProjectArgs,
 
     #[command(flatten)]
-    inspect_args: InspectArgs,
+    frontend_display_args: FrontendDisplayArgs,
 
     // backend specify
     #[arg(short = 'O', long = "optimize", help = optimize_help())]
@@ -111,7 +111,7 @@ struct BuildArgs {
     backend: BackendArg,
 }
 
-impl InspectArgs {
+impl FrontendDisplayArgs {
     fn needs_separators(&self) -> bool {
         (self.show_hir as u32)
             + (self.show_mir as u32)
@@ -231,9 +231,9 @@ fn check(plank_dir: Option<PathBuf>, args: CheckArg) {
     let mut driver = Driver::new(&RealFs);
 
     let common_args = args.common_args;
-    let inspect_args = args.inspect_args;
+    let frontend_display_args = args.frontend_display_args;
     setup_module(&mut driver, &common_args, plank_dir);
-    if run_frontend(&mut driver, &common_args, &inspect_args).is_none() {
+    if run_frontend(&mut driver, &common_args, &frontend_display_args).is_none() {
         driver.render_diagnostics_and_exit()
     }
 }
@@ -241,32 +241,32 @@ fn check(plank_dir: Option<PathBuf>, args: CheckArg) {
 fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
     let common_args = args.common_args;
-    let inspect_args = args.inspect_args;
+    let frontend_display_args = args.frontend_display_args;
 
     setup_module(&mut driver, &common_args, plank_dir);
 
-    match run_frontend(&mut driver, &common_args, &inspect_args) {
+    match run_frontend(&mut driver, &common_args, &frontend_display_args) {
         None => driver.render_diagnostics_and_exit(),
         Some(mir) => {
             let bytecode = driver
                 .emit_bytecode_with_backend(
                     &mir,
                     args.optimize.as_deref(),
-                    inspect_args.needs_separators(),
-                    inspect_args.show_sir_in,
-                    inspect_args.show_sir_last,
+                    frontend_display_args.needs_separators(),
+                    frontend_display_args.show_sir_in,
+                    frontend_display_args.show_sir_last,
                     args.backend.into(),
                 )
                 .unwrap_or_else(|err| cli_error_and_exit(err));
 
             println!("{:#}", alloy_primitives::hex::display(bytecode));
-        },
+        }
     };
 }
 
 fn setup_module<F: SourceFs>(
     driver: &mut Driver<F>,
-    common_args: &CommonArgs,
+    common_args: &ProjectArgs,
     plank_dir: Option<PathBuf>,
 ) {
     if let Some(name) = &common_args.module_name {
@@ -305,8 +305,8 @@ fn setup_module<F: SourceFs>(
 
 fn run_frontend<F: SourceFs>(
     driver: &mut Driver<F>,
-    common_args: &CommonArgs,
-    inspect_args: &InspectArgs,
+    common_args: &ProjectArgs,
+    frontend_display_args: &FrontendDisplayArgs,
 ) -> Option<Mir> {
     let project = match driver.load_project(Path::new(&common_args.file_path)) {
         Some(project) => project,
@@ -315,7 +315,7 @@ fn run_frontend<F: SourceFs>(
         }
     };
 
-    if inspect_args.show_cst {
+    if frontend_display_args.show_cst {
         let parsed = &project.parsed_sources[SourceId::ROOT];
         let source = driver.session.get_source(SourceId::ROOT);
         let display = DisplayCST::new(&parsed.cst, &source.content, &parsed.lexed);
@@ -324,16 +324,23 @@ fn run_frontend<F: SourceFs>(
 
     let hir = driver.lower_hir(&project);
 
-    if inspect_args.show_hir {
-        print_ir("HIR", inspect_args.needs_separators(), DisplayHir::new(&hir, &driver.values, &driver.session));
+    if frontend_display_args.show_hir {
+        print_ir(
+            "HIR",
+            frontend_display_args.needs_separators(),
+            DisplayHir::new(&hir, &driver.values, &driver.session),
+        );
     }
 
     let mir = driver.evaluate_hir(&hir, project.core_ops_source, common_args.evm_version.into());
-    
-    if inspect_args.show_mir {
-        print_ir("MIR",  inspect_args.needs_separators(), DisplayMir::new(&mir, &driver.values, &driver.session));
+
+    if frontend_display_args.show_mir {
+        print_ir(
+            "MIR",
+            frontend_display_args.needs_separators(),
+            DisplayMir::new(&mir, &driver.values, &driver.session),
+        );
     }
 
     if driver.session.has_errors() { None } else { Some(mir) }
 }
-
