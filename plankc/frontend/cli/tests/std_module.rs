@@ -128,3 +128,67 @@ init {
 
     assert!(!output.status.success());
 }
+
+#[test]
+fn plank_cli_check_successful() {
+    let plank_dir = TempDir::new().unwrap();
+    create_std_dir(&plank_dir);
+
+    let source_dir = TempDir::new().unwrap();
+    let source_file = source_dir.path().join("main.plk");
+    fs::write(
+        &source_file,
+        dedent_preserve_indent(
+            r#"
+            import std::math::max;
+
+            init {
+                let a = max(1, 2);
+                @evm_stop();
+            }
+            "#,
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(plank_bin())
+        .arg("check")
+        .arg(&source_file)
+        .env("PLANK_DIR", plank_dir.path())
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn plank_cli_check_return_errors() {
+    let plank_dir = TempDir::new().unwrap();
+    create_std_dir(&plank_dir);
+
+    let source_dir = TempDir::new().unwrap();
+    let source_file = source_dir.path().join("main.plk");
+    fs::write(
+        &source_file,
+        dedent_preserve_indent(
+            r#"
+            import std::math::max;
+            "#,
+        ),
+    )
+    .unwrap();
+
+    let output = Command::new(plank_bin())
+        .arg("check")
+        .arg(&source_file)
+        .env("PLANK_DIR", plank_dir.path())
+        .output()
+        .unwrap();
+    
+    assert!(!output.status.success());
+    let diag = String::from_utf8_lossy(&output.stderr);
+
+    assert!(diag.contains("missing init block"), "Failed for an unexpected reason: {}", &diag);
+
+}
+
