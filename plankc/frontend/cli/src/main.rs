@@ -100,7 +100,7 @@ struct CheckArg {
 #[derive(Parser)]
 struct BuildArgs {
     #[command(flatten)]
-    common_args: ProjectArgs,
+    project_args: ProjectArgs,
 
     #[command(flatten)]
     frontend_display_args: FrontendDisplayArgs,
@@ -108,7 +108,6 @@ struct BuildArgs {
     #[command(flatten)]
     backend_display_args: BackendDisplayArgs,
 
-    // backend specify
     #[arg(short = 'O', long = "optimize", help = optimize_help())]
     optimize: Option<String>,
 
@@ -222,22 +221,22 @@ fn doc(doc_dir: PathBuf, topic: Option<String>) {
 fn check(plank_dir: Option<PathBuf>, args: CheckArg) {
     let mut driver = Driver::new(&RealFs);
 
-    let common_args = args.common_args;
+    let project_args = args.common_args;
     let frontend_display_args = args.frontend_display_args;
-    register_modules(&mut driver, &common_args, plank_dir);
-    if run_frontend(&mut driver, &common_args, &frontend_display_args).is_none() {
+    register_modules(&mut driver, &project_args, plank_dir);
+    if run_frontend(&mut driver, &project_args, &frontend_display_args).is_none() {
         driver.render_diagnostics_and_exit()
     }
 }
 
 fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
     let mut driver = Driver::new(&RealFs);
-    let common_args = args.common_args;
+    let project_args = args.project_args;
     let frontend_display_args = args.frontend_display_args;
     let backend_display_args = args.backend_display_args;
-    register_modules(&mut driver, &common_args, plank_dir);
+    register_modules(&mut driver, &project_args, plank_dir);
 
-    match run_frontend(&mut driver, &common_args, &frontend_display_args) {
+    match run_frontend(&mut driver, &project_args, &frontend_display_args) {
         None => driver.render_diagnostics_and_exit(),
         Some(mir) => {
             let bytecode = driver
