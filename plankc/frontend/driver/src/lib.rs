@@ -104,23 +104,15 @@ impl<'a, F: SourceFs> Driver<'a, F> {
         backend: BackendKind,
     ) -> Result<Vec<u8>, String> {
         match backend {
-            BackendKind::Sona => self.emit_sona_bytecode(
-                mir,
-                optimizations,
-                show_sir_in,
-                show_sir_last,
-            ),
+            BackendKind::Sona => {
+                self.emit_sona_bytecode(mir, optimizations, show_sir_in, show_sir_last)
+            }
             BackendKind::Sir => {
                 let optimization_level = match optimizations {
                     Some(level) => level.parse()?,
                     None => OptimizationLevel::default(),
                 };
-                self.emit_sir_bytecode(
-                    mir,
-                    optimization_level,
-                    show_sir_in,
-                    show_sir_last,
-                )
+                self.emit_sir_bytecode(mir, optimization_level, show_sir_in, show_sir_last)
             }
         }
     }
