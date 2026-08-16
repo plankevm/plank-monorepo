@@ -13,11 +13,10 @@ pub struct CopyPropagation {
 impl Pass for CopyPropagation {
     fn run(&mut self, program: &mut EthIRProgram, store: &AnalysesStore) {
         let rpo = store.reverse_post_order(program);
-        for &bb_id in rpo.blocks_rpo() {
-            let bb = &mut program.basic_blocks[bb_id];
-            self.copy_map.clear();
+        self.copy_map.clear();
 
-            let ops_span = bb.operations;
+        for &bb_id in rpo.blocks_rpo() {
+            let ops_span = program.basic_blocks[bb_id].operations;
             for op in &program.operations[ops_span] {
                 if let Operation::SetCopy(InlineOperands { ins: [src], outs: [dst] }) = op {
                     let resolved_src = self.copy_map.get(src).unwrap_or(src);
@@ -25,7 +24,11 @@ impl Pass for CopyPropagation {
                     debug_assert!(prev.is_none(), "SSA violation: {:?} defined twice", dst);
                 }
             }
+        }
 
+        for &bb_id in rpo.blocks_rpo() {
+            let bb = &mut program.basic_blocks[bb_id];
+            let ops_span = bb.operations;
             for op_idx in ops_span.iter() {
                 let mut op = program.operations[op_idx];
                 for input in op.inputs_mut(&mut program.locals) {
@@ -339,7 +342,59 @@ mod tests {
     }
 
     #[test]
-    fn test_copy_map_does_not_leak_between_blocks() {
+    fn test_copy_propagates_across_dominated_blocks() {
+        let input = r#"
+            fn init:
+                entry {
+                    source = const 1
+                    copied = copy source
+                    => @next
+                }
+                next {
+                    result = add copied copied
+                    => copied ? @nonzero : @zero
+                }
+                nonzero {
+                    stop
+                }
+                zero {
+                    stop
+                }
+        "#;
+
+        let actual = run_pass_and_display::<CopyPropagation>(input);
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = const 0x1
+                    $1 = copy $0
+                    => @1
+                }
+
+                @1 {
+                    $2 = add $0 $0
+                    => $0 ? @2 : @3
+                }
+
+                @2 {
+                    stop
+                }
+
+                @3 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_block_inputs_are_not_replaced_by_predecessor_copies() {
         let input = r#"
             fn init:
                 entry {
