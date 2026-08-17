@@ -17,15 +17,13 @@ mod greedy_shuffler;
 mod layouts;
 mod scheduler;
 pub mod stack;
-
-mod beam_searching;
+pub mod treegraph;
 
 newtype_index! {
     pub struct StackOpIdx;
 }
 
 const AVG_OPS_PER_BLOCK: usize = 20;
-const DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH: usize = 32;
 const DEFAULT_MAX_EXHAUSTIVE_CANDIDATES: usize = 10_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
@@ -95,8 +93,6 @@ pub fn schedule<'ir>(
                     config,
                     exhaustive_searching::SearchConfig {
                         max_candidates: NonZero::new(DEFAULT_MAX_EXHAUSTIVE_CANDIDATES).unwrap(),
-                        incumbent_beam_width: NonZero::new(DEFAULT_BEAM_SCHEDULE_SEARCH_WIDTH)
-                            .unwrap(),
                     },
                     &graph,
                 );

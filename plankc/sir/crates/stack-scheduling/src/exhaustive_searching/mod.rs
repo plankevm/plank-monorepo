@@ -1,15 +1,14 @@
 use std::num::NonZero;
 
-use hashbrown::HashMap;
 use plank_core::IndexVec;
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
 
 use crate::{
-    beam_searching::{self, ScheduleConfig},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpSet, OpSetMut, ValueNodeId},
+    scheduler::greedy_schedule,
     stack::{ShuffleConfig, StackOps, TrackedStack},
 };
 
@@ -20,7 +19,6 @@ const ESTIMATED_STACK_OPS_PER_GRAPH_OP: usize = 8;
 #[derive(Clone, Copy)]
 pub struct SearchConfig {
     pub max_candidates: NonZero<usize>,
-    pub incumbent_beam_width: NonZero<usize>,
 }
 
 pub struct SearchResult {
@@ -34,13 +32,6 @@ struct SearchNode {
     stack_end: usize,
     completed_count: u32,
     executed_cost: u32,
-}
-
-#[derive(PartialEq, Eq, Hash)]
-struct SearchKey {
-    complete: Box<[BitsetWord]>,
-    values: Box<[ValueNodeId]>,
-    stack_end: usize,
 }
 
 struct Child {
@@ -60,7 +51,6 @@ struct Search<'a> {
     best_ops: Box<[StackOps]>,
     best_spill_count: u32,
     path: Vec<StackOps>,
-    visited: HashMap<SearchKey, u32>,
 }
 
 pub fn searching_schedule(
@@ -71,14 +61,8 @@ pub fn searching_schedule(
     graph: &OpGraph,
 ) -> SearchResult {
     let mut incumbent_ops = Vec::new();
-    let incumbent_next_alloc_id = beam_searching::searching_schedule(
-        |op| incumbent_ops.push(op),
-        block,
-        next_alloc_id,
-        shuffle,
-        ScheduleConfig { beam_width: config.incumbent_beam_width },
-        graph,
-    );
+    let incumbent_next_alloc_id =
+        greedy_schedule(|op| incumbent_ops.push(op), block, next_alloc_id, shuffle, graph);
     let incumbent_cost = stack_ops_cost(&incumbent_ops, shuffle);
     let incumbent_spill_count = incumbent_next_alloc_id - next_alloc_id;
 
@@ -96,11 +80,6 @@ pub fn searching_schedule(
         completed_count: 0,
         executed_cost: 0,
     };
-    let start_key = SearchKey {
-        complete: start.complete.clone(),
-        values: start.values.clone(),
-        stack_end: start.stack_end,
-    };
     let mut search = Search {
         block,
         graph,
@@ -112,7 +91,6 @@ pub fn searching_schedule(
         best_ops: incumbent_ops.into_boxed_slice(),
         best_spill_count: incumbent_spill_count,
         path: Vec::with_capacity(graph.total_ops() as usize * ESTIMATED_STACK_OPS_PER_GRAPH_OP),
-        visited: HashMap::from([(start_key, 0)]),
     };
     search.visit(start);
 
@@ -152,20 +130,6 @@ impl Search<'_> {
         children.sort_unstable_by_key(|child| child.lower_bound);
 
         for child in children {
-            let key = SearchKey {
-                complete: child.node.complete.clone(),
-                values: child.node.values.clone(),
-                stack_end: child.node.stack_end,
-            };
-            if self
-                .visited
-                .get(&key)
-                .is_some_and(|&best_cost| best_cost <= child.node.executed_cost)
-            {
-                continue;
-            }
-            self.visited.insert(key, child.node.executed_cost);
-
             let path_len = self.path.len();
             self.path.extend_from_slice(&child.transition_ops);
             self.visit(child.node);
@@ -290,6 +254,18 @@ fn remaining_cost_lower_bound(
 
 fn stack_ops_cost(ops: &[StackOps], shuffle: ShuffleConfig) -> u32 {
     ops.iter()
-        .map(|&op| u32::from(beam_searching::op_cost_model(op, shuffle)) * BASE_COST_FACTOR)
+        .map(|&op| {
+            let cost = match op {
+                // These represent necessary basic block operations and therefore shouldn't be
+                // included in the scheduling cost.
+                StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
+                StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => 3,
+                StackOps::Exchange(_, _) => shuffle.exchange_cost,
+                // Conservatively assume store will need to pay for memory expansion.
+                StackOps::Store(_) => 9,
+                StackOps::Load(_) => 6,
+            };
+            u32::from(cost) * BASE_COST_FACTOR
+        })
         .sum()
 }
