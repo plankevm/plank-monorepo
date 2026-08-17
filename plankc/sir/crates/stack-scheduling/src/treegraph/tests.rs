@@ -591,3 +591,70 @@ fn does_not_absorb_multi_output_or_repeated_operands() {
         "#,
     );
 }
+
+#[test]
+fn keeps_the_deep_operand_separate_when_sibling_inputs_break_stack_order() {
+    let input = {
+        let mut builder = OpGraphBuilder::with_capacity(3, 7);
+        let high_left = builder.push_input_value();
+        let high_right = builder.push_input_value();
+        let deep_left = builder.push_input_value();
+        let deep_right = builder.push_input_value();
+        let mut builder = builder.end_inputs_begin_ops();
+        let high = {
+            let mut op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            op.add_input(high_left);
+            op.add_input(high_right);
+            op.end_inputs_begin_outputs().add_output()
+        };
+        let deep = {
+            let mut op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            op.add_input(deep_left);
+            op.add_input(deep_right);
+            op.end_inputs_begin_outputs().add_output()
+        };
+        let output = {
+            let mut op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            op.add_input(high);
+            op.add_input(deep);
+            op.end_inputs_begin_outputs().add_output()
+        };
+        let mut builder = builder.end_ops_begin_end_stack();
+        builder.push_end_stack_value(output);
+        builder.finish()
+    };
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+            input graph:
+              inputs: [v0, v1, v2, v3]
+              op0 normal
+                inputs: [v0, v1]
+                outputs: [v4]
+                predecessors: []
+              op1 normal
+                inputs: [v2, v3]
+                outputs: [v5]
+                predecessors: []
+              op2 normal
+                inputs: [v4, v5]
+                outputs: [v6]
+                predecessors: [op0, op1]
+              outputs: [v6]
+
+            tree graph:
+              inputs: [v0, v1, v2, v3]
+              op0 normal = [op1]
+                inputs: [v2, v3]
+                outputs: [v4]
+                predecessors: []
+              op1 normal = [op0, op2]
+                inputs: [v0, v1, v4]
+                outputs: [v5]
+                predecessors: [op0]
+              outputs: [v5]
+        "#,
+    );
+}
