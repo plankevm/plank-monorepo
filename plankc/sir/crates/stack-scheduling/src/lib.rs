@@ -9,7 +9,7 @@ use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{op_graph::build_graph_effectful, stack::StackOps};
+use crate::{op_graph::build_graph_effectful, stack::StackOps, treegraph::build_tree_graph};
 
 mod exhaustive_searching;
 mod greedy_intra_op_scheduler;
@@ -87,15 +87,17 @@ pub fn schedule<'ir>(
         block_graphs
             .into_par_iter()
             .map(|(block, graph)| {
-                let result = exhaustive_searching::searching_schedule(
+                let tree_graph = build_tree_graph(&graph);
+                let mut result = exhaustive_searching::searching_schedule(
                     block,
                     local_alloc_start,
                     config,
                     exhaustive_searching::SearchConfig {
                         max_candidates: NonZero::new(DEFAULT_MAX_EXHAUSTIVE_CANDIDATES).unwrap(),
                     },
-                    &graph,
+                    &tree_graph.graph,
                 );
+                result.ops = tree_graph.expand_schedule(&graph, &result.ops);
                 (block.id(), result)
             })
             .collect::<Vec<_>>()

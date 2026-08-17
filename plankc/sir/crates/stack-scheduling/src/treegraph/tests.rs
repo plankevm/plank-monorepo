@@ -29,7 +29,7 @@ fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<
         write!(out, "  op{} {}", operation.get(), kind_name(op.kind)).unwrap();
         if let Some(trees) = trees {
             out.push_str(" = [");
-            for (position, step) in trees.original_operations(operation).iter().enumerate() {
+            for (position, step) in trees.original_operations(operation).enumerate() {
                 if position != 0 {
                     out.push_str(", ");
                 }
