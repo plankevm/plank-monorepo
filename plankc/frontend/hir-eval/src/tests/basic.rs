@@ -202,6 +202,58 @@ fn test_imported_init_missing_termination() {
 }
 
 #[test]
+fn test_imported_type_shadowing_at_file_scope_is_invalid() {
+    assert_project_diagnostics(
+        TestProject::root(
+            r#"
+            import m::other::storage;
+
+            const storage = fn(comptime T: type) type { T };
+
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file("other", "const storage = struct {};")
+        .add_module("m", ""),
+        &[r#"
+        error: imported definition collision
+         --> main.plk:1:1
+          |
+        1 | import m::other::storage;
+          | ^^^^^^^^^^^^^^^^^^^^^^^^^ conflicting import
+        2 |
+        3 | const storage = fn(comptime T: type) type { T };
+          | ------------------------------------------------ 'storage' previously defined here
+        "#],
+    );
+}
+
+#[test]
+fn test_imported_type_shadowing_in_local_scope_is_valid() {
+    assert_lowers_to(
+        TestProject::root(
+            r#"
+            import m::other::storage;
+
+            init {
+                let storage = fn(comptime T: type) type { T };
+                @evm_stop();
+            }
+            "#,
+        )
+        .add_file("other", "const storage = struct {};")
+        .add_module("m", ""),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_imported_init_missing_termination_without_entry_init() {
     assert_project_diagnostics(
         TestProject::root(
