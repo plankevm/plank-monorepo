@@ -3,8 +3,7 @@ use sir_data::OperationIdx;
 
 mod build_effectful;
 mod build_simple;
-mod builder;
-
+pub mod builder;
 pub use build_effectful::build_graph_effectful;
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
