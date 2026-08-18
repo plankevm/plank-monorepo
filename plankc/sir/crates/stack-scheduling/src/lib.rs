@@ -24,7 +24,7 @@ newtype_index! {
 }
 
 const AVG_OPS_PER_BLOCK: usize = 20;
-const DEFAULT_MAX_EXHAUSTIVE_CANDIDATES: usize = 10_000;
+const DEFAULT_MAX_EXHAUSTIVE_CANDIDATES: usize = 100_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
 #[derive(Debug)]

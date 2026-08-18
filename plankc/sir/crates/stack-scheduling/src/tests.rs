@@ -560,12 +560,12 @@ fn spill_allocations_are_unique_across_internal_calls() {
         "#,
         r#"
         @0 [return_dest, $0]
-            swap 1
-            not
             const 0x4
+            pop
             const 0x5
             pop
-            pop
+            swap 1
+            not
             swap 1
             => [return_dest | $3]
             (iret)
