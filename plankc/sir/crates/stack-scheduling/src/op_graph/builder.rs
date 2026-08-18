@@ -13,6 +13,15 @@ fn add_to_set(set: &mut Vec<BitsetWord>, id: OpNodeId) {
     set[word_idx as usize] |= 1 << shift;
 }
 
+fn union_bitset(dst: &mut Vec<BitsetWord>, src: &[BitsetWord]) {
+    if dst.len() < src.len() {
+        dst.resize(src.len(), 0);
+    }
+    for (dst, &src) in dst.iter_mut().zip(src) {
+        *dst |= src;
+    }
+}
+
 fn copy_bitset(dst: &mut [BitsetWord], src: &[BitsetWord]) {
     assert!(src.len() <= dst.len());
     dst[..src.len()].copy_from_slice(src);
@@ -74,6 +83,14 @@ impl OpGraphStorage {
         OpBuilder { graph: self, op, _phase: PhantomData }
     }
 
+    fn add_predecessor(&mut self, operation: OpNodeId, predecessor: OpNodeId) {
+        assert!(predecessor < operation, "operation predecessor must have an earlier ID");
+        let (earlier, current_and_later) = self.op_predecessors.split_at_mut(operation.idx());
+        let current = current_and_later.first_mut().expect("operation predecessor set disappeared");
+        add_to_set(current, predecessor);
+        union_bitset(current, &earlier[predecessor.idx()]);
+    }
+
     fn finish(self, inputs_end: ValueNodeId, end_stack_fifo_start: ValueArenaIdx) -> OpGraph {
         assert_eq!(self.operations.len_idx(), self.op_predecessors.len_idx());
 
@@ -93,6 +110,8 @@ impl OpGraphStorage {
             offset += words_per_set;
         }
 
+        let producers = self.values.iter().map(|(producer, _)| *producer).collect();
+
         OpGraph {
             total_ops: total_ops.try_into().expect("overflow"),
             total_values: total_values.try_into().expect("overflow"),
@@ -102,6 +121,7 @@ impl OpGraphStorage {
 
             values_arena: self.values_arena,
             operations: self.operations,
+            producers,
 
             bit_sets_arena,
         }
@@ -155,8 +175,8 @@ impl<Phase> OpBuilder<'_, Phase> {
         self.op
     }
 
-    pub fn add_predecessor(&mut self, pred: OpNodeId) {
-        add_to_set(&mut self.graph.op_predecessors[self.op], pred);
+    pub fn add_predecessor(&mut self, predecessor: OpNodeId) {
+        self.graph.add_predecessor(self.op, predecessor);
     }
 }
 
@@ -165,10 +185,13 @@ impl<'g> OpBuilder<'g, AddingInputs> {
         self.graph.values_arena.push(value);
         self.graph.operations[self.op].input_count += 1;
 
-        let (maybe_source, consumers) = &mut self.graph.values[value];
-        add_to_set(consumers, self.op);
-        if let Some(source) = maybe_source {
-            add_to_set(&mut self.graph.op_predecessors[self.op], *source);
+        let source = {
+            let (source, consumers) = &mut self.graph.values[value];
+            add_to_set(consumers, self.op);
+            *source
+        };
+        if let Some(source) = source {
+            self.graph.add_predecessor(self.op, source);
         }
     }
 
@@ -183,5 +206,55 @@ impl OpBuilder<'_, AddingOutputs> {
         let value = self.graph.values.push((Some(self.op), Vec::with_capacity(estimated_words)));
         self.graph.values_arena.push(value);
         value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sir_data::OperationIdx;
+
+    #[test]
+    fn preserves_producers_and_complete_predecessors() {
+        let mut graph = OpGraphBuilder::with_capacity(3, 4);
+        let input = graph.push_input_value();
+        let mut graph = graph.end_inputs_begin_ops();
+
+        let (first, first_value) = {
+            let operation = graph.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            let id = operation.id();
+            (id, operation.end_inputs_begin_outputs().add_output())
+        };
+        let (second, second_value) = {
+            let mut operation = graph.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(first);
+            operation.add_predecessor(first);
+            let id = operation.id();
+            (id, operation.end_inputs_begin_outputs().add_output())
+        };
+        let third = {
+            let mut operation = graph.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_input(second_value);
+            operation.id()
+        };
+        let graph = graph.end_ops_begin_end_stack().finish();
+
+        assert_eq!(graph.get_producer(input), None);
+        assert_eq!(graph.get_producer(first_value), Some(first));
+        assert_eq!(graph.get_producer(second_value), Some(second));
+        assert_eq!(graph.get_predecessors(first).count_members(), 0);
+        assert!(graph.get_predecessors(second).contains(first));
+        assert!(graph.get_predecessors(third).contains(first));
+        assert!(graph.get_predecessors(third).contains(second));
+        assert_eq!(graph.get_predecessors(third).count_members(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "operation predecessor must have an earlier ID")]
+    fn rejects_a_non_earlier_predecessor() {
+        let graph = OpGraphBuilder::with_capacity(1, 0);
+        let mut graph = graph.end_inputs_begin_ops();
+        let mut operation = graph.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+        operation.add_predecessor(operation.id());
     }
 }
