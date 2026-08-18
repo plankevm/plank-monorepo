@@ -40,7 +40,7 @@ pub fn greedy_schedule(
         let Some(op) = completable.iter().next() else {
             break 'schedule;
         };
-        greedy_schedule_op(config, &mut stack, graph, op, complete.as_ref());
+        greedy_schedule_op(config, &mut stack, graph, op, complete.as_ref(), false);
         complete.add(op);
     }
 

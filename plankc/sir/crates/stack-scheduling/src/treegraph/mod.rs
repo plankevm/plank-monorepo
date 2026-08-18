@@ -61,10 +61,12 @@ impl TreeGraph {
 
         let mut expanded = Vec::with_capacity(original.total_ops() as usize + schedule.len());
         for &scheduled in schedule {
-            let tree_operation = match scheduled {
-                StackOps::Op(operation) => operations.get(operation).copied(),
-                StackOps::CallRetPush(operation) => return_dest_pushes.get(operation).copied(),
-                StackOps::Flipped(_) => unreachable!("tree operations are scheduled unflipped"),
+            let (tree_operation, externally_flipped) = match scheduled {
+                StackOps::Op(operation) => (operations.get(operation).copied(), false),
+                StackOps::Flipped(operation) => (operations.get(operation).copied(), true),
+                StackOps::CallRetPush(operation) => {
+                    (return_dest_pushes.get(operation).copied(), false)
+                }
                 operation => {
                     expanded.push(operation);
                     continue;
@@ -72,11 +74,14 @@ impl TreeGraph {
             };
             let tree_operation =
                 tree_operation.expect("scheduled operation missing from tree graph");
+            if externally_flipped {
+                assert!(matches!(self.graph.get_op(tree_operation).kind, OpNodeKind::Flippable(_)));
+            }
+            let root = *self.trees[tree_operation].steps.last().expect("empty tree");
             expanded.extend(self.original_operations(tree_operation).map(|step| {
+                let flipped = step.flipped ^ (externally_flipped && step.operation == root);
                 match original.get_op(step.operation).kind {
-                    OpNodeKind::Flippable(operation) if step.flipped => {
-                        StackOps::Flipped(operation)
-                    }
+                    OpNodeKind::Flippable(operation) if flipped => StackOps::Flipped(operation),
                     OpNodeKind::Flippable(operation) | OpNodeKind::Normal(operation) => {
                         StackOps::Op(operation)
                     }

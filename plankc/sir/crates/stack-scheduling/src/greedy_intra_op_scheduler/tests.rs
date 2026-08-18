@@ -92,7 +92,7 @@ fn assert_intra_op_schedule_exists(
         );
     }
 
-    greedy_schedule_op(config, &mut stack, &graph, op_id, complete);
+    greedy_schedule_op(config, &mut stack, &graph, op_id, complete, false);
 
     for &value in start_stack {
         let value = ValueNodeId::new(value);
@@ -194,6 +194,36 @@ fn opts() -> AssertScheduleBuilder {
         spilled: Vec::new(),
         last_uses: Vec::new(),
     }
+}
+
+#[test]
+fn schedules_flipped_operand_order() {
+    let mut builder = OpGraphBuilder::with_capacity(1, 2);
+    let high = builder.push_input_value();
+    let deep = builder.push_input_value();
+    let mut builder = builder.end_inputs_begin_ops();
+    let op_id = {
+        let mut op = builder.begin_op(OpNodeKind::Flippable(OperationIdx::ZERO));
+        op.add_input(high);
+        op.add_input(deep);
+        let op_id = op.id();
+        drop(op.end_inputs_begin_outputs());
+        op_id
+    };
+    let graph = builder.end_ops_begin_end_stack().finish();
+    let complete_backing = vec![0; graph.words_per_set() as usize];
+    let complete = OpSet::new(&complete_backing, graph.total_ops());
+    let mut ops = Vec::new();
+    let mut stack = TrackedStack::new_from_parts(
+        StaticAllocId::ZERO,
+        |op| ops.push(op),
+        &[deep, high],
+        Vec::new(),
+    );
+
+    greedy_schedule_op(ShuffleConfig::default(), &mut stack, &graph, op_id, complete, true);
+
+    assert_eq!(ops, [Flipped(OperationIdx::ZERO)]);
 }
 
 #[test]
