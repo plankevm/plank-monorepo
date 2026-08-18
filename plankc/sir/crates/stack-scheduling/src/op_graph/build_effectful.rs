@@ -250,7 +250,7 @@ mod tests {
                     OpNodeKind::RetDestPush(_) => "ret_dest_push",
                 };
                 write!(out, "    #{op_id} {name} [").unwrap();
-                for (i, pred) in op.predecessors.iter().enumerate() {
+                for (i, pred) in graph.displayed_predecessors(op_id).into_iter().enumerate() {
                     if i != 0 {
                         out.push_str(", ");
                     }
@@ -308,9 +308,9 @@ mod tests {
                 #0 const []
                 #1 const []
                 #2 mstore [#0, #1]
-                #3 mload [#0, #2]
-                #4 mload [#0, #2]
-                #5 mstore [#0, #2, #3, #4]
+                #3 mload [#2]
+                #4 mload [#2]
+                #5 mstore [#3, #4]
                 #6 stop []
             "#,
         );
@@ -335,8 +335,8 @@ mod tests {
                 #0 const []
                 #1 sload [#0]
                 #2 sload [#0]
-                #3 sstore [#0, #1, #2]
-                #4 sload [#0, #3]
+                #3 sstore [#1, #2]
+                #4 sload [#3]
                 #5 stop [#3]
             "#,
         );
@@ -360,8 +360,8 @@ mod tests {
                 #0 const []
                 #1 const []
                 #2 log0 [#0, #1]
-                #3 log0 [#0, #1, #2]
-                #4 return [#0, #1, #3]
+                #3 log0 [#2]
+                #4 return [#3]
             "#,
         );
     }
@@ -441,8 +441,8 @@ mod tests {
                 #2 ret_dest_push []
                 #3 icall [#0, #2]
                 #4 sload [#0]
-                #5 log0 [#0, #3]
-                #6 stop [#3, #5]
+                #5 log0 [#3]
+                #6 stop [#5]
             "#,
         );
     }
@@ -479,7 +479,7 @@ mod tests {
                 #1 ret_dest_push []
                 #2 icall [#0, #1]
                 #3 ret_dest_push []
-                #4 icall [#0, #2, #3]
+                #4 icall [#2, #3]
                 #5 stop [#4]
             "#,
         );
@@ -546,7 +546,7 @@ mod tests {
                 #0 const []
                 #1 sstore [#0]
                 #2 mstore [#0]
-                #3 revert [#0, #2]
+                #3 revert [#2]
             "#,
         );
     }
@@ -631,9 +631,9 @@ mod tests {
                 #1 ret_dest_push []
                 #2 icall [#0, #1]
                 #3 ret_dest_push []
-                #4 icall [#0, #2, #3]
-                #5 sload [#0, #4]
-                #6 stop [#2, #4]
+                #4 icall [#2, #3]
+                #5 sload [#4]
+                #6 stop [#4]
             "#,
         );
     }
@@ -659,8 +659,8 @@ mod tests {
                 #1 tload [#0]
                 #2 tload [#0]
                 #3 sstore [#0]
-                #4 tstore [#0, #1, #2]
-                #5 tload [#0, #4]
+                #4 tstore [#1, #2]
+                #5 tload [#4]
                 #6 stop [#3, #4]
             "#,
         );
@@ -686,7 +686,7 @@ mod tests {
                 #1 staticcall [#0]
                 #2 returndatasize [#1]
                 #3 returndatasize [#1]
-                #4 staticcall [#0, #1, #2, #3]
+                #4 staticcall [#2, #3]
                 #5 stop []
             "#,
         );
@@ -723,7 +723,7 @@ mod tests {
                 #8 mstore [#3, #6, #7]
                 #9 const []
                 #10 mstore [#4, #8, #9]
-                #11 mload [#4, #10]
+                #11 mload [#10]
                 #12 const []
                 #13 malloc [#4, #12]
                 #14 mload [#10, #13]
@@ -804,7 +804,7 @@ mod tests {
                 #1 ret_dest_push []
                 #2 icall [#0, #1]
                 #3 ret_dest_push []
-                #4 icall [#0, #2, #3]
+                #4 icall [#2, #3]
                 #5 ret_dest_push []
                 #6 icall [#0, #5]
                 #7 stop [#4]

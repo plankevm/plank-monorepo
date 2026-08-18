@@ -41,6 +41,7 @@ pub struct OpGraph {
     /// Holds `[(op_input*, op_output*)] ++ end_stack_fifo`
     values_arena: IndexVec<ValueArenaIdx, ValueNodeId>,
     operations: IndexVec<OpNodeId, StoredOpView>,
+    producers: IndexVec<ValueNodeId, Option<OpNodeId>>,
 
     /// Holds `op_predecessors ++ value_consumers`
     bit_sets_arena: Vec<BitsetWord>,
@@ -107,8 +108,14 @@ impl OpGraph {
         OpSet { words, total_ops: self.total_ops }
     }
 
+    /// Returns every operation that must execute before `id`, including predecessors of
+    /// predecessors.
     pub fn get_predecessors(&self, id: OpNodeId) -> OpSet<'_> {
         self.get_bit_set(id.idx())
+    }
+
+    pub fn get_producer(&self, id: ValueNodeId) -> Option<OpNodeId> {
+        self.producers[id]
     }
 
     pub fn get_consumers(&self, id: ValueNodeId) -> OpSet<'_> {
@@ -137,6 +144,19 @@ impl OpGraph {
                 out.add(op);
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn displayed_predecessors(&self, operation: OpNodeId) -> Vec<OpNodeId> {
+        let predecessors = self.get_predecessors(operation);
+        predecessors
+            .iter()
+            .filter(|&candidate| {
+                !predecessors
+                    .iter()
+                    .any(|predecessor| self.get_predecessors(predecessor).contains(candidate))
+            })
+            .collect()
     }
 }
 

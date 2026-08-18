@@ -44,7 +44,7 @@ fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<
         out.push('\n');
         write_values(out, "    inputs", op.inputs_fifo.iter().copied());
         write_values(out, "    outputs", op.outputs_fifo.iter().copied());
-        write_operations(out, "    predecessors", op.predecessors.iter());
+        write_operations(out, "    predecessors", graph.displayed_predecessors(operation));
     }
     write_values(out, "  outputs", graph.output_values_fifo().iter().copied());
 }
@@ -501,7 +501,7 @@ fn folding_both_leading_operands_removes_flippability_while_preserving_internal_
               op2 flippable
                 inputs: [v0, v1]
                 outputs: [v2]
-                predecessors: [op0, op1]
+                predecessors: [op1]
               outputs: [v2]
 
             tree graph:
@@ -511,6 +511,82 @@ fn folding_both_leading_operands_removes_flippability_while_preserving_internal_
                 outputs: [v0]
                 predecessors: []
               outputs: [v0]
+        "#,
+    );
+}
+
+#[test]
+fn folds_only_the_viable_leading_operand_when_both_orders_are_interposed() {
+    let input = {
+        let builder = OpGraphBuilder::with_capacity(4, 3);
+        let mut builder = builder.end_inputs_begin_ops();
+        let (first_operation, first) = {
+            let operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            let id = operation.id();
+            (id, operation.end_inputs_begin_outputs().add_output())
+        };
+        let interposed = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(first_operation);
+            let id = operation.id();
+            let _operation = operation.end_inputs_begin_outputs();
+            id
+        };
+        let second = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(interposed);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let output = {
+            let mut operation = builder.begin_op(OpNodeKind::Flippable(OperationIdx::ZERO));
+            operation.add_input(first);
+            operation.add_input(second);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let mut builder = builder.end_ops_begin_end_stack();
+        builder.push_end_stack_value(output);
+        builder.finish()
+    };
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+            input graph:
+              inputs: []
+              op0 normal
+                inputs: []
+                outputs: [v0]
+                predecessors: []
+              op1 normal
+                inputs: []
+                outputs: []
+                predecessors: [op0]
+              op2 normal
+                inputs: []
+                outputs: [v1]
+                predecessors: [op1]
+              op3 flippable
+                inputs: [v0, v1]
+                outputs: [v2]
+                predecessors: [op2]
+              outputs: [v2]
+
+            tree graph:
+              inputs: []
+              op0 normal = [op0]
+                inputs: []
+                outputs: [v0]
+                predecessors: []
+              op1 normal = [op1]
+                inputs: []
+                outputs: []
+                predecessors: [op0]
+              op2 normal = [op2, flipped(op3)]
+                inputs: [v0]
+                outputs: [v1]
+                predecessors: [op1]
+              outputs: [v1]
         "#,
     );
 }
@@ -560,7 +636,7 @@ fn splits_non_flippable_effect_conflict() {
               op2 normal
                 inputs: [v0, v1]
                 outputs: [v2]
-                predecessors: [op0, op1]
+                predecessors: [op1]
               outputs: [v2]
 
             tree graph:
@@ -576,7 +652,7 @@ fn splits_non_flippable_effect_conflict() {
               op2 normal = [op2]
                 inputs: [v0, v1]
                 outputs: [v2]
-                predecessors: [op0, op1]
+                predecessors: [op1]
               outputs: [v2]
         "#,
     );
@@ -629,7 +705,7 @@ fn splits_tree_when_an_effect_is_interposed() {
               op2 normal
                 inputs: [v0]
                 outputs: [v1]
-                predecessors: [op0, op1]
+                predecessors: [op1]
               outputs: [v1]
 
             tree graph:
@@ -645,7 +721,7 @@ fn splits_tree_when_an_effect_is_interposed() {
               op2 normal = [op2]
                 inputs: [v0]
                 outputs: [v1]
-                predecessors: [op0, op1]
+                predecessors: [op1]
               outputs: [v1]
         "#,
     );
@@ -720,7 +796,78 @@ fn does_not_absorb_multi_output_or_repeated_operands() {
 }
 
 #[test]
-fn keeps_the_deep_operand_separate_when_sibling_inputs_break_stack_order() {
+fn folds_operands_with_a_common_predecessor() {
+    let input = {
+        let builder = OpGraphBuilder::with_capacity(4, 3);
+        let mut builder = builder.end_inputs_begin_ops();
+        let common = {
+            let operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            let id = operation.id();
+            let _operation = operation.end_inputs_begin_outputs();
+            id
+        };
+        let high = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(common);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let deep = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(common);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let output = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_input(high);
+            operation.add_input(deep);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let mut builder = builder.end_ops_begin_end_stack();
+        builder.push_end_stack_value(output);
+        builder.finish()
+    };
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+            input graph:
+              inputs: []
+              op0 normal
+                inputs: []
+                outputs: []
+                predecessors: []
+              op1 normal
+                inputs: []
+                outputs: [v0]
+                predecessors: [op0]
+              op2 normal
+                inputs: []
+                outputs: [v1]
+                predecessors: [op0]
+              op3 normal
+                inputs: [v0, v1]
+                outputs: [v2]
+                predecessors: [op1, op2]
+              outputs: [v2]
+
+            tree graph:
+              inputs: []
+              op0 normal = [op0]
+                inputs: []
+                outputs: []
+                predecessors: []
+              op1 normal = [op2, op1, op3]
+                inputs: []
+                outputs: [v0]
+                predecessors: [op0]
+              outputs: [v0]
+        "#,
+    );
+}
+
+#[test]
+fn does_not_fold_partial_operand_trees() {
     let input = {
         let mut builder = OpGraphBuilder::with_capacity(3, 7);
         let high_left = builder.push_input_value();
@@ -773,15 +920,19 @@ fn keeps_the_deep_operand_separate_when_sibling_inputs_break_stack_order() {
 
             tree graph:
               inputs: [v0, v1, v2, v3]
-              op0 normal = [op1]
-                inputs: [v2, v3]
+              op0 normal = [op0]
+                inputs: [v0, v1]
                 outputs: [v4]
                 predecessors: []
-              op1 normal = [op0, op2]
-                inputs: [v0, v1, v4]
+              op1 normal = [op1]
+                inputs: [v2, v3]
                 outputs: [v5]
-                predecessors: [op0]
-              outputs: [v5]
+                predecessors: []
+              op2 normal = [op2]
+                inputs: [v4, v5]
+                outputs: [v6]
+                predecessors: [op0, op1]
+              outputs: [v6]
         "#,
     );
 }

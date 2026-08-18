@@ -390,18 +390,18 @@ fn lowers_calldata_sum_loop() {
             => [$9 | $5, $6, $7, $8]
             (br @2 @3)
         @2 [$10, $11, $12, $13]
-            swap 3
             dup 2
-            calldataload
+            const 0x20
             [flipped] add
-            swap 1
+            swap 3
+            calldataload
+            swap 2
             const 0x1
             [flipped] add
             swap 2
-            const 0x20
-            [flipped] add
-            swap 2
             swap 1
+            swap 4
+            add
             swap 3
             => [$10, $17, $19, $15]
             (jmp @1)
