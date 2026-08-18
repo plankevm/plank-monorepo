@@ -9,11 +9,7 @@ use crate::{
     },
     stack::StackOps,
 };
-use plank_core::{DenseIndexMap, DenseIndexSet, IndexVec, newtype_index};
-
-newtype_index! {
-    struct TreeId;
-}
+use plank_core::{DenseIndexMap, DenseIndexSet, IndexVec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeStep {
@@ -21,22 +17,16 @@ pub struct TreeStep {
     pub flipped: bool,
 }
 
-#[derive(Debug, Clone)]
-struct Tree {
-    steps: Vec<OpNodeId>,
-}
-
 #[derive(Debug)]
 pub struct TreeGraph {
     pub graph: OpGraph,
     flipped: DenseIndexSet<OpNodeId>,
-    trees: IndexVec<OpNodeId, Tree>,
+    trees: IndexVec<OpNodeId, Vec<OpNodeId>>,
 }
 
 impl TreeGraph {
     pub fn original_operations(&self, operation: OpNodeId) -> impl Iterator<Item = TreeStep> {
         self.trees[operation]
-            .steps
             .iter()
             .map(|&operation| TreeStep { operation, flipped: self.flipped.contains(operation) })
     }
@@ -77,7 +67,7 @@ impl TreeGraph {
             if externally_flipped {
                 assert!(matches!(self.graph.get_op(tree_operation).kind, OpNodeKind::Flippable(_)));
             }
-            let root = *self.trees[tree_operation].steps.last().expect("empty tree");
+            let root = *self.trees[tree_operation].last().expect("empty tree");
             expanded.extend(self.original_operations(tree_operation).map(|step| {
                 let flipped = step.flipped ^ (externally_flipped && step.operation == root);
                 match original.get_op(step.operation).kind {
@@ -99,18 +89,17 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
     let mut producers = DenseIndexMap::with_capacity(total_values);
     let mut use_counts = DenseIndexMap::with_capacity(total_values);
 
-    for op_id in original.op_ids() {
-        let op = original.get_op(op_id);
+    for operation in original.op_ids() {
+        let op = original.get_op(operation);
         for &output in op.outputs_fifo {
-            producers.insert_no_prev(output, op_id);
+            producers.insert_no_prev(output, operation);
         }
         for &input in op.inputs_fifo {
             *use_counts.get_or_insert_with(input, || 0u32) += 1;
         }
     }
 
-    let mut roots = DenseIndexMap::with_capacity(total_values);
-    let mut operand_operations = DenseIndexSet::with_capacity_in_bits(total_ops);
+    let mut fold_parents = DenseIndexMap::with_capacity(total_ops);
     for consumer in original.op_ids() {
         for &input in original.get_op(consumer).inputs_fifo {
             let Some(&producer) = producers.get(input) else {
@@ -120,8 +109,7 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
                 && use_counts.get(input) == Some(&1)
                 && !original.output_values_fifo().contains(&input)
             {
-                roots.insert_no_prev(input, consumer);
-                assert!(operand_operations.add(producer));
+                fold_parents.insert_no_prev(producer, consumer);
             }
         }
     }
@@ -134,294 +122,212 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
 
     TreeGraphBuilder {
         original,
-        roots,
         producers,
-        operand_operations,
-        completed: IndexVec::with_capacity(total_ops),
+        fold_parents,
+        completed: DenseIndexMap::with_capacity(total_ops),
+        materialization_order: Vec::with_capacity(total_ops),
         original_to_tree: DenseIndexMap::with_capacity(total_ops),
         ancestors: collect_ancestors(original),
         builder: builder.end_inputs_begin_ops(),
         original_to_value,
         trees: IndexVec::with_capacity(total_ops),
         flipped: DenseIndexSet::with_capacity_in_bits(total_ops),
-        emitted: IndexVec::new(),
+        emitted: DenseIndexMap::with_capacity(total_ops),
         emitting: DenseIndexSet::with_capacity_in_bits(total_ops),
     }
     .fold_ops()
     .into_graph()
 }
 
-#[derive(Debug, Clone)]
-struct TreeEffects {
-    must_be_before: DenseIndexSet<OpNodeId>,
-}
-
-#[derive(Debug, Clone)]
-struct PendingTree {
-    root: OpNodeId,
-    steps: Vec<OpNodeId>,
-    flipped: DenseIndexSet<OpNodeId>,
-    operations: DenseIndexSet<OpNodeId>,
-    inputs_fifo: Option<Vec<ValueNodeId>>,
-    effects: TreeEffects,
-}
-
-enum FoldResult {
-    Operand(PendingTree),
-    Materialized,
-}
-
-#[derive(Default)]
-struct TreeBuffers {
-    pending: Vec<PendingTree>,
-    accumulator: Vec<PendingTree>,
-}
-
-struct TreePlan {
-    tree: PendingTree,
-    accepted_operands: DenseIndexSet<OpNodeId>,
-}
-
 struct TreeGraphBuilder<'graph> {
     original: &'graph OpGraph,
-    roots: DenseIndexMap<ValueNodeId, OpNodeId>,
     producers: DenseIndexMap<ValueNodeId, OpNodeId>,
-    operand_operations: DenseIndexSet<OpNodeId>,
-    completed: IndexVec<TreeId, PendingTree>,
-    original_to_tree: DenseIndexMap<OpNodeId, TreeId>,
+    fold_parents: DenseIndexMap<OpNodeId, OpNodeId>,
+    completed: DenseIndexMap<OpNodeId, Vec<OpNodeId>>,
+    materialization_order: Vec<OpNodeId>,
+    original_to_tree: DenseIndexMap<OpNodeId, OpNodeId>,
     ancestors: IndexVec<OpNodeId, DenseIndexSet<OpNodeId>>,
     builder: OpGraphBuilder<AddingGraphOps>,
     original_to_value: DenseIndexMap<ValueNodeId, ValueNodeId>,
-    trees: IndexVec<OpNodeId, Tree>,
+    trees: IndexVec<OpNodeId, Vec<OpNodeId>>,
     flipped: DenseIndexSet<OpNodeId>,
-    emitted: IndexVec<TreeId, Option<OpNodeId>>,
-    emitting: DenseIndexSet<TreeId>,
+    emitted: DenseIndexMap<OpNodeId, OpNodeId>,
+    emitting: DenseIndexSet<OpNodeId>,
 }
 
 impl TreeGraphBuilder<'_> {
-    fn fold_op(&mut self, id: OpNodeId, as_operand: bool) -> FoldResult {
-        let op = self.original.get_op(id);
-        let mut operands = Vec::with_capacity(op.inputs_fifo.len());
-        for &input in op.inputs_fifo {
-            let candidate = if self.roots.get(input) == Some(&id) {
-                let producer = self.producers[input];
-                match self.fold_op(producer, true) {
-                    FoldResult::Operand(candidate) => Some(candidate),
-                    FoldResult::Materialized => unreachable!("foldable operand was materialized"),
-                }
+    fn fold_op(&mut self, root: OpNodeId) -> Vec<OpNodeId> {
+        let op = self.original.get_op(root);
+        let operands = op
+            .inputs_fifo
+            .iter()
+            .map(|&input| {
+                self.producers.get(input).copied().and_then(|producer| {
+                    (self.fold_parents.get(producer) == Some(&root)).then(|| self.fold_op(producer))
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let normal = self.plan_tree(root, &operands, false);
+        let (steps, root_flipped) =
+            if matches!(op.kind, OpNodeKind::Flippable(_)) && op.inputs_fifo.len() >= 2 {
+                let flipped = self.plan_tree(root, &operands, true);
+                if flipped.len() > normal.len() { (flipped, true) } else { (normal, false) }
             } else {
-                None
+                (normal, false)
             };
-            operands.push((input, candidate));
+        if root_flipped {
+            assert!(self.flipped.add(root));
         }
 
-        let normal = self.plan_tree(id, &operands, false);
-        let plan = if matches!(op.kind, OpNodeKind::Flippable(_)) && op.inputs_fifo.len() >= 2 {
-            let flipped = self.plan_tree(id, &operands, true);
-            if flipped.tree.steps.len() > normal.tree.steps.len() { flipped } else { normal }
-        } else {
-            normal
-        };
-
-        for (_, operand) in operands {
-            let Some(operand) = operand else {
-                continue;
-            };
-            if !plan.accepted_operands.contains(operand.root) {
+        for operand in operands.into_iter().flatten() {
+            if !steps.contains(operand.last().unwrap()) {
                 self.materialize(operand);
             }
         }
-
-        if as_operand {
-            FoldResult::Operand(plan.tree)
-        } else {
-            self.materialize(plan.tree);
-            FoldResult::Materialized
-        }
+        steps
     }
 
     fn plan_tree(
         &self,
         root: OpNodeId,
-        operands: &[(ValueNodeId, Option<PendingTree>)],
-        flipped: bool,
-    ) -> TreePlan {
-        let mut buffers = TreeBuffers::default();
-        let operand_count = operands.len();
-        let order = (0..operand_count)
+        operands: &[Option<Vec<OpNodeId>>],
+        root_flipped: bool,
+    ) -> Vec<OpNodeId> {
+        let mut steps = Vec::new();
+        let mut operand_lengths = Vec::new();
+        let order = (0..operands.len())
             .rev()
-            .map(|position| if flipped && position < 2 { 1 - position } else { position });
+            .map(|position| if root_flipped && position < 2 { 1 - position } else { position });
 
         for position in order {
-            let Some(operand) = operands[position].1.clone() else {
-                buffers.accumulator.clear();
+            let Some(operand) = &operands[position] else {
+                steps.clear();
+                operand_lengths.clear();
                 continue;
             };
-
-            buffers.pending.clear();
-            buffers.pending.push(operand);
-            let proposed = self.join_trees(root, &buffers.accumulator, &buffers.pending, None);
-            if self.is_valid_tree(&proposed) {
-                buffers.accumulator.append(&mut buffers.pending);
-            } else {
-                buffers.accumulator.clear();
-                std::mem::swap(&mut buffers.accumulator, &mut buffers.pending);
+            steps.extend_from_slice(operand);
+            operand_lengths.push(operand.len());
+            if !self.is_valid_tree(&steps, false) {
+                steps.clear();
+                steps.extend_from_slice(operand);
+                operand_lengths.clear();
+                operand_lengths.push(operand.len());
             }
         }
 
-        while !buffers.accumulator.is_empty() {
-            let proposed = self.join_trees(root, &[], &buffers.accumulator, Some(flipped));
-            if self.is_valid_tree(&proposed) {
-                break;
-            }
-            buffers.accumulator.remove(0);
-        }
-
-        let tree = self.join_trees(root, &[], &buffers.accumulator, Some(flipped));
-        assert!(self.is_valid_tree(&tree));
-        let mut accepted_operands = DenseIndexSet::new();
-        for operand in &buffers.accumulator {
-            assert!(accepted_operands.add(operand.root));
-        }
-        TreePlan { tree, accepted_operands }
-    }
-
-    fn join_trees(
-        &self,
-        root: OpNodeId,
-        first: &[PendingTree],
-        second: &[PendingTree],
-        root_flipped: Option<bool>,
-    ) -> PendingTree {
-        let mut steps = Vec::new();
-        let mut flipped = DenseIndexSet::with_capacity_in_bits(self.original.total_ops() as usize);
-        for tree in first.iter().chain(second) {
-            steps.extend_from_slice(&tree.steps);
-            flipped.union_with(&tree.flipped);
-        }
-        if let Some(root_flipped) = root_flipped {
+        loop {
             steps.push(root);
-            if root_flipped {
-                assert!(flipped.add(root));
+            if self.is_valid_tree(&steps, root_flipped) {
+                return steps;
             }
+            steps.pop();
+            steps.drain(..operand_lengths.remove(0));
         }
-        self.describe_tree(root, steps, flipped)
     }
 
-    fn describe_tree(
-        &self,
-        root: OpNodeId,
-        steps: Vec<OpNodeId>,
-        flipped: DenseIndexSet<OpNodeId>,
-    ) -> PendingTree {
+    fn is_valid_tree(&self, steps: &[OpNodeId], root_flipped: bool) -> bool {
         let mut operations =
             DenseIndexSet::with_capacity_in_bits(self.original.total_ops() as usize);
-        for &step in &steps {
-            assert!(operations.add(step));
-        }
-
-        let mut must_be_before =
-            DenseIndexSet::with_capacity_in_bits(self.original.total_ops() as usize);
-        for operation in &operations {
-            for predecessor in self.original.get_predecessors(operation).iter() {
-                if !operations.contains(predecessor) {
-                    must_be_before.add(predecessor);
-                    must_be_before.union_with(&self.ancestors[predecessor]);
-                }
-            }
-        }
-
-        let inputs_fifo = self.required_inputs(&steps, &flipped);
-        PendingTree {
-            root,
-            steps,
-            flipped,
-            operations,
-            inputs_fifo,
-            effects: TreeEffects { must_be_before },
-        }
-    }
-
-    fn is_valid_tree(&self, tree: &PendingTree) -> bool {
-        if tree.inputs_fifo.is_none() {
-            return false;
+        for &operation in steps {
+            assert!(operations.add(operation));
         }
 
         let mut seen = DenseIndexSet::with_capacity_in_bits(self.original.total_ops() as usize);
-        for &step in &tree.steps {
-            for predecessor in self.original.get_predecessors(step).iter() {
-                if tree.operations.contains(predecessor) && !seen.contains(predecessor) {
+        for &operation in steps {
+            for predecessor in self.original.get_predecessors(operation).iter() {
+                if operations.contains(predecessor) && !seen.contains(predecessor) {
+                    return false;
+                }
+                if !operations.contains(predecessor)
+                    && self.ancestors[predecessor]
+                        .iter()
+                        .any(|ancestor| operations.contains(ancestor))
+                {
                     return false;
                 }
             }
-            seen.add(step);
+            seen.add(operation);
         }
 
-        !tree.effects.must_be_before.iter().any(|predecessor| tree.operations.contains(predecessor))
-    }
-
-    fn required_inputs(
-        &self,
-        steps: &[OpNodeId],
-        flipped: &DenseIndexSet<OpNodeId>,
-    ) -> Option<Vec<ValueNodeId>> {
         let mut stack = Vec::new();
-        let mut inputs_fifo = Vec::new();
-        for &step in steps {
+        for (step_position, &step) in steps.iter().enumerate() {
             let op = self.original.get_op(step);
-            let mut inputs = op.inputs_fifo.to_vec();
-            if flipped.contains(step) {
-                inputs.swap(0, 1);
-            }
-            for input in inputs {
+            let flipped =
+                self.flipped.contains(step) || (root_flipped && step_position == steps.len() - 1);
+            for position in 0..op.inputs_fifo.len() {
+                let position = if flipped && position < 2 { 1 - position } else { position };
                 match stack.last() {
-                    Some(&actual) if actual == input => {
+                    Some(&actual) if actual == op.inputs_fifo[position] => {
                         stack.pop();
                     }
-                    Some(_) => return None,
-                    None => inputs_fifo.push(input),
+                    Some(_) => return false,
+                    None => {}
                 }
             }
             stack.extend(op.outputs_fifo.iter().rev().copied());
         }
-        Some(inputs_fifo)
+        true
     }
 
-    fn materialize(&mut self, tree: PendingTree) -> TreeId {
-        let operations = tree.operations.clone();
-        self.flipped.union_with(&tree.flipped);
-        let tree_id = self.completed.push(tree);
-        self.emitted.push(None);
-        for operation in &operations {
-            self.original_to_tree.insert_no_prev(operation, tree_id);
+    fn required_inputs(&self, steps: &[OpNodeId]) -> Vec<ValueNodeId> {
+        let mut stack = Vec::new();
+        let mut inputs_fifo = Vec::new();
+        for &step in steps {
+            let op = self.original.get_op(step);
+            for position in 0..op.inputs_fifo.len() {
+                let position = if self.flipped.contains(step) && position < 2 {
+                    1 - position
+                } else {
+                    position
+                };
+                let input = op.inputs_fifo[position];
+                if stack.last() == Some(&input) {
+                    stack.pop();
+                } else {
+                    assert!(stack.is_empty(), "materialized an invalid tree");
+                    inputs_fifo.push(input);
+                }
+            }
+            stack.extend(op.outputs_fifo.iter().rev().copied());
         }
-        tree_id
+        inputs_fifo
+    }
+
+    fn materialize(&mut self, tree: Vec<OpNodeId>) -> OpNodeId {
+        let root = *tree.last().expect("empty tree");
+        for &operation in &tree {
+            self.original_to_tree.insert_no_prev(operation, root);
+        }
+        self.completed.insert_no_prev(root, tree);
+        self.materialization_order.push(root);
+        root
     }
 
     fn fold_ops(mut self) -> Self {
-        for op_id in self.original.op_ids() {
-            if self.operand_operations.contains(op_id) {
+        for operation in self.original.op_ids() {
+            if self.fold_parents.contains(operation) {
                 continue;
             }
-            let FoldResult::Materialized = self.fold_op(op_id, false) else {
-                unreachable!("tree root remained an operand")
-            };
+            let tree = self.fold_op(operation);
+            self.materialize(tree);
         }
         assert_eq!(self.original_to_tree.iter().count(), self.original.total_ops() as usize);
         self
     }
 
-    fn emit_tree(&mut self, tree_id: TreeId) -> OpNodeId {
-        if let Some(operation) = self.emitted[tree_id] {
+    fn emit_tree(&mut self, root: OpNodeId) -> OpNodeId {
+        if let Some(&operation) = self.emitted.get(root) {
             return operation;
         }
-        assert!(self.emitting.add(tree_id), "cycle in tree graph");
+        assert!(self.emitting.add(root), "cycle in tree graph");
 
-        let mut predecessors = DenseIndexSet::with_capacity_in_bits(self.completed.len());
-        for operation in &self.completed[tree_id].operations {
+        let mut predecessors =
+            DenseIndexSet::with_capacity_in_bits(self.original.total_ops() as usize);
+        for &operation in &self.completed[root] {
             for predecessor in self.original.get_predecessors(operation).iter() {
                 let predecessor_tree = self.original_to_tree[predecessor];
-                if predecessor_tree != tree_id {
+                if predecessor_tree != root {
                     predecessors.add(predecessor_tree);
                 }
             }
@@ -430,12 +336,15 @@ impl TreeGraphBuilder<'_> {
             self.emit_tree(predecessor);
         }
 
-        let tree = self.completed[tree_id].clone();
-        let root = self.original.get_op(tree.root);
-        let leading_operand_is_folded = root.inputs_fifo.iter().take(2).any(|&input| {
-            self.producers.get(input).is_some_and(|&producer| tree.operations.contains(producer))
+        let tree = self.completed.remove(root).expect("tree disappeared before emission");
+        let inputs_fifo = self.required_inputs(&tree);
+        let original_root = self.original.get_op(root);
+        let leading_operand_is_folded = original_root.inputs_fifo.iter().take(2).any(|&input| {
+            self.producers
+                .get(input)
+                .is_some_and(|&producer| self.original_to_tree.get(producer) == Some(&root))
         });
-        let kind = match root.kind {
+        let kind = match original_root.kind {
             // Folding either leading operand fixes its position inside the tree, so the virtual
             // operation can no longer exchange those operands when it is scheduled.
             OpNodeKind::Flippable(operation) if leading_operand_is_folded => {
@@ -446,26 +355,26 @@ impl TreeGraphBuilder<'_> {
         let mut operation = self.builder.begin_op(kind);
         let new_id = operation.id();
         for predecessor in &predecessors {
-            operation.add_predecessor(self.emitted[predecessor].unwrap());
+            operation.add_predecessor(self.emitted[predecessor]);
         }
-        for input in tree.inputs_fifo.expect("only valid trees are materialized") {
+        for input in inputs_fifo {
             operation.add_input(self.original_to_value[input]);
         }
         let mut operation = operation.end_inputs_begin_outputs();
-        for &output in root.outputs_fifo {
+        for &output in original_root.outputs_fifo {
             let mapped = operation.add_output();
             self.original_to_value.insert_no_prev(output, mapped);
         }
 
-        assert_eq!(self.trees.push(Tree { steps: tree.steps }), new_id);
-        self.emitted[tree_id] = Some(new_id);
-        assert!(self.emitting.remove(tree_id));
+        assert_eq!(self.trees.push(tree), new_id);
+        self.emitted.insert_no_prev(root, new_id);
+        assert!(self.emitting.remove(root));
         new_id
     }
 
     fn into_graph(mut self) -> TreeGraph {
-        for tree_id in self.completed.iter_idx().collect::<Vec<_>>() {
-            self.emit_tree(tree_id);
+        for root in std::mem::take(&mut self.materialization_order) {
+            self.emit_tree(root);
         }
 
         let mut builder = self.builder.end_ops_begin_end_stack();
