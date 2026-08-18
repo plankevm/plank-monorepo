@@ -53,7 +53,7 @@ struct Search<'a> {
     path: Vec<StackOps>,
 }
 
-pub fn searching_schedule(
+pub fn schedule(
     block: BlockView<'_>,
     next_alloc_id: StaticAllocId,
     shuffle: ShuffleConfig,
