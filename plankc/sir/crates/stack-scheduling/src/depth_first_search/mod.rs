@@ -1,5 +1,6 @@
-use std::num::NonZero;
+use std::{num::NonZero, rc::Rc};
 
+use hashbrown::HashMap;
 use plank_core::IndexVec;
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
@@ -7,7 +8,7 @@ use smallvec::SmallVec;
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
+    op_graph::{BitsetWord, OpGraph, OpNodeId, OpSet, OpSetMut, ValueNodeId},
     scheduler::greedy_schedule,
     stack::{ShuffleConfig, StackOps, TrackedStack},
 };
@@ -26,10 +27,15 @@ pub struct SearchResult {
     pub spill_count: u32,
 }
 
-struct SearchNode {
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct SearchState {
     complete: Box<[BitsetWord]>,
     values: Box<[ValueNodeId]>,
     stack_end: usize,
+}
+
+struct SearchNode {
+    state: Rc<SearchState>,
     completed_count: u32,
     executed_cost: u32,
 }
@@ -51,6 +57,7 @@ struct Search<'a> {
     best_ops: Box<[StackOps]>,
     best_spill_count: u32,
     path: Vec<StackOps>,
+    best_state_costs: HashMap<Rc<SearchState>, u32>,
 }
 
 pub fn schedule(
@@ -74,9 +81,11 @@ pub fn schedule(
     }
 
     let start = SearchNode {
-        complete: vec![0; graph.words_per_set() as usize].into_boxed_slice(),
-        values: graph.input_values_fifo().iter().collect(),
-        stack_end: graph.input_values_fifo().len() as usize,
+        state: Rc::new(SearchState {
+            complete: vec![0; graph.words_per_set() as usize].into_boxed_slice(),
+            values: graph.input_values_fifo().iter().collect(),
+            stack_end: graph.input_values_fifo().len() as usize,
+        }),
         completed_count: 0,
         executed_cost: 0,
     };
@@ -91,6 +100,7 @@ pub fn schedule(
         best_ops: incumbent_ops.into_boxed_slice(),
         best_spill_count: incumbent_spill_count,
         path: Vec::with_capacity(graph.total_ops() as usize * ESTIMATED_STACK_OPS_PER_GRAPH_OP),
+        best_state_costs: HashMap::new(),
     };
     search.visit(start);
 
@@ -99,6 +109,10 @@ pub fn schedule(
 
 impl Search<'_> {
     fn visit(&mut self, node: SearchNode) {
+        if !record_if_improved(&mut self.best_state_costs, &node.state, node.executed_cost) {
+            return;
+        }
+
         if node.completed_count == self.graph.total_ops() {
             self.finish(node);
             return;
@@ -107,7 +121,7 @@ impl Search<'_> {
             return;
         }
 
-        let complete = OpSet::new(&node.complete, self.graph.total_ops());
+        let complete = OpSet::new(&node.state.complete, self.graph.total_ops());
         let mut completable_backing =
             SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
         completable_backing.resize(self.graph.words_per_set() as usize, 0);
@@ -116,21 +130,16 @@ impl Search<'_> {
         let completable = completable.iter().collect::<SmallVec<[OpNodeId; 32]>>();
 
         let mut children = Vec::with_capacity(completable.len());
-        'operations: for op in completable {
-            for flipped in [false, true] {
-                if flipped && !matches!(self.graph.get_op(op).kind, OpNodeKind::Flippable(_)) {
-                    continue;
-                }
-                if self.assessed_candidates == self.max_candidates {
-                    break 'operations;
-                }
-                self.assessed_candidates += 1;
-                let child = self.build_child(&node, complete, op, flipped);
-                if child.lower_bound >= self.best_cost {
-                    continue;
-                }
-                children.push(child);
+        for op in completable {
+            if self.assessed_candidates == self.max_candidates {
+                break;
             }
+            self.assessed_candidates += 1;
+            let child = self.build_child(&node, complete, op);
+            if child.lower_bound >= self.best_cost {
+                continue;
+            }
+            children.push(child);
         }
         children.sort_unstable_by_key(|child| child.lower_bound);
 
@@ -142,21 +151,15 @@ impl Search<'_> {
         }
     }
 
-    fn build_child(
-        &self,
-        node: &SearchNode,
-        complete: OpSet<'_>,
-        op: OpNodeId,
-        flipped: bool,
-    ) -> Child {
+    fn build_child(&self, node: &SearchNode, complete: OpSet<'_>, op: OpNodeId) -> Child {
         let mut transition_ops = Vec::with_capacity(ESTIMATED_STACK_OPS_PER_GRAPH_OP);
         let mut stack = TrackedStack::new_from_parts(
             self.next_alloc_id,
             |op| transition_ops.push(op),
-            &node.values[..node.stack_end],
-            node.values[node.stack_end..].to_vec(),
+            &node.state.values[..node.state.stack_end],
+            node.state.values[node.state.stack_end..].to_vec(),
         );
-        greedy_schedule_op(self.shuffle, &mut stack, self.graph, op, complete, flipped);
+        greedy_schedule_op(self.shuffle, &mut stack, self.graph, op, complete, false);
 
         let complete = {
             let mut backing = complete.clone_backing();
@@ -186,9 +189,11 @@ impl Search<'_> {
 
         Child {
             node: SearchNode {
-                complete,
-                values: values.into_boxed_slice(),
-                stack_end,
+                state: Rc::new(SearchState {
+                    complete,
+                    values: values.into_boxed_slice(),
+                    stack_end,
+                }),
                 completed_count: node.completed_count + 1,
                 executed_cost,
             },
@@ -202,8 +207,8 @@ impl Search<'_> {
         let mut stack = TrackedStack::new_from_parts(
             self.next_alloc_id,
             |op| final_ops.push(op),
-            &node.values[..node.stack_end],
-            node.values[node.stack_end..].to_vec(),
+            &node.state.values[..node.state.stack_end],
+            node.state.values[node.state.stack_end..].to_vec(),
         );
         if !matches!(self.block.control(), ControlView::LastOpTerminates) {
             greedy_shuffler::shuffle(self.shuffle, &mut stack, self.graph);
@@ -223,6 +228,18 @@ impl Search<'_> {
         self.best_ops = best_ops.into_boxed_slice();
         self.best_spill_count = spill_count;
     }
+}
+
+fn record_if_improved(
+    best_state_costs: &mut HashMap<Rc<SearchState>, u32>,
+    state: &Rc<SearchState>,
+    cost: u32,
+) -> bool {
+    if best_state_costs.get(state).is_some_and(|&best_cost| best_cost <= cost) {
+        return false;
+    }
+    best_state_costs.insert(state.clone(), cost);
+    true
 }
 
 fn remaining_cost_lower_bound(
@@ -287,4 +304,23 @@ fn stack_ops_cost(ops: &[StackOps], shuffle: ShuffleConfig) -> u32 {
             u32::from(cost) * BASE_COST_FACTOR
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_revisits_a_state_at_lower_cost() {
+        let state =
+            Rc::new(SearchState { complete: Box::new([]), values: Box::new([]), stack_end: 0 });
+        let equal_state =
+            Rc::new(SearchState { complete: Box::new([]), values: Box::new([]), stack_end: 0 });
+        let mut best_state_costs = HashMap::new();
+
+        assert!(record_if_improved(&mut best_state_costs, &state, 10));
+        assert!(!record_if_improved(&mut best_state_costs, &equal_state, 10));
+        assert!(!record_if_improved(&mut best_state_costs, &equal_state, 11));
+        assert!(record_if_improved(&mut best_state_costs, &equal_state, 9));
+    }
 }

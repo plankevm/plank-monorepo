@@ -293,38 +293,6 @@ fn lowers_binary_operation_inputs() {
 }
 
 #[test]
-fn depth_first_search_checks_flipped_orientation() {
-    assert_lowers_to(
-        ShuffleConfig::default(),
-        r#"
-        fn init:
-            entry -> high0 deep0 {
-                high0 = const 1
-                deep0 = const 2
-                => @consume
-            }
-            consume high1 deep1 {
-                result = lt deep1 high1
-                return result result
-            }
-        "#,
-        r#"
-        @0 []
-            const 0x2
-            const 0x1
-            => [$0, $1]
-            (jmp @1)
-        @1 [$2, $3]
-            [flipped] lt
-            dup 0
-            return
-            => []
-            (return)
-        "#,
-    );
-}
-
-#[test]
 fn lowers_memory_hash_and_store() {
     assert_lowers_to(
         ShuffleConfig::default(),
