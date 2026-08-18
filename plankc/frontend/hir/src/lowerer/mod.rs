@@ -859,6 +859,9 @@ impl BlockLowerer<'_> {
         param_list_span: TokenSpan,
         is_eager: bool,
     ) -> FnDefId {
+        let previous_return_context = self.return_context;
+        self.return_context = ReturnContext::DisallowedOutsideFunction;
+
         let param_infos_start = self.param_info_buf.len();
         let return_type;
         let type_preamble = {
@@ -912,7 +915,6 @@ impl BlockLowerer<'_> {
             self.flush_instructions_from(preamble_block_start, preamble_span)
         };
 
-        let previous_return_context = self.return_context;
         self.return_context = ReturnContext::Allowed;
 
         let body = self.lower_fn_body_block(body_expr);

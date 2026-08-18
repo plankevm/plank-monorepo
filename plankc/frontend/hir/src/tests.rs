@@ -247,6 +247,28 @@ fn test_return_in_fn_param_type_expression() {
 }
 
 #[test]
+fn test_return_in_nested_fn_param_type_expression() {
+    let rendered = render_diagnostics(
+        r#"
+        const outer = fn () void {
+            let inner = fn (x: { return 0; u256 }) void {};
+        };
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: return is not allowed outside of function bodies
+         --> main.plk:2:26
+          |
+        2 |     let inner = fn (x: { return 0; u256 }) void {};
+          |                          ^^^^^^^^^ not allowed here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_duplicate_any_type_capture() {
     let rendered = render_diagnostics(
         r#"
