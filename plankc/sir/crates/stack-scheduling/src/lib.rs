@@ -11,7 +11,7 @@ pub mod op_graph;
 
 use crate::{op_graph::build_graph_effectful, stack::StackOps, treegraph::build_tree_graph};
 
-mod exhaustive_searching;
+mod depth_first_search;
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
@@ -24,7 +24,7 @@ newtype_index! {
 }
 
 const AVG_OPS_PER_BLOCK: usize = 20;
-const DEFAULT_MAX_EXHAUSTIVE_CANDIDATES: usize = 100_000;
+const DEFAULT_MAX_SEARCH_CANDIDATES: usize = 1_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
 #[derive(Debug)]
@@ -88,12 +88,12 @@ pub fn schedule<'ir>(
             .into_par_iter()
             .map(|(block, graph)| {
                 let tree_graph = build_tree_graph(&graph);
-                let mut result = exhaustive_searching::searching_schedule(
+                let mut result = depth_first_search::schedule(
                     block,
                     local_alloc_start,
                     config,
-                    exhaustive_searching::SearchConfig {
-                        max_candidates: NonZero::new(DEFAULT_MAX_EXHAUSTIVE_CANDIDATES).unwrap(),
+                    depth_first_search::SearchConfig {
+                        max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
                     },
                     &tree_graph.graph,
                 );
