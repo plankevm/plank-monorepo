@@ -427,7 +427,18 @@ impl TreeGraphBuilder<'_> {
 
         let tree = self.completed[tree_id].clone();
         let root = self.original.get_op(tree.root);
-        let mut operation = self.builder.begin_op(root.kind);
+        let leading_operand_is_folded = root.inputs_fifo.iter().take(2).any(|&input| {
+            self.producers.get(input).is_some_and(|&producer| tree.operations.contains(producer))
+        });
+        let kind = match root.kind {
+            // Folding either leading operand fixes its position inside the tree, so the virtual
+            // operation can no longer exchange those operands when it is scheduled.
+            OpNodeKind::Flippable(operation) if leading_operand_is_folded => {
+                OpNodeKind::Normal(operation)
+            }
+            kind => kind,
+        };
+        let mut operation = self.builder.begin_op(kind);
         let new_id = operation.id();
         for predecessor in &predecessors {
             operation.add_predecessor(self.emitted[predecessor].unwrap());
