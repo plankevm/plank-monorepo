@@ -147,15 +147,23 @@ impl Search<'_> {
         );
         greedy_schedule_op(self.shuffle, &mut stack, self.graph, op, complete);
 
-        let values = [stack.fifo(), stack.underlying_spilled()].concat();
-        let stack_end = stack.fifo().len();
-        drop(stack);
-        let transition_cost = stack_ops_cost(&transition_ops, self.shuffle);
         let complete = {
             let mut backing = complete.clone_backing();
             OpSetMut::new(&mut backing, self.graph.total_ops()).add(op);
             backing.into_boxed_slice()
         };
+        let completed = OpSet::new(&complete, self.graph.total_ops());
+        if !matches!(self.block.control(), ControlView::LastOpTerminates) {
+            while stack.top().is_some_and(|value| self.graph.uses_remaining(completed, value) == 0)
+            {
+                stack.pop();
+            }
+        }
+
+        let values = [stack.fifo(), stack.underlying_spilled()].concat();
+        let stack_end = stack.fifo().len();
+        drop(stack);
+        let transition_cost = stack_ops_cost(&transition_ops, self.shuffle);
         let executed_cost = node.executed_cost + transition_cost;
         let remaining_cost = remaining_cost_lower_bound(
             &complete,
