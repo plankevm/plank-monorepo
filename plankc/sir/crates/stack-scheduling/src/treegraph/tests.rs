@@ -329,7 +329,139 @@ fn materializes_an_operand_that_is_also_a_final_output() {
     );
 }
 
-fn effect_flipped_tree() -> OpGraph {
+#[test]
+fn preserves_flippability_when_neither_leading_operand_is_folded() {
+    let mut builder = OpGraphBuilder::with_capacity(1, 3);
+    let high = builder.push_input_value();
+    let deep = builder.push_input_value();
+    let mut builder = builder.end_inputs_begin_ops();
+    let output = {
+        let mut op = builder.begin_op(OpNodeKind::Flippable(OperationIdx::ZERO));
+        op.add_input(high);
+        op.add_input(deep);
+        op.end_inputs_begin_outputs().add_output()
+    };
+    let mut builder = builder.end_ops_begin_end_stack();
+    builder.push_end_stack_value(output);
+    let input = builder.finish();
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+            input graph:
+              inputs: [v0, v1]
+              op0 flippable
+                inputs: [v0, v1]
+                outputs: [v2]
+                predecessors: []
+              outputs: [v2]
+
+            tree graph:
+              inputs: [v0, v1]
+              op0 flippable = [op0]
+                inputs: [v0, v1]
+                outputs: [v2]
+                predecessors: []
+              outputs: [v2]
+        "#,
+    );
+}
+
+#[test]
+fn removes_flippability_when_the_first_leading_operand_is_folded() {
+    let mut builder = OpGraphBuilder::with_capacity(2, 3);
+    let deep = builder.push_input_value();
+    let mut builder = builder.end_inputs_begin_ops();
+    let high = {
+        let op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+        op.end_inputs_begin_outputs().add_output()
+    };
+    let output = {
+        let mut op = builder.begin_op(OpNodeKind::Flippable(OperationIdx::ZERO));
+        op.add_input(high);
+        op.add_input(deep);
+        op.end_inputs_begin_outputs().add_output()
+    };
+    let mut builder = builder.end_ops_begin_end_stack();
+    builder.push_end_stack_value(output);
+    let input = builder.finish();
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+            input graph:
+              inputs: [v0]
+              op0 normal
+                inputs: []
+                outputs: [v1]
+                predecessors: []
+              op1 flippable
+                inputs: [v1, v0]
+                outputs: [v2]
+                predecessors: [op0]
+              outputs: [v2]
+
+            tree graph:
+              inputs: [v0]
+              op0 normal = [op0, op1]
+                inputs: [v0]
+                outputs: [v1]
+                predecessors: []
+              outputs: [v1]
+        "#,
+    );
+}
+
+#[test]
+fn removes_flippability_when_the_second_leading_operand_is_folded() {
+    let mut builder = OpGraphBuilder::with_capacity(2, 3);
+    let high = builder.push_input_value();
+    let mut builder = builder.end_inputs_begin_ops();
+    let deep = {
+        let op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+        op.end_inputs_begin_outputs().add_output()
+    };
+    let output = {
+        let mut op = builder.begin_op(OpNodeKind::Flippable(OperationIdx::ZERO));
+        op.add_input(high);
+        op.add_input(deep);
+        op.end_inputs_begin_outputs().add_output()
+    };
+    let mut builder = builder.end_ops_begin_end_stack();
+    builder.push_end_stack_value(output);
+    let input = builder.finish();
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+            input graph:
+              inputs: [v0]
+              op0 normal
+                inputs: []
+                outputs: [v1]
+                predecessors: []
+              op1 flippable
+                inputs: [v0, v1]
+                outputs: [v2]
+                predecessors: [op0]
+              outputs: [v2]
+
+            tree graph:
+              inputs: [v0]
+              op0 normal = [op0, flipped(op1)]
+                inputs: [v0]
+                outputs: [v1]
+                predecessors: []
+              outputs: [v1]
+        "#,
+    );
+}
+
+#[test]
+fn folding_both_leading_operands_removes_flippability_while_preserving_internal_flip() {
     let builder = OpGraphBuilder::with_capacity(3, 3);
     let mut builder = builder.end_inputs_begin_ops();
     let (high_op, high) = {
@@ -350,12 +482,7 @@ fn effect_flipped_tree() -> OpGraph {
     };
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
-    builder.finish()
-}
-
-#[test]
-fn flips_tree_when_effects_require_high_operand_first() {
-    let input = effect_flipped_tree();
+    let input = builder.finish();
     let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
@@ -379,7 +506,7 @@ fn flips_tree_when_effects_require_high_operand_first() {
 
             tree graph:
               inputs: []
-              op0 flippable = [op0, op1, flipped(op2)]
+              op0 normal = [op0, op1, flipped(op2)]
                 inputs: []
                 outputs: [v0]
                 predecessors: []
