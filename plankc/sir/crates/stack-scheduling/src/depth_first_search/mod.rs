@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpNodeId, OpSet, OpSetMut, ValueNodeId},
+    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
     scheduler::greedy_schedule,
     stack::{ShuffleConfig, StackOps, TrackedStack},
 };
@@ -116,16 +116,21 @@ impl Search<'_> {
         let completable = completable.iter().collect::<SmallVec<[OpNodeId; 32]>>();
 
         let mut children = Vec::with_capacity(completable.len());
-        for op in completable {
-            if self.assessed_candidates == self.max_candidates {
-                break;
+        'operations: for op in completable {
+            for flipped in [false, true] {
+                if flipped && !matches!(self.graph.get_op(op).kind, OpNodeKind::Flippable(_)) {
+                    continue;
+                }
+                if self.assessed_candidates == self.max_candidates {
+                    break 'operations;
+                }
+                self.assessed_candidates += 1;
+                let child = self.build_child(&node, complete, op, flipped);
+                if child.lower_bound >= self.best_cost {
+                    continue;
+                }
+                children.push(child);
             }
-            self.assessed_candidates += 1;
-            let child = self.build_child(&node, complete, op);
-            if child.lower_bound >= self.best_cost {
-                continue;
-            }
-            children.push(child);
         }
         children.sort_unstable_by_key(|child| child.lower_bound);
 
@@ -137,7 +142,13 @@ impl Search<'_> {
         }
     }
 
-    fn build_child(&self, node: &SearchNode, complete: OpSet<'_>, op: OpNodeId) -> Child {
+    fn build_child(
+        &self,
+        node: &SearchNode,
+        complete: OpSet<'_>,
+        op: OpNodeId,
+        flipped: bool,
+    ) -> Child {
         let mut transition_ops = Vec::with_capacity(ESTIMATED_STACK_OPS_PER_GRAPH_OP);
         let mut stack = TrackedStack::new_from_parts(
             self.next_alloc_id,
@@ -145,7 +156,7 @@ impl Search<'_> {
             &node.values[..node.stack_end],
             node.values[node.stack_end..].to_vec(),
         );
-        greedy_schedule_op(self.shuffle, &mut stack, self.graph, op, complete);
+        greedy_schedule_op(self.shuffle, &mut stack, self.graph, op, complete, flipped);
 
         let complete = {
             let mut backing = complete.clone_backing();

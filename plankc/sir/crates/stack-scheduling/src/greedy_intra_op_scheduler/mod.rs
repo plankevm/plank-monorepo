@@ -23,26 +23,35 @@ pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     graph: &OpGraph,
     op_id: OpNodeId,
     complete: OpSet<'_>,
+    flipped: bool,
 ) {
     assert!(only_contains_unique(stack.fifo()), "expecting all start stack values to be unique");
 
     let op = graph.get_op(op_id);
+    let mut flipped_inputs = SmallVec::<[ValueNodeId; 32]>::new();
+    let inputs = if flipped {
+        flipped_inputs.extend_from_slice(op.inputs_fifo);
+        flipped_inputs.swap(0, 1);
+        flipped_inputs.as_slice()
+    } else {
+        op.inputs_fifo
+    };
 
     let unique_last_uses_on_stack = stack
         .fifo()
         .iter()
         .copied()
-        .filter(|value| graph.is_last_use(complete, *value) && op.inputs_fifo.contains(value))
+        .filter(|value| graph.is_last_use(complete, *value) && inputs.contains(value))
         .collect::<SmallVec<[_; 32]>>();
 
     let head = unique_last_uses_on_stack.len().try_into().expect("overflow");
 
     let mut preparer =
-        GreedyOperandPreparer::new(head, config, stack, op.inputs_fifo, &unique_last_uses_on_stack);
+        GreedyOperandPreparer::new(head, config, stack, inputs, &unique_last_uses_on_stack);
 
     for _ in 0..SCHEDULE_MAX_STEPS {
         if matches!(preparer.progress(), Ok(Status::Complete)) {
-            stack.op(graph, op_id, false);
+            stack.op(graph, op_id, flipped);
             return;
         }
     }
