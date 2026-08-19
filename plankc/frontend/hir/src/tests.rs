@@ -758,7 +758,7 @@ fn test_duplicate_const_def() {
 fn test_duplicated_const_def_should_not_be_lowered_into_hir() {
     let project = TestProject::root(
         r#"
-        import m::other::f2;
+        use m::other::f2;
 
         const f1 = fn (comptime T: type) void {
             f2;
@@ -836,7 +836,7 @@ fn test_import_name_collision() {
     let project = TestProject::root(
         r#"
         const x = 1;
-        import m::other::x;
+        use m::other::x;
         init {}
         "#,
     )
@@ -855,8 +855,8 @@ fn test_import_name_collision() {
           |
         1 | const x = 1;
           | ------------ 'x' previously defined here
-        2 | import m::other::x;
-          | ^^^^^^^^^^^^^^^^^^^ conflicting import
+        2 | use m::other::x;
+          | ^^^^^^^^^^^^^^^^ conflicting import
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -867,7 +867,7 @@ fn test_glob_import_name_collision() {
     let project = TestProject::root(
         r#"
         const x = 1;
-        import m::other::*;
+        use m::other::*;
         init {}
         "#,
     )
@@ -886,8 +886,8 @@ fn test_glob_import_name_collision() {
           |
         1 | const x = 1;
           | ------------ 'x' previously defined here
-        2 | import m::other::*;
-          | ^^^^^^^^^^^^^^^^^^^ conflicting import
+        2 | use m::other::*;
+          | ^^^^^^^^^^^^^^^^ conflicting import
           |
          ::: other.plk:1:1
           |
@@ -903,7 +903,7 @@ fn test_alias_import_collision() {
     let project = TestProject::root(
         r#"
         const x = 1;
-        import m::other::y as x;
+        use m::other::y as x;
         init {}
         "#,
     )
@@ -922,8 +922,8 @@ fn test_alias_import_collision() {
           |
         1 | const x = 1;
           | ------------ 'x' previously defined here
-        2 | import m::other::y as x;
-          | ^^^^^^^^^^^^^^^^^^^^^^^^ conflicting import
+        2 | use m::other::y as x;
+          | ^^^^^^^^^^^^^^^^^^^^^ conflicting import
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -933,8 +933,8 @@ fn test_alias_import_collision() {
 fn test_import_collision_with_previous_import() {
     let project = TestProject::root(
         r#"
-        import m::a::x;
-        import m::b::x;
+        use m::a::x;
+        use m::b::x;
         init {}
         "#,
     )
@@ -957,10 +957,10 @@ fn test_import_collision_with_previous_import() {
         error: imported definition collision
          --> main.plk:2:1
           |
-        1 | import m::a::x;
-          | --------------- 'x' previously imported here
-        2 | import m::b::x;
-          | ^^^^^^^^^^^^^^^ conflicting import
+        1 | use m::a::x;
+          | ------------ 'x' previously imported here
+        2 | use m::b::x;
+          | ^^^^^^^^^^^^ conflicting import
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -970,7 +970,7 @@ fn test_import_collision_with_previous_import() {
 fn test_unresolved_import() {
     let project = TestProject::root(
         r#"
-        import m::other::y;
+        use m::other::y;
         init {}
         "#,
     )
@@ -985,10 +985,10 @@ fn test_unresolved_import() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: unresolved import
-         --> main.plk:1:18
+         --> main.plk:1:15
           |
-        1 | import m::other::y;
-          |                  ^ 'y' not found in target module
+        1 | use m::other::y;
+          |               ^ 'y' not found in target module
           |
         info: no definition of 'y' found in file
          --> other.plk
@@ -1620,7 +1620,7 @@ fn test_unresolved_bare_builtin_name_suggests_at() {
 fn test_import_group_unresolved_item() {
     let project = TestProject::root(
         r#"
-        import m::other::{a, b};
+        use m::other::{a, b};
         init { @evm_stop(); }
         "#,
     )
@@ -1635,10 +1635,10 @@ fn test_import_group_unresolved_item() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: unresolved import
-         --> main.plk:1:22
+         --> main.plk:1:19
           |
-        1 | import m::other::{a, b};
-          |                      ^ 'b' not found in target module
+        1 | use m::other::{a, b};
+          |                   ^ 'b' not found in target module
           |
         info: no definition of 'b' found in file
          --> other.plk
@@ -1652,7 +1652,7 @@ fn test_import_group_collision_with_local() {
     let project = TestProject::root(
         r#"
         const x = 1;
-        import m::other::{a, b as x};
+        use m::other::{a, b as x};
         init { @evm_stop(); }
         "#,
     )
@@ -1668,12 +1668,12 @@ fn test_import_group_collision_with_local() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: imported definition collision
-         --> main.plk:2:22
+         --> main.plk:2:19
           |
         1 | const x = 1;
           | ------------ 'x' previously defined here
-        2 | import m::other::{a, b as x};
-          |                      ^^^^^^ conflicting import
+        2 | use m::other::{a, b as x};
+          |                   ^^^^^^ conflicting import
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -1683,8 +1683,8 @@ fn test_import_group_collision_with_local() {
 fn test_import_group_collision_with_other_import() {
     let project = TestProject::root(
         r#"
-        import m::a::x;
-        import m::b::{y, x};
+        use m::a::x;
+        use m::b::{y, x};
         init { @evm_stop(); }
         "#,
     )
@@ -1706,12 +1706,12 @@ fn test_import_group_collision_with_other_import() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: imported definition collision
-         --> main.plk:2:18
+         --> main.plk:2:15
           |
-        1 | import m::a::x;
-          | --------------- 'x' previously imported here
-        2 | import m::b::{y, x};
-          |                  ^ conflicting import
+        1 | use m::a::x;
+          | ------------ 'x' previously imported here
+        2 | use m::b::{y, x};
+          |               ^ conflicting import
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
@@ -1721,7 +1721,7 @@ fn test_import_group_collision_with_other_import() {
 fn test_import_group_self_collision() {
     let project = TestProject::root(
         r#"
-        import m::other::{a as x, b as x};
+        use m::other::{a as x, b as x};
         init { @evm_stop(); }
         "#,
     )
@@ -1737,12 +1737,12 @@ fn test_import_group_self_collision() {
     let expected = dedent_preserve_blank_lines(
         r#"
         error: imported definition collision
-         --> main.plk:1:27
+         --> main.plk:1:24
           |
-        1 | import m::other::{a as x, b as x};
-          |                   ------  ^^^^^^ conflicting import
-          |                   |
-          |                   'x' previously imported here
+        1 | use m::other::{a as x, b as x};
+          |                ------  ^^^^^^ conflicting import
+          |                |
+          |                'x' previously imported here
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

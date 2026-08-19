@@ -35,7 +35,7 @@ fn test_auto_registers_std_from_plank_dir() {
         &source_file,
         dedent_preserve_indent(
             r#"
-            import std::math::max;
+            use std::math::max;
 
             init {
                 let a = max(1, 2);
@@ -80,7 +80,7 @@ fn test_explicit_dep_overrides_plank_dir_std() {
         &source_file,
         dedent_preserve_indent(
             r#"
-            import std::math::skibidi_max;
+            use std::math::skibidi_max;
 
             init {
                 let a = skibidi_max(1, 2);
@@ -109,7 +109,7 @@ fn missing_std_fails_to_compile() {
     let source_file = source_dir.path().join("main.plk");
     fs::write(
         &source_file,
-        r#"import std::math::max;
+        r#"use std::math::max;
 
 init {
     evm_stop();

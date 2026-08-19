@@ -356,7 +356,7 @@ fn test_cross_file_not_callable() {
     assert_project_diagnostics(
         TestProject::root(
             "
-            import m::other::x;
+            use m::other::x;
             init {
                 x();
                 @evm_stop();
@@ -470,7 +470,7 @@ fn test_comptime_call_arg_count_mismatch() {
 #[test]
 fn test_cross_file_call_arg_count_mismatch() {
     assert_project_diagnostics(
-        TestProject::root("import m::other::f;\ninit { f(1, 2); @evm_stop(); }")
+        TestProject::root("use m::other::f;\ninit { f(1, 2); @evm_stop(); }")
             .add_file("other", "const f = fn(x: u256) u256 { return x; };")
             .add_module("m", ""),
         &[r#"
@@ -562,7 +562,7 @@ fn test_cross_file_type_mismatch() {
     assert_project_diagnostics(
         TestProject::root(
             "
-            import m::other::f;
+            use m::other::f;
             const y = f(true);
             init { @evm_stop(); }
             ",
@@ -589,7 +589,7 @@ fn test_import_group_symbols_accessible() {
     assert_lowers_to(
         TestProject::root(
             r#"
-            import m::other::{f, g as my_g};
+            use m::other::{f, g as my_g};
             init {
                 let x = f(1);
                 let y = my_g(2, 3);

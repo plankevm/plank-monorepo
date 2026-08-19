@@ -268,11 +268,11 @@ impl<'a> Parser<'a> {
     pub(crate) fn emit_empty_import_group(&mut self, brace_start: TokenIdx) {
         let start = self.tokens.token_src_span(brace_start).start;
         let end = self.last_src_span.end;
-        Diagnostic::warning("empty import group")
+        Diagnostic::warning("empty use group")
             .primary(
                 self.source_id,
                 Span::new(start, end),
-                "import group must contain at least one item",
+                "use group must contain at least one item",
             )
             .emit(self.session);
     }
@@ -280,24 +280,24 @@ impl<'a> Parser<'a> {
     pub(crate) fn emit_path_in_import_group(&mut self, path_start: TokenIdx) {
         let start = self.tokens.token_src_span(path_start).start;
         let end = self.last_src_span.end;
-        Diagnostic::error("path in import group")
+        Diagnostic::error("path in use group")
             .primary(
                 self.source_id,
                 Span::new(start, end),
-                "paths are not allowed inside import groups",
+                "paths are not allowed inside use groups",
             )
-            .help("use a separate import statement for items from different submodules")
+            .help("write a separate `use` statement for items from different submodules")
             .emit(self.session);
     }
 
     pub(crate) fn emit_glob_in_import_group(&mut self) {
-        Diagnostic::error("glob import inside import group")
+        Diagnostic::error("glob import inside use group")
             .primary(
                 self.source_id,
                 self.last_src_span,
-                "glob imports are not allowed inside import groups",
+                "glob imports are not allowed inside use groups",
             )
-            .help("use a separate `import foo::*;` statement instead")
+            .help("use a separate `use foo::*;` statement instead")
             .emit(self.session);
     }
 
@@ -316,8 +316,8 @@ impl<'a> Parser<'a> {
         let start_span = self.tokens.token_src_span(brace_start);
         let end_span = self.last_src_span;
         let src_span = Span::new(start_span.start, end_span.end);
-        Diagnostic::warning("unnecessary braces in import")
-            .primary(self.source_id, src_span, "this import group contains only one item")
+        Diagnostic::warning("unnecessary braces in use")
+            .primary(self.source_id, src_span, "this use group contains only one item")
             .help("remove the unnecessary braces")
             .emit(self.session);
     }

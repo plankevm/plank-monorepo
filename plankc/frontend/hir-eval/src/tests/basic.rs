@@ -174,7 +174,7 @@ fn test_imported_init_missing_termination() {
     assert_project_diagnostics(
         TestProject::root(
             r#"
-            import m::other::*;
+            use m::other::*;
             init { @evm_stop(); }
             "#,
         )
@@ -206,7 +206,7 @@ fn test_imported_type_shadowing_at_file_scope_is_invalid() {
     assert_project_diagnostics(
         TestProject::root(
             r#"
-            import m::other::storage;
+            use m::other::storage;
 
             const storage = fn(comptime T: type) type { T };
 
@@ -219,8 +219,8 @@ fn test_imported_type_shadowing_at_file_scope_is_invalid() {
         error: imported definition collision
          --> main.plk:1:1
           |
-        1 | import m::other::storage;
-          | ^^^^^^^^^^^^^^^^^^^^^^^^^ conflicting import
+        1 | use m::other::storage;
+          | ^^^^^^^^^^^^^^^^^^^^^^ conflicting import
         2 |
         3 | const storage = fn(comptime T: type) type { T };
           | ------------------------------------------------ 'storage' previously defined here
@@ -233,7 +233,7 @@ fn test_imported_type_shadowing_in_local_scope_is_valid() {
     assert_lowers_to(
         TestProject::root(
             r#"
-            import m::other::storage;
+            use m::other::storage;
 
             init {
                 let storage = fn(comptime T: type) type { T };
@@ -258,7 +258,7 @@ fn test_imported_init_missing_termination_without_entry_init() {
     assert_project_diagnostics(
         TestProject::root(
             r#"
-            import m::other::*;
+            use m::other::*;
             "#,
         )
         .add_file(
@@ -296,7 +296,7 @@ fn test_imported_run_missing_init_and_termination() {
     assert_project_diagnostics(
         TestProject::root(
             r#"
-            import m::other::*;
+            use m::other::*;
             init { @evm_stop(); }
             "#,
         )
@@ -414,7 +414,7 @@ fn test_imported_run_type_error() {
     assert_project_diagnostics(
         TestProject::root(
             r#"
-            import m::other::*;
+            use m::other::*;
             init { @evm_stop(); }
             "#,
         )
@@ -446,7 +446,7 @@ fn test_imported_run_not_selected_as_artifact_run() {
     let (mir, _values, session) = try_lower(
         TestProject::root(
             r#"
-            import m::other::*;
+            use m::other::*;
             init { @evm_stop(); }
             "#,
         )

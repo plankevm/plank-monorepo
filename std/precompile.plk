@@ -1,7 +1,7 @@
-import std::error::require;
-import std::membytes::{membytes, membytes_from_ptr};
-import std::option::{Option, Some, None};
-import std::core::addr::*;
+use std::error::require;
+use std::membytes::{membytes, membytes_from_ptr};
+use std::option::{Option, Some, None};
+use std::core::addr::*;
 
 const ECRECOVER_ADDR = addr_from_u256(0x01);
 const SHA256_ADDR = addr_from_u256(0x02);

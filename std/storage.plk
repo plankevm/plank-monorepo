@@ -1,4 +1,4 @@
-import std::membytes::{membytes, membytes_new};
+use std::membytes::{membytes, membytes_new};
 
 // Hashes a storage slot to derive a base slot for dynamic data.
 const slot_hash = fn (slot: u256) u256 {

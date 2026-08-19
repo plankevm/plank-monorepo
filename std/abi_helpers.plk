@@ -1,7 +1,7 @@
-import std::membytes::{membytes, membytes_from_ptr, membytes_read_u256};
-import std::option::unwrap;
-import std::math::ceil32;
-import std::utils::fold;
+use std::membytes::{membytes, membytes_from_ptr, membytes_read_u256};
+use std::option::unwrap;
+use std::math::ceil32;
+use std::utils::fold;
 
 const is_abi_dynamic = fn (comptime T: type) bool {
     if T == void {

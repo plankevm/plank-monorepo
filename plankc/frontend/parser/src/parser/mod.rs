@@ -10,14 +10,14 @@ use allocator_api2::vec::Vec;
 use plank_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
 use plank_session::{Session, SourceByteOffset, SourceId, SourceSpan, StrId};
 
-const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Import];
+const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Use];
 const STMT_RECOVERY: &[Token] = &[
     Token::Semicolon,
     Token::RightCurly,
     Token::Init,
     Token::Run,
     Token::Const,
-    Token::Import,
+    Token::Use,
     Token::Let,
     Token::Return,
     Token::Comptime,
@@ -178,7 +178,7 @@ impl<'a> Parser<'a> {
         while !self.eof() {
             self.skip_trivia();
             match self.current_token() {
-                Token::Init | Token::Run | Token::Const | Token::Import => return,
+                Token::Init | Token::Run | Token::Const | Token::Use => return,
                 _ => self.advance(),
             }
         }
@@ -1137,7 +1137,7 @@ impl<'a> Parser<'a> {
             self.parse_block(start, NodeKind::RunBlock)
         } else if self.eat(Token::Const) {
             self.parse_const_decl(start)
-        } else if self.eat(Token::Import) {
+        } else if self.eat(Token::Use) {
             self.parse_import_decl(start)
         } else {
             self.emit_unexpected();

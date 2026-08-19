@@ -360,8 +360,8 @@ fn test_generic_struct_name_collision_across_files() {
     assert_project_diagnostics(
         TestProject::root(
             "
-            import m::a::Box;
-            import m::b::Box as OtherBox;
+            use m::a::Box;
+            use m::b::Box as OtherBox;
             const takes_a_box = fn (value: Box(u256)) void {};
             init {
                 takes_a_box(OtherBox(u256) { value: 1 });
@@ -758,8 +758,8 @@ fn test_nested_generic_struct_name_collision_across_files() {
     assert_project_diagnostics(
         TestProject::root(
             r#"
-            import m::a::Box;
-            import m::b::Box as OtherBox;
+            use m::a::Box;
+            use m::b::Box as OtherBox;
             const Wrap = fn (comptime T: type) type { struct T { value: T } };
             const takes_wrap = fn (value: Wrap(Box(u256))) void {};
             init {

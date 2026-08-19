@@ -596,7 +596,23 @@ fn test_unexpected_token_at_top_level() {
              --> test.plk:1:1
               |
             1 | 5;
-              | ^ unexpected decimal literal, expected one of `init`, `run`, `const`, `import`
+              | ^ unexpected decimal literal, expected one of `init`, `run`, `const`, `use`
+        "#],
+    );
+}
+
+#[test]
+fn test_import_keyword_is_rejected() {
+    assert_parser_errors(
+        r#"
+            import m::x;
+        "#,
+        &[r#"
+            error: unexpected identifier
+             --> test.plk:1:1
+              |
+            1 | import m::x;
+              | ^^^^^^ unexpected identifier, expected one of `init`, `run`, `const`, `use`
         "#],
     );
 }
@@ -977,14 +993,14 @@ fn test_missing_semicolon_unexpected_garbage() {
 fn test_at_identifier_no_double_emission_missing_as() {
     assert_parser_errors(
         r#"
-            import foo @bar;
+            use foo @bar;
         "#,
         &[r#"
             error: unexpected builtin name
-             --> test.plk:1:12
+             --> test.plk:1:9
               |
-            1 | import foo @bar;
-              |            ^^^^ unexpected builtin name, expected one of `::`, `;`, `as`
+            1 | use foo @bar;
+              |         ^^^^ unexpected builtin name, expected one of `::`, `;`, `as`
         "#],
     );
 }
@@ -1044,14 +1060,14 @@ fn test_error_in_block_no_ast_panic() {
 fn test_import_group_empty() {
     assert_parser_errors(
         r#"
-        import foo::bar::{};
+        use foo::bar::{};
         "#,
         &[r#"
-        warning: empty import group
-         --> test.plk:1:18
+        warning: empty use group
+         --> test.plk:1:15
           |
-        1 | import foo::bar::{};
-          |                  ^^ import group must contain at least one item
+        1 | use foo::bar::{};
+          |               ^^ use group must contain at least one item
         "#],
     );
 }
@@ -1060,16 +1076,16 @@ fn test_import_group_empty() {
 fn test_import_group_nested_path() {
     assert_parser_errors(
         r#"
-        import foo::{X, bar::Baz};
+        use foo::{X, bar::Baz};
         "#,
         &[r#"
-            error: path in import group
-             --> test.plk:1:17
+            error: path in use group
+             --> test.plk:1:14
               |
-            1 | import foo::{X, bar::Baz};
-              |                 ^^^^^^^^ paths are not allowed inside import groups
+            1 | use foo::{X, bar::Baz};
+              |              ^^^^^^^^ paths are not allowed inside use groups
               |
-              = help: use a separate import statement for items from different submodules
+              = help: write a separate `use` statement for items from different submodules
         "#],
     );
 }
@@ -1078,14 +1094,14 @@ fn test_import_group_nested_path() {
 fn test_import_group_unnecessary_braces() {
     assert_parser_errors(
         r#"
-        import foo::bar::{X};
+        use foo::bar::{X};
         "#,
         &[r#"
-            warning: unnecessary braces in import
-             --> test.plk:1:18
+            warning: unnecessary braces in use
+             --> test.plk:1:15
               |
-            1 | import foo::bar::{X};
-              |                  ^^^ this import group contains only one item
+            1 | use foo::bar::{X};
+              |               ^^^ this use group contains only one item
               |
               = help: remove the unnecessary braces
         "#],
@@ -1096,16 +1112,16 @@ fn test_import_group_unnecessary_braces() {
 fn test_glob_inside_import_group() {
     assert_parser_errors(
         r#"
-        import foo::{a, *};
+        use foo::{a, *};
         "#,
         &[r#"
-            error: glob import inside import group
-             --> test.plk:1:17
+            error: glob import inside use group
+             --> test.plk:1:14
               |
-            1 | import foo::{a, *};
-              |                 ^ glob imports are not allowed inside import groups
+            1 | use foo::{a, *};
+              |              ^ glob imports are not allowed inside use groups
               |
-              = help: use a separate `import foo::*;` statement instead
+              = help: use a separate `use foo::*;` statement instead
         "#],
     );
 }
@@ -1114,14 +1130,14 @@ fn test_glob_inside_import_group() {
 fn test_import_group_unnecessary_braces_with_alias() {
     assert_parser_errors(
         r#"
-        import foo::bar::{X as Y};
+        use foo::bar::{X as Y};
         "#,
         &[r#"
-            warning: unnecessary braces in import
-             --> test.plk:1:18
+            warning: unnecessary braces in use
+             --> test.plk:1:15
               |
-            1 | import foo::bar::{X as Y};
-              |                  ^^^^^^^^ this import group contains only one item
+            1 | use foo::bar::{X as Y};
+              |               ^^^^^^^^ this use group contains only one item
               |
               = help: remove the unnecessary braces
         "#],

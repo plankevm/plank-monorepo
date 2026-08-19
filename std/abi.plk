@@ -1,9 +1,9 @@
-import std::option::*;
-import std::membytes::{membytes, membytes_new, membytes_from_ptr};
-import std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
-import std::math::ceil32;
-import std::utils::fold;
-import std::regions::keccak256;
+use std::option::*;
+use std::membytes::{membytes, membytes_new, membytes_from_ptr};
+use std::abi_helpers::{unsafe_abi_encode_to, unsafe_abi_decode_from, abi_buf_fits, is_abi_dynamic, abi_head_size};
+use std::math::ceil32;
+use std::utils::fold;
+use std::regions::keccak256;
 
 // Accumulator for computing ABI encoded size of a struct via fold.
 // Runtime value (encoded_value) cannot be captured in closures,

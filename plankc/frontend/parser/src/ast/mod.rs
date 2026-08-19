@@ -150,7 +150,7 @@ impl<'cst> Import<'cst> {
     }
 
     /// Span covering the segments that determine the imported file path.
-    /// For `import m::sub::X;` this is `m::sub`, for `import m::sub::*;` this is `m::sub`.
+    /// For `use m::sub::X;` this is `m::sub`, for `use m::sub::*;` this is `m::sub`.
     pub fn file_path_span(&self) -> TokenSpan {
         let mut second_to_last = self.first_child;
         let mut last = self.first_child;

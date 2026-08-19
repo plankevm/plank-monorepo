@@ -1,6 +1,6 @@
-import std::precompile::sha256;
-import std::constructor::*;
-import std::membytes::*;
+use std::precompile::sha256;
+use std::constructor::*;
+use std::membytes::*;
 
 
 const ZERO_HASHES =
