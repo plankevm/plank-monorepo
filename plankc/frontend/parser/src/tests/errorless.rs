@@ -3133,12 +3133,12 @@ fn test_empty_block_expr() {
 fn test_import_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo;
+        use foo;
         "#,
         r#"
         File
             ImportDecl { glob: false }
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3151,12 +3151,12 @@ fn test_import_single_segment() {
 fn test_import_two_segments() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar;
+        use foo::bar;
         "#,
         r#"
         File
             ImportDecl { glob: false }
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3172,12 +3172,12 @@ fn test_import_two_segments() {
 fn test_import_three_segments() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::baz;
+        use foo::bar::baz;
         "#,
         r#"
         File
             ImportDecl { glob: false }
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3196,12 +3196,12 @@ fn test_import_three_segments() {
 fn test_import_glob_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::*;
+        use foo::*;
         "#,
         r#"
         File
             ImportDecl { glob: true }
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3216,12 +3216,12 @@ fn test_import_glob_single_segment() {
 fn test_import_glob_multi_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::*;
+        use foo::bar::*;
         "#,
         r#"
         File
             ImportDecl { glob: true }
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3239,13 +3239,13 @@ fn test_import_glob_multi_segment() {
 fn test_import_as_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo as bar;
+        use foo as bar;
         "#,
         r#"
         File
             ImportAsDecl
                 ImportPath
-                    "import"
+                    "use"
                     " "
                     Identifier
                         "foo"
@@ -3263,13 +3263,13 @@ fn test_import_as_single_segment() {
 fn test_import_as_multi_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::baz as qux;
+        use foo::bar::baz as qux;
         "#,
         r#"
         File
             ImportAsDecl
                 ImportPath
-                    "import"
+                    "use"
                     " "
                     Identifier
                         "foo"
@@ -3293,22 +3293,22 @@ fn test_import_as_multi_segment() {
 fn test_import_multiple_declarations() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import std;
-        import std::io;
-        import std::io::*;
-        import std::io as io_lib;
+        use std;
+        use std::io;
+        use std::io::*;
+        use std::io as io_lib;
         "#,
         r#"
         File
             ImportDecl { glob: false }
-                "import"
+                "use"
                 " "
                 Identifier
                     "std"
                 ";"
             "\n"
             ImportDecl { glob: false }
-                "import"
+                "use"
                 " "
                 Identifier
                     "std"
@@ -3318,7 +3318,7 @@ fn test_import_multiple_declarations() {
                 ";"
             "\n"
             ImportDecl { glob: true }
-                "import"
+                "use"
                 " "
                 Identifier
                     "std"
@@ -3331,7 +3331,7 @@ fn test_import_multiple_declarations() {
             "\n"
             ImportAsDecl
                 ImportPath
-                    "import"
+                    "use"
                     " "
                     Identifier
                         "std"
@@ -3352,12 +3352,12 @@ fn test_import_multiple_declarations() {
 fn test_import_group() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::{X, Y as B};
+        use foo::bar::{X, Y as B};
         "#,
         r#"
         File
             ImportGroupDecl
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3389,12 +3389,12 @@ fn test_import_group() {
 fn test_import_group_trailing_comma() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::{X, Y,};
+        use foo::bar::{X, Y,};
         "#,
         r#"
         File
             ImportGroupDecl
-                "import"
+                "use"
                 " "
                 Identifier
                     "foo"

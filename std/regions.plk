@@ -1,5 +1,5 @@
-import std::error::*;
-import std::fixedbytes::bytes32;
+use std::error::*;
+use std::fixedbytes::bytes32;
 
 const memory = struct {};
 const code = struct {};

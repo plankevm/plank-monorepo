@@ -1,4 +1,4 @@
-import std::type::sizeof;
+use std::type::sizeof;
 
 // Reads a value of type T from calldata at `ptr`. Compound fields are
 // read contiguously in declaration order. No bounds check.

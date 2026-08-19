@@ -1,5 +1,5 @@
-import std::abi::{abi_encode, abi_decode};
-import std::membytes::{membytes, membytes_from_ptr};
+use std::abi::{abi_encode, abi_decode};
+use std::membytes::{membytes, membytes_from_ptr};
 
 const Pair = struct { a: u256, b: u256 };
 

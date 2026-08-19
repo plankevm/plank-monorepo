@@ -1,4 +1,4 @@
-import std::membytes::membytes;
+use std::membytes::membytes;
 
 const string = struct {
     bytes: membytes

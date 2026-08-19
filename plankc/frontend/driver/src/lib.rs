@@ -288,7 +288,7 @@ mod tests {
     #[test]
     fn unknown_module_import_emits_diagnostic() {
         let mut fs = InMemoryFs::new();
-        fs.add_file("main.plk", "import foo::bar::Baz;\ninit {}\n".to_string());
+        fs.add_file("main.plk", "use foo::bar::Baz;\ninit {}\n".to_string());
 
         let mut driver = Driver::new(&fs);
         driver.load_project(Path::new("main.plk"));
@@ -298,10 +298,10 @@ mod tests {
             &driver.session,
             &[r#"
             error: unresolved import
-             --> main.plk:1:8
+             --> main.plk:1:5
               |
-            1 | import foo::bar::Baz;
-              |        ^^^ unknown module 'foo'
+            1 | use foo::bar::Baz;
+              |     ^^^ unknown module 'foo'
             "#],
         );
     }
@@ -313,7 +313,7 @@ mod tests {
             "main.plk",
             dedent_preserve_indent(
                 r#"
-                import std::math::max;
+                use std::math::max;
                 init {}
                 "#,
             )
@@ -328,10 +328,10 @@ mod tests {
             &driver.session,
             &[r#"
             error: unresolved import
-             --> main.plk:1:8
+             --> main.plk:1:5
               |
-            1 | import std::math::max;
-              |        ^^^ unknown module 'std'
+            1 | use std::math::max;
+              |     ^^^ unknown module 'std'
               |
               = help: the 'std' module is included with plankup, the Plank installer
               = note: see https://github.com/plankevm/plank-monorepo for installation instructions
@@ -342,7 +342,7 @@ mod tests {
     #[test]
     fn imported_file_not_found_emits_diagnostic() {
         let mut fs = InMemoryFs::new();
-        fs.add_file("main.plk", "import m::a::b::X;\ninit {}\n".to_string());
+        fs.add_file("main.plk", "use m::a::b::X;\ninit {}\n".to_string());
 
         let mut driver = Driver::new(&fs);
         driver.register_module("m", PathBuf::from("/lib"));
@@ -353,10 +353,10 @@ mod tests {
             &driver.session,
             &[r#"
             error: could not open imported file
-             --> main.plk:1:8
+             --> main.plk:1:5
               |
-            1 | import m::a::b::X;
-              |        ^^^^^^^ imported here
+            1 | use m::a::b::X;
+              |     ^^^^^^^ imported here
               |
               = note: '/lib/a/b.plk': file not found in InMemoryFs: /lib/a/b.plk
             "#],

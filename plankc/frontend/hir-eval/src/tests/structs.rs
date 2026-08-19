@@ -1289,7 +1289,7 @@ fn test_cross_file_struct_lit_not_a_struct() {
     assert_project_diagnostics(
         TestProject::root(
             "
-            import m::other::T;
+            use m::other::T;
             init {
                 let x = T { value: 1 };
                 @evm_stop();
@@ -1318,7 +1318,7 @@ fn test_cross_file_type_not_type() {
     assert_project_diagnostics(
         TestProject::root(
             "
-            import m::other::T;
+            use m::other::T;
             init {
                 let x = T { };
                 @evm_stop();
@@ -1449,7 +1449,7 @@ fn test_cross_file_member_on_non_struct() {
     assert_project_diagnostics(
         TestProject::root(
             "
-            import m::other::x;
+            use m::other::x;
             const y = x.foo;
             init { @evm_stop(); }
             ",

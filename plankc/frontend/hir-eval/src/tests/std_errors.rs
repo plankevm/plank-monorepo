@@ -5,9 +5,9 @@ fn test_runtime_slice_rejects_cbytes_elements() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::None;
-            import std::regions::memory;
-            import std::slice::Slice;
+            use std::option::None;
+            use std::regions::memory;
+            use std::slice::Slice;
 
             const InvalidSlice = Slice(memory, cbytes, None(u256));
 
@@ -31,9 +31,9 @@ fn test_runtime_slice_rejects_nested_cbytes_elements() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::None;
-            import std::regions::memory;
-            import std::slice::Slice;
+            use std::option::None;
+            use std::regions::memory;
+            use std::slice::Slice;
 
             const Dynamic = struct { data: cbytes };
             const InvalidSlice = Slice(memory, Dynamic, None(u256));
@@ -58,9 +58,9 @@ fn test_ctime_slice_rejects_cbytes_elements() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::None;
-            import std::regions::ctime;
-            import std::slice::Slice;
+            use std::option::None;
+            use std::regions::ctime;
+            use std::slice::Slice;
 
             const InvalidSlice = Slice(ctime, cbytes, None(u256));
 
@@ -84,8 +84,8 @@ fn test_slice_new_rejects_code_region() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::code;
-            import std::slice::new;
+            use std::regions::code;
+            use std::slice::new;
 
             init {
                 new(code, (1, 2));
@@ -108,8 +108,8 @@ fn test_slice_new_rejects_calldata_region() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::calldata;
-            import std::slice::new;
+            use std::regions::calldata;
+            use std::slice::new;
 
             init {
                 new(calldata, (1, 2));
@@ -132,8 +132,8 @@ fn test_slice_new_ctime_rejects_runtime_values() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::ctime;
-            import std::slice::new;
+            use std::regions::ctime;
+            use std::slice::new;
 
             init {
                 let value = @evm_calldataload(0);
@@ -162,8 +162,8 @@ fn test_slice_new_rejects_heterogeneous_tuple() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::memory;
-            import std::slice::new;
+            use std::regions::memory;
+            use std::slice::new;
 
             init {
                 new(memory, (1, true));
@@ -192,8 +192,8 @@ fn test_slice_new_rejects_empty_tuple() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::regions::memory;
-            import std::slice::new;
+            use std::regions::memory;
+            use std::slice::new;
 
             init {
                 new(memory, ());
@@ -222,8 +222,8 @@ fn test_cslice_rejects_runtime_index() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::None;
-            import std::slice::{CSlice, get};
+            use std::option::None;
+            use std::slice::{CSlice, get};
 
             const VALUES = CSlice(u256, None(u256)) {
                 data: @concat_cbytes((1, 2)),
@@ -252,9 +252,9 @@ fn test_slice_set_rejects_non_memory_region() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::Some;
-            import std::regions::code;
-            import std::slice::{Slice, set};
+            use std::option::Some;
+            use std::regions::code;
+            use std::slice::{Slice, set};
 
             init {
                 let slice = Slice(code, u256, comptime { Some(1) }) { ptr: 0 };
@@ -278,9 +278,9 @@ fn test_slice_replace_rejects_out_of_bounds_index() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::Some;
-            import std::regions::ctime;
-            import std::slice::{Slice, replace};
+            use std::option::Some;
+            use std::regions::ctime;
+            use std::slice::{Slice, replace};
 
             const VALUES = Slice(ctime, u256, Some(2)) {
                 data: @concat_cbytes((1, 2))
@@ -307,9 +307,9 @@ fn test_slice_replace_rejects_non_ctime_region() {
     assert_diagnostics(
         std_project(
             r#"
-            import std::option::Some;
-            import std::regions::memory;
-            import std::slice::{Slice, replace};
+            use std::option::Some;
+            use std::regions::memory;
+            use std::slice::{Slice, replace};
 
             init {
                 let ptr = @evm_calldataload(0);

@@ -1,4 +1,4 @@
-import std::version::{active_evm_version, OSAKA};
+use std::version::{active_evm_version, OSAKA};
 
 const HAS_CLZ_OPCODE = active_evm_version().id >= OSAKA.id;
 

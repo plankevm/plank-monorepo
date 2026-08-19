@@ -107,7 +107,7 @@
       "members": [
         {
           "type": "STRING",
-          "value": "import"
+          "value": "use"
         },
         {
           "type": "FIELD",

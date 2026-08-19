@@ -38,7 +38,7 @@ if you wish to add support for another editor.
 Create a file called `magic_number.plk`:
 
 ```plank
-import std::constructor::return_runtime;
+use std::constructor::return_runtime;
 
 const MAGIC_NUMBER_SLOT = 0;
 const GET_SELECTOR = 0x6d4ce63c;
@@ -91,4 +91,3 @@ plank doc comptime
 ```
 
 Alternatively feed it to your LLM by pointing it to the `~/.plank/share/doc/src/` folder which contains the docs in their original markdown form.
-

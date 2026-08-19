@@ -1,6 +1,6 @@
-import std::storage::map_slot_hash;
-import std::core::addr::*;
-import std::precompile::ecrecover;
+use std::storage::map_slot_hash;
+use std::core::addr::*;
+use std::precompile::ecrecover;
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
 
