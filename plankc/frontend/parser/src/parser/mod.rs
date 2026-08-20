@@ -10,13 +10,15 @@ use allocator_api2::vec::Vec;
 use plank_core::{Idx, IndexVec, Span, bigint, list_of_lists::ListOfLists};
 use plank_session::{Session, SourceByteOffset, SourceId, SourceSpan, StrId};
 
-const CONST_DEF_EXPR_RECOVERY: &[Token] = &[Token::Init, Token::Run, Token::Const, Token::Use];
+const CONST_DEF_EXPR_RECOVERY: &[Token] =
+    &[Token::Init, Token::Run, Token::Const, Token::Pub, Token::Use];
 const STMT_RECOVERY: &[Token] = &[
     Token::Semicolon,
     Token::RightCurly,
     Token::Init,
     Token::Run,
     Token::Const,
+    Token::Pub,
     Token::Use,
     Token::Let,
     Token::Return,
@@ -178,7 +180,7 @@ impl<'a> Parser<'a> {
         while !self.eof() {
             self.skip_trivia();
             match self.current_token() {
-                Token::Init | Token::Run | Token::Const | Token::Use => return,
+                Token::Init | Token::Run | Token::Const | Token::Pub | Token::Use => return,
                 _ => self.advance(),
             }
         }
@@ -1137,8 +1139,19 @@ impl<'a> Parser<'a> {
             self.parse_block(start, NodeKind::RunBlock)
         } else if self.eat(Token::Const) {
             self.parse_const_decl(start)
+        } else if self.eat(Token::Pub) {
+            if self.eat(Token::Use) {
+                self.parse_import_decl(start, true)
+            } else {
+                self.emit_unexpected();
+                if !self.eof() {
+                    self.skip_until_decl_start();
+                }
+                let node = self.alloc_node_from(start, NodeKind::Error);
+                self.close_node(node)
+            }
         } else if self.eat(Token::Use) {
-            self.parse_import_decl(start)
+            self.parse_import_decl(start, false)
         } else {
             self.emit_unexpected();
             self.skip_until_decl_start();
@@ -1147,20 +1160,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_import_decl(&mut self, start: TokenIdx) -> NodeIdx {
-        let mut import_path = self.alloc_node_from(start, NodeKind::ImportDecl { glob: false });
+    fn parse_import_decl(&mut self, start: TokenIdx, public: bool) -> NodeIdx {
+        let mut import_path =
+            self.alloc_node_from(start, NodeKind::ImportDecl { public, glob: false });
         let path_start = self.expect_ident();
         self.push_child(&mut import_path, path_start);
 
         while self.eat(Token::DoubleColon) {
             if self.eat(Token::Star) {
-                self.update_kind(import_path, NodeKind::ImportDecl { glob: true });
+                self.update_kind(import_path, NodeKind::ImportDecl { public, glob: true });
                 self.expect(Token::Semicolon);
                 return self.close_node(import_path);
             }
 
             if self.check(Token::LeftCurly) {
-                self.update_kind(import_path, NodeKind::ImportGroupDecl);
+                self.update_kind(import_path, NodeKind::ImportGroupDecl { public });
                 return self.parse_import_group(import_path);
             }
 
@@ -1174,7 +1188,7 @@ impl<'a> Parser<'a> {
 
         self.update_kind(import_path, NodeKind::ImportPath);
         let import_path = self.close_node(import_path);
-        let mut import = self.alloc_node_from(start, NodeKind::ImportAsDecl);
+        let mut import = self.alloc_node_from(start, NodeKind::ImportAsDecl { public });
         self.push_child(&mut import, import_path);
 
         self.expect(Token::As);

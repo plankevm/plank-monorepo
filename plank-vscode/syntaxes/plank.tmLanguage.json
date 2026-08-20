@@ -32,9 +32,10 @@
     "imports": {
       "patterns": [
         {
-          "begin": "\\b(use)\\b",
+          "begin": "\\b(?:(pub)\\s+)?(use)\\b",
           "beginCaptures": {
-            "1": { "name": "keyword.other.use.plank" }
+            "1": { "name": "keyword.other.pub.plank" },
+            "2": { "name": "keyword.other.use.plank" }
           },
           "end": "(?=;|$)",
           "patterns": [
@@ -66,7 +67,7 @@
         },
         {
           "name": "keyword.other.plank",
-          "match": "\\b(use|as|comptime|eager)\\b"
+          "match": "\\b(pub|use|as|comptime|eager)\\b"
         },
         {
           "name": "keyword.operator.logical.plank",

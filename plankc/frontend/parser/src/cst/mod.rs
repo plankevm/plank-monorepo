@@ -68,9 +68,9 @@ pub enum NodeKind {
 
     // Declarations
     ConstDecl { typed: bool },
-    ImportDecl { glob: bool },
-    ImportAsDecl,
-    ImportGroupDecl,
+    ImportDecl { public: bool, glob: bool },
+    ImportAsDecl { public: bool },
+    ImportGroupDecl { public: bool },
     ImportGroupItem,
     InitBlock,
     RunBlock,
@@ -139,9 +139,15 @@ impl std::fmt::Debug for NodeKind {
         match self {
             Self::File => write!(f, "File"),
             Self::ConstDecl { typed } => f.debug_struct("ConstDecl").field("typed", typed).finish(),
-            Self::ImportDecl { glob } => f.debug_struct("ImportDecl").field("glob", glob).finish(),
-            Self::ImportAsDecl => write!(f, "ImportAsDecl"),
-            Self::ImportGroupDecl => write!(f, "ImportGroupDecl"),
+            Self::ImportDecl { public, glob } => {
+                f.debug_struct("ImportDecl").field("public", public).field("glob", glob).finish()
+            }
+            Self::ImportAsDecl { public } => {
+                f.debug_struct("ImportAsDecl").field("public", public).finish()
+            }
+            Self::ImportGroupDecl { public } => {
+                f.debug_struct("ImportGroupDecl").field("public", public).finish()
+            }
             Self::ImportGroupItem => write!(f, "ImportGroupItem"),
             Self::InitBlock => write!(f, "InitBlock"),
             Self::RunBlock => write!(f, "RunBlock"),

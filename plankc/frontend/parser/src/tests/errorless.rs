@@ -3137,7 +3137,7 @@ fn test_import_single_segment() {
         "#,
         r#"
         File
-            ImportDecl { glob: false }
+            ImportDecl { public: false, glob: false }
                 "use"
                 " "
                 Identifier
@@ -3155,7 +3155,7 @@ fn test_import_two_segments() {
         "#,
         r#"
         File
-            ImportDecl { glob: false }
+            ImportDecl { public: false, glob: false }
                 "use"
                 " "
                 Identifier
@@ -3176,7 +3176,7 @@ fn test_import_three_segments() {
         "#,
         r#"
         File
-            ImportDecl { glob: false }
+            ImportDecl { public: false, glob: false }
                 "use"
                 " "
                 Identifier
@@ -3200,7 +3200,7 @@ fn test_import_glob_single_segment() {
         "#,
         r#"
         File
-            ImportDecl { glob: true }
+            ImportDecl { public: false, glob: true }
                 "use"
                 " "
                 Identifier
@@ -3220,7 +3220,7 @@ fn test_import_glob_multi_segment() {
         "#,
         r#"
         File
-            ImportDecl { glob: true }
+            ImportDecl { public: false, glob: true }
                 "use"
                 " "
                 Identifier
@@ -3243,7 +3243,7 @@ fn test_import_as_single_segment() {
         "#,
         r#"
         File
-            ImportAsDecl
+            ImportAsDecl { public: false }
                 ImportPath
                     "use"
                     " "
@@ -3267,7 +3267,7 @@ fn test_import_as_multi_segment() {
         "#,
         r#"
         File
-            ImportAsDecl
+            ImportAsDecl { public: false }
                 ImportPath
                     "use"
                     " "
@@ -3300,14 +3300,14 @@ fn test_import_multiple_declarations() {
         "#,
         r#"
         File
-            ImportDecl { glob: false }
+            ImportDecl { public: false, glob: false }
                 "use"
                 " "
                 Identifier
                     "std"
                 ";"
             "\n"
-            ImportDecl { glob: false }
+            ImportDecl { public: false, glob: false }
                 "use"
                 " "
                 Identifier
@@ -3317,7 +3317,7 @@ fn test_import_multiple_declarations() {
                     "io"
                 ";"
             "\n"
-            ImportDecl { glob: true }
+            ImportDecl { public: false, glob: true }
                 "use"
                 " "
                 Identifier
@@ -3329,7 +3329,7 @@ fn test_import_multiple_declarations() {
                 "*"
                 ";"
             "\n"
-            ImportAsDecl
+            ImportAsDecl { public: false }
                 ImportPath
                     "use"
                     " "
@@ -3356,7 +3356,7 @@ fn test_import_group() {
         "#,
         r#"
         File
-            ImportGroupDecl
+            ImportGroupDecl { public: false }
                 "use"
                 " "
                 Identifier
@@ -3393,7 +3393,7 @@ fn test_import_group_trailing_comma() {
         "#,
         r#"
         File
-            ImportGroupDecl
+            ImportGroupDecl { public: false }
                 "use"
                 " "
                 Identifier
@@ -3412,6 +3412,86 @@ fn test_import_group_trailing_comma() {
                     Identifier
                         "Y"
                 ","
+                "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_public_import_declarations() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        pub use foo::item;
+        pub use foo::item as alias;
+        pub use foo::*;
+        pub use foo::{a, b as c};
+        "#,
+        r#"
+        File
+            ImportDecl { public: true, glob: false }
+                "pub"
+                " "
+                "use"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                Identifier
+                    "item"
+                ";"
+            "\n"
+            ImportAsDecl { public: true }
+                ImportPath
+                    "pub"
+                    " "
+                    "use"
+                    " "
+                    Identifier
+                        "foo"
+                    "::"
+                    Identifier
+                        "item"
+                    " "
+                "as"
+                " "
+                Identifier
+                    "alias"
+                ";"
+            "\n"
+            ImportDecl { public: true, glob: true }
+                "pub"
+                " "
+                "use"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                "*"
+                ";"
+            "\n"
+            ImportGroupDecl { public: true }
+                "pub"
+                " "
+                "use"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                "{"
+                ImportGroupItem
+                    Identifier
+                        "a"
+                ","
+                " "
+                ImportGroupItem
+                    Identifier
+                        "b"
+                    " "
+                    "as"
+                    " "
+                    Identifier
+                        "c"
                 "}"
                 ";"
         "#,
