@@ -11,6 +11,7 @@ plank-core.workspace = true
 hashbrown.workspace = true
 smallvec.workspace = true
 rayon.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
 plank-test-utils.workspace = true

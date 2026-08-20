@@ -160,6 +160,7 @@ impl OpGraph {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct OpView<'a> {
     pub inputs_fifo: &'a [ValueNodeId],
     pub outputs_fifo: &'a [ValueNodeId],

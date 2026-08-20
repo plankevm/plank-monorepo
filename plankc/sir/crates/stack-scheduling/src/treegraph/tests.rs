@@ -2,23 +2,22 @@ use std::fmt::Write;
 
 use plank_core::Idx;
 use plank_test_utils::dedent_preserve_blank_lines;
-use pretty_assertions::assert_str_eq;
 use sir_data::OperationIdx;
 
 use super::{TreeGraph, build_tree_graph};
 use crate::op_graph::{OpGraph, OpGraphBuilder, OpNodeKind, ValueNodeId};
 
-fn assert_snapshot(input: &OpGraph, trees: &TreeGraph, expected: &str) {
+fn assert_snapshot(input: &OpGraph, expected: &str) {
     let expected = dedent_preserve_blank_lines(expected);
-    assert_str_eq!(format_snapshot(input, trees).trim(), expected.trim());
-}
-
-fn format_snapshot(input: &OpGraph, trees: &TreeGraph) -> String {
+    let trees = build_tree_graph(input);
     let mut out = String::new();
-    format_graph(&mut out, "input graph", input, None);
-    out.push('\n');
-    format_graph(&mut out, "tree graph", &trees.graph, Some(trees));
-    out
+    let formatted = {
+        format_graph(&mut out, "input graph", input, None);
+        out.push('\n');
+        format_graph(&mut out, "tree graph", &trees.graph, Some(&trees));
+        out.trim()
+    };
+    pretty_assertions::assert_str_eq!(formatted, expected.trim());
 }
 
 fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<&TreeGraph>) {
@@ -112,10 +111,8 @@ fn partial_binary_tree() -> OpGraph {
 #[test]
 fn constructs_partial_binary_tree_in_depth_first_order() {
     let input = partial_binary_tree();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: [v0]
@@ -174,10 +171,8 @@ fn three_operand_tree() -> OpGraph {
 #[test]
 fn constructs_three_operand_tree_in_depth_first_order() {
     let input = three_operand_tree();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -236,10 +231,8 @@ fn multi_use_tree_edge() -> OpGraph {
 #[test]
 fn materializes_multi_use_operand_as_its_own_virtual_operation() {
     let input = multi_use_tree_edge();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -297,10 +290,8 @@ fn final_output_tree_edge() -> OpGraph {
 #[test]
 fn materializes_an_operand_that_is_also_a_final_output() {
     let input = final_output_tree_edge();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -344,10 +335,8 @@ fn preserves_flippability_when_neither_leading_operand_is_folded() {
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
     let input = builder.finish();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: [v0, v1]
@@ -386,10 +375,8 @@ fn removes_flippability_when_the_first_leading_operand_is_folded() {
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
     let input = builder.finish();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: [v0]
@@ -432,10 +419,8 @@ fn removes_flippability_when_the_second_leading_operand_is_folded() {
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
     let input = builder.finish();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: [v0]
@@ -483,10 +468,8 @@ fn folding_both_leading_operands_removes_flippability_while_preserving_internal_
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
     let input = builder.finish();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -547,10 +530,8 @@ fn folds_only_the_viable_leading_operand_when_both_orders_are_interposed() {
         builder.push_end_stack_value(output);
         builder.finish()
     };
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -618,10 +599,8 @@ fn effect_split_tree() -> OpGraph {
 #[test]
 fn splits_non_flippable_effect_conflict() {
     let input = effect_split_tree();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -687,10 +666,8 @@ fn effect_interposed_tree() -> OpGraph {
 #[test]
 fn splits_tree_when_an_effect_is_interposed() {
     let input = effect_interposed_tree();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -755,10 +732,8 @@ fn repeated_and_multi_output_operands() -> OpGraph {
 #[test]
 fn does_not_absorb_multi_output_or_repeated_operands() {
     let input = repeated_and_multi_output_operands();
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -826,10 +801,8 @@ fn folds_operands_with_a_common_predecessor() {
         builder.push_end_stack_value(output);
         builder.finish()
     };
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: []
@@ -897,10 +870,8 @@ fn does_not_fold_partial_operand_trees() {
         builder.push_end_stack_value(output);
         builder.finish()
     };
-    let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,
-        &trees,
         r#"
             input graph:
               inputs: [v0, v1, v2, v3]

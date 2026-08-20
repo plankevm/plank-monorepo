@@ -66,6 +66,7 @@ index_vec = "0.1.4"
 clap = { version = "4.5", features = ["derive"] }
 anstream = "1"
 stacker = "0.1.22"
+itertools = "0.15.0"
 
 # Testing
 proptest = "1.11.0"
