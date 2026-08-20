@@ -101,6 +101,7 @@ pub enum ImportSuffix {
 pub struct Import<'cst> {
     path_node: NodeView<'cst>,
     first_child: NodeView<'cst>,
+    pub public: bool,
     pub suffix: ImportSuffix,
     view: NodeView<'cst>,
 }
@@ -108,21 +109,21 @@ pub struct Import<'cst> {
 impl<'cst> Import<'cst> {
     /// Returns `Ok(None)` for non-Import nodes, `Err(span)` for malformed Import nodes.
     fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
-        let (path_node, suffix) = match view.kind() {
-            NodeKind::ImportAsDecl => {
+        let (path_node, public, suffix) = match view.kind() {
+            NodeKind::ImportAsDecl { public } => {
                 let mut children = view.children();
                 let path = children.next().ok_or(view.span())?;
                 let as_name =
                     children.next().and_then(|c| c.kind().as_ident()).ok_or(view.span())?;
-                (path, ImportSuffix::As(Some(as_name)))
+                (path, public, ImportSuffix::As(Some(as_name)))
             }
-            NodeKind::ImportDecl { glob: false } => (view, ImportSuffix::As(None)),
-            NodeKind::ImportDecl { glob: true } => (view, ImportSuffix::All),
+            NodeKind::ImportDecl { public, glob: false } => (view, public, ImportSuffix::As(None)),
+            NodeKind::ImportDecl { public, glob: true } => (view, public, ImportSuffix::All),
             _ => return Ok(None),
         };
         let first_child = path_node.child(0).ok_or(view.span())?;
         first_child.ident().ok_or(view.span())?;
-        Ok(Some(Self { path_node, first_child, suffix, view }))
+        Ok(Some(Self { path_node, first_child, public, suffix, view }))
     }
 
     pub fn node(&self) -> NodeView<'cst> {
@@ -193,6 +194,7 @@ impl<'cst> ImportGroupItemView<'cst> {
 pub struct ImportGroup<'cst> {
     view: NodeView<'cst>,
     first_child: NodeView<'cst>,
+    pub public: bool,
 }
 
 impl<'cst> ImportGroup<'cst> {
@@ -200,10 +202,10 @@ impl<'cst> ImportGroup<'cst> {
     /// nodes.
     fn try_new(view: NodeView<'cst>) -> Result<Option<Self>, TokenSpan> {
         match view.kind() {
-            NodeKind::ImportGroupDecl => {
+            NodeKind::ImportGroupDecl { public } => {
                 let first_child = view.child(0).ok_or(view.span())?;
                 first_child.ident().ok_or(view.span())?;
-                Ok(Some(Self { view, first_child }))
+                Ok(Some(Self { view, first_child, public }))
             }
             _ => Ok(None),
         }

@@ -124,6 +124,7 @@
 "eager" @keyword
 "fn" @keyword
 "if" @keyword
+"pub" @keyword
 "use" @keyword
 "init" @keyword
 "inline" @keyword

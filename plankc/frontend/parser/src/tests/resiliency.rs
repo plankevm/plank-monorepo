@@ -596,7 +596,7 @@ fn test_unexpected_token_at_top_level() {
              --> test.plk:1:1
               |
             1 | 5;
-              | ^ unexpected decimal literal, expected one of `init`, `run`, `const`, `use`
+              | ^ unexpected decimal literal, expected one of `init`, `run`, `const`, `pub`, `use`
         "#],
     );
 }
@@ -612,8 +612,46 @@ fn test_import_keyword_is_rejected() {
              --> test.plk:1:1
               |
             1 | import m::x;
-              | ^^^^^^ unexpected identifier, expected one of `init`, `run`, `const`, `use`
+              | ^^^^^^ unexpected identifier, expected one of `init`, `run`, `const`, `pub`, `use`
         "#],
+    );
+}
+
+#[test]
+fn test_pub_is_restricted_to_use_declarations() {
+    assert_parses_to_cst_with_errors(
+        r#"
+            pub const x = 1;
+            init {}
+        "#,
+        &[r#"
+            error: unexpected `const`
+             --> test.plk:1:5
+              |
+            1 | pub const x = 1;
+              |     ^^^^^ unexpected `const`, expected `use`
+        "#],
+        r#"
+            File
+                Error
+                    "pub"
+                    " "
+                    "const"
+                    " "
+                    "x"
+                    " "
+                    "="
+                    " "
+                    "1"
+                    ";"
+                    "\n"
+                InitBlock
+                    "init"
+                    " "
+                    "{"
+                    StatementsList
+                    "}"
+        "#,
     );
 }
 
