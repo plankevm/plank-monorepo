@@ -122,6 +122,14 @@ impl OpGraph {
         self.get_bit_set(self.total_ops as usize + id.idx())
     }
 
+    pub fn op_kind(&self, id: OpNodeId) -> OpNodeKind {
+        self.operations[id].kind
+    }
+
+    pub fn op_input_count(&self, id: OpNodeId) -> u32 {
+        self.operations[id].input_count
+    }
+
     pub fn get_op(&self, id: OpNodeId) -> OpView<'_> {
         let op = self.operations[id];
         let op_values_end = match self.operations.get(id + 1) {

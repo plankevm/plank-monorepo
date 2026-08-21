@@ -17,7 +17,7 @@ fn assert_snapshot(input: &OpGraph, expected: &str) {
         format_graph(&mut out, "tree graph", &trees.graph, Some(&trees));
         out.trim()
     };
-    pretty_assertions::assert_str_eq!(formatted, expected.trim());
+    pretty_assertions::assert_str_eq!(expected.trim(), formatted);
 }
 
 fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<&TreeGraph>) {
@@ -28,7 +28,9 @@ fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<
         write!(out, "  op{} {}", operation.get(), kind_name(op.kind)).unwrap();
         if let Some(trees) = trees {
             out.push_str(" = [");
-            for (position, step) in trees.original_operations(operation).enumerate() {
+            for (position, step) in
+                trees.original_operations(graph, operation).into_iter().enumerate()
+            {
                 if position != 0 {
                     out.push_str(", ");
                 }

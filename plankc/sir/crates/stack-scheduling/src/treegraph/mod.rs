@@ -26,15 +26,67 @@ pub struct TreeGraph {
     trees: IndexVec<OperationIdx, Tree>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Tree {
+    root: OpNodeId,
+    folded_count: u32,
+}
+
 impl TreeGraph {
-    pub fn original_operations(
+    pub fn original_operations(&self, original: &OpGraph, operation: OpNodeId) -> Vec<TreeStep> {
+        let idx = match self.graph.op_kind(operation) {
+            OpNodeKind::Flippable(idx) | OpNodeKind::Normal(idx) => idx,
+            OpNodeKind::RetDestPush(_) => unreachable!("treegraph doesn't add `RetDestPush`"),
+        };
+        let tree = self.trees[idx];
+
+        let mut steps = Vec::new();
+
+        fn iter_ops(
+            steps: &mut Vec<TreeStep>,
+            tg: &TreeGraph,
+            original: &OpGraph,
+            root: OpNodeId,
+            folded_count: u32,
+        ) {
+            let op = original.get_op(root);
+            for &input in op.inputs_fifo[..folded_count as usize].iter().rev() {
+                let producer = original.get_producer(input).expect("tree references bb input");
+                iter_ops(steps, tg, original, producer, original.op_input_count(producer))
+            }
+            steps.push(TreeStep { operation: root, flipped: tg.flipped.contains(root) })
+        }
+
+        iter_ops(&mut steps, self, original, tree.root, tree.folded_count);
+
+        steps
+    }
+
+    fn expand_tree(
         &self,
         original: &OpGraph,
-        operation: OpNodeId,
-    ) -> impl Iterator<Item = TreeStep> {
-        self.trees[operation]
-            .iter()
-            .map(|&operation| TreeStep { operation, flipped: self.flipped.contains(operation) })
+        ops: &mut Vec<StackOps>,
+        root: OpNodeId,
+        folded_count: u32,
+        flipped: bool,
+    ) {
+        let op = original.get_op(root);
+        for &input in op.inputs_fifo[..folded_count as usize].iter().rev() {
+            let producer = original.get_producer(input).expect("tree member consumes input");
+            self.expand_tree(
+                original,
+                ops,
+                producer,
+                original.op_input_count(producer),
+                self.flipped.contains(producer),
+            );
+        }
+        let op = match op.kind {
+            OpNodeKind::Flippable(idx) if flipped => StackOps::Flipped(idx),
+            OpNodeKind::Normal(idx) | OpNodeKind::Flippable(idx) => StackOps::Op(idx),
+            OpNodeKind::RetDestPush(idx) => StackOps::CallRetPush(idx),
+        };
+        ops.push(op);
     }
 
     pub(crate) fn expand_schedule(
@@ -42,19 +94,31 @@ impl TreeGraph {
         original: &OpGraph,
         schedule: &[StackOps],
     ) -> Box<[StackOps]> {
-        todo!()
-    }
-}
+        let mut expanded = Vec::new();
 
-#[derive(Debug)]
-struct Tree {
-    root: OpNodeId,
-    folded_count: u32,
+        for &op in schedule {
+            let (flipped, idx) = match op {
+                StackOps::Flipped(idx) => (true, idx),
+                StackOps::Op(idx) => (false, idx),
+                StackOps::CallRetPush(_) => {
+                    unreachable!("treegraph builder maps all ops to normal ops")
+                }
+                op => {
+                    expanded.push(op);
+                    continue;
+                }
+            };
+
+            let tree = self.trees[idx];
+            self.expand_tree(original, &mut expanded, tree.root, tree.folded_count, flipped);
+        }
+
+        expanded.into_boxed_slice()
+    }
 }
 
 struct AccumulatorState<'g> {
     total_ops: usize,
-    total_values: usize,
     original: &'g OpGraph,
     builder: OpGraphBuilder<AddingGraphOps>,
     values_og_to_new: DenseIndexMap<ValueNodeId, ValueNodeId>,
@@ -101,7 +165,7 @@ impl<'g> AccumulatorState<'g> {
             new_op.add_input(self.values_og_to_new[input]);
         }
         for pred in pending.view.predecessors.iter() {
-            new_op.add_predecessor(pred);
+            new_op.add_predecessor(self.op_og_to_new[pred]);
         }
         let mut new_op = new_op.end_inputs_begin_outputs();
         for &output in pending.view.outputs_fifo {
@@ -157,7 +221,6 @@ impl<'g> AccumulatorState<'g> {
 pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
     let total_ops = original.total_ops() as usize;
     let total_values = original.total_values() as usize;
-    let mut flipped = DenseIndexSet::with_capacity_in_bits(total_ops);
     let mut values_og_to_new = DenseIndexMap::with_capacity(total_values);
 
     let mut builder = OpGraphBuilder::with_capacity(total_ops, total_values);
@@ -169,7 +232,6 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
 
     let mut state = AccumulatorState {
         total_ops,
-        total_values,
         original,
         builder,
         values_og_to_new,
@@ -178,10 +240,17 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
     };
 
     for id in original.op_ids() {
-        state.try_fold(id);
+        if let Some(pending) = state.try_fold(id) {
+            state.materialize_pending(pending);
+        }
     }
 
-    TreeGraph { graph: todo!(), flipped: state.flipped, trees: todo!() }
+    let mut tg = state.builder.end_ops_begin_end_stack();
+    for &output in original.output_values_fifo() {
+        tg.push_end_stack_value(state.values_og_to_new[output]);
+    }
+
+    TreeGraph { graph: tg.finish(), flipped: DenseIndexSet::new(), trees: state.trees }
 }
 
 #[cfg(test)]
