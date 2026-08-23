@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use hashbrown::{HashMap, hash_map::Entry};
-use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
+use plank_core::{Idx, IncIterable, IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
     cst::{self, NumLitId},
@@ -152,6 +152,110 @@ struct ScopedConst {
     imported: bool,
 }
 
+struct RegisteredConsts {
+    consts: IndexVec<ConstId, ConstDef>,
+    source_public_bindings: IndexVec<SourceId, Vec<(StrId, ScopedConst)>>,
+}
+
+#[derive(Clone, Copy)]
+struct Reexporter {
+    source_id: SourceId,
+    import: FileImport,
+    cyclic: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReexportVisitState {
+    Unvisited,
+    Visiting,
+    Visited,
+}
+
+fn mark_cyclic_reexports(
+    source_id: SourceId,
+    project: &ParsedProject,
+    reexporters: &mut IndexVec<SourceId, Vec<Reexporter>>,
+    states: &mut IndexVec<SourceId, ReexportVisitState>,
+    session: &mut Session,
+) {
+    states[source_id] = ReexportVisitState::Visiting;
+    for index in 0..reexporters[source_id].len() {
+        let reexporter = reexporters[source_id][index];
+        match states[reexporter.source_id] {
+            ReexportVisitState::Unvisited => {
+                mark_cyclic_reexports(reexporter.source_id, project, reexporters, states, session)
+            }
+            ReexportVisitState::Visiting => {
+                reexporters[source_id][index].cyclic = true;
+                let source_span = project.parsed_sources[reexporter.source_id]
+                    .lexed
+                    .tokens_src_span(reexporter.import.span);
+                diagnostics::error_cyclic_reexport(session, reexporter.source_id, source_span);
+            }
+            ReexportVisitState::Visited => {}
+        }
+    }
+    states[source_id] = ReexportVisitState::Visited;
+}
+
+fn register_reexports(
+    project: &ParsedProject,
+    source_public_bindings: &mut IndexVec<SourceId, Vec<(StrId, ScopedConst)>>,
+    session: &mut Session,
+) {
+    let mut reexporters = index_vec![Vec::new(); source_public_bindings.len()];
+    for (source_id, imports) in project.imports.enumerate_idx() {
+        for &import in imports.iter().filter(|import| import.public) {
+            reexporters[import.target_source].push(Reexporter { source_id, import, cyclic: false });
+        }
+    }
+
+    let mut states = index_vec![ReexportVisitState::Unvisited; source_public_bindings.len()];
+    for source_id in project.parsed_sources.iter_idx() {
+        if states[source_id] == ReexportVisitState::Unvisited {
+            mark_cyclic_reexports(source_id, project, &mut reexporters, &mut states, session);
+        }
+    }
+
+    let mut worklist = Vec::new();
+    for (source_id, bindings) in source_public_bindings.enumerate_idx() {
+        for &(name, binding) in bindings {
+            worklist.push((source_id, name, binding.const_id));
+        }
+    }
+
+    while let Some((target_source, name, const_id)) = worklist.pop() {
+        for &Reexporter { source_id, import, cyclic } in &reexporters[target_source] {
+            if cyclic {
+                continue;
+            }
+            let exported_name = match import.kind {
+                ImportKind::Specific { selected_name, imported_as, .. } => {
+                    if selected_name != name {
+                        continue;
+                    }
+                    imported_as
+                }
+                ImportKind::All => name,
+            };
+            if source_public_bindings[source_id]
+                .iter()
+                .any(|&(existing_name, _)| existing_name == exported_name)
+            {
+                continue;
+            }
+            let binding = ScopedConst {
+                const_id,
+                source_id,
+                span: project.parsed_sources[source_id].lexed.tokens_src_span(import.span),
+                imported: true,
+            };
+            source_public_bindings[source_id].push((exported_name, binding));
+            worklist.push((source_id, exported_name, const_id));
+        }
+    }
+}
+
 struct BlockLowerer<'a> {
     consts: HashMap<StrId, ScopedConst>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
@@ -193,31 +297,24 @@ impl BlockLowerer<'_> {
 
     fn build_file_scope(
         &mut self,
-        source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
+        source_public_bindings: &IndexVec<SourceId, Vec<(StrId, ScopedConst)>>,
         imports: &ListOfLists<SourceId, FileImport>,
-        const_defs: &IndexVec<ConstId, ConstDef>,
     ) {
         self.consts.clear();
-        for &(name, const_id) in &source_consts[self.source_id] {
-            let def = &const_defs[const_id];
-            self.consts.insert(
-                name,
-                ScopedConst {
-                    const_id,
-                    source_id: def.source_id,
-                    span: def.source_span,
-                    imported: false,
-                },
-            );
+        for &(name, binding) in
+            source_public_bindings[self.source_id].iter().filter(|(_, binding)| !binding.imported)
+        {
+            self.consts.insert(name, binding);
         }
         for import in &imports[self.source_id] {
             let import_source_id = self.source_id;
             let import_source_span = self.lexed.tokens_src_span(import.span);
             match import.kind {
                 ImportKind::Specific { selected_name, imported_as, name_span } => {
-                    let Some(const_id) = source_consts[import.target_source]
-                        .iter()
-                        .find_map(|&(name, const_id)| (name == selected_name).then_some(const_id))
+                    let Some(const_id) =
+                        source_public_bindings[import.target_source].iter().find_map(
+                            |&(name, binding)| (name == selected_name).then_some(binding.const_id),
+                        )
                     else {
                         self.error_unresolved_import(
                             selected_name,
@@ -243,7 +340,8 @@ impl BlockLowerer<'_> {
                     );
                 }
                 ImportKind::All => {
-                    for &(name, const_id) in &source_consts[import.target_source] {
+                    for &(name, target_binding) in &source_public_bindings[import.target_source] {
+                        let const_id = target_binding.const_id;
                         let binding = ScopedConst {
                             const_id,
                             source_id: import_source_id,
@@ -251,14 +349,13 @@ impl BlockLowerer<'_> {
                             imported: true,
                         };
                         let Err(prev) = self.try_insert_import(name, binding) else { continue };
-                        let def = &const_defs[const_id];
                         self.error_import_collision(
                             name,
                             import.span,
                             prev.source_id,
                             prev.span,
                             prev.imported,
-                            Some((def.source_id, def.source_span)),
+                            Some((target_binding.source_id, target_binding.span)),
                         );
                     }
                 }
@@ -1117,7 +1214,9 @@ impl BlockLowerer<'_> {
 }
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
-    let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
+    let RegisteredConsts { mut consts, mut source_public_bindings } =
+        register_consts(&project.parsed_sources, session);
+    register_reexports(project, &mut source_public_bindings, session);
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
     let mut init = None;
@@ -1146,7 +1245,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
         lowerer.source_id = source_id;
         lowerer.lexed = &source.lexed;
-        lowerer.build_file_scope(&source_consts, &project.imports, &consts);
+        lowerer.build_file_scope(&source_public_bindings, &project.imports);
 
         let file = source.cst.as_file();
         let mut source_init = None;
@@ -1236,44 +1335,48 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 fn register_consts(
     sources: &IndexVec<SourceId, plank_source::project::ParsedSource>,
     session: &mut Session,
-) -> (IndexVec<ConstId, ConstDef>, ListOfLists<SourceId, (StrId, ConstId)>) {
+) -> RegisteredConsts {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
-    let mut source_consts: ListOfLists<SourceId, (StrId, ConstId)> = ListOfLists::new();
+    let mut source_public_bindings = IndexVec::with_capacity(sources.len());
 
     let mut seen = HashMap::new();
-    for (id, source) in sources.enumerate_idx() {
-        let mut source_const_defs: Vec<ConstDef> = Vec::new();
+    for (source_id, source) in sources.enumerate_idx() {
+        let mut bindings = Vec::new();
         let file = source.cst.as_file();
         seen.clear();
-        source_consts.push_with(|mut list| {
-            for def in file.iter_defs() {
-                let TopLevelDef::Const(const_decl) = def else { continue };
-                let source_span = source.lexed.tokens_src_span(const_decl.span());
-                let const_def = ConstDef {
-                    name: const_decl.name,
-                    source_id: id,
+        for def in file.iter_defs() {
+            let TopLevelDef::Const(const_decl) = def else { continue };
+            let source_span = source.lexed.tokens_src_span(const_decl.span());
+            let const_def = ConstDef {
+                name: const_decl.name,
+                source_id,
+                source_span,
+                body: BlockId::ZERO,
+                result: LocalId::ZERO,
+            };
+            if let Some(prev) = seen.insert(const_def.name, const_def) {
+                diagnostics::error_duplicate_const(
+                    session,
+                    source_id,
+                    const_def.name,
                     source_span,
-                    body: BlockId::ZERO,
-                    result: LocalId::ZERO,
-                };
-                if let Some(prev) = seen.insert(const_def.name, const_def) {
-                    diagnostics::error_duplicate_const(
-                        session,
-                        id,
-                        const_def.name,
-                        source_span,
-                        &prev,
-                    );
-                } else {
-                    source_const_defs.push(const_def);
-                }
-            }
-            for const_def in source_const_defs.into_iter() {
+                    &prev,
+                );
+            } else {
                 let const_id = consts.push(const_def);
-                list.push((const_def.name, const_id));
+                bindings.push((
+                    const_def.name,
+                    ScopedConst {
+                        const_id,
+                        source_id: const_def.source_id,
+                        span: const_def.source_span,
+                        imported: false,
+                    },
+                ));
             }
-        });
+        }
+        assert_eq!(source_public_bindings.push(bindings), source_id);
     }
 
-    (consts, source_consts)
+    RegisteredConsts { consts, source_public_bindings }
 }

@@ -841,6 +841,37 @@ fn test_import_name_collision() {
 }
 
 #[test]
+fn test_public_import_name_collision() {
+    let project = TestProject::root(
+        r#"
+        const x = 1;
+        pub use m::other::x;
+        init {}
+        "#,
+    )
+    .add_file(
+        "other",
+        r#"
+        const x = 2;
+        "#,
+    )
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: imported definition collision
+         --> main.plk:2:1
+          |
+        1 | const x = 1;
+          | ------------ 'x' previously defined here
+        2 | pub use m::other::x;
+          | ^^^^^^^^^^^^^^^^^^^^ conflicting import
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_glob_import_name_collision() {
     let project = TestProject::root(
         r#"
@@ -970,6 +1001,63 @@ fn test_unresolved_import() {
           |
         info: no definition of 'y' found in file
          --> other.plk
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_private_import_is_not_reexported() {
+    let project = TestProject::root(
+        r#"
+        use m::middle::x;
+        init {}
+        "#,
+    )
+    .add_file(
+        "middle",
+        r#"
+        use m::leaf::x;
+        const wrapper = x;
+        "#,
+    )
+    .add_file("leaf", "const x = 1;")
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved import
+         --> main.plk:1:16
+          |
+        1 | use m::middle::x;
+          |                ^ 'x' not found in target module
+          |
+        info: no definition of 'x' found in file
+         --> middle.plk
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_cyclic_reexport() {
+    let project = TestProject::root(
+        r#"
+        use m::a::*;
+        init {}
+        "#,
+    )
+    .add_file("a", "pub use m::b::*;")
+    .add_file("b", "pub use m::a::*;")
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: cyclic re-export
+         --> a.plk:1:1
+          |
+        1 | pub use m::b::*;
+          | ^^^^^^^^^^^^^^^^ this re-export creates a cycle
         "#,
     );
     pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());

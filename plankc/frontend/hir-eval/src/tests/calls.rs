@@ -631,6 +631,39 @@ fn test_import_group_symbols_accessible() {
 }
 
 #[test]
+fn test_transitive_reexported_symbol_accessible() {
+    assert_lowers_to(
+        TestProject::root(
+            r#"
+            use m::prelude::renamed;
+            init {
+                let x = renamed(1);
+                @evm_stop();
+            }
+            "#,
+        )
+        .add_file("prelude", "pub use m::middle::*;")
+        .add_file("middle", "pub use m::other::f as renamed;")
+        .add_file("other", "const f = fn(x: u256) u256 { return x; };")
+        .add_module("m", ""),
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = 1
+            %1 : u256 = call @fn0(%0)
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_runtime_recursion_emits_recursion_diagnostic() {
     assert_diagnostics(
         r#"
