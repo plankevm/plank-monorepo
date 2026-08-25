@@ -1,7 +1,4 @@
-use std::abi::compute_selector;
-use std::constructor::return_runtime;
-use std::error::{comptime_assert, require};
-use std::regions::*;
+use std::prelude::*;
 
 const TEST_BYTES = hex"00010203040506070809aabbccddeeff";
 const TEST_BYTES_HASH = keccak256(TEST_BYTES).raw;

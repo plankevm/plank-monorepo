@@ -1,7 +1,6 @@
 use std::storage::{sstore_bytes, sload_bytes};
-use std::membytes::{membytes, membytes_from_ptr};
-use std::abi::abi_encode;
-use std::constructor::return_runtime;
+use std::membytes::membytes_from_ptr;
+use std::prelude::*;
 
 const STORE_SELECTOR = 0xb374012b;
 const LOAD_SELECTOR = 0x86d5c4be;

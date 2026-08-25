@@ -1,5 +1,5 @@
-use std::abi::{abi_encode, abi_decode, abi_encoded_size};
-use std::membytes::{membytes, membytes_from_ptr};
+use std::membytes::membytes_from_ptr;
+use std::prelude::*;
 
 const Level0 = struct { x: u256, data: membytes };
 const Level1 = struct { inner: Level0, flag: bool };

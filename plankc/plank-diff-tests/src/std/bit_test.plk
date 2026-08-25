@@ -1,5 +1,5 @@
-use std::abi::{abi_encode, abi_decode};
 use std::membytes::membytes_from_ptr;
+use std::prelude::*;
 use std::bit::clz;
 
 init {
