@@ -631,6 +631,53 @@ fn test_import_group_symbols_accessible() {
 }
 
 #[test]
+fn test_public_import_group_symbols_reexported() {
+    assert_lowers_to(
+        TestProject::root(
+            r#"
+            use m::facade::*;
+            init {
+                let x = f(1);
+                let y = renamed(2, 3);
+                @evm_stop();
+            }
+            "#,
+        )
+        .add_file("facade", "pub use m::leaf::{f, g as renamed};")
+        .add_file(
+            "leaf",
+            r#"
+            const f = fn(x: u256) u256 { return x; };
+            const g = fn(a: u256, b: u256) u256 { return a; };
+            "#,
+        )
+        .add_module("m", ""),
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            ret %1
+        }
+
+        @fn1(%0: u256, %1: u256) -> u256 {
+            %2 : u256 = %0
+            ret %2
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : u256 = 1
+            %1 : u256 = call @fn0(%0)
+            %2 : u256 = 2
+            %3 : u256 = 3
+            %4 : u256 = call @fn1(%2, %3)
+            %5 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_transitive_reexported_symbol_accessible() {
     assert_lowers_to(
         TestProject::root(
