@@ -1,6 +1,5 @@
-use std::abi::abi_decode;
-use std::error::require;
 use std::membytes::membytes_from_ptr;
+use std::prelude::*;
 use std::version::{active_evm_version, CANCUN, PRAGUE, OSAKA};
 
 const EXPECT_CANCUN = 0;

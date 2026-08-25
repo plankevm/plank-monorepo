@@ -1,5 +1,5 @@
 use std::storage::map_slot_hash;
-use std::constructor::return_runtime;
+use std::prelude::*;
 
 const CLAIM_SELECTOR = 0x3d13f874;
 const MERKLE_ROOT_SELECTOR = 0x2eb4a7ab;

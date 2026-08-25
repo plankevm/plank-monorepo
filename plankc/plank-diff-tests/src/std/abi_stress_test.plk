@@ -1,5 +1,5 @@
-use std::abi::{abi_encode, abi_decode, abi_encoded_size};
-use std::membytes::{membytes, membytes_from_ptr};
+use std::membytes::membytes_from_ptr;
+use std::prelude::*;
 
 const Inner = struct { x: u256, data: membytes };
 const Outer = struct { a: u256, b: bool, inner: Inner, c: membytes };

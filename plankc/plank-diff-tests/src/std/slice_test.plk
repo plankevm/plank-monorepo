@@ -1,8 +1,5 @@
-use std::constructor::return_runtime;
-use std::error::{comptime_assert, require};
 use std::mem::unsafe_mem_write;
-use std::option::{None, Some};
-use std::regions::{calldata, code, ctime, memory};
+use std::prelude::*;
 use std::slice::*;
 use std::type::sizeof;
 

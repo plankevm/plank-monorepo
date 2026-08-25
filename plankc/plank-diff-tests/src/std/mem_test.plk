@@ -1,5 +1,5 @@
-use std::error::require;
 use std::mem::{unsafe_mem_read, unsafe_mem_write};
+use std::prelude::*;
 use std::type::sizeof;
 
 const Inner = struct {
