@@ -1040,23 +1040,23 @@ fn test_private_import_is_not_reexported() {
 }
 
 #[test]
-fn test_cyclic_reexport() {
+fn test_cyclic_named_reexport() {
     let project = TestProject::root(
         r#"
-        use m::a::*;
+        use m::a::x;
         init {}
         "#,
     )
-    .add_file("a", "pub use m::b::*;")
-    .add_file("b", "pub use m::a::*;")
+    .add_file("a", "pub use m::b::x;")
+    .add_file("b", "pub use m::a::x;")
     .add_module("m", "");
     let rendered = render_project_diagnostics(project);
     let expected = dedent_preserve_blank_lines(
         r#"
         error: cyclic re-export
-         --> a.plk:1:1
+         --> b.plk:1:1
           |
-        1 | pub use m::b::*;
+        1 | pub use m::a::x;
           | ^^^^^^^^^^^^^^^^ this re-export creates a cycle
         "#,
     );

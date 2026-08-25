@@ -1,6 +1,9 @@
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry as BTreeEntry},
+};
 
-use hashbrown::{HashMap, hash_map::Entry};
+use hashbrown::{HashMap, hash_map::Entry as HashEntry};
 use plank_core::{Idx, IncIterable, IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
@@ -152,83 +155,105 @@ struct ScopedConst {
     imported: bool,
 }
 
+#[derive(Clone, Copy)]
+enum PublicNameResolution {
+    Resolving,
+    Resolved(ScopedConst),
+    NotFound,
+    Cyclic,
+}
+
 struct RegisteredConsts {
     consts: IndexVec<ConstId, ConstDef>,
-    source_public_bindings: IndexVec<SourceId, Vec<(StrId, ScopedConst)>>,
+    // Stable iteration keeps re-export propagation and diagnostics deterministic.
+    source_public_names: IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
 }
 
 #[derive(Clone, Copy)]
 struct Reexporter {
     source_id: SourceId,
     import: FileImport,
-    cyclic: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ReexportVisitState {
-    Unvisited,
-    Visiting,
-    Visited,
-}
-
-fn mark_cyclic_reexports(
+fn resolve_reexport(
     source_id: SourceId,
+    exported_name: StrId,
     project: &ParsedProject,
-    reexporters: &mut IndexVec<SourceId, Vec<Reexporter>>,
-    states: &mut IndexVec<SourceId, ReexportVisitState>,
+    source_public_names: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
-) {
-    states[source_id] = ReexportVisitState::Visiting;
-    for index in 0..reexporters[source_id].len() {
-        let reexporter = reexporters[source_id][index];
-        match states[reexporter.source_id] {
-            ReexportVisitState::Unvisited => {
-                mark_cyclic_reexports(reexporter.source_id, project, reexporters, states, session)
+) -> PublicNameResolution {
+    assert!(
+        source_public_names[source_id]
+            .insert(exported_name, PublicNameResolution::Resolving)
+            .is_none()
+    );
+
+    let mut resolution = PublicNameResolution::NotFound;
+    // Overlapping globs and invalid duplicate aliases can provide multiple candidates.
+    for &import in project.imports[source_id].iter().filter(|import| import.public) {
+        let target_name = match import.kind {
+            ImportKind::Specific { selected_name, imported_as, .. } => {
+                if imported_as != exported_name {
+                    continue;
+                }
+                selected_name
             }
-            ReexportVisitState::Visiting => {
-                reexporters[source_id][index].cyclic = true;
-                let source_span = project.parsed_sources[reexporter.source_id]
-                    .lexed
-                    .tokens_src_span(reexporter.import.span);
-                diagnostics::error_cyclic_reexport(session, reexporter.source_id, source_span);
-            }
-            ReexportVisitState::Visited => {}
+            ImportKind::All => exported_name,
+        };
+        let candidate_resolution =
+            match source_public_names[import.target_source].get(&target_name).copied() {
+                Some(PublicNameResolution::Resolving) => {
+                    let source_span =
+                        project.parsed_sources[source_id].lexed.tokens_src_span(import.span);
+                    diagnostics::error_cyclic_reexport(session, source_id, source_span);
+                    PublicNameResolution::Cyclic
+                }
+                Some(PublicNameResolution::Cyclic) => PublicNameResolution::Cyclic,
+                Some(PublicNameResolution::NotFound) => PublicNameResolution::NotFound,
+                Some(PublicNameResolution::Resolved(_)) => {
+                    unreachable!("resolved candidate should have propagated")
+                }
+                None => resolve_reexport(
+                    import.target_source,
+                    target_name,
+                    project,
+                    source_public_names,
+                    session,
+                ),
+            };
+        if let PublicNameResolution::Cyclic = candidate_resolution {
+            resolution = PublicNameResolution::Cyclic;
+            break;
         }
     }
-    states[source_id] = ReexportVisitState::Visited;
+
+    source_public_names[source_id].insert(exported_name, resolution);
+    resolution
 }
 
-fn register_reexports(
+fn resolve_reexports(
     project: &ParsedProject,
-    source_public_bindings: &mut IndexVec<SourceId, Vec<(StrId, ScopedConst)>>,
+    source_public_names: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
 ) {
-    let mut reexporters = index_vec![Vec::new(); source_public_bindings.len()];
+    let mut reexporters = index_vec![Vec::new(); source_public_names.len()];
     for (source_id, imports) in project.imports.enumerate_idx() {
         for &import in imports.iter().filter(|import| import.public) {
-            reexporters[import.target_source].push(Reexporter { source_id, import, cyclic: false });
-        }
-    }
-
-    let mut states = index_vec![ReexportVisitState::Unvisited; source_public_bindings.len()];
-    for source_id in project.parsed_sources.iter_idx() {
-        if states[source_id] == ReexportVisitState::Unvisited {
-            mark_cyclic_reexports(source_id, project, &mut reexporters, &mut states, session);
+            reexporters[import.target_source].push(Reexporter { source_id, import });
         }
     }
 
     let mut worklist = Vec::new();
-    for (source_id, bindings) in source_public_bindings.enumerate_idx() {
-        for &(name, binding) in bindings {
-            worklist.push((source_id, name, binding.const_id));
+    for (source_id, names) in source_public_names.enumerate_idx() {
+        for (&name, &resolution) in names {
+            if let PublicNameResolution::Resolved(binding) = resolution {
+                worklist.push((source_id, name, binding.const_id));
+            }
         }
     }
 
     while let Some((target_source, name, const_id)) = worklist.pop() {
-        for &Reexporter { source_id, import, cyclic } in &reexporters[target_source] {
-            if cyclic {
-                continue;
-            }
+        for &Reexporter { source_id, import } in &reexporters[target_source] {
             let exported_name = match import.kind {
                 ImportKind::Specific { selected_name, imported_as, .. } => {
                     if selected_name != name {
@@ -238,10 +263,7 @@ fn register_reexports(
                 }
                 ImportKind::All => name,
             };
-            if source_public_bindings[source_id]
-                .iter()
-                .any(|&(existing_name, _)| existing_name == exported_name)
-            {
+            if source_public_names[source_id].contains_key(&exported_name) {
                 continue;
             }
             let binding = ScopedConst {
@@ -250,8 +272,25 @@ fn register_reexports(
                 span: project.parsed_sources[source_id].lexed.tokens_src_span(import.span),
                 imported: true,
             };
-            source_public_bindings[source_id].push((exported_name, binding));
+            source_public_names[source_id]
+                .insert(exported_name, PublicNameResolution::Resolved(binding));
             worklist.push((source_id, exported_name, const_id));
+        }
+    }
+
+    for (_, imports) in project.imports.enumerate_idx() {
+        for &import in imports {
+            if let ImportKind::Specific { selected_name, .. } = import.kind
+                && !source_public_names[import.target_source].contains_key(&selected_name)
+            {
+                resolve_reexport(
+                    import.target_source,
+                    selected_name,
+                    project,
+                    source_public_names,
+                    session,
+                );
+            }
         }
     }
 }
@@ -287,8 +326,8 @@ impl BlockLowerer<'_> {
         binding: ScopedConst,
     ) -> Result<(), ScopedConst> {
         match self.consts.entry(imported_as) {
-            Entry::Occupied(occupied) => Err(*occupied.get()),
-            Entry::Vacant(vacant) => {
+            HashEntry::Occupied(occupied) => Err(*occupied.get()),
+            HashEntry::Vacant(vacant) => {
                 vacant.insert(binding);
                 Ok(())
             }
@@ -297,13 +336,15 @@ impl BlockLowerer<'_> {
 
     fn build_file_scope(
         &mut self,
-        source_public_bindings: &IndexVec<SourceId, Vec<(StrId, ScopedConst)>>,
+        source_public_names: &IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
         imports: &ListOfLists<SourceId, FileImport>,
     ) {
         self.consts.clear();
-        for &(name, binding) in
-            source_public_bindings[self.source_id].iter().filter(|(_, binding)| !binding.imported)
-        {
+        for (&name, &resolution) in &source_public_names[self.source_id] {
+            let PublicNameResolution::Resolved(binding) = resolution else { continue };
+            if binding.imported {
+                continue;
+            }
             self.consts.insert(name, binding);
         }
         for import in &imports[self.source_id] {
@@ -311,17 +352,23 @@ impl BlockLowerer<'_> {
             let import_source_span = self.lexed.tokens_src_span(import.span);
             match import.kind {
                 ImportKind::Specific { selected_name, imported_as, name_span } => {
-                    let Some(const_id) =
-                        source_public_bindings[import.target_source].iter().find_map(
-                            |&(name, binding)| (name == selected_name).then_some(binding.const_id),
-                        )
-                    else {
-                        self.error_unresolved_import(
-                            selected_name,
-                            name_span,
-                            import.target_source,
-                        );
-                        continue;
+                    let const_id = match source_public_names[import.target_source]
+                        .get(&selected_name)
+                        .copied()
+                    {
+                        Some(PublicNameResolution::Resolved(binding)) => binding.const_id,
+                        Some(PublicNameResolution::Cyclic) => continue,
+                        Some(PublicNameResolution::NotFound) | None => {
+                            self.error_unresolved_import(
+                                selected_name,
+                                name_span,
+                                import.target_source,
+                            );
+                            continue;
+                        }
+                        Some(PublicNameResolution::Resolving) => {
+                            unreachable!("public name resolution completed before lowering")
+                        }
                     };
                     let binding = ScopedConst {
                         const_id,
@@ -340,7 +387,10 @@ impl BlockLowerer<'_> {
                     );
                 }
                 ImportKind::All => {
-                    for &(name, target_binding) in &source_public_bindings[import.target_source] {
+                    for (&name, &resolution) in &source_public_names[import.target_source] {
+                        let PublicNameResolution::Resolved(target_binding) = resolution else {
+                            continue;
+                        };
                         let const_id = target_binding.const_id;
                         let binding = ScopedConst {
                             const_id,
@@ -1214,9 +1264,9 @@ impl BlockLowerer<'_> {
 }
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
-    let RegisteredConsts { mut consts, mut source_public_bindings } =
+    let RegisteredConsts { mut consts, mut source_public_names } =
         register_consts(&project.parsed_sources, session);
-    register_reexports(project, &mut source_public_bindings, session);
+    resolve_reexports(project, &mut source_public_names, session);
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
     let mut init = None;
@@ -1245,7 +1295,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
         lowerer.source_id = source_id;
         lowerer.lexed = &source.lexed;
-        lowerer.build_file_scope(&source_public_bindings, &project.imports);
+        lowerer.build_file_scope(&source_public_names, &project.imports);
 
         let file = source.cst.as_file();
         let mut source_init = None;
@@ -1337,13 +1387,11 @@ fn register_consts(
     session: &mut Session,
 ) -> RegisteredConsts {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
-    let mut source_public_bindings = IndexVec::with_capacity(sources.len());
+    let mut source_public_names = IndexVec::with_capacity(sources.len());
 
-    let mut seen = HashMap::new();
     for (source_id, source) in sources.enumerate_idx() {
-        let mut bindings = Vec::new();
+        let mut names = BTreeMap::new();
         let file = source.cst.as_file();
-        seen.clear();
         for def in file.iter_defs() {
             let TopLevelDef::Const(const_decl) = def else { continue };
             let source_span = source.lexed.tokens_src_span(const_decl.span());
@@ -1354,29 +1402,32 @@ fn register_consts(
                 body: BlockId::ZERO,
                 result: LocalId::ZERO,
             };
-            if let Some(prev) = seen.insert(const_def.name, const_def) {
-                diagnostics::error_duplicate_const(
-                    session,
-                    source_id,
-                    const_def.name,
-                    source_span,
-                    &prev,
-                );
-            } else {
-                let const_id = consts.push(const_def);
-                bindings.push((
-                    const_def.name,
-                    ScopedConst {
+            match names.entry(const_def.name) {
+                BTreeEntry::Occupied(occupied) => {
+                    let PublicNameResolution::Resolved(binding) = *occupied.get() else {
+                        unreachable!("only constants are registered in this phase")
+                    };
+                    diagnostics::error_duplicate_const(
+                        session,
+                        source_id,
+                        const_def.name,
+                        source_span,
+                        &consts[binding.const_id],
+                    );
+                }
+                BTreeEntry::Vacant(vacant) => {
+                    let const_id = consts.push(const_def);
+                    vacant.insert(PublicNameResolution::Resolved(ScopedConst {
                         const_id,
                         source_id: const_def.source_id,
                         span: const_def.source_span,
                         imported: false,
-                    },
-                ));
+                    }));
+                }
             }
         }
-        assert_eq!(source_public_bindings.push(bindings), source_id);
+        assert_eq!(source_public_names.push(names), source_id);
     }
 
-    RegisteredConsts { consts, source_public_bindings }
+    RegisteredConsts { consts, source_public_names }
 }
