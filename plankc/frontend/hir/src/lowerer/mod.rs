@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, btree_map::Entry as BTreeEntry},
 };
 
-use hashbrown::{HashMap, hash_map::Entry as HashEntry};
+use hashbrown::HashMap;
 use plank_core::{Idx, IncIterable, IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
@@ -317,18 +317,29 @@ enum ShortCircuitOp {
 }
 
 impl BlockLowerer<'_> {
-    fn try_insert_import(
-        &mut self,
-        imported_as: StrId,
-        binding: ScopedConst,
-    ) -> Result<(), ScopedConst> {
-        match self.consts.entry(imported_as) {
-            HashEntry::Occupied(occupied) => Err(*occupied.get()),
-            HashEntry::Vacant(vacant) => {
-                vacant.insert(binding);
-                Ok(())
-            }
-        }
+    fn insert_import(&mut self, name: StrId, target_binding: ScopedConst, import: &FileImport) {
+        let Err(existing) = self.consts.try_insert(
+            name,
+            ScopedConst {
+                const_id: target_binding.const_id,
+                source_id: self.source_id,
+                span: self.lexed.tokens_src_span(import.span),
+                imported: true,
+            },
+        ) else {
+            return;
+        };
+        let previous = *existing.entry.get();
+        let glob_definition = matches!(import.kind, ImportKind::All)
+            .then_some((target_binding.source_id, target_binding.span));
+        self.error_import_collision(
+            name,
+            import.span,
+            previous.source_id,
+            previous.span,
+            previous.imported,
+            glob_definition,
+        );
     }
 
     fn build_file_scope(
@@ -346,15 +357,13 @@ impl BlockLowerer<'_> {
         }
 
         for import in &imports[self.source_id] {
-            let import_source_id = self.source_id;
-            let import_source_span = self.lexed.tokens_src_span(import.span);
             match import.kind {
                 ImportKind::Specific { selected_name, imported_as, name_span } => {
-                    let const_id = match public_names_by_source[import.target_source]
+                    let target_binding = match public_names_by_source[import.target_source]
                         .get(&selected_name)
                         .expect("invariant: specific imports resolved before lowering")
                     {
-                        PublicNameResolution::Resolved(binding) => binding.const_id,
+                        PublicNameResolution::Resolved(binding) => *binding,
                         PublicNameResolution::Failed(
                             ReexportFailure::Poisoned | ReexportFailure::Cyclic,
                         ) => continue,
@@ -370,43 +379,14 @@ impl BlockLowerer<'_> {
                             unreachable!("public name resolution completed before lowering")
                         }
                     };
-                    let binding = ScopedConst {
-                        const_id,
-                        source_id: import_source_id,
-                        span: import_source_span,
-                        imported: true,
-                    };
-                    let Err(prev) = self.try_insert_import(imported_as, binding) else { continue };
-                    self.error_import_collision(
-                        imported_as,
-                        import.span,
-                        prev.source_id,
-                        prev.span,
-                        prev.imported,
-                        None,
-                    );
+                    self.insert_import(imported_as, target_binding, import);
                 }
                 ImportKind::All => {
                     for (&name, &resolution) in &public_names_by_source[import.target_source] {
                         let PublicNameResolution::Resolved(target_binding) = resolution else {
                             continue;
                         };
-                        let const_id = target_binding.const_id;
-                        let binding = ScopedConst {
-                            const_id,
-                            source_id: import_source_id,
-                            span: import_source_span,
-                            imported: true,
-                        };
-                        let Err(prev) = self.try_insert_import(name, binding) else { continue };
-                        self.error_import_collision(
-                            name,
-                            import.span,
-                            prev.source_id,
-                            prev.span,
-                            prev.imported,
-                            Some((target_binding.source_id, target_binding.span)),
-                        );
+                        self.insert_import(name, target_binding, import);
                     }
                 }
             }
