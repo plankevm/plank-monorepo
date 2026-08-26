@@ -1067,6 +1067,33 @@ fn test_failed_reexport_suppresses_downstream_unresolved_import() {
 }
 
 #[test]
+fn test_missing_name_through_public_glob_reports_unresolved_import() {
+    let project = TestProject::root(
+        r#"
+        use m::facade::missing;
+        init {}
+        "#,
+    )
+    .add_file("facade", "pub use m::leaf::*;")
+    .add_file("leaf", "const other = 1;")
+    .add_module("m", "");
+    let rendered = render_project_diagnostics(project);
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: unresolved import
+         --> main.plk:1:16
+          |
+        1 | use m::facade::missing;
+          |                ^^^^^^^ 'missing' not found in target module
+          |
+        info: no definition of 'missing' found in file
+         --> facade.plk
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_cyclic_named_reexport() {
     let project = TestProject::root(
         r#"
