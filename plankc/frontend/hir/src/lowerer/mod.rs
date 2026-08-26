@@ -159,6 +159,11 @@ struct ScopedConst {
 enum PublicNameResolution {
     Resolving,
     Resolved(ScopedConst),
+    Failed(ReexportFailure),
+}
+
+#[derive(Clone, Copy)]
+enum ReexportFailure {
     NotFound,
     Poisoned,
     Cyclic,
@@ -166,40 +171,37 @@ enum PublicNameResolution {
 
 fn resolve_reexport(
     source_id: SourceId,
-    exported_name: StrId,
+    public_name: StrId,
     project: &ParsedProject,
     public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
-) -> PublicNameResolution {
+) -> ReexportFailure {
     assert!(
         public_names_by_source[source_id]
-            .insert(exported_name, PublicNameResolution::Resolving)
+            .insert(public_name, PublicNameResolution::Resolving)
             .is_none()
     );
 
-    let mut resolution = PublicNameResolution::NotFound;
-    // Overlapping globs and invalid duplicate aliases can provide multiple candidates.
+    let mut failure = ReexportFailure::NotFound;
     for &import in project.imports[source_id].iter().filter(|import| import.public) {
         let target_name = match import.kind {
             ImportKind::Specific { selected_name, imported_as, .. } => {
-                if imported_as != exported_name {
+                if imported_as != public_name {
                     continue;
                 }
                 selected_name
             }
-            ImportKind::All => exported_name,
+            ImportKind::All => public_name,
         };
-        let candidate_resolution =
+        let target_failure =
             match public_names_by_source[import.target_source].get(&target_name).copied() {
                 Some(PublicNameResolution::Resolving) => {
                     let source_span =
                         project.parsed_sources[source_id].lexed.tokens_src_span(import.span);
                     diagnostics::error_cyclic_reexport(session, source_id, source_span);
-                    PublicNameResolution::Cyclic
+                    ReexportFailure::Cyclic
                 }
-                Some(PublicNameResolution::Cyclic) => PublicNameResolution::Cyclic,
-                Some(PublicNameResolution::NotFound) => PublicNameResolution::NotFound,
-                Some(PublicNameResolution::Poisoned) => PublicNameResolution::Poisoned,
+                Some(PublicNameResolution::Failed(failure)) => failure,
                 Some(PublicNameResolution::Resolved(_)) => {
                     unreachable!("resolved candidate should have propagated")
                 }
@@ -211,22 +213,19 @@ fn resolve_reexport(
                     session,
                 ),
             };
-        match candidate_resolution {
-            PublicNameResolution::Cyclic => {
-                resolution = PublicNameResolution::Cyclic;
+        match target_failure {
+            ReexportFailure::Cyclic => {
+                failure = ReexportFailure::Cyclic;
                 break;
             }
-            PublicNameResolution::NotFound | PublicNameResolution::Poisoned => {
-                resolution = PublicNameResolution::Poisoned;
-            }
-            PublicNameResolution::Resolving | PublicNameResolution::Resolved(_) => {
-                unreachable!("candidate resolution completed before propagation")
+            ReexportFailure::NotFound | ReexportFailure::Poisoned => {
+                failure = ReexportFailure::Poisoned;
             }
         }
     }
 
-    public_names_by_source[source_id].insert(exported_name, resolution);
-    resolution
+    public_names_by_source[source_id].insert(public_name, PublicNameResolution::Failed(failure));
+    failure
 }
 
 fn resolve_reexports(
@@ -261,17 +260,17 @@ fn resolve_reexports(
                 }
                 ImportKind::All => name,
             };
-            if public_names_by_source[reexporting_source].contains_key(&reexported_name) {
+            let BTreeEntry::Vacant(public_name_entry) =
+                public_names_by_source[reexporting_source].entry(reexported_name)
+            else {
                 continue;
-            }
-            let binding = ScopedConst {
+            };
+            public_name_entry.insert(PublicNameResolution::Resolved(ScopedConst {
                 const_id,
                 source_id: reexporting_source,
                 span: project.parsed_sources[reexporting_source].lexed.tokens_src_span(import.span),
                 imported: true,
-            };
-            public_names_by_source[reexporting_source]
-                .insert(reexported_name, PublicNameResolution::Resolved(binding));
+            }));
             worklist.push((reexporting_source, reexported_name, const_id));
         }
     }
@@ -345,6 +344,7 @@ impl BlockLowerer<'_> {
             }
             self.consts.insert(name, scoped_const);
         }
+
         for import in &imports[self.source_id] {
             let import_source_id = self.source_id;
             let import_source_span = self.lexed.tokens_src_span(import.span);
@@ -352,13 +352,13 @@ impl BlockLowerer<'_> {
                 ImportKind::Specific { selected_name, imported_as, name_span } => {
                     let const_id = match public_names_by_source[import.target_source]
                         .get(&selected_name)
-                        .copied()
+                        .expect("invariant: specific imports resolved before lowering")
                     {
-                        Some(PublicNameResolution::Resolved(binding)) => binding.const_id,
-                        Some(PublicNameResolution::Poisoned | PublicNameResolution::Cyclic) => {
-                            continue;
-                        }
-                        Some(PublicNameResolution::NotFound) | None => {
+                        PublicNameResolution::Resolved(binding) => binding.const_id,
+                        PublicNameResolution::Failed(
+                            ReexportFailure::Poisoned | ReexportFailure::Cyclic,
+                        ) => continue,
+                        PublicNameResolution::Failed(ReexportFailure::NotFound) => {
                             self.error_unresolved_import(
                                 selected_name,
                                 name_span,
@@ -366,7 +366,7 @@ impl BlockLowerer<'_> {
                             );
                             continue;
                         }
-                        Some(PublicNameResolution::Resolving) => {
+                        PublicNameResolution::Resolving => {
                             unreachable!("public name resolution completed before lowering")
                         }
                     };
