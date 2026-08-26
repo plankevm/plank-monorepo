@@ -160,6 +160,7 @@ enum PublicNameResolution {
     Resolving,
     Resolved(ScopedConst),
     NotFound,
+    Poisoned,
     Cyclic,
 }
 
@@ -210,6 +211,7 @@ fn resolve_reexport(
                 }
                 Some(PublicNameResolution::Cyclic) => PublicNameResolution::Cyclic,
                 Some(PublicNameResolution::NotFound) => PublicNameResolution::NotFound,
+                Some(PublicNameResolution::Poisoned) => PublicNameResolution::Poisoned,
                 Some(PublicNameResolution::Resolved(_)) => {
                     unreachable!("resolved candidate should have propagated")
                 }
@@ -221,9 +223,17 @@ fn resolve_reexport(
                     session,
                 ),
             };
-        if let PublicNameResolution::Cyclic = candidate_resolution {
-            resolution = PublicNameResolution::Cyclic;
-            break;
+        match candidate_resolution {
+            PublicNameResolution::Cyclic => {
+                resolution = PublicNameResolution::Cyclic;
+                break;
+            }
+            PublicNameResolution::NotFound | PublicNameResolution::Poisoned => {
+                resolution = PublicNameResolution::Poisoned;
+            }
+            PublicNameResolution::Resolving | PublicNameResolution::Resolved(_) => {
+                unreachable!("candidate resolution completed before propagation")
+            }
         }
     }
 
@@ -357,7 +367,9 @@ impl BlockLowerer<'_> {
                         .copied()
                     {
                         Some(PublicNameResolution::Resolved(binding)) => binding.const_id,
-                        Some(PublicNameResolution::Cyclic) => continue,
+                        Some(PublicNameResolution::Poisoned | PublicNameResolution::Cyclic) => {
+                            continue;
+                        }
                         Some(PublicNameResolution::NotFound) | None => {
                             self.error_unresolved_import(
                                 selected_name,
