@@ -1,5 +1,4 @@
 use std::storage::{sstore_bytes, sload_bytes};
-use std::membytes::membytes_from_ptr;
 use std::prelude::*;
 
 const STORE_SELECTOR = 0xb374012b;
