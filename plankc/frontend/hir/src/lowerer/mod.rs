@@ -225,9 +225,13 @@ fn resolve_reexport(
                 failure = ReexportFailure::Cyclic;
                 break;
             }
-            ReexportFailure::NotFound | ReexportFailure::Poisoned => {
+            ReexportFailure::Poisoned => {
                 failure = ReexportFailure::Poisoned;
             }
+            ReexportFailure::NotFound if matches!(import.kind, ImportKind::Specific { .. }) => {
+                failure = ReexportFailure::Poisoned;
+            }
+            ReexportFailure::NotFound => {}
         }
     }
 
