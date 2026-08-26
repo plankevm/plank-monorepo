@@ -227,8 +227,10 @@ pub enum Token {
     And,
     #[token("or")]
     Or,
-    #[token("import")]
-    Import,
+    #[token("pub")]
+    Pub,
+    #[token("use")]
+    Use,
     #[token("as")]
     As,
     #[token("match")]
@@ -379,7 +381,8 @@ impl Token {
             Token::False => "false",
             Token::And => "and",
             Token::Or => "or",
-            Token::Import => "import",
+            Token::Pub => "pub",
+            Token::Use => "use",
             Token::As => "as",
             Token::Match => "match",
             Token::SelfType => "Self",
@@ -467,7 +470,8 @@ impl Token {
             Token::False => "`false`",
             Token::And => "`and`",
             Token::Or => "`or`",
-            Token::Import => "`import`",
+            Token::Pub => "`pub`",
+            Token::Use => "`use`",
             Token::As => "`as`",
             Token::Match => "`match`",
             Token::SelfType => "`Self`",

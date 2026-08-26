@@ -73,8 +73,8 @@ const map_slot_hash = fn (key: u256, base_slot: u256) u256 {
 Plank has no contract inheritance. Instead, code is organized through a module system with explicit imports.
 
 ```plank
-import std::abi::{abi_encode, abi_decode};
-import std::math::max;
+use std::prelude::*;
+use std::math::max;
 ```
 
 There are no virtual functions, no inheritance linearization, and no diamond problem. Composition is done by importing and using functionality directly.
@@ -84,7 +84,7 @@ There are no virtual functions, no inheritance linearization, and no diamond pro
 Plank's standard library provides ABI encoding and decoding utilities. With comptime, the compiler inspects struct fields and generates the correct encoding logic automatically from the value you pass.
 
 ```plank
-import std::abi::abi_encode;
+use std::prelude::*;
 
 const Transfer = struct { to: u256, amount: u256 };
 

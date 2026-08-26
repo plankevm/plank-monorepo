@@ -47,7 +47,8 @@ module.exports = grammar({
     run: ($) => seq("run", $.block),
     const_def: ($) => seq("const", $.identifier, optional(seq(":", $._expr)), "=", $._expr, ";"),
     import: ($) => seq(
-      "import",
+      optional("pub"),
+      "use",
       field("root", $.identifier),
       field("path", repeat(seq("::", $.identifier))),
       field("suffix", optional(choice($.suffix_import_all, $.suffix_import_as, $.suffix_import_group))),

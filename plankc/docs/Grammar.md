@@ -2,12 +2,12 @@
 
 ```ebnf
 program = decl*
-decl = init | run | const_def | import
+decl = init | run | const_def | use
 
 init = "init" block
 run = "run" block
 const_def = "const" IDENT (":" expr)? "=" expr ";"
-import = "import" IDENT ("::" IDENT)* (suffix_import_all | suffix_import_as | suffix_import_group)? ";"
+use = "pub"? "use" IDENT ("::" IDENT)* (suffix_import_all | suffix_import_as | suffix_import_group)? ";"
 suffix_import_all = "::" "*"
 suffix_import_as = "as" IDENT
 suffix_import_group = "::" "{" import_group_item ("," import_group_item)* ","? "}"

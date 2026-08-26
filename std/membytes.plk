@@ -1,7 +1,7 @@
-import std::mem::unsafe_mem_write;
-import std::option::{Option, Some, None};
-import std::type::sizeof;
-import std::regions::*;
+use std::mem::unsafe_mem_write;
+use std::option::{Option, Some, None};
+use std::type::sizeof;
+use std::regions::*;
 
 const membytes = bytes(memory);
 

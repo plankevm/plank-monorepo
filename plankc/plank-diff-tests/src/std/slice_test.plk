@@ -1,10 +1,6 @@
-import std::constructor::return_runtime;
-import std::error::{comptime_assert, require};
-import std::mem::unsafe_mem_write;
-import std::option::{None, Some};
-import std::regions::{calldata, code, ctime, memory};
-import std::slice::*;
-import std::type::sizeof;
+use std::mem::unsafe_mem_write;
+use std::prelude::*;
+use std::slice::*;
 
 const Pair = struct { first: u256, second: u256 };
 const Empty = struct {};

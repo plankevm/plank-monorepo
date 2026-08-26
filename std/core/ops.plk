@@ -1,4 +1,4 @@
-import std::sol::{SolPanicCode, PANIC_SELECTOR, ARITH_OVERFLOW_UNDERFLOW, DIV_BY_ZERO};
+use std::sol::{SolPanicCode, PANIC_SELECTOR, ARITH_OVERFLOW_UNDERFLOW, DIV_BY_ZERO};
 
 /// Comptime compatible error
 const arith_error = fn (comptime code: SolPanicCode) never {

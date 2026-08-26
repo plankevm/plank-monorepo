@@ -1,7 +1,7 @@
-import std::fixedbytes::bytes32;
-import std::regions::{bytes, memory};
-import std::option::{Option, Some, None, unwrap as option_unwrap};
-import std::core::uint::{u160, is_uint, try_cast_uint, cast_uint, unsafe_from_u256 as unsafe_uint_from_u256};
+use std::fixedbytes::bytes32;
+use std::regions::{bytes, memory};
+use std::option::{Option, Some, None, unwrap as option_unwrap};
+use std::core::uint::{u160, is_uint, try_cast_uint, cast_uint, unsafe_from_u256 as unsafe_uint_from_u256};
 
 const addr = struct {
     as_uint: u160,

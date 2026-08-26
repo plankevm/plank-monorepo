@@ -1,6 +1,5 @@
-import std::error::require;
-import std::mem::{unsafe_mem_read, unsafe_mem_write};
-import std::type::sizeof;
+use std::mem::{unsafe_mem_read, unsafe_mem_write};
+use std::prelude::*;
 
 const Inner = struct {
     marker: void,

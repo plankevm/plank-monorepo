@@ -35,7 +35,7 @@ This requires an explicit invocation of a function like
 and returns a `bytes(code)` or `bytes(memory)`.
 
 ```plank
-import std::regions::{embed_as, bytes, code};
+use std::prelude::*;
 
 init {
     let name: cbytes = "Plank";
@@ -59,7 +59,7 @@ At compile time, you can slice a larger `cbytes` into smaller sub-slices using
 the standard library function `std::regions::slice_bytes`:
 
 ```plank
-import std::regions::{slice_bytes, bytes, code, embed_as};
+use std::prelude::*;
 
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz";
 const BATTLE_SHIP_COLUMNS: cbytes = slice_bytes(ALPHABET, 0, 10);
@@ -116,8 +116,7 @@ the inputs. If you embed the result, only those bytes are embedded, even when
 some inputs were slices of larger `cbytes` values:
 
 ```plank
-import std::error::require;
-import std::regions::{embed_as, bytes, code};
+use std::prelude::*;
 
 const LOOKUP_TABLE =
     hex"0000000000000000000000000000000000000000000000000000000000000000"

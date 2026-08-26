@@ -32,6 +32,7 @@ pub struct FileImport {
     pub kind: ImportKind,
     pub target_source: SourceId,
     pub span: TokenSpan,
+    pub public: bool,
 }
 
 #[derive(Debug)]
@@ -149,6 +150,7 @@ impl<F: SourceFs> ProjectParser<'_, F> {
                         kind: import_kind,
                         target_source,
                         span: import.node().span(),
+                        public: import.public,
                     });
                     assert!(prev.is_none());
                     import_idx += 1;
@@ -204,6 +206,7 @@ impl<F: SourceFs> ProjectParser<'_, F> {
                                     },
                                     target_source,
                                     span: item.span(),
+                                    public: group.public,
                                 });
                             assert!(prev.is_none());
                         }

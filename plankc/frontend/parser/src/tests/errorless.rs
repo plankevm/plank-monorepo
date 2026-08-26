@@ -3133,12 +3133,12 @@ fn test_empty_block_expr() {
 fn test_import_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo;
+        use foo;
         "#,
         r#"
         File
-            ImportDecl { glob: false }
-                "import"
+            ImportDecl { public: false, glob: false }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3151,12 +3151,12 @@ fn test_import_single_segment() {
 fn test_import_two_segments() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar;
+        use foo::bar;
         "#,
         r#"
         File
-            ImportDecl { glob: false }
-                "import"
+            ImportDecl { public: false, glob: false }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3172,12 +3172,12 @@ fn test_import_two_segments() {
 fn test_import_three_segments() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::baz;
+        use foo::bar::baz;
         "#,
         r#"
         File
-            ImportDecl { glob: false }
-                "import"
+            ImportDecl { public: false, glob: false }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3196,12 +3196,12 @@ fn test_import_three_segments() {
 fn test_import_glob_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::*;
+        use foo::*;
         "#,
         r#"
         File
-            ImportDecl { glob: true }
-                "import"
+            ImportDecl { public: false, glob: true }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3216,12 +3216,12 @@ fn test_import_glob_single_segment() {
 fn test_import_glob_multi_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::*;
+        use foo::bar::*;
         "#,
         r#"
         File
-            ImportDecl { glob: true }
-                "import"
+            ImportDecl { public: false, glob: true }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3239,13 +3239,13 @@ fn test_import_glob_multi_segment() {
 fn test_import_as_single_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo as bar;
+        use foo as bar;
         "#,
         r#"
         File
-            ImportAsDecl
+            ImportAsDecl { public: false }
                 ImportPath
-                    "import"
+                    "use"
                     " "
                     Identifier
                         "foo"
@@ -3263,13 +3263,13 @@ fn test_import_as_single_segment() {
 fn test_import_as_multi_segment() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::baz as qux;
+        use foo::bar::baz as qux;
         "#,
         r#"
         File
-            ImportAsDecl
+            ImportAsDecl { public: false }
                 ImportPath
-                    "import"
+                    "use"
                     " "
                     Identifier
                         "foo"
@@ -3293,22 +3293,22 @@ fn test_import_as_multi_segment() {
 fn test_import_multiple_declarations() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import std;
-        import std::io;
-        import std::io::*;
-        import std::io as io_lib;
+        use std;
+        use std::io;
+        use std::io::*;
+        use std::io as io_lib;
         "#,
         r#"
         File
-            ImportDecl { glob: false }
-                "import"
+            ImportDecl { public: false, glob: false }
+                "use"
                 " "
                 Identifier
                     "std"
                 ";"
             "\n"
-            ImportDecl { glob: false }
-                "import"
+            ImportDecl { public: false, glob: false }
+                "use"
                 " "
                 Identifier
                     "std"
@@ -3317,8 +3317,8 @@ fn test_import_multiple_declarations() {
                     "io"
                 ";"
             "\n"
-            ImportDecl { glob: true }
-                "import"
+            ImportDecl { public: false, glob: true }
+                "use"
                 " "
                 Identifier
                     "std"
@@ -3329,9 +3329,9 @@ fn test_import_multiple_declarations() {
                 "*"
                 ";"
             "\n"
-            ImportAsDecl
+            ImportAsDecl { public: false }
                 ImportPath
-                    "import"
+                    "use"
                     " "
                     Identifier
                         "std"
@@ -3352,12 +3352,12 @@ fn test_import_multiple_declarations() {
 fn test_import_group() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::{X, Y as B};
+        use foo::bar::{X, Y as B};
         "#,
         r#"
         File
-            ImportGroupDecl
-                "import"
+            ImportGroupDecl { public: false }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3389,12 +3389,12 @@ fn test_import_group() {
 fn test_import_group_trailing_comma() {
     assert_parses_to_cst_no_errors_dedented(
         r#"
-        import foo::bar::{X, Y,};
+        use foo::bar::{X, Y,};
         "#,
         r#"
         File
-            ImportGroupDecl
-                "import"
+            ImportGroupDecl { public: false }
+                "use"
                 " "
                 Identifier
                     "foo"
@@ -3412,6 +3412,86 @@ fn test_import_group_trailing_comma() {
                     Identifier
                         "Y"
                 ","
+                "}"
+                ";"
+        "#,
+    );
+}
+
+#[test]
+fn test_public_import_declarations() {
+    assert_parses_to_cst_no_errors_dedented(
+        r#"
+        pub use foo::item;
+        pub use foo::item as alias;
+        pub use foo::*;
+        pub use foo::{a, b as c};
+        "#,
+        r#"
+        File
+            ImportDecl { public: true, glob: false }
+                "pub"
+                " "
+                "use"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                Identifier
+                    "item"
+                ";"
+            "\n"
+            ImportAsDecl { public: true }
+                ImportPath
+                    "pub"
+                    " "
+                    "use"
+                    " "
+                    Identifier
+                        "foo"
+                    "::"
+                    Identifier
+                        "item"
+                    " "
+                "as"
+                " "
+                Identifier
+                    "alias"
+                ";"
+            "\n"
+            ImportDecl { public: true, glob: true }
+                "pub"
+                " "
+                "use"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                "*"
+                ";"
+            "\n"
+            ImportGroupDecl { public: true }
+                "pub"
+                " "
+                "use"
+                " "
+                Identifier
+                    "foo"
+                "::"
+                "{"
+                ImportGroupItem
+                    Identifier
+                        "a"
+                ","
+                " "
+                ImportGroupItem
+                    Identifier
+                        "b"
+                    " "
+                    "as"
+                    " "
+                    Identifier
+                        "c"
                 "}"
                 ";"
         "#,

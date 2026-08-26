@@ -1,5 +1,5 @@
-import std::type::sizeof;
-import std::error::comptime_assert;
+use std::type::sizeof;
+use std::error::comptime_assert;
 
 const encode_cbytes = fn (comptime value: $T) cbytes {
     if T == void {

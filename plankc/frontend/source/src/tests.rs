@@ -21,8 +21,8 @@ fn source_content_matches_source_manager_path() {
             (
                 "main",
                 r#"
-                import m::a::A;
-                import m::b::B;
+                use m::a::A;
+                use m::b::B;
 
                 init {}
                 "#,

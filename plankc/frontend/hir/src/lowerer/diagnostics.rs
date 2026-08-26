@@ -8,6 +8,16 @@ use crate::FieldInfo;
 
 use super::BlockLowerer;
 
+pub(super) fn error_cyclic_reexport(
+    session: &mut Session,
+    source_id: SourceId,
+    source_span: SourceSpan,
+) {
+    Diagnostic::error("cyclic re-export")
+        .primary(source_id, source_span, "this re-export creates a cycle")
+        .emit(session);
+}
+
 impl BlockLowerer<'_> {
     fn lookup_name(&self, name: StrId) -> String {
         self.session.borrow().lookup_name(name).to_string()

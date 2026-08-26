@@ -1,8 +1,5 @@
-import std::abi::abi_encode;
-import std::constructor::return_runtime;
-import std::core::addr::cast_addr;
-import std::membytes::{membytes, membytes_new, membytes_from_ptr};
-import std::precompile::{ecrecover, sha256, ripemd160, modexp};
+use std::precompile::{ripemd160, modexp};
+use std::prelude::*;
 
 const ECRECOVER_SELECTOR = 0xa489405c;
 const RIPEMD160_SELECTOR = 0x31699b64;

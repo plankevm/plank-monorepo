@@ -1,5 +1,5 @@
 // Based on https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require
-import std::abi::compute_selector;
+use std::abi::compute_selector;
 
 const SolPanicCode = struct { code: u256 };
 

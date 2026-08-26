@@ -1,7 +1,10 @@
-use std::cell::RefCell;
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry as BTreeEntry},
+};
 
-use hashbrown::{HashMap, hash_map::Entry};
-use plank_core::{Idx, IncIterable, IndexVec, list_of_lists::ListOfLists};
+use hashbrown::HashMap;
+use plank_core::{Idx, IncIterable, IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
     cst::{self, NumLitId},
@@ -152,6 +155,150 @@ struct ScopedConst {
     imported: bool,
 }
 
+#[derive(Clone, Copy)]
+enum PublicNameResolution {
+    Resolving,
+    Resolved(ScopedConst),
+    Failed(ReexportFailure),
+}
+
+#[derive(Clone, Copy)]
+enum ReexportFailure {
+    NotFound,
+    Poisoned,
+    Cyclic,
+}
+
+fn resolve_reexport(
+    source_id: SourceId,
+    public_name: StrId,
+    project: &ParsedProject,
+    public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
+    session: &mut Session,
+) -> ReexportFailure {
+    assert!(
+        public_names_by_source[source_id]
+            .insert(public_name, PublicNameResolution::Resolving)
+            .is_none()
+    );
+
+    let mut failure = ReexportFailure::NotFound;
+    for &import in project.imports[source_id].iter().filter(|import| import.public) {
+        let target_name = match import.kind {
+            ImportKind::Specific { selected_name, imported_as, .. } => {
+                if imported_as != public_name {
+                    continue;
+                }
+                selected_name
+            }
+            ImportKind::All => public_name,
+        };
+        let target_failure =
+            match public_names_by_source[import.target_source].get(&target_name).copied() {
+                Some(PublicNameResolution::Resolving) => {
+                    let source_span =
+                        project.parsed_sources[source_id].lexed.tokens_src_span(import.span);
+                    diagnostics::error_cyclic_reexport(session, source_id, source_span);
+                    ReexportFailure::Cyclic
+                }
+                Some(PublicNameResolution::Failed(failure)) => failure,
+                Some(PublicNameResolution::Resolved(_)) => {
+                    unreachable!("resolved candidate should have propagated")
+                }
+                None => resolve_reexport(
+                    import.target_source,
+                    target_name,
+                    project,
+                    public_names_by_source,
+                    session,
+                ),
+            };
+        match target_failure {
+            ReexportFailure::Cyclic => {
+                failure = ReexportFailure::Cyclic;
+                break;
+            }
+            ReexportFailure::Poisoned => {
+                failure = ReexportFailure::Poisoned;
+            }
+            ReexportFailure::NotFound if matches!(import.kind, ImportKind::Specific { .. }) => {
+                failure = ReexportFailure::Poisoned;
+            }
+            ReexportFailure::NotFound => {}
+        }
+    }
+
+    public_names_by_source[source_id].insert(public_name, PublicNameResolution::Failed(failure));
+    failure
+}
+
+fn resolve_reexports(
+    project: &ParsedProject,
+    public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
+    session: &mut Session,
+) {
+    let mut reexporters = index_vec![Vec::new(); public_names_by_source.len()];
+    for (reexporting_source, imports) in project.imports.enumerate_idx() {
+        for &import in imports.iter().filter(|import| import.public) {
+            reexporters[import.target_source].push((reexporting_source, import));
+        }
+    }
+
+    let mut public_names_to_propagate = Vec::new();
+    for (source_id, public_names) in public_names_by_source.enumerate_idx() {
+        for (&public_name, &resolution) in public_names {
+            let PublicNameResolution::Resolved(scoped_const) = resolution else {
+                unreachable!(
+                    "invariant: public names contain only resolved constants before re-export propagation"
+                )
+            };
+            public_names_to_propagate.push((source_id, public_name, scoped_const.const_id));
+        }
+    }
+
+    while let Some((source_id, public_name, const_id)) = public_names_to_propagate.pop() {
+        // This also scans named re-exports for other names; could add a per-name lookup if
+        // profiling justifies it.
+        for &(reexporting_source, import) in &reexporters[source_id] {
+            let reexported_name = match import.kind {
+                ImportKind::Specific { selected_name, imported_as, .. } => {
+                    if selected_name != public_name {
+                        continue;
+                    }
+                    imported_as
+                }
+                ImportKind::All => public_name,
+            };
+            let BTreeEntry::Vacant(public_name_entry) =
+                public_names_by_source[reexporting_source].entry(reexported_name)
+            else {
+                continue;
+            };
+            public_name_entry.insert(PublicNameResolution::Resolved(ScopedConst {
+                const_id,
+                source_id: reexporting_source,
+                span: project.parsed_sources[reexporting_source].lexed.tokens_src_span(import.span),
+                imported: true,
+            }));
+            public_names_to_propagate.push((reexporting_source, reexported_name, const_id));
+        }
+    }
+
+    for &import in project.imports.iter().flatten() {
+        if let ImportKind::Specific { selected_name, .. } = import.kind
+            && !public_names_by_source[import.target_source].contains_key(&selected_name)
+        {
+            resolve_reexport(
+                import.target_source,
+                selected_name,
+                project,
+                public_names_by_source,
+                session,
+            );
+        }
+    }
+}
+
 struct BlockLowerer<'a> {
     consts: HashMap<StrId, ScopedConst>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
@@ -177,89 +324,76 @@ enum ShortCircuitOp {
 }
 
 impl BlockLowerer<'_> {
-    fn try_insert_import(
-        &mut self,
-        imported_as: StrId,
-        binding: ScopedConst,
-    ) -> Result<(), ScopedConst> {
-        match self.consts.entry(imported_as) {
-            Entry::Occupied(occupied) => Err(*occupied.get()),
-            Entry::Vacant(vacant) => {
-                vacant.insert(binding);
-                Ok(())
-            }
-        }
+    fn insert_import(&mut self, name: StrId, target_binding: ScopedConst, import: &FileImport) {
+        let Err(existing) = self.consts.try_insert(
+            name,
+            ScopedConst {
+                const_id: target_binding.const_id,
+                source_id: self.source_id,
+                span: self.lexed.tokens_src_span(import.span),
+                imported: true,
+            },
+        ) else {
+            return;
+        };
+        let previous = *existing.entry.get();
+        let glob_definition = matches!(import.kind, ImportKind::All)
+            .then_some((target_binding.source_id, target_binding.span));
+        self.error_import_collision(
+            name,
+            import.span,
+            previous.source_id,
+            previous.span,
+            previous.imported,
+            glob_definition,
+        );
     }
 
     fn build_file_scope(
         &mut self,
-        source_consts: &ListOfLists<SourceId, (StrId, ConstId)>,
+        public_names_by_source: &IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
         imports: &ListOfLists<SourceId, FileImport>,
-        const_defs: &IndexVec<ConstId, ConstDef>,
     ) {
         self.consts.clear();
-        for &(name, const_id) in &source_consts[self.source_id] {
-            let def = &const_defs[const_id];
-            self.consts.insert(
-                name,
-                ScopedConst {
-                    const_id,
-                    source_id: def.source_id,
-                    span: def.source_span,
-                    imported: false,
-                },
-            );
+        for (&name, &resolution) in &public_names_by_source[self.source_id] {
+            let PublicNameResolution::Resolved(scoped_const) = resolution else { continue };
+            if scoped_const.imported {
+                continue;
+            }
+            self.consts.insert(name, scoped_const);
         }
+
         for import in &imports[self.source_id] {
-            let import_source_id = self.source_id;
-            let import_source_span = self.lexed.tokens_src_span(import.span);
             match import.kind {
                 ImportKind::Specific { selected_name, imported_as, name_span } => {
-                    let Some(const_id) = source_consts[import.target_source]
-                        .iter()
-                        .find_map(|&(name, const_id)| (name == selected_name).then_some(const_id))
-                    else {
-                        self.error_unresolved_import(
-                            selected_name,
-                            name_span,
-                            import.target_source,
-                        );
-                        continue;
+                    let target_binding = match public_names_by_source[import.target_source]
+                        .get(&selected_name)
+                        .expect("invariant: specific imports resolved before lowering")
+                    {
+                        PublicNameResolution::Resolved(binding) => *binding,
+                        PublicNameResolution::Failed(
+                            ReexportFailure::Poisoned | ReexportFailure::Cyclic,
+                        ) => continue,
+                        PublicNameResolution::Failed(ReexportFailure::NotFound) => {
+                            self.error_unresolved_import(
+                                selected_name,
+                                name_span,
+                                import.target_source,
+                            );
+                            continue;
+                        }
+                        PublicNameResolution::Resolving => {
+                            unreachable!("public name resolution completed before lowering")
+                        }
                     };
-                    let binding = ScopedConst {
-                        const_id,
-                        source_id: import_source_id,
-                        span: import_source_span,
-                        imported: true,
-                    };
-                    let Err(prev) = self.try_insert_import(imported_as, binding) else { continue };
-                    self.error_import_collision(
-                        imported_as,
-                        import.span,
-                        prev.source_id,
-                        prev.span,
-                        prev.imported,
-                        None,
-                    );
+                    self.insert_import(imported_as, target_binding, import);
                 }
                 ImportKind::All => {
-                    for &(name, const_id) in &source_consts[import.target_source] {
-                        let binding = ScopedConst {
-                            const_id,
-                            source_id: import_source_id,
-                            span: import_source_span,
-                            imported: true,
+                    for (&name, &resolution) in &public_names_by_source[import.target_source] {
+                        let PublicNameResolution::Resolved(target_binding) = resolution else {
+                            continue;
                         };
-                        let Err(prev) = self.try_insert_import(name, binding) else { continue };
-                        let def = &const_defs[const_id];
-                        self.error_import_collision(
-                            name,
-                            import.span,
-                            prev.source_id,
-                            prev.span,
-                            prev.imported,
-                            Some((def.source_id, def.source_span)),
-                        );
+                        self.insert_import(name, target_binding, import);
                     }
                 }
             }
@@ -1117,7 +1251,9 @@ impl BlockLowerer<'_> {
 }
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
-    let (mut consts, source_consts) = register_consts(&project.parsed_sources, session);
+    let (mut consts, mut public_names_by_source) =
+        register_consts(&project.parsed_sources, session);
+    resolve_reexports(project, &mut public_names_by_source, session);
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
     let mut init = None;
@@ -1146,7 +1282,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
         lowerer.source_id = source_id;
         lowerer.lexed = &source.lexed;
-        lowerer.build_file_scope(&source_consts, &project.imports, &consts);
+        lowerer.build_file_scope(&public_names_by_source, &project.imports);
 
         let file = source.cst.as_file();
         let mut source_init = None;
@@ -1236,44 +1372,49 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 fn register_consts(
     sources: &IndexVec<SourceId, plank_source::project::ParsedSource>,
     session: &mut Session,
-) -> (IndexVec<ConstId, ConstDef>, ListOfLists<SourceId, (StrId, ConstId)>) {
+) -> (IndexVec<ConstId, ConstDef>, IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>) {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
-    let mut source_consts: ListOfLists<SourceId, (StrId, ConstId)> = ListOfLists::new();
+    // Using `BTreeMap` to ensure deterministic re-export propagation and diagnostics.
+    let mut public_names_by_source = index_vec![BTreeMap::new(); sources.len()];
 
-    let mut seen = HashMap::new();
-    for (id, source) in sources.enumerate_idx() {
-        let mut source_const_defs: Vec<ConstDef> = Vec::new();
+    for (source_id, source) in sources.enumerate_idx() {
+        let public_names = &mut public_names_by_source[source_id];
         let file = source.cst.as_file();
-        seen.clear();
-        source_consts.push_with(|mut list| {
-            for def in file.iter_defs() {
-                let TopLevelDef::Const(const_decl) = def else { continue };
-                let source_span = source.lexed.tokens_src_span(const_decl.span());
-                let const_def = ConstDef {
-                    name: const_decl.name,
-                    source_id: id,
-                    source_span,
-                    body: BlockId::ZERO,
-                    result: LocalId::ZERO,
-                };
-                if let Some(prev) = seen.insert(const_def.name, const_def) {
+        for def in file.iter_defs() {
+            let TopLevelDef::Const(const_decl) = def else { continue };
+            let source_span = source.lexed.tokens_src_span(const_decl.span());
+            let const_def = ConstDef {
+                name: const_decl.name,
+                source_id,
+                source_span,
+                body: BlockId::ZERO,
+                result: LocalId::ZERO,
+            };
+            match public_names.entry(const_def.name) {
+                BTreeEntry::Occupied(occupied) => {
+                    let PublicNameResolution::Resolved(binding) = *occupied.get() else {
+                        unreachable!("only constants are registered in this phase")
+                    };
                     diagnostics::error_duplicate_const(
                         session,
-                        id,
+                        source_id,
                         const_def.name,
                         source_span,
-                        &prev,
+                        &consts[binding.const_id],
                     );
-                } else {
-                    source_const_defs.push(const_def);
+                }
+                BTreeEntry::Vacant(vacant) => {
+                    let const_id = consts.push(const_def);
+                    vacant.insert(PublicNameResolution::Resolved(ScopedConst {
+                        const_id,
+                        source_id: const_def.source_id,
+                        span: const_def.source_span,
+                        imported: false,
+                    }));
                 }
             }
-            for const_def in source_const_defs.into_iter() {
-                let const_id = consts.push(const_def);
-                list.push((const_def.name, const_id));
-            }
-        });
+        }
     }
 
-    (consts, source_consts)
+    (consts, public_names_by_source)
 }

@@ -1,6 +1,5 @@
-import std::abi_helpers::abi_buf_fits;
-import std::error::require;
-import std::membytes::{membytes, membytes_new, membytes_write};
+use std::abi_helpers::abi_buf_fits;
+use std::prelude::*;
 
 const assert_fits = fn (comptime T: type, buf: membytes, offset: u256, expected: bool) void {
     if abi_buf_fits(T, buf, offset) != expected {

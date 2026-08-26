@@ -1,4 +1,4 @@
-import std::option::{Option, None, Some};
+use std::option::{Option, None, Some};
 
 const UInt = fn (comptime Size: u256) type {
     if Size == 256 {
