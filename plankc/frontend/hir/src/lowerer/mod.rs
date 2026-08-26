@@ -164,27 +164,15 @@ enum PublicNameResolution {
     Cyclic,
 }
 
-struct RegisteredConsts {
-    consts: IndexVec<ConstId, ConstDef>,
-    // Stable iteration keeps re-export propagation and diagnostics deterministic.
-    source_public_names: IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
-}
-
-#[derive(Clone, Copy)]
-struct Reexporter {
-    source_id: SourceId,
-    import: FileImport,
-}
-
 fn resolve_reexport(
     source_id: SourceId,
     exported_name: StrId,
     project: &ParsedProject,
-    source_public_names: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
+    public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
 ) -> PublicNameResolution {
     assert!(
-        source_public_names[source_id]
+        public_names_by_source[source_id]
             .insert(exported_name, PublicNameResolution::Resolving)
             .is_none()
     );
@@ -202,7 +190,7 @@ fn resolve_reexport(
             ImportKind::All => exported_name,
         };
         let candidate_resolution =
-            match source_public_names[import.target_source].get(&target_name).copied() {
+            match public_names_by_source[import.target_source].get(&target_name).copied() {
                 Some(PublicNameResolution::Resolving) => {
                     let source_span =
                         project.parsed_sources[source_id].lexed.tokens_src_span(import.span);
@@ -219,7 +207,7 @@ fn resolve_reexport(
                     import.target_source,
                     target_name,
                     project,
-                    source_public_names,
+                    public_names_by_source,
                     session,
                 ),
             };
@@ -237,34 +225,34 @@ fn resolve_reexport(
         }
     }
 
-    source_public_names[source_id].insert(exported_name, resolution);
+    public_names_by_source[source_id].insert(exported_name, resolution);
     resolution
 }
 
 fn resolve_reexports(
     project: &ParsedProject,
-    source_public_names: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
+    public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
 ) {
-    let mut reexporters = index_vec![Vec::new(); source_public_names.len()];
+    let mut reexporters = index_vec![Vec::new(); public_names_by_source.len()];
     for (source_id, imports) in project.imports.enumerate_idx() {
         for &import in imports.iter().filter(|import| import.public) {
-            reexporters[import.target_source].push(Reexporter { source_id, import });
+            reexporters[import.target_source].push((source_id, import));
         }
     }
 
     let mut worklist = Vec::new();
-    for (source_id, names) in source_public_names.enumerate_idx() {
-        for (&name, &resolution) in names {
+    for (source_id, public_names) in public_names_by_source.enumerate_idx() {
+        for (&name, &resolution) in public_names {
             if let PublicNameResolution::Resolved(binding) = resolution {
                 worklist.push((source_id, name, binding.const_id));
             }
         }
     }
 
-    while let Some((target_source, name, const_id)) = worklist.pop() {
-        for &Reexporter { source_id, import } in &reexporters[target_source] {
-            let exported_name = match import.kind {
+    while let Some((source_id, name, const_id)) = worklist.pop() {
+        for &(reexporting_source, import) in &reexporters[source_id] {
+            let reexported_name = match import.kind {
                 ImportKind::Specific { selected_name, imported_as, .. } => {
                     if selected_name != name {
                         continue;
@@ -273,31 +261,31 @@ fn resolve_reexports(
                 }
                 ImportKind::All => name,
             };
-            if source_public_names[source_id].contains_key(&exported_name) {
+            if public_names_by_source[reexporting_source].contains_key(&reexported_name) {
                 continue;
             }
             let binding = ScopedConst {
                 const_id,
-                source_id,
-                span: project.parsed_sources[source_id].lexed.tokens_src_span(import.span),
+                source_id: reexporting_source,
+                span: project.parsed_sources[reexporting_source].lexed.tokens_src_span(import.span),
                 imported: true,
             };
-            source_public_names[source_id]
-                .insert(exported_name, PublicNameResolution::Resolved(binding));
-            worklist.push((source_id, exported_name, const_id));
+            public_names_by_source[reexporting_source]
+                .insert(reexported_name, PublicNameResolution::Resolved(binding));
+            worklist.push((reexporting_source, reexported_name, const_id));
         }
     }
 
     for (_, imports) in project.imports.enumerate_idx() {
         for &import in imports {
             if let ImportKind::Specific { selected_name, .. } = import.kind
-                && !source_public_names[import.target_source].contains_key(&selected_name)
+                && !public_names_by_source[import.target_source].contains_key(&selected_name)
             {
                 resolve_reexport(
                     import.target_source,
                     selected_name,
                     project,
-                    source_public_names,
+                    public_names_by_source,
                     session,
                 );
             }
@@ -346,23 +334,23 @@ impl BlockLowerer<'_> {
 
     fn build_file_scope(
         &mut self,
-        source_public_names: &IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
+        public_names_by_source: &IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
         imports: &ListOfLists<SourceId, FileImport>,
     ) {
         self.consts.clear();
-        for (&name, &resolution) in &source_public_names[self.source_id] {
-            let PublicNameResolution::Resolved(binding) = resolution else { continue };
-            if binding.imported {
+        for (&name, &resolution) in &public_names_by_source[self.source_id] {
+            let PublicNameResolution::Resolved(scoped_const) = resolution else { continue };
+            if scoped_const.imported {
                 continue;
             }
-            self.consts.insert(name, binding);
+            self.consts.insert(name, scoped_const);
         }
         for import in &imports[self.source_id] {
             let import_source_id = self.source_id;
             let import_source_span = self.lexed.tokens_src_span(import.span);
             match import.kind {
                 ImportKind::Specific { selected_name, imported_as, name_span } => {
-                    let const_id = match source_public_names[import.target_source]
+                    let const_id = match public_names_by_source[import.target_source]
                         .get(&selected_name)
                         .copied()
                     {
@@ -399,7 +387,7 @@ impl BlockLowerer<'_> {
                     );
                 }
                 ImportKind::All => {
-                    for (&name, &resolution) in &source_public_names[import.target_source] {
+                    for (&name, &resolution) in &public_names_by_source[import.target_source] {
                         let PublicNameResolution::Resolved(target_binding) = resolution else {
                             continue;
                         };
@@ -1276,9 +1264,9 @@ impl BlockLowerer<'_> {
 }
 
 pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut Session) -> Hir {
-    let RegisteredConsts { mut consts, mut source_public_names } =
+    let (mut consts, mut public_names_by_source) =
         register_consts(&project.parsed_sources, session);
-    resolve_reexports(project, &mut source_public_names, session);
+    resolve_reexports(project, &mut public_names_by_source, session);
     let mut builder = HirBuilder::new();
     let mut entry_points = IndexVec::new();
     let mut init = None;
@@ -1307,7 +1295,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         lowerer.num_lit_limbs = &source.cst.num_lit_limbs;
         lowerer.source_id = source_id;
         lowerer.lexed = &source.lexed;
-        lowerer.build_file_scope(&source_public_names, &project.imports);
+        lowerer.build_file_scope(&public_names_by_source, &project.imports);
 
         let file = source.cst.as_file();
         let mut source_init = None;
@@ -1397,12 +1385,13 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 fn register_consts(
     sources: &IndexVec<SourceId, plank_source::project::ParsedSource>,
     session: &mut Session,
-) -> RegisteredConsts {
+) -> (IndexVec<ConstId, ConstDef>, IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>) {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
-    let mut source_public_names = IndexVec::with_capacity(sources.len());
+    // Using `BTreeMap` to ensure deterministic re-export propagation and diagnostics.
+    let mut public_names_by_source = index_vec![BTreeMap::new(); sources.len()];
 
     for (source_id, source) in sources.enumerate_idx() {
-        let mut names = BTreeMap::new();
+        let public_names = &mut public_names_by_source[source_id];
         let file = source.cst.as_file();
         for def in file.iter_defs() {
             let TopLevelDef::Const(const_decl) = def else { continue };
@@ -1414,7 +1403,7 @@ fn register_consts(
                 body: BlockId::ZERO,
                 result: LocalId::ZERO,
             };
-            match names.entry(const_def.name) {
+            match public_names.entry(const_def.name) {
                 BTreeEntry::Occupied(occupied) => {
                     let PublicNameResolution::Resolved(binding) = *occupied.get() else {
                         unreachable!("only constants are registered in this phase")
@@ -1438,8 +1427,7 @@ fn register_consts(
                 }
             }
         }
-        assert_eq!(source_public_names.push(names), source_id);
     }
 
-    RegisteredConsts { consts, source_public_names }
+    (consts, public_names_by_source)
 }
