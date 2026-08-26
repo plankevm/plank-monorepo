@@ -1,5 +1,3 @@
-use std::storage::map_slot_hash;
-use std::core::addr::*;
 use std::prelude::*;
 
 const U256_MAX = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;

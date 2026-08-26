@@ -38,7 +38,7 @@ if you wish to add support for another editor.
 Create a file called `magic_number.plk`:
 
 ```plank
-use std::constructor::return_runtime;
+use std::prelude::*;
 
 const MAGIC_NUMBER_SLOT = 0;
 const GET_SELECTOR = 0x6d4ce63c;
@@ -64,9 +64,8 @@ run {
 
 Out of the box Plank contracts are very bare bones, giving you access to two entry points: `init`
 and `run`. `init` becomes your contract's initcode and runs once at deployment, while `run` is the
-entrypoint to your runtime logic. Note nothing is implicit, by default you'll need to use something like
-`std::constructor::return_runtime` in your `init` to ensure your contract's
-runtime code is set to `run`.
+entrypoint to your runtime logic. Note nothing is implicit; the explicit `std::prelude` import above
+provides `return_runtime`, which the `init` block uses to set the contract's runtime code to `run`.
 
 In the above example, when the `init` block runs, it reads the initial magic number from the arguments, stores it, and returns the runtime bytecode. The `run` block executes on every call: it extracts the function selector from the first 4 bytes of calldata and executes the `get()` method if the selector matches `GET_SELECTOR`; otherwise, it reverts.
 

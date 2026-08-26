@@ -1,4 +1,4 @@
-use std::core::addr::{addr, addr_from_u256, cast_addr, raw_create, raw_create2};
+use std::core::addr::{raw_create, raw_create2};
 use std::fixedbytes::bytes32_from_u256;
 use std::membytes::membytes_from_ptr;
 use std::prelude::*;
