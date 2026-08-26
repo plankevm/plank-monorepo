@@ -234,31 +234,36 @@ fn resolve_reexports(
     session: &mut Session,
 ) {
     let mut reexporters = index_vec![Vec::new(); public_names_by_source.len()];
-    for (source_id, imports) in project.imports.enumerate_idx() {
+    for (reexporting_source, imports) in project.imports.enumerate_idx() {
         for &import in imports.iter().filter(|import| import.public) {
-            reexporters[import.target_source].push((source_id, import));
+            reexporters[import.target_source].push((reexporting_source, import));
         }
     }
 
-    let mut worklist = Vec::new();
+    let mut public_names_to_propagate = Vec::new();
     for (source_id, public_names) in public_names_by_source.enumerate_idx() {
-        for (&name, &resolution) in public_names {
-            if let PublicNameResolution::Resolved(binding) = resolution {
-                worklist.push((source_id, name, binding.const_id));
-            }
+        for (&public_name, &resolution) in public_names {
+            let PublicNameResolution::Resolved(scoped_const) = resolution else {
+                unreachable!(
+                    "invariant: public names contain only resolved constants before re-export propagation"
+                )
+            };
+            public_names_to_propagate.push((source_id, public_name, scoped_const.const_id));
         }
     }
 
-    while let Some((source_id, name, const_id)) = worklist.pop() {
+    while let Some((source_id, public_name, const_id)) = public_names_to_propagate.pop() {
+        // This also scans named re-exports for other names; could add a per-name lookup if
+        // profiling justifies it.
         for &(reexporting_source, import) in &reexporters[source_id] {
             let reexported_name = match import.kind {
                 ImportKind::Specific { selected_name, imported_as, .. } => {
-                    if selected_name != name {
+                    if selected_name != public_name {
                         continue;
                     }
                     imported_as
                 }
-                ImportKind::All => name,
+                ImportKind::All => public_name,
             };
             let BTreeEntry::Vacant(public_name_entry) =
                 public_names_by_source[reexporting_source].entry(reexported_name)
@@ -271,23 +276,21 @@ fn resolve_reexports(
                 span: project.parsed_sources[reexporting_source].lexed.tokens_src_span(import.span),
                 imported: true,
             }));
-            worklist.push((reexporting_source, reexported_name, const_id));
+            public_names_to_propagate.push((reexporting_source, reexported_name, const_id));
         }
     }
 
-    for (_, imports) in project.imports.enumerate_idx() {
-        for &import in imports {
-            if let ImportKind::Specific { selected_name, .. } = import.kind
-                && !public_names_by_source[import.target_source].contains_key(&selected_name)
-            {
-                resolve_reexport(
-                    import.target_source,
-                    selected_name,
-                    project,
-                    public_names_by_source,
-                    session,
-                );
-            }
+    for &import in project.imports.iter().flatten() {
+        if let ImportKind::Specific { selected_name, .. } = import.kind
+            && !public_names_by_source[import.target_source].contains_key(&selected_name)
+        {
+            resolve_reexport(
+                import.target_source,
+                selected_name,
+                project,
+                public_names_by_source,
+                session,
+            );
         }
     }
 }
