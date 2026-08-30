@@ -342,6 +342,16 @@ impl BlockLowerer<'_> {
             )
             .emit(*self.session.borrow_mut());
     }
+
+    pub fn emit_return_in_comptime_block(&self, return_span: TokenSpan) {
+        Diagnostic::error("return is not allowed in comptime blocks")
+            .element(
+                Annotations::new(self.source_id)
+                    .primary(self.lexed.tokens_src_span(return_span), "not allowed here"),
+            )
+            .help("if the function is already comptime, remove the comptime block")
+            .emit(*self.session.borrow_mut());
+    }
 }
 
 pub(super) fn error_duplicate_const(

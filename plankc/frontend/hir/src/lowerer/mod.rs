@@ -152,6 +152,13 @@ struct ScopedConst {
     imported: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReturnContext {
+    Allowed,
+    DisallowedOutsideFunction,
+    DisallowedInComptime,
+}
+
 struct BlockLowerer<'a> {
     consts: HashMap<StrId, ScopedConst>,
     num_lit_limbs: &'a ListOfLists<NumLitId, u32>,
@@ -160,7 +167,7 @@ struct BlockLowerer<'a> {
     values: &'a mut ValueInterner,
     builder: &'a mut HirBuilder,
     local_frames: Vec<LocalFrame>,
-    in_function_body: bool,
+    return_context: ReturnContext,
 
     instructions_buf: Vec<Instruction>,
     locals_buf: Vec<LocalId>,
@@ -189,6 +196,24 @@ impl BlockLowerer<'_> {
                 Ok(())
             }
         }
+    }
+    fn lower_comptime_block<R>(
+        &mut self,
+        reason: ComptimeReason,
+        span: TokenSpan,
+        lower_body: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = self.return_context;
+        self.return_context = ReturnContext::DisallowedInComptime;
+        let (body, result) = match reason {
+            ComptimeReason::LetInitializer => self.create_unscoped_block(span, lower_body),
+            ComptimeReason::Explicit | ComptimeReason::Assign | ComptimeReason::MatchKey => {
+                self.create_sub_block_with(span, lower_body)
+            }
+        };
+        self.return_context = previous;
+        self.emit(InstructionKind::ComptimeBlock { body, reason });
+        result
     }
 
     fn build_file_scope(
@@ -269,7 +294,7 @@ impl BlockLowerer<'_> {
     fn reset_scope(&mut self) {
         debug_assert_eq!(self.local_frames.len(), 1);
         self.local_frames[0] = LocalFrame::new();
-        debug_assert!(!self.in_function_body);
+        debug_assert_eq!(self.return_context, ReturnContext::DisallowedOutsideFunction);
         debug_assert!(self.instructions_buf.is_empty());
         debug_assert!(self.locals_buf.is_empty());
         debug_assert!(self.field_buf.is_empty());
@@ -478,12 +503,10 @@ impl BlockLowerer<'_> {
                     }
 
                     let key = ast::Expr::new_unwrap(key);
-                    let (key_block, key_local) = self
-                        .create_sub_block_with(key.span(), |this| this.lower_expr_to_local(key));
-                    self.emit(InstructionKind::ComptimeBlock {
-                        body: key_block,
-                        reason: ComptimeReason::MatchKey,
-                    });
+                    let key_local =
+                        self.lower_comptime_block(ComptimeReason::MatchKey, key.span(), |this| {
+                            this.lower_expr_to_local(key)
+                        });
 
                     let body = ast::Expr::new_unwrap(arm.body);
                     let body_block = self.create_sub_block(body.span(), |this| {
@@ -631,17 +654,13 @@ impl BlockLowerer<'_> {
                 let type_index = self.alloc_temp();
                 match struct_def.index_expr() {
                     Some(expr) => {
-                        let block = self.create_sub_block(expr.span(), |this| {
+                        self.lower_comptime_block(ComptimeReason::Explicit, expr.span(), |this| {
                             let expr = this.lower_expr(expr);
                             this.emit(InstructionKind::Set {
                                 local: type_index,
                                 r#type: None,
                                 expr,
                             });
-                        });
-                        self.emit(InstructionKind::ComptimeBlock {
-                            body: block,
-                            reason: ComptimeReason::Explicit,
                         });
                     }
                     None => {
@@ -716,7 +735,7 @@ impl BlockLowerer<'_> {
             ast::Expr::Match(match_expr) => self.lower_match(match_expr),
             ast::Expr::ComptimeBlock(block) => {
                 let result = self.alloc_temp();
-                let body = self.create_sub_block(block.node().span(), |this| {
+                self.lower_comptime_block(ComptimeReason::Explicit, block.node().span(), |this| {
                     for stmt in block.statements() {
                         this.lower_statement(stmt);
                     }
@@ -728,11 +747,6 @@ impl BlockLowerer<'_> {
                         }
                     };
                     this.emit(InstructionKind::Set { local: result, r#type: None, expr });
-                });
-
-                self.emit(InstructionKind::ComptimeBlock {
-                    body,
-                    reason: ComptimeReason::Explicit,
                 });
                 ExprKind::LocalRef(result)
             }
@@ -845,6 +859,9 @@ impl BlockLowerer<'_> {
         param_list_span: TokenSpan,
         is_eager: bool,
     ) -> FnDefId {
+        let previous_return_context = self.return_context;
+        self.return_context = ReturnContext::DisallowedOutsideFunction;
+
         let param_infos_start = self.param_info_buf.len();
         let return_type;
         let type_preamble = {
@@ -898,8 +915,7 @@ impl BlockLowerer<'_> {
             self.flush_instructions_from(preamble_block_start, preamble_span)
         };
 
-        let saved_is_function_body = self.in_function_body;
-        self.in_function_body = true;
+        self.return_context = ReturnContext::Allowed;
 
         let body = self.lower_fn_body_block(body_expr);
         let source_span = self.lexed.tokens_src_span(node_span);
@@ -922,7 +938,7 @@ impl BlockLowerer<'_> {
         assert_eq!(fn_def_id, fn_params_id, "fn and fn_params out of sync");
         assert_eq!(fn_def_id, fn_captures_id, "fn and fn_captures out of sync");
 
-        self.in_function_body = saved_is_function_body;
+        self.return_context = previous_return_context;
 
         fn_def_id
     }
@@ -1045,11 +1061,11 @@ impl BlockLowerer<'_> {
                 };
 
                 if let_stmt.comptime {
-                    let (body, ()) = self.create_unscoped_block(let_stmt.span, lower_let);
-                    self.emit(InstructionKind::ComptimeBlock {
-                        body,
-                        reason: ComptimeReason::LetInitializer,
-                    });
+                    self.lower_comptime_block(
+                        ComptimeReason::LetInitializer,
+                        let_stmt.span,
+                        lower_let,
+                    );
                 } else {
                     lower_let(self);
                 }
@@ -1060,11 +1076,16 @@ impl BlockLowerer<'_> {
             }
             Statement::Return(return_stmt) => {
                 let value = self.lower_expr(return_stmt.value());
-                if self.in_function_body {
-                    self.emit(InstructionKind::Return(value));
-                } else {
-                    self.emit_return_not_allowed_here(return_stmt.node().span());
-                    self.emit(InstructionKind::Eval(value));
+                match self.return_context {
+                    ReturnContext::Allowed => self.emit(InstructionKind::Return(value)),
+                    ReturnContext::DisallowedInComptime => {
+                        self.emit_return_in_comptime_block(return_stmt.node().span());
+                        self.emit(InstructionKind::Eval(value));
+                    }
+                    ReturnContext::DisallowedOutsideFunction => {
+                        self.emit_return_not_allowed_here(return_stmt.node().span());
+                        self.emit(InstructionKind::Eval(value));
+                    }
                 }
             }
             Statement::Assign(assign_stmt) => {
@@ -1089,11 +1110,11 @@ impl BlockLowerer<'_> {
                     this.emit(InstructionKind::Assign { target, expr: value });
                 };
                 if let LocalKind::ComptimeMutable = entry.kind {
-                    let body = self.create_sub_block(assign_stmt.node().span(), lower_assign);
-                    self.emit(InstructionKind::ComptimeBlock {
-                        body,
-                        reason: ComptimeReason::Assign,
-                    })
+                    self.lower_comptime_block(
+                        ComptimeReason::Assign,
+                        assign_stmt.node().span(),
+                        lower_assign,
+                    );
                 } else {
                     lower_assign(self);
                 }
@@ -1131,7 +1152,7 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
         values,
         builder: &mut builder,
         local_frames: vec![LocalFrame::new()],
-        in_function_body: false,
+        return_context: ReturnContext::DisallowedOutsideFunction,
         instructions_buf: Vec::new(),
         locals_buf: Vec::new(),
         field_buf: Vec::new(),

@@ -247,6 +247,28 @@ fn test_return_in_fn_param_type_expression() {
 }
 
 #[test]
+fn test_return_in_nested_fn_param_type_expression() {
+    let rendered = render_diagnostics(
+        r#"
+        const outer = fn () void {
+            let inner = fn (x: { return 0; u256 }) void {};
+        };
+        init {}
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: return is not allowed outside of function bodies
+         --> main.plk:2:26
+          |
+        2 |     let inner = fn (x: { return 0; u256 }) void {};
+          |                          ^^^^^^^^^ not allowed here
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
 fn test_duplicate_any_type_capture() {
     let rendered = render_diagnostics(
         r#"
@@ -1756,6 +1778,82 @@ fn test_explicit_return_in_function() {
 
         ==== Init ====
         eval @evm_stop()
+        "#,
+    );
+}
+
+#[test]
+fn test_return_in_comptime_block() {
+    let rendered = render_diagnostics(
+        r#"
+        const x = fn () void {
+            if @evm_calldataload(0) == 0 {
+                comptime {
+                    return ();
+                }
+            }
+            @evm_revert(0, 0);
+        };
+
+        init {
+            x();
+            @evm_stop();
+        }
+        "#,
+    );
+    let expected = dedent_preserve_blank_lines(
+        r#"
+        error: return is not allowed in comptime blocks
+         --> main.plk:4:13
+          |
+        4 |             return ();
+          |             ^^^^^^^^^^ not allowed here
+          |
+          = help: if the function is already comptime, remove the comptime block
+        "#,
+    );
+    pretty_assertions::assert_str_eq!(rendered.trim(), expected.trim());
+}
+
+#[test]
+fn test_return_in_function_nested_in_comptime_block() {
+    assert_lowers_to(
+        r#"
+        const outer = fn () void {
+            comptime {
+                let inner = fn () void {
+                    return ();
+                };
+            }
+        };
+        init {}
+        "#,
+        r#"
+        ==== Constants ====
+        ConstId(0) ("outer") result=LocalId(0) {
+            %0 = @fn1
+        }
+
+        ==== Functions ====
+        @fn0() -> %0 {
+            preamble:
+                %0 = type:tuple {}
+            body:
+                ret tuple_value ()
+                ret type:tuple {}
+        }
+        @fn1() -> %0 {
+            preamble:
+                %0 = type:tuple {}
+            body:
+                comptime {
+                    %2 = @fn0
+                    %1 = type:tuple {}
+                }
+                ret %1
+        }
+
+        ==== Init ====
         "#,
     );
 }
