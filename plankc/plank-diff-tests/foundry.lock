@@ -12,7 +12,7 @@
     }
   },
   "lib/plank-foundry-deployer": {
-    "rev": "79879d7"
+    "rev": "24fe42f1021f956838504fcad40a90f45e8ee218"
   },
   "lib/solady": {
     "tag": {
