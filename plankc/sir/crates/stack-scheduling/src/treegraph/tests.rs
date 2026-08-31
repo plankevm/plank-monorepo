@@ -5,7 +5,10 @@ use plank_test_utils::dedent_preserve_blank_lines;
 use sir_data::OperationIdx;
 
 use super::{TreeGraph, build_tree_graph};
-use crate::op_graph::{OpGraph, OpGraphBuilder, OpNodeKind, ValueNodeId};
+use crate::{
+    op_graph::{OpGraph, OpGraphBuilder, OpNodeKind, ValueNodeId},
+    treegraph::NewOpId,
+};
 
 fn assert_snapshot(input: &OpGraph, expected: &str) {
     let expected = dedent_preserve_blank_lines(expected);
@@ -14,22 +17,29 @@ fn assert_snapshot(input: &OpGraph, expected: &str) {
     let formatted = {
         format_graph(&mut out, "input graph", input, None);
         out.push('\n');
-        format_graph(&mut out, "tree graph", &trees.graph, Some(&trees));
+        format_graph(&mut out, "tree graph", &trees.graph, Some((&trees, input)));
         out.trim()
     };
+    println!("{formatted}");
     pretty_assertions::assert_str_eq!(expected.trim(), formatted);
 }
 
-fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<&TreeGraph>) {
+fn format_graph(
+    out: &mut String,
+    heading: &str,
+    graph: &OpGraph,
+    trees: Option<(&TreeGraph, &OpGraph)>,
+) {
     writeln!(out, "{heading}:").unwrap();
     write_values(out, "  inputs", graph.input_values_fifo().iter());
     for operation in graph.op_ids() {
-        let op = graph.get_op(operation);
+        let operation = NewOpId::from(operation);
+        let op = graph.get_op(operation.into());
         write!(out, "  op{} {}", operation.get(), kind_name(op.kind)).unwrap();
-        if let Some(trees) = trees {
+        if let Some((trees, original)) = trees {
             out.push_str(" = [");
             for (position, step) in
-                trees.original_operations(graph, operation).into_iter().enumerate()
+                trees.original_operations(original, operation).into_iter().enumerate()
             {
                 if position != 0 {
                     out.push_str(", ");
@@ -45,7 +55,7 @@ fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<
         out.push('\n');
         write_values(out, "    inputs", op.inputs_fifo.iter().copied());
         write_values(out, "    outputs", op.outputs_fifo.iter().copied());
-        write_operations(out, "    predecessors", graph.displayed_predecessors(operation));
+        write_operations(out, "    predecessors", graph.displayed_predecessors(operation.into()));
     }
     write_values(out, "  outputs", graph.output_values_fifo().iter().copied());
 }
@@ -84,7 +94,8 @@ fn write_operations(
     out.push_str("]\n");
 }
 
-fn partial_binary_tree() -> OpGraph {
+#[test]
+fn constructs_partial_binary_tree_in_depth_first_order() {
     let mut builder = OpGraphBuilder::with_capacity(3, 4);
     let external = builder.push_input_value();
     let mut builder = builder.end_inputs_begin_ops();
@@ -107,12 +118,8 @@ fn partial_binary_tree() -> OpGraph {
 
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
-    builder.finish()
-}
+    let input = builder.finish();
 
-#[test]
-fn constructs_partial_binary_tree_in_depth_first_order() {
-    let input = partial_binary_tree();
     assert_snapshot(
         &input,
         r#"
@@ -639,7 +646,8 @@ fn splits_non_flippable_effect_conflict() {
     );
 }
 
-fn effect_interposed_tree() -> OpGraph {
+#[test]
+fn splits_tree_when_an_effect_is_interposed() {
     let builder = OpGraphBuilder::with_capacity(3, 2);
     let mut builder = builder.end_inputs_begin_ops();
     let (producer, value) = {
@@ -662,12 +670,7 @@ fn effect_interposed_tree() -> OpGraph {
     };
     let mut builder = builder.end_ops_begin_end_stack();
     builder.push_end_stack_value(output);
-    builder.finish()
-}
-
-#[test]
-fn splits_tree_when_an_effect_is_interposed() {
-    let input = effect_interposed_tree();
+    let input = builder.finish();
     assert_snapshot(
         &input,
         r#"
@@ -689,18 +692,18 @@ fn splits_tree_when_an_effect_is_interposed() {
 
             tree graph:
               inputs: []
-              op0 normal = [op0]
+              op0 normal = [op1]
+                inputs: []
+                outputs: []
+                predecessors: [op1]
+              op1 normal = [op0]
                 inputs: []
                 outputs: [v0]
                 predecessors: []
-              op1 normal = [op1]
-                inputs: []
-                outputs: []
-                predecessors: [op0]
               op2 normal = [op2]
                 inputs: [v0]
                 outputs: [v1]
-                predecessors: [op1]
+                predecessors: [op0]
               outputs: [v1]
         "#,
     );

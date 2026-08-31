@@ -130,6 +130,7 @@ impl OpGraph {
         self.operations[id].input_count
     }
 
+    #[track_caller]
     pub fn get_op(&self, id: OpNodeId) -> OpView<'_> {
         let op = self.operations[id];
         let op_values_end = match self.operations.get(id + 1) {
@@ -188,6 +189,12 @@ impl<'a> OpSet<'a> {
 
     pub fn intersect_count(&self, other: Self) -> u32 {
         self.words.iter().zip(other.words.iter()).map(|(&x, &y)| (x & y).count_ones()).sum()
+    }
+
+    pub fn iter_sub(self, other: Self) -> impl Iterator<Item = OpNodeId> + 'a {
+        (0..self.total_ops)
+            .map(OpNodeId::new)
+            .filter(move |&op| self.contains(op) && !other.contains(op))
     }
 
     pub fn is_super(&self, other: Self) -> bool {
