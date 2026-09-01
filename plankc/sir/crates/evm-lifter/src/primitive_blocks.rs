@@ -15,10 +15,11 @@ struct StoredBlock {
     terminator: Option<Terminator>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Terminator {
     Terminates,
-    UnresolvedJump,
+    IllegalJump,
+    PotentialInternalReturn,
     JumpsTo(u32),
     JumpIfTo(u32),
 }
@@ -62,23 +63,26 @@ impl PrimitiveBlocks {
                 let control = stack.execute(instr);
                 match control {
                     Ok(Control::JumpTo(v)) => {
-                        flush_block(
-                            start,
-                            Some(match v {
-                                Value::Constant(x) => Terminator::JumpsTo(x),
-                                _ => Terminator::UnresolvedJump,
-                            }),
-                        );
+                        let terminator = match v {
+                            Value::Constant(x) => match u32::try_from(x) {
+                                Ok(pc) => Terminator::JumpsTo(pc),
+                                Err(_) => Terminator::Terminates,
+                            },
+                            Value::FunctionInput(_) => Terminator::PotentialInternalReturn,
+                            Value::Symbolic => Terminator::IllegalJump,
+                        };
+                        flush_block(start, Some(terminator));
                         start = i + 1;
                     }
                     Ok(Control::JumpIfUnknownTo(v)) => {
-                        flush_block(
-                            start,
-                            Some(match v {
-                                Value::Constant(x) => Terminator::JumpIfTo(x),
-                                _ => Terminator::UnresolvedJump,
-                            }),
-                        );
+                        let terminator = match v {
+                            Value::Constant(x) => match u32::try_from(x) {
+                                Ok(pc) => Terminator::JumpIfTo(pc),
+                                Err(_) => Terminator::Terminates,
+                            },
+                            _ => Terminator::IllegalJump,
+                        };
+                        flush_block(start, Some(terminator));
                         start = i + 1;
                     }
                     Ok(Control::Terminate) | Err(EvmError::StackOverflow) => {
@@ -115,7 +119,12 @@ impl PrimitiveBlocks {
                             Some(Terminator::JumpIfTo(dst_block.try_into().expect("overflow")))
                         });
                 }
-                None | Some(Terminator::Terminates) | Some(Terminator::UnresolvedJump) => {}
+                None
+                | Some(
+                    Terminator::Terminates
+                    | Terminator::IllegalJump
+                    | Terminator::PotentialInternalReturn,
+                ) => {}
             }
         }
 
@@ -197,7 +206,7 @@ mod tests {
         let block = blocks.get_block(PrimitiveBlockId::new(0));
 
         assert_eq!(block.instructions.range(), 0..2);
-        assert!(matches!(block.terminator, Some(Terminator::JumpsTo(1))));
+        assert_eq!(block.terminator, Some(Terminator::JumpsTo(1)));
 
         let bytes = bytecode![CallValue, Push1, 0x06, JumpI, JumpDest, Invalid, JumpDest, Stop];
         let instructions = Instructions::new(&bytes);

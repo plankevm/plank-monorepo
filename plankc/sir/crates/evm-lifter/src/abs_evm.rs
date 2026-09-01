@@ -1,9 +1,11 @@
+use alloy_primitives::U256;
+
 use crate::{Opcode, instructions::InstructionView};
 use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Value {
-    Constant(u32),
+    Constant(U256),
     Symbolic,
     FunctionInput(u32),
 }
@@ -80,15 +82,12 @@ impl AbstractStack {
                 }
             }
             Opcode::Push0 => {
-                self.push(Value::Constant(0))?;
+                self.push(Value::Constant(U256::ZERO))?;
                 Control::Step
             }
             op if op.is_push().is_some() => {
                 let imm = instr.immediate().expect("push without immediate");
-                match u32::try_from(imm) {
-                    Ok(x) => self.push(Value::Constant(x))?,
-                    Err(_) => self.push(Value::Symbolic)?,
-                };
+                self.push(Value::Constant(imm))?;
                 Control::Step
             }
             op if op.is_terminating() => {
