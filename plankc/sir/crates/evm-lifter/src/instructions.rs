@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn indexes_instruction_starts_around_push_immediates() {
-        let bytes = [0x60, 0xaa, 0x01, 0x61, 0xbb];
+        let bytes = bytecode![Push1, 0xaa, Add, Push2, 0xbb];
         let instructions = Instructions::new(&bytes);
 
         assert_eq!(&*instructions.instruction_index_to_byte, &[0, 2, 3]);
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn views_include_opcode_and_available_immediate_bytes() {
-        let bytes = [0x60, 0xaa, 0x01, 0x61, 0xbb];
+        let bytes = bytecode![Push1, 0xaa, Add, Push2, 0xbb];
         let instructions = Instructions::new(&bytes);
 
         let push1 = instructions.instruction(0);
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn unknown_bytes_are_instructions_without_immediates() {
-        let bytes = [0xab, 0x60];
+        let bytes = bytecode![0xab, Push1];
         let instructions = Instructions::new(&bytes);
 
         assert_eq!(&*instructions.instruction_index_to_byte, &[0, 1]);
