@@ -2,27 +2,14 @@ use alloy_primitives::U256;
 
 use crate::Opcode;
 
-pub struct Instructions<'b> {
-    bytes: &'b [u8],
-    instruction_index_to_byte: Box<[u32]>,
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct InstructionView<'b> {
-    pc: u32,
-    op: Result<Opcode, u8>,
+    pub pc: u32,
+    pub op: Result<Opcode, u8>,
     raw_immediate: Option<&'b [u8]>,
 }
 
 impl<'b> InstructionView<'b> {
-    pub fn pc(self) -> u32 {
-        self.pc
-    }
-
-    pub fn op(self) -> Result<Opcode, u8> {
-        self.op
-    }
-
     pub const fn immediate_size(self) -> Option<u8> {
         let Ok(op) = self.op else { return None };
         Opcode::immediate_bytes(op)
@@ -31,7 +18,8 @@ impl<'b> InstructionView<'b> {
     pub fn immediate(self) -> Option<U256> {
         let (size, raw) = self.immediate_size().map(usize::from).zip(self.raw_immediate)?;
         let mut buf = [0u8; 32];
-        buf[32 - size..size.min(raw.len())].copy_from_slice(raw);
+        let start = 32 - size;
+        buf[start..start + raw.len()].copy_from_slice(raw);
         Some(U256::from_be_bytes(buf))
     }
 }
@@ -48,6 +36,11 @@ pub fn decode<'b>(bytes: &'b [u8], pc: u32) -> InstructionView<'b> {
     InstructionView { pc, op: op.ok_or(byte), raw_immediate }
 }
 
+pub struct Instructions<'b> {
+    bytes: &'b [u8],
+    instruction_index_to_byte: Box<[u32]>,
+}
+
 impl<'b> Instructions<'b> {
     pub fn new(bytes: &'b [u8]) -> Self {
         let mut instruction_index_to_bytes =
@@ -59,20 +52,28 @@ impl<'b> Instructions<'b> {
             if let Some(immediate_bytes) =
                 Opcode::from_byte(bytes[pc as usize]).and_then(Opcode::immediate_bytes)
             {
-                pc += u32::from(immediate_bytes);
+                pc = pc.checked_add(u32::from(immediate_bytes)).expect("overflow");
             }
-            pc += 1;
+            pc = pc.checked_add(1).expect("overflow");
         }
 
         Self { bytes, instruction_index_to_byte: instruction_index_to_bytes.into() }
     }
 
-    pub fn pc_to_instruction_index(&self, pc: u32) -> Result<usize, usize> {
-        self.instruction_index_to_byte.binary_search(&pc).map_err(|i| i.saturating_sub(1))
+    pub fn jumpdest(&self, pc: u32) -> Option<u32> {
+        let i = self.pc_to_instruction_index(pc).ok()?;
+        matches!(self.instruction(i).op, Ok(Opcode::JumpDest)).then_some(i)
     }
 
-    pub fn instruction(&self, i: usize) -> InstructionView<'b> {
-        decode(self.bytes, self.instruction_index_to_byte[i])
+    pub fn pc_to_instruction_index(&self, pc: u32) -> Result<u32, u32> {
+        self.instruction_index_to_byte
+            .binary_search(&pc)
+            .map(|i| i.try_into().expect("overflow"))
+            .map_err(|i| i.saturating_sub(1).try_into().expect("overflow"))
+    }
+
+    pub fn instruction(&self, i: u32) -> InstructionView<'b> {
+        decode(self.bytes, self.instruction_index_to_byte[i as usize])
     }
 
     pub fn total(&self) -> u32 {

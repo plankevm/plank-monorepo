@@ -15,6 +15,10 @@ impl StackIO {
         Self { inputs, outputs }
     }
 
+    pub const fn as_tup(self) -> (u16, u16) {
+        (self.inputs, self.outputs)
+    }
+
     pub const fn chain(self, snd: Self) -> Self {
         Self::new(
             self.inputs + snd.inputs.saturating_sub(self.outputs),

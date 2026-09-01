@@ -1,16 +1,35 @@
+use crate::{
+    Opcode,
+    abs_evm::{AbstractStack, Control, EvmError, Value},
+    instructions::Instructions,
+};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
 
-use crate::{Opcode, instructions::Instructions};
 newtype_index! {
     pub struct PrimitiveBlockId;
 }
 
-struct Block {
+#[derive(Debug, Clone, Copy)]
+struct StoredBlock {
     instructions_start: u32,
+    terminator: Option<Terminator>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Terminator {
+    Terminates,
+    UnresolvedJump,
+    JumpsTo(u32),
+    JumpIfTo(u32),
+}
+
+pub struct Block {
+    pub instructions: Span<u32>,
+    pub terminator: Option<Terminator>,
 }
 
 pub struct PrimitiveBlocks {
-    blocks: IndexVec<PrimitiveBlockId, Block>,
+    blocks: IndexVec<PrimitiveBlockId, StoredBlock>,
     total_instructions: u32,
 }
 
@@ -22,38 +41,99 @@ impl PrimitiveBlocks {
             (instructions.total() as usize).div_ceil(AVG_INSTRUCTIONS_PER_BLOCK),
         );
 
+        let mut stack = AbstractStack::new();
         let mut start = 0;
-        let mut flush_block = |start| blocks.push(Block { instructions_start: start });
+        let mut flush_block =
+            |start, terminator| blocks.push(StoredBlock { instructions_start: start, terminator });
 
         for i in 0..instructions.total() {
-            let instr = instructions.instruction(i as usize);
-            if matches!(instr.op(), Ok(Opcode::JumpDest)) && start < i {
-                flush_block(start);
+            let instr = instructions.instruction(i);
+            if i == start {
+                stack.clear();
+            }
+
+            if matches!(instr.op, Ok(Opcode::JumpDest)) && start < i {
+                flush_block(start, None);
                 start = i;
-            } else if instr.op().is_ok_and(Opcode::is_terminating)
-                || matches!(instr.op(), Ok(Opcode::Jump | Opcode::JumpI) | Err(_))
-            {
-                flush_block(start);
-                start = i + 1;
+                stack.clear();
+
+                assert_eq!(stack.execute(instr), Ok(Control::Step));
+            } else {
+                let control = stack.execute(instr);
+                match control {
+                    Ok(Control::JumpTo(v)) => {
+                        flush_block(
+                            start,
+                            Some(match v {
+                                Value::Constant(x) => Terminator::JumpsTo(x),
+                                _ => Terminator::UnresolvedJump,
+                            }),
+                        );
+                        start = i + 1;
+                    }
+                    Ok(Control::JumpIfUnknownTo(v)) => {
+                        flush_block(
+                            start,
+                            Some(match v {
+                                Value::Constant(x) => Terminator::JumpIfTo(x),
+                                _ => Terminator::UnresolvedJump,
+                            }),
+                        );
+                        start = i + 1;
+                    }
+                    Ok(Control::Terminate) | Err(EvmError::StackOverflow) => {
+                        flush_block(start, Some(Terminator::Terminates));
+                        start = i + 1;
+                    }
+                    Ok(Control::Step) => {}
+                }
             }
         }
 
         if start < instructions.total() {
-            flush_block(start);
+            flush_block(start, Some(Terminator::Terminates));
+        }
+
+        for id in blocks.iter_idx() {
+            let block: StoredBlock = blocks[id];
+            match block.terminator {
+                Some(Terminator::JumpsTo(pc)) => {
+                    (&mut blocks[id] as &mut StoredBlock).terminator =
+                        instructions.jumpdest(pc).map_or(Some(Terminator::Terminates), |i| {
+                            let dst_block = blocks
+                                .binary_search_by_key(&i, |b| b.instructions_start)
+                                .expect("jumpdest is not start of any block");
+                            Some(Terminator::JumpsTo(dst_block.try_into().expect("overflow")))
+                        });
+                }
+                Some(Terminator::JumpIfTo(pc)) => {
+                    (&mut blocks[id] as &mut StoredBlock).terminator =
+                        instructions.jumpdest(pc).map_or(Some(Terminator::Terminates), |i| {
+                            let dst_block = blocks
+                                .binary_search_by_key(&i, |b| b.instructions_start)
+                                .expect("jumpdest is not start of any block");
+                            Some(Terminator::JumpIfTo(dst_block.try_into().expect("overflow")))
+                        });
+                }
+                None | Some(Terminator::Terminates) | Some(Terminator::UnresolvedJump) => {}
+            }
         }
 
         PrimitiveBlocks { blocks, total_instructions: instructions.total() }
     }
 
     #[track_caller]
-    pub fn instructions(&self, block: PrimitiveBlockId) -> Span<u32> {
-        let start = self.blocks[block].instructions_start;
-        let end = block
+    pub fn get_block(&self, id: PrimitiveBlockId) -> Block {
+        let block = self.blocks[id];
+        let end = id
             .checked_add(1)
             .and_then(|next| self.blocks.get(next))
-            .map_or(self.total_instructions, |b: &Block| b.instructions_start);
+            .map_or(self.total_instructions, |b: &StoredBlock| b.instructions_start);
 
-        Span::new(start, end)
+        Block {
+            instructions: Span::new(block.instructions_start, end),
+            terminator: block.terminator,
+        }
     }
 }
 
@@ -68,7 +148,7 @@ mod tests {
         let blocks = PrimitiveBlocks::new(instructions);
 
         (0..blocks.blocks.len())
-            .map(|index| blocks.instructions(PrimitiveBlockId::new(index as u32)).range())
+            .map(|index| blocks.get_block(PrimitiveBlockId::new(index as u32)).instructions.range())
             .collect()
     }
 
@@ -107,5 +187,24 @@ mod tests {
         assert_eq!(spans(bytecode![Jump, JumpDest]), vec![0..1, 1..2]);
         assert_eq!(spans(bytecode![JumpI, JumpDest]), vec![0..1, 1..2]);
         assert_eq!(spans(bytecode![Stop, JumpDest, JumpDest]), vec![0..1, 1..2, 2..3]);
+    }
+
+    #[test]
+    fn resolves_direct_jumps_to_jumpdest_blocks() {
+        let bytes = bytecode![Push1, 0x03, Jump, JumpDest, Stop];
+        let instructions = Instructions::new(&bytes);
+        let blocks = PrimitiveBlocks::new(instructions);
+        let block = blocks.get_block(PrimitiveBlockId::new(0));
+
+        assert_eq!(block.instructions.range(), 0..2);
+        assert!(matches!(block.terminator, Some(Terminator::JumpsTo(1))));
+
+        let bytes = bytecode![CallValue, Push1, 0x06, JumpI, JumpDest, Invalid, JumpDest, Stop];
+        let instructions = Instructions::new(&bytes);
+        let blocks = PrimitiveBlocks::new(instructions);
+        let block = blocks.get_block(PrimitiveBlockId::new(0));
+
+        assert_eq!(block.instructions.range(), 0..3);
+        assert!(matches!(block.terminator, Some(Terminator::JumpIfTo(2))));
     }
 }

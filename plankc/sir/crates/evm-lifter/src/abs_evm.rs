@@ -57,16 +57,13 @@ impl AbstractStack {
     }
 
     pub fn execute(&mut self, instr: InstructionView<'_>) -> Result<Control, EvmError> {
-        let Ok(op) = instr.op() else { return Ok(Control::Terminate) };
-        if op.is_terminating() {}
+        let Ok(op) = instr.op else { return Ok(Control::Terminate) };
         let control = match op {
             Opcode::Jump => {
-                const { assert!(Opcode::Jump.stack_io().inputs == 1) };
                 let destination = self.pop();
                 Control::JumpTo(destination)
             }
             Opcode::JumpI => {
-                const { assert!(Opcode::Jump.stack_io().inputs == 1) };
                 let destination = self.pop();
                 let condition = self.pop();
                 match condition {
@@ -81,6 +78,18 @@ impl AbstractStack {
                         Control::JumpIfUnknownTo(destination)
                     }
                 }
+            }
+            Opcode::Push0 => {
+                self.push(Value::Constant(0))?;
+                Control::Step
+            }
+            op if op.is_push().is_some() => {
+                let imm = instr.immediate().expect("push without immediate");
+                match u32::try_from(imm) {
+                    Ok(x) => self.push(Value::Constant(x))?,
+                    Err(_) => self.push(Value::Symbolic)?,
+                };
+                Control::Step
             }
             op if op.is_terminating() => {
                 for _ in 0..op.stack_io().inputs {
