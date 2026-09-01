@@ -1,0 +1,19 @@
+[package]
+name = "sir-evm-lifter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+plank-core.workspace = true
+sir-data.workspace = true
+sir-passes.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+plank-test-utils.workspace = true
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

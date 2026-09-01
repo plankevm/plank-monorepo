@@ -1,0 +1,13 @@
+[package]
+name = "evm-lifter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+clap.workspace = true
+sir-evm-lifter.workspace = true
+
+[lints]
+workspace = true

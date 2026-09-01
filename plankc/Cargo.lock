@@ -1247,6 +1247,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "evm-lifter"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "sir-evm-lifter",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3090,6 +3099,19 @@ dependencies = [
  "plank-core",
  "sir-assembler",
  "sir-data",
+]
+
+[[package]]
+name = "sir-evm-lifter"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "plank-core",
+ "plank-test-utils",
+ "pretty_assertions",
+ "sir-data",
+ "sir-passes",
+ "thiserror",
 ]
 
 [[package]]

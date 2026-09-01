@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "frontend/*", "sir/crates/*"]
+members = ["crates/*", "frontend/*", "sir/crates/*", "tools/evm-lifter"]
 
 [workspace.package]
 version = "0.1.0"
@@ -48,6 +48,7 @@ sir-debug-backend = { path = "sir/crates/debug-backend" }
 sir-release-backend = { path = "sir/crates/release-backend" }
 sir-stack-scheduling = { path = "sir/crates/stack-scheduling" }
 sir-static-memory-allocator = { path = "sir/crates/static-memory-allocator" }
+sir-evm-lifter = { path = "sir/crates/evm-lifter" }
 
 # Shared Dependencies
 bumpalo = { version = "3.19.0", features = ["allocator-api2", "collections"] }
