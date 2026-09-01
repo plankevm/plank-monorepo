@@ -3,8 +3,10 @@ use plank_core as _;
 use sir_data as _;
 use sir_passes as _;
 
+mod abs_evm;
 pub mod instructions;
 pub mod opcode;
+pub mod primitive_blocks;
 
 pub use opcode::{Opcode, StackIO};
 

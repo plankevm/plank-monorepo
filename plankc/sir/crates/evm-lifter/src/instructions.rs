@@ -1,3 +1,5 @@
+use alloy_primitives::U256;
+
 use crate::Opcode;
 
 pub struct Instructions<'b> {
@@ -9,7 +11,7 @@ pub struct Instructions<'b> {
 pub struct InstructionView<'b> {
     pc: u32,
     op: Result<Opcode, u8>,
-    immediate: Option<&'b [u8]>,
+    raw_immediate: Option<&'b [u8]>,
 }
 
 impl<'b> InstructionView<'b> {
@@ -21,12 +23,30 @@ impl<'b> InstructionView<'b> {
         self.op
     }
 
-    pub fn immediate(self) -> Option<&'b [u8]> {
-        self.immediate
+    pub const fn immediate_size(self) -> Option<u8> {
+        let Ok(op) = self.op else { return None };
+        Opcode::immediate_bytes(op)
+    }
+
+    pub fn immediate(self) -> Option<U256> {
+        let (size, raw) = self.immediate_size().map(usize::from).zip(self.raw_immediate)?;
+        let mut buf = [0u8; 32];
+        buf[32 - size..size.min(raw.len())].copy_from_slice(raw);
+        Some(U256::from_be_bytes(buf))
     }
 }
 
 const AVG_BYTES_PER_INSTRUCTION: usize = 2;
+
+pub fn decode<'b>(bytes: &'b [u8], pc: u32) -> InstructionView<'b> {
+    let byte = bytes[pc as usize];
+    let op = Opcode::from_byte(byte);
+    let raw_immediate = op.and_then(|op| op.immediate_bytes()).map(|imm| {
+        let remaining = &bytes[pc as usize + 1..];
+        &remaining[..remaining.len().min(usize::from(imm))]
+    });
+    InstructionView { pc, op: op.ok_or(byte), raw_immediate }
+}
 
 impl<'b> Instructions<'b> {
     pub fn new(bytes: &'b [u8]) -> Self {
@@ -52,18 +72,11 @@ impl<'b> Instructions<'b> {
     }
 
     pub fn instruction(&self, i: usize) -> InstructionView<'b> {
-        let pc = self.instruction_index_to_byte[i];
-        let byte = self.bytes[pc as usize];
-        let op = Opcode::from_byte(byte);
-        let immediate = op.and_then(|op| op.immediate_bytes()).map(|imm| {
-            let remaining = &self.bytes[pc as usize + 1..];
-            &remaining[..remaining.len().min(usize::from(imm))]
-        });
-        InstructionView { pc, op: op.ok_or(byte), immediate }
+        decode(self.bytes, self.instruction_index_to_byte[i])
     }
 
-    pub fn total_instructions(&self) -> usize {
-        self.instruction_index_to_byte.len()
+    pub fn total(&self) -> u32 {
+        self.instruction_index_to_byte.len().try_into().expect("overflow")
     }
 }
 
@@ -92,17 +105,17 @@ mod tests {
         let push1 = instructions.instruction(0);
         assert_eq!(push1.pc, 0);
         assert_eq!(push1.op, Ok(Opcode::Push1));
-        assert_eq!(push1.immediate, Some(&bytes[1..2]));
+        assert_eq!(push1.raw_immediate, Some(&bytes[1..2]));
 
         let add = instructions.instruction(1);
         assert_eq!(add.pc, 2);
         assert_eq!(add.op, Ok(Opcode::Add));
-        assert_eq!(add.immediate, None);
+        assert_eq!(add.raw_immediate, None);
 
         let truncated_push2 = instructions.instruction(2);
         assert_eq!(truncated_push2.pc, 3);
         assert_eq!(truncated_push2.op, Ok(Opcode::Push2));
-        assert_eq!(truncated_push2.immediate, Some(&bytes[4..5]));
+        assert_eq!(truncated_push2.raw_immediate, Some(&bytes[4..5]));
     }
 
     #[test]
@@ -115,11 +128,11 @@ mod tests {
         let unknown = instructions.instruction(0);
         assert_eq!(unknown.pc, 0);
         assert_eq!(unknown.op, Err(0xab));
-        assert_eq!(unknown.immediate, None);
+        assert_eq!(unknown.raw_immediate, None);
 
         let missing_immediate = instructions.instruction(1);
         assert_eq!(missing_immediate.pc, 1);
         assert_eq!(missing_immediate.op, Ok(Opcode::Push1));
-        assert_eq!(missing_immediate.immediate, Some(&bytes[2..]));
+        assert_eq!(missing_immediate.raw_immediate, Some(&bytes[2..]));
     }
 }
