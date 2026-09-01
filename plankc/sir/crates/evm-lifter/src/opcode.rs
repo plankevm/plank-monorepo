@@ -28,13 +28,23 @@ impl StackIO {
     }
 }
 
+macro_rules! immediate {
+    ($imm:literal) => {
+        Some($imm)
+    };
+    () => {
+        None
+    };
+}
+
 macro_rules! define_opcodes {
     (
         $(
             $byte:literal : $name:ident $display:literal ($inputs:expr, $outputs:expr)
+            $($imm:literal)?
         ),* $(,)?
     ) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(u8)]
         pub enum Opcode {
             $(
@@ -62,7 +72,15 @@ macro_rules! define_opcodes {
                 }
             }
 
-            pub fn from_byte(byte: u8) -> Option<Opcode> {
+            pub const fn immediate_bytes(self) -> Option<u8> {
+                match self {
+                    $(
+                        Self::$name => immediate!($($imm)?),
+                    )*
+                }
+            }
+
+            pub const fn from_byte(byte: u8) -> Option<Opcode> {
                 match byte {
                     $(
                         $byte => Some(Opcode::$name),
@@ -152,38 +170,38 @@ define_opcodes! {
     0x5e: MCopy     "MCOPY"     (3, 0),
     0x5f: Push0     "PUSH0"     (0, 1),
 
-    0x60: Push1     "PUSH1"     (0, 1),
-    0x61: Push2     "PUSH2"     (0, 1),
-    0x62: Push3     "PUSH3"     (0, 1),
-    0x63: Push4     "PUSH4"     (0, 1),
-    0x64: Push5     "PUSH5"     (0, 1),
-    0x65: Push6     "PUSH6"     (0, 1),
-    0x66: Push7     "PUSH7"     (0, 1),
-    0x67: Push8     "PUSH8"     (0, 1),
-    0x68: Push9     "PUSH9"     (0, 1),
-    0x69: Push10    "PUSH10"    (0, 1),
-    0x6a: Push11    "PUSH11"    (0, 1),
-    0x6b: Push12    "PUSH12"    (0, 1),
-    0x6c: Push13    "PUSH13"    (0, 1),
-    0x6d: Push14    "PUSH14"    (0, 1),
-    0x6e: Push15    "PUSH15"    (0, 1),
-    0x6f: Push16    "PUSH16"    (0, 1),
-    0x70: Push17    "PUSH17"    (0, 1),
-    0x71: Push18    "PUSH18"    (0, 1),
-    0x72: Push19    "PUSH19"    (0, 1),
-    0x73: Push20    "PUSH20"    (0, 1),
-    0x74: Push21    "PUSH21"    (0, 1),
-    0x75: Push22    "PUSH22"    (0, 1),
-    0x76: Push23    "PUSH23"    (0, 1),
-    0x77: Push24    "PUSH24"    (0, 1),
-    0x78: Push25    "PUSH25"    (0, 1),
-    0x79: Push26    "PUSH26"    (0, 1),
-    0x7a: Push27    "PUSH27"    (0, 1),
-    0x7b: Push28    "PUSH28"    (0, 1),
-    0x7c: Push29    "PUSH29"    (0, 1),
-    0x7d: Push30    "PUSH30"    (0, 1),
-    0x7e: Push31    "PUSH31"    (0, 1),
-    0x7f: Push32    "PUSH32"    (0, 1),
+    0x60: Push1     "PUSH1"     (0, 1) 1,
+    0x61: Push2     "PUSH2"     (0, 1) 2,
+    0x62: Push3     "PUSH3"     (0, 1) 3,
+    0x63: Push4     "PUSH4"     (0, 1) 4,
+    0x64: Push5     "PUSH5"     (0, 1) 5,
+    0x65: Push6     "PUSH6"     (0, 1) 6,
+    0x66: Push7     "PUSH7"     (0, 1) 7,
+    0x67: Push8     "PUSH8"     (0, 1) 8,
+    0x68: Push9     "PUSH9"     (0, 1) 9,
+    0x69: Push10    "PUSH10"    (0, 1) 10,
+    0x6a: Push11    "PUSH11"    (0, 1) 11,
+    0x6b: Push12    "PUSH12"    (0, 1) 12,
+    0x6c: Push13    "PUSH13"    (0, 1) 13,
+    0x6d: Push14    "PUSH14"    (0, 1) 14,
+    0x6e: Push15    "PUSH15"    (0, 1) 15,
+    0x6f: Push16    "PUSH16"    (0, 1) 16,
+    0x70: Push17    "PUSH17"    (0, 1) 17,
+    0x71: Push18    "PUSH18"    (0, 1) 18,
+    0x72: Push19    "PUSH19"    (0, 1) 19,
+    0x73: Push20    "PUSH20"    (0, 1) 20,
+    0x74: Push21    "PUSH21"    (0, 1) 21,
+    0x75: Push22    "PUSH22"    (0, 1) 22,
+    0x76: Push23    "PUSH23"    (0, 1) 23,
+    0x77: Push24    "PUSH24"    (0, 1) 24,
+    0x78: Push25    "PUSH25"    (0, 1) 25,
+    0x79: Push26    "PUSH26"    (0, 1) 26,
+    0x7a: Push27    "PUSH27"    (0, 1) 27,
+    0x7b: Push28    "PUSH28"    (0, 1) 28,
+    0x7c: Push29    "PUSH29"    (0, 1) 29,
+    0x7d: Push30    "PUSH30"    (0, 1) 30,
+    0x7e: Push31    "PUSH31"    (0, 1) 31,
+    0x7f: Push32    "PUSH32"    (0, 1) 32,
 
     0x80: Dup1      "DUP1"      (1,  2),
     0x81: Dup2      "DUP2"      (2,  3),
@@ -245,92 +263,100 @@ impl Opcode {
         )
     }
 
-    pub const fn push_size(self) -> Option<u8> {
-        if self.is_push() { Some(self as u8 - Self::Push1 as u8 + 1) } else { None }
-    }
-
-    /// Returns `true` for `PUSH1`..=`PUSH32`, `false` for everything else including `PUSH0`.
-    pub const fn is_push(self) -> bool {
-        matches!(
-            self,
-            Opcode::Push1
-                | Opcode::Push2
-                | Opcode::Push3
-                | Opcode::Push4
-                | Opcode::Push5
-                | Opcode::Push6
-                | Opcode::Push7
-                | Opcode::Push8
-                | Opcode::Push9
-                | Opcode::Push10
-                | Opcode::Push11
-                | Opcode::Push12
-                | Opcode::Push13
-                | Opcode::Push14
-                | Opcode::Push15
-                | Opcode::Push16
-                | Opcode::Push17
-                | Opcode::Push18
-                | Opcode::Push19
-                | Opcode::Push20
-                | Opcode::Push21
-                | Opcode::Push22
-                | Opcode::Push23
-                | Opcode::Push24
-                | Opcode::Push25
-                | Opcode::Push26
-                | Opcode::Push27
-                | Opcode::Push28
-                | Opcode::Push29
-                | Opcode::Push30
-                | Opcode::Push31
-                | Opcode::Push32
-        )
+    /// Returns `Some(n)` for `PUSH1`..=`PUSH32`.
+    pub const fn is_push(self) -> Option<u8> {
+        if (Opcode::Push1 as u8) <= (self as u8) && (self as u8) <= (Opcode::Push32 as u8) {
+            return Some(self as u8 - Opcode::Push1 as u8 + 1);
+        }
+        None
     }
 
     /// Returns `Some(n)` for `DUPn` (1..=16).
     pub const fn is_dup(self) -> Option<u8> {
-        match self {
-            Opcode::Dup1 => Some(1),
-            Opcode::Dup2 => Some(2),
-            Opcode::Dup3 => Some(3),
-            Opcode::Dup4 => Some(4),
-            Opcode::Dup5 => Some(5),
-            Opcode::Dup6 => Some(6),
-            Opcode::Dup7 => Some(7),
-            Opcode::Dup8 => Some(8),
-            Opcode::Dup9 => Some(9),
-            Opcode::Dup10 => Some(10),
-            Opcode::Dup11 => Some(11),
-            Opcode::Dup12 => Some(12),
-            Opcode::Dup13 => Some(13),
-            Opcode::Dup14 => Some(14),
-            Opcode::Dup15 => Some(15),
-            Opcode::Dup16 => Some(16),
-            _ => None,
+        if (Opcode::Dup1 as u8) <= (self as u8) && (self as u8) <= (Opcode::Dup16 as u8) {
+            return Some(self as u8 - Opcode::Dup1 as u8 + 1);
         }
+        None
     }
 
     /// Returns `Some(n)` for `SWAPn` (1..=16).
     pub const fn is_swap(self) -> Option<u8> {
-        match self {
-            Opcode::Swap1 => Some(1),
-            Opcode::Swap2 => Some(2),
-            Opcode::Swap3 => Some(3),
-            Opcode::Swap4 => Some(4),
-            Opcode::Swap5 => Some(5),
-            Opcode::Swap6 => Some(6),
-            Opcode::Swap7 => Some(7),
-            Opcode::Swap8 => Some(8),
-            Opcode::Swap9 => Some(9),
-            Opcode::Swap10 => Some(10),
-            Opcode::Swap11 => Some(11),
-            Opcode::Swap12 => Some(12),
-            Opcode::Swap13 => Some(13),
-            Opcode::Swap14 => Some(14),
-            Opcode::Swap15 => Some(15),
-            Opcode::Swap16 => Some(16),
-            _ => None,
+        if (Opcode::Swap1 as u8) <= (self as u8) && (self as u8) <= (Opcode::Swap16 as u8) {
+            return Some(self as u8 - Opcode::Swap1 as u8 + 1);
         }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stack_io_formats_and_chains() {
+        let first = StackIO::new(2, 1);
+        let second = StackIO::new(1, 2);
+
+        assert_eq!(first.to_string(), "2,1");
+        assert_eq!(first.chain(second), StackIO::new(2, 2));
+        assert!(first.matches(StackIO::new(3, 2)));
+        assert!(!first.matches(StackIO::new(1, 2)));
+    }
+
+    #[test]
+    fn known_bytes_round_trip_and_display() {
+        let cases = [
+            (0x00, Opcode::Stop, "STOP"),
+            (0x5f, Opcode::Push0, "PUSH0"),
+            (0x60, Opcode::Push1, "PUSH1"),
+            (0xff, Opcode::SelfDestruct, "SELFDESTRUCT"),
+        ];
+
+        for &(byte, opcode, display) in &cases {
+            assert_eq!(Opcode::from_byte(byte), Some(opcode));
+            assert_eq!(opcode as u8, byte);
+            assert_eq!(opcode.to_string(), display);
+        }
+
+        assert_eq!(Opcode::from_byte(0xab), None);
+    }
+
+    #[test]
+    fn opcode_stack_effects_are_defined() {
+        assert_eq!(Opcode::Stop.stack_io(), StackIO::new(0, 0));
+        assert_eq!(Opcode::Add.stack_io(), StackIO::new(2, 1));
+        assert_eq!(Opcode::Push1.stack_io(), StackIO::new(0, 1));
+        assert_eq!(Opcode::Call.stack_io(), StackIO::new(7, 1));
+    }
+
+    #[test]
+    fn push_opcodes_report_their_immediate_sizes() {
+        assert_eq!(Opcode::Push0.immediate_bytes(), None);
+        assert_eq!(Opcode::Stop.immediate_bytes(), None);
+
+        for byte in 0x60..=0x7f {
+            let opcode = Opcode::from_byte(byte).unwrap();
+            assert_eq!(opcode.immediate_bytes(), Some(byte - 0x5f));
+        }
+    }
+
+    #[test]
+    fn opcode_families_and_terminators_are_classified() {
+        assert_eq!(Opcode::Push0.is_push(), None);
+        assert_eq!(Opcode::Push1.is_push(), Some(1));
+        assert_eq!(Opcode::Push32.is_push(), Some(32));
+        assert_eq!(Opcode::Add.is_push(), None);
+
+        assert_eq!(Opcode::Dup1.is_dup(), Some(1));
+        assert_eq!(Opcode::Dup16.is_dup(), Some(16));
+        assert_eq!(Opcode::Add.is_dup(), None);
+
+        assert_eq!(Opcode::Swap1.is_swap(), Some(1));
+        assert_eq!(Opcode::Swap16.is_swap(), Some(16));
+        assert_eq!(Opcode::Add.is_swap(), None);
+
+        assert!(Opcode::Stop.is_terminating());
+        assert!(Opcode::SelfDestruct.is_terminating());
+        assert!(!Opcode::Jump.is_terminating());
     }
 }

@@ -1,27 +1,15 @@
-pub mod cfg;
-pub mod classify;
-pub mod decode;
-pub mod icall;
-pub mod lower;
+use alloy_primitives as _;
+use plank_core as _;
+use sir_data as _;
+use sir_passes as _;
+
+pub mod instructions;
 pub mod opcode;
-pub mod ownership;
-pub mod primitive_blocks;
-pub mod ssa;
-pub mod symbolic;
-pub mod verify;
 
-use plank_core::newtype_index;
-
-newtype_index! {
-    pub struct InstructionId;
-    pub struct PrimitiveBlockId;
-    pub struct CodeBlockId;
-    pub struct FunctionCandidateId;
-    pub struct SymbolicValueId;
-    pub struct SsaValueId;
-    pub struct SsaBlockId;
-    pub struct DataSectionId;
-}
-
-pub use decode::{DecodedBytecode, Instruction, decode};
 pub use opcode::{Opcode, StackIO};
+
+#[cfg(test)]
+mod tests {
+    use plank_test_utils as _;
+    use pretty_assertions as _;
+}
