@@ -9,7 +9,6 @@ alloy-primitives.workspace = true
 plank-core.workspace = true
 sir-data.workspace = true
 sir-passes.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
 plank-test-utils.workspace = true
