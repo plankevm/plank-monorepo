@@ -3180,6 +3180,7 @@ dependencies = [
  "sir-data",
  "sir-parser",
  "sir-passes",
+ "sir-stack-scheduling-db-inspect",
  "smallvec",
 ]
 
