@@ -1,0 +1,25 @@
+[package]
+name = "sir-stack-scheduling-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+clap.workspace = true
+csv.workspace = true
+plank-core.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sir-data.workspace = true
+sir-parser.workspace = true
+sir-passes.workspace = true
+sir-stack-scheduling.workspace = true
+
+[dev-dependencies]
+plank-test-utils.workspace = true
+pretty_assertions.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

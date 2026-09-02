@@ -9,8 +9,8 @@ pub use build_effectful::build_graph_effectful;
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
 pub use canonical::{
-    CanonicalBlockKey, CanonicalOpId, CanonicalizedBlock, canonicalize_block_for_dedup,
-    deduplication_key,
+    CanonicalBlockKey, CanonicalOpId, CanonicalOpView, CanonicalValueId, CanonicalizedBlock,
+    canonicalize_block_for_dedup, deduplication_key,
 };
 
 newtype_index! {
