@@ -3170,8 +3170,6 @@ dependencies = [
 name = "sir-stack-scheduling"
 version = "0.1.0"
 dependencies = [
- "clap",
- "csv",
  "hashbrown 0.16.1",
  "plank-core",
  "plank-test-utils",
@@ -3182,6 +3180,21 @@ dependencies = [
  "sir-parser",
  "sir-passes",
  "smallvec",
+]
+
+[[package]]
+name = "sir-stack-scheduling-bench"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "csv",
+ "plank-core",
+ "plank-test-utils",
+ "pretty_assertions",
+ "sir-data",
+ "sir-parser",
+ "sir-passes",
+ "sir-stack-scheduling",
 ]
 
 [[package]]

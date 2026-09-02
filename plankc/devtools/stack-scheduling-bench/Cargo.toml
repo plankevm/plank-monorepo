@@ -1,22 +1,22 @@
 [package]
-name = "sir-stack-scheduling"
+name = "sir-stack-scheduling-bench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dependencies]
-sir-data.workspace = true
-sir-passes.workspace = true
+clap.workspace = true
+csv.workspace = true
 plank-core.workspace = true
-hashbrown.workspace = true
-smallvec.workspace = true
-rayon.workspace = true
+sir-data.workspace = true
+sir-parser.workspace = true
+sir-passes.workspace = true
+sir-stack-scheduling.workspace = true
 
 [dev-dependencies]
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
-sir-parser.workspace = true
-proptest.workspace = true
 
 [lints]
 workspace = true
