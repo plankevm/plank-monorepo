@@ -4,8 +4,6 @@ use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
 use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
-#[cfg(test)]
-use {clap as _, csv as _};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;

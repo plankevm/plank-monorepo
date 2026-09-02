@@ -1,0 +1,325 @@
+fn init:
+    bb0 {
+        v0 = const 0x80
+        v1 = const 0x40
+        mstore256 v1 v0
+        v3 = init_end_offset
+        v4 = codesize
+        v5 = sub v4 v3
+        v6 = icall @init_f1 v5
+        codecopy v6 v3 v5
+        v8 = add v6 v5
+        v9 = sub v8 v6
+        v10 = slt v9 v1
+        v11 = const 0x00
+        v19 = const 0x01
+        v20 = const 0xa0
+        v28 = const 0x20
+        v61 = const 0x1f
+        v124 = const 0x4c9c8ce3
+        v125 = const 0xe0
+        v144 = const 0x04
+        v146 = const 0x24
+        v156 = large_const 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+        v161 = large_const 0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b
+        v174 = const 0xb398979f
+        v192 = const 0x60
+        => v10 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v11 v11
+    }
+    bb2 {
+        v18 = mload256 v6
+        v21 = shl v20 v19
+        v22 = sub v21 v19
+        v23 = and v18 v22
+        v24 = eq v18 v23
+        v25 = iszero v24
+        => v25 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v11 v11
+    }
+    bb5 {
+        v33 = add v6 v28
+        v34 = mload256 v33
+        v35 = shl v1 v19
+        v36 = sub v35 v19
+        v37 = gt v34 v36
+        => v37 ? @bb7 : @bb8
+    }
+    bb7 {
+        revert v11 v11
+    }
+    bb8 {
+        v48 = add v6 v34
+        v62 = add v48 v61
+        v63 = slt v62 v8
+        v64 = iszero v63
+        => v64 ? @bb10 : @bb11
+    }
+    bb10 {
+        revert v11 v11
+    }
+    bb11 {
+        v71 = mload256 v48
+        v72 = icall @init_f2 v71
+        v73 = icall @init_f1 v72
+        mstore256 v73 v71
+        v75 = add v73 v28
+        v80 = add v48 v71
+        v81 = add v80 v28
+        v82 = gt v81 v8
+        => v82 ? @bb13 : @bb14
+    }
+    bb13 {
+        revert v11 v11
+    }
+    bb14 {
+        v93 = add v48 v28
+        mcopy v75 v93 v71
+        v103 = add v73 v71
+        v104 = add v103 v28
+        mstore256 v104 v11
+        v122 = extcodesize v18
+        v123 = iszero v122
+        => v123 ? @bb16 : @bb17
+    }
+    bb16 {
+        v126 = shl v125 v124
+        mstore256 v11 v126
+        mstore256 v144 v23
+        revert v11 v146
+    }
+    bb17 {
+        v153 = shl v20 v19
+        v154 = sub v153 v19
+        v155 = not v154
+        v157 = sload v156
+        v158 = and v157 v155
+        v159 = or v158 v23
+        sstore v156 v159
+        log2 v11 v11 v161 v23
+        v167 = mload256 v73
+        v168 = iszero v167
+        v169 = iszero v168
+        v170 = eq v169 v11
+        => v170 ? @bb20 : @bb21
+    }
+    bb19 {
+        v211 = mload256 v1
+        v212 = runtime_length
+        v213 = runtime_start_offset
+        codecopy v211 v213 v212
+        return v211 v212
+    }
+    bb20 {
+        v171 = callvalue
+        v172 = iszero v171
+        v173 = iszero v172
+        => v173 ? @bb22 : @bb23
+    }
+    bb21 {
+        v179 = mload256 v73
+        v188 = gas
+        v189 = delegatecall v188 v18 v75 v179 v11 v11
+        v190 = returndatasize
+        v191 = eq v190 v11
+        => v191 ? @bb26 : @bb27
+    }
+    bb22 {
+        v175 = shl v125 v174
+        mstore256 v11 v175
+        revert v11 v144
+    }
+    bb23 {
+        => @bb19
+    }
+    bb25 v200 {
+        v209 = icall @init_f3 v18 v189 v200
+        => @bb19
+    }
+    bb26 {
+        => @edge_bb26_bb25
+    }
+    edge_bb26_bb25 -> v192 {
+        => @bb25
+    }
+    bb27 {
+        v193 = returndatasize
+        v194 = icall @init_f2 v193
+        v195 = icall @init_f1 v194
+        mstore256 v195 v193
+        v197 = returndatasize
+        v198 = add v195 v28
+        returndatacopy v198 v11 v197
+        => @edge_bb27_bb25
+    }
+    edge_bb27_bb25 -> v195 {
+        => @bb25
+    }
+
+fn init_f1:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = const 0x40
+        v3 = mload256 v2
+        v4 = const 0x1f
+        v5 = not v4
+        v6 = add v0 v4
+        v7 = and v6 v5
+        v8 = add v3 v7
+        v9 = lt v8 v3
+        v10 = const 0x01
+        v11 = shl v2 v10
+        v12 = sub v11 v10
+        v13 = gt v8 v12
+        v14 = or v13 v9
+        v15 = const 0x4e487b71
+        v16 = const 0xe0
+        v19 = const 0x41
+        v20 = const 0x04
+        v22 = const 0x24
+        => v14 ? @bb1 : @bb2
+    }
+    bb1 {
+        v17 = shl v16 v15
+        mstore256 v1 v17
+        mstore256 v20 v19
+        revert v1 v22
+    }
+    bb2 -> v3 {
+        mstore256 v2 v8
+        iret
+    }
+
+fn init_f2:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = const 0x01
+        v3 = const 0x40
+        v4 = shl v3 v2
+        v5 = sub v4 v2
+        v6 = gt v0 v5
+        v7 = const 0x4e487b71
+        v8 = const 0xe0
+        v11 = const 0x41
+        v12 = const 0x04
+        v14 = const 0x24
+        v17 = const 0x20
+        v18 = const 0x1f
+        => v6 ? @bb1 : @bb2
+    }
+    bb1 {
+        v9 = shl v8 v7
+        mstore256 v1 v9
+        mstore256 v12 v11
+        revert v1 v14
+    }
+    bb2 -> v26 {
+        v19 = not v18
+        v24 = add v0 v18
+        v25 = and v24 v19
+        v26 = add v25 v17
+        iret
+    }
+
+fn init_f3:
+    bb0 v0 v1 v2 {
+        v3 = const 0x00
+        v4 = const 0x60
+        v5 = iszero v1
+        v6 = eq v5 v3
+        v14 = const 0x9996b315
+        v15 = const 0xe0
+        v18 = const 0x01
+        v19 = const 0xa0
+        v26 = const 0x04
+        v28 = const 0x24
+        v42 = const 0x0a12f521
+        v43 = const 0xe1
+        v49 = const 0x20
+        => v6 ? @bb2 : @bb3
+    }
+    bb2 {
+        v7 = mload256 v2
+        v8 = iszero v7
+        => v8 ? @bb4 : @edge_bb2_bb5
+    }
+    edge_bb2_bb5 -> v8 {
+        => @bb5
+    }
+    bb3 {
+        v38 = mload256 v2
+        v39 = iszero v38
+        v40 = iszero v39
+        v41 = eq v40 v3
+        => v41 ? @bb11 : @bb12
+    }
+    bb4 {
+        v9 = extcodesize v0
+        v10 = iszero v9
+        => @edge_bb4_bb5
+    }
+    edge_bb4_bb5 -> v10 {
+        => @bb5
+    }
+    bb5 v11 {
+        => v11 ? @bb6 : @bb7
+    }
+    bb6 {
+        v16 = shl v15 v14
+        mstore256 v3 v16
+        v20 = shl v19 v18
+        v21 = sub v20 v18
+        v25 = and v0 v21
+        mstore256 v26 v25
+        revert v3 v28
+    }
+    bb7 -> v2 {
+        iret
+    }
+    bb11 {
+        v44 = shl v43 v42
+        mstore256 v3 v44
+        revert v3 v26
+    }
+    bb12 {
+        v48 = mload256 v2
+        v50 = add v49 v2
+        revert v50 v48
+    }
+
+fn main:
+    bb0 {
+        v0 = const 0x80
+        v1 = const 0x40
+        mstore256 v1 v0
+        v3 = const 0x01
+        v4 = const 0xa0
+        v5 = shl v4 v3
+        v6 = sub v5 v3
+        v7 = large_const 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+        v8 = sload v7
+        v9 = and v8 v6
+        v10 = calldatasize
+        v11 = const 0x00
+        calldatacopy v11 v11 v10
+        v13 = calldatasize
+        v14 = gas
+        v15 = delegatecall v14 v9 v11 v13 v11 v11
+        v16 = returndatasize
+        returndatacopy v11 v11 v16
+        v18 = eq v15 v11
+        => v18 ? @bb2 : @bb3
+    }
+    bb2 {
+        v19 = returndatasize
+        revert v11 v19
+    }
+    bb3 {
+        v22 = returndatasize
+        return v11 v22
+    }
+

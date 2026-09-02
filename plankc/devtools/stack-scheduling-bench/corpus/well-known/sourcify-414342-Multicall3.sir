@@ -1,0 +1,1590 @@
+fn init:
+    bb0 {
+        v0 = const 0x80
+        v1 = const 0x40
+        mstore256 v1 v0
+        v3 = callvalue
+        v4 = const 0x00
+        => v3 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v4 v4
+    }
+    bb2 {
+        v7 = runtime_length
+        v8 = runtime_start_offset
+        codecopy v0 v8 v7
+        return v0 v7
+    }
+
+fn main:
+    bb0 {
+        v0 = const 0x80
+        v1 = const 0x40
+        mstore256 v1 v0
+        v3 = const 0x04
+        v4 = calldatasize
+        v5 = lt v4 v3
+        v6 = iszero v5
+        v7 = const 0x00
+        v9 = const 0xe0
+        v11 = const 0x0f28c97d
+        v15 = const 0x174dea71
+        v19 = const 0x252dba42
+        v23 = const 0x27e86d6e
+        v27 = const 0x3408e470
+        v31 = const 0x399542e9
+        v35 = const 0x3e64a696
+        v39 = const 0x42cbb15c
+        v43 = const 0x4d2301cc
+        v47 = const 0x72425d9d
+        v51 = const 0x82ad56cb
+        v55 = const 0x86d516e8
+        v59 = const 0xa8b0574e
+        v63 = const 0xbce38bd7
+        v67 = const 0xc3077fa9
+        v71 = const 0xee82ac5e
+        => v6 ? @bb1 : @bb2
+    }
+    bb1 {
+        v8 = calldataload v7
+        v10 = shr v9 v8
+        v12 = eq v10 v11
+        => v12 ? @bb4 : @bb5
+    }
+    bb2 {
+        revert v7 v7
+    }
+    bb3 {
+        => @bb2
+    }
+    bb4 {
+        icall @main_f1
+        invalid
+    }
+    bb5 {
+        v16 = eq v10 v15
+        => v16 ? @bb7 : @bb8
+    }
+    bb7 {
+        icall @main_f7
+        invalid
+    }
+    bb8 {
+        v20 = eq v10 v19
+        => v20 ? @bb10 : @bb11
+    }
+    bb10 {
+        icall @main_f9
+        invalid
+    }
+    bb11 {
+        v24 = eq v10 v23
+        => v24 ? @bb13 : @bb14
+    }
+    bb13 {
+        icall @main_f10
+        invalid
+    }
+    bb14 {
+        v28 = eq v10 v27
+        => v28 ? @bb16 : @bb17
+    }
+    bb16 {
+        icall @main_f11
+        invalid
+    }
+    bb17 {
+        v32 = eq v10 v31
+        => v32 ? @bb19 : @bb20
+    }
+    bb19 {
+        icall @main_f14
+        invalid
+    }
+    bb20 {
+        v36 = eq v10 v35
+        => v36 ? @bb22 : @bb23
+    }
+    bb22 {
+        icall @main_f15
+        invalid
+    }
+    bb23 {
+        v40 = eq v10 v39
+        => v40 ? @bb25 : @bb26
+    }
+    bb25 {
+        icall @main_f16
+        invalid
+    }
+    bb26 {
+        v44 = eq v10 v43
+        => v44 ? @bb28 : @bb29
+    }
+    bb28 {
+        icall @main_f18
+        invalid
+    }
+    bb29 {
+        v48 = eq v10 v47
+        => v48 ? @bb31 : @bb32
+    }
+    bb31 {
+        icall @main_f19
+        invalid
+    }
+    bb32 {
+        v52 = eq v10 v51
+        => v52 ? @bb34 : @bb35
+    }
+    bb34 {
+        icall @main_f20
+        invalid
+    }
+    bb35 {
+        v56 = eq v10 v55
+        => v56 ? @bb37 : @bb38
+    }
+    bb37 {
+        icall @main_f21
+        invalid
+    }
+    bb38 {
+        v60 = eq v10 v59
+        => v60 ? @bb40 : @bb41
+    }
+    bb40 {
+        icall @main_f22
+        invalid
+    }
+    bb41 {
+        v64 = eq v10 v63
+        => v64 ? @bb43 : @bb44
+    }
+    bb43 {
+        icall @main_f23
+        invalid
+    }
+    bb44 {
+        v68 = eq v10 v67
+        => v68 ? @bb46 : @bb47
+    }
+    bb46 {
+        icall @main_f24
+        invalid
+    }
+    bb47 {
+        v72 = eq v10 v71
+        => v72 ? @bb49 : @bb3
+    }
+    bb49 {
+        icall @main_f25
+        invalid
+    }
+
+fn main_f1:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = timestamp
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f2:
+    bb0 v0 v1 {
+        v2 = const 0x00
+        v3 = const 0x1f
+        v4 = add v0 v3
+        v5 = slt v4 v1
+        v6 = iszero v5
+        v14 = const 0x01
+        v15 = const 0x40
+        v21 = const 0x20
+        v39 = const 0x05
+        => v6 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v2 v2
+    }
+    bb2 {
+        v13 = calldataload v0
+        v16 = shl v15 v14
+        v17 = sub v16 v14
+        v18 = gt v13 v17
+        => v18 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v2 v2
+    }
+    bb5 {
+        v26 = add v0 v21
+        v40 = shl v39 v13
+        v41 = add v0 v40
+        v42 = add v41 v21
+        v43 = gt v42 v1
+        => v43 ? @bb7 : @bb8
+    }
+    bb7 {
+        revert v2 v2
+    }
+    bb8 -> v26 v13 {
+        iret
+    }
+
+fn main_f3:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = const 0x20
+        v3 = const 0x03
+        v4 = not v3
+        v5 = add v0 v4
+        v6 = slt v5 v2
+        v9 = const 0x04
+        v11 = const 0x01
+        v12 = const 0x40
+        => v6 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v10 = calldataload v9
+        v13 = shl v12 v11
+        v14 = sub v13 v11
+        v15 = gt v10 v14
+        => v15 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 -> v32 v33 {
+        v30 = add v9 v10
+        v32 v33 = icall @main_f2 v30 v0
+        iret
+    }
+
+fn main_f4:
+    bb0 v0 v1 -> v17 {
+        v2 = const 0x00
+        v3 = mload256 v0
+        mstore256 v1 v3
+        v5 = const 0x20
+        v6 = add v0 v5
+        v7 = add v1 v5
+        mcopy v7 v6 v3
+        v9 = add v1 v3
+        v10 = add v9 v5
+        mstore256 v10 v2
+        v12 = const 0x1f
+        v13 = not v12
+        v14 = add v3 v12
+        v15 = and v14 v13
+        v16 = add v1 v15
+        v17 = add v16 v5
+        iret
+    }
+
+fn main_f5:
+    bb0 v0 v1 {
+        v2 = const 0x00
+        v3 = mload256 v0
+        mstore256 v1 v3
+        v5 = const 0x20
+        v6 = add v1 v5
+        v7 = const 0x05
+        v8 = shl v7 v3
+        v9 = add v1 v8
+        v10 = add v9 v5
+        v11 = add v0 v5
+        v15 = const 0x1f
+        v31 = const 0x40
+        v38 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v2 v10 v6 v11 {
+        => @bb1
+    }
+    bb1 v13 v18 v21 v23 {
+        v14 = lt v13 v3
+        => v14 ? @bb2 : @bb4
+    }
+    bb2 {
+        v16 = not v15
+        v19 = sub v18 v1
+        v20 = add v19 v16
+        mstore256 v21 v20
+        v24 = mload256 v23
+        v25 = mload256 v24
+        v26 = iszero v25
+        v27 = iszero v26
+        mstore256 v18 v27
+        v29 = add v24 v5
+        v30 = mload256 v29
+        v32 = add v18 v5
+        mstore256 v32 v31
+        v34 = add v18 v31
+        v35 = icall @main_f4 v30 v34
+        v36 = add v23 v5
+        v37 = add v21 v5
+        => @bb3
+    }
+    bb3 {
+        v39 = add v13 v38
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v39 v35 v37 v36 {
+        => @bb1
+    }
+    bb4 -> v18 {
+        iret
+    }
+
+fn main_f6:
+    bb0 v0 v1 -> v6 {
+        v2 = const 0x00
+        v3 = const 0x20
+        mstore256 v0 v3
+        v5 = add v0 v3
+        v6 = icall @main_f5 v1 v5
+        iret
+    }
+
+fn main_f7:
+    bb0 {
+        v0 = calldatasize
+        v2 v3 = icall @main_f3 v0
+        v4 = const 0x00
+        v5 = icall @main_f29 v3
+        v14 = const 0x40
+        v20 = const 0x60
+        v31 = const 0x20
+        v40 = const 0x461bcd
+        v41 = const 0xe5
+        v44 = const 0x04
+        v46 = const 0x17
+        v47 = const 0x24
+        v49 = large_const 0x135d5b1d1a58d85b1b0cce8818d85b1b0819985a5b1959
+        v50 = const 0x4a
+        v52 = const 0x44
+        v54 = const 0x84
+        v57 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v4 v4 {
+        => @bb1
+    }
+    bb1 v7 v17 {
+        v8 = lt v7 v3
+        => v8 ? @bb2 : @bb4
+    }
+    bb2 {
+        v10 = icall @main_f31 v5 v7
+        v11 = mload256 v10
+        v13 = icall @main_f32 v2 v3 v7
+        v15 = add v13 v14
+        v16 = calldataload v15
+        v18 = add v17 v16
+        v19 = icall @main_f33 v13
+        v21 = add v13 v20
+        v23 v24 = icall @main_f34 v13 v21
+        v25 = mload256 v14
+        v26 = icall @main_f35 v23 v24 v25
+        v27 = sub v26 v25
+        v28 = gas
+        v29 = call v28 v19 v16 v25 v27 v4 v4
+        v30 = icall @main_f36
+        v32 = add v11 v31
+        mstore256 v32 v30
+        icall @main_f37 v11 v29
+        v35 = mload256 v11
+        v36 = add v13 v31
+        v37 = calldataload v36
+        v38 = or v37 v35
+        v39 = iszero v38
+        => v39 ? @bb5 : @bb6
+    }
+    bb3 {
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v62 v18 {
+        => @bb1
+    }
+    bb4 {
+        v89 = callvalue
+        v90 = eq v89 v17
+        icall @main_f38 v90
+        v92 = mload256 v14
+        v93 = icall @main_f6 v92 v5
+        v94 = sub v93 v92
+        return v92 v94
+    }
+    bb5 {
+        v42 = shl v41 v40
+        mstore256 v4 v42
+        mstore256 v44 v31
+        mstore256 v47 v46
+        v51 = shl v50 v49
+        mstore256 v52 v51
+        revert v4 v54
+    }
+    bb6 {
+        v62 = add v7 v57
+        => @bb3
+    }
+
+fn main_f8:
+    bb0 v0 v1 v2 {
+        v3 = const 0x00
+        v4 = const 0x40
+        v5 = add v0 v4
+        mstore256 v0 v1
+        v7 = const 0x20
+        v8 = add v0 v7
+        mstore256 v8 v4
+        v10 = mload256 v2
+        mstore256 v5 v10
+        v12 = const 0x60
+        v13 = add v0 v12
+        v14 = const 0x05
+        v15 = shl v14 v10
+        v16 = add v0 v15
+        v17 = add v16 v12
+        v18 = add v2 v7
+        v22 = const 0x5f
+        v35 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v3 v17 v13 v18 {
+        => @bb1
+    }
+    bb1 v20 v25 v28 v30 {
+        v21 = lt v20 v10
+        => v21 ? @bb2 : @bb4
+    }
+    bb2 {
+        v23 = not v22
+        v26 = sub v25 v0
+        v27 = add v26 v23
+        mstore256 v28 v27
+        v31 = mload256 v30
+        v32 = icall @main_f4 v31 v25
+        v33 = add v30 v7
+        v34 = add v28 v7
+        => @bb3
+    }
+    bb3 {
+        v36 = add v20 v35
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v36 v32 v34 v33 {
+        => @bb1
+    }
+    bb4 -> v25 {
+        iret
+    }
+
+fn main_f9:
+    bb0 {
+        v0 = calldatasize
+        v2 v3 = icall @main_f3 v0
+        v4 = icall @main_f28 v3
+        v5 = icall @main_f27 v4
+        mstore256 v5 v3
+        v7 = const 0x1f
+        v8 = not v7
+        v9 = icall @main_f28 v3
+        v10 = add v9 v8
+        v11 = const 0x00
+        v15 = const 0x60
+        v16 = const 0x20
+        v38 = const 0x40
+        v49 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v11 {
+        => @bb1
+    }
+    bb1 v13 {
+        v14 = lt v13 v10
+        => v14 ? @bb2 : @bb4
+    }
+    bb2 {
+        v18 = add v5 v13
+        v19 = add v18 v16
+        mstore256 v19 v15
+        => @bb3
+    }
+    bb3 {
+        v21 = add v13 v16
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v21 {
+        => @bb1
+    }
+    bb4 {
+        => @edge_bb4_bb5
+    }
+    edge_bb4_bb5 -> v11 {
+        => @bb5
+    }
+    bb5 v29 {
+        v30 = lt v29 v3
+        => v30 ? @bb6 : @bb8
+    }
+    bb6 {
+        v32 = icall @main_f39 v2 v3 v29
+        v33 = icall @main_f33 v32
+        v34 = add v32 v16
+        v36 v37 = icall @main_f34 v32 v34
+        v39 = mload256 v38
+        v40 = icall @main_f35 v36 v37 v39
+        v41 = sub v40 v39
+        v42 = gas
+        v43 = call v42 v33 v11 v39 v41 v11 v11
+        v44 = icall @main_f36
+        v46 = icall @main_f31 v5 v29
+        mstore256 v46 v44
+        icall @main_f40 v43
+        v50 = add v29 v49
+        => @bb7
+    }
+    bb7 {
+        => @edge_bb7_bb5
+    }
+    edge_bb7_bb5 -> v50 {
+        => @bb5
+    }
+    bb8 {
+        v65 = mload256 v38
+        v66 = number
+        v67 = icall @main_f8 v65 v66 v5
+        v68 = sub v67 v65
+        return v65 v68
+    }
+
+fn main_f10:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v18 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = not v1
+        v14 = number
+        v15 = add v14 v13
+        v16 = blockhash v15
+        mstore256 v12 v16
+        return v12 v18
+    }
+
+fn main_f11:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = chainid
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f12:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = const 0x40
+        v3 = const 0x03
+        v4 = not v3
+        v5 = add v0 v4
+        v6 = slt v5 v2
+        v9 = const 0x04
+        v21 = const 0x24
+        v23 = const 0x01
+        => v6 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v10 = calldataload v9
+        v11 = iszero v10
+        v12 = iszero v11
+        v13 = eq v10 v12
+        v14 = iszero v13
+        => v14 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v22 = calldataload v21
+        v24 = shl v2 v23
+        v25 = sub v24 v23
+        v26 = gt v22 v25
+        => v26 ? @bb7 : @bb8
+    }
+    bb7 {
+        revert v1 v1
+    }
+    bb8 -> v10 v47 v48 {
+        v45 = add v9 v22
+        v47 v48 = icall @main_f2 v45 v0
+        iret
+    }
+
+fn main_f13:
+    bb0 v0 v1 v2 v3 -> v14 {
+        v4 = const 0x00
+        mstore256 v0 v1
+        v6 = const 0x20
+        v7 = add v0 v6
+        mstore256 v7 v2
+        v9 = const 0x60
+        v10 = const 0x40
+        v11 = add v0 v10
+        mstore256 v11 v9
+        v13 = add v0 v9
+        v14 = icall @main_f5 v3 v13
+        iret
+    }
+
+fn main_f14:
+    bb0 {
+        v0 = calldatasize
+        v2 v3 v4 = icall @main_f12 v0
+        v5 = icall @main_f42 v2 v3 v4
+        v6 = const 0x40
+        v7 = mload256 v6
+        v8 = number
+        v9 = blockhash v8
+        v10 = number
+        v11 = icall @main_f13 v7 v10 v9 v5
+        v12 = sub v11 v7
+        return v7 v12
+    }
+
+fn main_f15:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = basefee
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f16:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = number
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f17:
+    bb0 v0 {
+        v1 = const 0x01
+        v2 = const 0xa0
+        v3 = shl v2 v1
+        v4 = sub v3 v1
+        v5 = and v0 v4
+        v6 = eq v0 v5
+        v7 = iszero v6
+        v8 = const 0x00
+        => v7 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v8 v8
+    }
+    bb2 {
+        iret
+    }
+
+fn main_f18:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x20
+        v5 = const 0x03
+        v12 = const 0x04
+        v16 = const 0x40
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v6 = not v5
+        v7 = calldatasize
+        v8 = add v7 v6
+        v9 = slt v8 v4
+        => v9 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v13 = calldataload v12
+        icall @main_f17 v13
+        v15 = balance v13
+        v17 = mload256 v16
+        mstore256 v17 v15
+        return v17 v4
+    }
+
+fn main_f19:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = difficulty
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f20:
+    bb0 {
+        v0 = calldatasize
+        v2 v3 = icall @main_f3 v0
+        v4 = icall @main_f29 v3
+        v5 = const 0x00
+        v15 = const 0x40
+        v26 = const 0x20
+        v35 = const 0x461bcd
+        v36 = const 0xe5
+        v39 = const 0x04
+        v41 = const 0x17
+        v42 = const 0x24
+        v44 = large_const 0x135d5b1d1a58d85b1b0cce8818d85b1b0819985a5b1959
+        v45 = const 0x4a
+        v47 = const 0x44
+        v49 = const 0x64
+        v52 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v5 {
+        => @bb1
+    }
+    bb1 v7 {
+        v8 = lt v7 v3
+        => v8 ? @bb2 : @bb4
+    }
+    bb2 {
+        v10 = icall @main_f31 v4 v7
+        v11 = mload256 v10
+        v13 = icall @main_f41 v2 v3 v7
+        v14 = icall @main_f33 v13
+        v16 = add v13 v15
+        v18 v19 = icall @main_f34 v13 v16
+        v20 = mload256 v15
+        v21 = icall @main_f35 v18 v19 v20
+        v22 = sub v21 v20
+        v23 = gas
+        v24 = call v23 v14 v5 v20 v22 v5 v5
+        v25 = icall @main_f36
+        v27 = add v11 v26
+        mstore256 v27 v25
+        icall @main_f37 v11 v24
+        v30 = mload256 v11
+        v31 = add v13 v26
+        v32 = calldataload v31
+        v33 = or v32 v30
+        v34 = iszero v33
+        => v34 ? @bb5 : @bb6
+    }
+    bb3 {
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v57 {
+        => @bb1
+    }
+    bb4 {
+        v78 = mload256 v15
+        v79 = icall @main_f6 v78 v4
+        v80 = sub v79 v78
+        return v78 v80
+    }
+    bb5 {
+        v37 = shl v36 v35
+        mstore256 v5 v37
+        mstore256 v39 v26
+        mstore256 v42 v41
+        v46 = shl v45 v44
+        mstore256 v47 v46
+        revert v5 v49
+    }
+    bb6 {
+        v57 = add v7 v52
+        => @bb3
+    }
+
+fn main_f21:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = gaslimit
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f22:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x03
+        v11 = const 0x40
+        v15 = const 0x20
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v5 = not v4
+        v6 = calldatasize
+        v7 = add v6 v5
+        v8 = slt v7 v1
+        => v8 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v12 = mload256 v11
+        v13 = coinbase
+        mstore256 v12 v13
+        return v12 v15
+    }
+
+fn main_f23:
+    bb0 {
+        v0 = calldatasize
+        v2 v3 v4 = icall @main_f12 v0
+        v5 = icall @main_f42 v2 v3 v4
+        v6 = const 0x40
+        v7 = mload256 v6
+        v8 = const 0x00
+        v9 = const 0x20
+        mstore256 v7 v9
+        v11 = add v7 v9
+        v12 = icall @main_f5 v5 v11
+        v13 = sub v12 v7
+        return v7 v13
+    }
+
+fn main_f24:
+    bb0 {
+        v0 = calldatasize
+        v2 v3 = icall @main_f3 v0
+        v4 = const 0x00
+        v5 = icall @main_f29 v3
+        v16 = const 0x20
+        v21 = const 0x40
+        v36 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v4 {
+        => @bb1
+    }
+    bb1 v7 {
+        v8 = lt v7 v3
+        => v8 ? @bb2 : @bb4
+    }
+    bb2 {
+        v10 = icall @main_f31 v5 v7
+        v11 = mload256 v10
+        v13 = icall @main_f39 v2 v3 v7
+        v14 = calldataload v13
+        icall @main_f17 v14
+        v17 = add v13 v16
+        v19 v20 = icall @main_f34 v13 v17
+        v22 = mload256 v21
+        calldatacopy v22 v19 v20
+        v24 = add v22 v20
+        mstore256 v24 v4
+        v26 = sub v24 v22
+        v27 = gas
+        v28 = call v27 v14 v4 v22 v26 v4 v4
+        v29 = icall @main_f36
+        v30 = add v11 v16
+        mstore256 v30 v29
+        v32 = iszero v28
+        v33 = iszero v32
+        mstore256 v11 v33
+        icall @main_f40 v33
+        v37 = add v7 v36
+        => @bb3
+    }
+    bb3 {
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v37 {
+        => @bb1
+    }
+    bb4 {
+        v46 = mload256 v21
+        v47 = number
+        v48 = blockhash v47
+        v49 = number
+        v50 = icall @main_f13 v46 v49 v48 v5
+        v51 = sub v50 v46
+        return v46 v51
+    }
+
+fn main_f25:
+    bb0 {
+        v0 = callvalue
+        v1 = const 0x00
+        v4 = const 0x20
+        v5 = const 0x03
+        v12 = const 0x40
+        v14 = const 0x04
+        => v0 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v1 v1
+    }
+    bb2 {
+        v6 = not v5
+        v7 = calldatasize
+        v8 = add v7 v6
+        v9 = slt v8 v4
+        => v9 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v1 v1
+    }
+    bb5 {
+        v13 = mload256 v12
+        v15 = calldataload v14
+        v16 = blockhash v15
+        mstore256 v13 v16
+        return v13 v4
+    }
+
+fn main_f26:
+    bb0 {
+        v0 = const 0x4e487b71
+        v1 = const 0xe0
+        v2 = shl v1 v0
+        v3 = const 0x00
+        mstore256 v3 v2
+        v5 = const 0x41
+        v6 = const 0x04
+        mstore256 v6 v5
+        v8 = const 0x24
+        revert v3 v8
+    }
+
+fn main_f27:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = const 0x40
+        v3 = mload256 v2
+        v4 = const 0x1f
+        v5 = not v4
+        v6 = add v0 v4
+        v7 = and v6 v5
+        v8 = add v3 v7
+        v9 = lt v8 v3
+        v10 = const 0x01
+        v11 = shl v2 v10
+        v12 = sub v11 v10
+        v13 = gt v8 v12
+        v14 = or v13 v9
+        => v14 ? @bb1 : @bb2
+    }
+    bb1 {
+        icall @main_f26
+        invalid
+    }
+    bb2 -> v3 {
+        mstore256 v2 v8
+        iret
+    }
+
+fn main_f28:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = const 0x01
+        v3 = const 0x40
+        v4 = shl v3 v2
+        v5 = sub v4 v2
+        v6 = gt v0 v5
+        v9 = const 0x20
+        v14 = const 0x05
+        => v6 ? @bb1 : @bb2
+    }
+    bb1 {
+        icall @main_f26
+        invalid
+    }
+    bb2 -> v16 {
+        v15 = shl v14 v0
+        v16 = add v15 v9
+        iret
+    }
+
+fn main_f29:
+    bb0 v0 {
+        v1 = const 0x00
+        v2 = icall @main_f28 v0
+        v3 = icall @main_f27 v2
+        mstore256 v3 v0
+        v5 = const 0x1f
+        v6 = not v5
+        v7 = icall @main_f28 v0
+        v8 = add v7 v6
+        v12 = const 0x40
+        v16 = const 0x01
+        v33 = const 0x60
+        v34 = const 0x20
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v1 {
+        => @bb1
+    }
+    bb1 v10 {
+        v11 = lt v10 v8
+        => v11 ? @bb2 : @bb4
+    }
+    bb2 {
+        v13 = mload256 v12
+        v14 = add v13 v12
+        v15 = lt v14 v13
+        v17 = shl v12 v16
+        v18 = sub v17 v16
+        v19 = gt v14 v18
+        v20 = or v19 v15
+        => v20 ? @bb5 : @bb6
+    }
+    bb3 {
+        v49 = add v10 v34
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v49 {
+        => @bb1
+    }
+    bb4 -> v3 {
+        iret
+    }
+    bb5 {
+        icall @main_f26
+        invalid
+    }
+    bb6 {
+        mstore256 v12 v14
+        mstore256 v13 v1
+        v35 = add v13 v34
+        mstore256 v35 v33
+        v46 = add v3 v10
+        v47 = add v46 v34
+        mstore256 v47 v13
+        => @bb3
+    }
+
+fn main_f30:
+    bb0 {
+        v0 = const 0x4e487b71
+        v1 = const 0xe0
+        v2 = shl v1 v0
+        v3 = const 0x00
+        mstore256 v3 v2
+        v5 = const 0x32
+        v6 = const 0x04
+        mstore256 v6 v5
+        v8 = const 0x24
+        revert v3 v8
+    }
+
+fn main_f31:
+    bb0 v0 v1 {
+        v2 = const 0x00
+        v3 = mload256 v0
+        v4 = lt v1 v3
+        v5 = iszero v4
+        v8 = const 0x20
+        v13 = const 0x05
+        => v5 ? @bb1 : @bb2
+    }
+    bb1 {
+        icall @main_f30
+        invalid
+    }
+    bb2 -> v20 {
+        v14 = shl v13 v1
+        v19 = add v0 v14
+        v20 = add v19 v8
+        iret
+    }
+
+fn main_f32:
+    bb0 v0 v1 v2 {
+        v3 = const 0x00
+        v4 = lt v2 v1
+        v5 = iszero v4
+        v12 = const 0x05
+        v20 = const 0x7e
+        => v5 ? @bb1 : @bb2
+    }
+    bb1 {
+        icall @main_f30
+        invalid
+    }
+    bb2 {
+        v13 = shl v12 v2
+        v18 = add v0 v13
+        v19 = calldataload v18
+        v21 = not v20
+        v22 = calldatasize
+        v23 = sub v22 v0
+        v24 = add v23 v21
+        v25 = slt v19 v24
+        v26 = iszero v25
+        => v26 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v3 v3
+    }
+    bb5 -> v37 {
+        v37 = add v0 v19
+        iret
+    }
+
+fn main_f33:
+    bb0 v0 -> v2 {
+        v1 = const 0x00
+        v2 = calldataload v0
+        icall @main_f17 v2
+        iret
+    }
+
+fn main_f34:
+    bb0 v0 v1 {
+        v2 = const 0x00
+        v3 = calldataload v1
+        v4 = const 0x1e
+        v5 = not v4
+        v6 = calldatasize
+        v7 = sub v6 v0
+        v8 = add v7 v5
+        v9 = slt v3 v8
+        v10 = iszero v9
+        v23 = const 0x01
+        v24 = const 0x40
+        v30 = const 0x20
+        => v10 ? @bb1 : @bb2
+    }
+    bb1 {
+        revert v2 v2
+    }
+    bb2 {
+        v21 = add v0 v3
+        v22 = calldataload v21
+        v25 = shl v24 v23
+        v26 = sub v25 v23
+        v27 = gt v22 v26
+        => v27 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v2 v2
+    }
+    bb5 {
+        v35 = add v21 v30
+        v40 = calldatasize
+        v41 = sub v40 v22
+        v42 = sgt v35 v41
+        => v42 ? @bb7 : @bb8
+    }
+    bb7 {
+        revert v2 v2
+    }
+    bb8 -> v35 v22 {
+        iret
+    }
+
+fn main_f35:
+    bb0 v0 v1 v2 -> v5 {
+        v3 = const 0x00
+        calldatacopy v2 v0 v1
+        v5 = add v2 v1
+        mstore256 v5 v3
+        iret
+    }
+
+fn main_f36:
+    bb0 {
+        v0 = const 0x00
+        v1 = returndatasize
+        v2 = eq v1 v0
+        v3 = const 0x60
+        v5 = const 0x01
+        v6 = const 0x40
+        v12 = const 0x20
+        v13 = const 0x1f
+        => v2 ? @bb2 : @bb3
+    }
+    bb1 v27 -> v27 {
+        iret
+    }
+    bb2 {
+        => @edge_bb2_bb1
+    }
+    edge_bb2_bb1 -> v3 {
+        => @bb1
+    }
+    bb3 {
+        v4 = returndatasize
+        v7 = shl v6 v5
+        v8 = sub v7 v5
+        v9 = gt v4 v8
+        => v9 ? @bb4 : @bb5
+    }
+    bb4 {
+        icall @main_f26
+        invalid
+    }
+    bb5 {
+        v14 = not v13
+        v19 = add v4 v13
+        v20 = and v19 v14
+        v21 = add v20 v12
+        v22 = icall @main_f27 v21
+        mstore256 v22 v4
+        v24 = returndatasize
+        v25 = add v22 v12
+        returndatacopy v25 v0 v24
+        => @edge_bb5_bb1
+    }
+    edge_bb5_bb1 -> v22 {
+        => @bb1
+    }
+
+fn main_f37:
+    bb0 v0 v1 {
+        v2 = iszero v1
+        v3 = iszero v2
+        mstore256 v0 v3
+        iret
+    }
+
+fn main_f38:
+    bb0 v0 {
+        v1 = iszero v0
+        v2 = const 0x40
+        v4 = const 0x461bcd
+        v5 = const 0xe5
+        v8 = const 0x20
+        v9 = const 0x04
+        v12 = const 0x1a
+        v13 = const 0x24
+        v16 = large_const 0x4d756c746963616c6c333a2076616c7565206d69736d61746368000000000000
+        v17 = const 0x44
+        v20 = const 0x64
+        => v1 ? @bb1 : @bb2
+    }
+    bb1 {
+        v3 = mload256 v2
+        v6 = shl v5 v4
+        mstore256 v3 v6
+        v10 = add v3 v9
+        mstore256 v10 v8
+        v14 = add v3 v13
+        mstore256 v14 v12
+        v18 = add v3 v17
+        mstore256 v18 v16
+        revert v3 v20
+    }
+    bb2 {
+        iret
+    }
+
+fn main_f39:
+    bb0 v0 v1 v2 {
+        v3 = const 0x00
+        v4 = lt v2 v1
+        v5 = iszero v4
+        v12 = const 0x05
+        v20 = const 0x3e
+        => v5 ? @bb1 : @bb2
+    }
+    bb1 {
+        icall @main_f30
+        invalid
+    }
+    bb2 {
+        v13 = shl v12 v2
+        v18 = add v0 v13
+        v19 = calldataload v18
+        v21 = not v20
+        v22 = calldatasize
+        v23 = sub v22 v0
+        v24 = add v23 v21
+        v25 = slt v19 v24
+        v26 = iszero v25
+        => v26 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v3 v3
+    }
+    bb5 -> v37 {
+        v37 = add v0 v19
+        iret
+    }
+
+fn main_f40:
+    bb0 v0 {
+        v1 = iszero v0
+        v2 = const 0x40
+        v4 = const 0x461bcd
+        v5 = const 0xe5
+        v8 = const 0x20
+        v9 = const 0x04
+        v12 = const 0x17
+        v13 = const 0x24
+        v16 = large_const 0x4d756c746963616c6c333a2063616c6c206661696c6564000000000000000000
+        v17 = const 0x44
+        v20 = const 0x64
+        => v1 ? @bb1 : @bb2
+    }
+    bb1 {
+        v3 = mload256 v2
+        v6 = shl v5 v4
+        mstore256 v3 v6
+        v10 = add v3 v9
+        mstore256 v10 v8
+        v14 = add v3 v13
+        mstore256 v14 v12
+        v18 = add v3 v17
+        mstore256 v18 v16
+        revert v3 v20
+    }
+    bb2 {
+        iret
+    }
+
+fn main_f41:
+    bb0 v0 v1 v2 {
+        v3 = const 0x00
+        v4 = lt v2 v1
+        v5 = iszero v4
+        v12 = const 0x05
+        v20 = const 0x5e
+        => v5 ? @bb1 : @bb2
+    }
+    bb1 {
+        icall @main_f30
+        invalid
+    }
+    bb2 {
+        v13 = shl v12 v2
+        v18 = add v0 v13
+        v19 = calldataload v18
+        v21 = not v20
+        v22 = calldatasize
+        v23 = sub v22 v0
+        v24 = add v23 v21
+        v25 = slt v19 v24
+        v26 = iszero v25
+        => v26 ? @bb4 : @bb5
+    }
+    bb4 {
+        revert v3 v3
+    }
+    bb5 -> v37 {
+        v37 = add v0 v19
+        iret
+    }
+
+fn main_f42:
+    bb0 v0 v1 v2 {
+        v3 = const 0x00
+        v4 = icall @main_f29 v2
+        v15 = const 0x20
+        v20 = const 0x40
+        v36 = const 0x01
+        => @edge_bb0_bb1
+    }
+    edge_bb0_bb1 -> v3 {
+        => @bb1
+    }
+    bb1 v6 {
+        v7 = lt v6 v2
+        => v7 ? @bb2 : @bb4
+    }
+    bb2 {
+        v9 = icall @main_f31 v4 v6
+        v10 = mload256 v9
+        v12 = icall @main_f39 v1 v2 v6
+        v13 = calldataload v12
+        icall @main_f17 v13
+        v16 = add v12 v15
+        v18 v19 = icall @main_f34 v12 v16
+        v21 = mload256 v20
+        calldatacopy v21 v18 v19
+        v23 = add v21 v19
+        mstore256 v23 v3
+        v25 = sub v23 v21
+        v26 = gas
+        v27 = call v26 v13 v3 v21 v25 v3 v3
+        v28 = icall @main_f36
+        v29 = add v10 v15
+        mstore256 v29 v28
+        v31 = iszero v27
+        v32 = iszero v31
+        mstore256 v10 v32
+        => v0 ? @bb5 : @bb6
+    }
+    bb3 {
+        => @edge_bb3_bb1
+    }
+    edge_bb3_bb1 -> v40 {
+        => @bb1
+    }
+    bb4 -> v4 {
+        iret
+    }
+    bb5 {
+        icall @main_f40 v32
+        => @bb6
+    }
+    bb6 {
+        v40 = add v6 v36
+        => @bb3
+    }
+
