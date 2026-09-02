@@ -242,7 +242,7 @@ mod tests {
             "#,
         );
 
-        assert_eq!(super::source_blocks(&source_blocks), expected);
+        assert_eq!(crate::render_source_blocks(&source_blocks), expected);
     }
 
     #[test]
@@ -289,7 +289,7 @@ mod tests {
             op1'          [v4, v1, v2]
             "#,
         );
-        assert_eq!(super::graph(&graph), expected_graph);
-        assert_eq!(super::schedule(&graph, &best).unwrap(), expected_schedule);
+        assert_eq!(crate::render_graph(&graph), expected_graph);
+        assert_eq!(crate::render_schedule(&graph, &best).unwrap(), expected_schedule);
     }
 }
