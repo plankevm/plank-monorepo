@@ -1,5 +1,7 @@
-use crate::model::{BlockFinalization, RepresentativeGraph, RepresentativeOperation};
 use plank_core::{Idx, IndexVec, Span, newtype_index};
+use sir_stack_scheduling_common::{
+    BlockFinalization, RepresentativeGraph, RepresentativeOperation,
+};
 
 newtype_index! {
     pub struct OperationId;

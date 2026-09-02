@@ -1,10 +1,9 @@
-use crate::model::{RepresentativeGraph, RepresentativeSchedule};
 use rand::Rng;
-use serde::Deserialize;
+use sir_stack_scheduling_common::{
+    BLOCKS_FILE_NAME, BlockRow, CANONICAL_BLOCKS_FILE_NAME, CanonicalBlockRow, RepresentativeGraph,
+    RepresentativeSchedule,
+};
 use std::path::{Path, PathBuf};
-
-const BLOCKS_FILE_NAME: &str = "blocks.csv";
-const CANONICAL_BLOCKS_FILE_NAME: &str = "canonical-blocks.csv";
 
 pub struct DatabaseEntry {
     pub canonical_hash: String,
@@ -17,21 +16,6 @@ pub struct DatabaseEntry {
 pub struct SourceBlock {
     pub file: String,
     pub block_id: u32,
-}
-
-#[derive(Deserialize)]
-struct CanonicalBlockRow {
-    canonical_hash: String,
-    canonical_graph: String,
-    best_schedule: String,
-    best_gas_cost: u64,
-}
-
-#[derive(Deserialize)]
-struct BlockRow {
-    file: String,
-    block_id: u32,
-    canonical_hash: String,
 }
 
 pub fn find(database: &Path, requested_hash: &str) -> Result<DatabaseEntry, String> {

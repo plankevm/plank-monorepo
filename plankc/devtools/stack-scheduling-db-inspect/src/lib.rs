@@ -3,12 +3,11 @@ use std::path::Path;
 
 mod database;
 mod graph;
-mod model;
 mod render;
 
 pub use database::{DatabaseEntry, SourceBlock};
 pub use graph::Graph;
-pub use model::{
+pub use sir_stack_scheduling_common::{
     BlockFinalization, RepresentativeGraph, RepresentativeOperation, RepresentativeSchedule,
     RepresentativeStackOp,
 };

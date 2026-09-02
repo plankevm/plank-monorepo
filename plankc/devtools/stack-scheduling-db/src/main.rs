@@ -1,6 +1,4 @@
-mod corpus;
 mod database;
-mod inline_constants;
 mod model;
 mod pipeline;
 mod runner;

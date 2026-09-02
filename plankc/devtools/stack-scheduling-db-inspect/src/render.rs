@@ -1,9 +1,11 @@
 use crate::{
     database::SourceBlock,
     graph::{Graph, OperationId, ValueId},
-    model::{BlockFinalization, RepresentativeSchedule, RepresentativeStackOp},
 };
 use plank_core::{DenseIndexSet, Idx, IndexVec, newtype_index};
+use sir_stack_scheduling_common::{
+    BlockFinalization, RepresentativeSchedule, RepresentativeStackOp,
+};
 use std::fmt::Write;
 
 newtype_index! {
@@ -222,11 +224,11 @@ fn operation_names(operations: impl IntoIterator<Item = OperationId>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        graph::Graph,
-        model::{BlockFinalization, RepresentativeGraph, RepresentativeOperation},
-    };
+    use crate::graph::Graph;
     use plank_test_utils::dedent_preserve_indent;
+    use sir_stack_scheduling_common::{
+        BlockFinalization, RepresentativeGraph, RepresentativeOperation,
+    };
 
     #[test]
     fn renders_source_file_and_block_mappings() {

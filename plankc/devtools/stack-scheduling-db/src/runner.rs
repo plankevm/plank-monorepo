@@ -1,4 +1,5 @@
-use crate::{corpus::Corpus, database::DatabaseWriter, pipeline};
+use crate::{database::DatabaseWriter, pipeline};
+use sir_stack_scheduling_common::Corpus;
 use std::path::PathBuf;
 
 pub struct RunConfig {
@@ -27,8 +28,8 @@ pub fn run(config: RunConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::{BLOCKS_FILE_NAME, CANONICAL_BLOCKS_FILE_NAME};
     use plank_test_utils::dedent_preserve_indent;
+    use sir_stack_scheduling_common::{BLOCKS_FILE_NAME, CANONICAL_BLOCKS_FILE_NAME};
     use std::fs;
 
     #[test]

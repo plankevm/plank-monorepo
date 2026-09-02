@@ -25,9 +25,8 @@ devtools/stack-scheduling-bench/plot.py \
 
 The implementation is separated by responsibility:
 
-- `src/corpus.rs`: corpus discovery and loading
 - `src/runner.rs`: corpus iteration and pipeline execution
-- `src/pipeline.rs`: benchmark pipeline definition
+- `src/pipeline.rs`: benchmark scheduling pipeline
 - `src/collection.rs`: per-block measurements and CSV output
-- `src/inline_constants.rs`: benchmark-specific constant inlining pass and tests
+- `../stack-scheduling-common`: shared corpus loading and SIR preparation
 - `plot.py`: regressions and plots
