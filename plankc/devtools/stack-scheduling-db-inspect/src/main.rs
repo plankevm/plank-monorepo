@@ -2,8 +2,8 @@ use clap::Parser;
 use csv as _;
 use plank_core as _;
 use rand as _;
-use serde as _;
 use serde_json as _;
+use sir_stack_scheduling_common as _;
 use sir_stack_scheduling_db_inspect::{
     Graph, find, random, render_graph, render_schedule, render_source_blocks,
 };

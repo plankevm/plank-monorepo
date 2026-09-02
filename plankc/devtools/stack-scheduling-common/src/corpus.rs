@@ -27,6 +27,10 @@ impl Corpus {
         self.files.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
     pub fn entries(&self) -> impl Iterator<Item = CorpusEntry> + '_ {
         self.files.iter().map(|path| {
             let source = fs::read_to_string(path)

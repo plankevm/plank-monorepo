@@ -23,7 +23,7 @@ impl Constant {
     }
 }
 
-pub fn inline_constants_at_each_use(program: &mut EthIRProgram) {
+pub(crate) fn inline_constants_at_each_use(program: &mut EthIRProgram) {
     let mut constants = IndexVec::<LocalId, Option<Constant>>::new();
     constants.resize(program.next_free_local_id.idx(), None);
     for operation in program.operations.iter() {

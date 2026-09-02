@@ -39,6 +39,9 @@ plank-mir-lower-sona = { path = "frontend/mir-lower-sona" }
 plank-hir-eval = { path = "frontend/hir-eval" }
 plank-driver = { path = "frontend/driver" }
 
+# Devtools
+sir-stack-scheduling-common = { path = "devtools/stack-scheduling-common" }
+
 # Sensei IR Sub Crates
 sir-data = { path = "sir/crates/data" }
 sir-passes = { path = "sir/crates/passes" }

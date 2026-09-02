@@ -1,8 +1,8 @@
 use crate::{
     collection::CsvCollector,
-    corpus::Corpus,
     pipeline::{PipelineOutput, StackSchedulingPipeline},
 };
+use sir_stack_scheduling_common::Corpus;
 use std::path::PathBuf;
 
 pub struct RunConfig {

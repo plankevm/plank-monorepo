@@ -3191,12 +3191,23 @@ dependencies = [
  "clap",
  "csv",
  "plank-core",
+ "sir-data",
+ "sir-stack-scheduling",
+ "sir-stack-scheduling-common",
+]
+
+[[package]]
+name = "sir-stack-scheduling-common"
+version = "0.1.0"
+dependencies = [
+ "plank-core",
  "plank-test-utils",
  "pretty_assertions",
+ "serde",
+ "serde_json",
  "sir-data",
  "sir-parser",
  "sir-passes",
- "sir-stack-scheduling",
 ]
 
 [[package]]
@@ -3207,13 +3218,10 @@ dependencies = [
  "csv",
  "plank-core",
  "plank-test-utils",
- "pretty_assertions",
- "serde",
  "serde_json",
  "sir-data",
- "sir-parser",
- "sir-passes",
  "sir-stack-scheduling",
+ "sir-stack-scheduling-common",
  "tempfile",
 ]
 
@@ -3226,8 +3234,8 @@ dependencies = [
  "plank-core",
  "plank-test-utils",
  "rand 0.9.2",
- "serde",
  "serde_json",
+ "sir-stack-scheduling-common",
 ]
 
 [[package]]
