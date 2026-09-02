@@ -64,6 +64,7 @@ logos = "0.16.0"
 chumsky = "0.11.1"
 index_vec = "0.1.4"
 clap = { version = "4.5", features = ["derive"] }
+csv = "1"
 anstream = "1"
 stacker = "0.1.22"
 

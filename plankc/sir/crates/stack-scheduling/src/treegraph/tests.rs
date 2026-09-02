@@ -727,34 +727,73 @@ fn splits_tree_when_an_effect_is_interposed() {
     );
 }
 
-fn repeated_and_multi_output_operands() -> OpGraph {
-    let builder = OpGraphBuilder::with_capacity(3, 4);
-    let mut builder = builder.end_inputs_begin_ops();
-    let (first, second) = {
-        let op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
-        let mut op = op.end_inputs_begin_outputs();
-        (op.add_output(), op.add_output())
+#[test]
+fn detects_crossing_dependencies_between_independent_trees() {
+    let input = {
+        let builder = OpGraphBuilder::with_capacity(4, 4);
+        let mut builder = builder.end_inputs_begin_ops();
+        let (first_leaf_operation, first_leaf) = {
+            let operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            let id = operation.id();
+            (id, operation.end_inputs_begin_outputs().add_output())
+        };
+        let (second_leaf_operation, second_leaf) = {
+            let operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            let id = operation.id();
+            (id, operation.end_inputs_begin_outputs().add_output())
+        };
+        let first_root = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(second_leaf_operation);
+            operation.add_input(first_leaf);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let second_root = {
+            let mut operation = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            operation.add_predecessor(first_leaf_operation);
+            operation.add_input(second_leaf);
+            operation.end_inputs_begin_outputs().add_output()
+        };
+        let mut builder = builder.end_ops_begin_end_stack();
+        builder.push_end_stack_value(first_root);
+        builder.push_end_stack_value(second_root);
+        builder.finish()
     };
-    let repeated = {
-        let op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
-        op.end_inputs_begin_outputs().add_output()
-    };
-    let output = {
-        let mut op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
-        op.add_input(first);
-        op.add_input(second);
-        op.add_input(repeated);
-        op.add_input(repeated);
-        op.end_inputs_begin_outputs().add_output()
-    };
-    let mut builder = builder.end_ops_begin_end_stack();
-    builder.push_end_stack_value(output);
-    builder.finish()
+    let trees = build_tree_graph(&input);
+    assert_snapshot(
+        &input,
+        &trees,
+        r#"
+        "#,
+    );
 }
 
 #[test]
 fn does_not_absorb_multi_output_or_repeated_operands() {
-    let input = repeated_and_multi_output_operands();
+    let input = {
+        let builder = OpGraphBuilder::with_capacity(3, 4);
+        let mut builder = builder.end_inputs_begin_ops();
+        let (first, second) = {
+            let op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            let mut op = op.end_inputs_begin_outputs();
+            (op.add_output(), op.add_output())
+        };
+        let repeated = {
+            let op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            op.end_inputs_begin_outputs().add_output()
+        };
+        let output = {
+            let mut op = builder.begin_op(OpNodeKind::Normal(OperationIdx::ZERO));
+            op.add_input(first);
+            op.add_input(second);
+            op.add_input(repeated);
+            op.add_input(repeated);
+            op.end_inputs_begin_outputs().add_output()
+        };
+        let mut builder = builder.end_ops_begin_end_stack();
+        builder.push_end_stack_value(output);
+        builder.finish()
+    };
     let trees = build_tree_graph(&input);
     assert_snapshot(
         &input,

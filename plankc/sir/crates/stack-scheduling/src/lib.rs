@@ -4,12 +4,14 @@ use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
 use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
+#[cfg(test)]
+use {clap as _, csv as _};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{op_graph::build_graph_effectful, stack::StackOps, treegraph::build_tree_graph};
+use crate::{op_graph::build_graph_effectful, stack::StackOps};
 
 mod depth_first_search;
 mod greedy_intra_op_scheduler;
@@ -87,17 +89,15 @@ pub fn schedule<'ir>(
         block_graphs
             .into_par_iter()
             .map(|(block, graph)| {
-                let tree_graph = build_tree_graph(&graph);
-                let mut result = depth_first_search::schedule(
+                let result = depth_first_search::schedule(
                     block,
                     local_alloc_start,
                     config,
                     depth_first_search::SearchConfig {
                         max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
                     },
-                    &tree_graph.graph,
+                    &graph,
                 );
-                result.ops = tree_graph.expand_schedule(&graph, &result.ops);
                 (block.id(), result)
             })
             .collect::<Vec<_>>()
