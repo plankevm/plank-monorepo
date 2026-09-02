@@ -17,6 +17,8 @@ plank-test-utils.workspace = true
 pretty_assertions.workspace = true
 sir-parser.workspace = true
 proptest.workspace = true
+clap.workspace = true
+csv.workspace = true
 
 [lints]
 workspace = true
