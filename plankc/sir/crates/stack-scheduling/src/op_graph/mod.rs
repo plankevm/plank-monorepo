@@ -4,9 +4,14 @@ use sir_data::OperationIdx;
 mod build_effectful;
 mod build_simple;
 pub mod builder;
+mod canonical;
 pub use build_effectful::build_graph_effectful;
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
+pub use canonical::{
+    CanonicalBlockKey, CanonicalOpId, CanonicalizedBlock, canonicalize_block_for_dedup,
+    deduplication_key,
+};
 
 newtype_index! {
     pub struct OpNodeId;
@@ -114,6 +119,16 @@ impl OpGraph {
         self.get_bit_set(id.idx())
     }
 
+    /// Returns the predecessors connected to `id` by the transitive reduction of the graph.
+    pub fn get_immediate_predecessors(&self, id: OpNodeId) -> impl Iterator<Item = OpNodeId> + '_ {
+        let predecessors = self.get_predecessors(id);
+        predecessors.iter().filter(move |&candidate| {
+            !predecessors
+                .iter()
+                .any(|predecessor| self.get_predecessors(predecessor).contains(candidate))
+        })
+    }
+
     pub fn get_producer(&self, id: ValueNodeId) -> Option<OpNodeId> {
         self.producers[id]
     }
@@ -148,15 +163,7 @@ impl OpGraph {
 
     #[cfg(test)]
     pub(crate) fn displayed_predecessors(&self, operation: OpNodeId) -> Vec<OpNodeId> {
-        let predecessors = self.get_predecessors(operation);
-        predecessors
-            .iter()
-            .filter(|&candidate| {
-                !predecessors
-                    .iter()
-                    .any(|predecessor| self.get_predecessors(predecessor).contains(candidate))
-            })
-            .collect()
+        self.get_immediate_predecessors(operation).collect()
     }
 }
 

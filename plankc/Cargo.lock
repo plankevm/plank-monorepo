@@ -3176,6 +3176,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "rayon",
+ "sha2",
  "sir-data",
  "sir-parser",
  "sir-passes",
