@@ -1,0 +1,20 @@
+[package]
+name = "sir-stack-scheduling-db-inspect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+clap.workspace = true
+csv.workspace = true
+plank-core.workspace = true
+rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+plank-test-utils.workspace = true
+
+[lints]
+workspace = true

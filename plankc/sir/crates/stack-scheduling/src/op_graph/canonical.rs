@@ -8,7 +8,7 @@ use super::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
 
 newtype_index! {
     pub struct CanonicalOpId;
-    struct CanonicalValueId;
+    pub struct CanonicalValueId;
     struct CanonicalInputArenaIdx;
     struct CanonicalPredArenaIdx;
 }
@@ -47,6 +47,14 @@ struct CanonicalOpWitness {
 pub struct CanonicalizedBlock {
     canonical: CanonicalBlock,
     witness: IndexVec<CanonicalOpId, CanonicalOpWitness>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CanonicalOpView<'a> {
+    pub inputs_fifo: &'a [CanonicalValueId],
+    pub effect_predecessors: &'a [CanonicalOpId],
+    pub output_count: u32,
+    pub flippable: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,8 +111,31 @@ impl CanonicalizedBlock {
         self.canonical.deduplication_key()
     }
 
+    pub fn input_count(&self) -> u32 {
+        self.canonical.input_count
+    }
+
+    pub fn last_op_terminates(&self) -> bool {
+        matches!(self.canonical.finalization, BlockFinalization::LastOpTerminates)
+    }
+
     pub fn canonical_op_ids(&self) -> impl Iterator<Item = CanonicalOpId> + '_ {
         self.witness.iter_idx()
+    }
+
+    pub fn operation(&self, operation: CanonicalOpId) -> CanonicalOpView<'_> {
+        let operation = self.canonical.operations[operation];
+        CanonicalOpView {
+            inputs_fifo: &self.canonical.inputs_arena[operation.inputs],
+            effect_predecessors: &self.canonical.effect_predecessors_arena
+                [operation.effect_predecessors],
+            output_count: operation.output_count,
+            flippable: operation.flippable,
+        }
+    }
+
+    pub fn outputs_fifo(&self) -> &[CanonicalValueId] {
+        &self.canonical.outputs_fifo
     }
 
     pub fn source_op(&self, operation: CanonicalOpId) -> OpNodeId {
@@ -433,339 +464,5 @@ fn update_u32(hash: &mut Sha256, value: u32) {
 }
 
 #[cfg(test)]
-mod tests {
-    use hashbrown::HashMap;
-    use plank_core::IndexVec;
-    use sir_data::OperationIdx;
-
-    use super::*;
-    use crate::op_graph::OpGraphBuilder;
-
-    #[derive(Clone, Copy)]
-    enum TestOpKind {
-        Normal,
-        Flippable,
-        RetDestPush,
-    }
-
-    struct TestOp<'a> {
-        name: &'a str,
-        kind: TestOpKind,
-        inputs: Vec<&'a str>,
-        outputs: Vec<&'a str>,
-        predecessors: Vec<&'a str>,
-    }
-
-    struct TestGraph<'a> {
-        inputs: Vec<&'a str>,
-        operations: Vec<TestOp<'a>>,
-        outputs: Vec<&'a str>,
-        finalization: BlockFinalization,
-    }
-
-    fn directive<'a>(line: &'a str, name: &str) -> Option<&'a str> {
-        line.strip_prefix(name)
-            .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
-            .map(str::trim)
-    }
-
-    fn names(source: &str) -> Vec<&str> {
-        source.split_whitespace().collect()
-    }
-
-    fn parse_operation(line: &str) -> TestOp<'_> {
-        let (head, tail) = line.split_once("->").expect("operation is missing `->`");
-        let (name, invocation) =
-            head.trim().split_once(' ').expect("operation is missing its kind");
-        let open = invocation.find('(').expect("operation is missing `(`");
-        let kind = match &invocation[..open] {
-            "normal" => TestOpKind::Normal,
-            "flip" => TestOpKind::Flippable,
-            "ret-dest" => TestOpKind::RetDestPush,
-            unknown => panic!("unknown operation kind `{unknown}`"),
-        };
-        let inputs = invocation[open + 1..].strip_suffix(')').expect("operation is missing `)`");
-        let (outputs, predecessors) = tail
-            .split_once("; after ")
-            .map_or((tail, ""), |(outputs, predecessors)| (outputs, predecessors));
-
-        TestOp {
-            name,
-            kind,
-            inputs: names(inputs),
-            outputs: names(outputs),
-            predecessors: names(predecessors),
-        }
-    }
-
-    fn parse_test_graph(source: &str) -> TestGraph<'_> {
-        let mut inputs = None;
-        let mut operations = Vec::new();
-        let mut outputs = None;
-        let mut finalization = None;
-
-        for line in source.lines().map(str::trim).filter(|line| !line.is_empty()) {
-            if let Some(value) = directive(line, "inputs") {
-                assert!(inputs.replace(names(value)).is_none(), "duplicate `inputs` directive");
-            } else if let Some(value) = directive(line, "outputs") {
-                assert!(outputs.replace(names(value)).is_none(), "duplicate `outputs` directive");
-            } else if let Some(value) = directive(line, "final") {
-                let value = match value {
-                    "shuffle" => BlockFinalization::ShuffleToOutputs,
-                    "terminate" => BlockFinalization::LastOpTerminates,
-                    unknown => panic!("unknown finalization `{unknown}`"),
-                };
-                assert!(finalization.replace(value).is_none(), "duplicate `final` directive");
-            } else {
-                operations.push(parse_operation(line));
-            }
-        }
-
-        TestGraph {
-            inputs: inputs.expect("missing `inputs` directive"),
-            operations,
-            outputs: outputs.expect("missing `outputs` directive"),
-            finalization: finalization.expect("missing `final` directive"),
-        }
-    }
-
-    fn build_test_graph(source: &str) -> (OpGraph, BlockFinalization) {
-        let parsed = parse_test_graph(source);
-        let estimated_values = parsed.inputs.len()
-            + parsed.operations.iter().map(|operation| operation.outputs.len()).sum::<usize>();
-        let mut graph = OpGraphBuilder::with_capacity(parsed.operations.len(), estimated_values);
-        let mut values = HashMap::new();
-        for input in parsed.inputs {
-            let value = graph.push_input_value();
-            assert!(values.insert(input, value).is_none(), "duplicate value `{input}`");
-        }
-
-        let mut graph = graph.end_inputs_begin_ops();
-        let mut source_operations = IndexVec::<OperationIdx, ()>::new();
-        let mut operations = HashMap::new();
-        for operation in parsed.operations {
-            let source_operation = source_operations.push(());
-            let kind = match operation.kind {
-                TestOpKind::Normal => OpNodeKind::Normal(source_operation),
-                TestOpKind::Flippable => OpNodeKind::Flippable(source_operation),
-                TestOpKind::RetDestPush => OpNodeKind::RetDestPush(source_operation),
-            };
-            let mut builder = graph.begin_op(kind);
-            for predecessor in operation.predecessors {
-                builder.add_predecessor(operations[predecessor]);
-            }
-            for input in operation.inputs {
-                builder.add_input(values[input]);
-            }
-            let operation_id = builder.id();
-            let mut builder = builder.end_inputs_begin_outputs();
-            for output in operation.outputs {
-                let value = builder.add_output();
-                assert!(values.insert(output, value).is_none(), "duplicate value `{output}`");
-            }
-            assert!(
-                operations.insert(operation.name, operation_id).is_none(),
-                "duplicate operation `{}`",
-                operation.name
-            );
-        }
-
-        let mut graph = graph.end_ops_begin_end_stack();
-        for output in parsed.outputs {
-            graph.push_end_stack_value(values[output]);
-        }
-        (graph.finish(), parsed.finalization)
-    }
-
-    fn canonical_key(source: &str) -> CanonicalBlockKey {
-        let (graph, finalization) = build_test_graph(source);
-        canonicalize_graph(&graph, finalization).deduplication_key()
-    }
-
-    fn assert_canonicalizes_equal(left: &str, right: &str) {
-        assert_eq!(canonical_key(left), canonical_key(right), "left:\n{left}\nright:\n{right}");
-    }
-
-    fn assert_canonicalizes_different(left: &str, right: &str) {
-        assert_ne!(canonical_key(left), canonical_key(right), "left:\n{left}\nright:\n{right}");
-    }
-
-    #[test]
-    fn equal_when_independent_operations_are_reordered() {
-        assert_canonicalizes_equal(
-            r#"
-                inputs left right
-                make_left normal(left) -> left_value
-                make_right normal(right) -> right_value
-                combine normal(left_value right_value) -> result
-                outputs result
-                final shuffle
-            "#,
-            r#"
-                inputs left right
-                make_right normal(right) -> right_value
-                make_left normal(left) -> left_value
-                combine normal(left_value right_value) -> result
-                outputs result
-                final shuffle
-            "#,
-        );
-    }
-
-    #[test]
-    fn equal_when_tied_operations_with_different_consumers_are_reordered() {
-        assert_canonicalizes_equal(
-            r#"
-                inputs value
-                make_single normal(value) -> single
-                make_repeated normal(value) -> repeated
-                use_single normal(single) -> single_result
-                use_repeated normal(repeated repeated) -> repeated_result
-                outputs single_result repeated_result
-                final shuffle
-            "#,
-            r#"
-                inputs value
-                make_repeated normal(value) -> repeated
-                make_single normal(value) -> single
-                use_single normal(single) -> single_result
-                use_repeated normal(repeated repeated) -> repeated_result
-                outputs single_result repeated_result
-                final shuffle
-            "#,
-        );
-    }
-
-    #[test]
-    fn equal_for_normal_and_return_destination_push_with_the_same_arity() {
-        assert_canonicalizes_equal(
-            r#"
-                inputs
-                make normal() -> value
-                outputs value
-                final shuffle
-            "#,
-            r#"
-                inputs
-                make ret-dest() -> value
-                outputs value
-                final shuffle
-            "#,
-        );
-    }
-
-    #[test]
-    fn equal_when_flippable_inputs_are_reversed() {
-        let first = r#"
-            inputs left right
-            combine flip(left right) -> result
-            outputs result
-            final shuffle
-        "#;
-        let second = r#"
-            inputs left right
-            combine flip(right left) -> result
-            outputs result
-            final shuffle
-        "#;
-
-        assert_canonicalizes_equal(first, second);
-
-        let (graph, finalization) = build_test_graph(second);
-        let canonicalized = canonicalize_graph(&graph, finalization);
-        let operation = canonicalized.canonical_op_ids().next().unwrap();
-        assert!(canonicalized.first_two_inputs_swapped(operation));
-    }
-
-    #[test]
-    fn not_equal_when_unflippable_inputs_are_reversed() {
-        assert_canonicalizes_different(
-            r#"
-                inputs left right
-                combine normal(left right) -> result
-                outputs result
-                final shuffle
-            "#,
-            r#"
-                inputs left right
-                combine normal(right left) -> result
-                outputs result
-                final shuffle
-            "#,
-        );
-    }
-
-    #[test]
-    fn equal_when_an_ordering_edge_is_transitively_redundant() {
-        assert_canonicalizes_equal(
-            r#"
-                inputs
-                first normal() ->
-                second normal() -> ; after first
-                third normal() -> ; after second
-                outputs
-                final shuffle
-            "#,
-            r#"
-                inputs
-                first normal() ->
-                second normal() -> ; after first
-                third normal() -> ; after first second
-                outputs
-                final shuffle
-            "#,
-        );
-    }
-
-    #[test]
-    fn not_equal_when_necessary_ordering_differs() {
-        assert_canonicalizes_different(
-            r#"
-                inputs
-                first normal() ->
-                second normal() ->
-                outputs
-                final shuffle
-            "#,
-            r#"
-                inputs
-                first normal() ->
-                second normal() -> ; after first
-                outputs
-                final shuffle
-            "#,
-        );
-    }
-
-    #[test]
-    fn not_equal_when_finalization_differs() {
-        assert_canonicalizes_different(
-            r#"
-                inputs
-                outputs
-                final shuffle
-            "#,
-            r#"
-                inputs
-                outputs
-                final terminate
-            "#,
-        );
-    }
-
-    #[test]
-    fn key_has_versioned_hex_display() {
-        let key = canonical_key(
-            r#"
-                inputs
-                outputs
-                final shuffle
-            "#,
-        );
-
-        assert_eq!(
-            key.to_string(),
-            "ssb1:105c3a3c4eade43a0d32470e29c3fde6612c883f20b1d7514299b2ba8d2f9d87"
-        );
-    }
-}
+#[path = "canonical_tests.rs"]
+mod tests;
