@@ -5,13 +5,13 @@ use tempfile as _;
 
 use clap::{Parser, Subcommand, ValueEnum};
 use owo_colors::OwoColorize;
-use plank_driver::{BackendKind, Driver};
+use plank_driver::{BackendKind, Driver, print_ir};
 use plank_evm::EvmVersion;
 use plank_hir::display::DisplayHir;
-use plank_mir::display::DisplayMir;
+use plank_mir::{Mir, display::DisplayMir};
 use plank_parser::cst::display::DisplayCST;
 use plank_session::SourceId;
-use plank_source::source_fs::RealFs;
+use plank_source::{SourceFs, source_fs::RealFs};
 use std::{
     path::{Path, PathBuf},
     process,
@@ -38,6 +38,8 @@ struct Cli {
 enum Action {
     /// Compile a Plank project
     Build(BuildArgs),
+    /// Check a Plank project
+    Check(CheckArg),
     /// Open Plank documentation in the browser
     Doc {
         /// Topic to open (e.g., 'comptime', 'getting-started')
@@ -46,9 +48,24 @@ enum Action {
 }
 
 #[derive(Parser)]
-struct BuildArgs {
+struct ProjectArgs {
     file_path: String,
 
+    #[arg(long = "module-name")]
+    module_name: Option<String>,
+
+    #[arg(long = "module-root", requires = "module_name")]
+    module_root: Option<String>,
+
+    #[arg(long = "dep", value_parser = parse_dep)]
+    deps: Vec<(String, PathBuf)>,
+
+    #[arg(long = "evm-version", value_enum, default_value_t = EvmVersionArg::Osaka)]
+    evm_version: EvmVersionArg,
+}
+
+#[derive(Parser)]
+struct FrontendDisplayArgs {
     #[arg(short = 'c', long = "show-cst", help = "show CST")]
     show_cst: bool,
 
@@ -57,7 +74,10 @@ struct BuildArgs {
 
     #[arg(short = 'm', long = "show-mir", help = "show MIR")]
     show_mir: bool,
+}
 
+#[derive(Parser)]
+struct BackendDisplayArgs {
     #[arg(
         long = "show-sir-first",
         help = "show the selected backend IR before backend optimizations"
@@ -66,24 +86,33 @@ struct BuildArgs {
 
     #[arg(long = "show-sir-final", help = "show the selected backend IR before bytecode emission")]
     show_sir_last: bool,
+}
+
+#[derive(Parser)]
+struct CheckArg {
+    #[command(flatten)]
+    common_args: ProjectArgs,
+
+    #[command(flatten)]
+    frontend_display_args: FrontendDisplayArgs,
+}
+
+#[derive(Parser)]
+struct BuildArgs {
+    #[command(flatten)]
+    project_args: ProjectArgs,
+
+    #[command(flatten)]
+    frontend_display_args: FrontendDisplayArgs,
+
+    #[command(flatten)]
+    backend_display_args: BackendDisplayArgs,
 
     #[arg(short = 'O', long = "optimize", help = optimize_help())]
     optimize: Option<String>,
 
     #[arg(long = "backend", value_enum, default_value_t = BackendArg::Sir)]
     backend: BackendArg,
-
-    #[arg(long = "module-name")]
-    module_name: Option<String>,
-
-    #[arg(long = "module-root", requires = "module_name")]
-    module_root: Option<String>,
-
-    #[arg(long = "evm-version", value_enum, default_value_t = EvmVersionArg::Osaka)]
-    evm_version: EvmVersionArg,
-
-    #[arg(long = "dep", value_parser = parse_dep)]
-    deps: Vec<(String, PathBuf)>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -137,6 +166,7 @@ fn main() {
 
     match cli.action {
         Action::Build(args) => build(plank_dir, args),
+        Action::Check(args) => check(plank_dir, args),
         Action::Doc { topic } => {
             let doc_dir = plank_dir
                 .unwrap_or_else(|| cli_error_and_exit("neither $PLANK_DIR or $HOME set"))
@@ -188,18 +218,56 @@ fn doc(doc_dir: PathBuf, topic: Option<String>) {
         .unwrap_or_else(|_| cli_error_and_exit(format!("`{opener}` failed to open documentation")));
 }
 
-fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
+fn check(plank_dir: Option<PathBuf>, args: CheckArg) {
     let mut driver = Driver::new(&RealFs);
 
-    if let Some(name) = &args.module_name {
-        let root = match &args.module_root {
+    let project_args = args.common_args;
+    let frontend_display_args = args.frontend_display_args;
+    register_modules(&mut driver, &project_args, plank_dir);
+    if run_frontend(&mut driver, &project_args, &frontend_display_args).is_none() {
+        driver.render_diagnostics_and_exit()
+    }
+}
+
+fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
+    let mut driver = Driver::new(&RealFs);
+    let project_args = args.project_args;
+    let frontend_display_args = args.frontend_display_args;
+    let backend_display_args = args.backend_display_args;
+    register_modules(&mut driver, &project_args, plank_dir);
+
+    match run_frontend(&mut driver, &project_args, &frontend_display_args) {
+        None => driver.render_diagnostics_and_exit(),
+        Some(mir) => {
+            let bytecode = driver
+                .emit_bytecode_with_backend(
+                    &mir,
+                    args.optimize.as_deref(),
+                    backend_display_args.show_sir_in,
+                    backend_display_args.show_sir_last,
+                    args.backend.into(),
+                )
+                .unwrap_or_else(|err| cli_error_and_exit(err));
+
+            println!("{:#}", alloy_primitives::hex::display(bytecode));
+        }
+    };
+}
+
+fn register_modules<F: SourceFs>(
+    driver: &mut Driver<F>,
+    common_args: &ProjectArgs,
+    plank_dir: Option<PathBuf>,
+) {
+    if let Some(name) = &common_args.module_name {
+        let root = match &common_args.module_root {
             Some(root) => PathBuf::from(root),
-            None => Path::new(&args.file_path)
+            None => Path::new(&common_args.file_path)
                 .parent()
                 .unwrap_or_else(|| {
                     cli_error_and_exit(format!(
                         "{:?} has no parent directory to use as module root{}",
-                        args.file_path, ", omit --module-name or specify --module-root",
+                        common_args.file_path, ", omit --module-name or specify --module-root",
                     ))
                 })
                 .to_path_buf(),
@@ -207,7 +275,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         driver.register_module(name, root);
     }
 
-    let std_path = args
+    let std_path = common_args
         .deps
         .iter()
         .find_map(|(name, path)| (name == "std").then_some(path.clone()))
@@ -217,21 +285,27 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         driver.register_std(std_path);
     }
 
-    for (name, path) in &args.deps {
+    for (name, path) in &common_args.deps {
         if name == "std" {
             continue;
         }
         driver.register_module(name, path.clone());
     }
+}
 
-    let project = match driver.load_project(Path::new(&args.file_path)) {
+fn run_frontend<F: SourceFs>(
+    driver: &mut Driver<F>,
+    common_args: &ProjectArgs,
+    frontend_display_args: &FrontendDisplayArgs,
+) -> Option<Mir> {
+    let project = match driver.load_project(Path::new(&common_args.file_path)) {
         Some(project) => project,
         None => {
             driver.render_diagnostics_and_exit();
         }
     };
 
-    if args.show_cst {
+    if frontend_display_args.show_cst {
         let parsed = &project.parsed_sources[SourceId::ROOT];
         let source = driver.session.get_source(SourceId::ROOT);
         let display = DisplayCST::new(&parsed.cst, &source.content, &parsed.lexed);
@@ -240,47 +314,15 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
 
     let hir = driver.lower_hir(&project);
 
-    let needs_separators = (args.show_hir as u32)
-        + (args.show_mir as u32)
-        + (args.show_sir_in as u32)
-        + (args.show_sir_last as u32)
-        >= 2;
-
-    if args.show_hir {
-        if needs_separators {
-            eprintln!("////////////////////////////////////////////////////////////////");
-            eprintln!("//                            HIR                             //");
-            eprintln!("////////////////////////////////////////////////////////////////");
-        }
-        eprintln!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
+    if frontend_display_args.show_hir {
+        print_ir("HIR", DisplayHir::new(&hir, &driver.values, &driver.session));
     }
 
-    let mir = driver.evaluate_hir(&hir, project.core_ops_source, args.evm_version.into());
+    let mir = driver.evaluate_hir(&hir, project.core_ops_source, common_args.evm_version.into());
 
-    if args.show_mir {
-        if needs_separators {
-            eprintln!("\n");
-            eprintln!("////////////////////////////////////////////////////////////////");
-            eprintln!("//                            MIR                             //");
-            eprintln!("////////////////////////////////////////////////////////////////");
-        }
-        eprintln!("{}", DisplayMir::new(&mir, &driver.values, &driver.session));
+    if frontend_display_args.show_mir {
+        print_ir("MIR", DisplayMir::new(&mir, &driver.values, &driver.session));
     }
 
-    if driver.session.has_errors() {
-        driver.render_diagnostics_and_exit();
-    }
-
-    let bytecode = driver
-        .emit_bytecode_with_backend(
-            &mir,
-            args.optimize.as_deref(),
-            needs_separators,
-            args.show_sir_in,
-            args.show_sir_last,
-            args.backend.into(),
-        )
-        .unwrap_or_else(|err| cli_error_and_exit(err));
-
-    println!("{:#}", alloy_primitives::hex::display(bytecode));
+    if driver.session.has_errors() { None } else { Some(mir) }
 }
