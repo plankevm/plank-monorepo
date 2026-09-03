@@ -3239,6 +3239,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sir-stack-scheduling-db-submit"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "csv",
+ "plank-test-utils",
+ "serde_json",
+ "sir-stack-scheduling-common",
+ "sir-stack-scheduling-db-inspect",
+ "tempfile",
+]
+
+[[package]]
 name = "sir-static-memory-allocator"
 version = "0.1.0"
 dependencies = [

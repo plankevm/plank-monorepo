@@ -12,6 +12,13 @@ newtype_index! {
     struct SpillSlotId;
 }
 
+const MAX_EVM_STACK_HEIGHT: usize = 1024;
+
+pub struct ScheduleTrace {
+    pub rendering: String,
+    pub error: Option<String>,
+}
+
 pub fn source_blocks(source_blocks: &[SourceBlock]) -> String {
     let mut output = format!("source blocks ({}):", source_blocks.len());
     for source in source_blocks {
@@ -49,6 +56,14 @@ pub fn graph(graph: &Graph) -> String {
 }
 
 pub fn schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> Result<String, String> {
+    let trace = schedule_trace(graph, schedule);
+    match trace.error {
+        Some(error) => Err(error),
+        None => Ok(trace.rendering),
+    }
+}
+
+pub fn schedule_trace(graph: &Graph, schedule: &RepresentativeSchedule) -> ScheduleTrace {
     let mut stack = Vec::with_capacity(graph.total_values());
     for input in graph.input_values().rev() {
         stack.push(input);
@@ -57,10 +72,47 @@ pub fn schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> Result<Stri
     let mut completed =
         DenseIndexSet::<OperationId>::with_capacity_in_bits(graph.operation_ids().count());
     let mut steps = vec![Step::new("; start:", &stack)];
+    if stack.len() > MAX_EVM_STACK_HEIGHT {
+        return ScheduleTrace {
+            rendering: render_steps(&steps),
+            error: Some(format!(
+                "initial stack height {} exceeds the EVM limit of {MAX_EVM_STACK_HEIGHT}",
+                stack.len()
+            )),
+        };
+    }
 
     for &scheduled in schedule.0.iter() {
-        let action = apply(scheduled, graph, &mut stack, &mut spills, &mut completed)?;
-        steps.push(Step::new(action, &stack));
+        match apply(scheduled, graph, &mut stack, &mut spills, &mut completed) {
+            Ok(action) => {
+                steps.push(Step::new(action, &stack));
+                if stack.len() > MAX_EVM_STACK_HEIGHT {
+                    return ScheduleTrace {
+                        rendering: render_steps(&steps),
+                        error: Some(format!(
+                            "stack height {} exceeds the EVM limit of {MAX_EVM_STACK_HEIGHT}",
+                            stack.len()
+                        )),
+                    };
+                }
+            }
+            Err(error) => {
+                return ScheduleTrace { rendering: render_steps(&steps), error: Some(error) };
+            }
+        }
+    }
+
+    let error = validate_final_state(graph, &stack, &completed).err();
+    ScheduleTrace { rendering: render_steps(&steps), error }
+}
+
+fn validate_final_state(
+    graph: &Graph,
+    stack: &[ValueId],
+    completed: &DenseIndexSet<OperationId>,
+) -> Result<(), String> {
+    if let Some(missing) = graph.operation_ids().find(|&operation| !completed.contains(operation)) {
+        return Err(format!("schedule does not execute op{missing}"));
     }
 
     if graph.finalization == BlockFinalization::ShuffleToOutputs {
@@ -73,7 +125,10 @@ pub fn schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> Result<Stri
             ));
         }
     }
+    Ok(())
+}
 
+fn render_steps(steps: &[Step]) -> String {
     let action_width = steps.iter().map(|step| step.action.len()).max().unwrap_or(0);
     let stack_width = steps.iter().map(|step| step.stack.len()).max().unwrap_or(0);
     let mut output = String::new();
@@ -83,7 +138,7 @@ pub fn schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> Result<Stri
         }
         write!(output, "{:<action_width$}  {:>stack_width$}", step.action, step.stack).unwrap();
     }
-    Ok(output)
+    output
 }
 
 struct Step {
@@ -152,7 +207,7 @@ fn apply(
         }
         RepresentativeStackOp::Flipped { operation } => {
             apply_operation(graph, stack, completed, operation, true)?;
-            Ok(format!("op{operation}'"))
+            Ok(format!("op{operation}f"))
         }
     }
 }
@@ -288,7 +343,7 @@ mod tests {
             ; start:      [v0, v1, v2]
             dup3      [v2, v0, v1, v2]
             op0       [v3, v0, v1, v2]
-            op1'          [v4, v1, v2]
+            op1f          [v4, v1, v2]
             "#,
         );
         assert_eq!(crate::render_graph(&graph), expected_graph);

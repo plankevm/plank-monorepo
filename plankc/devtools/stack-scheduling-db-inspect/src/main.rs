@@ -24,8 +24,12 @@ struct Args {
     random: bool,
 
     /// Database directory or canonical-blocks.csv path.
-    #[arg(short, long, default_value = "tmp/stack-scheduling-db")]
+    #[arg(short, long, default_value_os_t = default_database_path())]
     database: PathBuf,
+}
+
+fn default_database_path() -> PathBuf {
+    sir_stack_scheduling_common::workspace_corpus_path("stack-scheduling-db")
 }
 
 fn main() -> ExitCode {

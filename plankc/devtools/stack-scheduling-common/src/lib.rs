@@ -1,6 +1,7 @@
 mod corpus;
 mod inline_constants;
 mod model;
+mod paths;
 mod pipeline;
 
 pub use corpus::{Corpus, CorpusEntry};
@@ -9,4 +10,5 @@ pub use model::{
     CANONICAL_BLOCKS_HEADER, CanonicalBlockRow, RepresentativeGraph, RepresentativeOperation,
     RepresentativeSchedule, RepresentativeStackOp,
 };
+pub use paths::{blocks_path, canonical_blocks_path, normalize_hash, workspace_corpus_path};
 pub use pipeline::{PreparedProgram, prepare_program};

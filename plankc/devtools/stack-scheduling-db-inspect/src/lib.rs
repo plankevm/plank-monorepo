@@ -7,6 +7,7 @@ mod render;
 
 pub use database::{DatabaseEntry, SourceBlock};
 pub use graph::Graph;
+pub use render::ScheduleTrace;
 pub use sir_stack_scheduling_common::{
     BlockFinalization, RepresentativeGraph, RepresentativeOperation, RepresentativeSchedule,
     RepresentativeStackOp,
@@ -30,4 +31,8 @@ pub fn render_graph(graph: &Graph) -> String {
 
 pub fn render_schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> Result<String, String> {
     render::schedule(graph, schedule)
+}
+
+pub fn trace_schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> ScheduleTrace {
+    render::schedule_trace(graph, schedule)
 }
