@@ -1,4 +1,4 @@
-use crate::model::{representative_graph, representative_schedule, schedule_gas_cost};
+use crate::model::{representative_graph, representative_schedule};
 use plank_core::Idx;
 use sir_data::BasicBlockId;
 use sir_stack_scheduling::{
@@ -61,9 +61,10 @@ impl DatabaseWriter {
         let representative_graph = serde_json::to_string(&representative_graph(canonicalized))
             .expect("representative graph serialization failed");
         let representative_schedule =
-            serde_json::to_string(&representative_schedule(source_schedule, graph, canonicalized))
-                .expect("representative schedule serialization failed");
-        let gas_cost = schedule_gas_cost(source_schedule);
+            representative_schedule(source_schedule, graph, canonicalized);
+        let gas_cost = representative_schedule.gas_cost();
+        let representative_schedule = serde_json::to_string(&representative_schedule)
+            .expect("representative schedule serialization failed");
 
         match self.canonical_blocks.entry(canonical_hash) {
             std::collections::btree_map::Entry::Vacant(entry) => {

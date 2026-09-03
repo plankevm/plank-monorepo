@@ -14,12 +14,16 @@ struct Args {
     input: PathBuf,
 
     /// Directory receiving blocks.csv and canonical-blocks.csv.
-    #[arg(default_value = "tmp/stack-scheduling-db")]
+    #[arg(default_value_os_t = default_database_path())]
     output_directory: PathBuf,
 }
 
 fn default_corpus_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../stack-scheduling-bench/corpus")
+    sir_stack_scheduling_common::workspace_corpus_path("stack-scheduling")
+}
+
+fn default_database_path() -> PathBuf {
+    sir_stack_scheduling_common::workspace_corpus_path("stack-scheduling-db")
 }
 
 fn main() {

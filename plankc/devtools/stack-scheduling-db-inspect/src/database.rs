@@ -1,9 +1,9 @@
 use rand::Rng;
 use sir_stack_scheduling_common::{
-    BLOCKS_FILE_NAME, BlockRow, CANONICAL_BLOCKS_FILE_NAME, CanonicalBlockRow, RepresentativeGraph,
-    RepresentativeSchedule,
+    BlockRow, CanonicalBlockRow, RepresentativeGraph, RepresentativeSchedule, blocks_path,
+    canonical_blocks_path, normalize_hash,
 };
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub struct DatabaseEntry {
     pub canonical_hash: String,
@@ -92,20 +92,4 @@ fn source_blocks(database: &Path, canonical_hash: &str) -> Result<Box<[SourceBlo
         return Err(format!("hash '{canonical_hash}' has no entries in '{}'", path.display()));
     }
     Ok(source_blocks.into_boxed_slice())
-}
-
-fn blocks_path(database: &Path) -> PathBuf {
-    if database.is_dir() {
-        database.join(BLOCKS_FILE_NAME)
-    } else {
-        database.parent().unwrap_or_else(|| Path::new(".")).join(BLOCKS_FILE_NAME)
-    }
-}
-
-fn canonical_blocks_path(database: &Path) -> PathBuf {
-    if database.is_dir() { database.join(CANONICAL_BLOCKS_FILE_NAME) } else { database.to_owned() }
-}
-
-fn normalize_hash(hash: &str) -> String {
-    if hash.starts_with("ssb1:") { hash.to_owned() } else { format!("ssb1:{hash}") }
 }

@@ -14,18 +14,18 @@ Omit the hash and select a random canonical block with `--random`:
 ```bash
 cargo run -p sir-stack-scheduling-db-inspect -- \
   --random \
-  --database /tmp/stack-scheduling-db-full
+  --database corpus/stack-scheduling-db-full
 ```
 
 The selected hash is printed above the graph. The default database directory is
-`tmp/stack-scheduling-db`. Select another generated database or pass its `canonical-blocks.csv`
+`corpus/stack-scheduling-db`. Select another generated database or pass its `canonical-blocks.csv`
 directly with `--database`:
 
 ```bash
 cargo run -p sir-stack-scheduling-db-inspect -- \
   b456edeffb54263bdc5e7525e9d69c976235fc5c75c11f28ea487539cd7d79d8 \
-  --database /tmp/stack-scheduling-db-full
+  --database corpus/stack-scheduling-db-full
 ```
 
-A `_f` suffix marks a flippable graph operation. An apostrophe marks a schedule step that executes
+A `_f` suffix marks a flippable graph operation. An `f` suffix marks a schedule step that executes
 the operation with its first two inputs flipped.

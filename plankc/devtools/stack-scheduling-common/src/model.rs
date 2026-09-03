@@ -32,6 +32,22 @@ pub struct RepresentativeOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepresentativeSchedule(pub Box<[RepresentativeStackOp]>);
 
+impl RepresentativeSchedule {
+    pub fn gas_cost(&self) -> u64 {
+        self.0
+            .iter()
+            .map(|operation| match operation {
+                RepresentativeStackOp::Swap { .. }
+                | RepresentativeStackOp::Dup { .. }
+                | RepresentativeStackOp::Pop => 3,
+                RepresentativeStackOp::Exchange { .. } | RepresentativeStackOp::Store { .. } => 9,
+                RepresentativeStackOp::Load { .. } => 6,
+                RepresentativeStackOp::Op { .. } | RepresentativeStackOp::Flipped { .. } => 0,
+            })
+            .sum()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RepresentativeStackOp {
@@ -98,5 +114,6 @@ mod tests {
             schedule_text,
             r#"[{"kind":"swap","depth":1},{"kind":"flipped","operation":0}]"#
         );
+        assert_eq!(schedule.gas_cost(), 3);
     }
 }

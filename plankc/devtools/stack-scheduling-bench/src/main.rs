@@ -22,7 +22,7 @@ struct Args {
 }
 
 fn default_corpus_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("corpus")
+    sir_stack_scheduling_common::workspace_corpus_path("stack-scheduling")
 }
 
 fn main() {

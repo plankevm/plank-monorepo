@@ -1,7 +1,8 @@
 # Stack scheduling corpus benchmark
 
-The checked-in corpus is under [`corpus/`](corpus/). Running the benchmark without arguments uses
-that corpus and writes `tmp/stack-scheduling.csv` from the workspace root.
+The default corpus is under the gitignored workspace directory `corpus/stack-scheduling`. Running
+the benchmark without arguments uses that corpus and writes `tmp/stack-scheduling.csv` from the
+workspace root.
 
 ```bash
 cargo run --release -p sir-stack-scheduling-bench
@@ -10,7 +11,7 @@ cargo run --release -p sir-stack-scheduling-bench
 A specific SIR file or external corpus and output path can be supplied positionally:
 
 ```bash
-cargo run --release -p sir-stack-scheduling-bench -- path/to/input.sir tmp/stats.csv
+cargo run --release -p sir-stack-scheduling-bench -- corpus/my-input tmp/stats.csv
 ```
 
 Use `--print-canonicalized` to print the exact prepared SIR passed to stack scheduling.

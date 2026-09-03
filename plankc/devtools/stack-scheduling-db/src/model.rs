@@ -146,16 +146,3 @@ fn find_canonical_operation(
         })
         .expect("scheduled operation is absent from its canonical graph")
 }
-
-pub fn schedule_gas_cost(schedule: &[StackOps]) -> u64 {
-    schedule
-        .iter()
-        .map(|operation| match operation {
-            StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => 3,
-            StackOps::Exchange(_, _) => 9,
-            StackOps::Store(_) => 9,
-            StackOps::Load(_) => 6,
-            StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
-        })
-        .sum()
-}
