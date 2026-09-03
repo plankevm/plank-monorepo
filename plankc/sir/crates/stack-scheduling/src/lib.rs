@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
-use layouts::{LayoutsTracker, build_basic_block_layout_sets};
+use layouts::{LayoutsTracker, build_basic_block_layout_sets, order_layouts};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
@@ -27,6 +27,19 @@ const AVG_OPS_PER_BLOCK: usize = 20;
 const DEFAULT_MAX_SEARCH_CANDIDATES: usize = 1_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutOrdering {
+    #[default]
+    Naive,
+    SuccessorOnly,
+    SuccessorAndProducer,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GlobalSchedulerConfig {
+    pub layout_ordering: LayoutOrdering,
+}
+
 #[derive(Debug)]
 pub struct ScheduledOps {
     bb_to_ops: DenseIndexMap<BasicBlockId, StackOpIdx>,
@@ -46,13 +59,29 @@ impl ScheduledOps {
 pub fn schedule<'ir>(
     program: &'ir EthIRProgram,
     analyses: &AnalysesStore,
-    config: ShuffleConfig,
+    shuffle_config: ShuffleConfig,
+) -> (ScheduledOps, LayoutsTracker<'ir>, StaticAllocId) {
+    schedule_with_config(program, analyses, shuffle_config, GlobalSchedulerConfig::default())
+}
+
+pub fn schedule_with_config<'ir>(
+    program: &'ir EthIRProgram,
+    analyses: &AnalysesStore,
+    shuffle_config: ShuffleConfig,
+    global_config: GlobalSchedulerConfig,
 ) -> (ScheduledOps, LayoutsTracker<'ir>, StaticAllocId) {
     let in_out_bundling = ControlFlowGraphInOutBundling::new(program, analyses);
-    let layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);
+    let mut layout_sets = build_basic_block_layout_sets(program, analyses, &in_out_bundling);
+    order_layouts(
+        program,
+        analyses,
+        &in_out_bundling,
+        &mut layout_sets,
+        global_config.layout_ordering,
+    );
     let mut next_alloc_id = program.next_static_alloc_id;
 
-    // Naively take layout sets as layouts since they are deterministically ordered.
+    // Freeze the selected layout sets as concrete layouts.
     let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
 
     let mut bb_to_ops = DenseIndexMap::with_capacity(program.basic_blocks.len());
@@ -90,7 +119,7 @@ pub fn schedule<'ir>(
                 let result = depth_first_search::schedule(
                     block,
                     local_alloc_start,
-                    config,
+                    shuffle_config,
                     depth_first_search::SearchConfig {
                         max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
                     },
