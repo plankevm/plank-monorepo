@@ -1,0 +1,14 @@
+# Stack scheduling database benchmark
+
+Runs the current stack scheduler over every canonical graph in
+`corpus/stack-scheduling-db`, compares its total gas with the best-known schedules, and saves any
+improvements back to the database.
+
+```bash
+cargo run --release -p sir-stack-scheduling-db-bench
+```
+
+Every generated schedule is replayed and validated. An invalid schedule stops the run immediately
+and prints its hash, graph, stack trace, and validation error. The score is
+`best-known total / local total`; percentile deltas are the nearest-rank values of
+`best-known gas - local gas` for each graph.
