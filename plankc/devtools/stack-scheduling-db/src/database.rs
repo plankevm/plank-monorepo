@@ -6,18 +6,19 @@ use sir_stack_scheduling::{
     stack::StackOps,
 };
 use sir_stack_scheduling_common::{
-    BLOCKS_FILE_NAME, BLOCKS_HEADER, BlockRow, CANONICAL_BLOCKS_FILE_NAME, CANONICAL_BLOCKS_HEADER,
-    CanonicalBlockRow,
+    BLOCKS_FILE_NAME, BLOCKS_HEADER, BlockRow, CANONICAL_BLOCKS_FILE_NAME, CanonicalBlockRow,
+    seed_canonical_database,
 };
 use std::{
     collections::BTreeMap,
-    fs::{self, File},
+    fs,
     path::{Path, PathBuf},
 };
+use tempfile::NamedTempFile;
 
 pub struct DatabaseWriter {
     output_directory: PathBuf,
-    blocks: csv::Writer<File>,
+    blocks: csv::Writer<NamedTempFile>,
     canonical_blocks: BTreeMap<String, CanonicalBlockRecord>,
 }
 
@@ -32,11 +33,8 @@ impl DatabaseWriter {
         fs::create_dir_all(&output_directory).unwrap_or_else(|error| {
             panic!("failed to create '{}': {error}", output_directory.display())
         });
-        let blocks_path = output_directory.join(BLOCKS_FILE_NAME);
-        let mut blocks =
-            csv::WriterBuilder::new().has_headers(false).from_path(&blocks_path).unwrap_or_else(
-                |error| panic!("failed to create '{}': {error}", blocks_path.display()),
-            );
+        let file = NamedTempFile::new_in(&output_directory).unwrap();
+        let mut blocks = csv::WriterBuilder::new().has_headers(false).from_writer(file);
         blocks.write_record(BLOCKS_HEADER).unwrap();
         Self { output_directory, blocks, canonical_blocks: BTreeMap::new() }
     }
@@ -95,24 +93,20 @@ impl DatabaseWriter {
         self.blocks.flush().unwrap();
 
         let canonical_blocks_path = self.output_directory.join(CANONICAL_BLOCKS_FILE_NAME);
-        let mut canonical_blocks = csv::WriterBuilder::new()
-            .has_headers(false)
-            .from_path(&canonical_blocks_path)
-            .unwrap_or_else(|error| {
-                panic!("failed to create '{}': {error}", canonical_blocks_path.display())
-            });
-        canonical_blocks.write_record(CANONICAL_BLOCKS_HEADER).unwrap();
-        for (canonical_hash, record) in self.canonical_blocks {
-            canonical_blocks
-                .serialize(CanonicalBlockRow {
-                    canonical_hash,
-                    canonical_graph: record.graph,
-                    best_schedule: record.best_schedule,
-                    best_gas_cost: record.best_gas_cost,
-                })
-                .unwrap();
-        }
-        canonical_blocks.flush().unwrap();
+        let rows = self
+            .canonical_blocks
+            .into_iter()
+            .map(|(canonical_hash, record)| CanonicalBlockRow {
+                canonical_hash,
+                canonical_graph: record.graph,
+                best_schedule: record.best_schedule,
+                best_gas_cost: record.best_gas_cost,
+            })
+            .collect::<Box<[_]>>();
+        seed_canonical_database(&canonical_blocks_path, &rows).unwrap();
+        let blocks = self.blocks.into_inner().unwrap();
+        blocks.as_file().sync_all().unwrap();
+        blocks.persist(self.output_directory.join(BLOCKS_FILE_NAME)).unwrap();
 
         eprintln!("wrote {}", self.output_directory.join(BLOCKS_FILE_NAME).display());
         eprintln!("wrote {}", canonical_blocks_path.display());

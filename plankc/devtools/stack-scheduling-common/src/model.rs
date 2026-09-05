@@ -1,10 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const BLOCKS_FILE_NAME: &str = "blocks.csv";
-pub const CANONICAL_BLOCKS_FILE_NAME: &str = "canonical-blocks.csv";
+pub const CANONICAL_BLOCKS_FILE_NAME: &str = "canonical-blocks.sqlite3";
 pub const BLOCKS_HEADER: [&str; 3] = ["file", "block_id", "canonical_hash"];
-pub const CANONICAL_BLOCKS_HEADER: [&str; 4] =
-    ["canonical_hash", "canonical_graph", "best_schedule", "best_gas_cost"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepresentativeGraph {

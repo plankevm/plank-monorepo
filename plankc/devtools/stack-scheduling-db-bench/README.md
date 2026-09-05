@@ -2,7 +2,10 @@
 
 Runs the current stack scheduler over every canonical graph in
 `corpus/stack-scheduling-db`, compares its total gas with the best-known schedules, and saves any
-improvements back to the database.
+improvements back to `canonical-blocks.sqlite3`.
+
+Improvements use the submitter's conditional SQLite update, preserving concurrent submissions.
+Statistics compare against the baseline snapshot loaded at startup.
 
 ```bash
 cargo run --release -p sir-stack-scheduling-db-bench

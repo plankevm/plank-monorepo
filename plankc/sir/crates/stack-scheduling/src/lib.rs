@@ -1,8 +1,8 @@
 use std::num::NonZero;
 
-use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{DenseIndexMap, Idx, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
-use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
+use sir_data::{BasicBlockId, BlockView, ControlView, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
@@ -27,6 +27,28 @@ const AVG_OPS_PER_BLOCK: usize = 20;
 const DEFAULT_MAX_SEARCH_CANDIDATES: usize = 1_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockFinalization {
+    ShuffleToOutputs,
+    LastOpTerminates,
+}
+
+impl BlockFinalization {
+    fn from_block(block: BlockView<'_>) -> Self {
+        if matches!(block.control(), ControlView::LastOpTerminates) {
+            Self::LastOpTerminates
+        } else {
+            Self::ShuffleToOutputs
+        }
+    }
+}
+
+pub struct GraphScheduleResult {
+    pub ops: Box<[StackOps]>,
+    pub spill_count: u32,
+    pub candidate_limit_reached: bool,
+}
+
 #[derive(Debug)]
 pub struct ScheduledOps {
     bb_to_ops: DenseIndexMap<BasicBlockId, StackOpIdx>,
@@ -40,6 +62,26 @@ impl ScheduledOps {
 
     pub fn enumerate_idx(&self) -> impl Iterator<Item = (BasicBlockId, &[StackOps])> {
         self.bb_to_ops.iter().map(|(bb_id, &idx)| (bb_id, &self.ops[idx]))
+    }
+}
+
+pub fn schedule_graph(
+    graph: &op_graph::OpGraph,
+    finalization: BlockFinalization,
+) -> GraphScheduleResult {
+    let result = depth_first_search::schedule(
+        finalization,
+        StaticAllocId::ZERO,
+        ShuffleConfig::PRE_AMSTERDAM,
+        depth_first_search::SearchConfig {
+            max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
+        },
+        graph,
+    );
+    GraphScheduleResult {
+        ops: result.ops,
+        spill_count: result.spill_count,
+        candidate_limit_reached: result.candidate_limit_reached,
     }
 }
 
@@ -88,7 +130,7 @@ pub fn schedule<'ir>(
             .into_par_iter()
             .map(|(block, graph)| {
                 let result = depth_first_search::schedule(
-                    block,
+                    BlockFinalization::from_block(block),
                     local_alloc_start,
                     config,
                     depth_first_search::SearchConfig {

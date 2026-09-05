@@ -26,3 +26,7 @@ EOF
 Accepted operations are `swapN`, `dupN`, `pop`, `opN`, and `opNf`. Spill slots are block-local,
 numbered from zero, and written as `storeN` and `loadN`; stores must introduce slots in order.
 `swapN` and `dupN` use the usual one-based EVM display depths.
+
+`--database` accepts a directory or `canonical-blocks.sqlite3` path. Validation runs before a short
+SQLite transaction that updates only if the schedule is still cheaper. Concurrent submissions and
+benchmarks retain the lowest cost; no external lock file is needed.

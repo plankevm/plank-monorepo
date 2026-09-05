@@ -18,7 +18,7 @@ cargo run -p sir-stack-scheduling-db-inspect -- \
 ```
 
 The selected hash is printed above the graph. The default database directory is
-`corpus/stack-scheduling-db`. Select another generated database or pass its `canonical-blocks.csv`
+`corpus/stack-scheduling-db`. Select another generated database or pass its `canonical-blocks.sqlite3`
 directly with `--database`:
 
 ```bash

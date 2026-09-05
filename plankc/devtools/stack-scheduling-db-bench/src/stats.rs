@@ -46,10 +46,6 @@ impl Stats {
         self.capped_searches += usize::from(candidate_limit_reached);
     }
 
-    pub fn has_improvements(&self) -> bool {
-        self.improvements != 0
-    }
-
     pub fn render(mut self, elapsed: Duration) -> String {
         assert_eq!(self.deltas.len(), self.graph_count);
         self.deltas.sort_unstable();

@@ -1,6 +1,9 @@
 use clap as _;
 use std::path::Path;
 
+#[cfg(test)]
+use tempfile as _;
+
 mod database;
 mod graph;
 mod render;
