@@ -1,14 +1,30 @@
 use crate::{
     BlockFinalization,
+    depth_first_search::{self, SearchConfig, SearchResult},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
+    treegraph::build_tree_graph,
 };
 use sir_data::StaticAllocId;
 use smallvec::SmallVec;
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
+
+pub fn schedule(
+    finalization: BlockFinalization,
+    next_alloc_id: StaticAllocId,
+    shuffle: ShuffleConfig,
+    search: SearchConfig,
+    graph: &OpGraph,
+) -> SearchResult {
+    let trees = build_tree_graph(graph);
+    let mut result =
+        depth_first_search::schedule(finalization, next_alloc_id, shuffle, search, &trees.graph);
+    result.ops = trees.expand_schedule(graph, &result.ops);
+    result
+}
 
 pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),

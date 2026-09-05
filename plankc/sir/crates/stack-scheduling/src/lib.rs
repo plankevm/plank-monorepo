@@ -69,7 +69,7 @@ pub fn schedule_graph(
     graph: &op_graph::OpGraph,
     finalization: BlockFinalization,
 ) -> GraphScheduleResult {
-    let result = depth_first_search::schedule(
+    let result = scheduler::schedule(
         finalization,
         StaticAllocId::ZERO,
         ShuffleConfig::PRE_AMSTERDAM,
@@ -129,7 +129,7 @@ pub fn schedule<'ir>(
         block_graphs
             .into_par_iter()
             .map(|(block, graph)| {
-                let result = depth_first_search::schedule(
+                let result = scheduler::schedule(
                     BlockFinalization::from_block(block),
                     local_alloc_start,
                     config,

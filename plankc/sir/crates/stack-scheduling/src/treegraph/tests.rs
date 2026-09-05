@@ -764,6 +764,41 @@ fn detects_crossing_dependencies_between_independent_trees() {
         &input,
         &trees,
         r#"
+            input graph:
+              inputs: []
+              op0 normal
+                inputs: []
+                outputs: [v0]
+                predecessors: []
+              op1 normal
+                inputs: []
+                outputs: [v1]
+                predecessors: []
+              op2 normal
+                inputs: [v0]
+                outputs: [v2]
+                predecessors: [op0, op1]
+              op3 normal
+                inputs: [v1]
+                outputs: [v3]
+                predecessors: [op0, op1]
+              outputs: [v2, v3]
+
+            tree graph:
+              inputs: []
+              op0 normal = [op1]
+                inputs: []
+                outputs: [v0]
+                predecessors: []
+              op1 normal = [op0, op2]
+                inputs: []
+                outputs: [v1]
+                predecessors: [op0]
+              op2 normal = [op3]
+                inputs: [v0]
+                outputs: [v2]
+                predecessors: [op1]
+              outputs: [v1, v2]
         "#,
     );
 }
