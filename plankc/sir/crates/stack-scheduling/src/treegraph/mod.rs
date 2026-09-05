@@ -94,7 +94,7 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
 
     TreeGraphBuilder {
         original,
-        built: DenseIndexMap::with_capacity(total_ops),
+        original_to_root: DenseIndexMap::with_capacity(total_ops),
         completed: DenseIndexMap::with_capacity(total_ops),
         materialization_order: Vec::with_capacity(total_ops),
         builder: builder.end_inputs_begin_ops(),
@@ -108,15 +108,9 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
     .into_graph()
 }
 
-#[derive(Debug, Clone, Copy)]
-enum BuiltState {
-    Materialized,
-    FoldedInto(OpNodeId),
-}
-
 struct TreeGraphBuilder<'graph> {
     original: &'graph OpGraph,
-    built: DenseIndexMap<OpNodeId, BuiltState>,
+    original_to_root: DenseIndexMap<OpNodeId, OpNodeId>,
     completed: DenseIndexMap<OpNodeId, Vec<OpNodeId>>,
     materialization_order: Vec<OpNodeId>,
     builder: OpGraphBuilder<AddingGraphOps>,
@@ -155,7 +149,10 @@ impl TreeGraphBuilder<'_> {
     fn build_operand(&mut self, consumer: OpNodeId, input: ValueNodeId) -> Option<Vec<OpNodeId>> {
         let producer = self.original.get_producer(input)?;
         if self.fold_consumer(producer) == Some(consumer) {
-            assert!(self.built.get(producer).is_none(), "foldable producer was already built");
+            assert!(
+                self.original_to_root.get(producer).is_none(),
+                "foldable producer was already built"
+            );
             let tree = self.build_pending(producer);
             if self.tree_inputs(&tree, false).expect("built an invalid operand tree").is_empty() {
                 Some(tree)
@@ -180,7 +177,7 @@ impl TreeGraphBuilder<'_> {
     }
 
     fn build_pending(&mut self, root: OpNodeId) -> Vec<OpNodeId> {
-        assert!(self.built.get(root).is_none(), "built an operation twice");
+        assert!(self.original_to_root.get(root).is_none(), "built an operation twice");
         let op = self.original.get_op(root);
         if matches!(op.kind, OpNodeKind::Flippable(_)) && op.inputs_fifo.len() >= 2 {
             self.build_flippable(root)
@@ -292,22 +289,34 @@ impl TreeGraphBuilder<'_> {
         }
 
         let mut seen = DenseIndexSet::with_capacity_in_bits(self.original.total_ops() as usize);
+        let mut external = Vec::new();
         for &operation in steps {
             for predecessor in self.original.get_predecessors(operation).iter() {
-                if operations.contains(predecessor) && !seen.contains(predecessor) {
-                    return false;
-                }
-                if !operations.contains(predecessor)
-                    && self
-                        .original
-                        .get_predecessors(predecessor)
-                        .iter()
-                        .any(|earlier| operations.contains(earlier))
-                {
-                    return false;
+                if operations.contains(predecessor) {
+                    if !seen.contains(predecessor) {
+                        return false;
+                    }
+                } else {
+                    external.push(predecessor);
                 }
             }
             seen.add(operation);
+        }
+
+        // Original-graph reachability alone misses cycles introduced by earlier contractions.
+        // Every member of an existing tree must move together with its root.
+        seen.clear();
+        while let Some(predecessor) = external.pop() {
+            if operations.contains(predecessor) {
+                return false;
+            }
+            if !seen.add(predecessor) {
+                continue;
+            }
+            external.extend(self.original.get_predecessors(predecessor).iter());
+            if let Some(&root) = self.original_to_root.get(predecessor) {
+                external.extend(self.completed[root].iter().copied());
+            }
         }
 
         self.tree_inputs(steps, root_flipped).is_some()
@@ -338,20 +347,17 @@ impl TreeGraphBuilder<'_> {
 
     fn materialize(&mut self, tree: Vec<OpNodeId>) -> OpNodeId {
         let root = *tree.last().expect("empty tree");
-        let folded = &tree[..tree.len() - 1];
-        for &operation in folded {
-            self.built.insert_no_prev(operation, BuiltState::FoldedInto(root));
+        for &operation in &tree {
+            self.original_to_root.insert_no_prev(operation, root);
         }
-        self.built.insert_no_prev(root, BuiltState::Materialized);
         self.completed.insert_no_prev(root, tree);
         self.materialization_order.push(root);
         root
     }
 
     fn ensure_materialized(&mut self, operation: OpNodeId) -> OpNodeId {
-        match self.built.get(operation).copied() {
-            Some(BuiltState::Materialized) => operation,
-            Some(BuiltState::FoldedInto(root)) => root,
+        match self.original_to_root.get(operation).copied() {
+            Some(root) => root,
             None => {
                 let tree = self.build_pending(operation);
                 self.materialize(tree)
@@ -366,15 +372,12 @@ impl TreeGraphBuilder<'_> {
                 self.ensure_materialized(operation);
             }
         }
-        assert_eq!(self.built.iter().count(), self.original.total_ops() as usize);
+        assert_eq!(self.original_to_root.iter().count(), self.original.total_ops() as usize);
         self
     }
 
     fn tree_root(&self, operation: OpNodeId) -> OpNodeId {
-        match self.built.get(operation).copied().expect("operation was not built") {
-            BuiltState::Materialized => operation,
-            BuiltState::FoldedInto(root) => root,
-        }
+        self.original_to_root[operation]
     }
 
     fn emit_tree(&mut self, root: OpNodeId) -> OpNodeId {
@@ -447,5 +450,7 @@ impl TreeGraphBuilder<'_> {
     }
 }
 
+#[cfg(test)]
+mod schedule_tests;
 #[cfg(test)]
 mod tests;
