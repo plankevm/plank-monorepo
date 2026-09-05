@@ -37,7 +37,8 @@ impl CanonicalDatabase {
 
     pub fn find(&self, hash: &str) -> Result<CanonicalBlockRow, String> {
         let hash = normalize_hash(hash);
-        self.connection
+        if let Some(row) = self
+            .connection
             .query_row(
                 &format!("SELECT {COLUMNS} FROM canonical_blocks WHERE canonical_hash = ?1"),
                 [&hash],
@@ -45,7 +46,27 @@ impl CanonicalDatabase {
             )
             .optional()
             .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("hash '{hash}' was not found in the canonical database"))
+        {
+            return Ok(row);
+        }
+
+        let mut statement = self
+            .connection
+            .prepare(&format!(
+                "SELECT {COLUMNS} FROM canonical_blocks
+                 WHERE substr(canonical_hash, 1, length(?1)) = ?1
+                 ORDER BY canonical_hash LIMIT 2"
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut matches =
+            statement.query_map([&hash], decode_row).map_err(|error| error.to_string())?;
+        let Some(first) = matches.next().transpose().map_err(|error| error.to_string())? else {
+            return Err(format!("hash prefix '{hash}' was not found in the canonical database"));
+        };
+        if matches.next().transpose().map_err(|error| error.to_string())?.is_some() {
+            return Err(format!("hash prefix '{hash}' matches more than one canonical block"));
+        }
+        Ok(first)
     }
 
     pub fn random(&self) -> Result<CanonicalBlockRow, String> {
@@ -237,6 +258,24 @@ mod tests {
         assert_eq!(
             CanonicalDatabase::open(&path).unwrap().all().unwrap().as_ref(),
             &[row("ssb1:a", 0), row("ssb1:b", 1), row("ssb1:c", 2)]
+        );
+    }
+
+    #[test]
+    fn partial_hashes_must_be_unique() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("canonical-blocks.sqlite3");
+        seed_canonical_database(&path, &[row("ssb1:aa", 1), row("ssb1:ab", 2)]).unwrap();
+        let database = CanonicalDatabase::open(&path).unwrap();
+        assert_eq!(database.find("aa").unwrap().canonical_hash, "ssb1:aa");
+        assert_eq!(database.find("ab").unwrap().canonical_hash, "ssb1:ab");
+        assert_eq!(
+            database.find("a").unwrap_err(),
+            "hash prefix 'ssb1:a' matches more than one canonical block"
+        );
+        assert_eq!(
+            database.find("missing").unwrap_err(),
+            "hash prefix 'ssb1:missing' was not found in the canonical database"
         );
     }
 

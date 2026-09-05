@@ -14,7 +14,7 @@ use plank_test_utils as _;
 #[derive(Parser)]
 #[command(about = "Display a canonical stack-scheduling graph and its best known schedule")]
 struct Args {
-    /// Canonical hash, with or without the ssb1: prefix.
+    /// Canonical hash or unique hash prefix, with or without the ssb1: prefix.
     #[arg(required_unless_present = "random", conflicts_with = "random")]
     hash: Option<String>,
 
@@ -102,9 +102,14 @@ mod tests {
         "#,
         );
         for database in [directory.path(), path.as_path()] {
-            for random in [false, true] {
+            for (hash, random) in [
+                (Some("ssb1:test"), false),
+                (Some("test"), false),
+                (Some("tes"), false),
+                (None, true),
+            ] {
                 let output = run(Args {
-                    hash: (!random).then(|| "test".to_owned()),
+                    hash: hash.map(str::to_owned),
                     random,
                     database: database.to_owned(),
                 })
