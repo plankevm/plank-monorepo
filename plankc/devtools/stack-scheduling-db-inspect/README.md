@@ -17,7 +17,8 @@ cargo run -p sir-stack-scheduling-db-inspect -- \
   --database corpus/stack-scheduling-db-full
 ```
 
-The selected hash is printed above the graph. The default database directory is
+A unique hash prefix is also accepted, for example `612f2f51d499`. Ambiguous prefixes are rejected.
+The selected full hash is printed above the graph. The default database directory is
 `corpus/stack-scheduling-db`. Select another generated database or pass its `canonical-blocks.sqlite3`
 directly with `--database`:
 
