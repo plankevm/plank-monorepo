@@ -2,10 +2,11 @@ use std::{num::NonZero, rc::Rc};
 
 use hashbrown::HashMap;
 use plank_core::IndexVec;
-use sir_data::{BlockView, ControlView, StaticAllocId};
+use sir_data::StaticAllocId;
 use smallvec::SmallVec;
 
 use crate::{
+    BlockFinalization,
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpSet, OpSetMut, ValueNodeId},
@@ -25,6 +26,7 @@ pub struct SearchConfig {
 pub struct SearchResult {
     pub ops: Box<[StackOps]>,
     pub spill_count: u32,
+    pub candidate_limit_reached: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -47,12 +49,13 @@ struct Child {
 }
 
 struct Search<'a> {
-    block: BlockView<'a>,
+    finalization: BlockFinalization,
     graph: &'a OpGraph,
     next_alloc_id: StaticAllocId,
     shuffle: ShuffleConfig,
     max_candidates: usize,
     assessed_candidates: usize,
+    candidate_limit_reached: bool,
     best_cost: u32,
     best_ops: Box<[StackOps]>,
     best_spill_count: u32,
@@ -61,7 +64,7 @@ struct Search<'a> {
 }
 
 pub fn schedule(
-    block: BlockView<'_>,
+    finalization: BlockFinalization,
     next_alloc_id: StaticAllocId,
     shuffle: ShuffleConfig,
     config: SearchConfig,
@@ -69,7 +72,7 @@ pub fn schedule(
 ) -> SearchResult {
     let mut incumbent_ops = Vec::new();
     let incumbent_next_alloc_id =
-        greedy_schedule(|op| incumbent_ops.push(op), block, next_alloc_id, shuffle, graph);
+        greedy_schedule(|op| incumbent_ops.push(op), finalization, next_alloc_id, shuffle, graph);
     let incumbent_cost = stack_ops_cost(&incumbent_ops, shuffle);
     let incumbent_spill_count = incumbent_next_alloc_id - next_alloc_id;
 
@@ -77,6 +80,7 @@ pub fn schedule(
         return SearchResult {
             ops: incumbent_ops.into_boxed_slice(),
             spill_count: incumbent_spill_count,
+            candidate_limit_reached: false,
         };
     }
 
@@ -90,12 +94,13 @@ pub fn schedule(
         executed_cost: 0,
     };
     let mut search = Search {
-        block,
+        finalization,
         graph,
         next_alloc_id,
         shuffle,
         max_candidates: config.max_candidates.get(),
         assessed_candidates: 0,
+        candidate_limit_reached: false,
         best_cost: incumbent_cost,
         best_ops: incumbent_ops.into_boxed_slice(),
         best_spill_count: incumbent_spill_count,
@@ -104,7 +109,11 @@ pub fn schedule(
     };
     search.visit(start);
 
-    SearchResult { ops: search.best_ops, spill_count: search.best_spill_count }
+    SearchResult {
+        ops: search.best_ops,
+        spill_count: search.best_spill_count,
+        candidate_limit_reached: search.candidate_limit_reached,
+    }
 }
 
 impl Search<'_> {
@@ -118,6 +127,7 @@ impl Search<'_> {
             return;
         }
         if self.assessed_candidates == self.max_candidates {
+            self.candidate_limit_reached = true;
             return;
         }
 
@@ -132,6 +142,7 @@ impl Search<'_> {
         let mut children = Vec::with_capacity(completable.len());
         for op in completable {
             if self.assessed_candidates == self.max_candidates {
+                self.candidate_limit_reached = true;
                 break;
             }
             self.assessed_candidates += 1;
@@ -167,7 +178,7 @@ impl Search<'_> {
             backing.into_boxed_slice()
         };
         let completed = OpSet::new(&complete, self.graph.total_ops());
-        if !matches!(self.block.control(), ControlView::LastOpTerminates) {
+        if self.finalization == BlockFinalization::ShuffleToOutputs {
             while stack.top().is_some_and(|value| self.graph.uses_remaining(completed, value) == 0)
             {
                 stack.pop();
@@ -183,7 +194,7 @@ impl Search<'_> {
             &complete,
             &values[..stack_end],
             &values[stack_end..],
-            !matches!(self.block.control(), ControlView::LastOpTerminates),
+            self.finalization == BlockFinalization::ShuffleToOutputs,
             self.graph,
         );
 
@@ -210,7 +221,7 @@ impl Search<'_> {
             &node.state.values[..node.state.stack_end],
             node.state.values[node.state.stack_end..].to_vec(),
         );
-        if !matches!(self.block.control(), ControlView::LastOpTerminates) {
+        if self.finalization == BlockFinalization::ShuffleToOutputs {
             greedy_shuffler::shuffle(self.shuffle, &mut stack, self.graph);
         }
         let spill_count = u32::try_from(stack.underlying_spilled().len()).expect("overflow");

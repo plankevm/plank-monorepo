@@ -29,7 +29,7 @@ pub fn run(config: RunConfig) {
 mod tests {
     use super::*;
     use plank_test_utils::dedent_preserve_indent;
-    use sir_stack_scheduling_common::{BLOCKS_FILE_NAME, CANONICAL_BLOCKS_FILE_NAME};
+    use sir_stack_scheduling_common::{BLOCKS_FILE_NAME, CanonicalBlockRow, CanonicalDatabase};
     use std::fs;
 
     #[test]
@@ -58,10 +58,11 @@ mod tests {
         )
         .unwrap();
 
+        run(RunConfig { input: corpus.clone(), output_directory: output.clone() });
         run(RunConfig { input: corpus, output_directory: output.clone() });
 
         let blocks = fs::read_to_string(output.join(BLOCKS_FILE_NAME)).unwrap();
-        let canonical_blocks = fs::read_to_string(output.join(CANONICAL_BLOCKS_FILE_NAME)).unwrap();
+        let canonical_blocks = CanonicalDatabase::open(&output).unwrap().all().unwrap();
         let expected_blocks = dedent_preserve_indent(
             r#"
             file,block_id,canonical_hash
@@ -77,6 +78,10 @@ mod tests {
             "#,
         ) + "\n";
         assert_eq!(blocks, expected_blocks);
-        assert_eq!(canonical_blocks, expected_canonical_blocks);
+        let expected = csv::Reader::from_reader(expected_canonical_blocks.as_bytes())
+            .deserialize::<CanonicalBlockRow>()
+            .collect::<Result<Box<[_]>, _>>()
+            .unwrap();
+        assert_eq!(canonical_blocks, expected);
     }
 }

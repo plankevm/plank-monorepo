@@ -1,19 +1,18 @@
-#![allow(unused)]
-
 use crate::{
+    BlockFinalization,
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
-use sir_data::{BlockView, ControlView, StaticAllocId};
+use sir_data::StaticAllocId;
 use smallvec::SmallVec;
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 
 pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),
-    block: BlockView<'_>,
+    finalization: BlockFinalization,
     next_alloc_id: StaticAllocId,
     config: ShuffleConfig,
     graph: &OpGraph,
@@ -44,7 +43,7 @@ pub fn greedy_schedule(
         complete.add(op);
     }
 
-    if !matches!(block.control(), ControlView::LastOpTerminates) {
+    if finalization == BlockFinalization::ShuffleToOutputs {
         greedy_shuffler::shuffle(config, &mut stack, graph);
     }
 

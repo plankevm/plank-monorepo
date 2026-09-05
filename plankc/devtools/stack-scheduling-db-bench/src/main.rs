@@ -1,13 +1,12 @@
-mod database;
 mod graph;
 mod stats;
 
-use database::Database;
 use graph::{reconstruct, representative_schedule};
 use indicatif::{ProgressBar, ProgressStyle};
 use sir_stack_scheduling::schedule_graph;
 use sir_stack_scheduling_common::{
-    CanonicalBlockRow, RepresentativeGraph, RepresentativeSchedule, workspace_corpus_path,
+    CanonicalBlockRow, CanonicalDatabase, RepresentativeGraph, RepresentativeSchedule,
+    improve_schedule, workspace_corpus_path,
 };
 use sir_stack_scheduling_db_inspect::{Graph as ValidationGraph, render_graph, trace_schedule};
 use stats::Stats;
@@ -28,8 +27,12 @@ fn main() -> ExitCode {
 
 fn run() -> Result<String, String> {
     let start = Instant::now();
-    let mut database = Database::load(workspace_corpus_path("stack-scheduling-db"))?;
-    let graph_count = database.rows.len();
+    let path = workspace_corpus_path("stack-scheduling-db");
+    let mut rows = CanonicalDatabase::open(&path)?.all()?;
+    let graph_count = rows.len();
+    if graph_count == 0 {
+        return Err("database contains no canonical blocks".to_owned());
+    }
     let progress = ProgressBar::new(
         u64::try_from(graph_count).expect("canonical graph count does not fit u64"),
     );
@@ -39,18 +42,21 @@ fn run() -> Result<String, String> {
     progress.set_message("processing");
     let mut stats = Stats::new(graph_count);
 
-    for row in &mut database.rows {
+    for row in &mut rows {
+        let previous_cost = row.best_gas_cost;
         if let Err(error) = process_graph(row, &mut stats) {
             progress.finish_and_clear();
             return Err(error);
+        }
+        if row.best_gas_cost < previous_cost {
+            let schedule =
+                serde_json::from_str(&row.best_schedule).map_err(|error| error.to_string())?;
+            improve_schedule(&path, &row.canonical_hash, &schedule)?;
         }
         progress.inc(1);
     }
     progress.finish_with_message("processed");
 
-    if stats.has_improvements() {
-        database.save()?;
-    }
     Ok(stats.render(start.elapsed()))
 }
 
@@ -145,6 +151,5 @@ mod tests {
             serde_json::from_str::<RepresentativeSchedule>(&row.best_schedule).unwrap(),
             RepresentativeSchedule(Box::new([RepresentativeStackOp::Op { operation: 0 }]))
         );
-        assert!(stats.has_improvements());
     }
 }

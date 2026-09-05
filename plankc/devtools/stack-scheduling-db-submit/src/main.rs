@@ -1,8 +1,7 @@
-mod database;
 mod parser;
 
 use clap::Parser;
-use sir_stack_scheduling_common::workspace_corpus_path;
+use sir_stack_scheduling_common::{ScheduleUpdate, improve_schedule, workspace_corpus_path};
 use sir_stack_scheduling_db_inspect::{Graph, find, render_graph, trace_schedule};
 use std::{
     fmt::Write,
@@ -21,7 +20,7 @@ struct Args {
     #[arg(value_name = "STACK_OP")]
     stack_ops: Vec<String>,
 
-    /// Database directory or canonical-blocks.csv path.
+    /// Database directory or canonical-blocks.sqlite3 path.
     #[arg(short, long, default_value_os_t = default_database_path())]
     database: PathBuf,
 }
@@ -77,25 +76,20 @@ fn submit(database: &Path, hash: &str, source: &str) -> Result<SubmissionResult,
     let gas_cost = parsed.schedule.gas_cost();
     let trace = trace_schedule(&graph, &parsed.schedule);
 
-    let rejection = parsed.error.or(trace.error).or_else(|| {
-        (gas_cost >= entry.gas_cost).then(|| {
-            format!("gas cost {gas_cost} does not improve the current best cost {}", entry.gas_cost)
-        })
-    });
-    let (submission_status, status_text) = match rejection {
+    let (submission_status, status_text) = match parsed.error.or(trace.error) {
         Some(reason) => (SubmissionStatus::Rejected, format!("rejected: {reason}")),
-        None => {
-            database::replace_best_schedule(
-                database,
-                &entry.canonical_hash,
-                &parsed.schedule,
-                gas_cost,
-            )?;
-            (
+        None => match improve_schedule(database, &entry.canonical_hash, &parsed.schedule)? {
+            ScheduleUpdate::Improved { previous_cost, new_cost } => (
                 SubmissionStatus::Accepted,
-                format!("accepted: improved gas cost from {} to {gas_cost}", entry.gas_cost),
-            )
-        }
+                format!("accepted: improved gas cost from {previous_cost} to {new_cost}"),
+            ),
+            ScheduleUpdate::NotImproved { current_cost } => (
+                SubmissionStatus::Rejected,
+                format!(
+                    "rejected: gas cost {gas_cost} does not improve the current best cost {current_cost}"
+                ),
+            ),
+        },
     };
 
     let mut output = String::new();
@@ -112,8 +106,8 @@ mod tests {
     use plank_test_utils::dedent_preserve_indent;
     use sir_stack_scheduling_common::{
         BLOCKS_FILE_NAME, BLOCKS_HEADER, BlockFinalization, BlockRow, CANONICAL_BLOCKS_FILE_NAME,
-        CANONICAL_BLOCKS_HEADER, CanonicalBlockRow, RepresentativeGraph, RepresentativeOperation,
-        RepresentativeSchedule, RepresentativeStackOp,
+        CanonicalBlockRow, CanonicalDatabase, RepresentativeGraph, RepresentativeOperation,
+        RepresentativeSchedule, RepresentativeStackOp, seed_canonical_database,
     };
 
     const HASH: &str = "ssb1:test";
@@ -151,20 +145,16 @@ mod tests {
             .unwrap();
         blocks.flush().unwrap();
 
-        let mut canonical = csv::WriterBuilder::new()
-            .has_headers(false)
-            .from_path(temporary.path().join(CANONICAL_BLOCKS_FILE_NAME))
-            .unwrap();
-        canonical.write_record(CANONICAL_BLOCKS_HEADER).unwrap();
-        canonical
-            .serialize(CanonicalBlockRow {
+        seed_canonical_database(
+            &temporary.path().join(CANONICAL_BLOCKS_FILE_NAME),
+            &[CanonicalBlockRow {
                 canonical_hash: HASH.to_owned(),
                 canonical_graph: serde_json::to_string(&graph).unwrap(),
                 best_schedule: serde_json::to_string(&baseline).unwrap(),
                 best_gas_cost: baseline.gas_cost(),
-            })
-            .unwrap();
-        canonical.flush().unwrap();
+            }],
+        )
+        .unwrap();
         temporary
     }
 
@@ -202,7 +192,9 @@ mod tests {
     #[test]
     fn rejects_an_invalid_schedule_and_displays_its_valid_prefix() {
         let database = database();
+        let before = CanonicalDatabase::open(database.path()).unwrap().all().unwrap();
         let result = submit(database.path(), HASH, "pop op0").unwrap();
+        assert_eq!(CanonicalDatabase::open(database.path()).unwrap().all().unwrap(), before);
         let expected = dedent_preserve_indent(
             r#"
             hash: ssb1:test

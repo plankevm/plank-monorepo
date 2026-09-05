@@ -1,7 +1,6 @@
-use rand::Rng;
 use sir_stack_scheduling_common::{
-    BlockRow, CanonicalBlockRow, RepresentativeGraph, RepresentativeSchedule, blocks_path,
-    canonical_blocks_path, normalize_hash,
+    BlockRow, CanonicalBlockRow, CanonicalDatabase, RepresentativeGraph, RepresentativeSchedule,
+    blocks_path,
 };
 use std::path::Path;
 
@@ -19,39 +18,11 @@ pub struct SourceBlock {
 }
 
 pub fn find(database: &Path, requested_hash: &str) -> Result<DatabaseEntry, String> {
-    let canonical_blocks_path = canonical_blocks_path(database);
-    let normalized_hash = normalize_hash(requested_hash);
-    let mut reader = open_database(&canonical_blocks_path)?;
-
-    for row in reader.deserialize::<CanonicalBlockRow>() {
-        let row = read_row(row, &canonical_blocks_path)?;
-        if row.canonical_hash == normalized_hash {
-            return decode(row, database);
-        }
-    }
-
-    Err(format!("hash '{normalized_hash}' was not found in '{}'", canonical_blocks_path.display()))
+    decode(CanonicalDatabase::open(database)?.find(requested_hash)?, database)
 }
 
 pub fn random(database: &Path) -> Result<DatabaseEntry, String> {
-    let canonical_blocks_path = canonical_blocks_path(database);
-    let mut reader = open_database(&canonical_blocks_path)?;
-    let mut rng = rand::rng();
-    let mut selected = None;
-
-    for (seen, row) in reader.deserialize::<CanonicalBlockRow>().enumerate() {
-        let row = read_row(row, &canonical_blocks_path)?;
-        if rng.random_range(0..=seen) == 0 {
-            selected = Some(row);
-        }
-    }
-
-    decode(
-        selected.ok_or_else(|| {
-            format!("'{}' contains no canonical blocks", canonical_blocks_path.display())
-        })?,
-        database,
-    )
+    decode(CanonicalDatabase::open(database)?.random()?, database)
 }
 
 fn open_database(path: &Path) -> Result<csv::Reader<std::fs::File>, String> {
@@ -87,9 +58,6 @@ fn source_blocks(database: &Path, canonical_hash: &str) -> Result<Box<[SourceBlo
         if row.canonical_hash == canonical_hash {
             source_blocks.push(SourceBlock { file: row.file, block_id: row.block_id });
         }
-    }
-    if source_blocks.is_empty() {
-        return Err(format!("hash '{canonical_hash}' has no entries in '{}'", path.display()));
     }
     Ok(source_blocks.into_boxed_slice())
 }
