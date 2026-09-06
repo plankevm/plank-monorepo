@@ -1,6 +1,6 @@
 use std::{fmt::Write, time::Duration};
 
-const PERCENTILES: [usize; 5] = [5, 20, 50, 80, 95];
+const PERCENTILES: &[usize] = &[1, 5, 20, 50, 80, 95, 99];
 
 pub struct Stats {
     graph_count: usize,
@@ -49,7 +49,7 @@ impl Stats {
     pub fn render(mut self, elapsed: Duration) -> String {
         assert_eq!(self.deltas.len(), self.graph_count);
         self.deltas.sort_unstable();
-        let score = if self.local_total_gas == 0 {
+        let score_percent = if self.local_total_gas == 0 {
             if self.best_known_total_gas == 0 { "100.00%".to_owned() } else { "∞%".to_owned() }
         } else {
             format!(
@@ -59,11 +59,10 @@ impl Stats {
         };
         let mut output = String::new();
         writeln!(output, "graphs: {}", self.graph_count).unwrap();
-        writeln!(output, "best known total gas: {}", self.best_known_total_gas).unwrap();
-        writeln!(output, "our total gas: {}", self.local_total_gas).unwrap();
-        writeln!(output, "score: {score}").unwrap();
+        writeln!(output, "best total gas: {}", self.best_known_total_gas).unwrap();
+        writeln!(output, "score: {} ({score_percent})", self.local_total_gas).unwrap();
         writeln!(output, "\ndelta (best known - ours):").unwrap();
-        for (index, percentile) in PERCENTILES.into_iter().enumerate() {
+        for (index, &percentile) in PERCENTILES.iter().enumerate() {
             if index != 0 {
                 output.push_str("  ");
             }

@@ -27,9 +27,5 @@ fn default_corpus_path() -> PathBuf {
 
 fn main() {
     let args = Args::parse();
-    runner::run(runner::RunConfig {
-        input: args.input,
-        output: args.output,
-        print_pipeline_input: args.print_canonicalized,
-    });
+    runner::run(args.input, args.output, args.print_canonicalized);
 }
