@@ -1,6 +1,8 @@
 use crate::op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
 use plank_core::Idx;
-use sir_data::{OperationIdx, StaticAllocId};
+use sir_data::StaticAllocId;
+
+pub use crate::stack_ops::{ParsedStackOps, ShuffleConfig, StackOps, gas_cost, parse_stack_ops};
 
 const MAX_STACK_LENGTH: usize = 1024;
 
@@ -95,82 +97,6 @@ impl EvmStack {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StackOps {
-    Swap(u8),
-    Dup(u8),
-    Pop,
-    Flipped(OperationIdx),
-    Op(OperationIdx),
-    CallRetPush(OperationIdx),
-    Exchange(u8, u8),
-    Store(StaticAllocId),
-    Load(StaticAllocId),
-}
-
-impl std::fmt::Display for StackOps {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StackOps::Swap(depth) => write!(f, "Swap({depth})"),
-            StackOps::Dup(depth) => write!(f, "Dup({depth})"),
-            StackOps::Pop => write!(f, "Pop"),
-            StackOps::Flipped(id) => write!(f, "flipped({id})"),
-            StackOps::Op(id) => write!(f, "op({id})"),
-            StackOps::CallRetPush(id) => write!(f, "call_ret_push({id})"),
-            StackOps::Exchange(a, b) => write!(f, "Exchange({a}, {b})"),
-            StackOps::Store(id) => write!(f, "store({id})"),
-            StackOps::Load(id) => write!(f, "load({id})"),
-        }
-    }
-}
-
-impl StackOps {
-    pub fn is_valid(self, config: ShuffleConfig) -> bool {
-        match self {
-            StackOps::Swap(depth) => depth <= config.max_swap_depth,
-            StackOps::Dup(depth) => depth <= config.max_dup_depth,
-            StackOps::Exchange(n, m) => {
-                n.checked_add(m).is_some_and(|sum| sum <= config.max_exchange_range)
-            }
-            StackOps::Flipped(_)
-            | StackOps::Op(_)
-            | StackOps::Pop
-            | StackOps::Store(_)
-            | StackOps::Load(_)
-            | StackOps::CallRetPush(_) => true,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ShuffleConfig {
-    pub max_swap_depth: u8,
-    pub max_dup_depth: u8,
-    /// Given 0-indexed stack depths `m`, `n`, the `max_exchange_range` represents the constraints
-    /// such that all valid `(m, n)` must satisfy `m + n <= max_exchange_range`
-    pub max_exchange_range: u8,
-    pub exchange_cost: u8,
-}
-
-impl ShuffleConfig {
-    pub const PRE_AMSTERDAM: Self = Self::max_swap_no_exchange(16);
-
-    pub const fn max_swap_no_exchange(max_swap_depth: u8) -> Self {
-        Self {
-            max_swap_depth,
-            max_dup_depth: max_swap_depth.checked_sub(1).expect("dup depth underflow"),
-            max_exchange_range: max_swap_depth,
-            exchange_cost: 9,
-        }
-    }
-}
-
-impl Default for ShuffleConfig {
-    fn default() -> Self {
-        Self::PRE_AMSTERDAM
-    }
-}
-
 pub struct TrackedStack<Sink: FnMut(StackOps)> {
     start_alloc_id: StaticAllocId,
     ops_sink: Sink,
@@ -236,16 +162,8 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
             }
         };
 
-        for (i, &target) in (0usize..).zip(op.inputs_fifo) {
-            let actual = self.inner.pop().expect("missing input");
-
-            let correct = match i {
-                0 if flipped => actual == op.inputs_fifo[1],
-                1 if flipped => actual == op.inputs_fifo[0],
-                _ => target == actual,
-            };
-
-            assert!(correct, "incorrect op schedule");
+        for _ in op.inputs_fifo {
+            self.inner.pop().expect("missing input");
         }
         for &output in op.outputs_fifo.iter().rev() {
             self.inner.push(output);

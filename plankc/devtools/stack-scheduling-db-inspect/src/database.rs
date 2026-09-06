@@ -1,13 +1,16 @@
-use sir_stack_scheduling_common::{
-    BlockRow, CanonicalBlockRow, CanonicalDatabase, RepresentativeGraph, RepresentativeSchedule,
-    blocks_path,
+use sir_stack_scheduling::{
+    BlockFinalization,
+    op_graph::{CanonicalBlock, OpGraph},
+    stack::StackOps,
 };
+use sir_stack_scheduling_common::{BlockRow, CanonicalBlockRow, CanonicalDatabase, blocks_path};
 use std::path::Path;
 
 pub struct DatabaseEntry {
     pub canonical_hash: String,
-    pub graph: RepresentativeGraph,
-    pub schedule: RepresentativeSchedule,
+    pub graph: OpGraph,
+    pub finalization: BlockFinalization,
+    pub schedule: Box<[StackOps]>,
     pub gas_cost: u64,
     pub source_blocks: Box<[SourceBlock]>,
 }
@@ -35,14 +38,18 @@ fn read_row<T>(row: Result<T, csv::Error>, path: &Path) -> Result<T, String> {
 }
 
 fn decode(row: CanonicalBlockRow, database: &Path) -> Result<DatabaseEntry, String> {
-    let graph = serde_json::from_str(&row.canonical_graph)
+    let canonical = serde_json::from_str::<CanonicalBlock>(&row.canonical_graph)
         .map_err(|error| format!("canonical graph is invalid: {error}"))?;
+    let finalization = canonical.finalization;
+    let graph =
+        canonical.to_op_graph().map_err(|error| format!("canonical graph is invalid: {error}"))?;
     let schedule = serde_json::from_str(&row.best_schedule)
         .map_err(|error| format!("best schedule is invalid: {error}"))?;
     let source_blocks = source_blocks(database, &row.canonical_hash)?;
     Ok(DatabaseEntry {
         canonical_hash: row.canonical_hash,
         graph,
+        finalization,
         schedule,
         gas_cost: row.best_gas_cost,
         source_blocks,

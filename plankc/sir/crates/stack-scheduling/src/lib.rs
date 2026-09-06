@@ -2,12 +2,15 @@ use std::num::NonZero;
 
 use plank_core::{DenseIndexMap, Idx, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use sir_data::{BasicBlockId, BlockView, ControlView, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{LayoutsTracker, build_basic_block_layout_sets};
 pub use stack::ShuffleConfig;
+pub mod display;
 pub mod op_graph;
+pub mod validation;
 
 use crate::{op_graph::build_graph_effectful, stack::StackOps};
 
@@ -17,6 +20,7 @@ mod greedy_shuffler;
 mod layouts;
 mod scheduler;
 pub mod stack;
+pub mod stack_ops;
 pub mod treegraph;
 
 newtype_index! {
@@ -27,7 +31,8 @@ const AVG_OPS_PER_BLOCK: usize = 20;
 const DEFAULT_MAX_SEARCH_CANDIDATES: usize = 1_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BlockFinalization {
     ShuffleToOutputs,
     LastOpTerminates,

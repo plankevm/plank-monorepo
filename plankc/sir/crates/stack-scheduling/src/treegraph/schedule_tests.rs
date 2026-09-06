@@ -3,17 +3,14 @@ use std::num::NonZero;
 use plank_core::Idx;
 use proptest::prelude::*;
 use sir_data::{OperationIdx, StaticAllocId};
-use sir_stack_scheduling_db_inspect::{
-    BlockFinalization as InspectFinalization, Graph, RepresentativeGraph, RepresentativeOperation,
-    RepresentativeSchedule, RepresentativeStackOp, trace_schedule,
-};
 
 use crate::{
     BlockFinalization,
     depth_first_search::SearchConfig,
     op_graph::{OpGraph, OpGraphBuilder, OpNodeKind},
     scheduler,
-    stack::{ShuffleConfig, StackOps},
+    stack::ShuffleConfig,
+    validation,
 };
 
 fn generated_graph() -> impl Strategy<Value = (OpGraph, BlockFinalization)> {
@@ -95,34 +92,13 @@ proptest! {
             SearchConfig { max_candidates: NonZero::new(20).unwrap() },
             &graph,
         );
-        let validation_graph = Graph::from_representative(RepresentativeGraph {
-            finalization: match finalization {
-                BlockFinalization::ShuffleToOutputs => InspectFinalization::ShuffleToOutputs,
-                BlockFinalization::LastOpTerminates => InspectFinalization::LastOpTerminates,
-            },
-            input_count: graph.input_values_fifo().len(),
-            operations: graph.op_ids().map(|id| {
-                let operation = graph.get_op(id);
-                RepresentativeOperation {
-                    inputs_fifo: operation.inputs_fifo.iter().map(|input| input.get()).collect(),
-                    output_count: u32::try_from(operation.outputs_fifo.len()).unwrap(),
-                    effect_predecessors: operation.predecessors.iter().map(|id| id.get()).collect(),
-                    flippable: matches!(operation.kind, OpNodeKind::Flippable(_)),
-                }
-            }).collect(),
-            outputs_fifo: graph.output_values_fifo().iter().map(|output| output.get()).collect(),
-        }).unwrap();
-        let schedule = RepresentativeSchedule(result.ops.iter().map(|&operation| match operation {
-            StackOps::Op(id) => RepresentativeStackOp::Op { operation: id.get() },
-            StackOps::Flipped(id) => RepresentativeStackOp::Flipped { operation: id.get() },
-            StackOps::Swap(depth) => RepresentativeStackOp::Swap { depth },
-            StackOps::Dup(depth) => RepresentativeStackOp::Dup { depth },
-            StackOps::Pop => RepresentativeStackOp::Pop,
-            StackOps::Store(id) => RepresentativeStackOp::Store { slot: id.get() },
-            StackOps::Load(id) => RepresentativeStackOp::Load { slot: id.get() },
-            StackOps::CallRetPush(_) | StackOps::Exchange(_, _) => unreachable!(),
-        }).collect());
-        let trace = trace_schedule(&validation_graph, &schedule);
-        prop_assert!(trace.error.is_none(), "{:?}\n{}", trace.error, trace.rendering);
+        let validation = validation::validate(
+            &graph,
+            finalization,
+            ShuffleConfig::PRE_AMSTERDAM,
+            StaticAllocId::ZERO,
+            &result.ops,
+        );
+        prop_assert!(validation.is_ok(), "{validation:?}");
     }
 }

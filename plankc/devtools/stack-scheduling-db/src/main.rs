@@ -1,5 +1,4 @@
 mod database;
-mod model;
 mod pipeline;
 mod runner;
 

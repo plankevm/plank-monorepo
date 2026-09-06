@@ -1,40 +1,33 @@
 use std::fmt;
 
-use plank_core::{DenseIndexSet, Idx, IndexVec, Span, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{DenseIndexSet, Idx, IndexVec, list_of_lists::ListOfLists, newtype_index};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sir_data::{BlockView, ControlView};
+use sir_data::{BlockView, OperationIdx};
 
-use super::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId};
+use crate::BlockFinalization;
+
+use super::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, ValueNodeId};
 
 newtype_index! {
     pub struct CanonicalOpId;
     pub struct CanonicalValueId;
-    struct CanonicalInputArenaIdx;
-    struct CanonicalPredArenaIdx;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum BlockFinalization {
-    ShuffleToOutputs,
-    LastOpTerminates,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalOperation {
+    pub inputs_fifo: Box<[CanonicalValueId]>,
+    pub effect_predecessors: Box<[CanonicalOpId]>,
+    pub output_count: u32,
+    pub flippable: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct CanonicalOp {
-    inputs: Span<CanonicalInputArenaIdx>,
-    effect_predecessors: Span<CanonicalPredArenaIdx>,
-    output_count: u32,
-    flippable: bool,
-}
-
-#[derive(Debug)]
-struct CanonicalBlock {
-    finalization: BlockFinalization,
-    input_count: u32,
-    operations: IndexVec<CanonicalOpId, CanonicalOp>,
-    inputs_arena: IndexVec<CanonicalInputArenaIdx, CanonicalValueId>,
-    effect_predecessors_arena: IndexVec<CanonicalPredArenaIdx, CanonicalOpId>,
-    outputs_fifo: Box<[CanonicalValueId]>,
+#[derive(Debug, Clone)]
+pub struct CanonicalBlock {
+    pub finalization: BlockFinalization,
+    pub input_count: u32,
+    operations: IndexVec<CanonicalOpId, CanonicalOperation>,
+    pub outputs_fifo: Box<[CanonicalValueId]>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,12 +42,102 @@ pub struct CanonicalizedBlock {
     witness: IndexVec<CanonicalOpId, CanonicalOpWitness>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct CanonicalOpView<'a> {
-    pub inputs_fifo: &'a [CanonicalValueId],
-    pub effect_predecessors: &'a [CanonicalOpId],
-    pub output_count: u32,
-    pub flippable: bool,
+impl PartialEq for CanonicalBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.finalization == other.finalization
+            && self.input_count == other.input_count
+            && self.operations.as_raw_slice() == other.operations.as_raw_slice()
+            && self.outputs_fifo == other.outputs_fifo
+    }
+}
+
+impl Eq for CanonicalBlock {}
+
+#[derive(Serialize, Deserialize)]
+struct SerializedCanonicalBlock {
+    finalization: BlockFinalization,
+    input_count: u32,
+    operations: Box<[SerializedCanonicalOperation]>,
+    outputs_fifo: Box<[u32]>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializedCanonicalOperation {
+    inputs_fifo: Box<[u32]>,
+    output_count: u32,
+    effect_predecessors: Box<[u32]>,
+    flippable: bool,
+}
+
+impl Serialize for CanonicalBlock {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SerializedCanonicalBlock {
+            finalization: self.finalization,
+            input_count: self.input_count,
+            operations: self
+                .operations
+                .iter()
+                .map(|operation| SerializedCanonicalOperation {
+                    inputs_fifo: operation.inputs_fifo.iter().map(|value| value.get()).collect(),
+                    output_count: operation.output_count,
+                    effect_predecessors: operation
+                        .effect_predecessors
+                        .iter()
+                        .map(|operation| operation.get())
+                        .collect(),
+                    flippable: operation.flippable,
+                })
+                .collect(),
+            outputs_fifo: self.outputs_fifo.iter().map(|value| value.get()).collect(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for CanonicalBlock {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+
+        let serialized = SerializedCanonicalBlock::deserialize(deserializer)?;
+        let mut operations = IndexVec::with_capacity(serialized.operations.len());
+        for operation in serialized.operations {
+            operations.push(CanonicalOperation {
+                inputs_fifo: operation
+                    .inputs_fifo
+                    .iter()
+                    .map(|&value| {
+                        CanonicalValueId::try_new(value)
+                            .ok_or_else(|| D::Error::custom("canonical value ID is out of range"))
+                    })
+                    .collect::<Result<_, _>>()?,
+                effect_predecessors: operation
+                    .effect_predecessors
+                    .iter()
+                    .map(|&operation| {
+                        CanonicalOpId::try_new(operation).ok_or_else(|| {
+                            D::Error::custom("canonical operation ID is out of range")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?,
+                output_count: operation.output_count,
+                flippable: operation.flippable,
+            });
+        }
+        let outputs_fifo = serialized
+            .outputs_fifo
+            .iter()
+            .map(|&value| {
+                CanonicalValueId::try_new(value)
+                    .ok_or_else(|| D::Error::custom("canonical value ID is out of range"))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
+            finalization: serialized.finalization,
+            input_count: serialized.input_count,
+            operations,
+            outputs_fifo,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,9 +162,7 @@ struct CanonicalState {
     source_ops: IndexVec<OpNodeId, Option<CanonicalOpId>>,
     source_values: IndexVec<ValueNodeId, Option<CanonicalValueId>>,
     canonical_values: IndexVec<CanonicalValueId, ()>,
-    operations: IndexVec<CanonicalOpId, CanonicalOp>,
-    inputs_arena: IndexVec<CanonicalInputArenaIdx, CanonicalValueId>,
-    effect_predecessors_arena: IndexVec<CanonicalPredArenaIdx, CanonicalOpId>,
+    operations: IndexVec<CanonicalOpId, CanonicalOperation>,
     witness: IndexVec<CanonicalOpId, CanonicalOpWitness>,
 }
 
@@ -94,12 +175,7 @@ struct Canonicalizer<'a> {
 }
 
 pub fn canonicalize_block_for_dedup(block: BlockView<'_>, graph: &OpGraph) -> CanonicalizedBlock {
-    let finalization = if matches!(block.control(), ControlView::LastOpTerminates) {
-        BlockFinalization::LastOpTerminates
-    } else {
-        BlockFinalization::ShuffleToOutputs
-    };
-    canonicalize_graph(graph, finalization)
+    canonicalize_graph(graph, BlockFinalization::from_block(block))
 }
 
 pub fn deduplication_key(block: BlockView<'_>, graph: &OpGraph) -> CanonicalBlockKey {
@@ -109,6 +185,10 @@ pub fn deduplication_key(block: BlockView<'_>, graph: &OpGraph) -> CanonicalBloc
 impl CanonicalizedBlock {
     pub fn deduplication_key(&self) -> CanonicalBlockKey {
         self.canonical.deduplication_key()
+    }
+
+    pub fn block(&self) -> &CanonicalBlock {
+        &self.canonical
     }
 
     pub fn input_count(&self) -> u32 {
@@ -123,15 +203,8 @@ impl CanonicalizedBlock {
         self.witness.iter_idx()
     }
 
-    pub fn operation(&self, operation: CanonicalOpId) -> CanonicalOpView<'_> {
-        let operation = self.canonical.operations[operation];
-        CanonicalOpView {
-            inputs_fifo: &self.canonical.inputs_arena[operation.inputs],
-            effect_predecessors: &self.canonical.effect_predecessors_arena
-                [operation.effect_predecessors],
-            output_count: operation.output_count,
-            flippable: operation.flippable,
-        }
+    pub fn operation(&self, operation: CanonicalOpId) -> &CanonicalOperation {
+        &self.canonical.operations[operation]
     }
 
     pub fn outputs_fifo(&self) -> &[CanonicalValueId] {
@@ -164,7 +237,88 @@ impl fmt::Display for CanonicalBlockKey {
 }
 
 impl CanonicalBlock {
-    fn deduplication_key(&self) -> CanonicalBlockKey {
+    pub fn new(
+        finalization: BlockFinalization,
+        input_count: u32,
+        operations: Box<[CanonicalOperation]>,
+        outputs_fifo: Box<[CanonicalValueId]>,
+    ) -> Self {
+        Self {
+            finalization,
+            input_count,
+            operations: IndexVec::from_vec(operations.into_vec()),
+            outputs_fifo,
+        }
+    }
+
+    pub fn operation_ids(&self) -> impl Iterator<Item = CanonicalOpId> + '_ {
+        self.operations.iter_idx()
+    }
+
+    pub fn operation(&self, operation: CanonicalOpId) -> &CanonicalOperation {
+        &self.operations[operation]
+    }
+
+    pub fn to_op_graph(&self) -> Result<OpGraph, String> {
+        let estimated_values = self.operations.iter().try_fold(
+            usize::try_from(self.input_count)
+                .map_err(|_| "canonical input count does not fit usize")?,
+            |total, operation| {
+                let outputs = usize::try_from(operation.output_count)
+                    .map_err(|_| "canonical output count does not fit usize")?;
+                total.checked_add(outputs).ok_or("canonical value count overflow")
+            },
+        )?;
+        let mut operation_ids = IndexVec::<CanonicalOpId, OpNodeId>::new();
+        let mut value_ids = IndexVec::<CanonicalValueId, ValueNodeId>::new();
+        let mut graph = OpGraphBuilder::with_capacity(self.operations.len(), estimated_values);
+        for _ in 0..self.input_count {
+            value_ids.push(graph.push_input_value());
+        }
+        let mut graph = graph.end_inputs_begin_ops();
+
+        for (canonical_id, operation) in self.operations.enumerate_idx() {
+            let source = OperationIdx::try_from(canonical_id.idx())
+                .map_err(|_| "canonical operation ID does not fit OperationIdx")?;
+            let kind = if operation.flippable {
+                OpNodeKind::Flippable(source)
+            } else {
+                OpNodeKind::Normal(source)
+            };
+            let mut builder = graph.begin_op(kind);
+            for &input in &operation.inputs_fifo {
+                let input = value_ids
+                    .get(input)
+                    .copied()
+                    .ok_or_else(|| format!("graph refers to missing v{input}"))?;
+                builder.add_input(input);
+            }
+            for &predecessor in &operation.effect_predecessors {
+                let predecessor = operation_ids.get(predecessor).copied().ok_or_else(|| {
+                    format!("operation refers to missing predecessor op{predecessor}")
+                })?;
+                builder.add_predecessor(predecessor);
+            }
+            let operation_id = builder.id();
+            let mut builder = builder.end_inputs_begin_outputs();
+            for _ in 0..operation.output_count {
+                value_ids.push(builder.add_output());
+            }
+            assert_eq!(operation_ids.push(operation_id), canonical_id);
+        }
+
+        let mut graph = graph.end_ops_begin_end_stack();
+        for &output in &self.outputs_fifo {
+            let output = value_ids
+                .get(output)
+                .copied()
+                .ok_or_else(|| format!("graph refers to missing v{output}"))?;
+            graph.push_end_stack_value(output);
+        }
+        Ok(graph.finish())
+    }
+
+    pub fn deduplication_key(&self) -> CanonicalBlockKey {
         const DOMAIN: &[u8] = b"plank.stack-scheduling.block-key";
         const FORMAT_VERSION: u8 = 1;
 
@@ -180,17 +334,14 @@ impl CanonicalBlock {
 
         for operation in self.operations.iter() {
             hash.update([u8::from(operation.flippable)]);
-            let inputs = &self.inputs_arena[operation.inputs];
-            update_len(&mut hash, inputs.len());
-            for &input in inputs {
+            update_len(&mut hash, operation.inputs_fifo.len());
+            for &input in &operation.inputs_fifo {
                 update_u32(&mut hash, input.get());
             }
             update_u32(&mut hash, operation.output_count);
 
-            let effect_predecessors =
-                &self.effect_predecessors_arena[operation.effect_predecessors];
-            update_len(&mut hash, effect_predecessors.len());
-            for &predecessor in effect_predecessors {
+            update_len(&mut hash, operation.effect_predecessors.len());
+            for &predecessor in &operation.effect_predecessors {
                 update_u32(&mut hash, predecessor.get());
             }
         }
@@ -248,8 +399,6 @@ impl Canonicalizer<'_> {
             source_values,
             canonical_values,
             operations: IndexVec::with_capacity(self.graph.total_ops() as usize),
-            inputs_arena: IndexVec::new(),
-            effect_predecessors_arena: IndexVec::new(),
             witness: IndexVec::with_capacity(self.graph.total_ops() as usize),
         };
 
@@ -287,8 +436,6 @@ impl Canonicalizer<'_> {
                 finalization: self.finalization,
                 input_count: self.input_count,
                 operations: state.operations,
-                inputs_arena: state.inputs_arena,
-                effect_predecessors_arena: state.effect_predecessors_arena,
                 outputs_fifo,
             },
             witness: state.witness,
@@ -336,22 +483,9 @@ impl Canonicalizer<'_> {
     }
 
     fn assign(&self, state: &mut CanonicalState, candidate: Candidate) {
-        let inputs_start = state.inputs_arena.len_idx();
-        for input in candidate.descriptor.inputs {
-            state.inputs_arena.push(input);
-        }
-        let inputs = Span::new(inputs_start, state.inputs_arena.len_idx());
-
-        let predecessors_start = state.effect_predecessors_arena.len_idx();
-        for predecessor in candidate.descriptor.effect_predecessors {
-            state.effect_predecessors_arena.push(predecessor);
-        }
-        let effect_predecessors =
-            Span::new(predecessors_start, state.effect_predecessors_arena.len_idx());
-
-        let canonical = state.operations.push(CanonicalOp {
-            inputs,
-            effect_predecessors,
+        let canonical = state.operations.push(CanonicalOperation {
+            inputs_fifo: candidate.descriptor.inputs.into_boxed_slice(),
+            effect_predecessors: candidate.descriptor.effect_predecessors.into_boxed_slice(),
             output_count: candidate.descriptor.output_count,
             flippable: candidate.descriptor.flippable,
         });
@@ -451,7 +585,7 @@ fn successor_fingerprints(
         .collect()
 }
 
-fn canonicalize_graph(graph: &OpGraph, finalization: BlockFinalization) -> CanonicalizedBlock {
+pub fn canonicalize_graph(graph: &OpGraph, finalization: BlockFinalization) -> CanonicalizedBlock {
     Canonicalizer::new(graph, finalization).run()
 }
 

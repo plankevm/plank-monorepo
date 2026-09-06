@@ -8,7 +8,7 @@ use std::{collections::HashSet, fmt::Write};
 use super::{
     ScheduledOps,
     layouts::{Layout, LayoutMember},
-    op_graph::{OpGraph, ValueNodeId, build_graph_simple},
+    op_graph::{OpGraph, ValueNodeId, build_graph_effectful},
     stack::{ShuffleConfig, StackOps},
 };
 
@@ -30,32 +30,49 @@ fn format_scheduled(program: &EthIRProgram, config: ShuffleConfig) -> String {
 
     let mut out = String::new();
     for (block_id, ops) in lowered.enumerate_idx() {
-        out.push_str(&format_scheduled_block(program, &layouts, block_id, ops));
+        out.push_str(&format_scheduled_block(program, &analyses, &layouts, block_id, ops, config));
     }
     out
 }
 
 pub(crate) fn format_scheduled_block(
     program: &EthIRProgram,
+    analyses: &AnalysesStore,
     layouts: &super::layouts::LayoutsTracker<'_>,
     block_id: sir_data::BasicBlockId,
     ops: &[StackOps],
+    config: ShuffleConfig,
 ) -> String {
     let Some((input_layout, output_layout)) = layouts.get_input_output(block_id) else {
         return String::new();
     };
     let block = program.block(block_id);
-    let graph = build_graph_simple(program, block, layouts, input_layout, output_layout);
+    let graph =
+        build_graph_effectful(program, block, layouts, input_layout, output_layout, analyses);
     let mut out = String::new();
 
     write!(out, "@{block_id} ").unwrap();
     fmt_layout(&mut out, layouts.get_input_layout(block_id), block);
     writeln!(out).unwrap();
 
-    for &op in ops {
-        write!(out, "    ").unwrap();
-        fmt_stack_op(&mut out, program, op);
-        writeln!(out).unwrap();
+    let first_spill = ops
+        .iter()
+        .find_map(|operation| match operation {
+            StackOps::Store(allocation) => Some(*allocation),
+            _ => None,
+        })
+        .unwrap_or(program.next_static_alloc_id);
+    let trace = crate::display::trace_with_operation_labels(
+        &graph,
+        super::BlockFinalization::from_block(block),
+        config,
+        first_spill,
+        ops,
+        |operation| format_operation(program, operation),
+    );
+    assert!(trace.error.is_none(), "{:?}\n{}", trace.error, trace.rendering);
+    for line in trace.rendering.lines() {
+        writeln!(out, "    {line}").unwrap();
     }
 
     write!(out, "    => ").unwrap();
@@ -123,31 +140,14 @@ fn fmt_layout_member(out: &mut String, member: LayoutMember, block: BlockView<'_
     }
 }
 
-fn fmt_stack_op(out: &mut String, program: &EthIRProgram, op: StackOps) {
-    match op {
-        StackOps::Swap(depth) => write!(out, "swap {depth}").unwrap(),
-        StackOps::Dup(depth) => write!(out, "dup {depth}").unwrap(),
-        StackOps::Pop => out.push_str("pop"),
-        StackOps::Flipped(op) => {
-            out.push_str("[flipped] ");
-            fmt_op(out, program, op)
-        }
-        StackOps::Op(op) => fmt_op(out, program, op),
-        StackOps::CallRetPush(operation) => write!(out, "call_ret_push #{operation}").unwrap(),
-        StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),
-        StackOps::Store(alloc) => write!(out, "store :{alloc}").unwrap(),
-        StackOps::Load(alloc) => write!(out, "load :{alloc}").unwrap(),
-    }
-}
-
-fn fmt_op(out: &mut String, program: &EthIRProgram, op: OperationIdx) {
-    match program.operations[op] {
-        Operation::SetSmallConst(data) => write!(out, "const {:#x}", data.value).unwrap(),
+fn format_operation(program: &EthIRProgram, operation: OperationIdx) -> String {
+    match program.operations[operation] {
+        Operation::SetSmallConst(data) => format!("const {:#x}", data.value),
         Operation::SetLargeConst(data) => {
-            write!(out, "large_const {:#x}", program.large_consts[data.value]).unwrap()
+            format!("large_const {:#x}", program.large_consts[data.value])
         }
-        Operation::InternalCall(_) => write!(out, "icall #{op}").unwrap(),
-        op => out.push_str(op.kind().mnemonic()),
+        Operation::InternalCall(_) => format!("icall #{operation}"),
+        operation => operation.kind().mnemonic().to_owned(),
     }
 }
 
@@ -258,9 +258,10 @@ fn lowers_terminator_inputs() {
         "#,
         r#"
         @0 []
-            const 0x2
-            const 0x1
-            return
+            ; start:         []
+            const 0x2      [v1]
+            const 0x1  [v0, v1]
+            return           []
             => []
             (return)
         "#,
@@ -282,10 +283,11 @@ fn lowers_binary_operation_inputs() {
         "#,
         r#"
         @0 []
-            const 0x2
-            const 0x1
-            add
-            stop
+            ; start:         []
+            const 0x2      [v1]
+            const 0x1  [v0, v1]
+            add            [v2]
+            stop           [v2]
             => []
             (stop)
         "#,
@@ -316,24 +318,25 @@ fn lowers_memory_hash_and_store() {
         "#,
         r#"
         @0 []
-            const 0x20
-            const 0x40
-            dup 0
-            malloc
-            const 0x0
-            calldataload
-            dup 1
-            mstore
-            dup 2
-            calldataload
-            const 0x1
-            swap 4
-            dup 2
-            add
-            mstore
-            keccak256
-            sstore
-            stop
+            ; start:                            []
+            const 0x20                        [v1]
+            const 0x40                    [v2, v1]
+            dup1                      [v2, v2, v1]
+            malloc                    [v6, v2, v1]
+            const 0x0             [v0, v6, v2, v1]
+            calldataload          [v4, v6, v2, v1]
+            dup2              [v6, v4, v6, v2, v1]
+            mstore                    [v6, v2, v1]
+            dup3                  [v1, v6, v2, v1]
+            calldataload          [v5, v6, v2, v1]
+            const 0x1         [v3, v5, v6, v2, v1]
+            swap4             [v1, v5, v6, v2, v3]
+            dup3          [v6, v1, v5, v6, v2, v3]
+            add               [v7, v5, v6, v2, v3]
+            mstore                    [v6, v2, v3]
+            keccak256                     [v8, v3]
+            sstore                              []
+            stop                                []
             => []
             (stop)
         "#,
@@ -376,45 +379,49 @@ fn lowers_calldata_sum_loop() {
         "#,
         r#"
         @0 []
-            const 0x0
-            const 0x20
-            const 0x0
-            const 0x0
-            calldataload
+            ; start:                    []
+            const 0x0                 [v4]
+            const 0x20            [v3, v4]
+            const 0x0         [v2, v3, v4]
+            const 0x0     [v0, v2, v3, v4]
+            calldataload  [v1, v2, v3, v4]
             => [$1, $2, $3, $4]
             (jmp @1)
         @1 [$5, $6, $7, $8]
-            dup 0
-            dup 2
-            lt
+            ; start:          [v0, v1, v2, v3]
+            dup1          [v0, v0, v1, v2, v3]
+            dup3      [v1, v0, v0, v1, v2, v3]
+            lt            [v4, v0, v1, v2, v3]
             => [$9 | $5, $6, $7, $8]
             (br @2 @3)
         @2 [$10, $11, $12, $13]
-            dup 2
-            const 0x20
-            [flipped] add
-            swap 3
-            calldataload
-            swap 2
-            const 0x1
-            [flipped] add
-            swap 2
-            swap 1
-            swap 4
-            add
-            swap 3
+            ; start:               [v0, v1, v2, v3]
+            dup3               [v2, v0, v1, v2, v3]
+            const 0x20     [v8, v2, v0, v1, v2, v3]
+            [flipped] add      [v9, v0, v1, v2, v3]
+            swap3              [v2, v0, v1, v9, v3]
+            calldataload       [v4, v0, v1, v9, v3]
+            swap2              [v1, v0, v4, v9, v3]
+            const 0x1      [v6, v1, v0, v4, v9, v3]
+            [flipped] add      [v7, v0, v4, v9, v3]
+            swap2              [v4, v0, v7, v9, v3]
+            swap1              [v0, v4, v7, v9, v3]
+            swap4              [v3, v4, v7, v9, v0]
+            add                    [v5, v7, v9, v0]
+            swap3                  [v0, v7, v9, v5]
             => [$10, $17, $19, $15]
             (jmp @1)
         @3 [$20, $21, $22, $23]
-            const 0x20
-            dup 0
-            malloc
-            swap 5
-            dup 5
-            mstore
-            swap 1
-            swap 4
-            return
+            ; start:                [v0, v1, v2, v3]
+            const 0x20          [v4, v0, v1, v2, v3]
+            dup1            [v4, v4, v0, v1, v2, v3]
+            malloc          [v5, v4, v0, v1, v2, v3]
+            swap5           [v3, v4, v0, v1, v2, v5]
+            dup6        [v5, v3, v4, v0, v1, v2, v5]
+            mstore              [v4, v0, v1, v2, v5]
+            swap1               [v0, v4, v1, v2, v5]
+            swap4               [v5, v4, v1, v2, v0]
+            return                      [v1, v2, v0]
             => []
             (return)
         "#,
@@ -444,20 +451,24 @@ fn lowers_branch_layouts() {
         "#,
         r#"
         @0 []
-            const 0x0
-            const 0x7
-            pop
+            ; start:         []
+            const 0x0      [v0]
+            const 0x7  [v1, v0]
+            pop            [v0]
             => [$0]
             (jmp @1)
         @1 [$2]
+            ; start:  [v0]
             => [$2 | ]
             (br @2 @3)
         @2 []
-            stop
+            ; start:  []
+            stop      []
             => []
             (stop)
         @3 []
-            invalid
+            ; start:  []
+            invalid   []
             => []
             (invalid)
         "#,
@@ -484,15 +495,17 @@ fn simple_icall() {
         "#,
         r#"
         @0 [return_dest, $0]
+            ; start:  [v0, v1]
             => [return_dest | $0]
             (iret)
         @1 []
-            const 0x0
-            caller
-            call_ret_push #2
-            icall #2
-            sstore
-            stop
+            ; start:                  []
+            const 0x0               [v1]
+            caller              [v0, v1]
+            call_ret_push2  [v2, v0, v1]
+            icall #2            [v3, v1]
+            sstore                    []
+            stop                      []
             => []
             (stop)
         "#,
@@ -521,15 +534,15 @@ fn simple_op_use_spill() {
             }
         "#,
         r#"
-
         @0 []
-            const 0x0
-            const 0x0
-            const 0x0
-            const 0x0
-            const 0x1
-            not
-            stop
+            ; start:                     []
+            const 0x0                  [v1]
+            const 0x0              [v2, v1]
+            const 0x0          [v3, v2, v1]
+            const 0x0      [v4, v3, v2, v1]
+            const 0x1  [v0, v4, v3, v2, v1]
+            not        [v5, v4, v3, v2, v1]
+            stop       [v5, v4, v3, v2, v1]
             => []
             (stop)
         "#,
@@ -560,23 +573,25 @@ fn spill_allocations_are_unique_across_internal_calls() {
         "#,
         r#"
         @0 [return_dest, $0]
-            const 0x4
-            pop
-            const 0x5
-            pop
-            swap 1
-            not
-            swap 1
+            ; start:       [v0, v1]
+            const 0x4  [v2, v0, v1]
+            pop            [v0, v1]
+            const 0x5  [v3, v0, v1]
+            pop            [v0, v1]
+            swap1          [v1, v0]
+            not            [v4, v0]
+            swap1          [v0, v4]
             => [return_dest | $3]
             (iret)
         @1 []
-            const 0x2
-            const 0x1
-            call_ret_push #6
-            icall #6
-            const 0x3
-            add
-            stop
+            ; start:                  []
+            const 0x2               [v1]
+            const 0x1           [v0, v1]
+            call_ret_push6  [v3, v0, v1]
+            icall #6            [v4, v1]
+            const 0x3       [v2, v4, v1]
+            add                 [v5, v1]
+            stop                [v5, v1]
             => []
             (stop)
         "#,
@@ -599,10 +614,10 @@ fn unreachable() {
             }
         "#,
         r#"
-
         @0 []
-            const 0x3
-            stop
+            ; start:     []
+            const 0x3  [v0]
+            stop       [v0]
             => []
             (stop)
         "#,
@@ -624,11 +639,12 @@ fn repeated_input() {
         "#,
         r#"
         @0 []
-            const 0x3
-            dup 0
-            const 0x2
-            [flipped] addmod
-            stop
+            ; start:                    []
+            const 0x3                 [v0]
+            dup1                  [v0, v0]
+            const 0x2         [v1, v0, v0]
+            [flipped] addmod          [v2]
+            stop                      [v2]
             => []
             (stop)
         "#,
