@@ -1,8 +1,9 @@
-use crate::{
-    CanonicalBlockRow, RepresentativeGraph, RepresentativeSchedule, canonical_blocks_path,
-    normalize_hash,
-};
+use crate::{CanonicalBlockRow, canonical_blocks_path, normalize_hash};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
+use sir_stack_scheduling::{
+    op_graph::CanonicalBlock,
+    stack::{ShuffleConfig, StackOps, gas_cost},
+};
 use std::{path::Path, time::Duration};
 
 const SCHEMA_VERSION: i64 = 1;
@@ -117,11 +118,11 @@ fn read_cost(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<u64> {
 pub fn improve_schedule(
     database: &Path,
     hash: &str,
-    schedule: &RepresentativeSchedule,
+    schedule: &[StackOps],
 ) -> Result<ScheduleUpdate, String> {
     let hash = normalize_hash(hash);
-    let gas_cost = schedule.gas_cost();
-    let sql_cost = i64::try_from(gas_cost).map_err(|error| error.to_string())?;
+    let schedule_cost = gas_cost(schedule, ShuffleConfig::PRE_AMSTERDAM);
+    let sql_cost = i64::try_from(schedule_cost).map_err(|error| error.to_string())?;
     let encoded = serde_json::to_string(schedule).map_err(|error| error.to_string())?;
     let mut connection = open(database, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     connection.pragma_update(None, "synchronous", "FULL").map_err(|error| error.to_string())?;
@@ -137,7 +138,7 @@ pub fn improve_schedule(
         .optional()
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("hash '{hash}' was not found in the canonical database"))?;
-    if gas_cost >= previous_cost {
+    if schedule_cost >= previous_cost {
         return Ok(ScheduleUpdate::NotImproved { current_cost: previous_cost });
     }
     transaction.execute(
@@ -145,7 +146,7 @@ pub fn improve_schedule(
         params![encoded, sql_cost, hash],
     ).map_err(|error| error.to_string())?;
     transaction.commit().map_err(|error| error.to_string())?;
-    Ok(ScheduleUpdate::Improved { previous_cost, new_cost: gas_cost })
+    Ok(ScheduleUpdate::Improved { previous_cost, new_cost: schedule_cost })
 }
 
 /// Creates or seeds a database without discarding existing graphs or cheaper schedules.
@@ -185,22 +186,22 @@ pub fn seed_canonical_database(path: &Path, rows: &[CanonicalBlockRow]) -> Resul
              WHERE excluded.best_gas_cost < canonical_blocks.best_gas_cost",
         ).map_err(|error| error.to_string())?;
         for row in rows {
-            let graph = serde_json::from_str::<RepresentativeGraph>(&row.canonical_graph)
+            let graph = serde_json::from_str::<CanonicalBlock>(&row.canonical_graph)
                 .map_err(|error| error.to_string())?;
             let previous: Option<String> = existing
                 .query_row([&row.canonical_hash], |row| row.get(0))
                 .optional()
                 .map_err(|error| error.to_string())?;
             if let Some(previous) = previous {
-                let previous = serde_json::from_str::<RepresentativeGraph>(&previous)
+                let previous = serde_json::from_str::<CanonicalBlock>(&previous)
                     .map_err(|error| error.to_string())?;
                 if previous != graph {
                     return Err(format!("canonical graph changed for {}", row.canonical_hash));
                 }
             }
-            let schedule = serde_json::from_str::<RepresentativeSchedule>(&row.best_schedule)
+            let schedule = serde_json::from_str::<Box<[StackOps]>>(&row.best_schedule)
                 .map_err(|error| error.to_string())?;
-            if schedule.gas_cost() != row.best_gas_cost {
+            if gas_cost(&schedule, ShuffleConfig::PRE_AMSTERDAM) != row.best_gas_cost {
                 return Err(format!(
                     "schedule cost disagrees with stored cost for {}",
                     row.canonical_hash
@@ -223,25 +224,23 @@ pub fn seed_canonical_database(path: &Path, rows: &[CanonicalBlockRow]) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BlockFinalization, RepresentativeStackOp};
+    use plank_core::Idx;
+    use sir_stack_scheduling::{BlockFinalization, op_graph::CanonicalValueId};
 
     fn row(hash: &str, pairs: usize) -> CanonicalBlockRow {
-        let graph = RepresentativeGraph {
-            finalization: BlockFinalization::ShuffleToOutputs,
-            input_count: 1,
-            operations: Box::new([]),
-            outputs_fifo: Box::new([0]),
-        };
-        let schedule = RepresentativeSchedule(
-            (0..pairs)
-                .flat_map(|_| [RepresentativeStackOp::Dup { depth: 0 }, RepresentativeStackOp::Pop])
-                .collect(),
+        let graph = CanonicalBlock::new(
+            BlockFinalization::ShuffleToOutputs,
+            1,
+            Box::new([]),
+            Box::new([CanonicalValueId::ZERO]),
         );
+        let schedule =
+            (0..pairs).flat_map(|_| [StackOps::Dup(0), StackOps::Pop]).collect::<Box<[_]>>();
         CanonicalBlockRow {
             canonical_hash: hash.to_owned(),
             canonical_graph: serde_json::to_string(&graph).unwrap(),
             best_schedule: serde_json::to_string(&schedule).unwrap(),
-            best_gas_cost: schedule.gas_cost(),
+            best_gas_cost: gas_cost(&schedule, ShuffleConfig::PRE_AMSTERDAM),
         }
     }
 
@@ -251,7 +250,7 @@ mod tests {
         let path = directory.path().join("canonical-blocks.sqlite3");
         Connection::open(&path).unwrap();
         seed_canonical_database(&path, &[row("ssb1:a", 3), row("ssb1:b", 2)]).unwrap();
-        improve_schedule(&path, "ssb1:a", &RepresentativeSchedule(Box::new([]))).unwrap();
+        improve_schedule(&path, "ssb1:a", &[]).unwrap();
         let candidates = [row("ssb1:a", 3), row("ssb1:b", 1), row("ssb1:c", 2)];
         seed_canonical_database(&path, &candidates).unwrap();
         seed_canonical_database(&path, &candidates).unwrap();
@@ -284,7 +283,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("missing.sqlite3");
         assert!(CanonicalDatabase::open(&path).is_err());
-        assert!(improve_schedule(&path, "ssb1:a", &RepresentativeSchedule(Box::new([]))).is_err());
+        assert!(improve_schedule(&path, "ssb1:a", &[]).is_err());
         assert!(!path.exists());
     }
 }

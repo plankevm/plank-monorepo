@@ -300,21 +300,8 @@ fn remaining_cost_lower_bound(
 }
 
 fn stack_ops_cost(ops: &[StackOps], shuffle: ShuffleConfig) -> u32 {
-    ops.iter()
-        .map(|&op| {
-            let cost = match op {
-                // These represent necessary basic block operations and therefore shouldn't be
-                // included in the scheduling cost.
-                StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
-                StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => 3,
-                StackOps::Exchange(_, _) => shuffle.exchange_cost,
-                // Conservatively assume store will need to pay for memory expansion.
-                StackOps::Store(_) => 9,
-                StackOps::Load(_) => 6,
-            };
-            u32::from(cost) * BASE_COST_FACTOR
-        })
-        .sum()
+    let cost = crate::stack::gas_cost(ops, shuffle);
+    u32::try_from(cost).expect("stack operation cost overflow") * BASE_COST_FACTOR
 }
 
 #[cfg(test)]

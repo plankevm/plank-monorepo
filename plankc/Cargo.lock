@@ -3276,11 +3276,12 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "rayon",
+ "serde",
+ "serde_json",
  "sha2",
  "sir-data",
  "sir-parser",
  "sir-passes",
- "sir-stack-scheduling-db-inspect",
  "smallvec",
 ]
 
@@ -3309,6 +3310,7 @@ dependencies = [
  "sir-data",
  "sir-parser",
  "sir-passes",
+ "sir-stack-scheduling",
  "tempfile",
 ]
 
@@ -3338,7 +3340,6 @@ dependencies = [
  "sir-data",
  "sir-stack-scheduling",
  "sir-stack-scheduling-common",
- "sir-stack-scheduling-db-inspect",
 ]
 
 [[package]]
@@ -3347,9 +3348,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "csv",
- "plank-core",
  "plank-test-utils",
  "serde_json",
+ "sir-data",
+ "sir-stack-scheduling",
  "sir-stack-scheduling-common",
  "tempfile",
 ]
@@ -3360,8 +3362,11 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "csv",
+ "plank-core",
  "plank-test-utils",
  "serde_json",
+ "sir-data",
+ "sir-stack-scheduling",
  "sir-stack-scheduling-common",
  "sir-stack-scheduling-db-inspect",
  "tempfile",

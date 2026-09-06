@@ -1,10 +1,11 @@
 use clap::Parser;
 use csv as _;
-use plank_core as _;
 use serde_json as _;
+use sir_data as _;
+use sir_stack_scheduling as _;
 use sir_stack_scheduling_common as _;
 use sir_stack_scheduling_db_inspect::{
-    Graph, find, random, render_graph, render_schedule, render_source_blocks,
+    find, random, render_graph, render_schedule, render_source_blocks,
 };
 use std::{path::PathBuf, process::ExitCode};
 
@@ -54,9 +55,8 @@ fn run(args: Args) -> Result<String, String> {
         )?
     };
     let source_blocks_text = render_source_blocks(&entry.source_blocks);
-    let graph = Graph::from_representative(entry.graph)?;
-    let graph_text = render_graph(&graph);
-    let schedule_text = render_schedule(&graph, &entry.schedule)?;
+    let graph_text = render_graph(&entry.graph);
+    let schedule_text = render_schedule(&entry.graph, entry.finalization, &entry.schedule)?;
     Ok(format!(
         "hash: {}\n\n{source_blocks_text}\n\ngraph:\n{graph_text}\n\nbest schedule (gas: {}):\n{schedule_text}",
         entry.canonical_hash, entry.gas_cost

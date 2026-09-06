@@ -4,10 +4,6 @@ use plank_core::{Idx, IndexVec};
 use plank_test_utils::dedent_preserve_blank_lines;
 use pretty_assertions::assert_str_eq;
 use sir_data::OperationIdx;
-use sir_stack_scheduling_db_inspect::{
-    BlockFinalization as InspectFinalization, Graph as InspectGraph, RepresentativeGraph,
-    RepresentativeOperation, render_graph,
-};
 
 use super::*;
 use crate::op_graph::{OpGraphBuilder, OpNodeKind};
@@ -68,41 +64,31 @@ fn key(graph: &OpGraph, finalization: BlockFinalization) -> CanonicalBlockKey {
     canonicalize_graph(graph, finalization).deduplication_key()
 }
 
-fn representative_graph(canonicalized: &CanonicalizedBlock) -> RepresentativeGraph {
-    let finalization = if canonicalized.last_op_terminates() {
-        InspectFinalization::LastOpTerminates
-    } else {
-        InspectFinalization::ShuffleToOutputs
-    };
-    let operations = canonicalized
-        .canonical_op_ids()
-        .map(|operation| {
-            let view = canonicalized.operation(operation);
-            RepresentativeOperation {
-                inputs_fifo: view.inputs_fifo.iter().map(|value| value.get()).collect(),
-                output_count: view.output_count,
-                effect_predecessors: view
-                    .effect_predecessors
-                    .iter()
-                    .map(|operation| operation.get())
-                    .collect(),
-                flippable: view.flippable,
-            }
-        })
-        .collect();
-    let outputs_fifo = canonicalized.outputs_fifo().iter().map(|value| value.get()).collect();
-    RepresentativeGraph {
-        finalization,
-        input_count: canonicalized.input_count(),
-        operations,
-        outputs_fifo,
-    }
+#[test]
+fn canonical_block_json_round_trip_is_stable() {
+    let block = CanonicalBlock::new(
+        BlockFinalization::ShuffleToOutputs,
+        2,
+        Box::new([CanonicalOperation {
+            inputs_fifo: Box::new([CanonicalValueId::ZERO, CanonicalValueId::ZERO + 1]),
+            output_count: 1,
+            effect_predecessors: Box::new([]),
+            flippable: true,
+        }]),
+        Box::new([CanonicalValueId::ZERO + 2]),
+    );
+    let encoded = serde_json::to_string(&block).unwrap();
+    assert_eq!(
+        encoded,
+        r#"{"finalization":"shuffle_to_outputs","input_count":2,"operations":[{"inputs_fifo":[0,1],"output_count":1,"effect_predecessors":[],"flippable":true}],"outputs_fifo":[2]}"#
+    );
+    assert_eq!(serde_json::from_str::<CanonicalBlock>(&encoded).unwrap(), block);
 }
 
 fn format_canonical_graph(out: &mut String, heading: &str, canonicalized: &CanonicalizedBlock) {
     writeln!(out, "{heading}:").unwrap();
-    let graph = InspectGraph::from_representative(representative_graph(canonicalized)).unwrap();
-    for line in render_graph(&graph).lines() {
+    let graph = canonicalized.block().to_op_graph().unwrap();
+    for line in crate::display::graph(&graph).lines() {
         writeln!(out, "  {line}").unwrap();
     }
 }

@@ -21,6 +21,7 @@ pub trait Idx:
     + AddAssign<u32>
     + Sub<Self, Output = u32>
     + Sub<u32, Output = Self>
+    + TryFrom<u32>
     + TryFrom<usize>
     + Debug
 {
@@ -140,6 +141,15 @@ macro_rules! newtype_index {
             fn sub(self, rhs: u32) -> Self::Output {
                 use $crate::Idx;
                 Self::new(self.get() - rhs)
+            }
+        }
+
+        impl ::core::convert::TryFrom<u32> for $name {
+            type Error = ();
+
+            #[inline]
+            fn try_from(value: u32) -> Result<Self, Self::Error> {
+                ::core::num::NonZero::new(value.wrapping_add(1)).map(Self).ok_or(())
             }
         }
 

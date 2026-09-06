@@ -6,6 +6,7 @@ use crate::{
     op_graph::{BitsetWord, OpGraph, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
+    validation,
 };
 use sir_data::StaticAllocId;
 use smallvec::SmallVec;
@@ -23,6 +24,16 @@ pub fn schedule(
     let mut result =
         depth_first_search::schedule(finalization, next_alloc_id, shuffle, search, &trees.graph);
     result.ops = trees.expand_schedule(graph, &result.ops);
+    let validated_next_alloc =
+        validation::validate(graph, finalization, shuffle, next_alloc_id, &result.ops)
+            .unwrap_or_else(|error| {
+                panic!("stack scheduler produced an invalid schedule: {error}")
+            });
+    assert_eq!(
+        validated_next_alloc - next_alloc_id,
+        result.spill_count,
+        "stack scheduler reported an incorrect spill count"
+    );
     result
 }
 

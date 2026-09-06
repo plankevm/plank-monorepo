@@ -1,8 +1,7 @@
-mod parser;
-
 use clap::Parser;
+use sir_stack_scheduling::stack::{ShuffleConfig, gas_cost, parse_stack_ops};
 use sir_stack_scheduling_common::{ScheduleUpdate, improve_schedule, workspace_corpus_path};
-use sir_stack_scheduling_db_inspect::{Graph, find, render_graph, trace_schedule};
+use sir_stack_scheduling_db_inspect::{find, render_graph, trace_schedule};
 use std::{
     fmt::Write,
     io::{self, Read},
@@ -70,15 +69,15 @@ fn main() -> ExitCode {
 
 fn submit(database: &Path, hash: &str, source: &str) -> Result<SubmissionResult, String> {
     let entry = find(database, hash)?;
-    let graph = Graph::from_representative(entry.graph)?;
-    let graph_text = render_graph(&graph);
-    let parsed = parser::parse(source);
-    let gas_cost = parsed.schedule.gas_cost();
-    let trace = trace_schedule(&graph, &parsed.schedule);
+    let graph_text = render_graph(&entry.graph);
+    let parsed = parse_stack_ops(source, ShuffleConfig::PRE_AMSTERDAM);
+    let gas_cost = gas_cost(&parsed.operations, ShuffleConfig::PRE_AMSTERDAM);
+    let trace = trace_schedule(&entry.graph, entry.finalization, &parsed.operations);
 
-    let (submission_status, status_text) = match parsed.error.or(trace.error) {
+    let validation_error = trace.error.as_ref().map(ToString::to_string);
+    let (submission_status, status_text) = match parsed.error.or(validation_error) {
         Some(reason) => (SubmissionStatus::Rejected, format!("rejected: {reason}")),
-        None => match improve_schedule(database, &entry.canonical_hash, &parsed.schedule)? {
+        None => match improve_schedule(database, &entry.canonical_hash, &parsed.operations)? {
             ScheduleUpdate::Improved { previous_cost, new_cost } => (
                 SubmissionStatus::Accepted,
                 format!("accepted: improved gas cost from {previous_cost} to {new_cost}"),
@@ -103,33 +102,36 @@ fn submit(database: &Path, hash: &str, source: &str) -> Result<SubmissionResult,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plank_core::Idx;
     use plank_test_utils::dedent_preserve_indent;
+    use sir_data::OperationIdx;
+    use sir_stack_scheduling::{
+        BlockFinalization,
+        op_graph::{CanonicalBlock, CanonicalOperation, CanonicalValueId},
+        stack::StackOps,
+    };
     use sir_stack_scheduling_common::{
-        BLOCKS_FILE_NAME, BLOCKS_HEADER, BlockFinalization, BlockRow, CANONICAL_BLOCKS_FILE_NAME,
-        CanonicalBlockRow, CanonicalDatabase, RepresentativeGraph, RepresentativeOperation,
-        RepresentativeSchedule, RepresentativeStackOp, seed_canonical_database,
+        BLOCKS_FILE_NAME, BLOCKS_HEADER, BlockRow, CANONICAL_BLOCKS_FILE_NAME, CanonicalBlockRow,
+        CanonicalDatabase, seed_canonical_database,
     };
 
     const HASH: &str = "ssb1:test";
 
     fn database() -> tempfile::TempDir {
         let temporary = tempfile::tempdir().unwrap();
-        let graph = RepresentativeGraph {
-            finalization: BlockFinalization::ShuffleToOutputs,
-            input_count: 1,
-            operations: Box::new([RepresentativeOperation {
-                inputs_fifo: Box::new([0]),
+        let graph = CanonicalBlock::new(
+            BlockFinalization::ShuffleToOutputs,
+            1,
+            Box::new([CanonicalOperation {
+                inputs_fifo: Box::new([CanonicalValueId::ZERO]),
                 output_count: 1,
                 effect_predecessors: Box::new([]),
                 flippable: false,
             }]),
-            outputs_fifo: Box::new([1]),
-        };
-        let baseline = RepresentativeSchedule(Box::new([
-            RepresentativeStackOp::Dup { depth: 0 },
-            RepresentativeStackOp::Pop,
-            RepresentativeStackOp::Op { operation: 0 },
-        ]));
+            Box::new([CanonicalValueId::ZERO + 1]),
+        );
+        let baseline: Box<[StackOps]> =
+            Box::new([StackOps::Dup(0), StackOps::Pop, StackOps::Op(OperationIdx::ZERO)]);
 
         let mut blocks = csv::WriterBuilder::new()
             .has_headers(false)
@@ -151,7 +153,7 @@ mod tests {
                 canonical_hash: HASH.to_owned(),
                 canonical_graph: serde_json::to_string(&graph).unwrap(),
                 best_schedule: serde_json::to_string(&baseline).unwrap(),
-                best_gas_cost: baseline.gas_cost(),
+                best_gas_cost: gas_cost(&baseline, ShuffleConfig::PRE_AMSTERDAM),
             }],
         )
         .unwrap();
@@ -183,10 +185,7 @@ mod tests {
 
         let updated = find(database.path(), HASH).unwrap();
         assert_eq!(updated.gas_cost, 0);
-        assert_eq!(
-            updated.schedule,
-            RepresentativeSchedule(Box::new([RepresentativeStackOp::Op { operation: 0 }]))
-        );
+        assert_eq!(updated.schedule.as_ref(), &[StackOps::Op(OperationIdx::ZERO)]);
     }
 
     #[test]
@@ -208,7 +207,7 @@ mod tests {
             ; start:  [v0]
             pop         []
 
-            rejected: op0 underflowed the stack
+            rejected: stack operation 2: op0 underflowed the stack
             "#,
         );
         assert!(result.status == SubmissionStatus::Rejected);

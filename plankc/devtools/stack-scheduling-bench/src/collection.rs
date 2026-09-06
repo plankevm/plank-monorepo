@@ -1,6 +1,9 @@
 use plank_core::Idx;
 use sir_data::{BasicBlockId, EthIRProgram};
-use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
+use sir_stack_scheduling::{
+    ScheduledOps,
+    stack::{ShuffleConfig, StackOps, gas_cost},
+};
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
@@ -94,14 +97,15 @@ impl BlockStats {
 }
 
 fn assumed_schedule_cost(stack_ops: &[StackOps]) -> (u64, u64) {
-    stack_ops.iter().fold((0, 0), |(gas, bytes), operation| {
-        let (operation_gas, operation_bytes) = match operation {
-            StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => (3, 1),
-            StackOps::Exchange(_, _) => (9, 3),
-            StackOps::Store(_) => (9, 4),
-            StackOps::Load(_) => (6, 4),
-            StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => (0, 0),
-        };
-        (gas + operation_gas, bytes + operation_bytes)
-    })
+    let gas = gas_cost(stack_ops, ShuffleConfig::PRE_AMSTERDAM);
+    let bytes = stack_ops
+        .iter()
+        .map(|operation| match operation {
+            StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => 1,
+            StackOps::Exchange(_, _) => 3,
+            StackOps::Store(_) | StackOps::Load(_) => 4,
+            StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
+        })
+        .sum();
+    (gas, bytes)
 }

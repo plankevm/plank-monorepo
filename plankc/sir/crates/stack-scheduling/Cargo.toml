@@ -12,12 +12,13 @@ hashbrown.workspace = true
 smallvec.workspace = true
 rayon.workspace = true
 sha2.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 plank-test-utils.workspace = true
 pretty_assertions.workspace = true
 sir-parser.workspace = true
-sir-stack-scheduling-db-inspect = { path = "../../../devtools/stack-scheduling-db-inspect" }
+serde_json.workspace = true
 proptest.workspace = true
 
 [lints]

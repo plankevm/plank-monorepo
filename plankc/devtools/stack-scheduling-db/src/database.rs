@@ -1,9 +1,8 @@
-use crate::model::{representative_graph, representative_schedule};
 use plank_core::Idx;
 use sir_data::BasicBlockId;
 use sir_stack_scheduling::{
-    op_graph::{CanonicalizedBlock, OpGraph},
-    stack::StackOps,
+    op_graph::{CanonicalizedBlock, OpGraph, canonical_schedule},
+    stack::{ShuffleConfig, StackOps, gas_cost},
 };
 use sir_stack_scheduling_common::{
     BLOCKS_FILE_NAME, BLOCKS_HEADER, BlockRow, CANONICAL_BLOCKS_FILE_NAME, CanonicalBlockRow,
@@ -56,33 +55,33 @@ impl DatabaseWriter {
             })
             .unwrap();
 
-        let representative_graph = serde_json::to_string(&representative_graph(canonicalized))
-            .expect("representative graph serialization failed");
-        let representative_schedule =
-            representative_schedule(source_schedule, graph, canonicalized);
-        let gas_cost = representative_schedule.gas_cost();
-        let representative_schedule = serde_json::to_string(&representative_schedule)
-            .expect("representative schedule serialization failed");
+        let canonical_graph = serde_json::to_string(canonicalized.block())
+            .expect("canonical graph serialization failed");
+        let canonical_schedule = canonical_schedule(source_schedule, graph, canonicalized)
+            .expect("canonical schedule conversion failed");
+        let schedule_gas = gas_cost(&canonical_schedule, ShuffleConfig::PRE_AMSTERDAM);
+        let canonical_schedule = serde_json::to_string(&canonical_schedule)
+            .expect("canonical schedule serialization failed");
 
         match self.canonical_blocks.entry(canonical_hash) {
             std::collections::btree_map::Entry::Vacant(entry) => {
                 entry.insert(CanonicalBlockRecord {
-                    graph: representative_graph,
-                    best_schedule: representative_schedule,
-                    best_gas_cost: gas_cost,
+                    graph: canonical_graph,
+                    best_schedule: canonical_schedule,
+                    best_gas_cost: schedule_gas,
                 });
             }
             std::collections::btree_map::Entry::Occupied(mut entry) => {
                 assert_eq!(
                     entry.get().graph,
-                    representative_graph,
-                    "equal canonical hashes produced different representative graphs"
+                    canonical_graph,
+                    "equal canonical hashes produced different canonical graphs"
                 );
-                if gas_cost < entry.get().best_gas_cost {
+                if schedule_gas < entry.get().best_gas_cost {
                     entry.insert(CanonicalBlockRecord {
-                        graph: representative_graph,
-                        best_schedule: representative_schedule,
-                        best_gas_cost: gas_cost,
+                        graph: canonical_graph,
+                        best_schedule: canonical_schedule,
+                        best_gas_cost: schedule_gas,
                     });
                 }
             }

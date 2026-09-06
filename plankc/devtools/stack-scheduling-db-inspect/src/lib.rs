@@ -1,20 +1,20 @@
 use clap as _;
+use sir_data::StaticAllocId;
+use sir_stack_scheduling::{
+    BlockFinalization,
+    display::{ScheduleTrace, graph, trace},
+    op_graph::OpGraph,
+    stack::{ShuffleConfig, StackOps},
+};
 use std::path::Path;
 
 #[cfg(test)]
 use tempfile as _;
 
 mod database;
-mod graph;
 mod render;
 
 pub use database::{DatabaseEntry, SourceBlock};
-pub use graph::Graph;
-pub use render::ScheduleTrace;
-pub use sir_stack_scheduling_common::{
-    BlockFinalization, RepresentativeGraph, RepresentativeOperation, RepresentativeSchedule,
-    RepresentativeStackOp,
-};
 
 pub fn find(database: &Path, requested_hash: &str) -> Result<DatabaseEntry, String> {
     database::find(database, requested_hash)
@@ -28,14 +28,26 @@ pub fn render_source_blocks(source_blocks: &[SourceBlock]) -> String {
     render::source_blocks(source_blocks)
 }
 
-pub fn render_graph(graph: &Graph) -> String {
-    render::graph(graph)
+pub fn render_graph(graph_value: &OpGraph) -> String {
+    graph(graph_value)
 }
 
-pub fn render_schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> Result<String, String> {
-    render::schedule(graph, schedule)
+pub fn render_schedule(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    schedule: &[StackOps],
+) -> Result<String, String> {
+    let trace = trace_schedule(graph, finalization, schedule);
+    match trace.error {
+        Some(error) => Err(error.to_string()),
+        None => Ok(trace.rendering),
+    }
 }
 
-pub fn trace_schedule(graph: &Graph, schedule: &RepresentativeSchedule) -> ScheduleTrace {
-    render::schedule_trace(graph, schedule)
+pub fn trace_schedule(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    schedule: &[StackOps],
+) -> ScheduleTrace {
+    trace(graph, finalization, ShuffleConfig::PRE_AMSTERDAM, StaticAllocId::default(), schedule)
 }

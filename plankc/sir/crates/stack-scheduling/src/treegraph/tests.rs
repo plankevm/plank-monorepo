@@ -1,12 +1,10 @@
-use std::fmt::Write;
-
 use plank_core::Idx;
 use plank_test_utils::dedent_preserve_blank_lines;
 use pretty_assertions::assert_str_eq;
 use sir_data::OperationIdx;
 
 use super::{TreeGraph, build_tree_graph};
-use crate::op_graph::{OpGraph, OpGraphBuilder, OpNodeKind, ValueNodeId};
+use crate::op_graph::{OpGraph, OpGraphBuilder, OpNodeKind};
 
 fn assert_snapshot(input: &OpGraph, trees: &TreeGraph, expected: &str) {
     let expected = dedent_preserve_blank_lines(expected);
@@ -14,73 +12,22 @@ fn assert_snapshot(input: &OpGraph, trees: &TreeGraph, expected: &str) {
 }
 
 fn format_snapshot(input: &OpGraph, trees: &TreeGraph) -> String {
-    let mut out = String::new();
-    format_graph(&mut out, "input graph", input, None);
-    out.push('\n');
-    format_graph(&mut out, "tree graph", &trees.graph, Some(trees));
-    out
-}
-
-fn format_graph(out: &mut String, heading: &str, graph: &OpGraph, trees: Option<&TreeGraph>) {
-    writeln!(out, "{heading}:").unwrap();
-    write_values(out, "  inputs", graph.input_values_fifo().iter());
-    for operation in graph.op_ids() {
-        let op = graph.get_op(operation);
-        write!(out, "  op{} {}", operation.get(), kind_name(op.kind)).unwrap();
-        if let Some(trees) = trees {
-            out.push_str(" = [");
-            for (position, step) in trees.original_operations(operation).enumerate() {
-                if position != 0 {
-                    out.push_str(", ");
-                }
+    let input = crate::display::graph(input);
+    let tree = crate::display::graph_with_annotations(&trees.graph, |operation| {
+        let operations = trees
+            .original_operations(operation)
+            .map(|step| {
                 if step.flipped {
-                    write!(out, "flipped(op{})", step.operation.get()).unwrap();
+                    format!("flipped(op{})", step.operation.get())
                 } else {
-                    write!(out, "op{}", step.operation.get()).unwrap();
+                    format!("op{}", step.operation.get())
                 }
-            }
-            out.push(']');
-        }
-        out.push('\n');
-        write_values(out, "    inputs", op.inputs_fifo.iter().copied());
-        write_values(out, "    outputs", op.outputs_fifo.iter().copied());
-        write_operations(out, "    predecessors", graph.displayed_predecessors(operation));
-    }
-    write_values(out, "  outputs", graph.output_values_fifo().iter().copied());
-}
-
-fn kind_name(kind: OpNodeKind) -> &'static str {
-    match kind {
-        OpNodeKind::Normal(_) => "normal",
-        OpNodeKind::Flippable(_) => "flippable",
-        OpNodeKind::RetDestPush(_) => "ret-dest-push",
-    }
-}
-
-fn write_values(out: &mut String, label: &str, values: impl IntoIterator<Item = ValueNodeId>) {
-    write!(out, "{label}: [").unwrap();
-    for (position, value) in values.into_iter().enumerate() {
-        if position != 0 {
-            out.push_str(", ");
-        }
-        write!(out, "v{}", value.get()).unwrap();
-    }
-    out.push_str("]\n");
-}
-
-fn write_operations(
-    out: &mut String,
-    label: &str,
-    operations: impl IntoIterator<Item = crate::op_graph::OpNodeId>,
-) {
-    write!(out, "{label}: [").unwrap();
-    for (position, operation) in operations.into_iter().enumerate() {
-        if position != 0 {
-            out.push_str(", ");
-        }
-        write!(out, "op{}", operation.get()).unwrap();
-    }
-    out.push_str("]\n");
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("tree: [{operations}]"))
+    });
+    format!("input graph:\n{input}\n\ntree graph:\n{tree}")
 }
 
 fn partial_binary_tree() -> OpGraph {
@@ -118,28 +65,16 @@ fn constructs_partial_binary_tree_in_depth_first_order() {
         &trees,
         r#"
             input graph:
-              inputs: [v0]
-              op0 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v2]
-                predecessors: []
-              op2 normal
-                inputs: [v1, v2, v0]
-                outputs: [v3]
-                predecessors: [op0, op1]
-              outputs: [v3]
+            inputs: [v0]
+            v1 = op0()
+            v2 = op1()
+            v3 = op2(v1, v2, v0)
+            outputs: [v3]
 
             tree graph:
-              inputs: [v0]
-              op0 normal = [op1, op0, op2]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: []
-              outputs: [v1]
+            inputs: [v0]
+            v1 = op0(v0) ; tree: [op1, op0, op2]
+            outputs: [v1]
         "#,
     );
 }
@@ -180,32 +115,17 @@ fn constructs_three_operand_tree_in_depth_first_order() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: []
-              op2 normal
-                inputs: []
-                outputs: [v2]
-                predecessors: []
-              op3 normal
-                inputs: [v0, v1, v2]
-                outputs: [v3]
-                predecessors: [op0, op1, op2]
-              outputs: [v3]
+            inputs: []
+            v0 = op0()
+            v1 = op1()
+            v2 = op2()
+            v3 = op3(v0, v1, v2)
+            outputs: [v3]
 
             tree graph:
-              inputs: []
-              op0 normal = [op2, op1, op0, op3]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              outputs: [v0]
+            inputs: []
+            v0 = op0() ; tree: [op2, op1, op0, op3]
+            outputs: [v0]
         "#,
     );
 }
@@ -242,36 +162,18 @@ fn materializes_multi_use_operand_as_its_own_virtual_operation() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op0]
-              op2 normal
-                inputs: [v0]
-                outputs: [v2]
-                predecessors: [op0]
-              outputs: [v1, v2]
+            inputs: []
+            v0 = op0()
+            v1 = op1(v0)
+            v2 = op2(v0)
+            outputs: [v1, v2]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op0]
-              op2 normal = [op2]
-                inputs: [v0]
-                outputs: [v2]
-                predecessors: [op0]
-              outputs: [v1, v2]
+            inputs: []
+            v0 = op0() ; tree: [op0]
+            v1 = op1(v0) ; tree: [op1]
+            v2 = op2(v0) ; tree: [op2]
+            outputs: [v1, v2]
         "#,
     );
 }
@@ -303,28 +205,16 @@ fn materializes_an_operand_that_is_also_a_final_output() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op0]
-              outputs: [v0, v1]
+            inputs: []
+            v0 = op0()
+            v1 = op1(v0)
+            outputs: [v0, v1]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op0]
-              outputs: [v0, v1]
+            inputs: []
+            v0 = op0() ; tree: [op0]
+            v1 = op1(v0) ; tree: [op1]
+            outputs: [v0, v1]
         "#,
     );
 }
@@ -350,20 +240,14 @@ fn preserves_flippability_when_neither_leading_operand_is_folded() {
         &trees,
         r#"
             input graph:
-              inputs: [v0, v1]
-              op0 flippable
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: []
-              outputs: [v2]
+            inputs: [v0, v1]
+            v2 = op0_f(v0, v1)
+            outputs: [v2]
 
             tree graph:
-              inputs: [v0, v1]
-              op0 flippable = [op0]
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: []
-              outputs: [v2]
+            inputs: [v0, v1]
+            v2 = op0_f(v0, v1) ; tree: [op0]
+            outputs: [v2]
         "#,
     );
 }
@@ -392,24 +276,15 @@ fn removes_flippability_when_the_first_leading_operand_is_folded() {
         &trees,
         r#"
             input graph:
-              inputs: [v0]
-              op0 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: []
-              op1 flippable
-                inputs: [v1, v0]
-                outputs: [v2]
-                predecessors: [op0]
-              outputs: [v2]
+            inputs: [v0]
+            v1 = op0()
+            v2 = op1_f(v1, v0)
+            outputs: [v2]
 
             tree graph:
-              inputs: [v0]
-              op0 normal = [op0, op1]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: []
-              outputs: [v1]
+            inputs: [v0]
+            v1 = op0(v0) ; tree: [op0, op1]
+            outputs: [v1]
         "#,
     );
 }
@@ -438,24 +313,15 @@ fn removes_flippability_when_the_second_leading_operand_is_folded() {
         &trees,
         r#"
             input graph:
-              inputs: [v0]
-              op0 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: []
-              op1 flippable
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: [op0]
-              outputs: [v2]
+            inputs: [v0]
+            v1 = op0()
+            v2 = op1_f(v0, v1)
+            outputs: [v2]
 
             tree graph:
-              inputs: [v0]
-              op0 normal = [op0, flipped(op1)]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: []
-              outputs: [v1]
+            inputs: [v0]
+            v1 = op0(v0) ; tree: [op0, flipped(op1)]
+            outputs: [v1]
         "#,
     );
 }
@@ -489,28 +355,16 @@ fn folding_both_leading_operands_removes_flippability_while_preserving_internal_
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: [op0]
-              op2 flippable
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: [op1]
-              outputs: [v2]
+            inputs: []
+            v0 = op0()
+            v1 = op1() ; after: [op0]
+            v2 = op2_f(v0, v1)
+            outputs: [v2]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0, op1, flipped(op2)]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              outputs: [v0]
+            inputs: []
+            v0 = op0() ; tree: [op0, op1, flipped(op2)]
+            outputs: [v0]
         "#,
     );
 }
@@ -553,40 +407,19 @@ fn folds_only_the_viable_leading_operand_when_both_orders_are_interposed() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: []
-                predecessors: [op0]
-              op2 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: [op1]
-              op3 flippable
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: [op2]
-              outputs: [v2]
+            inputs: []
+            v0 = op0()
+            op1() ; after: [op0]
+            v1 = op2() ; after: [op1]
+            v2 = op3_f(v0, v1)
+            outputs: [v2]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: []
-                outputs: []
-                predecessors: [op0]
-              op2 normal = [op2, flipped(op3)]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op1]
-              outputs: [v1]
+            inputs: []
+            v0 = op0() ; tree: [op0]
+            op1() ; after: [op0] ; tree: [op1]
+            v1 = op2(v0) ; after: [op1] ; tree: [op2, flipped(op3)]
+            outputs: [v1]
         "#,
     );
 }
@@ -624,36 +457,18 @@ fn splits_non_flippable_effect_conflict() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: [op0]
-              op2 normal
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: [op1]
-              outputs: [v2]
+            inputs: []
+            v0 = op0()
+            v1 = op1() ; after: [op0]
+            v2 = op2(v0, v1)
+            outputs: [v2]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: []
-                outputs: [v1]
-                predecessors: [op0]
-              op2 normal = [op2]
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: [op1]
-              outputs: [v2]
+            inputs: []
+            v0 = op0() ; tree: [op0]
+            v1 = op1() ; after: [op0] ; tree: [op1]
+            v2 = op2(v0, v1) ; tree: [op2]
+            outputs: [v2]
         "#,
     );
 }
@@ -693,36 +508,18 @@ fn splits_tree_when_an_effect_is_interposed() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: []
-                predecessors: [op0]
-              op2 normal
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op1]
-              outputs: [v1]
+            inputs: []
+            v0 = op0()
+            op1() ; after: [op0]
+            v1 = op2(v0) ; after: [op1]
+            outputs: [v1]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: []
-                outputs: []
-                predecessors: [op0]
-              op2 normal = [op2]
-                inputs: [v0]
-                outputs: [v1]
-                predecessors: [op1]
-              outputs: [v1]
+            inputs: []
+            v0 = op0() ; tree: [op0]
+            op1() ; after: [op0] ; tree: [op1]
+            v1 = op2(v0) ; after: [op1] ; tree: [op2]
+            outputs: [v1]
         "#,
     );
 }
@@ -765,40 +562,19 @@ fn detects_crossing_dependencies_between_independent_trees() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: []
-              op2 normal
-                inputs: [v0]
-                outputs: [v2]
-                predecessors: [op0, op1]
-              op3 normal
-                inputs: [v1]
-                outputs: [v3]
-                predecessors: [op0, op1]
-              outputs: [v2, v3]
+            inputs: []
+            v0 = op0()
+            v1 = op1()
+            v2 = op2(v0) ; after: [op1]
+            v3 = op3(v1) ; after: [op0]
+            outputs: [v2, v3]
 
             tree graph:
-              inputs: []
-              op0 normal = [op1]
-                inputs: []
-                outputs: [v0]
-                predecessors: []
-              op1 normal = [op0, op2]
-                inputs: []
-                outputs: [v1]
-                predecessors: [op0]
-              op2 normal = [op3]
-                inputs: [v0]
-                outputs: [v2]
-                predecessors: [op1]
-              outputs: [v1, v2]
+            inputs: []
+            v0 = op0() ; tree: [op1]
+            v1 = op1() ; after: [op0] ; tree: [op0, op2]
+            v2 = op2(v0) ; after: [op1] ; tree: [op3]
+            outputs: [v1, v2]
         "#,
     );
 }
@@ -835,36 +611,18 @@ fn does_not_absorb_multi_output_or_repeated_operands() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: [v0, v1]
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v2]
-                predecessors: []
-              op2 normal
-                inputs: [v0, v1, v2, v2]
-                outputs: [v3]
-                predecessors: [op0, op1]
-              outputs: [v3]
+            inputs: []
+            [v0, v1] = op0()
+            v2 = op1()
+            v3 = op2(v0, v1, v2, v2)
+            outputs: [v3]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: [v0, v1]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: []
-                outputs: [v2]
-                predecessors: []
-              op2 normal = [op2]
-                inputs: [v0, v1, v2, v2]
-                outputs: [v3]
-                predecessors: [op0, op1]
-              outputs: [v3]
+            inputs: []
+            [v0, v1] = op0() ; tree: [op0]
+            v2 = op1() ; tree: [op1]
+            v3 = op2(v0, v1, v2, v2) ; tree: [op2]
+            outputs: [v3]
         "#,
     );
 }
@@ -906,36 +664,18 @@ fn folds_operands_with_a_common_predecessor() {
         &trees,
         r#"
             input graph:
-              inputs: []
-              op0 normal
-                inputs: []
-                outputs: []
-                predecessors: []
-              op1 normal
-                inputs: []
-                outputs: [v0]
-                predecessors: [op0]
-              op2 normal
-                inputs: []
-                outputs: [v1]
-                predecessors: [op0]
-              op3 normal
-                inputs: [v0, v1]
-                outputs: [v2]
-                predecessors: [op1, op2]
-              outputs: [v2]
+            inputs: []
+            op0()
+            v0 = op1() ; after: [op0]
+            v1 = op2() ; after: [op0]
+            v2 = op3(v0, v1)
+            outputs: [v2]
 
             tree graph:
-              inputs: []
-              op0 normal = [op0]
-                inputs: []
-                outputs: []
-                predecessors: []
-              op1 normal = [op2, op1, op3]
-                inputs: []
-                outputs: [v0]
-                predecessors: [op0]
-              outputs: [v0]
+            inputs: []
+            op0() ; tree: [op0]
+            v0 = op1() ; after: [op0] ; tree: [op2, op1, op3]
+            outputs: [v0]
         "#,
     );
 }
@@ -977,36 +717,18 @@ fn does_not_fold_partial_operand_trees() {
         &trees,
         r#"
             input graph:
-              inputs: [v0, v1, v2, v3]
-              op0 normal
-                inputs: [v0, v1]
-                outputs: [v4]
-                predecessors: []
-              op1 normal
-                inputs: [v2, v3]
-                outputs: [v5]
-                predecessors: []
-              op2 normal
-                inputs: [v4, v5]
-                outputs: [v6]
-                predecessors: [op0, op1]
-              outputs: [v6]
+            inputs: [v0, v1, v2, v3]
+            v4 = op0(v0, v1)
+            v5 = op1(v2, v3)
+            v6 = op2(v4, v5)
+            outputs: [v6]
 
             tree graph:
-              inputs: [v0, v1, v2, v3]
-              op0 normal = [op0]
-                inputs: [v0, v1]
-                outputs: [v4]
-                predecessors: []
-              op1 normal = [op1]
-                inputs: [v2, v3]
-                outputs: [v5]
-                predecessors: []
-              op2 normal = [op2]
-                inputs: [v4, v5]
-                outputs: [v6]
-                predecessors: [op0, op1]
-              outputs: [v6]
+            inputs: [v0, v1, v2, v3]
+            v4 = op0(v0, v1) ; tree: [op0]
+            v5 = op1(v2, v3) ; tree: [op1]
+            v6 = op2(v4, v5) ; tree: [op2]
+            outputs: [v6]
         "#,
     );
 }

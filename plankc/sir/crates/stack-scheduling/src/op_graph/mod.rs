@@ -5,13 +5,15 @@ mod build_effectful;
 mod build_simple;
 pub mod builder;
 mod canonical;
+mod schedule;
 pub use build_effectful::build_graph_effectful;
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
 pub use canonical::{
-    CanonicalBlockKey, CanonicalOpId, CanonicalOpView, CanonicalValueId, CanonicalizedBlock,
-    canonicalize_block_for_dedup, deduplication_key,
+    CanonicalBlock, CanonicalBlockKey, CanonicalOpId, CanonicalOperation, CanonicalValueId,
+    CanonicalizedBlock, canonicalize_block_for_dedup, canonicalize_graph, deduplication_key,
 };
+pub use schedule::canonical_schedule;
 
 newtype_index! {
     pub struct OpNodeId;
