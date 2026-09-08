@@ -1,7 +1,9 @@
 use crate::{CallArgumentStrategy, LayoutOrdering};
 use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, DenseIndexSet, newtype_index};
-use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, Operation};
+use sir_data::{
+    BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, Operation, OperationIdx,
+};
 use sir_passes::{
     AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, analyses::Unreachable,
 };
@@ -112,6 +114,24 @@ impl GlobalSpills {
                 .into_iter()
                 .map(|(function, position)| GlobalSpill::CallArgument(function, position)),
         );
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Rematerialization {
+    pub local: LocalId,
+    pub operation: OperationIdx,
+    pub bytecode_size: u8,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Rematerializations {
+    by_call: BTreeMap<OperationIdx, Vec<Rematerialization>>,
+}
+
+impl Rematerializations {
+    pub fn for_call(&self, call: OperationIdx) -> &[Rematerialization] {
+        self.by_call.get(&call).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -446,6 +466,26 @@ fn first_uses_in_block(
     first_uses
 }
 
+fn live_before_control(
+    program: &EthIRProgram,
+    liveness: &sir_passes::analyses::LocalLiveness,
+    block_id: BasicBlockId,
+) -> HashSet<LocalId> {
+    let block = program.block(block_id);
+    let mut live = liveness.get_live_at_exit(block_id).clone();
+    match block.control() {
+        ControlView::Branches { condition, .. } => {
+            live.insert(condition);
+        }
+        ControlView::Switch(switch) => {
+            live.insert(switch.condition());
+        }
+        ControlView::InternalReturn => live.extend(block.outputs()),
+        ControlView::LastOpTerminates | ControlView::ContinuesTo(_) => {}
+    }
+    live
+}
+
 fn max_callsite_overflow(
     program: &EthIRProgram,
     analyses: &AnalysesStore,
@@ -459,17 +499,7 @@ fn max_callsite_overflow(
 
     for &block_id in rpo.blocks_rpo() {
         let block = program.block(block_id);
-        let mut live = liveness.get_live_at_exit(block_id).clone();
-        match block.control() {
-            ControlView::Branches { condition, .. } => {
-                live.insert(condition);
-            }
-            ControlView::Switch(switch) => {
-                live.insert(switch.condition());
-            }
-            ControlView::InternalReturn => live.extend(block.outputs()),
-            ControlView::LastOpTerminates | ControlView::ContinuesTo(_) => {}
-        }
+        let mut live = live_before_control(program, &liveness, block_id);
 
         for operation in block.operations().rev() {
             if let Operation::InternalCall(call) = operation.op() {
@@ -541,6 +571,119 @@ pub(crate) fn select_memory_call_arguments(
             .extend(arguments.into_iter().rev().take(count).map(|position| (function, position)));
     }
     selected
+}
+
+pub(crate) fn select_call_rematerializations(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+    in_out_bundling: &ControlFlowGraphInOutBundling,
+    layouts: &DenseIndexMap<InOutGroupId, Layout>,
+    max_swap_depth: usize,
+) -> Rematerializations {
+    let mut constants = BTreeMap::<LocalId, (BasicBlockId, OperationIdx, u32)>::new();
+    for block in program.blocks() {
+        for operation in block.operations() {
+            if let Operation::SetSmallConst(constant) = operation.op() {
+                constants.insert(constant.sets, (block.id(), operation.id(), constant.value));
+            }
+        }
+    }
+
+    let liveness = analyses.local_liveness(program);
+    let rpo = analyses.reverse_post_order(program);
+    let accessible_entries = max_swap_depth.saturating_add(1);
+    let mut rematerializations = Rematerializations::default();
+
+    for &block_id in rpo.blocks_rpo() {
+        let block = program.block(block_id);
+        let Some(input_group) = in_out_bundling.get_in_group(block_id) else { continue };
+        let input_layout = &layouts[input_group];
+        let input_positions = block
+            .inputs()
+            .iter()
+            .enumerate()
+            .map(|(position, &local)| (local, position as u32))
+            .collect::<BTreeMap<_, _>>();
+        let defined_in_block = block
+            .operations()
+            .flat_map(|operation| operation.outputs().iter().copied())
+            .collect::<BTreeSet<_>>();
+        let mut live = live_before_control(program, &liveness, block_id);
+
+        let mut calls = Vec::new();
+        for operation in block.operations().rev() {
+            if let Operation::InternalCall(call) = operation.op() {
+                let callee_entry = program.function(call.function).entry().id();
+                let callee_group = in_out_bundling
+                    .get_in_group(callee_entry)
+                    .expect("internal-call target without an input layout group");
+                let live_across = live
+                    .iter()
+                    .filter(|&&local| !operation.outputs().contains(&local))
+                    .copied()
+                    .collect::<Vec<_>>();
+                let stack_live_across = live_across
+                    .iter()
+                    .filter(|&&local| {
+                        defined_in_block.contains(&local)
+                            || input_positions.get(&local).is_some_and(|&position| {
+                                input_layout.contains(&LayoutMember::InputOutput(position))
+                            })
+                            || input_layout.contains(&LayoutMember::Local(local))
+                    })
+                    .count();
+                let caller_return_dest =
+                    usize::from(input_layout.contains(&LayoutMember::ReturnDest));
+                let pressure = stack_live_across + caller_return_dest + layouts[callee_group].len();
+                let overflow = pressure.saturating_sub(accessible_entries);
+                if overflow != 0 {
+                    calls.push((operation.id(), live_across, overflow));
+                }
+            }
+
+            for output in operation.outputs() {
+                live.remove(output);
+            }
+            live.extend(operation.inputs());
+        }
+
+        // Replaying once per local bounds code growth and avoids duplicate operation IDs within a
+        // block graph.
+        let mut rematerialized_locals = BTreeSet::new();
+        for (call, live_across, overflow) in calls.into_iter().rev() {
+            let mut candidates = live_across
+                .into_iter()
+                .filter_map(|local| {
+                    let &(definition_block, operation, value) = constants.get(&local)?;
+                    // Same-block constants are already free to move after the call.
+                    if definition_block == block_id
+                        || rematerialized_locals.contains(&local)
+                        || !input_layout.contains(&LayoutMember::Local(local))
+                    {
+                        return None;
+                    }
+                    let value_bytes = if value == 0 {
+                        0
+                    } else {
+                        (u32::BITS - value.leading_zeros()).div_ceil(8)
+                    };
+                    let bytecode_size = if value == 0 { 1 } else { value_bytes + 1 };
+                    Some((bytecode_size, local, operation))
+                })
+                .collect::<Vec<_>>();
+            candidates.sort_unstable();
+            for (bytecode_size, local, operation) in candidates.into_iter().take(overflow) {
+                rematerialized_locals.insert(local);
+                rematerializations.by_call.entry(call).or_default().push(Rematerialization {
+                    local,
+                    operation,
+                    bytecode_size: bytecode_size.try_into().unwrap(),
+                });
+            }
+        }
+    }
+
+    rematerializations
 }
 
 pub(crate) fn select_global_spills(

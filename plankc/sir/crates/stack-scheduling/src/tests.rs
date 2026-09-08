@@ -8,7 +8,7 @@ use sir_passes::AnalysesStore;
 use std::{collections::HashSet, fmt::Write};
 
 use super::{
-    CallArgumentStrategy, GlobalSchedulerConfig, LayoutOrdering, ScheduledOps,
+    CallArgumentStrategy, GlobalSchedulerConfig, ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ShuffleConfig, StackOps},
@@ -674,11 +674,7 @@ fn globally_spills_an_unused_obstruction() {
         &program,
         &analyses,
         ShuffleConfig::max_swap_no_exchange(2),
-        GlobalSchedulerConfig {
-            layout_ordering: LayoutOrdering::Naive,
-            spill_dormant_values: true,
-            call_arguments: CallArgumentStrategy::StackOnly,
-        },
+        GlobalSchedulerConfig { spill_dormant_values: true, ..GlobalSchedulerConfig::default() },
     );
     let entry = BasicBlockId::new(0);
     let middle = BasicBlockId::new(1);
@@ -721,9 +717,8 @@ fn passes_pressured_call_arguments_through_global_spills() {
         &analyses,
         ShuffleConfig::max_swap_no_exchange(4),
         GlobalSchedulerConfig {
-            layout_ordering: LayoutOrdering::Naive,
-            spill_dormant_values: false,
             call_arguments: CallArgumentStrategy::FullReliefOnly,
+            ..GlobalSchedulerConfig::default()
         },
     );
     let caller = program.function(program.init_entry).entry().id();
@@ -773,9 +768,8 @@ fn does_not_overwrite_call_arguments_before_the_previous_call() {
         &analyses,
         ShuffleConfig::max_swap_no_exchange(4),
         GlobalSchedulerConfig {
-            layout_ordering: LayoutOrdering::Naive,
-            spill_dormant_values: false,
             call_arguments: CallArgumentStrategy::PartialRelief,
+            ..GlobalSchedulerConfig::default()
         },
     );
     let caller = program.function(program.init_entry).entry().id();
@@ -804,4 +798,95 @@ fn does_not_overwrite_call_arguments_before_the_previous_call() {
         assert!(call_positions[0] < store_positions[1]);
         assert!(store_positions[1] < call_positions[1]);
     }
+}
+
+#[test]
+fn rematerializes_a_deep_constant_after_a_pressured_call() {
+    let program = sir_parser::parse_or_panic(
+        r#"
+        fn init:
+            entry {
+                p = caller
+                q = callvalue
+                r = calldatasize
+                k = const 0x7
+                => @call
+            }
+            call {
+                a = returndatasize
+                result = icall @callee a
+                with_k = add k result
+                pq = add p q
+                pqr = add pq r
+                sstore pqr with_k
+                stop
+            }
+        fn callee:
+            entry a -> result {
+                result = iszero a
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let (scheduled, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        GlobalSchedulerConfig {
+            rematerialize_small_constants: true,
+            ..GlobalSchedulerConfig::default()
+        },
+    );
+    let constant = program
+        .operations()
+        .find(|operation| matches!(operation.op(), Operation::SetSmallConst(_)))
+        .unwrap()
+        .id();
+    let call = program
+        .operations()
+        .find(|operation| matches!(operation.op(), Operation::InternalCall(_)))
+        .unwrap()
+        .id();
+    let call_block = program
+        .blocks()
+        .find(|block| block.operations().any(|operation| operation.id() == call))
+        .unwrap()
+        .id();
+    let scheduled = scheduled.get(call_block).unwrap();
+    let call_position = scheduled.iter().position(|&op| op == StackOps::Op(call)).unwrap();
+    let replay_position = scheduled.iter().position(|&op| op == StackOps::Op(constant)).unwrap();
+    assert!(call_position < replay_position);
+    assert_eq!(scheduled.iter().filter(|&&op| op == StackOps::Op(constant)).count(), 1);
+
+    let (unpressured, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(16),
+        GlobalSchedulerConfig {
+            rematerialize_small_constants: true,
+            ..GlobalSchedulerConfig::default()
+        },
+    );
+    assert!(!unpressured.get(call_block).unwrap().contains(&StackOps::Op(constant)));
+}
+
+#[test]
+fn rematerialization_cost_gate_requires_a_pareto_improvement() {
+    let alloc = StaticAllocId::new(0);
+    assert!(crate::rematerialized_schedule_is_better(
+        &[StackOps::Store(alloc), StackOps::Load(alloc)],
+        &[StackOps::Pop],
+        2,
+        3,
+        ShuffleConfig::max_swap_no_exchange(16),
+    ));
+    assert!(!crate::rematerialized_schedule_is_better(
+        &[StackOps::Swap(1)],
+        &[StackOps::Pop],
+        2,
+        3,
+        ShuffleConfig::max_swap_no_exchange(16),
+    ));
 }

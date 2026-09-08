@@ -1,6 +1,7 @@
 use crate::{
     layouts::{
-        GlobalSpill, GlobalSpills, Layout, LayoutMember, LayoutsTracker, layout_member_local,
+        GlobalSpill, GlobalSpills, Layout, LayoutMember, LayoutsTracker, Rematerializations,
+        layout_member_local,
     },
     op_graph::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, builder::OpBuilder},
 };
@@ -102,6 +103,7 @@ pub fn build_graph_effectful<'ir>(
         analyses,
         &GlobalSpills::default(),
         program.next_static_alloc_id,
+        &Rematerializations::default(),
     )
 }
 
@@ -114,6 +116,7 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
     analyses: &AnalysesStore,
     global_spills: &GlobalSpills,
     global_spill_base: StaticAllocId,
+    rematerializations: &Rematerializations,
 ) -> OpGraph {
     let function_effects = analyses.function_effects(program);
 
@@ -237,6 +240,13 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
         }
         if let Operation::InternalCall(call) = op.op() {
             last_call_by_function.insert(call.function, op_id);
+        }
+        for rematerialization in rematerializations.for_call(op.id()) {
+            let mut replay = graph.begin_op(OpNodeKind::Normal(rematerialization.operation));
+            replay.add_predecessor(op_id);
+            let replayed = replay.end_inputs_begin_outputs().add_output();
+            let previous = local_to_value.insert(rematerialization.local, replayed);
+            assert!(previous.is_some(), "rematerialized constant unavailable at callsite");
         }
     }
 

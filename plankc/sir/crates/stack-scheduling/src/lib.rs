@@ -6,8 +6,8 @@ use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{
-    GlobalSpills, LayoutsTracker, build_basic_block_layout_sets, order_layouts,
-    select_global_spills, select_memory_call_arguments,
+    GlobalSpills, LayoutsTracker, Rematerializations, build_basic_block_layout_sets, order_layouts,
+    select_call_rematerializations, select_global_spills, select_memory_call_arguments,
 };
 pub use stack::ShuffleConfig;
 pub mod op_graph;
@@ -30,6 +30,43 @@ const AVG_OPS_PER_BLOCK: usize = 20;
 const DEFAULT_MAX_SEARCH_CANDIDATES: usize = 1_000;
 const BLOCK_SCHEDULING_THREADS: usize = 6;
 
+fn estimated_stack_management_cost(
+    ops: &[StackOps],
+    shuffle_config: ShuffleConfig,
+) -> (usize, u32) {
+    ops.iter().fold((0, 0), |(bytes, gas), op| {
+        let (op_bytes, op_gas) = match op {
+            StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => (1, 3),
+            StackOps::Exchange(0, _) | StackOps::Exchange(_, 0) => {
+                (1, u32::from(shuffle_config.exchange_cost))
+            }
+            StackOps::Exchange(_, _) => (3, u32::from(shuffle_config.exchange_cost)),
+            // Assume a PUSH1 address and exclude context-dependent memory expansion.
+            StackOps::Store(_) | StackOps::Load(_) => (3, 6),
+            // Necessary SIR operations are common to both candidate schedules.
+            StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => (0, 0),
+        };
+        (bytes + op_bytes, gas + op_gas)
+    })
+}
+
+fn rematerialized_schedule_is_better(
+    baseline: &[StackOps],
+    rematerialized: &[StackOps],
+    replay_bytecode_size: usize,
+    replay_execution_gas: u32,
+    shuffle_config: ShuffleConfig,
+) -> bool {
+    let (baseline_bytes, baseline_gas) = estimated_stack_management_cost(baseline, shuffle_config);
+    let (rematerialized_bytes, rematerialized_gas) =
+        estimated_stack_management_cost(rematerialized, shuffle_config);
+    let rematerialized_bytes = rematerialized_bytes + replay_bytecode_size;
+    let rematerialized_gas = rematerialized_gas + replay_execution_gas;
+    rematerialized_bytes <= baseline_bytes
+        && rematerialized_gas <= baseline_gas
+        && (rematerialized_bytes < baseline_bytes || rematerialized_gas < baseline_gas)
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutOrdering {
     #[default]
@@ -51,6 +88,7 @@ pub struct GlobalSchedulerConfig {
     pub layout_ordering: LayoutOrdering,
     pub spill_dormant_values: bool,
     pub call_arguments: CallArgumentStrategy,
+    pub rematerialize_small_constants: bool,
 }
 
 #[derive(Debug)]
@@ -112,6 +150,17 @@ pub fn schedule_with_config<'ir>(
         global_config.call_arguments,
     ));
     global_spills.remove_from_layouts(program, &in_out_bundling, &mut layout_sets);
+    let rematerializations = if global_config.rematerialize_small_constants {
+        select_call_rematerializations(
+            program,
+            analyses,
+            &in_out_bundling,
+            &layout_sets,
+            usize::from(shuffle_config.max_swap_depth),
+        )
+    } else {
+        Rematerializations::default()
+    };
     let global_spill_base = program.next_static_alloc_id;
     let local_alloc_start =
         global_spill_base + u32::try_from(global_spills.len()).expect("too many global spills");
@@ -139,8 +188,37 @@ pub fn schedule_with_config<'ir>(
                 analyses,
                 &global_spills,
                 global_spill_base,
+                &rematerializations,
             );
-            Some((block, graph))
+            let (replay_bytecode_size, replay_execution_gas) = block
+                .operations()
+                .flat_map(|operation| rematerializations.for_call(operation.id()))
+                .fold((0, 0), |(bytes, gas), rematerialization| {
+                    (
+                        bytes + usize::from(rematerialization.bytecode_size),
+                        gas + if rematerialization.bytecode_size == 1 { 2 } else { 3 },
+                    )
+                });
+            // Call pressure is only a candidate heuristic. Compare complete block schedules before
+            // accepting the replay.
+            let baseline = (replay_bytecode_size != 0).then(|| {
+                (
+                    build_graph_effectful_with_spills(
+                        program,
+                        block,
+                        &layouts,
+                        input_layout,
+                        output_layout,
+                        analyses,
+                        &global_spills,
+                        global_spill_base,
+                        &Rematerializations::default(),
+                    ),
+                    replay_bytecode_size,
+                    replay_execution_gas,
+                )
+            });
+            Some((block, graph, baseline))
         })
         .collect::<Vec<_>>();
     // Blocks share a temporary spill base while scheduling so they can run independently. Their
@@ -153,16 +231,36 @@ pub fn schedule_with_config<'ir>(
     let block_schedules = scheduling_pool.install(|| {
         block_graphs
             .into_par_iter()
-            .map(|(block, graph)| {
-                let result = depth_first_search::schedule(
-                    block,
-                    spill_alloc_start,
-                    shuffle_config,
-                    depth_first_search::SearchConfig {
-                        max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
-                    },
-                    &graph,
-                );
+            .map(|(block, graph, baseline)| {
+                let schedule = |graph| {
+                    depth_first_search::schedule(
+                        block,
+                        spill_alloc_start,
+                        shuffle_config,
+                        depth_first_search::SearchConfig {
+                            max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
+                        },
+                        graph,
+                    )
+                };
+                let rematerialized = schedule(&graph);
+                let result = match baseline {
+                    None => rematerialized,
+                    Some((baseline_graph, replay_bytecode_size, replay_execution_gas)) => {
+                        let baseline = schedule(&baseline_graph);
+                        if rematerialized_schedule_is_better(
+                            &baseline.ops,
+                            &rematerialized.ops,
+                            replay_bytecode_size,
+                            replay_execution_gas,
+                            shuffle_config,
+                        ) {
+                            rematerialized
+                        } else {
+                            baseline
+                        }
+                    }
+                };
                 (block.id(), result)
             })
             .collect::<Vec<_>>()
