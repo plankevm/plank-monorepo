@@ -1,12 +1,14 @@
 use plank_core::Idx;
 use plank_test_utils::dedent_preserve_blank_lines;
-use sir_data::{BlockView, ControlView, EthIRProgram, Operation, OperationIdx, StaticAllocId};
+use sir_data::{
+    BasicBlockId, BlockView, ControlView, EthIRProgram, Operation, OperationIdx, StaticAllocId,
+};
 use sir_parser::EmitConfig;
 use sir_passes::AnalysesStore;
 use std::{collections::HashSet, fmt::Write};
 
 use super::{
-    ScheduledOps,
+    GlobalSchedulerConfig, LayoutOrdering, ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ShuffleConfig, StackOps},
@@ -221,6 +223,9 @@ fn fmt_value(
         | super::op_graph::OpNodeKind::Normal(op_idx) => op_idx,
         super::op_graph::OpNodeKind::RetDestPush(_) => {
             panic!("return destination push should not produce local outputs")
+        }
+        super::op_graph::OpNodeKind::GlobalStore(_) => {
+            panic!("global store should not produce local outputs")
         }
     };
     let local = program.operations[op_idx].outputs(program)[output_position];
@@ -633,4 +638,49 @@ fn repeated_input() {
             (stop)
         "#,
     );
+}
+
+#[test]
+fn globally_spills_an_unused_obstruction() {
+    let program = sir_parser::parse_or_panic(
+        r#"
+        fn init:
+            entry -> x0 y0 z0 target0 {
+                x0 = caller
+                y0 = callvalue
+                z0 = calldatasize
+                target0 = returndatasize
+                => @middle
+            }
+            middle x1 y1 z1 target1 -> x1 y1 z1 {
+                use_target = iszero target1
+                => @use
+            }
+            use x2 y2 z2 {
+                use_x = iszero x2
+                use_y = iszero y2
+                use_z = iszero z2
+                stop
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let spill_base = program.next_static_alloc_id;
+    let (scheduled, layouts, next_alloc_id) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        GlobalSchedulerConfig {
+            layout_ordering: LayoutOrdering::Naive,
+            spill_dormant_values: true,
+        },
+    );
+    let entry = BasicBlockId::new(0);
+    let middle = BasicBlockId::new(1);
+
+    assert!(scheduled.get(entry).unwrap().contains(&StackOps::Store(spill_base)));
+    assert!(scheduled.get(middle).unwrap().contains(&StackOps::Load(spill_base)));
+    assert!(!layouts.get_input_layout(middle).contains(&LayoutMember::InputOutput(0)));
+    assert!(next_alloc_id > spill_base);
 }

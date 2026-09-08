@@ -5,11 +5,14 @@ use rayon::prelude::*;
 use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
-use layouts::{LayoutsTracker, build_basic_block_layout_sets, order_layouts};
+use layouts::{
+    GlobalSpills, LayoutsTracker, build_basic_block_layout_sets, order_layouts,
+    select_global_spills,
+};
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{op_graph::build_graph_effectful, stack::StackOps};
+use crate::{op_graph::build_graph_effectful_with_spills, stack::StackOps};
 
 mod depth_first_search;
 mod greedy_intra_op_scheduler;
@@ -38,6 +41,7 @@ pub enum LayoutOrdering {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct GlobalSchedulerConfig {
     pub layout_ordering: LayoutOrdering,
+    pub spill_dormant_values: bool,
 }
 
 #[derive(Debug)]
@@ -79,7 +83,22 @@ pub fn schedule_with_config<'ir>(
         &mut layout_sets,
         global_config.layout_ordering,
     );
-    let mut next_alloc_id = program.next_static_alloc_id;
+    let global_spills = if global_config.spill_dormant_values {
+        select_global_spills(
+            program,
+            analyses,
+            &in_out_bundling,
+            &layout_sets,
+            usize::from(shuffle_config.max_swap_depth),
+        )
+    } else {
+        GlobalSpills::default()
+    };
+    global_spills.remove_from_layouts(&mut layout_sets);
+    let global_spill_base = program.next_static_alloc_id;
+    let local_alloc_start =
+        global_spill_base + u32::try_from(global_spills.len()).expect("too many global spills");
+    let mut next_alloc_id = local_alloc_start;
 
     // Freeze the selected layout sets as concrete layouts.
     let layouts = LayoutsTracker::new(program, layout_sets, in_out_bundling);
@@ -94,20 +113,22 @@ pub fn schedule_with_config<'ir>(
         .blocks()
         .filter_map(|block| {
             let (input_layout, output_layout) = layouts.get_input_output(block.id())?;
-            let graph = build_graph_effectful(
+            let graph = build_graph_effectful_with_spills(
                 program,
                 block,
                 &layouts,
                 input_layout,
                 output_layout,
                 analyses,
+                &global_spills,
+                global_spill_base,
             );
             Some((block, graph))
         })
         .collect::<Vec<_>>();
     // Blocks share a temporary spill base while scheduling so they can run independently. Their
     // block-local spill IDs are rebased after the parallel search finishes.
-    let local_alloc_start = next_alloc_id;
+    let spill_alloc_start = global_spill_base;
     let scheduling_pool = rayon::ThreadPoolBuilder::new()
         .num_threads(BLOCK_SCHEDULING_THREADS)
         .build()
@@ -118,7 +139,7 @@ pub fn schedule_with_config<'ir>(
             .map(|(block, graph)| {
                 let result = depth_first_search::schedule(
                     block,
-                    local_alloc_start,
+                    spill_alloc_start,
                     shuffle_config,
                     depth_first_search::SearchConfig {
                         max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
@@ -133,8 +154,8 @@ pub fn schedule_with_config<'ir>(
     for (block_id, schedule) in block_schedules {
         let alloc_offset = next_alloc_id - local_alloc_start;
         let ops_idx = ops.push_iter(schedule.ops.into_iter().map(|op| match op {
-            StackOps::Store(id) => StackOps::Store(id + alloc_offset),
-            StackOps::Load(id) => StackOps::Load(id + alloc_offset),
+            StackOps::Store(id) if id >= local_alloc_start => StackOps::Store(id + alloc_offset),
+            StackOps::Load(id) if id >= local_alloc_start => StackOps::Load(id + alloc_offset),
             op => op,
         }));
         next_alloc_id += schedule.spill_count;

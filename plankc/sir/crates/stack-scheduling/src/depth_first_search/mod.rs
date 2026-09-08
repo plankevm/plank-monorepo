@@ -56,6 +56,7 @@ struct Search<'a> {
     best_cost: u32,
     best_ops: Box<[StackOps]>,
     best_spill_count: u32,
+    global_spill_count: u32,
     path: Vec<StackOps>,
     best_state_costs: HashMap<Rc<SearchState>, u32>,
 }
@@ -68,10 +69,11 @@ pub fn schedule(
     graph: &OpGraph,
 ) -> SearchResult {
     let mut incumbent_ops = Vec::new();
+    let global_spill_count = graph.spilled_input_values().len();
     let incumbent_next_alloc_id =
         greedy_schedule(|op| incumbent_ops.push(op), block, next_alloc_id, shuffle, graph);
     let incumbent_cost = stack_ops_cost(&incumbent_ops, shuffle);
-    let incumbent_spill_count = incumbent_next_alloc_id - next_alloc_id;
+    let incumbent_spill_count = incumbent_next_alloc_id - next_alloc_id - global_spill_count;
 
     if graph.total_ops() == 0 {
         return SearchResult {
@@ -83,7 +85,7 @@ pub fn schedule(
     let start = SearchNode {
         state: Rc::new(SearchState {
             complete: vec![0; graph.words_per_set() as usize].into_boxed_slice(),
-            values: graph.input_values_fifo().iter().collect(),
+            values: graph.input_values_fifo().iter().chain(graph.spilled_input_values()).collect(),
             stack_end: graph.input_values_fifo().len() as usize,
         }),
         completed_count: 0,
@@ -99,6 +101,7 @@ pub fn schedule(
         best_cost: incumbent_cost,
         best_ops: incumbent_ops.into_boxed_slice(),
         best_spill_count: incumbent_spill_count,
+        global_spill_count,
         path: Vec::with_capacity(graph.total_ops() as usize * ESTIMATED_STACK_OPS_PER_GRAPH_OP),
         best_state_costs: HashMap::new(),
     };
@@ -213,7 +216,8 @@ impl Search<'_> {
         if !matches!(self.block.control(), ControlView::LastOpTerminates) {
             greedy_shuffler::shuffle(self.shuffle, &mut stack, self.graph);
         }
-        let spill_count = u32::try_from(stack.underlying_spilled().len()).expect("overflow");
+        let spill_count = u32::try_from(stack.underlying_spilled().len()).expect("overflow")
+            - self.global_spill_count;
         drop(stack);
 
         let cost = node.executed_cost + stack_ops_cost(&final_ops, self.shuffle);

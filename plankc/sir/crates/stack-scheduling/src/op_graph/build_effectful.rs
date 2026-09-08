@@ -1,9 +1,11 @@
 use crate::{
-    layouts::{Layout, LayoutMember, LayoutsTracker},
+    layouts::{GlobalSpills, Layout, LayoutMember, LayoutsTracker, layout_member_local},
     op_graph::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, builder::OpBuilder},
 };
 use hashbrown::HashMap;
-use sir_data::{BlockView, ControlView, EthIRProgram, Operation, operation::effects::Effect};
+use sir_data::{
+    BlockView, ControlView, EthIRProgram, Operation, StaticAllocId, operation::effects::Effect,
+};
 use sir_passes::AnalysesStore;
 
 /// Channels of `(minor, major)` effect pairs. Within a channel, minor effects commute with each
@@ -89,6 +91,28 @@ pub fn build_graph_effectful<'ir>(
     output_layout: &Layout,
     analyses: &AnalysesStore,
 ) -> OpGraph {
+    build_graph_effectful_with_spills(
+        program,
+        block,
+        layouts,
+        input_layout,
+        output_layout,
+        analyses,
+        &GlobalSpills::default(),
+        program.next_static_alloc_id,
+    )
+}
+
+pub(crate) fn build_graph_effectful_with_spills<'ir>(
+    program: &'ir EthIRProgram,
+    block: BlockView<'ir>,
+    layouts: &LayoutsTracker<'ir>,
+    input_layout: &Layout,
+    output_layout: &Layout,
+    analyses: &AnalysesStore,
+    global_spills: &GlobalSpills,
+    global_spill_base: StaticAllocId,
+) -> OpGraph {
     let function_effects = analyses.function_effects(program);
 
     let estimated_ops = (block.operations().count() * 11).div_ceil(10);
@@ -108,6 +132,14 @@ pub fn build_graph_effectful<'ir>(
             }
             LayoutMember::Local(local) => local_to_value.insert(local, vid),
         };
+    }
+    let input_group = layouts.get_input_group(block.id());
+    for (group, member) in global_spills.iter() {
+        let vid = graph.push_spilled_input_value();
+        if Some(group) == input_group {
+            let local = layout_member_local(member, inputs).expect("return destination spilled");
+            local_to_value.insert(local, vid);
+        }
     }
 
     let mut graph = graph.end_inputs_begin_ops();
@@ -170,6 +202,18 @@ pub fn build_graph_effectful<'ir>(
             let vid = op_builder.add_output();
             let prev = local_to_value.insert(local, vid);
             assert!(prev.is_none());
+        }
+    }
+
+    if let Some(output_group) = layouts.get_output_group(block.id()) {
+        for (spill_index, member) in global_spills.for_group(output_group) {
+            let local =
+                layout_member_local(member, block.outputs()).expect("return destination spilled");
+            let mut store = graph.begin_op(OpNodeKind::GlobalStore(
+                global_spill_base + u32::try_from(spill_index).expect("too many global spills"),
+            ));
+            store.add_input(local_to_value[&local]);
+            let _ = store.end_inputs_begin_outputs();
         }
     }
 
@@ -248,6 +292,7 @@ mod tests {
                         program.operations[op_idx].kind().mnemonic()
                     }
                     OpNodeKind::RetDestPush(_) => "ret_dest_push",
+                    OpNodeKind::GlobalStore(_) => "global_store",
                 };
                 write!(out, "    #{op_id} {name} [").unwrap();
                 for (i, pred) in graph.displayed_predecessors(op_id).into_iter().enumerate() {

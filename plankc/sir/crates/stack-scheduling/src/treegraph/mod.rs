@@ -46,6 +46,7 @@ impl TreeGraph {
                 OpNodeKind::RetDestPush(operation) => {
                     return_dest_pushes.insert_no_prev(operation, tree_operation);
                 }
+                OpNodeKind::GlobalStore(_) => {}
             }
         }
 
@@ -76,6 +77,7 @@ impl TreeGraph {
                         StackOps::Op(operation)
                     }
                     OpNodeKind::RetDestPush(operation) => StackOps::CallRetPush(operation),
+                    OpNodeKind::GlobalStore(alloc) => StackOps::Store(alloc),
                 }
             }));
         }
@@ -90,6 +92,9 @@ pub fn build_tree_graph(original: &OpGraph) -> TreeGraph {
     let mut builder = OpGraphBuilder::with_capacity(total_ops, total_values);
     for input in original.input_values_fifo() {
         original_to_value.insert_no_prev(input, builder.push_input_value());
+    }
+    for input in original.spilled_input_values() {
+        original_to_value.insert_no_prev(input, builder.push_spilled_input_value());
     }
 
     TreeGraphBuilder {
@@ -182,7 +187,10 @@ impl TreeGraphBuilder<'_> {
     fn build_pending(&mut self, root: OpNodeId) -> Vec<OpNodeId> {
         assert!(self.built.get(root).is_none(), "built an operation twice");
         let op = self.original.get_op(root);
-        if matches!(op.kind, OpNodeKind::Flippable(_)) && op.inputs_fifo.len() >= 2 {
+        if matches!(op.kind, OpNodeKind::GlobalStore(_)) {
+            self.ensure_inputs_materialized(root, 0);
+            vec![root]
+        } else if matches!(op.kind, OpNodeKind::Flippable(_)) && op.inputs_fifo.len() >= 2 {
             self.build_flippable(root)
         } else {
             self.fold_deeper_operands(root, vec![root], 0, false)

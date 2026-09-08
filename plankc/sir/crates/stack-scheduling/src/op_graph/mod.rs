@@ -1,10 +1,11 @@
 use plank_core::{Idx, IndexVec, Span, newtype_index};
-use sir_data::OperationIdx;
+use sir_data::{OperationIdx, StaticAllocId};
 
 mod build_effectful;
 mod build_simple;
 pub mod builder;
 pub use build_effectful::build_graph_effectful;
+pub(crate) use build_effectful::build_graph_effectful_with_spills;
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
 
@@ -19,6 +20,7 @@ pub enum OpNodeKind {
     Flippable(OperationIdx),
     RetDestPush(OperationIdx),
     Normal(OperationIdx),
+    GlobalStore(StaticAllocId),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +37,7 @@ pub struct OpGraph {
     total_ops: u32,
     total_values: u32,
 
+    stack_inputs_end: ValueNodeId,
     inputs_end: ValueNodeId,
     end_stack_fifo_start: ValueArenaIdx,
 
@@ -73,7 +76,11 @@ impl OpGraph {
     }
 
     pub fn input_values_fifo(&self) -> Span<ValueNodeId> {
-        Span::new(ValueNodeId::ZERO, self.inputs_end)
+        Span::new(ValueNodeId::ZERO, self.stack_inputs_end)
+    }
+
+    pub fn spilled_input_values(&self) -> Span<ValueNodeId> {
+        Span::new(self.stack_inputs_end, self.inputs_end)
     }
 
     pub fn is_input(&self, id: ValueNodeId) -> bool {

@@ -27,11 +27,15 @@ fn copy_bitset(dst: &mut [BitsetWord], src: &[BitsetWord]) {
     dst[..src.len()].copy_from_slice(src);
 }
 
-pub struct AddingGraphInputs;
+pub struct AddingGraphInputs {
+    stack_inputs_end: Option<ValueNodeId>,
+}
 pub struct AddingGraphOps {
+    stack_inputs_end: ValueNodeId,
     inputs_end: ValueNodeId,
 }
 pub struct AddingGraphEndStack {
+    stack_inputs_end: ValueNodeId,
     inputs_end: ValueNodeId,
     end_stack_fifo_start: ValueArenaIdx,
 }
@@ -91,7 +95,12 @@ impl OpGraphStorage {
         union_bitset(current, &earlier[predecessor.idx()]);
     }
 
-    fn finish(self, inputs_end: ValueNodeId, end_stack_fifo_start: ValueArenaIdx) -> OpGraph {
+    fn finish(
+        self,
+        stack_inputs_end: ValueNodeId,
+        inputs_end: ValueNodeId,
+        end_stack_fifo_start: ValueArenaIdx,
+    ) -> OpGraph {
         assert_eq!(self.operations.len_idx(), self.op_predecessors.len_idx());
 
         let total_ops = self.operations.len();
@@ -116,6 +125,7 @@ impl OpGraphStorage {
             total_ops: total_ops.try_into().expect("overflow"),
             total_values: total_values.try_into().expect("overflow"),
 
+            stack_inputs_end,
             inputs_end,
             end_stack_fifo_start,
 
@@ -132,17 +142,28 @@ impl OpGraphBuilder<AddingGraphInputs> {
     pub fn with_capacity(estimated_ops: usize, estimated_values: usize) -> Self {
         Self {
             storage: OpGraphStorage::with_capacity(estimated_ops, estimated_values),
-            phase: AddingGraphInputs,
+            phase: AddingGraphInputs { stack_inputs_end: None },
         }
     }
 
     pub fn push_input_value(&mut self) -> ValueNodeId {
+        assert!(self.phase.stack_inputs_end.is_none(), "stack input added after spilled input");
+        self.storage.values.push((None, Vec::with_capacity(self.storage.estimated_words())))
+    }
+
+    pub fn push_spilled_input_value(&mut self) -> ValueNodeId {
+        self.phase.stack_inputs_end.get_or_insert_with(|| self.storage.values.len_idx());
         self.storage.values.push((None, Vec::with_capacity(self.storage.estimated_words())))
     }
 
     pub fn end_inputs_begin_ops(self) -> OpGraphBuilder<AddingGraphOps> {
+        let stack_inputs_end =
+            self.phase.stack_inputs_end.unwrap_or_else(|| self.storage.values.len_idx());
         let inputs_end = self.storage.values.len_idx();
-        OpGraphBuilder { storage: self.storage, phase: AddingGraphOps { inputs_end } }
+        OpGraphBuilder {
+            storage: self.storage,
+            phase: AddingGraphOps { stack_inputs_end, inputs_end },
+        }
     }
 }
 
@@ -155,7 +176,11 @@ impl OpGraphBuilder<AddingGraphOps> {
         let end_stack_fifo_start = self.storage.values_arena.len_idx();
         OpGraphBuilder {
             storage: self.storage,
-            phase: AddingGraphEndStack { inputs_end: self.phase.inputs_end, end_stack_fifo_start },
+            phase: AddingGraphEndStack {
+                stack_inputs_end: self.phase.stack_inputs_end,
+                inputs_end: self.phase.inputs_end,
+                end_stack_fifo_start,
+            },
         }
     }
 }
@@ -166,7 +191,11 @@ impl OpGraphBuilder<AddingGraphEndStack> {
     }
 
     pub fn finish(self) -> OpGraph {
-        self.storage.finish(self.phase.inputs_end, self.phase.end_stack_fifo_start)
+        self.storage.finish(
+            self.phase.stack_inputs_end,
+            self.phase.inputs_end,
+            self.phase.end_stack_fifo_start,
+        )
     }
 }
 

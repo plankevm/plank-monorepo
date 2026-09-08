@@ -4,7 +4,7 @@ use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpSetMut},
-    stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
+    stack::{ShuffleConfig, StackOps, TrackedStack},
 };
 use sir_data::{BlockView, ControlView, StaticAllocId};
 use smallvec::SmallVec;
@@ -26,13 +26,12 @@ pub fn greedy_schedule(
     complete_backing.resize(graph.words_per_set() as usize, 0);
     let mut complete = OpSetMut::new(&mut complete_backing, graph.total_ops());
 
-    let mut stack = {
-        let mut inner = EvmStack::new();
-        for input in graph.input_values_fifo().iter().rev() {
-            inner.push(input);
-        }
-        TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
-    };
+    let mut stack = TrackedStack::new_from_parts(
+        next_alloc_id,
+        ops_sink,
+        &graph.input_values_fifo().iter().collect::<Vec<_>>(),
+        graph.spilled_input_values().iter().collect(),
+    );
 
     'schedule: loop {
         completable.clear();

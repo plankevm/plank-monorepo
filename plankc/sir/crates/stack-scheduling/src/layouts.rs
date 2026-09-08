@@ -5,7 +5,7 @@ use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, Ope
 use sir_passes::{
     AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, analyses::Unreachable,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 newtype_index! {
     pub(crate) struct LayoutIdx;
@@ -36,6 +36,40 @@ impl Layout {
 
     pub fn members_fifo(&self) -> &[LayoutMember] {
         &self.members_fifo
+    }
+
+    fn remove(&mut self, member: LayoutMember) {
+        self.members_fifo.retain(|&candidate| candidate != member);
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct GlobalSpills {
+    values: Vec<(InOutGroupId, LayoutMember)>,
+}
+
+impl GlobalSpills {
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    pub fn for_group(
+        &self,
+        group: InOutGroupId,
+    ) -> impl Iterator<Item = (usize, LayoutMember)> + '_ {
+        self.values.iter().enumerate().filter_map(move |(index, &(candidate_group, member))| {
+            (candidate_group == group).then_some((index, member))
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (InOutGroupId, LayoutMember)> + '_ {
+        self.values.iter().copied()
+    }
+
+    pub fn remove_from_layouts(&self, layouts: &mut DenseIndexMap<InOutGroupId, Layout>) {
+        for &(group, member) in &self.values {
+            layouts[group].remove(member);
+        }
     }
 }
 
@@ -75,6 +109,14 @@ impl<'ir> LayoutsTracker<'ir> {
             unreachable!("getting input layout for block without IO group");
         };
         &self.cfg_layouts[group]
+    }
+
+    pub(crate) fn get_input_group(&self, bb: BasicBlockId) -> Option<InOutGroupId> {
+        self.in_out_bundling.get_in_group(bb)
+    }
+
+    pub(crate) fn get_output_group(&self, bb: BasicBlockId) -> Option<InOutGroupId> {
+        self.in_out_bundling.get_out_group(bb)
     }
 
     pub fn get_input_output(&self, bb: BasicBlockId) -> Option<(&Layout, &Layout)> {
@@ -362,6 +404,145 @@ fn first_uses_in_block(
     first_uses
 }
 
+pub(crate) fn select_global_spills(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+    in_out_bundling: &ControlFlowGraphInOutBundling,
+    layouts: &DenseIndexMap<InOutGroupId, Layout>,
+    access_limit: usize,
+) -> GlobalSpills {
+    let liveness = analyses.local_liveness(program);
+    let mut input_blocks = DenseIndexMap::<InOutGroupId, Vec<BasicBlockId>>::with_capacity(
+        in_out_bundling.total_groups() as usize,
+    );
+    let mut groups_with_predecessors =
+        DenseIndexSet::with_capacity_in_bits(in_out_bundling.total_groups() as usize);
+    let mut function_entry_groups =
+        DenseIndexSet::with_capacity_in_bits(in_out_bundling.total_groups() as usize);
+    for block in program.blocks() {
+        if let Some(group) = in_out_bundling.get_in_group(block.id()) {
+            input_blocks.entry(group).or_insert_default().push(block.id());
+        }
+        if let Some(group) = in_out_bundling.get_out_group(block.id()) {
+            groups_with_predecessors.add(group);
+        }
+    }
+    for function in program.functions_iter() {
+        if let Some(group) = in_out_bundling.get_in_group(function.entry().id()) {
+            function_entry_groups.add(group);
+        }
+    }
+
+    let mut global_spills = GlobalSpills::default();
+    for (group, layout) in layouts.iter() {
+        if !groups_with_predecessors.contains(group) || function_entry_groups.contains(group) {
+            continue;
+        }
+        let Some(blocks) = input_blocks.get(group) else { continue };
+
+        let mut block_uses = Vec::with_capacity(blocks.len());
+        let mut used_by_group = BTreeSet::new();
+        for &block_id in blocks {
+            let first_uses =
+                first_uses_in_block(program, block_id, layout, in_out_bundling, layouts);
+            used_by_group.extend(first_uses.iter().copied());
+            block_uses.push((block_id, first_uses));
+        }
+
+        let mut candidates = BTreeSet::new();
+        for (block_id, first_uses) in block_uses {
+            let selected = obstructing_members_to_spill(
+                program,
+                &liveness,
+                layout,
+                block_id,
+                &first_uses,
+                &used_by_group,
+                access_limit,
+            );
+            if !selected.is_empty() {
+                candidates.extend(selected);
+            }
+        }
+
+        global_spills.values.extend(
+            candidates.into_iter().map(|member_index| (group, layout.members_fifo()[member_index])),
+        );
+    }
+    global_spills
+}
+
+fn obstructing_members_to_spill(
+    program: &EthIRProgram,
+    liveness: &sir_passes::analyses::LocalLiveness,
+    layout: &Layout,
+    block_id: BasicBlockId,
+    first_uses: &[usize],
+    used_by_group: &BTreeSet<usize>,
+    access_limit: usize,
+) -> Vec<usize> {
+    let block = program.block(block_id);
+    let used_here = first_uses.iter().copied().collect::<BTreeSet<_>>();
+    let mut pending = used_here.clone();
+    let mut stack = layout
+        .members_fifo()
+        .iter()
+        .enumerate()
+        .filter_map(|(member_index, &member)| {
+            if member == LayoutMember::ReturnDest {
+                return Some((member_index, true));
+            }
+            let local = layout_member_local(member, block.inputs())?;
+            let live_out = liveness.get_live_at_exit(block_id).contains(&local);
+            (used_here.contains(&member_index) || live_out).then_some((member_index, live_out))
+        })
+        .collect::<Vec<_>>();
+    let mut selected = Vec::new();
+
+    loop {
+        let accessible = stack.len().min(access_limit.saturating_add(1));
+        let mut removed = false;
+        for position in 0..accessible {
+            let (member_index, live_out) = stack[position];
+            if !pending.remove(&member_index) {
+                continue;
+            }
+            if !live_out {
+                stack.remove(position);
+                removed = true;
+                break;
+            }
+        }
+        if removed {
+            continue;
+        }
+        if pending.is_empty() {
+            return selected;
+        }
+
+        let Some(position) = (0..accessible).find(|&position| {
+            let (member_index, live_out) = stack[position];
+            live_out
+                && layout.members_fifo()[member_index] != LayoutMember::ReturnDest
+                && !used_by_group.contains(&member_index)
+        }) else {
+            return selected;
+        };
+        selected.push(stack.remove(position).0);
+    }
+}
+
+pub(crate) fn layout_member_local(
+    member: LayoutMember,
+    positional_locals: &[LocalId],
+) -> Option<LocalId> {
+    match member {
+        LayoutMember::ReturnDest => None,
+        LayoutMember::InputOutput(position) => Some(positional_locals[position as usize]),
+        LayoutMember::Local(local) => Some(local),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +692,70 @@ mod tests {
             layouts[bundling.get_in_group(call_block).unwrap()].members_fifo(),
             &[LayoutMember::InputOutput(1), LayoutMember::InputOutput(0)]
         );
+    }
+
+    #[test]
+    fn finds_value_unused_before_pressure_limit() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry -> x0 y0 z0 target0 {
+                    x0 = caller
+                    y0 = callvalue
+                    z0 = calldatasize
+                    target0 = returndatasize
+                    => @middle
+                }
+                middle x1 y1 z1 target1 -> x1 y1 z1 {
+                    use_target = iszero target1
+                    => @use
+                }
+                use x2 y2 z2 {
+                    use_x = iszero x2
+                    use_y = iszero y2
+                    use_z = iszero z2
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+
+        let constrained = select_global_spills(&program, &analyses, &bundling, &layouts, 2);
+        assert_eq!(constrained.len(), 1);
+
+        let reachable = select_global_spills(&program, &analyses, &bundling, &layouts, 3);
+        assert_eq!(reachable.len(), 0);
+    }
+
+    #[test]
+    fn does_not_spill_function_entry_loop_layout() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    x = caller
+                    y = callvalue
+                    z = calldatasize
+                    target = returndatasize
+                    icall @loop x y z target
+                    stop
+                }
+            fn loop:
+                entry x0 y0 z0 target0 -> x0 y0 z0 target0 {
+                    use_target = iszero target0
+                    => @backedge
+                }
+                backedge x1 y1 z1 target1 -> x1 y1 z1 target1 {
+                    => @entry
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+        let spills = select_global_spills(&program, &analyses, &bundling, &layouts, 2);
+        assert_eq!(spills.len(), 0);
     }
 }
