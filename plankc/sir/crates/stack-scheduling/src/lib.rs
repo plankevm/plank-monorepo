@@ -7,7 +7,7 @@ use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{
     GlobalSpills, LayoutsTracker, build_basic_block_layout_sets, order_layouts,
-    select_global_spills,
+    select_global_spills, select_memory_call_arguments,
 };
 pub use stack::ShuffleConfig;
 pub mod op_graph;
@@ -39,9 +39,18 @@ pub enum LayoutOrdering {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CallArgumentStrategy {
+    #[default]
+    StackOnly,
+    FullReliefOnly,
+    PartialRelief,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct GlobalSchedulerConfig {
     pub layout_ordering: LayoutOrdering,
     pub spill_dormant_values: bool,
+    pub call_arguments: CallArgumentStrategy,
 }
 
 #[derive(Debug)]
@@ -83,7 +92,7 @@ pub fn schedule_with_config<'ir>(
         &mut layout_sets,
         global_config.layout_ordering,
     );
-    let global_spills = if global_config.spill_dormant_values {
+    let mut global_spills = if global_config.spill_dormant_values {
         select_global_spills(
             program,
             analyses,
@@ -94,7 +103,15 @@ pub fn schedule_with_config<'ir>(
     } else {
         GlobalSpills::default()
     };
-    global_spills.remove_from_layouts(&mut layout_sets);
+    global_spills.extend_call_arguments(select_memory_call_arguments(
+        program,
+        analyses,
+        &in_out_bundling,
+        &layout_sets,
+        usize::from(shuffle_config.max_swap_depth),
+        global_config.call_arguments,
+    ));
+    global_spills.remove_from_layouts(program, &in_out_bundling, &mut layout_sets);
     let global_spill_base = program.next_static_alloc_id;
     let local_alloc_start =
         global_spill_base + u32::try_from(global_spills.len()).expect("too many global spills");

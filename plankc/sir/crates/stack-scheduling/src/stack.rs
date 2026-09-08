@@ -223,13 +223,15 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
     #[track_caller]
     pub fn op(&mut self, graph: &OpGraph, op_id: OpNodeId, flipped: bool) {
         let op = graph.get_op(op_id);
-        if let OpNodeKind::GlobalStore(alloc) = op.kind {
+        if let OpNodeKind::GlobalStore(alloc) | OpNodeKind::CallArgumentStore(alloc) = op.kind {
             assert!(!flipped);
             let &[target] = op.inputs_fifo else { panic!("global store must have one input") };
             let actual = self.inner.pop().expect("missing global store input");
             assert_eq!(actual, target, "incorrect global store schedule");
-            let index = (alloc - self.start_alloc_id) as usize;
-            self.spilled[index] = target;
+            if matches!(op.kind, OpNodeKind::GlobalStore(_)) {
+                let index = (alloc - self.start_alloc_id) as usize;
+                self.spilled[index] = target;
+            }
             self.emit(StackOps::Store(alloc));
             return;
         }
@@ -245,6 +247,7 @@ impl<Sink: FnMut(StackOps)> TrackedStack<Sink> {
                 StackOps::CallRetPush(op_idx)
             }
             OpNodeKind::GlobalStore(_) => unreachable!(),
+            OpNodeKind::CallArgumentStore(_) => unreachable!(),
         };
 
         for (i, &target) in (0usize..).zip(op.inputs_fifo) {

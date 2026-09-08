@@ -21,6 +21,7 @@ pub enum OpNodeKind {
     RetDestPush(OperationIdx),
     Normal(OperationIdx),
     GlobalStore(StaticAllocId),
+    CallArgumentStore(StaticAllocId),
 }
 
 #[derive(Debug, Clone, Copy)]

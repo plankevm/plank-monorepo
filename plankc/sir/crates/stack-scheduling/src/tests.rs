@@ -8,7 +8,7 @@ use sir_passes::AnalysesStore;
 use std::{collections::HashSet, fmt::Write};
 
 use super::{
-    GlobalSchedulerConfig, LayoutOrdering, ScheduledOps,
+    CallArgumentStrategy, GlobalSchedulerConfig, LayoutOrdering, ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ShuffleConfig, StackOps},
@@ -226,6 +226,9 @@ fn fmt_value(
         }
         super::op_graph::OpNodeKind::GlobalStore(_) => {
             panic!("global store should not produce local outputs")
+        }
+        super::op_graph::OpNodeKind::CallArgumentStore(_) => {
+            panic!("call argument store should not produce local outputs")
         }
     };
     let local = program.operations[op_idx].outputs(program)[output_position];
@@ -674,6 +677,7 @@ fn globally_spills_an_unused_obstruction() {
         GlobalSchedulerConfig {
             layout_ordering: LayoutOrdering::Naive,
             spill_dormant_values: true,
+            call_arguments: CallArgumentStrategy::StackOnly,
         },
     );
     let entry = BasicBlockId::new(0);
@@ -683,4 +687,121 @@ fn globally_spills_an_unused_obstruction() {
     assert!(scheduled.get(middle).unwrap().contains(&StackOps::Load(spill_base)));
     assert!(!layouts.get_input_layout(middle).contains(&LayoutMember::InputOutput(0)));
     assert!(next_alloc_id > spill_base);
+}
+
+#[test]
+fn passes_pressured_call_arguments_through_global_spills() {
+    let (program, sources) = sir_parser::parse_or_panic_with_sources(
+        r#"
+        fn init:
+            entry {
+                p = caller
+                q = callvalue
+                r = calldatasize
+                a = returndatasize
+                b = gas
+                result = icall @callee a b
+                pq = add p q
+                pqr = add pq r
+                sstore pqr result
+                stop
+            }
+        fn callee:
+            entry a b -> result {
+                result = add a b
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let spill_base = program.next_static_alloc_id;
+    let (scheduled, layouts, next_alloc_id) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(4),
+        GlobalSchedulerConfig {
+            layout_ordering: LayoutOrdering::Naive,
+            spill_dormant_values: false,
+            call_arguments: CallArgumentStrategy::FullReliefOnly,
+        },
+    );
+    let caller = program.function(program.init_entry).entry().id();
+    let callee = sources.function_by_name(&program, "callee").unwrap();
+    let callee = program.function(callee).entry().id();
+
+    assert!(scheduled.get(caller).unwrap().contains(&StackOps::Store(spill_base)));
+    assert!(scheduled.get(callee).unwrap().contains(&StackOps::Load(spill_base)));
+    assert_eq!(
+        layouts.get_input_layout(callee).members_fifo(),
+        &[LayoutMember::ReturnDest, LayoutMember::InputOutput(0)]
+    );
+    assert!(next_alloc_id > spill_base);
+}
+
+#[test]
+fn does_not_overwrite_call_arguments_before_the_previous_call() {
+    let (program, sources) = sir_parser::parse_or_panic_with_sources(
+        r#"
+        fn init:
+            entry {
+                p = caller
+                q = callvalue
+                r = calldatasize
+                a = returndatasize
+                b = gas
+                first = icall @callee a b
+                second = icall @callee b a
+                pq = add p q
+                pqr = add pq r
+                results = add first second
+                sstore pqr results
+                stop
+            }
+        fn callee:
+            entry a b -> result {
+                result = add a b
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let spill_base = program.next_static_alloc_id;
+    let (scheduled, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(4),
+        GlobalSchedulerConfig {
+            layout_ordering: LayoutOrdering::Naive,
+            spill_dormant_values: false,
+            call_arguments: CallArgumentStrategy::PartialRelief,
+        },
+    );
+    let caller = program.function(program.init_entry).entry().id();
+    let callee = sources.function_by_name(&program, "callee").unwrap();
+    let calls = program
+        .operations()
+        .filter_map(|operation| match operation.op() {
+            Operation::InternalCall(call) if call.function == callee => Some(operation.id()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let scheduled = scheduled.get(caller).unwrap();
+    let call_positions = calls
+        .iter()
+        .map(|&call| scheduled.iter().position(|&op| op == StackOps::Op(call)).unwrap())
+        .collect::<Vec<_>>();
+
+    for slot in [spill_base, spill_base + 1] {
+        let store_positions = scheduled
+            .iter()
+            .enumerate()
+            .filter_map(|(position, &op)| (op == StackOps::Store(slot)).then_some(position))
+            .collect::<Vec<_>>();
+        assert_eq!(store_positions.len(), 2);
+        assert!(store_positions[0] < call_positions[0]);
+        assert!(call_positions[0] < store_positions[1]);
+        assert!(store_positions[1] < call_positions[1]);
+    }
 }

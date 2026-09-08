@@ -47,6 +47,7 @@ impl TreeGraph {
                     return_dest_pushes.insert_no_prev(operation, tree_operation);
                 }
                 OpNodeKind::GlobalStore(_) => {}
+                OpNodeKind::CallArgumentStore(_) => {}
             }
         }
 
@@ -78,6 +79,7 @@ impl TreeGraph {
                     }
                     OpNodeKind::RetDestPush(operation) => StackOps::CallRetPush(operation),
                     OpNodeKind::GlobalStore(alloc) => StackOps::Store(alloc),
+                    OpNodeKind::CallArgumentStore(alloc) => StackOps::Store(alloc),
                 }
             }));
         }
@@ -187,7 +189,7 @@ impl TreeGraphBuilder<'_> {
     fn build_pending(&mut self, root: OpNodeId) -> Vec<OpNodeId> {
         assert!(self.built.get(root).is_none(), "built an operation twice");
         let op = self.original.get_op(root);
-        if matches!(op.kind, OpNodeKind::GlobalStore(_)) {
+        if matches!(op.kind, OpNodeKind::GlobalStore(_) | OpNodeKind::CallArgumentStore(_)) {
             self.ensure_inputs_materialized(root, 0);
             vec![root]
         } else if matches!(op.kind, OpNodeKind::Flippable(_)) && op.inputs_fifo.len() >= 2 {

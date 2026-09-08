@@ -1,4 +1,4 @@
-use crate::LayoutOrdering;
+use crate::{CallArgumentStrategy, LayoutOrdering};
 use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, DenseIndexSet, newtype_index};
 use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, Operation};
@@ -45,7 +45,13 @@ impl Layout {
 
 #[derive(Debug, Default)]
 pub(crate) struct GlobalSpills {
-    values: Vec<(InOutGroupId, LayoutMember)>,
+    values: Vec<GlobalSpill>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum GlobalSpill {
+    Layout(InOutGroupId, LayoutMember),
+    CallArgument(FunctionId, u32),
 }
 
 impl GlobalSpills {
@@ -57,19 +63,55 @@ impl GlobalSpills {
         &self,
         group: InOutGroupId,
     ) -> impl Iterator<Item = (usize, LayoutMember)> + '_ {
-        self.values.iter().enumerate().filter_map(move |(index, &(candidate_group, member))| {
+        self.values.iter().enumerate().filter_map(move |(index, &spill)| {
+            let GlobalSpill::Layout(candidate_group, member) = spill else { return None };
             (candidate_group == group).then_some((index, member))
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (InOutGroupId, LayoutMember)> + '_ {
+    pub fn for_function(&self, function: FunctionId) -> impl Iterator<Item = (usize, u32)> + '_ {
+        self.values.iter().enumerate().filter_map(move |(index, &spill)| {
+            let GlobalSpill::CallArgument(candidate_function, position) = spill else {
+                return None;
+            };
+            (candidate_function == function).then_some((index, position))
+        })
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = GlobalSpill> + '_ {
         self.values.iter().copied()
     }
 
-    pub fn remove_from_layouts(&self, layouts: &mut DenseIndexMap<InOutGroupId, Layout>) {
-        for &(group, member) in &self.values {
+    pub fn remove_from_layouts(
+        &self,
+        program: &EthIRProgram,
+        in_out_bundling: &ControlFlowGraphInOutBundling,
+        layouts: &mut DenseIndexMap<InOutGroupId, Layout>,
+    ) {
+        for &spill in &self.values {
+            let (group, member) = match spill {
+                GlobalSpill::Layout(group, member) => (group, member),
+                GlobalSpill::CallArgument(function, position) => {
+                    let entry = program.function(function).entry().id();
+                    let group = in_out_bundling
+                        .get_in_group(entry)
+                        .expect("called function without entry layout");
+                    (group, LayoutMember::InputOutput(position))
+                }
+            };
             layouts[group].remove(member);
         }
+    }
+
+    pub fn extend_call_arguments(
+        &mut self,
+        arguments: impl IntoIterator<Item = (FunctionId, u32)>,
+    ) {
+        self.values.extend(
+            arguments
+                .into_iter()
+                .map(|(function, position)| GlobalSpill::CallArgument(function, position)),
+        );
     }
 }
 
@@ -404,6 +446,103 @@ fn first_uses_in_block(
     first_uses
 }
 
+fn max_callsite_overflow(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+    in_out_bundling: &ControlFlowGraphInOutBundling,
+    layouts: &DenseIndexMap<InOutGroupId, Layout>,
+    max_swap_depth: usize,
+) -> DenseIndexMap<FunctionId, usize> {
+    let liveness = analyses.local_liveness(program);
+    let rpo = analyses.reverse_post_order(program);
+    let mut max_overflow_by_callee = DenseIndexMap::<FunctionId, usize>::new();
+
+    for &block_id in rpo.blocks_rpo() {
+        let block = program.block(block_id);
+        let mut live = liveness.get_live_at_exit(block_id).clone();
+        match block.control() {
+            ControlView::Branches { condition, .. } => {
+                live.insert(condition);
+            }
+            ControlView::Switch(switch) => {
+                live.insert(switch.condition());
+            }
+            ControlView::InternalReturn => live.extend(block.outputs()),
+            ControlView::LastOpTerminates | ControlView::ContinuesTo(_) => {}
+        }
+
+        for operation in block.operations().rev() {
+            if let Operation::InternalCall(call) = operation.op() {
+                let callee_entry = program.function(call.function).entry().id();
+                let callee_group = in_out_bundling
+                    .get_in_group(callee_entry)
+                    .expect("internal-call target without an input layout group");
+                let entry_layout = &layouts[callee_group];
+                let live_across = live.len()
+                    - operation.outputs().iter().filter(|&&output| live.contains(&output)).count();
+                let pressure = live_across + entry_layout.len();
+                let accessible_entries = max_swap_depth.saturating_add(1);
+                let overflow = pressure.saturating_sub(accessible_entries);
+
+                if overflow != 0 {
+                    let max_overflow =
+                        max_overflow_by_callee.entry(call.function).or_insert_default();
+                    *max_overflow = (*max_overflow).max(overflow);
+                }
+            }
+
+            for output in operation.outputs() {
+                live.remove(output);
+            }
+            live.extend(operation.inputs());
+        }
+    }
+
+    max_overflow_by_callee
+}
+
+pub(crate) fn select_memory_call_arguments(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+    in_out_bundling: &ControlFlowGraphInOutBundling,
+    layouts: &DenseIndexMap<InOutGroupId, Layout>,
+    max_swap_depth: usize,
+    strategy: CallArgumentStrategy,
+) -> Vec<(FunctionId, u32)> {
+    if strategy == CallArgumentStrategy::StackOnly {
+        return Vec::new();
+    }
+    let max_overflow_by_callee =
+        max_callsite_overflow(program, analyses, in_out_bundling, layouts, max_swap_depth);
+    let predecessors = analyses.predecessors(program);
+    let mut selected = Vec::new();
+    for (function, &overflow) in max_overflow_by_callee.iter() {
+        let entry = program.function(function).entry().id();
+        if !predecessors.of(entry).is_empty() {
+            continue;
+        }
+        let group =
+            in_out_bundling.get_in_group(entry).expect("called function without entry layout");
+        let arguments = layouts[group]
+            .iter()
+            .filter_map(|&member| match member {
+                LayoutMember::InputOutput(position) => Some(position),
+                LayoutMember::ReturnDest | LayoutMember::Local(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let count = match strategy {
+            CallArgumentStrategy::StackOnly => unreachable!(),
+            CallArgumentStrategy::FullReliefOnly if overflow > arguments.len() => 0,
+            CallArgumentStrategy::FullReliefOnly | CallArgumentStrategy::PartialRelief => {
+                overflow.min(arguments.len())
+            }
+        };
+        selected
+            .extend(arguments.into_iter().rev().take(count).map(|position| (function, position)));
+    }
+    selected
+}
+
 pub(crate) fn select_global_spills(
     program: &EthIRProgram,
     analyses: &AnalysesStore,
@@ -466,7 +605,9 @@ pub(crate) fn select_global_spills(
         }
 
         global_spills.values.extend(
-            candidates.into_iter().map(|member_index| (group, layout.members_fifo()[member_index])),
+            candidates.into_iter().map(|member_index| {
+                GlobalSpill::Layout(group, layout.members_fifo()[member_index])
+            }),
         );
     }
     global_spills
@@ -757,5 +898,120 @@ mod tests {
         let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
         let spills = select_global_spills(&program, &analyses, &bundling, &layouts, 2);
         assert_eq!(spills.len(), 0);
+    }
+
+    #[test]
+    fn selects_call_arguments_from_caller_pressure() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    p = caller
+                    q = callvalue
+                    r = calldatasize
+                    a = returndatasize
+                    b = gas
+                    result = icall @callee a b
+                    pq = add p q
+                    pqr = add pq r
+                    sstore pqr result
+                    stop
+                }
+            fn callee:
+                entry a b -> result {
+                    result = add a b
+                    iret
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+        let callee = program
+            .operations()
+            .find_map(|operation| match operation.op() {
+                Operation::InternalCall(call) => Some(call.function),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            select_memory_call_arguments(
+                &program,
+                &analyses,
+                &bundling,
+                &layouts,
+                4,
+                CallArgumentStrategy::FullReliefOnly,
+            )
+            .as_slice(),
+            &[(callee, 1)]
+        );
+
+        assert!(
+            select_memory_call_arguments(
+                &program,
+                &analyses,
+                &bundling,
+                &layouts,
+                2,
+                CallArgumentStrategy::FullReliefOnly,
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            select_memory_call_arguments(
+                &program,
+                &analyses,
+                &bundling,
+                &layouts,
+                2,
+                CallArgumentStrategy::PartialRelief,
+            )
+            .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn does_not_select_call_arguments_for_a_looping_function_entry() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    p = caller
+                    q = callvalue
+                    r = calldatasize
+                    a = returndatasize
+                    b = gas
+                    icall @callee a b
+                    pq = add p q
+                    pqr = add pq r
+                    sstore pqr pqr
+                    stop
+                }
+            fn callee:
+                entry a0 b0 -> a0 b0 {
+                    => @backedge
+                }
+                backedge a1 b1 -> a1 b1 {
+                    => @entry
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+
+        assert!(
+            select_memory_call_arguments(
+                &program,
+                &analyses,
+                &bundling,
+                &layouts,
+                4,
+                CallArgumentStrategy::PartialRelief,
+            )
+            .is_empty()
+        );
     }
 }

@@ -1,5 +1,7 @@
 use crate::{
-    layouts::{GlobalSpills, Layout, LayoutMember, LayoutsTracker, layout_member_local},
+    layouts::{
+        GlobalSpill, GlobalSpills, Layout, LayoutMember, LayoutsTracker, layout_member_local,
+    },
     op_graph::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, builder::OpBuilder},
 };
 use hashbrown::HashMap;
@@ -134,18 +136,44 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
         };
     }
     let input_group = layouts.get_input_group(block.id());
-    for (group, member) in global_spills.iter() {
+    for spill in global_spills.iter() {
         let vid = graph.push_spilled_input_value();
-        if Some(group) == input_group {
-            let local = layout_member_local(member, inputs).expect("return destination spilled");
+        let local = match spill {
+            GlobalSpill::Layout(group, member) if Some(group) == input_group => {
+                layout_member_local(member, inputs)
+            }
+            GlobalSpill::CallArgument(function, position) => {
+                let entry = program.function(function).entry().id();
+                (layouts.get_input_group(entry) == input_group).then(|| inputs[position as usize])
+            }
+            GlobalSpill::Layout(_, _) => None,
+        };
+        if let Some(local) = local {
             local_to_value.insert(local, vid);
         }
     }
 
     let mut graph = graph.end_inputs_begin_ops();
     let mut effect_order = EffectOrderTracker::default();
+    let mut last_call_by_function = HashMap::new();
 
     for op in block.operations() {
+        let mut call_stores = Vec::new();
+        if let Operation::InternalCall(call) = op.op() {
+            let call_inputs = call.get_inputs(program);
+            for (spill_index, position) in global_spills.for_function(call.function) {
+                let mut store = graph.begin_op(OpNodeKind::CallArgumentStore(
+                    global_spill_base + u32::try_from(spill_index).expect("too many global spills"),
+                ));
+                let store_id = store.id();
+                if let Some(&previous_call) = last_call_by_function.get(&call.function) {
+                    store.add_predecessor(previous_call);
+                }
+                store.add_input(local_to_value[&call_inputs[position as usize]]);
+                let _ = store.end_inputs_begin_outputs();
+                call_stores.push(store_id);
+            }
+        }
         let return_dest = 'return_dest: {
             let Operation::InternalCall(icall) = op.op() else {
                 break 'return_dest None;
@@ -169,6 +197,10 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
             OpNodeKind::Normal(op.id())
         };
         let mut op_builder = graph.begin_op(kind);
+        let op_id = op_builder.id();
+        for store in call_stores {
+            op_builder.add_predecessor(store);
+        }
 
         let effect =
             Effect::of(op.op()).unwrap_or_else(|callee| function_effects.effect_of(callee));
@@ -202,6 +234,9 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
             let vid = op_builder.add_output();
             let prev = local_to_value.insert(local, vid);
             assert!(prev.is_none());
+        }
+        if let Operation::InternalCall(call) = op.op() {
+            last_call_by_function.insert(call.function, op_id);
         }
     }
 
@@ -293,6 +328,7 @@ mod tests {
                     }
                     OpNodeKind::RetDestPush(_) => "ret_dest_push",
                     OpNodeKind::GlobalStore(_) => "global_store",
+                    OpNodeKind::CallArgumentStore(_) => "call_argument_store",
                 };
                 write!(out, "    #{op_id} {name} [").unwrap();
                 for (i, pred) in graph.displayed_predecessors(op_id).into_iter().enumerate() {

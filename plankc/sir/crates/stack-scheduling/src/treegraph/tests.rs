@@ -55,6 +55,7 @@ fn kind_name(kind: OpNodeKind) -> &'static str {
         OpNodeKind::Flippable(_) => "flippable",
         OpNodeKind::RetDestPush(_) => "ret-dest-push",
         OpNodeKind::GlobalStore(_) => "global-store",
+        OpNodeKind::CallArgumentStore(_) => "call-argument-store",
     }
 }
 
