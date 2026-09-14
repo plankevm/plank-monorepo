@@ -2,7 +2,6 @@ use std::{num::NonZero, sync::Arc as Rc};
 
 use hashbrown::HashMap;
 use plank_core::{Idx, IndexVec};
-use rayon::prelude::*;
 use sir_data::StaticAllocId;
 use smallvec::SmallVec;
 
@@ -14,7 +13,7 @@ use crate::{
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
     scheduler::{GreedyPolicy, greedy_schedule},
-    stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
+    stack::{ShuffleConfig, StackOps, TrackedStack},
 };
 
 const BASE_COST_FACTOR: u32 = 100;
@@ -24,10 +23,6 @@ const ESTIMATED_STACK_OPS_PER_GRAPH_OP: usize = 8;
 #[derive(Clone, Copy)]
 pub struct SearchConfig {
     pub max_candidates: NonZero<usize>,
-    pub(crate) copy_all_inputs: bool,
-    pub(crate) alignment_factor: u32,
-    pub(crate) arity_factor: u32,
-    pub(crate) layout_alignment_factor: u32,
 }
 
 pub struct SearchResult {
@@ -84,10 +79,6 @@ struct Search<'a> {
     best_spill_count: u32,
     path: Vec<StackOps>,
     best_state_costs: HashMap<Rc<SearchState>, u32>,
-    allow_tail_swaps: bool,
-    copy_all_inputs: bool,
-    alignment_factor: u32,
-    arity_factor: u32,
 }
 
 fn initial_permutation(
@@ -358,56 +349,37 @@ pub fn schedule(
             path
         },
         best_state_costs: HashMap::new(),
-        allow_tail_swaps: false,
-        copy_all_inputs: config.copy_all_inputs,
-        alignment_factor: config.alignment_factor,
-        arity_factor: config.arity_factor,
     };
-    let ((_, beam_results), policy_results) = rayon::join(
+    let (_, beam_results) = rayon::join(
         || {
-            rayon::join(
-                || {
-                    if !should_permute {
-                        search.visit(start);
-                    } else {
-                        search.path.truncate(initial_spill_count);
-                        search.visit(unpermuted_start);
-                        search.max_candidates = if alternate_starts.is_empty() {
-                            max_candidates
-                        } else {
-                            max_candidates * 9 / 10
-                        };
-                        search.path.clear();
-                        search.path.extend_from_slice(&initial_ops);
-                        search.visit(start);
-                        search.max_candidates = max_candidates;
-                        for (alternate_start, alternate_ops) in alternate_starts {
-                            if search.assessed_candidates == max_candidates {
-                                break;
-                            }
-                            search.path.clear();
-                            search.path.extend_from_slice(&alternate_ops);
-                            search.visit(alternate_start);
-                        }
+            if !should_permute {
+                search.visit(start);
+            } else {
+                search.path.truncate(initial_spill_count);
+                search.visit(unpermuted_start);
+                search.max_candidates = if alternate_starts.is_empty() {
+                    max_candidates
+                } else {
+                    max_candidates * 9 / 10
+                };
+                search.path.clear();
+                search.path.extend_from_slice(&initial_ops);
+                search.visit(start);
+                search.max_candidates = max_candidates;
+                for (alternate_start, alternate_ops) in alternate_starts {
+                    if search.assessed_candidates == max_candidates {
+                        break;
                     }
-                    search.optimize_initial_spills(&inputs, initial_spill_count, 300);
-                    search.improve_adjacent_order(100);
-                },
-                || {
-                    rayon::join(
-                        || beam_schedule(finalization, next_alloc_id, shuffle, graph, 64, 3),
-                        || beam_schedule(finalization, next_alloc_id, shuffle, graph, 56, 0),
-                    )
-                },
-            )
+                    search.path.clear();
+                    search.path.extend_from_slice(&alternate_ops);
+                    search.visit(alternate_start);
+                }
+            }
         },
         || {
-            policy_candidates(
-                finalization,
-                next_alloc_id,
-                shuffle,
-                graph,
-                config.layout_alignment_factor,
+            rayon::join(
+                || beam_schedule(finalization, next_alloc_id, shuffle, graph, 64, 3),
+                || beam_schedule(finalization, next_alloc_id, shuffle, graph, 56, 0),
             )
         },
     );
@@ -421,124 +393,13 @@ pub fn schedule(
     }
     simplify_result(&mut search.best_ops, graph, shuffle);
     search.best_cost = stack_ops_cost(&search.best_ops, shuffle);
-    for policy_result in policy_results {
-        let policy_cost = stack_ops_cost(&policy_result.ops, shuffle);
-        if policy_cost < search.best_cost {
-            search.best_cost = policy_cost;
-            search.best_ops = policy_result.ops;
-            search.best_spill_count = policy_result.spill_count;
-        }
-    }
-    search.improve_operand_layouts(16);
-    search.optimize_tail(4, 5_000);
+    search.improve_operand_layouts();
 
     SearchResult {
         ops: search.best_ops,
         spill_count: search.best_spill_count,
         candidate_limit_reached: search.candidate_limit_reached,
     }
-}
-
-fn policy_candidates(
-    finalization: BlockFinalization,
-    next_alloc_id: StaticAllocId,
-    shuffle: ShuffleConfig,
-    graph: &OpGraph,
-    layout_alignment_factor: u32,
-) -> Vec<SearchResult> {
-    if graph.total_ops() < 8 {
-        return Vec::new();
-    }
-    let mut policy_results = (0_u32..69)
-        .into_par_iter()
-        .map(|iteration| {
-            let policy = match iteration {
-                0 => GreedyPolicy::First,
-                1 => GreedyPolicy::Cheapest,
-                2 => GreedyPolicy::OutputsBottomUp,
-                _ => {
-                    let seed = iteration.wrapping_mul(0x9e37_79b9).wrapping_add(0xd1b5_4a35);
-                    if iteration < 54 {
-                        GreedyPolicy::Scrambled(seed)
-                    } else {
-                        match iteration % 3 {
-                            0 => GreedyPolicy::CheapestScrambled(seed),
-                            1 => GreedyPolicy::HighestArityScrambled(seed),
-                            _ => GreedyPolicy::OutputsBottomUpScrambled(seed),
-                        }
-                    }
-                }
-            };
-            let mut policy_ops = Vec::new();
-            let policy_alloc_id = greedy_schedule(
-                |operation| policy_ops.push(operation),
-                finalization,
-                next_alloc_id,
-                shuffle,
-                graph,
-                policy,
-            );
-            improve_schedule_order(
-                finalization,
-                next_alloc_id,
-                shuffle,
-                graph,
-                SearchResult {
-                    ops: policy_ops.into_boxed_slice(),
-                    spill_count: policy_alloc_id - next_alloc_id,
-                    candidate_limit_reached: false,
-                },
-                100,
-                2,
-            )
-        })
-        .collect::<Vec<_>>();
-    policy_results.sort_unstable_by_key(|result| stack_ops_cost(&result.ops, shuffle));
-    policy_results.par_iter_mut().take(2).for_each(|result| {
-        simplify_result(&mut result.ops, graph, shuffle);
-    });
-    policy_results.sort_unstable_by_key(|result| stack_ops_cost(&result.ops, shuffle));
-    let mut layout_results = policy_results
-        .par_iter()
-        .take(31)
-        .enumerate()
-        .map(|(index, result)| {
-            let order = result
-                .ops
-                .iter()
-                .filter_map(|&operation| graph_operation_id(graph, operation))
-                .collect::<Vec<_>>();
-            let width = if index < 5 {
-                32
-            } else if index < 28 {
-                8
-            } else {
-                4
-            };
-            beam_schedule_in_order(
-                finalization,
-                next_alloc_id,
-                shuffle,
-                graph,
-                &order,
-                width,
-                if index < 3 {
-                    layout_alignment_factor
-                } else if index < 8 {
-                    4
-                } else {
-                    [3, 5][index % 2]
-                },
-                index < 5,
-            )
-        })
-        .collect::<Vec<_>>();
-    layout_results.sort_unstable_by_key(|result| stack_ops_cost(&result.ops, shuffle));
-    layout_results.par_iter_mut().take(2).for_each(|result| {
-        simplify_result(&mut result.ops, graph, shuffle);
-    });
-    policy_results.extend(layout_results);
-    policy_results
 }
 
 fn beam_schedule(
@@ -722,10 +583,8 @@ fn beam_schedule_in_order(
     shuffle: ShuffleConfig,
     graph: &OpGraph,
     order: &[OpNodeId],
-    width: usize,
-    alignment_factor: u32,
-    allow_copy_inputs: bool,
 ) -> SearchResult {
+    const WIDTH: usize = 16;
     let inputs = graph.input_values_fifo().iter().collect::<Box<_>>();
     let minimum_spill_count = inputs.len().saturating_sub(usize::from(shuffle.max_swap_depth) + 1);
     let maximum_spill_count = if inputs.len() >= 10 {
@@ -765,93 +624,53 @@ fn beam_schedule_in_order(
                 state.stack_end.saturating_sub(1).min(usize::from(shuffle.max_swap_depth));
             for swap_depth in 0..=swap_count {
                 for flipped in [false, true].into_iter().take(1 + usize::from(can_flip)) {
-                    let copy_inputs = allow_copy_inputs
-                        && swap_depth == 0
-                        && !operation_view.inputs_fifo.is_empty()
-                        && (operation_view.inputs_fifo.len() <= 3
-                            || (operation_view.inputs_fifo.len() == 4 && graph.total_ops() <= 10));
-                    let preserve_inputs = if allow_copy_inputs
-                        && swap_depth <= 1
-                        && ((2..=3).contains(&operation_view.inputs_fifo.len())
-                            && graph.total_ops() <= 20
-                            || operation_view.inputs_fifo.len() == 4 && graph.total_ops() <= 10)
-                    {
-                        operation_view
-                            .inputs_fifo
-                            .iter()
-                            .copied()
-                            .filter(|&input| graph.is_last_use(complete, input))
-                            .collect::<SmallVec<[_; 4]>>()
-                    } else {
-                        SmallVec::new()
-                    };
-                    for strategy in 0..1 + usize::from(copy_inputs) + preserve_inputs.len() {
-                        let mut transition = Vec::new();
-                        let mut stack = TrackedStack::new_from_parts(
-                            next_alloc_id,
-                            |operation| transition.push(operation),
-                            &state.values[..state.stack_end],
-                            state.values[state.stack_end..].to_vec(),
-                        );
-                        if swap_depth > 0 {
-                            stack.swap(
-                                u8::try_from(swap_depth).expect("bounded swap depth exceeds u8"),
-                            );
-                        }
-                        if strategy == 0 {
-                            greedy_schedule_op(
-                                shuffle, &mut stack, graph, operation, complete, flipped,
-                            );
-                        } else if copy_inputs && strategy == 1 {
-                            copy_schedule_op(shuffle, &mut stack, graph, operation, flipped);
-                        } else {
-                            greedy_schedule_op_preserving(
-                                shuffle,
-                                &mut stack,
-                                graph,
-                                operation,
-                                complete,
-                                flipped,
-                                Some(preserve_inputs[strategy - 1 - usize::from(copy_inputs)]),
-                            );
-                        }
-                        if needs_final_shuffle {
-                            let completed = OpSet::new(&next_complete, graph.total_ops());
-                            while stack
-                                .top()
-                                .is_some_and(|value| graph.uses_remaining(completed, value) == 0)
-                            {
-                                stack.pop();
-                            }
-                        }
-                        let values =
-                            [stack.fifo(), stack.underlying_spilled()].concat().into_boxed_slice();
-                        let stack_end = stack.fifo().len();
-                        drop(stack);
-                        let cost = state.cost + stack_ops_cost(&transition, shuffle);
-                        let remaining = demand_cost_lower_bound(
-                            &demand,
-                            &values[..stack_end],
-                            &values[stack_end..],
-                            needs_final_shuffle,
-                        );
-                        let priority = layout_priority(
-                            cost,
-                            remaining,
-                            &values[..stack_end],
-                            graph.output_values_fifo(),
-                            alignment_factor,
-                        );
-                        let mut operations = state.operations.clone();
-                        operations.extend(transition);
-                        candidates
-                            .push((priority, BeamState { values, stack_end, operations, cost }));
+                    let mut transition = Vec::new();
+                    let mut stack = TrackedStack::new_from_parts(
+                        next_alloc_id,
+                        |operation| transition.push(operation),
+                        &state.values[..state.stack_end],
+                        state.values[state.stack_end..].to_vec(),
+                    );
+                    if swap_depth > 0 {
+                        stack
+                            .swap(u8::try_from(swap_depth).expect("bounded swap depth exceeds u8"));
                     }
+                    greedy_schedule_op(shuffle, &mut stack, graph, operation, complete, flipped);
+                    if needs_final_shuffle {
+                        let completed = OpSet::new(&next_complete, graph.total_ops());
+                        while stack
+                            .top()
+                            .is_some_and(|value| graph.uses_remaining(completed, value) == 0)
+                        {
+                            stack.pop();
+                        }
+                    }
+                    let values =
+                        [stack.fifo(), stack.underlying_spilled()].concat().into_boxed_slice();
+                    let stack_end = stack.fifo().len();
+                    drop(stack);
+                    let cost = state.cost + stack_ops_cost(&transition, shuffle);
+                    let remaining = demand_cost_lower_bound(
+                        &demand,
+                        &values[..stack_end],
+                        &values[stack_end..],
+                        needs_final_shuffle,
+                    );
+                    let priority = layout_priority(
+                        cost,
+                        remaining,
+                        &values[..stack_end],
+                        graph.output_values_fifo(),
+                        4,
+                    );
+                    let mut operations = state.operations.clone();
+                    operations.extend(transition);
+                    candidates.push((priority, BeamState { values, stack_end, operations, cost }));
                 }
             }
         }
         candidates.sort_unstable_by_key(|(priority, _)| *priority);
-        let mut next_frontier = Vec::with_capacity(width);
+        let mut next_frontier = Vec::with_capacity(WIDTH);
         for (_, candidate) in candidates {
             if next_frontier.iter().any(|existing: &BeamState| {
                 existing.stack_end == candidate.stack_end && existing.values == candidate.values
@@ -859,7 +678,7 @@ fn beam_schedule_in_order(
                 continue;
             }
             next_frontier.push(candidate);
-            if next_frontier.len() == width {
+            if next_frontier.len() == WIDTH {
                 break;
             }
         }
@@ -926,210 +745,8 @@ fn graph_operation_id(graph: &OpGraph, scheduled: StackOps) -> Option<OpNodeId> 
     })
 }
 
-fn improve_schedule_order(
-    finalization: BlockFinalization,
-    next_alloc_id: StaticAllocId,
-    shuffle: ShuffleConfig,
-    graph: &OpGraph,
-    mut incumbent: SearchResult,
-    max_trials: usize,
-    passes: usize,
-) -> SearchResult {
-    if graph.total_ops() < 2 {
-        return incumbent;
-    }
-    let mut order = incumbent
-        .ops
-        .iter()
-        .filter_map(|&operation| graph_operation_id(graph, operation))
-        .collect::<Vec<_>>();
-    assert_eq!(order.len(), graph.total_ops() as usize);
-    let mut best_cost = stack_ops_cost(&incumbent.ops, shuffle);
-    let trial_count = (order.len() - 1).min(max_trials);
-    for _ in 0..passes {
-        for trial in 0..trial_count {
-            let position = trial * (order.len() - 1) / trial_count;
-            let earlier = order[position];
-            let later = order[position + 1];
-            if graph.get_predecessors(later).contains(earlier) {
-                continue;
-            }
-            order.swap(position, position + 1);
-            let (candidate_ops, spill_count) =
-                schedule_in_order(finalization, next_alloc_id, shuffle, graph, &order);
-            let candidate_cost = stack_ops_cost(&candidate_ops, shuffle);
-            if candidate_cost <= best_cost {
-                if candidate_cost < best_cost {
-                    best_cost = candidate_cost;
-                    incumbent.ops = candidate_ops;
-                    incumbent.spill_count = spill_count;
-                }
-            } else {
-                order.swap(position, position + 1);
-            }
-        }
-    }
-    for trial in 0_u32..24 {
-        let first = usize::try_from(trial.wrapping_mul(0x9e37_79b9).wrapping_add(0x243f_6a88))
-            .expect("u32 does not fit usize")
-            % order.len();
-        let second = usize::try_from(trial.wrapping_mul(0x85eb_ca6b).wrapping_add(0xb7e1_5163))
-            .expect("u32 does not fit usize")
-            % order.len();
-        if first == second {
-            continue;
-        }
-        order.swap(first, second);
-        let mut positions = IndexVec::<OpNodeId, usize>::from_vec(vec![0; order.len()]);
-        for (position, &operation) in order.iter().enumerate() {
-            positions[operation] = position;
-        }
-        let valid = order.iter().enumerate().all(|(position, &operation)| {
-            graph
-                .get_predecessors(operation)
-                .iter()
-                .all(|predecessor| positions[predecessor] < position)
-        });
-        if !valid {
-            order.swap(first, second);
-            continue;
-        }
-        let (candidate_ops, spill_count) =
-            schedule_in_order(finalization, next_alloc_id, shuffle, graph, &order);
-        let candidate_cost = stack_ops_cost(&candidate_ops, shuffle);
-        if candidate_cost <= best_cost {
-            if candidate_cost < best_cost {
-                best_cost = candidate_cost;
-                incumbent.ops = candidate_ops;
-                incumbent.spill_count = spill_count;
-            }
-        } else {
-            order.swap(first, second);
-        }
-    }
-    for trial in 32_u32..40 {
-        let source = usize::try_from(trial.wrapping_mul(0x9e37_79b9).wrapping_add(0x243f_6a88))
-            .expect("u32 does not fit usize")
-            % order.len();
-        let destination =
-            usize::try_from(trial.wrapping_mul(0x85eb_ca6b).wrapping_add(0xb7e1_5163))
-                .expect("u32 does not fit usize")
-                % order.len();
-        if source == destination {
-            continue;
-        }
-        let mut candidate_order = order.clone();
-        let operation = candidate_order.remove(source);
-        candidate_order.insert(destination, operation);
-        let mut positions = IndexVec::<OpNodeId, usize>::from_vec(vec![0; order.len()]);
-        for (position, &operation) in candidate_order.iter().enumerate() {
-            positions[operation] = position;
-        }
-        let valid = candidate_order.iter().enumerate().all(|(position, &operation)| {
-            graph
-                .get_predecessors(operation)
-                .iter()
-                .all(|predecessor| positions[predecessor] < position)
-        });
-        if !valid {
-            continue;
-        }
-        let (candidate_ops, spill_count) =
-            schedule_in_order(finalization, next_alloc_id, shuffle, graph, &candidate_order);
-        let candidate_cost = stack_ops_cost(&candidate_ops, shuffle);
-        if candidate_cost <= best_cost {
-            order = candidate_order;
-            if candidate_cost < best_cost {
-                best_cost = candidate_cost;
-                incumbent.ops = candidate_ops;
-                incumbent.spill_count = spill_count;
-            }
-        }
-    }
-    incumbent
-}
-
-fn schedule_in_order(
-    finalization: BlockFinalization,
-    next_alloc_id: StaticAllocId,
-    shuffle: ShuffleConfig,
-    graph: &OpGraph,
-    order: &[OpNodeId],
-) -> (Box<[StackOps]>, u32) {
-    let mut operations = Vec::new();
-    let mut complete_backing = vec![0; graph.words_per_set() as usize];
-    let mut complete = OpSetMut::new(&mut complete_backing, graph.total_ops());
-    let mut inner = EvmStack::new();
-    for input in graph.input_values_fifo().iter().rev() {
-        inner.push(input);
-    }
-    let mut stack = TrackedStack::new_from_evm(next_alloc_id, |op| operations.push(op), inner, 8);
-    for &operation in order {
-        let operation_view = graph.get_op(operation);
-        let can_flip = matches!(operation_view.kind, OpNodeKind::Flippable(_));
-        let mut best = None;
-        for flipped in [false, true].into_iter().take(1 + usize::from(can_flip)) {
-            let mut trial_ops = Vec::new();
-            let mut trial = stack.clone_with(|op| trial_ops.push(op));
-            greedy_schedule_op(shuffle, &mut trial, graph, operation, complete.as_ref(), flipped);
-            let cost = stack_ops_cost(&trial_ops, shuffle);
-            if best.is_none_or(|(best_cost, _)| cost < best_cost) {
-                best = Some((cost, flipped));
-            }
-        }
-        let (_, flipped) = best.expect("every operation has a scheduling strategy");
-        greedy_schedule_op(shuffle, &mut stack, graph, operation, complete.as_ref(), flipped);
-        complete.add(operation);
-    }
-    if finalization == BlockFinalization::ShuffleToOutputs {
-        greedy_shuffler::shuffle(shuffle, &mut stack, graph);
-    }
-    let spill_count =
-        u32::try_from(stack.underlying_spilled().len()).expect("spill count overflow");
-    drop(stack);
-    (operations.into_boxed_slice(), spill_count)
-}
-
 impl Search<'_> {
-    fn optimize_initial_spills(
-        &mut self,
-        inputs: &[ValueNodeId],
-        minimum_spill_count: usize,
-        candidate_budget: usize,
-    ) {
-        if inputs.len() < 10 {
-            return;
-        }
-        let extra_spill_count = (inputs.len() - minimum_spill_count).min(4);
-        for extra in 1..=extra_spill_count {
-            let spill_count = minimum_spill_count + extra;
-            let path = (0..spill_count)
-                .map(|index| {
-                    StackOps::Store(
-                        self.next_alloc_id
-                            + u32::try_from(index).expect("initial spill index overflow"),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let values =
-                inputs[spill_count..].iter().chain(&inputs[..spill_count]).copied().collect();
-            self.path = path;
-            self.assessed_candidates = 0;
-            self.max_candidates = candidate_budget;
-            self.best_state_costs.clear();
-            self.visit(SearchNode {
-                state: Rc::new(SearchState {
-                    complete: vec![0; self.graph.words_per_set() as usize].into_boxed_slice(),
-                    values,
-                    stack_end: inputs.len() - spill_count,
-                }),
-                completed_count: 0,
-                executed_cost: stack_ops_cost(&self.path, self.shuffle),
-            });
-        }
-    }
-
-    fn improve_operand_layouts(&mut self, width: usize) {
+    fn improve_operand_layouts(&mut self) {
         let order = self
             .best_ops
             .iter()
@@ -1141,9 +758,6 @@ impl Search<'_> {
             self.shuffle,
             self.graph,
             &order,
-            width,
-            4,
-            false,
         );
         let candidate_cost = stack_ops_cost(&candidate.ops, self.shuffle);
         if candidate_cost < self.best_cost {
@@ -1151,118 +765,6 @@ impl Search<'_> {
             self.best_ops = candidate.ops;
             self.best_spill_count = candidate.spill_count;
         }
-    }
-
-    fn improve_adjacent_order(&mut self, max_trials: usize) {
-        if self.graph.total_ops() < 2 {
-            return;
-        }
-        let mut order = self
-            .best_ops
-            .iter()
-            .filter_map(|&operation| graph_operation_id(self.graph, operation))
-            .collect::<Vec<_>>();
-        assert_eq!(order.len(), self.graph.total_ops() as usize);
-
-        let trial_count = (order.len() - 1).min(max_trials);
-        for _ in 0..10 {
-            for trial in 0..trial_count {
-                let position = trial * (order.len() - 1) / trial_count;
-                let earlier = order[position];
-                let later = order[position + 1];
-                if self.graph.get_predecessors(later).contains(earlier) {
-                    continue;
-                }
-                order.swap(position, position + 1);
-                let (candidate_ops, spill_count) = schedule_in_order(
-                    self.finalization,
-                    self.next_alloc_id,
-                    self.shuffle,
-                    self.graph,
-                    &order,
-                );
-                let candidate_cost = stack_ops_cost(&candidate_ops, self.shuffle);
-                if candidate_cost <= self.best_cost {
-                    if candidate_cost < self.best_cost {
-                        self.best_cost = candidate_cost;
-                        self.best_ops = candidate_ops;
-                        self.best_spill_count = spill_count;
-                    }
-                } else {
-                    order.swap(position, position + 1);
-                }
-            }
-        }
-    }
-
-    fn optimize_tail(&mut self, tail_operations: u32, candidate_budget: usize) {
-        if self.finalization != BlockFinalization::ShuffleToOutputs || self.graph.total_ops() == 0 {
-            return;
-        }
-
-        let prefix_operation_count = self.graph.total_ops().saturating_sub(tail_operations);
-        let mut seen_operations = 0;
-        let mut prefix_end = 0;
-        if prefix_operation_count > 0 {
-            for (position, operation) in self.best_ops.iter().enumerate() {
-                if matches!(
-                    operation,
-                    StackOps::Op(_) | StackOps::Flipped(_) | StackOps::CallRetPush(_)
-                ) {
-                    seen_operations += 1;
-                    if seen_operations == prefix_operation_count {
-                        prefix_end = position + 1;
-                        break;
-                    }
-                }
-            }
-        }
-        let prefix = self.best_ops[..prefix_end].to_vec();
-        let mut complete = vec![0; self.graph.words_per_set() as usize];
-        let mut stack = TrackedStack::new_from_parts(
-            self.next_alloc_id,
-            |_| {},
-            &self.graph.input_values_fifo().iter().collect::<Vec<_>>(),
-            Vec::new(),
-        );
-        for &operation in &prefix {
-            match operation {
-                StackOps::Swap(depth) => stack.swap(depth),
-                StackOps::Dup(depth) => stack.dup(depth),
-                StackOps::Pop => stack.pop(),
-                StackOps::Store(expected) => assert_eq!(stack.spill_top(), expected),
-                StackOps::Load(allocation) => stack.load(allocation),
-                StackOps::Op(_) | StackOps::Flipped(_) | StackOps::CallRetPush(_) => {
-                    let operation_id = graph_operation_id(self.graph, operation)
-                        .expect("scheduled operation is absent from the graph");
-                    let flipped = matches!(operation, StackOps::Flipped(_));
-                    stack.op(self.graph, operation_id, flipped);
-                    OpSetMut::new(&mut complete, self.graph.total_ops()).add(operation_id);
-                }
-                StackOps::Exchange(_, _) => {
-                    unreachable!("pre-Amsterdam schedule contains an exchange")
-                }
-            }
-        }
-
-        let values = [stack.fifo(), stack.underlying_spilled()].concat().into_boxed_slice();
-        let stack_end = stack.fifo().len();
-        drop(stack);
-        self.path = prefix;
-        self.assessed_candidates = 0;
-        self.max_candidates = candidate_budget;
-        self.best_state_costs.clear();
-        self.allow_tail_swaps = true;
-        self.visit(SearchNode {
-            state: Rc::new(SearchState {
-                complete: complete.into_boxed_slice(),
-                values,
-                stack_end,
-            }),
-            completed_count: prefix_operation_count,
-            executed_cost: stack_ops_cost(&self.path, self.shuffle),
-        });
-        self.allow_tail_swaps = false;
     }
 
     fn precondition_target(
@@ -1337,26 +839,6 @@ impl Search<'_> {
         let precondition_target =
             self.precondition_target(&node.state.values[..node.state.stack_end], complete);
         let mut children = Vec::with_capacity(completable.len() + 10);
-        if self.allow_tail_swaps
-            && node.completed_count + 4 >= self.graph.total_ops()
-            && (2..=7).contains(&node.state.stack_end)
-        {
-            let max_depth = node.state.stack_end.min(usize::from(self.shuffle.max_swap_depth) + 1);
-            for depth in 1..max_depth {
-                if self.assessed_candidates == self.max_candidates {
-                    self.candidate_limit_reached = true;
-                    break;
-                }
-                self.assessed_candidates += 1;
-                let child = self.build_swap_child(
-                    &node,
-                    u8::try_from(depth).expect("bounded stack depth exceeds u8"),
-                );
-                if child.lower_bound < self.best_cost {
-                    children.push(child);
-                }
-            }
-        }
         let dead_depth = node.state.values[..node.state.stack_end]
             .iter()
             .position(|&value| self.graph.uses_remaining(complete, value) == 0)
@@ -1389,14 +871,11 @@ impl Search<'_> {
         'operations: for op in completable {
             let operation = self.graph.get_op(op);
             let can_flip = matches!(operation.kind, OpNodeKind::Flippable(_));
-            let can_copy_inputs = (self.copy_all_inputs
-                && !operation.inputs_fifo.is_empty()
-                && operation.inputs_fifo.len() <= 2)
-                || operation
-                    .inputs_fifo
-                    .iter()
-                    .enumerate()
-                    .any(|(i, input)| operation.inputs_fifo[i + 1..].contains(input));
+            let can_copy_inputs = operation
+                .inputs_fifo
+                .iter()
+                .enumerate()
+                .any(|(i, input)| operation.inputs_fifo[i + 1..].contains(input));
             for flipped in [false, true].into_iter().take(1 + usize::from(can_flip)) {
                 for copy_inputs in [false, true].into_iter().take(1 + usize::from(can_copy_inputs))
                 {
@@ -1420,42 +899,6 @@ impl Search<'_> {
             self.path.extend_from_slice(&child.transition_ops);
             self.visit(child.node);
             self.path.truncate(path_len);
-        }
-    }
-
-    fn build_swap_child(&self, node: &SearchNode, depth: u8) -> Child {
-        let mut values = node.state.values.clone();
-        values.swap(0, usize::from(depth));
-        let transition_ops: Box<[StackOps]> = Box::new([StackOps::Swap(depth)]);
-        let remaining_cost = remaining_cost_lower_bound(
-            &node.state.complete,
-            &values[..node.state.stack_end],
-            &values[node.state.stack_end..],
-            self.finalization == BlockFinalization::ShuffleToOutputs,
-            self.graph,
-        );
-        let executed_cost = node.executed_cost + stack_ops_cost(&transition_ops, self.shuffle);
-        let priority = child_priority(
-            executed_cost,
-            remaining_cost,
-            &values[..node.state.stack_end],
-            self.graph.output_values_fifo(),
-            self.alignment_factor,
-        );
-
-        Child {
-            node: SearchNode {
-                state: Rc::new(SearchState {
-                    complete: node.state.complete.clone(),
-                    values,
-                    stack_end: node.state.stack_end,
-                }),
-                completed_count: node.completed_count,
-                executed_cost,
-            },
-            transition_ops,
-            lower_bound: executed_cost + remaining_cost,
-            priority,
         }
     }
 
@@ -1496,7 +939,7 @@ impl Search<'_> {
             remaining_cost,
             &values[..stack_end],
             self.graph.output_values_fifo(),
-            self.alignment_factor,
+            5,
         );
 
         Child {
@@ -1553,7 +996,7 @@ impl Search<'_> {
             remaining_cost,
             &values[..stack_end],
             self.graph.output_values_fifo(),
-            self.alignment_factor,
+            5,
         );
 
         Child {
@@ -1638,12 +1081,12 @@ impl Search<'_> {
             remaining_cost,
             &values[..stack_end],
             self.graph.output_values_fifo(),
-            self.alignment_factor,
+            5,
         )
         .saturating_sub(
             u32::try_from(operation.inputs_fifo.len()).expect("operation arity exceeds u32")
                 * BASE_COST_FACTOR
-                * self.arity_factor
+                * 5
                 + u32::from(outputs_are_dead) * BASE_COST_FACTOR * 5,
         );
 

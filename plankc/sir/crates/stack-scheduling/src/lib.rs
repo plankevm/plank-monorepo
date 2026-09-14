@@ -80,10 +80,6 @@ pub fn schedule_graph(
         ShuffleConfig::PRE_AMSTERDAM,
         depth_first_search::SearchConfig {
             max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
-            copy_all_inputs: false,
-            alignment_factor: 5,
-            arity_factor: 5,
-            layout_alignment_factor: 2,
         },
         graph,
     );
@@ -144,10 +140,6 @@ pub fn schedule<'ir>(
                     config,
                     depth_first_search::SearchConfig {
                         max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
-                        copy_all_inputs: false,
-                        alignment_factor: 5,
-                        arity_factor: 5,
-                        layout_alignment_factor: 2,
                     },
                     &graph,
                 );

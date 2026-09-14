@@ -91,10 +91,6 @@ proptest! {
             ShuffleConfig::PRE_AMSTERDAM,
             SearchConfig {
                 max_candidates: NonZero::new(20).unwrap(),
-                copy_all_inputs: false,
-                alignment_factor: 5,
-                arity_factor: 5,
-                layout_alignment_factor: 2,
             },
             &graph,
         );

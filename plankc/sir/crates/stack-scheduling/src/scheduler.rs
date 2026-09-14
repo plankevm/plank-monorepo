@@ -5,12 +5,12 @@ use crate::{
     depth_first_search::{self, SearchConfig, SearchResult},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut, ValueNodeId},
+    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
     validation,
 };
-use plank_core::{DenseIndexSet, Idx, IndexVec};
+use plank_core::{DenseIndexSet, Idx};
 use sir_data::{OperationIdx, StaticAllocId};
 use smallvec::SmallVec;
 
@@ -41,96 +41,14 @@ pub fn schedule(
     finalization: BlockFinalization,
     next_alloc_id: StaticAllocId,
     shuffle: ShuffleConfig,
-    mut search: SearchConfig,
+    search: SearchConfig,
     graph: &OpGraph,
 ) -> SearchResult {
-    let (zero_arity_count, unary_count, binary_count, high_arity_count, total_arity) =
-        graph.op_ids().fold((0, 0, 0, 0, 0), |(zero, unary, binary, high, total), operation| {
-            let arity = graph.get_op(operation).inputs_fifo.len();
-            (
-                zero + usize::from(arity == 0),
-                unary + usize::from(arity == 1),
-                binary + usize::from(arity == 2),
-                high + usize::from(arity >= 3),
-                total + arity,
-            )
-        });
-    let mut uses = IndexVec::<ValueNodeId, u32>::from_vec(vec![0; graph.total_values() as usize]);
-    for operation in graph.op_ids() {
-        for &input in graph.get_op(operation).inputs_fifo {
-            uses[input] += 1;
-        }
-    }
-    for &output in graph.output_values_fifo() {
-        uses[output] += 1;
-    }
-    let max_uses = uses.iter().copied().max().unwrap_or(0);
-    let excess_uses = uses.iter().map(|uses| uses.saturating_sub(1)).sum::<u32>();
-    search.alignment_factor = if zero_arity_count <= 14 && excess_uses >= 2 {
-        6
-    } else if graph.input_values_fifo().len() >= 7 && binary_count <= 8 {
-        4
-    } else {
-        5
-    };
-    search.arity_factor =
-        if graph.input_values_fifo().len() >= 9 && unary_count >= 1 { 5 } else { 3 };
-    search.layout_alignment_factor = if graph.total_ops() >= 33 && zero_arity_count <= 18 {
-        3
-    } else if graph.total_ops() <= 32 && graph.output_values_fifo().len() >= 8 {
-        1
-    } else {
-        2
-    };
-    search.copy_all_inputs = (unary_count <= 1 && high_arity_count >= 2)
-        || (binary_count <= 10 && high_arity_count >= 4)
-        || (graph.total_ops() >= 23 && total_arity <= 24)
-        || (max_uses >= 11 && excess_uses <= 15)
-        || (zero_arity_count <= 7 && max_uses >= 5);
     let trees = build_tree_graph(graph);
-    let compare_original = trees.graph.total_ops() != graph.total_ops()
-        && (graph.total_ops() <= 13
-            || (graph.total_ops() == 14
-                && trees.graph.total_ops() <= 4
-                && graph.input_values_fifo().len() <= 5));
-    let (mut result, original_result) = if compare_original {
-        let (tree_result, original_result) = rayon::join(
-            || {
-                depth_first_search::schedule(
-                    finalization,
-                    next_alloc_id,
-                    shuffle,
-                    search,
-                    &trees.graph,
-                )
-            },
-            || depth_first_search::schedule(finalization, next_alloc_id, shuffle, search, graph),
-        );
-        (tree_result, Some(original_result))
-    } else {
-        (
-            depth_first_search::schedule(
-                finalization,
-                next_alloc_id,
-                shuffle,
-                search,
-                &trees.graph,
-            ),
-            None,
-        )
-    };
+    let mut result =
+        depth_first_search::schedule(finalization, next_alloc_id, shuffle, search, &trees.graph);
     result.ops = trees.expand_schedule(graph, &result.ops);
     finalize_result(&mut result, graph, next_alloc_id, shuffle);
-    if let Some(mut original_result) = original_result {
-        finalize_result(&mut original_result, graph, next_alloc_id, shuffle);
-        result.candidate_limit_reached |= original_result.candidate_limit_reached;
-        if crate::stack::gas_cost(&original_result.ops, shuffle)
-            < crate::stack::gas_cost(&result.ops, shuffle)
-        {
-            result.ops = original_result.ops;
-            result.spill_count = original_result.spill_count;
-        }
-    }
     let validated_next_alloc =
         validation::validate(graph, finalization, shuffle, next_alloc_id, &result.ops)
             .unwrap_or_else(|error| {
