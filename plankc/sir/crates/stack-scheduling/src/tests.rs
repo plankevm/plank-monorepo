@@ -8,7 +8,7 @@ use sir_passes::AnalysesStore;
 use std::{collections::HashSet, fmt::Write};
 
 use super::{
-    CallArgumentStrategy, GlobalSchedulerConfig, ScheduledOps,
+    CallArgumentStrategy, GlobalSchedulerConfig, GlobalSpillStrategy, ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ShuffleConfig, StackOps},
@@ -674,7 +674,10 @@ fn globally_spills_an_unused_obstruction() {
         &program,
         &analyses,
         ShuffleConfig::max_swap_no_exchange(2),
-        GlobalSchedulerConfig { spill_dormant_values: true, ..GlobalSchedulerConfig::default() },
+        GlobalSchedulerConfig {
+            global_spills: GlobalSpillStrategy::Boundary,
+            ..GlobalSchedulerConfig::default()
+        },
     );
     let entry = BasicBlockId::new(0);
     let middle = BasicBlockId::new(1);
@@ -683,6 +686,71 @@ fn globally_spills_an_unused_obstruction() {
     assert!(scheduled.get(middle).unwrap().contains(&StackOps::Load(spill_base)));
     assert!(!layouts.get_input_layout(middle).contains(&LayoutMember::InputOutput(0)));
     assert!(next_alloc_id > spill_base);
+}
+
+#[test]
+fn persists_a_global_spill_across_blocks() {
+    let program = sir_parser::parse_or_panic(
+        r#"
+        fn init:
+            entry {
+                x = caller
+                y = callvalue
+                z = calldatasize
+                target = returndatasize
+                => @middle
+            }
+            middle {
+                used_target = iszero target
+                => @bridge
+            }
+            bridge {
+                => @use
+            }
+            use {
+                used_x = iszero x
+                used_y = iszero y
+                used_z = iszero z
+                stop
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let spill = program.next_static_alloc_id;
+    let (boundary, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        GlobalSchedulerConfig {
+            global_spills: GlobalSpillStrategy::Boundary,
+            ..GlobalSchedulerConfig::default()
+        },
+    );
+    let (persistent, layouts, next_alloc_id) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        GlobalSchedulerConfig {
+            global_spills: GlobalSpillStrategy::Persistent,
+            ..GlobalSchedulerConfig::default()
+        },
+    );
+    let entry = program.function(program.init_entry).entry().id();
+    let middle = program.block(entry).successors().next().unwrap();
+    let bridge = program.block(middle).successors().next().unwrap();
+    let use_block = program.block(bridge).successors().next().unwrap();
+    let x = program.block(entry).operations().next().unwrap().outputs()[0];
+
+    assert!(persistent.get(entry).unwrap().contains(&StackOps::Store(spill)));
+    assert!(boundary.get(middle).unwrap().contains(&StackOps::Load(spill)));
+    assert!(!persistent.get(middle).unwrap().contains(&StackOps::Load(spill)));
+    assert!(!persistent.get(bridge).unwrap().contains(&StackOps::Store(spill)));
+    assert!(persistent.get(use_block).unwrap().contains(&StackOps::Load(spill)));
+    assert!(next_alloc_id > spill);
+    for block in [middle, bridge, use_block] {
+        assert!(!layouts.get_input_layout(block).contains(&LayoutMember::Local(x)));
+    }
 }
 
 #[test]

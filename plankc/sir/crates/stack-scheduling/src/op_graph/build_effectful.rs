@@ -142,14 +142,13 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
     for spill in global_spills.iter() {
         let vid = graph.push_spilled_input_value();
         let local = match spill {
-            GlobalSpill::Layout(group, member) if Some(group) == input_group => {
-                layout_member_local(member, inputs)
-            }
+            GlobalSpill::Layout { .. } => input_group
+                .and_then(|group| spill.layout_member_for_group(group))
+                .and_then(|member| layout_member_local(member, inputs)),
             GlobalSpill::CallArgument(function, position) => {
-                let entry = program.function(function).entry().id();
-                (layouts.get_input_group(entry) == input_group).then(|| inputs[position as usize])
+                let entry = program.function(*function).entry().id();
+                (layouts.get_input_group(entry) == input_group).then(|| inputs[*position as usize])
             }
-            GlobalSpill::Layout(_, _) => None,
         };
         if let Some(local) = local {
             local_to_value.insert(local, vid);
@@ -251,7 +250,8 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
     }
 
     if let Some(output_group) = layouts.get_output_group(block.id()) {
-        for (spill_index, member) in global_spills.for_group(output_group) {
+        for (spill_index, member) in global_spills.stores_for_transition(input_group, output_group)
+        {
             let local =
                 layout_member_local(member, block.outputs()).expect("return destination spilled");
             let mut store = graph.begin_op(OpNodeKind::GlobalStore(

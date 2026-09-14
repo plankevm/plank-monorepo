@@ -50,10 +50,39 @@ pub(crate) struct GlobalSpills {
     values: Vec<GlobalSpill>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) enum GlobalSpill {
-    Layout(InOutGroupId, LayoutMember),
+    Layout { member: LayoutMember, groups: BTreeSet<InOutGroupId>, persistent: bool },
     CallArgument(FunctionId, u32),
+}
+
+impl GlobalSpill {
+    fn layout(group: InOutGroupId, member: LayoutMember) -> Self {
+        Self::Layout { member, groups: BTreeSet::from([group]), persistent: false }
+    }
+
+    pub fn layout_member_for_group(&self, group: InOutGroupId) -> Option<LayoutMember> {
+        let Self::Layout { member, groups, .. } = self else { return None };
+        groups.contains(&group).then_some(*member)
+    }
+}
+
+fn eligible_global_spill_groups(
+    program: &EthIRProgram,
+    in_out_bundling: &ControlFlowGraphInOutBundling,
+) -> DenseIndexSet<InOutGroupId> {
+    let mut groups = DenseIndexSet::with_capacity_in_bits(in_out_bundling.total_groups() as usize);
+    for block in program.blocks() {
+        if let Some(group) = in_out_bundling.get_out_group(block.id()) {
+            groups.add(group);
+        }
+    }
+    for function in program.functions_iter() {
+        if let Some(group) = in_out_bundling.get_in_group(function.entry().id()) {
+            groups.remove(group);
+        }
+    }
+    groups
 }
 
 impl GlobalSpills {
@@ -61,27 +90,33 @@ impl GlobalSpills {
         self.values.len()
     }
 
-    pub fn for_group(
+    pub fn stores_for_transition(
         &self,
-        group: InOutGroupId,
+        input_group: Option<InOutGroupId>,
+        output_group: InOutGroupId,
     ) -> impl Iterator<Item = (usize, LayoutMember)> + '_ {
-        self.values.iter().enumerate().filter_map(move |(index, &spill)| {
-            let GlobalSpill::Layout(candidate_group, member) = spill else { return None };
-            (candidate_group == group).then_some((index, member))
+        self.values.iter().enumerate().filter_map(move |(index, spill)| {
+            let GlobalSpill::Layout { member, groups, persistent } = spill else { return None };
+            if !groups.contains(&output_group)
+                || (*persistent && input_group.is_some_and(|group| groups.contains(&group)))
+            {
+                return None;
+            }
+            Some((index, *member))
         })
     }
 
     pub fn for_function(&self, function: FunctionId) -> impl Iterator<Item = (usize, u32)> + '_ {
-        self.values.iter().enumerate().filter_map(move |(index, &spill)| {
+        self.values.iter().enumerate().filter_map(move |(index, spill)| {
             let GlobalSpill::CallArgument(candidate_function, position) = spill else {
                 return None;
             };
-            (candidate_function == function).then_some((index, position))
+            (*candidate_function == function).then_some((index, *position))
         })
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = GlobalSpill> + '_ {
-        self.values.iter().copied()
+    pub fn iter(&self) -> impl Iterator<Item = &GlobalSpill> {
+        self.values.iter()
     }
 
     pub fn remove_from_layouts(
@@ -90,18 +125,21 @@ impl GlobalSpills {
         in_out_bundling: &ControlFlowGraphInOutBundling,
         layouts: &mut DenseIndexMap<InOutGroupId, Layout>,
     ) {
-        for &spill in &self.values {
-            let (group, member) = match spill {
-                GlobalSpill::Layout(group, member) => (group, member),
+        for spill in &self.values {
+            match spill {
+                GlobalSpill::Layout { member, groups, .. } => {
+                    for &group in groups {
+                        layouts[group].remove(*member);
+                    }
+                }
                 GlobalSpill::CallArgument(function, position) => {
-                    let entry = program.function(function).entry().id();
+                    let entry = program.function(*function).entry().id();
                     let group = in_out_bundling
                         .get_in_group(entry)
                         .expect("called function without entry layout");
-                    (group, LayoutMember::InputOutput(position))
+                    layouts[group].remove(LayoutMember::InputOutput(*position));
                 }
-            };
-            layouts[group].remove(member);
+            }
         }
     }
 
@@ -114,6 +152,85 @@ impl GlobalSpills {
                 .into_iter()
                 .map(|(function, position)| GlobalSpill::CallArgument(function, position)),
         );
+    }
+
+    /// Coalesces selected spills of the same exact SSA local, then extends their memory residency
+    /// forward while that local remains present in consecutive layouts.
+    pub fn persist_across_regions(
+        &mut self,
+        program: &EthIRProgram,
+        in_out_bundling: &ControlFlowGraphInOutBundling,
+        layouts: &DenseIndexMap<InOutGroupId, Layout>,
+    ) {
+        let eligible_groups = eligible_global_spill_groups(program, in_out_bundling);
+
+        let original = std::mem::take(&mut self.values);
+        let mut regions = BTreeMap::<LocalId, BTreeSet<InOutGroupId>>::new();
+        for spill in &original {
+            if let GlobalSpill::Layout { member: LayoutMember::Local(local), groups, .. } = spill {
+                regions.entry(*local).or_default().extend(groups);
+            }
+        }
+        let mut successor_groups =
+            BTreeMap::<LocalId, BTreeMap<InOutGroupId, BTreeSet<InOutGroupId>>>::new();
+        for block in program.blocks() {
+            let (Some(input), Some(output)) = (
+                in_out_bundling.get_in_group(block.id()),
+                in_out_bundling.get_out_group(block.id()),
+            ) else {
+                continue;
+            };
+            if !eligible_groups.contains(input) || !eligible_groups.contains(output) {
+                continue;
+            }
+            let (Some(input_layout), Some(output_layout)) =
+                (layouts.get(input), layouts.get(output))
+            else {
+                continue;
+            };
+            for &member in input_layout.members_fifo() {
+                let LayoutMember::Local(local) = member else { continue };
+                if regions.contains_key(&local) && output_layout.contains(&member) {
+                    successor_groups
+                        .entry(local)
+                        .or_default()
+                        .entry(input)
+                        .or_default()
+                        .insert(output);
+                }
+            }
+        }
+
+        for (&local, region) in &mut regions {
+            let mut pending = region.iter().copied().collect::<Vec<_>>();
+            while let Some(group) = pending.pop() {
+                if let Some(neighbors) =
+                    successor_groups.get(&local).and_then(|groups| groups.get(&group))
+                {
+                    for &neighbor in neighbors {
+                        if region.insert(neighbor) {
+                            pending.push(neighbor);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut emitted_locals = BTreeSet::new();
+        for spill in original {
+            let GlobalSpill::Layout { member: LayoutMember::Local(local), .. } = spill else {
+                self.values.push(spill);
+                continue;
+            };
+            if !emitted_locals.insert(local) {
+                continue;
+            }
+            self.values.push(GlobalSpill::Layout {
+                member: LayoutMember::Local(local),
+                groups: regions.remove(&local).unwrap(),
+                persistent: true,
+            });
+        }
     }
 }
 
@@ -697,27 +814,16 @@ pub(crate) fn select_global_spills(
     let mut input_blocks = DenseIndexMap::<InOutGroupId, Vec<BasicBlockId>>::with_capacity(
         in_out_bundling.total_groups() as usize,
     );
-    let mut groups_with_predecessors =
-        DenseIndexSet::with_capacity_in_bits(in_out_bundling.total_groups() as usize);
-    let mut function_entry_groups =
-        DenseIndexSet::with_capacity_in_bits(in_out_bundling.total_groups() as usize);
+    let eligible_groups = eligible_global_spill_groups(program, in_out_bundling);
     for block in program.blocks() {
         if let Some(group) = in_out_bundling.get_in_group(block.id()) {
             input_blocks.entry(group).or_insert_default().push(block.id());
-        }
-        if let Some(group) = in_out_bundling.get_out_group(block.id()) {
-            groups_with_predecessors.add(group);
-        }
-    }
-    for function in program.functions_iter() {
-        if let Some(group) = in_out_bundling.get_in_group(function.entry().id()) {
-            function_entry_groups.add(group);
         }
     }
 
     let mut global_spills = GlobalSpills::default();
     for (group, layout) in layouts.iter() {
-        if !groups_with_predecessors.contains(group) || function_entry_groups.contains(group) {
+        if !eligible_groups.contains(group) {
             continue;
         }
         let Some(blocks) = input_blocks.get(group) else { continue };
@@ -749,7 +855,7 @@ pub(crate) fn select_global_spills(
 
         global_spills.values.extend(
             candidates.into_iter().map(|member_index| {
-                GlobalSpill::Layout(group, layout.members_fifo()[member_index])
+                GlobalSpill::layout(group, layout.members_fifo()[member_index])
             }),
         );
     }
@@ -1156,5 +1262,169 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn persists_an_exact_local_across_connected_layout_groups() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    value = caller
+                    => @middle
+                }
+                middle {
+                    => @use
+                }
+                use {
+                    used = iszero value
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, mut layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+        let entry = program.function(program.init_entry).entry().id();
+        let middle = program.block(entry).successors().next().unwrap();
+        let use_block = program.block(middle).successors().next().unwrap();
+        let first_group = bundling.get_out_group(entry).unwrap();
+        let second_group = bundling.get_out_group(middle).unwrap();
+        let value = program.block(entry).operations().next().unwrap().outputs()[0];
+        let member = LayoutMember::Local(value);
+        assert!(layouts[first_group].contains(&member));
+        assert!(layouts[second_group].contains(&member));
+
+        let mut downstream_only = GlobalSpills {
+            values: vec![GlobalSpill::layout(second_group, member)],
+            ..GlobalSpills::default()
+        };
+        downstream_only.persist_across_regions(&program, &bundling, &layouts);
+        assert_eq!(downstream_only.values[0].layout_member_for_group(first_group), None);
+        assert_eq!(downstream_only.values[0].layout_member_for_group(second_group), Some(member));
+
+        let mut spills = GlobalSpills {
+            values: vec![
+                GlobalSpill::layout(first_group, member),
+                GlobalSpill::layout(second_group, member),
+            ],
+            ..GlobalSpills::default()
+        };
+        spills.persist_across_regions(&program, &bundling, &layouts);
+
+        assert_eq!(spills.len(), 1);
+        assert_eq!(spills.values[0].layout_member_for_group(first_group), Some(member));
+        assert_eq!(spills.values[0].layout_member_for_group(second_group), Some(member));
+        assert_eq!(
+            spills
+                .stores_for_transition(bundling.get_in_group(entry), first_group)
+                .collect::<Vec<_>>(),
+            vec![(0, member)]
+        );
+        assert_eq!(
+            spills.stores_for_transition(Some(first_group), second_group).collect::<Vec<_>>(),
+            Vec::new()
+        );
+
+        spills.remove_from_layouts(&program, &bundling, &mut layouts);
+        assert!(!layouts[first_group].contains(&member));
+        assert!(!layouts[second_group].contains(&member));
+        assert_eq!(bundling.get_in_group(use_block), Some(second_group));
+    }
+
+    #[test]
+    fn keeps_a_persistent_spill_initialized_across_a_loop_backedge() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry {
+                    value = caller
+                    => @header
+                }
+                header {
+                    condition = callvalue
+                    => condition ? @body : @exit
+                }
+                body {
+                    => @header
+                }
+                exit {
+                    used = iszero value
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+        let entry = program.function(program.init_entry).entry().id();
+        let header = program.block(entry).successors().next().unwrap();
+        let body = program
+            .block(header)
+            .successors()
+            .find(|&successor| program.block(successor).successors().any(|next| next == header))
+            .unwrap();
+        let header_group = bundling.get_in_group(header).unwrap();
+        let branch_group = bundling.get_out_group(header).unwrap();
+        let value = program.block(entry).operations().next().unwrap().outputs()[0];
+        let member = LayoutMember::Local(value);
+        let mut spills = GlobalSpills {
+            values: vec![GlobalSpill::layout(header_group, member)],
+            ..GlobalSpills::default()
+        };
+
+        spills.persist_across_regions(&program, &bundling, &layouts);
+
+        assert_eq!(spills.values[0].layout_member_for_group(branch_group), Some(member));
+        assert_eq!(
+            spills
+                .stores_for_transition(bundling.get_in_group(entry), header_group)
+                .collect::<Vec<_>>(),
+            vec![(0, member)]
+        );
+        assert!(spills.stores_for_transition(Some(header_group), branch_group).next().is_none());
+        assert!(
+            spills
+                .stores_for_transition(Some(branch_group), bundling.get_out_group(body).unwrap())
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn does_not_persist_positional_block_arguments() {
+        let program = parse_or_panic(
+            r#"
+            fn init:
+                entry -> value0 {
+                    value0 = caller
+                    => @middle
+                }
+                middle value1 -> value1 {
+                    => @use
+                }
+                use value2 {
+                    used = iszero value2
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let analyses = AnalysesStore::default();
+        let (bundling, layouts) = build_layouts(&program, &analyses, LayoutOrdering::Naive);
+        let entry = program.function(program.init_entry).entry().id();
+        let middle = program.block(entry).successors().next().unwrap();
+        let first_group = bundling.get_out_group(entry).unwrap();
+        let second_group = bundling.get_out_group(middle).unwrap();
+        let member = LayoutMember::InputOutput(0);
+        let mut spills = GlobalSpills {
+            values: vec![GlobalSpill::layout(first_group, member)],
+            ..GlobalSpills::default()
+        };
+
+        spills.persist_across_regions(&program, &bundling, &layouts);
+
+        assert_eq!(spills.values[0].layout_member_for_group(first_group), Some(member));
+        assert_eq!(spills.values[0].layout_member_for_group(second_group), None);
     }
 }
