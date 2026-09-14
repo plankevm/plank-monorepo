@@ -8,7 +8,7 @@ use sir_passes::AnalysesStore;
 use std::{collections::HashSet, fmt::Write};
 
 use super::{
-    CallArgumentStrategy, GlobalSchedulerConfig, GlobalSpillStrategy, ScheduledOps,
+    CallArgumentStrategy, GlobalSchedulerConfig, ScheduledOps,
     layouts::{Layout, LayoutMember},
     op_graph::{OpGraph, ValueNodeId, build_graph_simple},
     stack::{ShuffleConfig, StackOps},
@@ -674,10 +674,7 @@ fn globally_spills_an_unused_obstruction() {
         &program,
         &analyses,
         ShuffleConfig::max_swap_no_exchange(2),
-        GlobalSchedulerConfig {
-            global_spills: GlobalSpillStrategy::Boundary,
-            ..GlobalSchedulerConfig::default()
-        },
+        GlobalSchedulerConfig { spill_dormant_values: true, ..GlobalSchedulerConfig::default() },
     );
     let entry = BasicBlockId::new(0);
     let middle = BasicBlockId::new(1);
@@ -718,23 +715,11 @@ fn persists_a_global_spill_across_blocks() {
     );
     let analyses = AnalysesStore::default();
     let spill = program.next_static_alloc_id;
-    let (boundary, _, _) = crate::schedule_with_config(
-        &program,
-        &analyses,
-        ShuffleConfig::max_swap_no_exchange(2),
-        GlobalSchedulerConfig {
-            global_spills: GlobalSpillStrategy::Boundary,
-            ..GlobalSchedulerConfig::default()
-        },
-    );
     let (persistent, layouts, next_alloc_id) = crate::schedule_with_config(
         &program,
         &analyses,
         ShuffleConfig::max_swap_no_exchange(2),
-        GlobalSchedulerConfig {
-            global_spills: GlobalSpillStrategy::Persistent,
-            ..GlobalSchedulerConfig::default()
-        },
+        GlobalSchedulerConfig { spill_dormant_values: true, ..GlobalSchedulerConfig::default() },
     );
     let entry = program.function(program.init_entry).entry().id();
     let middle = program.block(entry).successors().next().unwrap();
@@ -743,7 +728,6 @@ fn persists_a_global_spill_across_blocks() {
     let x = program.block(entry).operations().next().unwrap().outputs()[0];
 
     assert!(persistent.get(entry).unwrap().contains(&StackOps::Store(spill)));
-    assert!(boundary.get(middle).unwrap().contains(&StackOps::Load(spill)));
     assert!(!persistent.get(middle).unwrap().contains(&StackOps::Load(spill)));
     assert!(!persistent.get(bridge).unwrap().contains(&StackOps::Store(spill)));
     assert!(persistent.get(use_block).unwrap().contains(&StackOps::Load(spill)));

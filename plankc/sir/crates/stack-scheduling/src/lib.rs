@@ -84,17 +84,9 @@ pub enum CallArgumentStrategy {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum GlobalSpillStrategy {
-    #[default]
-    Disabled,
-    Boundary,
-    Persistent,
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct GlobalSchedulerConfig {
     pub layout_ordering: LayoutOrdering,
-    pub global_spills: GlobalSpillStrategy,
+    pub spill_dormant_values: bool,
     pub call_arguments: CallArgumentStrategy,
     pub rematerialize_small_constants: bool,
 }
@@ -138,19 +130,19 @@ pub fn schedule_with_config<'ir>(
         &mut layout_sets,
         global_config.layout_ordering,
     );
-    let mut global_spills = match global_config.global_spills {
-        GlobalSpillStrategy::Disabled => GlobalSpills::default(),
-        GlobalSpillStrategy::Boundary | GlobalSpillStrategy::Persistent => select_global_spills(
+    let mut global_spills = if global_config.spill_dormant_values {
+        let mut spills = select_global_spills(
             program,
             analyses,
             &in_out_bundling,
             &layout_sets,
             usize::from(shuffle_config.max_swap_depth),
-        ),
+        );
+        spills.persist_across_regions(program, &in_out_bundling, &layout_sets);
+        spills
+    } else {
+        GlobalSpills::default()
     };
-    if global_config.global_spills == GlobalSpillStrategy::Persistent {
-        global_spills.persist_across_regions(program, &in_out_bundling, &layout_sets);
-    }
     global_spills.extend_call_arguments(select_memory_call_arguments(
         program,
         analyses,
