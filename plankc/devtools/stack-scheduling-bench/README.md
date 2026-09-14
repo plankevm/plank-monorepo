@@ -3,6 +3,8 @@
 The checked-in corpus is under [`corpus/`](corpus/). Running the benchmark without arguments uses
 that corpus and writes `tmp/stack-scheduling.csv` from the workspace root.
 
+See [`EXPERIMENTS.md`](EXPERIMENTS.md) for the strategy diary.
+
 ```bash
 cargo run --release -p sir-stack-scheduling-bench
 ```
