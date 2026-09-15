@@ -9,7 +9,19 @@ mod code_to_asm;
 mod codegen_orchestrator;
 mod mark_map;
 
+#[cfg(test)]
+mod tests;
+
 pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode: &mut Vec<u8>) {
+    let (asm, marks) = ir_to_asm(program, analyses);
+    asm.assemble(bytecode, Some(marks.next_mark_id.const_get() as usize))
+        .expect("generated invalid asm");
+}
+
+fn ir_to_asm(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+) -> (sir_assembler::Assembler, mark_map::MarkMap) {
     if cfg!(debug_assertions) {
         let reachable_blocks = analyses.reachable_blocks(program);
         let preds = analyses.predecessors(program);
@@ -50,6 +62,5 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
         None => in_progress_codegen.finish_init_only(),
     };
 
-    asm.assemble(bytecode, Some(marks.next_mark_id.const_get() as usize))
-        .expect("generated invalid asm");
+    (asm, marks)
 }
