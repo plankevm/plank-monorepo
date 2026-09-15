@@ -12,7 +12,7 @@ A standard ERC20 implementation covering the core patterns used in Plank:
 
 ## Imports
 
-The contract uses a few standard library utilities:
+The contract imports `std::prelude::*`, which makes several commonly used standard library utilities available:
 
 - `std::storage::map_slot_hash` - computes mapping storage slots using `keccak256(key, base_slot)`
 - `std::constructor::return_runtime` - returns `runtime` bytecode from `init`

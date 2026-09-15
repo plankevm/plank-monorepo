@@ -1,5 +1,5 @@
-import std::option::{Option, Some, None};
-import std::membytes::membytes;
+use std::option::{Option, Some, None};
+use std::membytes::membytes;
 
 const bytes32 = struct { raw: u256 };
 

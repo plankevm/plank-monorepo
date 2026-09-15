@@ -1,4 +1,4 @@
-import std::constructor::return_runtime;
+use std::prelude::*;
 
 const CLONE_SELECTOR = 0x8124b78e;
 const CLONE_DETERMINISTIC_SELECTOR = 0xb86b2ceb;

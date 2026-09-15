@@ -1,4 +1,4 @@
-import std::type::sizeof;
+use std::type::sizeof;
 
 // Writes a value of type T at `ptr`. Compound fields are serialized
 // contiguously. No bounds check.

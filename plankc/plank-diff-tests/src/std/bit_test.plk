@@ -1,6 +1,5 @@
-import std::abi::{abi_encode, abi_decode};
-import std::membytes::membytes_from_ptr;
-import std::bit::clz;
+use std::prelude::*;
+use std::bit::clz;
 
 init {
     let size = @evm_calldatasize();

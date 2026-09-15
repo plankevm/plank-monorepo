@@ -1,7 +1,5 @@
-import std::abi::abi_decode;
-import std::error::require;
-import std::membytes::membytes_from_ptr;
-import std::version::{active_evm_version, CANCUN, PRAGUE, OSAKA};
+use std::prelude::*;
+use std::version::{active_evm_version, CANCUN, PRAGUE, OSAKA};
 
 const EXPECT_CANCUN = 0;
 const EXPECT_PRAGUE = 1;

@@ -5,7 +5,7 @@ fn test_compile_log() {
     assert_diagnostics_and_compile_logs(
         std_project(
             r#"
-    import std::option::Some;
+    use std::option::Some;
     init {
         comptime {
             @compile_log(true);

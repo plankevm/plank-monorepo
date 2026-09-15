@@ -3394,10 +3394,6 @@
     "named": false
   },
   {
-    "type": "import",
-    "named": false
-  },
-  {
     "type": "init",
     "named": false
   },
@@ -3427,6 +3423,10 @@
     "named": false
   },
   {
+    "type": "pub",
+    "named": false
+  },
+  {
     "type": "return",
     "named": false
   },
@@ -3448,6 +3448,10 @@
   },
   {
     "type": "tuple",
+    "named": false
+  },
+  {
+    "type": "use",
     "named": false
   },
   {
