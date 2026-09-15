@@ -31,6 +31,7 @@ pub(crate) struct CodeToAsmEmitter<'a> {
     pub ir: &'a EthIRProgram,
     ops: &'a ScheduledOps,
     visited_bbs: DenseIndexSet<BasicBlockId>,
+    fallthrough_targets: DenseIndexSet<BasicBlockId>,
     basic_blocks_worklist: Vec<BasicBlockId>,
 }
 
@@ -43,12 +44,13 @@ impl<'a> CodeToAsmEmitter<'a> {
     ) -> Self {
         let mark_map = MarkMap::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
+        let fallthrough_targets = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
 
         // Extra clear just to be safe.
         visited_bbs.clear();
         basic_blocks_worklist.clear();
 
-        Self { ir, ops, mark_map, visited_bbs, basic_blocks_worklist, asm }
+        Self { ir, ops, mark_map, visited_bbs, fallthrough_targets, basic_blocks_worklist, asm }
     }
 
     pub fn alloc_bb_marks(&mut self) -> IndexableMarkSpan<BasicBlockId> {
@@ -58,6 +60,7 @@ impl<'a> CodeToAsmEmitter<'a> {
     fn reset_for_entrypoint(&mut self) {
         self.basic_blocks_worklist.clear();
         self.visited_bbs.clear();
+        self.fallthrough_targets.clear();
     }
 
     fn enqueue_bb(&mut self, bb: BasicBlockId) -> bool {
@@ -129,21 +132,30 @@ impl<'a> CodeToAsmEmitter<'a> {
                     self.asm.push_op_byte(op::JUMP);
                 }
                 ControlView::ContinuesTo(to) => {
-                    let to_mark = state.bb_marks().get(to);
-                    let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
-                    self.asm.push_reference(AsmReference::pushed(to_ref));
-                    self.asm.push_op_byte(op::JUMP);
+                    if self.enqueue_bb(to) {
+                        self.fallthrough_targets.add(to);
+                    } else {
+                        let to_mark = state.bb_marks().get(to);
+                        let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
+                        self.asm.push_reference(AsmReference::pushed(to_ref));
+                        self.asm.push_op_byte(op::JUMP);
+                    }
                 }
                 ControlView::Branches { condition: _, non_zero_target, zero_target } => {
+                    self.enqueue_bb(non_zero_target);
                     let non_zero_mark = state.bb_marks().get(non_zero_target);
                     let non_zero_ref = state.mark_to_ref(&self.mark_map, non_zero_mark);
-                    let zero_mark = state.bb_marks().get(zero_target);
-                    let zero_ref = state.mark_to_ref(&self.mark_map, zero_mark);
-
                     self.asm.push_reference(AsmReference::pushed(non_zero_ref));
                     self.asm.push_op_byte(op::JUMPI);
-                    self.asm.push_reference(AsmReference::pushed(zero_ref));
-                    self.asm.push_op_byte(op::JUMP);
+
+                    if self.enqueue_bb(zero_target) {
+                        self.fallthrough_targets.add(zero_target);
+                    } else {
+                        let zero_mark = state.bb_marks().get(zero_target);
+                        let zero_ref = state.mark_to_ref(&self.mark_map, zero_mark);
+                        self.asm.push_reference(AsmReference::pushed(zero_ref));
+                        self.asm.push_op_byte(op::JUMP);
+                    }
                 }
                 ControlView::Switch(switch) => {
                     let switch_store_addr =
@@ -153,6 +165,7 @@ impl<'a> CodeToAsmEmitter<'a> {
                     self.asm.push_op_byte(op::MSTORE);
 
                     for (value, to) in switch.cases() {
+                        self.enqueue_bb(to);
                         let to_mark = state.bb_marks().get(to);
                         let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
                         self.asm.push_minimal_u32(switch_store_addr);
@@ -164,10 +177,14 @@ impl<'a> CodeToAsmEmitter<'a> {
                     }
 
                     if let Some(to) = switch.fallback() {
-                        let to_mark = state.bb_marks().get(to);
-                        let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
-                        self.asm.push_reference(AsmReference::pushed(to_ref));
-                        self.asm.push_op_byte(op::JUMP);
+                        if self.enqueue_bb(to) {
+                            self.fallthrough_targets.add(to);
+                        } else {
+                            let to_mark = state.bb_marks().get(to);
+                            let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
+                            self.asm.push_reference(AsmReference::pushed(to_ref));
+                            self.asm.push_op_byte(op::JUMP);
+                        }
                     }
                 }
             }
