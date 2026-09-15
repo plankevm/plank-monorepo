@@ -17,3 +17,16 @@ Average and worst regression include only contracts that regressed.
 | Bidirectional persistent spilling | Boundary spilling | 41.052% | 10/0/0 | n/a | n/a | Saved 500,289 bytes, but could hoist stores backward. | No |
 | Global spilling | Original baseline | 43.712% | 10/0/0 | n/a | n/a | Saved 612,284 bytes. | Yes |
 | Global spilling + rematerialization | Original baseline | 45.345% | 10/0/0 | n/a | n/a | Saved 623,866 bytes, including 11,582 bytes beyond global spilling alone. | Yes |
+| Cost-guided shared layout search | Global spilling + rematerialization | 2.748% | 6/0/4 | 21.733% | 46.034% | Improved 10/10 alone, but increased the current total by 17,268 bytes and cost about 2.8-3.7x compiler CPU. | No |
+| Edge-specific layouts | Original baseline | n/a | 0/0/10 | 13.813% | 18.213% | Increased total size by 129,154 bytes. | No |
+
+## Not kept
+
+- **Alternative producer weights:** Performed worse than equal successor and producer weighting.
+- **Boundary global spilling:** Superseded by persistent global spilling.
+- **Ungated constant rematerialization:** Regressed all ten benchmark contracts.
+- **Bidirectional persistent spilling:** Could hoist stores onto paths that previously avoided them;
+  replaced by forward-only persistence.
+- **Cost-guided shared layout search:** Strong alone, but expensive and regressed the current global
+  spilling configuration.
+- **Edge-specific layouts:** Adapter jump and shuffle overhead regressed every benchmark contract.
