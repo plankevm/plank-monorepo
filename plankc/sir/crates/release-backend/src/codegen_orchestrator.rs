@@ -9,6 +9,7 @@ use sir_data::{
     BasicBlockId, DataId, EthIRProgram, FunctionId, Operation,
     operation::{InternalCallData, InternalCallNeverData},
 };
+use sir_passes::Predecessors;
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
 
@@ -118,6 +119,7 @@ impl<'a> InitcodeEmitted<'a> {
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
         init_memory_layout: static_mem::Layout,
+        predecessors: &Predecessors,
     ) -> Self {
         let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_START_CAPACITY);
@@ -145,7 +147,7 @@ impl<'a> InitcodeEmitted<'a> {
             runtime_datas,
         };
 
-        emitter.emit_from_entrypoint(&mut state, ir.init_entry);
+        emitter.emit_from_entrypoint(&mut state, ir.init_entry, predecessors);
 
         let init_only_datas = {
             let mut init_only_datas_undeterministic: Vec<_> =
@@ -166,6 +168,7 @@ impl<'a> InitcodeEmitted<'a> {
         self,
         runtime_entrypoint: FunctionId,
         run_memory_layout: static_mem::Layout,
+        predecessors: &Predecessors,
     ) -> (Assembler, MarkMap) {
         let InitcodeEmitted { mut emitter, runtime_datas } = self;
 
@@ -173,7 +176,7 @@ impl<'a> InitcodeEmitted<'a> {
             EmitRuncode { memory: run_memory_layout, bb_marks: emitter.alloc_bb_marks() };
 
         emitter.asm.push_mark(emitter.mark_map.runcode_start);
-        emitter.emit_from_entrypoint(&mut state, runtime_entrypoint);
+        emitter.emit_from_entrypoint(&mut state, runtime_entrypoint, predecessors);
         for data in runtime_datas.iter() {
             emitter.asm.push_mark(emitter.mark_map.datas.get(data));
             emitter.asm.push_data(&emitter.ir.data_segments[data]);
