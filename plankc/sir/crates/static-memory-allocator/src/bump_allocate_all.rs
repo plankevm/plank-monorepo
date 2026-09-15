@@ -90,10 +90,13 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
                 self.collect_operation(operation.op());
             }
 
-            for &stack_op in self.stack_ops.get(block.id()).expect("reachable block not scheduled")
-            {
+            let stack_ops = self.stack_ops.get(block.id()).expect("reachable block not scheduled");
+            for &stack_op in stack_ops {
                 match stack_op {
                     StackOps::Store(id) => self.alloc_static(id, EVM_WORD_IN_BYTES, false),
+                    StackOps::MemoryReturnCall(_, id) => {
+                        self.alloc_static(id, EVM_WORD_IN_BYTES, false)
+                    }
                     StackOps::Load(id) => {
                         assert!(self.alloc_start.contains_key(&id), "stack load from unallocated")
                     }
@@ -101,6 +104,7 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
                     | StackOps::Dup(_)
                     | StackOps::Pop
                     | StackOps::Op(_)
+                    | StackOps::TailCall(_)
                     | StackOps::Flipped(_)
                     | StackOps::CallRetPush(_)
                     | StackOps::Exchange(_, _) => {}
@@ -113,8 +117,10 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
                 self.switch_store = Some(self.bump.alloc(EVM_WORD_IN_BYTES));
             }
 
-            self.block_worklist
-                .extend(block.successors().filter(|&block| self.seen_blocks.add(block)));
+            if !stack_ops.last().is_some_and(|op| op.replaces_block_control()) {
+                self.block_worklist
+                    .extend(block.successors().filter(|&block| self.seen_blocks.add(block)));
+            }
         }
     }
 

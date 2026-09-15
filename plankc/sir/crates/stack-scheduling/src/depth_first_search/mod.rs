@@ -298,7 +298,11 @@ fn stack_ops_cost(ops: &[StackOps], shuffle: ShuffleConfig) -> u32 {
             let cost = match op {
                 // These represent necessary basic block operations and therefore shouldn't be
                 // included in the scheduling cost.
-                StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => 0,
+                StackOps::Flipped(_)
+                | StackOps::Op(_)
+                | StackOps::MemoryReturnCall(_, _)
+                | StackOps::TailCall(_)
+                | StackOps::CallRetPush(_) => 0,
                 StackOps::Swap(_) | StackOps::Dup(_) | StackOps::Pop => 3,
                 StackOps::Exchange(_, _) => shuffle.exchange_cost,
                 // Conservatively assume store will need to pay for memory expansion.

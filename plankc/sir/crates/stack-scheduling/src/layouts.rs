@@ -307,6 +307,74 @@ pub(crate) struct Rematerializations {
     by_call: BTreeMap<OperationIdx, Vec<Rematerialization>>,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct MemoryReturnDestinations {
+    function_slots: BTreeMap<FunctionId, StaticAllocId>,
+    block_slots: DenseIndexMap<BasicBlockId, StaticAllocId>,
+}
+
+impl MemoryReturnDestinations {
+    pub fn select(
+        program: &EthIRProgram,
+        analyses: &AnalysesStore,
+        in_out_bundling: &ControlFlowGraphInOutBundling,
+        layouts: &mut DenseIndexMap<InOutGroupId, Layout>,
+        max_swap_depth: usize,
+        alloc_start: StaticAllocId,
+        enabled: bool,
+    ) -> Self {
+        if !enabled {
+            return Self::default();
+        }
+        let selected = select_memory_return_destinations(
+            program,
+            analyses,
+            in_out_bundling,
+            layouts,
+            max_swap_depth,
+        );
+        let function_slots = selected
+            .iter()
+            .enumerate()
+            .map(|(index, &function)| {
+                (
+                    function,
+                    alloc_start
+                        + u32::try_from(index).expect("too many memory return destinations"),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let ownership = analyses.basic_block_ownership(program);
+        let mut block_slots = DenseIndexMap::with_capacity(program.basic_blocks.len());
+        for block in program.blocks() {
+            let Ok(function) = ownership.get_owner(block.id()) else { continue };
+            let Some(&slot) = function_slots.get(&function) else { continue };
+            block_slots.insert(block.id(), slot);
+            if let Some(group) = in_out_bundling.get_in_group(block.id()) {
+                layouts[group].remove(LayoutMember::ReturnDest);
+            }
+            if let Some(group) = in_out_bundling.get_out_group(block.id())
+                && let Some(layout) = layouts.get_mut(group)
+            {
+                layout.remove(LayoutMember::ReturnDest);
+            }
+        }
+        Self { function_slots, block_slots }
+    }
+
+    pub fn len(&self) -> usize {
+        self.function_slots.len()
+    }
+
+    pub fn slot_for_function(&self, function: FunctionId) -> Option<StaticAllocId> {
+        self.function_slots.get(&function).copied()
+    }
+
+    pub fn slot_for_block(&self, block: BasicBlockId) -> Option<StaticAllocId> {
+        self.block_slots.get(block).copied()
+    }
+}
+
 impl Rematerializations {
     pub fn for_call(&self, call: OperationIdx) -> &[Rematerialization] {
         self.by_call.get(&call).map_or(&[], Vec::as_slice)
@@ -747,6 +815,38 @@ pub(crate) fn select_memory_call_arguments(
         };
         selected
             .extend(arguments.into_iter().rev().take(count).map(|position| (function, position)));
+    }
+    selected
+}
+
+fn select_memory_return_destinations(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+    in_out_bundling: &ControlFlowGraphInOutBundling,
+    layouts: &DenseIndexMap<InOutGroupId, Layout>,
+    max_swap_depth: usize,
+) -> BTreeSet<FunctionId> {
+    let called_functions = program
+        .operations()
+        .filter_map(|operation| match operation.op() {
+            Operation::InternalCall(call) => Some(call.function),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let ownership = analyses.basic_block_ownership(program);
+    let target_width = max_swap_depth.saturating_add(2);
+    let mut selected = BTreeSet::new();
+    for block in program.blocks() {
+        let Ok(function) = ownership.get_owner(block.id()) else { continue };
+        if !called_functions.contains(&function) {
+            continue;
+        }
+        let Some(group) = in_out_bundling.get_in_group(block.id()) else { continue };
+        if layouts[group].len() == target_width
+            && layouts[group].contains(&LayoutMember::ReturnDest)
+        {
+            selected.insert(function);
+        }
     }
     selected
 }

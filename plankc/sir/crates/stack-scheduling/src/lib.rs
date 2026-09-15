@@ -2,18 +2,21 @@ use std::{collections::BTreeMap, num::NonZero};
 
 use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
-use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
+use sir_data::{BasicBlockId, EthIRProgram, Operation, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{
-    GlobalSpills, LayoutsTracker, Rematerialization, Rematerializations,
+    GlobalSpills, LayoutsTracker, MemoryReturnDestinations, Rematerialization, Rematerializations,
     build_basic_block_layout_sets, order_layouts, select_call_rematerializations,
     select_global_spills, select_memory_call_arguments,
 };
 pub use stack::ShuffleConfig;
 pub mod op_graph;
 
-use crate::{op_graph::build_graph_effectful_with_spills, stack::StackOps};
+use crate::{
+    op_graph::{build_graph_effectful_with_spills, tail_call_in_block},
+    stack::StackOps,
+};
 
 mod depth_first_search;
 mod greedy_intra_op_scheduler;
@@ -45,7 +48,11 @@ fn estimated_stack_management_cost(
             // Assume a PUSH1 address and exclude context-dependent memory expansion.
             StackOps::Store(_) | StackOps::Load(_) => (3, 6),
             // Necessary SIR operations are common to both candidate schedules.
-            StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => (0, 0),
+            StackOps::Flipped(_)
+            | StackOps::Op(_)
+            | StackOps::MemoryReturnCall(_, _)
+            | StackOps::TailCall(_)
+            | StackOps::CallRetPush(_) => (0, 0),
         };
         (bytes + op_bytes, gas + op_gas)
     })
@@ -127,6 +134,8 @@ pub struct GlobalSchedulerConfig {
     pub spill_dormant_values: bool,
     pub call_arguments: CallArgumentStrategy,
     pub rematerialize_small_constants: bool,
+    pub eliminate_tail_calls: bool,
+    pub memory_back_return_destinations: bool,
 }
 
 #[derive(Debug)]
@@ -196,6 +205,17 @@ pub fn schedule_with_config<'ir>(
         BTreeMap::new()
     };
     global_spills.remove_from_layouts(program, &in_out_bundling, &mut layout_sets);
+    let return_destination_base =
+        global_spill_base + u32::try_from(global_spills.len()).expect("too many global spills");
+    let memory_return_destinations = MemoryReturnDestinations::select(
+        program,
+        analyses,
+        &in_out_bundling,
+        &mut layout_sets,
+        usize::from(shuffle_config.max_swap_depth),
+        return_destination_base,
+        global_config.memory_back_return_destinations,
+    );
     let rematerializations = if global_config.rematerialize_small_constants {
         select_call_rematerializations(
             program,
@@ -207,8 +227,9 @@ pub fn schedule_with_config<'ir>(
     } else {
         Rematerializations::default()
     };
-    let local_alloc_start =
-        global_spill_base + u32::try_from(global_spills.len()).expect("too many global spills");
+    let local_alloc_start = return_destination_base
+        + u32::try_from(memory_return_destinations.len())
+            .expect("too many memory return destinations");
     let mut next_alloc_id = local_alloc_start;
 
     // Freeze the selected layout sets as concrete layouts.
@@ -224,6 +245,17 @@ pub fn schedule_with_config<'ir>(
         .blocks()
         .filter_map(|block| {
             let (input_layout, output_layout) = layouts.get_input_output(block.id())?;
+            let tail_call = global_config
+                .eliminate_tail_calls
+                .then(|| tail_call_in_block(program, block))
+                .flatten()
+                .filter(|&operation| {
+                    let Operation::InternalCall(call) = program.operations[operation] else {
+                        unreachable!()
+                    };
+                    memory_return_destinations.slot_for_block(block.id()).is_none()
+                        && memory_return_destinations.slot_for_function(call.function).is_none()
+                });
             let graph = build_graph_effectful_with_spills(
                 program,
                 block,
@@ -234,6 +266,8 @@ pub fn schedule_with_config<'ir>(
                 &global_spills,
                 global_spill_base,
                 &rematerializations,
+                tail_call,
+                &memory_return_destinations,
             );
             let (replay_bytecode_size, replay_execution_gas) = block
                 .operations()
@@ -258,12 +292,20 @@ pub fn schedule_with_config<'ir>(
                         &global_spills,
                         global_spill_base,
                         &Rematerializations::default(),
+                        tail_call,
+                        &memory_return_destinations,
                     ),
                     replay_bytecode_size,
                     replay_execution_gas,
                 )
             });
-            Some((block, graph, baseline))
+            let return_destination =
+                if matches!(block.control(), sir_data::ControlView::InternalReturn) {
+                    memory_return_destinations.slot_for_block(block.id())
+                } else {
+                    None
+                };
+            Some((block, graph, baseline, return_destination, tail_call))
         })
         .collect::<Vec<_>>();
     // Blocks share a temporary spill base while scheduling so they can run independently. Their
@@ -276,7 +318,7 @@ pub fn schedule_with_config<'ir>(
     let block_schedules = scheduling_pool.install(|| {
         block_graphs
             .into_par_iter()
-            .map(|(block, graph, baseline)| {
+            .map(|(block, graph, baseline, return_destination, tail_call)| {
                 let schedule = |graph| {
                     depth_first_search::schedule(
                         block,
@@ -306,7 +348,28 @@ pub fn schedule_with_config<'ir>(
                         }
                     }
                 };
-                let result = rematerialize_global_loads(result, &spilled_constants, shuffle_config);
+                let mut result =
+                    rematerialize_global_loads(result, &spilled_constants, shuffle_config);
+                for operation in &mut result.ops {
+                    let StackOps::Op(operation_id) = operation else { continue };
+                    let Operation::InternalCall(call) = program.operations[*operation_id] else {
+                        continue;
+                    };
+                    if let Some(slot) = memory_return_destinations.slot_for_function(call.function)
+                    {
+                        *operation = StackOps::MemoryReturnCall(*operation_id, slot);
+                    }
+                }
+                if let Some(slot) = return_destination {
+                    let mut operations = result.ops.into_vec();
+                    operations.push(StackOps::Load(slot));
+                    result.ops = operations.into_boxed_slice();
+                }
+                if let Some(tail_call) = tail_call {
+                    let mut operations = result.ops.into_vec();
+                    operations.push(StackOps::TailCall(tail_call));
+                    result.ops = operations.into_boxed_slice();
+                }
                 (block.id(), result)
             })
             .collect::<Vec<_>>()

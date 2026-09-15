@@ -135,6 +135,13 @@ fn fmt_stack_op(out: &mut String, program: &EthIRProgram, op: StackOps) {
             fmt_op(out, program, op)
         }
         StackOps::Op(op) => fmt_op(out, program, op),
+        StackOps::MemoryReturnCall(op, slot) => {
+            write!(out, "memory_return_call #{op} :{slot}").unwrap()
+        }
+        StackOps::TailCall(op) => {
+            out.push_str("tail ");
+            fmt_op(out, program, op);
+        }
         StackOps::CallRetPush(operation) => write!(out, "call_ret_push #{operation}").unwrap(),
         StackOps::Exchange(n, m) => write!(out, "exchange {n} {m}").unwrap(),
         StackOps::Store(alloc) => write!(out, "store :{alloc}").unwrap(),
@@ -907,6 +914,156 @@ fn does_not_overwrite_call_arguments_before_the_previous_call() {
         assert!(call_positions[0] < store_positions[1]);
         assert!(store_positions[1] < call_positions[1]);
     }
+}
+
+#[test]
+fn eliminates_a_direct_tail_call() {
+    let (program, sources) = sir_parser::parse_or_panic_with_sources(
+        r#"
+        fn init:
+            entry {
+                value = caller
+                result = icall @wrapper value
+                sstore value result
+                stop
+            }
+        fn wrapper:
+            entry value -> result {
+                garbage = caller
+                result = icall @callee value
+                iret
+            }
+        fn callee:
+            entry value -> result {
+                result = iszero value
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let (scheduled, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::PRE_AMSTERDAM,
+        GlobalSchedulerConfig { eliminate_tail_calls: true, ..GlobalSchedulerConfig::default() },
+    );
+    let wrapper = sources.function_by_name(&program, "wrapper").unwrap();
+    let wrapper = program.function(wrapper).entry().id();
+    let tail_call = program
+        .block(wrapper)
+        .operations()
+        .find(|operation| matches!(operation.op(), Operation::InternalCall(_)))
+        .unwrap()
+        .id();
+    let operations = scheduled.get(wrapper).unwrap();
+
+    assert!(operations.contains(&StackOps::TailCall(tail_call)));
+    assert!(!operations.contains(&StackOps::CallRetPush(tail_call)));
+    assert!(operations.contains(&StackOps::Pop));
+    assert_eq!(operations.last(), Some(&StackOps::TailCall(tail_call)));
+}
+
+#[test]
+fn optionally_eliminates_a_tail_call_through_a_forwarder() {
+    let (program, sources) = sir_parser::parse_or_panic_with_sources(
+        r#"
+        fn init:
+            entry {
+                value = caller
+                result = icall @wrapper value
+                sstore value result
+                stop
+            }
+        fn wrapper:
+            entry value -> result0 {
+                result0 = icall @callee value
+                => @forward
+            }
+            forward result1 -> result1 {
+                iret
+            }
+        fn callee:
+            entry value -> result {
+                result = iszero value
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let (disabled, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::PRE_AMSTERDAM,
+        GlobalSchedulerConfig::default(),
+    );
+    let (forwarding, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::PRE_AMSTERDAM,
+        GlobalSchedulerConfig { eliminate_tail_calls: true, ..GlobalSchedulerConfig::default() },
+    );
+    let wrapper = sources.function_by_name(&program, "wrapper").unwrap();
+    let wrapper = program.function(wrapper).entry().id();
+    let tail_call = program.block(wrapper).operations().next().unwrap().id();
+
+    assert!(disabled.get(wrapper).unwrap().contains(&StackOps::Op(tail_call)));
+    assert!(forwarding.get(wrapper).unwrap().contains(&StackOps::TailCall(tail_call)));
+}
+
+#[test]
+fn passes_a_selected_return_destination_through_memory() {
+    let (program, sources) = sir_parser::parse_or_panic_with_sources(
+        r#"
+        fn init:
+            entry {
+                a = caller
+                b = callvalue
+                c = calldatasize
+                first = icall @callee a b c
+                second = icall @callee a b c
+                result = add first second
+                sstore a result
+                stop
+            }
+        fn callee:
+            entry a b c -> result {
+                ab = add a b
+                result = add ab c
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let slot = program.next_static_alloc_id;
+    let (scheduled, layouts, next_alloc_id) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        GlobalSchedulerConfig {
+            memory_back_return_destinations: true,
+            ..GlobalSchedulerConfig::default()
+        },
+    );
+    let caller = program.function(program.init_entry).entry().id();
+    let calls = program
+        .block(caller)
+        .operations()
+        .filter(|operation| matches!(operation.op(), Operation::InternalCall(_)))
+        .map(|operation| operation.id())
+        .collect::<Vec<_>>();
+    let callee = sources.function_by_name(&program, "callee").unwrap();
+    let callee = program.function(callee).entry().id();
+
+    for call in calls {
+        assert!(scheduled.get(caller).unwrap().contains(&StackOps::MemoryReturnCall(call, slot)));
+        assert!(!scheduled.get(caller).unwrap().contains(&StackOps::CallRetPush(call)));
+    }
+    assert_eq!(scheduled.get(callee).unwrap().last(), Some(&StackOps::Load(slot)));
+    assert!(!layouts.get_input_layout(callee).contains(&LayoutMember::ReturnDest));
+    assert!(next_alloc_id > slot);
 }
 
 #[test]

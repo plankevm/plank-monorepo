@@ -100,7 +100,11 @@ fn assumed_schedule_cost(stack_ops: &[StackOps]) -> (u64, u64) {
             StackOps::Exchange(_, _) => (9, 3),
             StackOps::Store(_) => (9, 4),
             StackOps::Load(_) => (6, 4),
-            StackOps::Flipped(_) | StackOps::Op(_) | StackOps::CallRetPush(_) => (0, 0),
+            StackOps::MemoryReturnCall(_, _) => (9, 4),
+            StackOps::Flipped(_)
+            | StackOps::Op(_)
+            | StackOps::TailCall(_)
+            | StackOps::CallRetPush(_) => (0, 0),
         };
         (gas + operation_gas, bytes + operation_bytes)
     })

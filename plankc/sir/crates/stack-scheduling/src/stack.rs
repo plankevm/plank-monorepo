@@ -102,6 +102,8 @@ pub enum StackOps {
     Pop,
     Flipped(OperationIdx),
     Op(OperationIdx),
+    MemoryReturnCall(OperationIdx, StaticAllocId),
+    TailCall(OperationIdx),
     CallRetPush(OperationIdx),
     Exchange(u8, u8),
     Store(StaticAllocId),
@@ -116,6 +118,8 @@ impl std::fmt::Display for StackOps {
             StackOps::Pop => write!(f, "Pop"),
             StackOps::Flipped(id) => write!(f, "flipped({id})"),
             StackOps::Op(id) => write!(f, "op({id})"),
+            StackOps::MemoryReturnCall(id, slot) => write!(f, "memory_return_call({id}, {slot})"),
+            StackOps::TailCall(id) => write!(f, "tail_call({id})"),
             StackOps::CallRetPush(id) => write!(f, "call_ret_push({id})"),
             StackOps::Exchange(a, b) => write!(f, "Exchange({a}, {b})"),
             StackOps::Store(id) => write!(f, "store({id})"),
@@ -125,6 +129,10 @@ impl std::fmt::Display for StackOps {
 }
 
 impl StackOps {
+    pub const fn replaces_block_control(self) -> bool {
+        matches!(self, Self::TailCall(_))
+    }
+
     pub fn is_valid(self, config: ShuffleConfig) -> bool {
         match self {
             StackOps::Swap(depth) => depth <= config.max_swap_depth,
@@ -134,6 +142,8 @@ impl StackOps {
             }
             StackOps::Flipped(_)
             | StackOps::Op(_)
+            | StackOps::MemoryReturnCall(_, _)
+            | StackOps::TailCall(_)
             | StackOps::Pop
             | StackOps::Store(_)
             | StackOps::Load(_)

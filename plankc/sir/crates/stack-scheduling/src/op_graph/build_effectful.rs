@@ -1,13 +1,14 @@
 use crate::{
     layouts::{
-        GlobalSpill, GlobalSpills, Layout, LayoutMember, LayoutsTracker, Rematerializations,
-        layout_member_local,
+        GlobalSpill, GlobalSpills, Layout, LayoutMember, LayoutsTracker, MemoryReturnDestinations,
+        Rematerializations, layout_member_local,
     },
     op_graph::{OpGraph, OpGraphBuilder, OpNodeId, OpNodeKind, builder::OpBuilder},
 };
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use sir_data::{
-    BlockView, ControlView, EthIRProgram, Operation, StaticAllocId, operation::effects::Effect,
+    BlockView, ControlView, EthIRProgram, Operation, OperationIdx, StaticAllocId,
+    operation::effects::Effect,
 };
 use sir_passes::AnalysesStore;
 
@@ -104,6 +105,8 @@ pub fn build_graph_effectful<'ir>(
         &GlobalSpills::default(),
         program.next_static_alloc_id,
         &Rematerializations::default(),
+        None,
+        &MemoryReturnDestinations::default(),
     )
 }
 
@@ -117,8 +120,11 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
     global_spills: &GlobalSpills,
     global_spill_base: StaticAllocId,
     rematerializations: &Rematerializations,
+    tail_call: Option<OperationIdx>,
+    memory_return_destinations: &MemoryReturnDestinations,
 ) -> OpGraph {
     let function_effects = analyses.function_effects(program);
+    let memory_return_destination = memory_return_destinations.slot_for_block(block.id());
 
     let estimated_ops = (block.operations().count() * 11).div_ceil(10);
     let estimated_values = estimated_ops * 2 + input_layout.len();
@@ -154,12 +160,16 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
             local_to_value.insert(local, vid);
         }
     }
+    for _ in 0..memory_return_destinations.len() {
+        graph.push_spilled_input_value();
+    }
 
     let mut graph = graph.end_inputs_begin_ops();
     let mut effect_order = EffectOrderTracker::default();
     let mut last_call_by_function = HashMap::new();
 
     for op in block.operations() {
+        let is_tail_call = tail_call == Some(op.id());
         let mut call_stores = Vec::new();
         if let Operation::InternalCall(call) = op.op() {
             let call_inputs = call.get_inputs(program);
@@ -175,6 +185,9 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
                 let _ = store.end_inputs_begin_outputs();
                 call_stores.push(store_id);
             }
+        }
+        if is_tail_call {
+            continue;
         }
         let return_dest = 'return_dest: {
             let Operation::InternalCall(icall) = op.op() else {
@@ -249,6 +262,27 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
         }
     }
 
+    if let Some(tail_call) = tail_call {
+        let Operation::InternalCall(call) = program.operations[tail_call] else { unreachable!() };
+        let callee_layout = layouts.get_input_layout(program.function(call.function).entry().id());
+        let mut graph = graph.end_ops_begin_end_stack();
+        for &member in callee_layout.members_fifo() {
+            let value = match member {
+                LayoutMember::ReturnDest => {
+                    ret_dest_value.expect("tail call without return destination")
+                }
+                LayoutMember::InputOutput(position) => {
+                    local_to_value[&call.get_inputs(program)[position as usize]]
+                }
+                LayoutMember::Local(_) => {
+                    unreachable!("function entry should not have non-input members")
+                }
+            };
+            graph.push_end_stack_value(value);
+        }
+        return graph.finish();
+    }
+
     if let Some(output_group) = layouts.get_output_group(block.id()) {
         for (spill_index, member) in global_spills.stores_for_transition(input_group, output_group)
         {
@@ -274,6 +308,9 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
                 // doesn't have any external value
                 break 'handle_control;
             }
+            ControlView::InternalReturn if memory_return_destination.is_some() => {
+                break 'handle_control;
+            }
             ControlView::InternalReturn => ret_dest_value.expect("no return dest for iret"),
             ControlView::Switch(switch) => local_to_value[&switch.condition()],
             ControlView::Branches { condition, .. } => local_to_value[&condition],
@@ -294,6 +331,40 @@ pub(crate) fn build_graph_effectful_with_spills<'ir>(
     }
 
     graph.finish()
+}
+
+pub(crate) fn tail_call_in_block(
+    program: &EthIRProgram,
+    block: BlockView<'_>,
+) -> Option<OperationIdx> {
+    let operation = block.operations().next_back()?;
+    let Operation::InternalCall(call) = operation.op() else { return None };
+    if block.outputs() != call.get_outputs(program) {
+        return None;
+    }
+    let mut current = block;
+    let mut visited = HashSet::new();
+
+    loop {
+        if !visited.insert(current.id()) {
+            return None;
+        }
+        match current.control() {
+            ControlView::InternalReturn => return Some(operation.id()),
+            ControlView::ContinuesTo(successor) => {
+                let successor = program.block(successor);
+                if successor.operations().next().is_some()
+                    || successor.inputs() != successor.outputs()
+                {
+                    return None;
+                }
+                current = successor;
+            }
+            ControlView::LastOpTerminates
+            | ControlView::Branches { .. }
+            | ControlView::Switch(_) => return None,
+        }
+    }
 }
 
 #[cfg(test)]

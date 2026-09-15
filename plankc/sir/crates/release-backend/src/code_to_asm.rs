@@ -89,7 +89,7 @@ impl<'a> CodeToAsmEmitter<'a> {
             self.asm.push_op_byte(op::JUMPDEST);
 
             let bb_ops = self.ops.get(bb_id).expect("reachable block not scheduled");
-            for &op in bb_ops {
+            for (position, &op) in bb_ops.iter().enumerate() {
                 match op {
                     StackOps::Swap(depth) => self.asm.push_swap(depth),
                     StackOps::Dup(depth) => self.asm.push_dup(depth),
@@ -112,13 +112,41 @@ impl<'a> CodeToAsmEmitter<'a> {
                         let mark_ref = state.mark_to_ref(&self.mark_map, return_dest_mark);
                         self.asm.push_reference(AsmReference::pushed(mark_ref));
                     }
+                    StackOps::MemoryReturnCall(op_idx, slot) => {
+                        let return_dest_mark = self.mark_map.next_mark_id.get_and_inc();
+                        icall_return_marks.push((op_idx, return_dest_mark));
+                        let mark_ref = state.mark_to_ref(&self.mark_map, return_dest_mark);
+                        self.asm.push_reference(AsmReference::pushed(mark_ref));
+                        let addr = state.layout().alloc_start[&slot];
+                        self.asm.push_minimal_u32(addr.get());
+                        self.asm.push_op_byte(op::MSTORE);
+                        let Operation::InternalCall(call) = self.ir.operations[op_idx] else {
+                            unreachable!("memory return call is not an internal call")
+                        };
+                        self.emit_icall(state, &mut icall_return_marks, op_idx, call.function);
+                    }
                     StackOps::Op(op_idx) => {
                         self.emit_op(state, &mut icall_return_marks, op_idx, false);
+                    }
+                    StackOps::TailCall(op_idx) => {
+                        assert_eq!(
+                            position + 1,
+                            bb_ops.len(),
+                            "tail call must terminate its block"
+                        );
+                        let Operation::InternalCall(call) = self.ir.operations[op_idx] else {
+                            unreachable!("tail call stack operation is not an internal call")
+                        };
+                        self.emit_function_jump(state, call.function);
                     }
                     StackOps::Flipped(op_idx) => {
                         self.emit_op(state, &mut icall_return_marks, op_idx, true);
                     }
                 }
+            }
+
+            if bb_ops.last().is_some_and(|op| op.replaces_block_control()) {
+                continue;
             }
 
             let block = self.ir.block(bb_id);
@@ -250,12 +278,6 @@ impl<'a> CodeToAsmEmitter<'a> {
         op_idx: OperationIdx,
         function: FunctionId,
     ) {
-        let function_entry_ref = {
-            let call_entry_bb = self.ir.function(function).entry().id();
-            self.enqueue_bb(call_entry_bb);
-            let bb_entry_mark = state.bb_marks().get(call_entry_bb);
-            state.mark_to_ref(&self.mark_map, bb_entry_mark)
-        };
         let call_return_dest = {
             let (i, mark) = icall_return_marks
                 .iter()
@@ -268,10 +290,18 @@ impl<'a> CodeToAsmEmitter<'a> {
             mark
         };
 
-        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
-        self.asm.push_op_byte(op::JUMP);
+        self.emit_function_jump(state, function);
         self.asm.push_mark(call_return_dest);
         self.asm.push_op_byte(op::JUMPDEST);
+    }
+
+    fn emit_function_jump(&mut self, state: &impl CodegenState, function: FunctionId) {
+        let call_entry_bb = self.ir.function(function).entry().id();
+        self.enqueue_bb(call_entry_bb);
+        let bb_entry_mark = state.bb_marks().get(call_entry_bb);
+        let function_entry_ref = state.mark_to_ref(&self.mark_map, bb_entry_mark);
+        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
+        self.asm.push_op_byte(op::JUMP);
     }
 
     fn emit_dynamic_alloc_zeroed(&mut self, state: &impl CodegenState) {

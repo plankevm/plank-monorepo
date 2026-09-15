@@ -5,7 +5,7 @@ mod build_effectful;
 mod build_simple;
 pub mod builder;
 pub use build_effectful::build_graph_effectful;
-pub(crate) use build_effectful::build_graph_effectful_with_spills;
+pub(crate) use build_effectful::{build_graph_effectful_with_spills, tail_call_in_block};
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
 

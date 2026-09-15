@@ -19,6 +19,9 @@ Average and worst regression include only contracts that regressed.
 | Global spilling + rematerialization | Original baseline | 45.345% | 10/0/0 | n/a | n/a | Saved 623,866 bytes, including 11,582 bytes beyond global spilling alone. | Yes |
 | Cost-guided shared layout search | Global spilling + rematerialization | 2.748% | 6/0/4 | 21.733% | 46.034% | Improved 10/10 alone, but increased the current total by 17,268 bytes and cost about 2.8-3.7x compiler CPU. | No |
 | Edge-specific layouts | Original baseline | n/a | 0/0/10 | 13.813% | 18.213% | Increased total size by 129,154 bytes. | No |
+| Direct tail-call elimination | Original baseline | 0.034% | 9/1/0 | n/a | n/a | Saved 154 bytes. | No, superseded |
+| Tail-call elimination through forwarders | Original baseline | 0.042% | 9/1/0 | n/a | n/a | Saved 265 bytes; saved 249 bytes on the current global pipeline. | Yes |
+| Memory-backed return destinations | Global spilling + rematerialization | 0.834% | 6/4/0 | n/a | n/a | Saved 1,052 bytes; a targeted two-call benchmark saved 269 runtime gas. | Yes |
 
 ## Not kept
 
@@ -30,3 +33,4 @@ Average and worst regression include only contracts that regressed.
 - **Cost-guided shared layout search:** Strong alone, but expensive and regressed the current global
   spilling configuration.
 - **Edge-specific layouts:** Adapter jump and shuffle overhead regressed every benchmark contract.
+- **Direct tail-call elimination:** Superseded by tail-call elimination through empty forwarders.
