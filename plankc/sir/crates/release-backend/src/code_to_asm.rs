@@ -6,6 +6,7 @@ use sir_data::{
     BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, Operation, OperationIdx,
     operation::{IRMemoryIOByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
 };
+use sir_passes::Predecessors;
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;
 use smallvec::SmallVec;
@@ -72,7 +73,12 @@ impl<'a> CodeToAsmEmitter<'a> {
         }
     }
 
-    pub fn emit_from_entrypoint(&mut self, state: &mut impl CodegenState, entrypoint: FunctionId) {
+    pub fn emit_from_entrypoint(
+        &mut self,
+        state: &mut impl CodegenState,
+        entrypoint: FunctionId,
+        predecessors: &Predecessors,
+    ) {
         self.reset_for_entrypoint();
 
         if let Some(free_pointer) = state.layout().dyn_free_pointer {
@@ -89,7 +95,14 @@ impl<'a> CodeToAsmEmitter<'a> {
         while let Some(bb_id) = self.basic_blocks_worklist.pop() {
             let jumpdest_mark = state.bb_marks().get(bb_id);
             self.asm.push_mark(jumpdest_mark);
-            self.asm.push_op_byte(op::JUMPDEST);
+            let omit_jumpdest = match predecessors.of(bb_id).len() {
+                0 => bb_id == entry_bb, // Entrypoints do not need `JUMPDEST`.
+                1 => self.fallthrough_targets.contains(bb_id),
+                _ => false,
+            };
+            if !omit_jumpdest {
+                self.asm.push_op_byte(op::JUMPDEST);
+            }
 
             let bb_ops = self.ops.get(bb_id).expect("reachable block not scheduled");
             for &op in bb_ops {

@@ -29,8 +29,10 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
         sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
     let init_memory_layout =
         BumpAllocateAll::generate(program, program.init_entry, &stack_ops, last_alloc_id.idx());
+    let predecessors = analyses.predecessors(program);
 
-    let in_progress_codegen = InitcodeEmitted::emit_init(program, &stack_ops, init_memory_layout);
+    let in_progress_codegen =
+        InitcodeEmitted::emit_init(program, &stack_ops, init_memory_layout, &predecessors);
     let (asm, marks) = match program.main_entry {
         Some(runtime_entrypoint) => {
             let run_memory_layout = BumpAllocateAll::generate(
@@ -39,7 +41,11 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
                 &stack_ops,
                 last_alloc_id.idx(),
             );
-            in_progress_codegen.finish_with_runcode(runtime_entrypoint, run_memory_layout)
+            in_progress_codegen.finish_with_runcode(
+                runtime_entrypoint,
+                run_memory_layout,
+                &predecessors,
+            )
         }
         None => in_progress_codegen.finish_init_only(),
     };
