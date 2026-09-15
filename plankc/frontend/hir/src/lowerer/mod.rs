@@ -1,4 +1,9 @@
-use hashbrown::{HashMap, hash_map::Entry};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, btree_map::Entry as BTreeEntry},
+};
+
+use hashbrown::HashMap;
 use plank_core::{Idx, IncIterable, IndexVec, index_vec, list_of_lists::ListOfLists};
 use plank_parser::{
     ast::{self, MatchArmKind, Statement, TopLevelDef},
@@ -8,7 +13,6 @@ use plank_parser::{
 use plank_session::{Builtin, Poisoned, Session, SourceId, SourceSpan, StrId};
 use plank_source::project::{FileImport, ImportKind};
 use plank_values::{TypeId, ValueInterner};
-use std::cell::RefCell;
 
 use crate::operators as hir_ops;
 
@@ -176,7 +180,7 @@ fn resolve_reexport(
     source_id: SourceId,
     public_name: StrId,
     project: &ParsedProject,
-    public_names_by_source: &mut IndexVec<SourceId, HashMap<StrId, PublicNameResolution>>,
+    public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
 ) -> ReexportFailure {
     assert!(
@@ -237,7 +241,7 @@ fn resolve_reexport(
 
 fn resolve_reexports(
     project: &ParsedProject,
-    public_names_by_source: &mut IndexVec<SourceId, HashMap<StrId, PublicNameResolution>>,
+    public_names_by_source: &mut IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
     session: &mut Session,
 ) {
     let mut reexporters = index_vec![Vec::new(); public_names_by_source.len()];
@@ -272,7 +276,7 @@ fn resolve_reexports(
                 }
                 ImportKind::All => public_name,
             };
-            let Entry::Vacant(public_name_entry) =
+            let BTreeEntry::Vacant(public_name_entry) =
                 public_names_by_source[reexporting_source].entry(reexported_name)
             else {
                 continue;
@@ -372,7 +376,7 @@ impl BlockLowerer<'_> {
 
     fn build_file_scope(
         &mut self,
-        public_names_by_source: &IndexVec<SourceId, HashMap<StrId, PublicNameResolution>>,
+        public_names_by_source: &IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>,
         imports: &ListOfLists<SourceId, FileImport>,
     ) {
         self.consts.clear();
@@ -1389,10 +1393,10 @@ pub fn lower(project: &ParsedProject, values: &mut ValueInterner, session: &mut 
 fn register_consts(
     sources: &IndexVec<SourceId, plank_source::project::ParsedSource>,
     session: &mut Session,
-) -> (IndexVec<ConstId, ConstDef>, IndexVec<SourceId, HashMap<StrId, PublicNameResolution>>) {
+) -> (IndexVec<ConstId, ConstDef>, IndexVec<SourceId, BTreeMap<StrId, PublicNameResolution>>) {
     let mut consts: IndexVec<ConstId, ConstDef> = IndexVec::new();
     // Using `BTreeMap` to ensure deterministic re-export propagation and diagnostics.
-    let mut public_names_by_source = index_vec![HashMap::new(); sources.len()];
+    let mut public_names_by_source = index_vec![BTreeMap::new(); sources.len()];
 
     for (source_id, source) in sources.enumerate_idx() {
         let public_names = &mut public_names_by_source[source_id];
@@ -1408,7 +1412,7 @@ fn register_consts(
                 result: LocalId::ZERO,
             };
             match public_names.entry(const_def.name) {
-                Entry::Occupied(occupied) => {
+                BTreeEntry::Occupied(occupied) => {
                     let PublicNameResolution::Resolved(binding) = *occupied.get() else {
                         unreachable!("only constants are registered in this phase")
                     };
@@ -1420,7 +1424,7 @@ fn register_consts(
                         &consts[binding.const_id],
                     );
                 }
-                Entry::Vacant(vacant) => {
+                BTreeEntry::Vacant(vacant) => {
                     let const_id = consts.push(const_def);
                     vacant.insert(PublicNameResolution::Resolved(ScopedConst {
                         const_id,
