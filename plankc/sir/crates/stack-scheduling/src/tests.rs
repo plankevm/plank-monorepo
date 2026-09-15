@@ -738,6 +738,63 @@ fn persists_a_global_spill_across_blocks() {
 }
 
 #[test]
+fn rematerializes_a_globally_spilled_constant_load() {
+    let program = sir_parser::parse_or_panic(
+        r#"
+        fn init:
+            entry {
+                constant = const 0x7
+                x = caller
+                y = callvalue
+                target = returndatasize
+                => @middle
+            }
+            middle {
+                used_target = iszero target
+                => @bridge
+            }
+            bridge {
+                => @use
+            }
+            use {
+                used_constant = iszero constant
+                used_x = iszero x
+                used_y = iszero y
+                stop
+            }
+        "#,
+        EmitConfig::init_only(),
+    );
+    let analyses = AnalysesStore::default();
+    let spill = program.next_static_alloc_id;
+    let config =
+        GlobalSchedulerConfig { spill_dormant_values: true, ..GlobalSchedulerConfig::default() };
+    let (spilled, _, _) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        config,
+    );
+    let (rematerialized, _, next_alloc_id) = crate::schedule_with_config(
+        &program,
+        &analyses,
+        ShuffleConfig::max_swap_no_exchange(2),
+        GlobalSchedulerConfig { rematerialize_small_constants: true, ..config },
+    );
+    let entry = program.function(program.init_entry).entry().id();
+    let middle = program.block(entry).successors().next().unwrap();
+    let bridge = program.block(middle).successors().next().unwrap();
+    let use_block = program.block(bridge).successors().next().unwrap();
+    let constant = program.block(entry).operations().next().unwrap().id();
+
+    assert!(spilled.get(use_block).unwrap().contains(&StackOps::Load(spill)));
+    assert!(!rematerialized.get(use_block).unwrap().contains(&StackOps::Load(spill)));
+    assert!(rematerialized.get(use_block).unwrap().contains(&StackOps::Op(constant)));
+    assert!(rematerialized.get(entry).unwrap().contains(&StackOps::Store(spill)));
+    assert!(next_alloc_id > spill);
+}
+
+#[test]
 fn passes_pressured_call_arguments_through_global_spills() {
     let (program, sources) = sir_parser::parse_or_panic_with_sources(
         r#"
@@ -941,4 +998,27 @@ fn rematerialization_cost_gate_requires_a_pareto_improvement() {
         3,
         ShuffleConfig::max_swap_no_exchange(16),
     ));
+}
+
+#[test]
+fn does_not_replace_a_global_load_with_a_larger_push() {
+    let slot = StaticAllocId::new(0);
+    let operation = OperationIdx::new(0);
+    let constants = std::collections::BTreeMap::from([(
+        slot,
+        crate::layouts::Rematerialization {
+            local: sir_data::LocalId::new(0),
+            operation,
+            bytecode_size: 3,
+        },
+    )]);
+    let schedule = crate::depth_first_search::SearchResult {
+        ops: vec![StackOps::Load(slot)].into_boxed_slice(),
+        spill_count: 0,
+    };
+
+    let result =
+        crate::rematerialize_global_loads(schedule, &constants, ShuffleConfig::PRE_AMSTERDAM);
+
+    assert_eq!(result.ops.as_ref(), &[StackOps::Load(slot)]);
 }

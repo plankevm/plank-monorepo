@@ -3,6 +3,7 @@ use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, DenseIndexSet, newtype_index};
 use sir_data::{
     BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, Operation, OperationIdx,
+    StaticAllocId,
 };
 use sir_passes::{
     AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, analyses::Unreachable,
@@ -117,6 +118,32 @@ impl GlobalSpills {
 
     pub fn iter(&self) -> impl Iterator<Item = &GlobalSpill> {
         self.values.iter()
+    }
+
+    pub fn rematerializable_constants(
+        &self,
+        program: &EthIRProgram,
+        spill_base: StaticAllocId,
+    ) -> BTreeMap<StaticAllocId, Rematerialization> {
+        let constants = small_constants(program);
+        self.values
+            .iter()
+            .enumerate()
+            .filter_map(|(index, spill)| {
+                let GlobalSpill::Layout { member: LayoutMember::Local(local), .. } = spill else {
+                    return None;
+                };
+                let constant = constants.get(local)?;
+                Some((
+                    spill_base + u32::try_from(index).expect("too many global spills"),
+                    Rematerialization {
+                        local: *local,
+                        operation: constant.operation,
+                        bytecode_size: constant.bytecode_size,
+                    },
+                ))
+            })
+            .collect()
     }
 
     pub fn remove_from_layouts(
@@ -239,6 +266,40 @@ pub(crate) struct Rematerialization {
     pub local: LocalId,
     pub operation: OperationIdx,
     pub bytecode_size: u8,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SmallConstant {
+    block: BasicBlockId,
+    operation: OperationIdx,
+    bytecode_size: u8,
+}
+
+fn small_constants(program: &EthIRProgram) -> BTreeMap<LocalId, SmallConstant> {
+    let mut constants = BTreeMap::new();
+    for block in program.blocks() {
+        for operation in block.operations() {
+            let Operation::SetSmallConst(constant) = operation.op() else { continue };
+            let value_bytes = if constant.value == 0 {
+                0
+            } else {
+                (u32::BITS - constant.value.leading_zeros()).div_ceil(8)
+            };
+            constants.insert(
+                constant.sets,
+                SmallConstant {
+                    block: block.id(),
+                    operation: operation.id(),
+                    bytecode_size: if constant.value == 0 {
+                        1
+                    } else {
+                        u8::try_from(value_bytes + 1).unwrap()
+                    },
+                },
+            );
+        }
+    }
+    constants
 }
 
 #[derive(Debug, Default)]
@@ -697,14 +758,7 @@ pub(crate) fn select_call_rematerializations(
     layouts: &DenseIndexMap<InOutGroupId, Layout>,
     max_swap_depth: usize,
 ) -> Rematerializations {
-    let mut constants = BTreeMap::<LocalId, (BasicBlockId, OperationIdx, u32)>::new();
-    for block in program.blocks() {
-        for operation in block.operations() {
-            if let Operation::SetSmallConst(constant) = operation.op() {
-                constants.insert(constant.sets, (block.id(), operation.id(), constant.value));
-            }
-        }
-    }
+    let constants = small_constants(program);
 
     let liveness = analyses.local_liveness(program);
     let rpo = analyses.reverse_post_order(program);
@@ -771,21 +825,15 @@ pub(crate) fn select_call_rematerializations(
             let mut candidates = live_across
                 .into_iter()
                 .filter_map(|local| {
-                    let &(definition_block, operation, value) = constants.get(&local)?;
+                    let &constant = constants.get(&local)?;
                     // Same-block constants are already free to move after the call.
-                    if definition_block == block_id
+                    if constant.block == block_id
                         || rematerialized_locals.contains(&local)
                         || !input_layout.contains(&LayoutMember::Local(local))
                     {
                         return None;
                     }
-                    let value_bytes = if value == 0 {
-                        0
-                    } else {
-                        (u32::BITS - value.leading_zeros()).div_ceil(8)
-                    };
-                    let bytecode_size = if value == 0 { 1 } else { value_bytes + 1 };
-                    Some((bytecode_size, local, operation))
+                    Some((constant.bytecode_size, local, constant.operation))
                 })
                 .collect::<Vec<_>>();
             candidates.sort_unstable();
@@ -794,7 +842,7 @@ pub(crate) fn select_call_rematerializations(
                 rematerializations.by_call.entry(call).or_default().push(Rematerialization {
                     local,
                     operation,
-                    bytecode_size: bytecode_size.try_into().unwrap(),
+                    bytecode_size,
                 });
             }
         }

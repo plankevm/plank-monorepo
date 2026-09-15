@@ -1,4 +1,4 @@
-use std::num::NonZero;
+use std::{collections::BTreeMap, num::NonZero};
 
 use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
@@ -6,8 +6,9 @@ use sir_data::{BasicBlockId, EthIRProgram, StaticAllocId};
 use sir_passes::{AnalysesStore, ControlFlowGraphInOutBundling};
 
 use layouts::{
-    GlobalSpills, LayoutsTracker, Rematerializations, build_basic_block_layout_sets, order_layouts,
-    select_call_rematerializations, select_global_spills, select_memory_call_arguments,
+    GlobalSpills, LayoutsTracker, Rematerialization, Rematerializations,
+    build_basic_block_layout_sets, order_layouts, select_call_rematerializations,
+    select_global_spills, select_memory_call_arguments,
 };
 pub use stack::ShuffleConfig;
 pub mod op_graph;
@@ -65,6 +66,43 @@ fn rematerialized_schedule_is_better(
     rematerialized_bytes <= baseline_bytes
         && rematerialized_gas <= baseline_gas
         && (rematerialized_bytes < baseline_bytes || rematerialized_gas < baseline_gas)
+}
+
+fn rematerialize_global_loads(
+    mut schedule: depth_first_search::SearchResult,
+    constants: &BTreeMap<StaticAllocId, Rematerialization>,
+    shuffle_config: ShuffleConfig,
+) -> depth_first_search::SearchResult {
+    if constants.is_empty() {
+        return schedule;
+    }
+    let mut candidate = schedule.ops.to_vec();
+    let mut replay_bytecode_size = 0;
+    let mut replay_execution_gas = 0;
+    for operation in &mut candidate {
+        let StackOps::Load(slot) = operation else { continue };
+        let Some(constant) = constants.get(slot) else { continue };
+        // A load can be as small as PUSH0 + MLOAD, so larger pushes cannot guarantee a bytecode
+        // non-regression until exact memory addresses are available.
+        if constant.bytecode_size > 2 {
+            continue;
+        }
+        *operation = StackOps::Op(constant.operation);
+        replay_bytecode_size += usize::from(constant.bytecode_size);
+        replay_execution_gas += if constant.bytecode_size == 1 { 2 } else { 3 };
+    }
+    if replay_bytecode_size != 0
+        && rematerialized_schedule_is_better(
+            &schedule.ops,
+            &candidate,
+            replay_bytecode_size,
+            replay_execution_gas,
+            shuffle_config,
+        )
+    {
+        schedule.ops = candidate.into_boxed_slice();
+    }
+    schedule
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +189,12 @@ pub fn schedule_with_config<'ir>(
         usize::from(shuffle_config.max_swap_depth),
         global_config.call_arguments,
     ));
+    let global_spill_base = program.next_static_alloc_id;
+    let spilled_constants = if global_config.rematerialize_small_constants {
+        global_spills.rematerializable_constants(program, global_spill_base)
+    } else {
+        BTreeMap::new()
+    };
     global_spills.remove_from_layouts(program, &in_out_bundling, &mut layout_sets);
     let rematerializations = if global_config.rematerialize_small_constants {
         select_call_rematerializations(
@@ -163,7 +207,6 @@ pub fn schedule_with_config<'ir>(
     } else {
         Rematerializations::default()
     };
-    let global_spill_base = program.next_static_alloc_id;
     let local_alloc_start =
         global_spill_base + u32::try_from(global_spills.len()).expect("too many global spills");
     let mut next_alloc_id = local_alloc_start;
@@ -263,6 +306,7 @@ pub fn schedule_with_config<'ir>(
                         }
                     }
                 };
+                let result = rematerialize_global_loads(result, &spilled_constants, shuffle_config);
                 (block.id(), result)
             })
             .collect::<Vec<_>>()
