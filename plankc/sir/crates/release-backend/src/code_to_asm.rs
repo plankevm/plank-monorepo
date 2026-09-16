@@ -170,24 +170,20 @@ impl<'a> CodeToAsmEmitter<'a> {
                 ControlView::Switch(switch) => {
                     let switch_store_addr =
                         state.layout().switch_store.expect("missing switch allocation").get();
-                    let mut fallthrough_target = None;
-                    if let Some(target) = switch.fallback()
+                    let (fallthrough_target, fallthrough_case) = if let Some(target) =
+                        switch.fallback()
                         && !self.visited_bbs.contains(target)
                     {
-                        fallthrough_target = Some(target);
-                    }
-                    let fallthrough_case = if fallthrough_target.is_none() {
-                        switch
-                            .cases()
-                            .enumerate()
-                            .find(|(_, (_, target))| !self.visited_bbs.contains(*target))
-                            .map(|(idx, (value, target))| (idx, value, target))
+                        (Some(target), None)
+                    } else if let Some((idx, (value, target))) = switch
+                        .cases()
+                        .enumerate()
+                        .find(|(_, (_, target))| !self.visited_bbs.contains(*target))
+                    {
+                        (Some(target), Some((idx, value, target)))
                     } else {
-                        None
+                        (None, None)
                     };
-                    if let Some((_, _, target)) = fallthrough_case {
-                        fallthrough_target = Some(target);
-                    }
 
                     self.asm.push_minimal_u32(switch_store_addr);
                     self.asm.push_op_byte(op::MSTORE);
@@ -196,6 +192,8 @@ impl<'a> CodeToAsmEmitter<'a> {
                         if fallthrough_case.is_some_and(|(idx, _, _)| idx == case_idx) {
                             continue;
                         }
+                        // Reserve the fallthrough target for the final enqueue; other cases may
+                        // still jump to it.
                         if fallthrough_target != Some(to) {
                             self.enqueue_bb(to);
                         }
@@ -208,6 +206,9 @@ impl<'a> CodeToAsmEmitter<'a> {
 
                     if let Some((_, value, to)) = fallthrough_case {
                         if let Some(fallback) = switch.fallback() {
+                            assert!(self.visited_bbs.contains(fallback));
+                            // Invert the match so `JUMPI` takes the fallback on mismatch and falls
+                            // through on match.
                             self.asm.push_minimal_u32(switch_store_addr);
                             self.asm.push_op_byte(op::MLOAD);
                             self.asm.push_minimal_u256(value);
@@ -218,6 +219,7 @@ impl<'a> CodeToAsmEmitter<'a> {
                         assert!(self.enqueue_bb(to));
                         self.fallthrough_targets.add(to);
                     } else if let Some(to) = fallthrough_target {
+                        assert_eq!(switch.fallback(), Some(to));
                         assert!(self.enqueue_bb(to));
                         self.fallthrough_targets.add(to);
                     } else if let Some(to) = switch.fallback() {
