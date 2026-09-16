@@ -9,7 +9,19 @@ mod code_to_asm;
 mod codegen_orchestrator;
 mod mark_map;
 
+#[cfg(test)]
+mod tests;
+
 pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode: &mut Vec<u8>) {
+    let (asm, marks) = ir_to_asm(program, analyses);
+    asm.assemble(bytecode, Some(marks.next_mark_id.const_get() as usize))
+        .expect("generated invalid asm");
+}
+
+fn ir_to_asm(
+    program: &EthIRProgram,
+    analyses: &AnalysesStore,
+) -> (sir_assembler::Assembler, mark_map::MarkMap) {
     if cfg!(debug_assertions) {
         let reachable_blocks = analyses.reachable_blocks(program);
         let preds = analyses.predecessors(program);
@@ -29,8 +41,10 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
         sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
     let init_memory_layout =
         BumpAllocateAll::generate(program, program.init_entry, &stack_ops, last_alloc_id.idx());
+    let predecessors = analyses.predecessors(program);
 
-    let in_progress_codegen = InitcodeEmitted::emit_init(program, &stack_ops, init_memory_layout);
+    let in_progress_codegen =
+        InitcodeEmitted::emit_init(program, &stack_ops, init_memory_layout, &predecessors);
     let (asm, marks) = match program.main_entry {
         Some(runtime_entrypoint) => {
             let run_memory_layout = BumpAllocateAll::generate(
@@ -39,11 +53,14 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
                 &stack_ops,
                 last_alloc_id.idx(),
             );
-            in_progress_codegen.finish_with_runcode(runtime_entrypoint, run_memory_layout)
+            in_progress_codegen.finish_with_runcode(
+                runtime_entrypoint,
+                run_memory_layout,
+                &predecessors,
+            )
         }
         None => in_progress_codegen.finish_init_only(),
     };
 
-    asm.assemble(bytecode, Some(marks.next_mark_id.const_get() as usize))
-        .expect("generated invalid asm");
+    (asm, marks)
 }
