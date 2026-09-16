@@ -2,6 +2,8 @@ use crate::{
     AnalysesStore, UseKind,
     analyses::{Dominators, ReversePostOrder},
 };
+use alloy_primitives::U256;
+use hashbrown::HashSet;
 use plank_core::{DenseIndexSet, Idx, IndexVec, index_vec};
 use sir_data::{
     BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, LargeConstId, LocalId,
@@ -80,6 +82,8 @@ pub enum LegalizerError {
     InvalidFunctionId(FunctionId),
     #[error("invalid basic block id {0}")]
     InvalidBasicBlockId(BasicBlockId),
+    #[error("duplicate switch key {key} in @{block}")]
+    DuplicateSwitchKey { block: BasicBlockId, key: U256 },
     #[error("local ${local} not in scope at @{block} ({use_kind})")]
     LocalNotInScope { block: BasicBlockId, local: LocalId, use_kind: UseKind },
 }
@@ -90,6 +94,7 @@ pub struct Legalizer {
     operations_spans: Vec<TrackedSpan<OperationIdx>>,
     block_owner: IndexVec<BasicBlockId, Option<FunctionId>>,
     call_edges: Vec<(FunctionId, FunctionId)>,
+    switch_keys: HashSet<U256>,
 }
 
 impl Legalizer {
@@ -103,6 +108,7 @@ impl Legalizer {
         self.block_owner.clear();
         self.block_owner.resize(program.basic_blocks.len(), None);
         self.call_edges.clear();
+        self.switch_keys.clear();
 
         self.validate_entry_points(program)?;
         self.validate_blocks(program)?;
@@ -218,7 +224,11 @@ impl Legalizer {
                 if let Some(fallback) = switch.fallback {
                     validate_basic_block_id(program, fallback)?;
                 }
-                for &target in program.cases[switch.cases].get_bb_ids(program).iter() {
+                self.switch_keys.clear();
+                for (key, target) in program.cases[switch.cases].iter(program) {
+                    if !self.switch_keys.insert(key) {
+                        return Err(LegalizerError::DuplicateSwitchKey { block: bb_id, key });
+                    }
                     validate_basic_block_id(program, target)?;
                 }
             }
@@ -602,7 +612,6 @@ fn validate_spans<I: Idx>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::U256;
     use plank_core::Span;
     use sir_data::{
         Branch,
@@ -717,6 +726,65 @@ mod tests {
             "#,
             EmitConfig::init_only(),
         );
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
+    }
+
+    #[test]
+    fn test_rejects_duplicate_switch_keys() {
+        let program = parse_without_legalization(
+            r#"
+            fn init:
+                entry {
+                    selector = calldatasize
+                    switch selector {
+                        0 => @first
+                        0 => @second
+                        default => @fallback
+                    }
+                }
+                first {
+                    stop
+                }
+                second {
+                    invalid
+                }
+                fallback {
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        let entry = program.functions[program.init_entry].entry();
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::DuplicateSwitchKey { block: entry, key: U256::ZERO }
+        );
+    }
+
+    #[test]
+    fn test_allows_duplicate_switch_targets() {
+        let program = parse_without_legalization(
+            r#"
+            fn init:
+                entry {
+                    selector = calldatasize
+                    switch selector {
+                        0 => @shared
+                        1 => @shared
+                        default => @fallback
+                    }
+                }
+                shared {
+                    stop
+                }
+                fallback {
+                    invalid
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+
         assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
     }
 
