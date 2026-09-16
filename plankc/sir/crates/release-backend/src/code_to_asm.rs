@@ -155,19 +155,28 @@ impl<'a> CodeToAsmEmitter<'a> {
                     }
                 }
                 ControlView::Branches { condition: _, non_zero_target, zero_target } => {
-                    self.enqueue_bb(non_zero_target);
-                    let non_zero_mark = state.bb_marks().get(non_zero_target);
-                    let non_zero_ref = state.mark_to_ref(&self.mark_map, non_zero_mark);
-                    self.asm.push_reference(AsmReference::pushed(non_zero_ref));
-                    self.asm.push_op_byte(op::JUMPI);
-
-                    if self.enqueue_bb(zero_target) {
-                        self.fallthrough_targets.add(zero_target);
-                    } else {
+                    if self.visited_bbs.contains(zero_target) && self.enqueue_bb(non_zero_target) {
+                        self.asm.push_op_byte(op::ISZERO);
                         let zero_mark = state.bb_marks().get(zero_target);
                         let zero_ref = state.mark_to_ref(&self.mark_map, zero_mark);
                         self.asm.push_reference(AsmReference::pushed(zero_ref));
-                        self.asm.push_op_byte(op::JUMP);
+                        self.asm.push_op_byte(op::JUMPI);
+                        self.fallthrough_targets.add(non_zero_target);
+                    } else {
+                        self.enqueue_bb(non_zero_target);
+                        let non_zero_mark = state.bb_marks().get(non_zero_target);
+                        let non_zero_ref = state.mark_to_ref(&self.mark_map, non_zero_mark);
+                        self.asm.push_reference(AsmReference::pushed(non_zero_ref));
+                        self.asm.push_op_byte(op::JUMPI);
+
+                        if self.enqueue_bb(zero_target) {
+                            self.fallthrough_targets.add(zero_target);
+                        } else {
+                            let zero_mark = state.bb_marks().get(zero_target);
+                            let zero_ref = state.mark_to_ref(&self.mark_map, zero_mark);
+                            self.asm.push_reference(AsmReference::pushed(zero_ref));
+                            self.asm.push_op_byte(op::JUMP);
+                        }
                     }
                 }
                 ControlView::Switch(switch) => {
