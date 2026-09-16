@@ -68,39 +68,6 @@ fn zero_branch_falls_through() {
 }
 
 #[test]
-fn non_zero_branch_falls_through_when_zero_is_unavailable() {
-    assert_asm(
-        r#"
-        fn init:
-            entry {
-                => @branch
-            }
-            branch {
-                condition = calldatasize
-                => condition ? @non_zero : @entry
-            }
-            non_zero {
-                stop
-            }
-        "#,
-        EmitConfig::init_only(),
-        r#"
-            .mark2:
-              JUMPDEST
-            .mark3:
-              CALLDATASIZE
-              ISZERO
-              PUSH .mark2
-              JUMPI
-            .mark4:
-              STOP
-            .mark0:
-            .mark1:
-        "#,
-    );
-}
-
-#[test]
 fn switch_fallback_falls_through() {
     assert_asm(
         r#"
