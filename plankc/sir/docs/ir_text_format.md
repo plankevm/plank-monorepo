@@ -78,6 +78,8 @@ switch_case      = number thick_arrow label newline
 switch_default   = "default" thick_arrow label newline
 ```
 
+Switch keys must be unique. Multiple keys may target the same basic block.
+
 ### Lexical Elements
 
 ```ebnf
