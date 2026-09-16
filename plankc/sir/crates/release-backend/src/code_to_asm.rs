@@ -152,19 +152,13 @@ impl<'a> CodeToAsmEmitter<'a> {
                     }
                 }
                 ControlView::Branches { condition: _, non_zero_target, zero_target } => {
-                    if self.visited_bbs.contains(zero_target) && self.enqueue_bb(non_zero_target) {
-                        self.asm.push_op_byte(op::ISZERO);
-                        self.emit_jumpi_to(state, zero_target);
-                        self.fallthrough_targets.add(non_zero_target);
-                    } else {
-                        self.enqueue_bb(non_zero_target);
-                        self.emit_jumpi_to(state, non_zero_target);
+                    self.enqueue_bb(non_zero_target);
+                    self.emit_jumpi_to(state, non_zero_target);
 
-                        if self.enqueue_bb(zero_target) {
-                            self.fallthrough_targets.add(zero_target);
-                        } else {
-                            self.emit_jump_to(state, zero_target);
-                        }
+                    if self.enqueue_bb(zero_target) {
+                        self.fallthrough_targets.add(zero_target);
+                    } else {
+                        self.emit_jump_to(state, zero_target);
                     }
                 }
                 ControlView::Switch(switch) => {
@@ -192,11 +186,8 @@ impl<'a> CodeToAsmEmitter<'a> {
                         if fallthrough_case.is_some_and(|(idx, _, _)| idx == case_idx) {
                             continue;
                         }
-                        // Reserve the fallthrough target for the final enqueue; other cases may
-                        // still jump to it.
-                        if fallthrough_target != Some(to) {
-                            self.enqueue_bb(to);
-                        }
+                        assert_ne!(fallthrough_target, Some(to));
+                        self.enqueue_bb(to);
                         self.asm.push_minimal_u32(switch_store_addr);
                         self.asm.push_op_byte(op::MLOAD);
                         self.asm.push_minimal_u256(value);
