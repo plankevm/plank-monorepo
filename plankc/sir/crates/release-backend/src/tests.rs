@@ -143,6 +143,103 @@ fn switch_fallback_falls_through() {
 }
 
 #[test]
+fn switch_case_falls_through_when_fallback_is_unavailable() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                => @dispatch
+            }
+            dispatch {
+                selector = calldatasize
+                switch selector {
+                    0 => @case_zero
+                    1 => @case_one
+                    default => @entry
+                }
+            }
+            case_zero {
+                invalid
+            }
+            case_one {
+                stop
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark2:
+              JUMPDEST
+            .mark3:
+              CALLDATASIZE
+              PUSH0
+              MSTORE
+              PUSH0
+              MLOAD
+              PUSH1 0x01
+              EQ
+              PUSH .mark5
+              JUMPI
+              PUSH0
+              MLOAD
+              PUSH0
+              EQ
+              ISZERO
+              PUSH .mark2
+              JUMPI
+            .mark4:
+              INVALID
+            .mark5:
+              JUMPDEST
+              STOP
+            .mark0:
+            .mark1:
+        "#,
+    );
+}
+
+#[test]
+fn switch_case_falls_through_without_fallback() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                selector = calldatasize
+                switch selector {
+                    0 => @case_zero
+                    1 => @case_one
+                }
+            }
+            case_zero {
+                invalid
+            }
+            case_one {
+                stop
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark2:
+              CALLDATASIZE
+              PUSH0
+              MSTORE
+              PUSH0
+              MLOAD
+              PUSH1 0x01
+              EQ
+              PUSH .mark4
+              JUMPI
+            .mark3:
+              INVALID
+            .mark4:
+              JUMPDEST
+              STOP
+            .mark0:
+            .mark1:
+        "#,
+    );
+}
+
+#[test]
 fn join_keeps_jumpdest() {
     assert_asm(
         r#"
