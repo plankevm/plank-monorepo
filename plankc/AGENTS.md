@@ -1,1 +1,81 @@
-CLAUDE.md
+## Project Overview
+
+Plank is a compiler frontend for the Plank programming language that lowers to Sensei IR (SIR), an EVM-specific intermediate representation.
+
+
+When working with the stack scheduling benchmark db, always make a copy before
+applying destructive operations.
+
+## Commands
+
+```bash
+cargo nextest run -p <crate name> # Run during work on a specific crate for validation
+
+just check # Run formatter & linter
+just test-all # Run all tests (Rust tests, Plank & SIR differential tests)
+just fmt # Run formatter
+```
+
+## Workspace Structure
+
+Cargo workspace with general-purpose crates in `crates/` and frontend crates in `frontend/`:
+
+- **Docs** (`docs`): Documentation
+- **plank-core** (`crates/plank-core`): Core utilities (stack-wide fundamental types and utilities)
+    - `index.rs`: `X32` easily new-typed index
+    - `index_vec.rs`: IndexVec collection type
+    - `span.rs`: Range-like start, end with a more convenient API
+    - `bigint.rs`: Arena allocated big int with parsing helpers
+    - `intern.rs`: String interning
+    - `dense_index_set.rs`: Dense index set implementation
+- **plank-parser** (`frontend/parser`): LSP-grade error resilient parser
+    - `lexer.rs`: Token lexer using the `logos` crate
+    - `cst/`: Homogeneous syntax tree that stores well-formed nodes & errors
+    - `parser.rs`: Main parser implementation
+    - `ast/`: AST wrappers for easier access to CST nodes.
+    - `errors.rs`: Parser diagnostics
+- **plank-hir** (`frontend/hir`): High-level IR
+- **plank** (`frontend/cli`): CLI frontend
+
+
+## Coding Style
+
+### Tests
+
+Display and lowering tests must assert the complete rendered snapshot; do not use partial assertions.
+
+### Code QA
+
+All issues raised by the `code-qa` agent MUST BE ADDRESSED, any
+issues that are not fixed must be listed with an explanation in the completion summary.
+
+### Comments
+Do NOT add inline comments that describe *what* the code does
+(e.g., "// Parse next element"). The code should be self-documenting.
+Only add comments for non-obvious *why* decisions.
+
+Never remove existing comments unless they are made out of date by your new
+changes.
+
+### Type Driven Development
+- Always prefer a compile-time, type-level check over a runtime check
+- Liberally use panic-triggering asserts (`assert!`, `assert_eq!`, `.unwrap()`,
+    `.expect(comment on what this assert is check)`) but only for invariants &
+    assumptions that **CANNOT BE ENFORCED VIA THE TYPE SYSTEM**
+- Always use the most precise type possible, favor the new typed indices,
+    IndexVec and RelSlice type variants instead of the general purpose u32/usize,
+    Vec & [T] alternatives.
+
+### Warnings
+
+Never add `#[allow(dead_code)]` to supress dead code warnings. For WIP code it
+is expected, for code that's actually dead no longer used & will not be used in
+future delete.
+
+## Docs (`docs/`)
+- `./docs/Grammar.md`: Grammar definition, to be referenced for parser work
+- `./docs/Frontend-Architecture.md`: Frontend architecture, read for context on
+  intended frontend design and structure.
+- `./tmp/`: Stores any report, plan or other temporary document that was requested by 
+    he user but not explicitly associated with the actual repo docs
+
