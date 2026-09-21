@@ -1,5 +1,5 @@
 use hashbrown::{HashMap, hash_map::Entry};
-use plank_core::{Idx, Span, span::IncIterable};
+use plank_core::{DenseIndexSet, Idx, Span, span::IncIterable};
 use sir_data::*;
 
 use crate::{AnalysesStore, Pass, analyses::ReachableBlocks};
@@ -30,6 +30,7 @@ impl Pass for Defragmenter {
 struct DefragmenterState {
     func_worklist: Vec<FunctionId>,
     block_worklist: Vec<BasicBlockId>,
+    scheduled_blocks: DenseIndexSet<BasicBlockId>,
     local_map: HashMap<LocalId, LocalId>,
     static_alloc_map: HashMap<StaticAllocId, StaticAllocId>,
     large_const_map: HashMap<LargeConstId, LargeConstId>,
@@ -42,6 +43,7 @@ impl DefragmenterState {
     fn clear(&mut self) {
         self.func_worklist.clear();
         self.block_worklist.clear();
+        self.scheduled_blocks.clear();
         self.local_map.clear();
         self.static_alloc_map.clear();
         self.large_const_map.clear();
@@ -124,7 +126,7 @@ impl<'a> Rewriter<'a> {
         };
         let new_id = self.dst.basic_blocks.push(placeholder);
         let prev = self.state.block_map.insert(old_id, new_id);
-        debug_assert!(prev.is_none());
+        assert!(prev.is_none(), "basic block should only be emitted once");
         let block = self.src.block(old_id);
 
         let inputs = self.emit_block_locals(block.inputs());
@@ -227,7 +229,7 @@ impl<'a> Rewriter<'a> {
 
     fn push_block(&mut self, bb: BasicBlockId) {
         debug_assert!(self.reachable_blocks.contains(bb), "successor {bb:?} should be reachable");
-        if !self.state.block_map.contains_key(&bb) {
+        if self.state.scheduled_blocks.add(bb) {
             self.state.block_worklist.push(bb);
         }
     }
@@ -242,11 +244,17 @@ impl<'a> Rewriter<'a> {
                 ControlView::InternalReturn => Control::InternalReturn,
                 ControlView::ContinuesTo(bb) => Control::ContinuesTo(block_map[&bb]),
                 ControlView::Branches { condition, non_zero_target, zero_target } => {
-                    Control::Branches(Branch {
-                        condition: local_map[&condition],
-                        non_zero_target: block_map[&non_zero_target],
-                        zero_target: block_map[&zero_target],
-                    })
+                    let non_zero_target = block_map[&non_zero_target];
+                    let zero_target = block_map[&zero_target];
+                    if non_zero_target == zero_target {
+                        Control::ContinuesTo(non_zero_target)
+                    } else {
+                        Control::Branches(Branch {
+                            condition: local_map[&condition],
+                            non_zero_target,
+                            zero_target,
+                        })
+                    }
                 }
                 ControlView::Switch(switch) => {
                     let old_cases = &self.src.cases[switch.cases_id()];
@@ -632,6 +640,89 @@ mod tests {
                 }
 
             data .0 0x1234
+            "#,
+        );
+    }
+
+    #[test]
+    fn canonicalizes_branch_with_identical_targets() {
+        let input = r#"
+            fn init:
+                entry {
+                    condition = calldatasize
+                    => condition ? @same : @same
+                }
+                same {
+                    stop
+                }
+        "#;
+
+        let mut ir = parse_or_panic(input, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut Defragmenter::default(), &mut ir, &store);
+
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = calldatasize
+                    => @1
+                }
+
+                @1 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn emits_repeated_switch_target_once() {
+        let input = r#"
+            fn init:
+                entry {
+                    selector = calldatasize
+                    switch selector {
+                        0 => @same
+                        1 => @same
+                        default => @same
+                    }
+                }
+                same {
+                    stop
+                }
+        "#;
+
+        let mut ir = parse_or_panic(input, EmitConfig::init_only());
+        let store = AnalysesStore::default();
+        run_pass(&mut Defragmenter::default(), &mut ir, &store);
+
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @0
+            Functions:
+                fn @0 -> entry @0  (outputs: 0)
+
+            Basic Blocks:
+                @0 {
+                    $0 = calldatasize
+                    switch $0 {
+                        0x0 => @1,
+                        0x1 => @1,
+                        else => @1
+                    }
+
+                }
+
+                @1 {
+                    stop
+                }
             "#,
         );
     }
