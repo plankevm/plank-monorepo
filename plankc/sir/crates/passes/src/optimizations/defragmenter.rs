@@ -1,6 +1,9 @@
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::{DenseIndexSet, Idx, Span, span::IncIterable};
-use sir_data::*;
+use sir_data::{
+    operation::{InternalCallData, InternalCallNeverData},
+    *,
+};
 
 use crate::{AnalysesStore, Pass, analyses::ReachableBlocks};
 
@@ -178,13 +181,14 @@ impl<'a> Rewriter<'a> {
             Operation::SetDataOffset(data) => {
                 data.segment_id = self.emit_data(data.segment_id);
             }
-            Operation::InternalCall(data) => {
-                let old_function = data.function;
+            Operation::InternalCall(InternalCallData { function, .. })
+            | Operation::InternalCallNever(InternalCallNeverData { function, .. }) => {
+                let old_function = *function;
                 if let Some(&new_function) = self.state.function_map.get(&old_function) {
-                    data.function = new_function;
+                    *function = new_function;
                 } else {
                     self.state.func_worklist.push(old_function);
-                    data.function = self.reserve_function_id(old_function);
+                    *function = self.reserve_function_id(old_function);
                 }
             }
             _ => {}

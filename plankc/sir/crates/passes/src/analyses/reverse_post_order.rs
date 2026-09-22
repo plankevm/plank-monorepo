@@ -45,9 +45,12 @@ impl ReversePostOrder {
         }
 
         for operation in program.basic_blocks[block].operations.iter() {
-            if let Operation::InternalCall(call) = program.operations[operation] {
-                self.visit_function(program, call.function);
-            }
+            let callee = match program.operations[operation] {
+                Operation::InternalCall(call) => call.function,
+                Operation::InternalCallNever(call) => call.function,
+                _ => continue,
+            };
+            self.visit_function(program, callee);
         }
         for successor in program.block(block).successors() {
             self.visit_block(program, function, successor);

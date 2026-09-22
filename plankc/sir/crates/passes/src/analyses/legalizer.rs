@@ -60,6 +60,10 @@ pub enum LegalizerError {
     WrongOutputCount { block: BasicBlockId, expected: u32, actual: u32 },
     #[error("@{block} returns internally from never-returning function @{function}")]
     InternalReturnInNeverFunction { function: FunctionId, block: BasicBlockId },
+    #[error("operation {op} uses `icall` to target never-returning function @{function}")]
+    InternalCallToNever { op: OperationIdx, function: FunctionId },
+    #[error("operation {op} uses `icall_never` to target returning function @{function}")]
+    NeverCallReturns { op: OperationIdx, function: FunctionId },
     #[error("operation {op} has {actual} call inputs, expected {expected}")]
     WrongCallInputCount { op: OperationIdx, expected: u32, actual: u32 },
     #[error("recursive call detected: @{0} calls @{1}")]
@@ -231,8 +235,27 @@ impl Legalizer {
                 {
                     return Err(LegalizerError::InvalidStaticAllocId(data.alloc_id));
                 }
-                Operation::InternalCall(data) if program.functions.get(data.function).is_none() => {
-                    return Err(LegalizerError::InvalidFunctionId(data.function));
+                Operation::InternalCall(data) => {
+                    let Some(function) = program.functions.get(data.function) else {
+                        return Err(LegalizerError::InvalidFunctionId(data.function));
+                    };
+                    if matches!(function.return_kind(), ReturnKind::Never) {
+                        return Err(LegalizerError::InternalCallToNever {
+                            op: op_id,
+                            function: data.function,
+                        });
+                    }
+                }
+                Operation::InternalCallNever(data) => {
+                    let Some(function) = program.functions.get(data.function) else {
+                        return Err(LegalizerError::InvalidFunctionId(data.function));
+                    };
+                    if matches!(function.return_kind(), ReturnKind::Values(_)) {
+                        return Err(LegalizerError::NeverCallReturns {
+                            op: op_id,
+                            function: data.function,
+                        });
+                    }
                 }
                 _ => {}
             }
@@ -365,9 +388,12 @@ impl Legalizer {
 
         for op_id in program.basic_blocks[bb].operations.iter() {
             let op = &program.operations[op_id];
-            let Operation::InternalCall(data) = op else { continue };
-            let expected_ins = program.functions[data.function].get_inputs(&program.basic_blocks);
-            let actual_ins = data.outs_start - data.ins_start;
+            let (callee, actual_ins) = match op {
+                Operation::InternalCall(data) => (data.function, data.inputs_span().len()),
+                Operation::InternalCallNever(data) => (data.function, data.inputs.len()),
+                _ => continue,
+            };
+            let expected_ins = program.functions[callee].get_inputs(&program.basic_blocks);
             if actual_ins != expected_ins {
                 return Err(LegalizerError::WrongCallInputCount {
                     op: op_id,
@@ -375,7 +401,7 @@ impl Legalizer {
                     actual: actual_ins,
                 });
             }
-            self.call_edges.push((fn_id, data.function));
+            self.call_edges.push((fn_id, callee));
         }
 
         for succ in program.basic_blocks[bb].control.iter_outgoing(program) {
@@ -570,15 +596,25 @@ mod tests {
         Branch,
         builder::EthIRBuilder,
         operation::{
-            InlineOperands, InternalCallData, SetDataOffsetData, SetLargeConstData,
-            SetSmallConstData, StaticAllocData,
+            InlineOperands, InternalCallData, InternalCallNeverData, OpExtraData, OperationKind,
+            SetDataOffsetData, SetLargeConstData, SetSmallConstData, StaticAllocData,
         },
     };
     use sir_parser::{EmitConfig, parse_without_legalization};
 
-    // Note: WrongOutputCount cannot be triggered via the builder because the builder
-    // catches conflicting function outputs (ConflictingFunctionOutputs error).
-    // This check exists for malformed IR constructed outside the builder.
+    fn add_never_function(builder: &mut EthIRBuilder) -> FunctionId {
+        let mut function = builder.begin_function();
+        let mut entry = function.begin_basic_block();
+        entry.add_operation(Operation::Stop(()));
+        let entry = entry.finish_terminating().unwrap();
+        function.finish(entry)
+    }
+
+    fn add_returning_function(builder: &mut EthIRBuilder) -> FunctionId {
+        let mut function = builder.begin_function();
+        let entry = function.begin_basic_block().finish_with_internal_return().unwrap();
+        function.finish(entry)
+    }
 
     #[test]
     fn test_valid_ir_passes() {
@@ -650,6 +686,24 @@ mod tests {
                 body a -> b {
                     b = iszero a
                     iret
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
+    }
+
+    #[test]
+    fn test_valid_ir_with_internal_call_never() {
+        let program = parse_without_legalization(
+            r#"
+            fn init:
+                entry {
+                    icall_never @halt
+                }
+            fn halt:
+                body {
+                    stop
                 }
             "#,
             EmitConfig::init_only(),
@@ -958,6 +1012,85 @@ mod tests {
     }
 
     #[test]
+    fn test_rejects_invalid_never_call_function_id() {
+        let mut builder = EthIRBuilder::new();
+        let never = add_never_function(&mut builder);
+
+        let mut caller = builder.begin_function();
+        let mut entry = caller.begin_basic_block();
+        entry
+            .try_add_op(OperationKind::InternalCallNever, &[], &[], OpExtraData::FuncId(never))
+            .unwrap();
+        let entry = entry.finish_terminating().unwrap();
+        let caller = caller.finish(entry);
+        let mut program = builder.build(caller, None);
+        let operation = program.basic_blocks[entry].operations.start;
+        let invalid_function = FunctionId::new(999);
+        let Operation::InternalCallNever(call) = &mut program.operations[operation] else {
+            unreachable!()
+        };
+        call.function = invalid_function;
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::InvalidFunctionId(invalid_function)
+        );
+    }
+
+    #[test]
+    fn test_rejects_internal_call_to_never() {
+        let mut builder = EthIRBuilder::new();
+        let never = add_never_function(&mut builder);
+        let returning = add_returning_function(&mut builder);
+
+        let mut caller = builder.begin_function();
+        let mut entry = caller.begin_basic_block();
+        entry
+            .try_add_op(OperationKind::InternalCall, &[], &[], OpExtraData::FuncId(returning))
+            .unwrap();
+        entry.add_operation(Operation::Stop(()));
+        let entry = entry.finish_terminating().unwrap();
+        let caller = caller.finish(entry);
+        let mut program = builder.build(caller, None);
+        let operation = program.basic_blocks[entry].operations.start;
+        let Operation::InternalCall(call) = &mut program.operations[operation] else {
+            unreachable!()
+        };
+        call.function = never;
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::InternalCallToNever { op: operation, function: never }
+        );
+    }
+
+    #[test]
+    fn test_rejects_never_call_to_returning_function() {
+        let mut builder = EthIRBuilder::new();
+        let never = add_never_function(&mut builder);
+        let returning = add_returning_function(&mut builder);
+
+        let mut caller = builder.begin_function();
+        let mut entry = caller.begin_basic_block();
+        entry
+            .try_add_op(OperationKind::InternalCallNever, &[], &[], OpExtraData::FuncId(never))
+            .unwrap();
+        let entry = entry.finish_terminating().unwrap();
+        let caller = caller.finish(entry);
+        let mut program = builder.build(caller, None);
+        let operation = program.basic_blocks[entry].operations.start;
+        let Operation::InternalCallNever(call) = &mut program.operations[operation] else {
+            unreachable!()
+        };
+        call.function = returning;
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::NeverCallReturns { op: operation, function: returning }
+        );
+    }
+
+    #[test]
     fn test_rejects_wrong_call_input_count() {
         let mut program = parse_without_legalization(
             r#"
@@ -993,6 +1126,39 @@ mod tests {
     }
 
     #[test]
+    fn test_rejects_wrong_never_call_input_count() {
+        let mut program = parse_without_legalization(
+            r#"
+            fn init:
+                entry {
+                    x = caller
+                    icall_never @halt x
+                }
+            fn halt:
+                body a {
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+
+        let call_idx = program
+            .operations
+            .iter_idx()
+            .find(|op_id| matches!(program.operations[*op_id], Operation::InternalCallNever(_)))
+            .unwrap();
+
+        if let Operation::InternalCallNever(data) = &mut program.operations[call_idx] {
+            data.inputs = Span::EMPTY;
+        }
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::WrongCallInputCount { op: call_idx, expected: 1, actual: 0 }
+        );
+    }
+
+    #[test]
     fn test_rejects_direct_recursion() {
         let mut builder = EthIRBuilder::new();
         let func_id = FunctionId::new(0);
@@ -1004,8 +1170,7 @@ mod tests {
             ins_start: LocalIdx::new(0),
             outs_start: LocalIdx::new(0),
         }));
-        bb.add_operation(Operation::Stop(()));
-        let bb_id = bb.finish_terminating().unwrap();
+        let bb_id = bb.finish_with_internal_return().unwrap();
         func.finish(bb_id);
 
         let program = builder.build(func_id, None);
@@ -1025,23 +1190,19 @@ mod tests {
 
         let mut func_a = builder.begin_function();
         let mut bb_a = func_a.begin_basic_block();
-        bb_a.add_operation(Operation::InternalCall(InternalCallData {
+        bb_a.add_operation(Operation::InternalCallNever(InternalCallNeverData {
             function: func_b_id,
-            ins_start: LocalIdx::new(0),
-            outs_start: LocalIdx::new(0),
+            inputs: Span::EMPTY,
         }));
-        bb_a.add_operation(Operation::Stop(()));
         let bb_a_id = bb_a.finish_terminating().unwrap();
         func_a.finish(bb_a_id);
 
         let mut func_b = builder.begin_function();
         let mut bb_b = func_b.begin_basic_block();
-        bb_b.add_operation(Operation::InternalCall(InternalCallData {
+        bb_b.add_operation(Operation::InternalCallNever(InternalCallNeverData {
             function: func_a_id,
-            ins_start: LocalIdx::new(0),
-            outs_start: LocalIdx::new(0),
+            inputs: Span::EMPTY,
         }));
-        bb_b.add_operation(Operation::Stop(()));
         let bb_b_id = bb_b.finish_terminating().unwrap();
         func_b.finish(bb_b_id);
 

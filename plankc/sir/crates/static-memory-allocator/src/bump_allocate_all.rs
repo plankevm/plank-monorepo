@@ -1,6 +1,9 @@
 use hashbrown::{HashMap, HashSet};
 use plank_core::DenseIndexSet;
-use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId};
+use sir_data::{
+    BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId,
+    operation::{InternalCallData, InternalCallNeverData},
+};
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 
 use crate::{DynFreePointer, EvmMemAddr, Layout};
@@ -133,8 +136,11 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
             Operation::StaticAllocAnyBytes(data) => {
                 self.alloc_static(data.alloc_id, data.size, false);
             }
-            Operation::InternalCall(data) if self.seen_functions.add(data.function) => {
-                self.function_worklist.push(data.function);
+            Operation::InternalCall(InternalCallData { function, .. })
+            | Operation::InternalCallNever(InternalCallNeverData { function, .. })
+                if self.seen_functions.add(function) =>
+            {
+                self.function_worklist.push(function);
             }
             _ => {}
         }
