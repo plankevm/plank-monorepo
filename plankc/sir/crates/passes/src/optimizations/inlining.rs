@@ -82,7 +82,7 @@ impl Inliner {
             Span::new(original_callsite_block.operations.start, callsite_operation);
 
         let join_block = program.basic_blocks.push(BasicBlock {
-            inputs: call.outputs_span(program),
+            inputs: call.outputs_span(&program.functions),
             outputs: original_callsite_block.outputs,
             operations: Span::new(callsite_operation + 1, original_callsite_block.operations.end),
             control: original_callsite_block.control,

@@ -5,7 +5,7 @@ use crate::{
 use plank_core::{DenseIndexSet, Idx, IndexVec, index_vec};
 use sir_data::{
     BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    LocalIdx, Operation, OperationIdx, StaticAllocId,
+    LocalIdx, Operation, OperationIdx, ReturnKind, StaticAllocId,
 };
 
 /// Identifies which IR construct a tracked span belongs to, used in span overlap diagnostics.
@@ -58,6 +58,8 @@ pub enum LegalizerError {
     IncompatibleEdge { from: BasicBlockId, to: BasicBlockId },
     #[error("@{block} has {actual} outputs, expected {expected}")]
     WrongOutputCount { block: BasicBlockId, expected: u32, actual: u32 },
+    #[error("@{block} returns internally from never-returning function @{function}")]
+    InternalReturnInNeverFunction { function: FunctionId, block: BasicBlockId },
     #[error("operation {op} has {actual} call inputs, expected {expected}")]
     WrongCallInputCount { op: OperationIdx, expected: u32, actual: u32 },
     #[error("recursive call detected: @{0} calls @{1}")]
@@ -335,14 +337,25 @@ impl Legalizer {
         }
         visited.add(bb);
 
-        if matches!(program.basic_blocks[bb].control, Control::InternalReturn)
-            && program.basic_blocks[bb].outputs.len() != program.functions[fn_id].get_outputs()
-        {
-            return Err(LegalizerError::WrongOutputCount {
-                block: bb,
-                expected: program.functions[fn_id].get_outputs(),
-                actual: program.basic_blocks[bb].outputs.len(),
-            });
+        if matches!(program.basic_blocks[bb].control, Control::InternalReturn) {
+            match program.functions[fn_id].return_kind() {
+                ReturnKind::Never => {
+                    return Err(LegalizerError::InternalReturnInNeverFunction {
+                        function: fn_id,
+                        block: bb,
+                    });
+                }
+                ReturnKind::Values(expected_outputs) => {
+                    let actual_outputs = program.basic_blocks[bb].outputs.len();
+                    if actual_outputs != expected_outputs {
+                        return Err(LegalizerError::WrongOutputCount {
+                            block: bb,
+                            expected: expected_outputs,
+                            actual: actual_outputs,
+                        });
+                    }
+                }
+            }
         }
 
         if let Some(owner) = self.block_owner[bb] {
@@ -583,6 +596,21 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
+    }
+
+    #[test]
+    fn test_rejects_internal_return_in_never_function() {
+        let mut builder = EthIRBuilder::new();
+        let mut function = builder.begin_function();
+        let entry = function.begin_basic_block().finish_with_internal_return().unwrap();
+        let function = function.finish(entry);
+        let mut program = builder.build(function, None);
+        program.functions[function] = sir_data::Function::new(entry, ReturnKind::Never, None);
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
+            LegalizerError::InternalReturnInNeverFunction { function, block: entry }
+        );
     }
 
     #[test]
@@ -1322,7 +1350,11 @@ mod tests {
 
         let mut program = builder.build(func_a_id, None);
 
-        let func_b_id = program.functions.push(sir_data::Function::new(bb_shared_id, 0, None));
+        let func_b_id = program.functions.push(sir_data::Function::new(
+            bb_shared_id,
+            sir_data::ReturnKind::Values(0),
+            None,
+        ));
         program.main_entry = Some(func_b_id);
 
         assert_eq!(

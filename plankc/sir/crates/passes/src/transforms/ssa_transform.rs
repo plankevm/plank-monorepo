@@ -181,7 +181,7 @@ impl Pass for PreSSAFunctionEntryRegularizer {
                 program.basic_blocks[entry].inputs = Span::EMPTY;
                 program.functions[func_id] = Function::new(
                     new_entry,
-                    program.functions[func_id].get_outputs(),
+                    program.functions[func_id].return_kind(),
                     program.functions[func_id].source(),
                 );
             }

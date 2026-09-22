@@ -96,7 +96,7 @@ impl<'a> Rewriter<'a> {
         }
         let new_entry = self.state.block_map[&old_entry_id];
         self.dst.functions[new_id] =
-            Function::new(new_entry, old_func.num_outputs(), old_func.source());
+            Function::new(new_entry, old_func.return_kind(), old_func.source());
     }
 
     fn reserve_function_id(&mut self, old_id: FunctionId) -> FunctionId {
@@ -105,7 +105,7 @@ impl<'a> Rewriter<'a> {
             Entry::Vacant(entry) => {
                 let old_func = self.src.function(old_id);
                 let placeholder =
-                    Function::new(BasicBlockId::ZERO, old_func.num_outputs(), old_func.source());
+                    Function::new(BasicBlockId::ZERO, old_func.return_kind(), old_func.source());
                 let new_id = self.dst.functions.push(placeholder);
                 entry.insert(new_id);
                 new_id

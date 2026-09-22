@@ -90,8 +90,7 @@ impl<'d, 'fmt, 'ir, W: fmt::Write> OpVisitor<'d, fmt::Result> for OpFormatter<'f
 
     fn visit_icall(&mut self, data: &'d InternalCallData) -> fmt::Result {
         let ins = &self.ir.locals[data.ins_start..data.outs_start];
-        let outs = &self.ir.locals
-            [data.outs_start..data.outs_start + self.ir.functions[data.function].get_outputs()];
+        let outs = &self.ir.locals[data.outputs_span(&self.ir.functions)];
         fmt_locals(self.write, outs.iter().copied())?;
         if !outs.is_empty() {
             write!(self.write, " = {} @{}", self.mnemonic, data.function)?;

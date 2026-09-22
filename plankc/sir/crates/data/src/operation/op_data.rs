@@ -1,7 +1,7 @@
 use super::op_visitor::{OpVisitor, OpVisitorMut};
-use crate::{EthIRProgram, builder::EthIRBuilder, index::*};
+use crate::{EthIRProgram, Function, ReturnKind, builder::EthIRBuilder, index::*};
 use alloy_primitives::{U256, ruint::FromUintError};
-use plank_core::{Idx, Span};
+use plank_core::{Idx, IndexVec, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpExtraData {
@@ -252,7 +252,7 @@ impl SetDataOffsetData {
 
 /// Expects args and outputs to be stored contiguously in the IR arena:
 /// - Arguments: `ins_start..outs_start`
-/// - Outputs: `outs_start..outs_start + functions[function].outputs`
+/// - Outputs: `outs_start..outs_start + target function output count`
 #[derive(Debug, Clone, Copy)]
 pub struct InternalCallData {
     pub function: FunctionId,
@@ -274,15 +274,18 @@ impl InternalCallData {
     }
 
     pub fn get_outputs<'ir>(&self, ir: &'ir EthIRProgram) -> &'ir [LocalId] {
-        &ir.locals[self.outputs_span(ir)]
+        &ir.locals[self.outputs_span(&ir.functions)]
     }
 
     pub fn inputs_span(&self) -> Span<LocalIdx> {
         Span::new(self.ins_start, self.outs_start)
     }
 
-    pub fn outputs_span(&self, ir: &EthIRProgram) -> Span<LocalIdx> {
-        Span::new(self.outs_start, self.outs_start + ir.functions[self.function].outputs)
+    pub fn outputs_span(&self, functions: &IndexVec<FunctionId, Function>) -> Span<LocalIdx> {
+        let ReturnKind::Values(output_count) = functions[self.function].return_kind() else {
+            unreachable!("invariant: internal call target @{} never returns", self.function);
+        };
+        Span::new(self.outs_start, self.outs_start + output_count)
     }
 }
 
@@ -296,6 +299,8 @@ pub enum OpBuildError {
     UnexpectedExtraData { received: OpExtraData, expected: &'static str },
     #[error("Undefined function @{0}")]
     UndefinedFunction(FunctionId),
+    #[error("`icall` cannot target never-returning function @{0}")]
+    InternalCallToNever(FunctionId),
     #[error(
         "Provided number {too_large} too large, expected value in range [{valid_lower}; {valid_upper}]"
     )]
@@ -397,7 +402,10 @@ impl FromOpData for InternalCallData {
         };
         let func = *builder.get_func(func_id).ok_or(OpBuildError::UndefinedFunction(func_id))?;
         let inputs = func.get_inputs(&builder.basic_blocks) as usize;
-        let outputs = func.get_outputs() as usize;
+        let ReturnKind::Values(outputs) = func.return_kind() else {
+            return Err(OpBuildError::InternalCallToNever(func_id));
+        };
+        let outputs = outputs as usize;
 
         check_ins_count(ins, inputs)?;
         check_outs_count(outs, outputs)?;

@@ -80,7 +80,7 @@ impl EthIRProgram {
 
         writeln!(&mut output, "\n=== Functions ({}) ===", self.functions.len()).unwrap();
         for (id, func) in self.functions.enumerate_idx() {
-            writeln!(&mut output, "@{id}: entry=@{}, outputs={}", func.entry(), func.get_outputs())
+            writeln!(&mut output, "@{id}: entry=@{}, outputs={}", func.entry(), func.return_kind())
                 .unwrap();
         }
 
@@ -216,7 +216,7 @@ pub fn display_program(ir: &EthIRProgram) -> String {
             "    fn @{} -> entry @{}  (outputs: {})",
             func.id(),
             func.entry().id(),
-            func.num_outputs()
+            func.return_kind()
         )
         .unwrap();
     }
@@ -381,16 +381,35 @@ impl fmt::Display for EthIRProgram {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnKind {
+    Never,
+    Values(u32),
+}
+
+impl fmt::Display for ReturnKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Never => f.write_str("never"),
+            Self::Values(count) => count.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Function {
     entry_bb_id: BasicBlockId,
-    outputs: u32,
+    return_kind: ReturnKind,
     source: Option<OpaqueSourceId>,
 }
 
 impl Function {
-    pub fn new(entry_bb_id: BasicBlockId, outputs: u32, source: Option<OpaqueSourceId>) -> Self {
-        Self { entry_bb_id, outputs, source }
+    pub fn new(
+        entry_bb_id: BasicBlockId,
+        return_kind: ReturnKind,
+        source: Option<OpaqueSourceId>,
+    ) -> Self {
+        Self { entry_bb_id, return_kind, source }
     }
 
     pub fn entry(&self) -> BasicBlockId {
@@ -406,8 +425,8 @@ impl Function {
         inputs.end - inputs.start
     }
 
-    pub fn get_outputs(&self) -> u32 {
-        self.outputs
+    pub fn return_kind(&self) -> ReturnKind {
+        self.return_kind
     }
 }
 

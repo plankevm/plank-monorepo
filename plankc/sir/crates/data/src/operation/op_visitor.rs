@@ -203,10 +203,7 @@ impl<F: FnMut(Span<LocalIdx>) -> LocalIdx> OpVisitorMut<'_, ()> for &mut Operati
 
     fn visit_icall_mut(self, data: &mut InternalCallData) {
         let input_count = data.outs_start - data.ins_start;
-        let old_operands = Span::new(
-            data.ins_start,
-            data.outs_start + self.functions[data.function].get_outputs(),
-        );
+        let old_operands = Span::new(data.ins_start, data.outputs_span(self.functions).end);
         data.ins_start = (self.clone_span)(old_operands);
         data.outs_start = data.ins_start + input_count;
     }
@@ -310,9 +307,7 @@ impl<'a> OpVisitorMut<'a, &'a mut [LocalId]> for OutputsMutGetter<'a> {
     }
 
     fn visit_icall_mut(self, data: &'a mut InternalCallData) -> &'a mut [LocalId] {
-        let fn_output_count = self.functions[data.function].outputs as usize;
-        let start = data.outs_start.idx();
-        &mut self.locals.as_raw_slice_mut()[start..start + fn_output_count]
+        &mut self.locals[data.outputs_span(self.functions)]
     }
 
     fn visit_void_mut(self) -> &'a mut [LocalId] {
@@ -361,7 +356,10 @@ impl<'a> OpVisitor<'a, AllocatedSpans> for AllocatedSpansGetter<'a> {
         AllocatedSpans::NONE
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> AllocatedSpans {
-        AllocatedSpans { input: Some(data.inputs_span()), output: Some(data.outputs_span(self.ir)) }
+        AllocatedSpans {
+            input: Some(data.inputs_span()),
+            output: Some(data.outputs_span(&self.ir.functions)),
+        }
     }
     fn visit_void(&mut self) -> AllocatedSpans {
         AllocatedSpans::NONE
