@@ -80,8 +80,13 @@ impl EthIRProgram {
 
         writeln!(&mut output, "\n=== Functions ({}) ===", self.functions.len()).unwrap();
         for (id, func) in self.functions.enumerate_idx() {
-            writeln!(&mut output, "@{id}: entry=@{}, outputs={}", func.entry(), func.return_kind())
-                .unwrap();
+            write!(&mut output, "@{id}: entry=@{}", func.entry()).unwrap();
+            match func.return_kind() {
+                ReturnKind::Never => writeln!(&mut output, ", never").unwrap(),
+                ReturnKind::Values(outputs) => {
+                    writeln!(&mut output, ", outputs={outputs}").unwrap()
+                }
+            }
         }
 
         writeln!(&mut output, "\n=== Basic Blocks ({}) ===", self.basic_blocks.len()).unwrap();
@@ -211,14 +216,11 @@ pub fn display_program(ir: &EthIRProgram) -> String {
 
     // Display functions
     for func in ir.functions_iter() {
-        writeln!(
-            &mut output,
-            "    fn @{} -> entry @{}  (outputs: {})",
-            func.id(),
-            func.entry().id(),
-            func.return_kind()
-        )
-        .unwrap();
+        write!(&mut output, "    fn @{} -> entry @{}  ", func.id(), func.entry().id()).unwrap();
+        match func.return_kind() {
+            ReturnKind::Never => writeln!(&mut output, "(never)").unwrap(),
+            ReturnKind::Values(outputs) => writeln!(&mut output, "(outputs: {outputs})").unwrap(),
+        }
     }
 
     if !ir.functions.is_empty() {
@@ -684,7 +686,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
                 fn @1 -> entry @2  (outputs: 1)
 
             Basic Blocks:
@@ -747,7 +749,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {

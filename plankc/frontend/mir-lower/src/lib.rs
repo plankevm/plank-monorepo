@@ -257,18 +257,23 @@ fn lower_basic_block(
                         let inputs = ctx.locals_map.get(arg);
                         ctx.locals_buf.extend(inputs);
                     }
+                    let operation_kind = if ret_type == TypeId::NEVER {
+                        OperationKind::InternalCallNever
+                    } else {
+                        OperationKind::InternalCall
+                    };
                     current_bb
                         .try_add_op(
-                            OperationKind::InternalCall,
+                            operation_kind,
                             &ctx.locals_buf,
                             ctx.locals_map.get(target),
                             OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
                         )
                         .expect("mir should guarantee valid construction");
                     if ret_type == TypeId::NEVER {
-                        current_bb.add_operation(Operation::Invalid(()));
-                        let end_id =
-                            current_bb.finish_terminating().expect("error dispite invalid");
+                        let end_id = current_bb
+                            .finish_terminating()
+                            .expect("error despite `InternalCallNever` being terminating");
                         return CFGSegment {
                             bb_in: bb_in.unwrap_or(end_id),
                             bb_out: end_id,

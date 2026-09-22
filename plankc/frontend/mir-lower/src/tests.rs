@@ -849,9 +849,9 @@ fn test_multi_entry_multi_function() {
         Run: @3
         Functions:
             fn @0 -> entry @0  (outputs: 1)
-            fn @1 -> entry @1  (outputs: 0)
-            fn @2 -> entry @2  (outputs: 0)
-            fn @3 -> entry @3  (outputs: 0)
+            fn @1 -> entry @1  (never)
+            fn @2 -> entry @2  (never)
+            fn @3 -> entry @3  (never)
 
         Basic Blocks:
             @0 $0 -> $7 {
@@ -881,8 +881,7 @@ fn test_multi_entry_multi_function() {
             @2 {
                 $15 = const 0x22
                 $16 = icall @0 $15
-                icall @1
-                invalid
+                icall_never @1
             }
 
             @3 {
