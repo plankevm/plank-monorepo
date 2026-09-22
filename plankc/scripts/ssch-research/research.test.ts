@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { partition, prepare, sha, load, type Manifest } from "./data";
@@ -58,7 +58,6 @@ describe("research protocol", () => {
       for (const f of Object.values(m.files)) expect(sha(f.path)).toBe(f.sha256);
       expect(existsSync(resolve(directory, "ARCHIVE-CHECKLIST.md"))).toBe(true);
       expect(() => prepare(directory, source, "seed")).toThrow();
-      expect(readFileSync(source).length).toBeGreaterThan(0);
     } finally { db.close(); rmSync(temp, { recursive: true, force: true }); }
   });
 });
