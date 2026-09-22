@@ -192,8 +192,17 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
         self.translator.bbs_to_be_translated.push((data.function, func_entry_bb));
     }
 
-    fn visit_icall_never(&mut self, _data: &'d InternalCallNeverData) {
-        unimplemented!("debug backend lowering for `icall_never`");
+    fn visit_icall_never(&mut self, data: &'d InternalCallNeverData) {
+        self.translator.memory_layout.emit_copy_for_basic_block_inputs(
+            &mut self.translator.asm,
+            data.get_inputs(self.translator.ir),
+        );
+
+        let func_entry_bb = self.translator.ir.function(data.function).entry().id();
+        let func_entry_bb_mark = self.translator.get_bb_mark(func_entry_bb);
+        self.translator.emit_code_offset_push(func_entry_bb_mark);
+        self.translator.asm.push_op_byte(op::JUMP);
+        self.translator.bbs_to_be_translated.push((data.function, func_entry_bb));
     }
 }
 

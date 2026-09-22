@@ -507,6 +507,38 @@ fn simple_icall() {
 }
 
 #[test]
+fn simple_icall_never() {
+    assert_lowers_to(
+        ScheduleConfig::default(),
+        r#"
+        fn init:
+            entry {
+                offset = const 0
+                size = const 0
+                icall_never @halt offset size
+            }
+        fn halt:
+            entry offset size {
+                revert offset size
+            }
+        "#,
+        r#"
+        @0 [$0, $1]
+            revert
+            => []
+            (revert)
+        @1 []
+            const 0x0
+            const 0x0
+            swap 1
+            icall_never
+            => []
+            (icall_never)
+        "#,
+    );
+}
+
+#[test]
 fn simple_op_use_spill() {
     assert_lowers_to(
         ScheduleConfig {

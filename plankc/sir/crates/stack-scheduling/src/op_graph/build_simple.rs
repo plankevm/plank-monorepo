@@ -1,6 +1,6 @@
 use crate::{
     layouts::{Layout, LayoutMember, LayoutsTracker},
-    op_graph::{OpGraph, OpGraphBuilder, OpNodeKind},
+    op_graph::{OpGraph, OpGraphBuilder, OpNodeKind, add_call_inputs},
 };
 use hashbrown::HashMap;
 use sir_data::{BlockView, ControlView, EthIRProgram, Operation};
@@ -35,21 +35,19 @@ pub fn build_graph_simple<'ir>(
 
     let mut previous_in_chain = None;
     for op in block.operations() {
-        let return_dest = 'return_dest: {
-            let Operation::InternalCall(icall) = op.op() else {
-                break 'return_dest None;
-            };
-            let callee = program.function(icall.function);
-            let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
-            if !callee_entry_layout.contains(&LayoutMember::ReturnDest) {
-                break 'return_dest None;
+        let return_dest = match op.op() {
+            Operation::InternalCall(call) => {
+                let callee = program.function(call.function);
+                let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
+                if !callee_entry_layout.contains(&LayoutMember::ReturnDest) {
+                    None
+                } else {
+                    let kind = OpNodeKind::RetDestPush(op.id());
+                    let ret_dest_push = graph.begin_op(kind);
+                    Some(ret_dest_push.end_inputs_begin_outputs().add_output())
+                }
             }
-
-            let kind = OpNodeKind::RetDestPush(op.id());
-            let ret_dest_push = graph.begin_op(kind);
-            let ret_dest_value = ret_dest_push.end_inputs_begin_outputs().add_output();
-
-            Some(ret_dest_value)
+            _ => None,
         };
 
         let kind = if op.op().kind().flippable() {
@@ -64,21 +62,24 @@ pub fn build_graph_simple<'ir>(
         }
 
         match op.op() {
-            Operation::InternalCall(icall) => {
-                let call_inputs = icall.get_inputs(program);
-                let callee = program.function(icall.function);
-                let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
-                for &member in callee_entry_layout.members_fifo() {
-                    let value = match member {
-                        LayoutMember::InputOutput(i) => local_to_value[&call_inputs[i as usize]],
-                        LayoutMember::ReturnDest => return_dest.expect("return dest created first"),
-                        LayoutMember::Local(_) => {
-                            unreachable!("function entry should not have non-input members")
-                        }
-                    };
-                    op_builder.add_input(value);
-                }
-            }
+            Operation::InternalCall(call) => add_call_inputs(
+                &mut op_builder,
+                call.function,
+                call.get_inputs(program),
+                program,
+                layouts,
+                &local_to_value,
+                return_dest,
+            ),
+            Operation::InternalCallNever(call) => add_call_inputs(
+                &mut op_builder,
+                call.function,
+                call.get_inputs(program),
+                program,
+                layouts,
+                &local_to_value,
+                return_dest,
+            ),
             _non_icall => {
                 for input in op.inputs() {
                     op_builder.add_input(local_to_value[input]);

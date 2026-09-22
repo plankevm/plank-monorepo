@@ -200,6 +200,7 @@ impl<'a> CodeToAsmEmitter<'a> {
             Operation::InternalCall(args) => {
                 self.emit_icall(state, icall_return_marks, op_idx, args.function)
             }
+            Operation::InternalCallNever(args) => self.emit_icall_never(state, args.function),
             Operation::DynamicAllocZeroed(_) => self.emit_dynamic_alloc_zeroed(state),
             Operation::DynamicAllocAnyBytes(_) => self.emit_dynamic_alloc_any_bytes(state),
             Operation::AcquireFreePointer(_) => self.emit_acquire_free_pointer(state),
@@ -272,6 +273,16 @@ impl<'a> CodeToAsmEmitter<'a> {
         self.asm.push_op_byte(op::JUMP);
         self.asm.push_mark(call_return_dest);
         self.asm.push_op_byte(op::JUMPDEST);
+    }
+
+    fn emit_icall_never(&mut self, state: &impl CodegenState, function: FunctionId) {
+        let call_entry_bb = self.ir.function(function).entry().id();
+        self.enqueue_bb(call_entry_bb);
+        let bb_entry_mark = state.bb_marks().get(call_entry_bb);
+        let function_entry_ref = state.mark_to_ref(&self.mark_map, bb_entry_mark);
+
+        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
+        self.asm.push_op_byte(op::JUMP);
     }
 
     fn emit_dynamic_alloc_zeroed(&mut self, state: &impl CodegenState) {
