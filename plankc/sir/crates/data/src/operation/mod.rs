@@ -140,6 +140,7 @@ impl OperationKind {
             | OperationKind::SetDataOffset
             | OperationKind::Noop
             | OperationKind::InternalCall
+            | OperationKind::InternalCallNever
             | OperationKind::RuntimeStartOffset
             | OperationKind::InitEndOffset
             | OperationKind::RuntimeLength => return None,
@@ -360,6 +361,7 @@ define_operations! {
 
     // ========== Internal Call ==========
     InternalCall(InternalCallData) "icall",
+    InternalCallNever(InternalCallNeverData) "icall_never",
 
     // ========== Bytecode Introspection ==========
     RuntimeStartOffset(InlineOperands<0, 1>) "runtime_start_offset",
@@ -376,6 +378,7 @@ impl OperationKind {
                 | OperationKind::Revert
                 | OperationKind::Invalid
                 | OperationKind::SelfDestruct
+                | OperationKind::InternalCallNever
         )
     }
 
@@ -472,7 +475,8 @@ impl OperationKind {
             | OperationKind::CodeCopy
             | OperationKind::ExtCodeCopy
             | OperationKind::ReturnDataCopy
-            | OperationKind::InternalCall => false,
+            | OperationKind::InternalCall
+            | OperationKind::InternalCallNever => false,
 
             // TODO: gas introspection semantic equivalence depends on high-level gas invocations
             // lining up with bytecode gas invocations

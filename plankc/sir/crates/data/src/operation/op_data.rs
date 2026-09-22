@@ -289,6 +289,26 @@ impl InternalCallData {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct InternalCallNeverData {
+    pub function: FunctionId,
+    pub inputs: Span<LocalIdx>,
+}
+
+impl InternalCallNeverData {
+    pub(crate) fn get_visited<'d, O, V: OpVisitor<'d, O>>(&'d self, visitor: &mut V) -> O {
+        visitor.visit_icall_never(self)
+    }
+
+    pub(crate) fn get_visited_mut<'d, O, V: OpVisitorMut<'d, O>>(&'d mut self, visitor: V) -> O {
+        visitor.visit_icall_never_mut(self)
+    }
+
+    pub fn get_inputs<'ir>(&self, ir: &'ir EthIRProgram) -> &'ir [LocalId] {
+        &ir.locals[self.inputs]
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum OpBuildError {
     #[error("Wrong input count: got {received}, expected {expected}")]
@@ -301,6 +321,8 @@ pub enum OpBuildError {
     UndefinedFunction(FunctionId),
     #[error("`icall` cannot target never-returning function @{0}")]
     InternalCallToNever(FunctionId),
+    #[error("`icall_never` cannot target returning function @{0}")]
+    NeverCallReturns(FunctionId),
     #[error(
         "Provided number {too_large} too large, expected value in range [{valid_lower}; {valid_upper}]"
     )]
@@ -422,6 +444,32 @@ impl FromOpData for InternalCallData {
             ins_start: ins_span.start,
             outs_start: outs_span.start,
         })
+    }
+}
+
+impl FromOpData for InternalCallNeverData {
+    fn try_build_op(
+        ins: &[LocalId],
+        outs: &[LocalId],
+        extra: OpExtraData,
+        builder: &mut EthIRBuilder,
+    ) -> Result<Self, OpBuildError> {
+        let OpExtraData::FuncId(function) = extra else {
+            return Err(OpBuildError::UnexpectedExtraData {
+                received: extra,
+                expected: "FunctionId",
+            });
+        };
+        let target =
+            *builder.get_func(function).ok_or(OpBuildError::UndefinedFunction(function))?;
+        if !matches!(target.return_kind(), ReturnKind::Never) {
+            return Err(OpBuildError::NeverCallReturns(function));
+        }
+
+        check_ins_count(ins, target.get_inputs(&builder.basic_blocks) as usize)?;
+        check_outs_count(outs, 0)?;
+
+        Ok(Self { function, inputs: builder.alloc_locals(ins) })
     }
 }
 

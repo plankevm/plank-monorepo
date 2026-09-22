@@ -106,7 +106,7 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
             let [_ptr, value] = data.ins;
             value == local
         }
-        Operation::InternalCall(_) => true,
+        Operation::InternalCall(_) | Operation::InternalCallNever(_) => true,
 
         Operation::Add(_)
         | Operation::Mul(_)

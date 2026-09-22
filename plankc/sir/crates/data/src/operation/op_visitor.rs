@@ -35,6 +35,7 @@ pub trait OpVisitor<'d, VisitOut> {
     fn visit_set_large_const(&mut self, data: &'d SetLargeConstData) -> VisitOut;
     fn visit_set_data_offset(&mut self, data: &'d SetDataOffsetData) -> VisitOut;
     fn visit_icall(&mut self, data: &'d InternalCallData) -> VisitOut;
+    fn visit_icall_never(&mut self, data: &'d InternalCallNeverData) -> VisitOut;
     fn visit_void(&mut self) -> VisitOut;
 }
 
@@ -56,6 +57,7 @@ pub trait OpVisitorMut<'d, VisitOut> {
     fn visit_set_large_const_mut(self, data: &'d mut SetLargeConstData) -> VisitOut;
     fn visit_set_data_offset_mut(self, data: &'d mut SetDataOffsetData) -> VisitOut;
     fn visit_icall_mut(self, data: &'d mut InternalCallData) -> VisitOut;
+    fn visit_icall_never_mut(self, data: &'d mut InternalCallNeverData) -> VisitOut;
     fn visit_void_mut(self) -> VisitOut;
 }
 
@@ -97,6 +99,9 @@ impl<'a> OpVisitor<'a, &'a [LocalId]> for InputsGetter<'a> {
         &[]
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> &'a [LocalId] {
+        data.get_inputs(self.ir)
+    }
+    fn visit_icall_never(&mut self, data: &'a InternalCallNeverData) -> &'a [LocalId] {
         data.get_inputs(self.ir)
     }
     fn visit_void(&mut self) -> &'a [LocalId] {
@@ -143,6 +148,9 @@ impl<'a> OpVisitor<'a, &'a [LocalId]> for OutputsGetter<'a> {
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> &'a [LocalId] {
         data.get_outputs(self.ir)
+    }
+    fn visit_icall_never(&mut self, _data: &'a InternalCallNeverData) -> &'a [LocalId] {
+        &[]
     }
     fn visit_void(&mut self) -> &'a [LocalId] {
         &[]
@@ -208,6 +216,12 @@ impl<F: FnMut(Span<LocalIdx>) -> LocalIdx> OpVisitorMut<'_, ()> for &mut Operati
         data.outs_start = data.ins_start + input_count;
     }
 
+    fn visit_icall_never_mut(self, data: &mut InternalCallNeverData) {
+        let input_count = data.inputs.end - data.inputs.start;
+        let start = (self.clone_span)(data.inputs);
+        data.inputs = Span::new(start, start + input_count);
+    }
+
     fn visit_void_mut(self) {}
 }
 
@@ -255,6 +269,10 @@ impl<'a> OpVisitorMut<'a, &'a mut [LocalId]> for InputsMutGetter<'a> {
         let start = data.ins_start.idx();
         let end = data.outs_start.idx();
         &mut self.locals.as_raw_slice_mut()[start..end]
+    }
+
+    fn visit_icall_never_mut(self, data: &'a mut InternalCallNeverData) -> &'a mut [LocalId] {
+        &mut self.locals[data.inputs]
     }
 
     fn visit_void_mut(self) -> &'a mut [LocalId] {
@@ -310,6 +328,10 @@ impl<'a> OpVisitorMut<'a, &'a mut [LocalId]> for OutputsMutGetter<'a> {
         &mut self.locals[data.outputs_span(self.functions)]
     }
 
+    fn visit_icall_never_mut(self, _data: &'a mut InternalCallNeverData) -> &'a mut [LocalId] {
+        &mut []
+    }
+
     fn visit_void_mut(self) -> &'a mut [LocalId] {
         &mut []
     }
@@ -360,6 +382,9 @@ impl<'a> OpVisitor<'a, AllocatedSpans> for AllocatedSpansGetter<'a> {
             input: Some(data.inputs_span()),
             output: Some(data.outputs_span(&self.ir.functions)),
         }
+    }
+    fn visit_icall_never(&mut self, data: &'a InternalCallNeverData) -> AllocatedSpans {
+        AllocatedSpans { input: Some(data.inputs), output: None }
     }
     fn visit_void(&mut self) -> AllocatedSpans {
         AllocatedSpans::NONE

@@ -483,6 +483,14 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                                 function
                             ),
                         },
+                        OpBuildError::NeverCallReturns(function) => SirAstSemaError {
+                            spans: arena.alloc([stmt.op.span()]),
+                            reason: format_in!(
+                                arena,
+                                "`icall_never` cannot target returning function @{}",
+                                function
+                            ),
+                        },
                     })?;
                     bb_builder.add_operation(operation);
                 }

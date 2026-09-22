@@ -317,6 +317,10 @@ impl fmt::Display for EthIRProgram {
                             function_worklist.push(icall.function);
                             write!(f, " @f{}", icall.function)?;
                         }
+                        Operation::InternalCallNever(icall) => {
+                            function_worklist.push(icall.function);
+                            write!(f, " @f{}", icall.function)?;
+                        }
                         Operation::StaticAllocZeroed(static_alloc)
                         | Operation::StaticAllocAnyBytes(static_alloc) => {
                             write!(f, " {}", static_alloc.size)?;

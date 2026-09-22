@@ -62,11 +62,14 @@ impl Effect {
     pub fn of(op: Operation) -> Result<Effect, FunctionId> {
         let op = match op {
             Operation::InternalCall(icall) => return Err(icall.function),
+            Operation::InternalCallNever(icall) => return Err(icall.function),
             op => op.kind(),
         };
 
         let e = match op {
-            OperationKind::InternalCall => unreachable!("icall checked above"),
+            OperationKind::InternalCall | OperationKind::InternalCallNever => {
+                unreachable!("internal calls checked above")
+            }
             OperationKind::Add
             | OperationKind::Mul
             | OperationKind::Sub

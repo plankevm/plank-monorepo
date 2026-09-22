@@ -191,6 +191,10 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
 
         self.translator.bbs_to_be_translated.push((data.function, func_entry_bb));
     }
+
+    fn visit_icall_never(&mut self, _data: &'d InternalCallNeverData) {
+        unimplemented!("debug backend lowering for `icall_never`");
+    }
 }
 
 pub(crate) fn translate_operation(translator: &mut Translator, op: Operation) {
