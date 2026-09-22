@@ -1,0 +1,13 @@
+{
+  "name": "ssch-research",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit --strict --target esnext --module preserve --moduleResolution bundler --types bun --skipLibCheck *.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.0"
+  }
+}

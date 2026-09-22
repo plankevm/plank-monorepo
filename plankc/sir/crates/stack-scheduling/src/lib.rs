@@ -74,13 +74,23 @@ pub fn schedule_graph(
     graph: &op_graph::OpGraph,
     finalization: BlockFinalization,
 ) -> GraphScheduleResult {
+    schedule_graph_with_effort(
+        graph,
+        finalization,
+        NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
+    )
+}
+
+pub fn schedule_graph_with_effort(
+    graph: &op_graph::OpGraph,
+    finalization: BlockFinalization,
+    max_candidates: NonZero<usize>,
+) -> GraphScheduleResult {
     let result = scheduler::schedule(
         finalization,
         StaticAllocId::ZERO,
         ShuffleConfig::PRE_AMSTERDAM,
-        depth_first_search::SearchConfig {
-            max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
-        },
+        depth_first_search::SearchConfig { max_candidates },
         graph,
     );
     GraphScheduleResult {

@@ -13,6 +13,7 @@ sir-stack-scheduling.workspace = true
 sir-stack-scheduling-common.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 plank-core.workspace = true
 plank-test-utils.workspace = true
 

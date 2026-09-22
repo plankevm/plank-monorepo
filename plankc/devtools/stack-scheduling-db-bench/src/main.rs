@@ -28,6 +28,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<String, String> {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if !args.is_empty() {
+        return evaluate(&args);
+    }
     let start = Instant::now();
     let path = workspace_corpus_path("stack-scheduling-db");
     let mut rows = CanonicalDatabase::open(&path)?.all()?;
@@ -61,6 +65,45 @@ fn run() -> Result<String, String> {
     progress.finish_and_clear();
 
     Ok(stats.render(start.elapsed()))
+}
+
+fn evaluate(args: &[String]) -> Result<String, String> {
+    let [mode, database, effort] = args else {
+        return Err(
+            "usage: sir-stack-scheduling-db-bench --evaluate DATABASE MAX_CANDIDATES".into()
+        );
+    };
+    if mode != "--evaluate" {
+        return Err("expected --evaluate; evaluation never modifies the database".into());
+    }
+    let effort = effort.parse::<std::num::NonZero<usize>>().map_err(|e| e.to_string())?;
+    let start = Instant::now();
+    let rows = CanonicalDatabase::open(std::path::Path::new(database))?.all()?;
+    if rows.is_empty() {
+        return Err("database contains no canonical blocks".into());
+    }
+    let mut total_gas = 0u64;
+    let mut scheduling_time = std::time::Duration::ZERO;
+    for row in &rows {
+        let canonical = serde_json::from_str::<CanonicalBlock>(&row.canonical_graph)
+            .map_err(|e| e.to_string())?;
+        let graph = canonical.to_op_graph().map_err(|e| e.to_string())?;
+        let schedule_start = Instant::now();
+        let result = sir_stack_scheduling::schedule_graph_with_effort(
+            &graph,
+            canonical.finalization,
+            effort,
+        );
+        scheduling_time += schedule_start.elapsed();
+        validate_schedule(&row.canonical_hash, &graph, canonical.finalization, &result.ops)?;
+        total_gas += gas_cost(&result.ops, ShuffleConfig::PRE_AMSTERDAM);
+    }
+    Ok(serde_json::json!({
+        "graphs": rows.len(), "effort": effort.get(), "total_gas": total_gas,
+        "scheduler_seconds": scheduling_time.as_secs_f64(),
+        "elapsed_seconds": start.elapsed().as_secs_f64(),
+    })
+    .to_string())
 }
 
 fn process_graph(row: &mut CanonicalBlockRow, stats: &mut Stats) -> Result<(), String> {
@@ -124,6 +167,61 @@ mod tests {
     use plank_core::Idx;
     use sir_data::OperationIdx;
     use sir_stack_scheduling::op_graph::{CanonicalOperation, CanonicalValueId};
+
+    #[test]
+    fn evaluation_rejects_bad_arguments() {
+        for args in [
+            vec![],
+            vec!["--evaluate", "missing"],
+            vec!["--wrong", "missing", "1"],
+            vec!["--evaluate", "missing", "0"],
+        ] {
+            assert!(evaluate(&args.into_iter().map(str::to_owned).collect::<Vec<_>>()).is_err());
+        }
+    }
+
+    #[test]
+    fn evaluates_at_multiple_efforts_without_mutating_database() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("canonical-blocks.sqlite3");
+        let graph = CanonicalBlock::new(
+            BlockFinalization::ShuffleToOutputs,
+            1,
+            Box::new([]),
+            Box::new([CanonicalValueId::ZERO]),
+        );
+        let row = CanonicalBlockRow {
+            canonical_hash: "ssb1:test".to_owned(),
+            canonical_graph: serde_json::to_string(&graph).unwrap(),
+            best_schedule: "[]".to_owned(),
+            best_gas_cost: 0,
+            manually_optimized: false,
+        };
+        sir_stack_scheduling_common::seed_canonical_database(&path, &[row]).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        for effort in [1, 10, 100] {
+            let rendered = evaluate(&[
+                "--evaluate".to_owned(),
+                path.to_str().unwrap().to_owned(),
+                effort.to_string(),
+            ])
+            .unwrap();
+            let mut result: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+            let elapsed = result["elapsed_seconds"].as_f64().unwrap();
+            let scheduling = result["scheduler_seconds"].as_f64().unwrap();
+            assert!(elapsed >= scheduling && scheduling >= 0.0);
+            result["elapsed_seconds"] = serde_json::json!(0);
+            result["scheduler_seconds"] = serde_json::json!(0);
+            assert_eq!(
+                result,
+                serde_json::json!({
+                    "graphs": 1, "effort": effort, "total_gas": 0,
+                    "elapsed_seconds": 0, "scheduler_seconds": 0,
+                })
+            );
+        }
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
 
     #[test]
     fn replaces_a_worse_best_known_schedule_in_memory() {

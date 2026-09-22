@@ -3340,6 +3340,7 @@ dependencies = [
  "sir-data",
  "sir-stack-scheduling",
  "sir-stack-scheduling-common",
+ "tempfile",
 ]
 
 [[package]]

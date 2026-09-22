@@ -13,6 +13,17 @@ it has already been processed by the LLM runner.
 cargo run --release -p sir-stack-scheduling-db-bench
 ```
 
+For non-mutating research evaluation with an explicit positive search-candidate budget:
+
+```bash
+cargo run --release -p sir-stack-scheduling-db-bench -- --evaluate /path/to/partition.sqlite3 4000
+```
+
+This mode opens the database read-only and emits JSON containing graph count, effort, total gas,
+scheduler-only seconds, and elapsed evaluation seconds. Measure the built binary externally for
+whole-process timing; Cargo compilation is not part of the scheduling budget. The no-argument mode
+above retains its existing write-back behavior.
+
 Every generated schedule is replayed and validated. An invalid schedule stops the run immediately
 and prints its hash, graph, stack trace, and validation error. The score is
 `best-known total / local total`; percentile deltas are the nearest-rank values of
