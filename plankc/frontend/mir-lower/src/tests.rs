@@ -59,8 +59,8 @@ fn test_simple_set() {
         Init: @0
         Run: @1
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
-            fn @1 -> entry @1  (outputs: 0)
+            fn @0 -> entry @0  (never)
+            fn @1 -> entry @1  (never)
 
         Basic Blocks:
             @0 {
@@ -94,7 +94,7 @@ fn test_evm_builtins() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -124,7 +124,7 @@ fn test_assign() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -148,7 +148,7 @@ fn test_explicit_terminator() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -179,7 +179,7 @@ fn test_simple_call() {
         Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 1)
-            fn @1 -> entry @1  (outputs: 0)
+            fn @1 -> entry @1  (never)
 
         Basic Blocks:
             @0 -> $1 {
@@ -216,7 +216,7 @@ fn test_call_with_args() {
         Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 1)
-            fn @1 -> entry @1  (outputs: 0)
+            fn @1 -> entry @1  (never)
 
         Basic Blocks:
             @0 $0 $1 -> $5 {
@@ -252,7 +252,7 @@ fn test_simple_if() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -301,7 +301,7 @@ fn test_nested_if_assign() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -365,7 +365,7 @@ fn test_match() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -430,7 +430,7 @@ fn test_nested_match() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -509,7 +509,7 @@ fn test_match_with_terminating_arm() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -564,7 +564,7 @@ fn test_while() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -607,7 +607,7 @@ fn test_struct_lit() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -634,7 +634,7 @@ fn test_tuple_lit() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -661,7 +661,7 @@ fn test_runtime_tuple_lit() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -692,7 +692,7 @@ fn test_runtime_tuple_field_builtins() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -732,7 +732,7 @@ fn test_tuple_lit_with_void_element() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -759,7 +759,7 @@ fn test_struct_field_access() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -794,7 +794,7 @@ fn test_fn_struct_return() {
         Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 2)
-            fn @1 -> entry @1  (outputs: 0)
+            fn @1 -> entry @1  (never)
 
         Basic Blocks:
             @0 $0 $1 -> $4 $5 {
@@ -907,7 +907,7 @@ fn test_logical_not() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -952,7 +952,7 @@ fn test_bool_to_u256_lowers_to_copy() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -988,7 +988,7 @@ fn test_uninit_struct() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1014,7 +1014,7 @@ fn test_uninit_struct_with_void_field() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1040,7 +1040,7 @@ fn test_uninit_type() {
         Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 0)
-            fn @1 -> entry @1  (outputs: 0)
+            fn @1 -> entry @1  (never)
 
         Basic Blocks:
             @0 {
@@ -1068,7 +1068,7 @@ fn test_uninit_primitives() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1092,7 +1092,7 @@ fn test_data_offset_lowers_to_data_segment() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1121,7 +1121,7 @@ fn test_data_offset_dedups_identical_literals() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1155,7 +1155,7 @@ fn test_data_offset_of_slice_cbytes_adds_start_offset() {
         r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1189,7 +1189,7 @@ fn data_offset_of_concat() {
 
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -1223,7 +1223,7 @@ fn data_offset_of_lone_concat() {
 
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {

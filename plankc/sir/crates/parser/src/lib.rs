@@ -260,8 +260,8 @@ mod tests {
 Init: @0
 Run: @1
 Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
+    fn @0 -> entry @0  (never)
+    fn @1 -> entry @1  (never)
 
 Basic Blocks:
     @0 {
@@ -298,7 +298,7 @@ Basic Blocks:
         let expected = r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -334,7 +334,7 @@ Basic Blocks:
         let expected = r#"
         Init: @0
         Functions:
-            fn @0 -> entry @0  (outputs: 0)
+            fn @0 -> entry @0  (never)
 
         Basic Blocks:
             @0 {
@@ -367,7 +367,7 @@ Basic Blocks:
         Init: @1
         Functions:
             fn @0 -> entry @0  (outputs: 1)
-            fn @1 -> entry @1  (outputs: 0)
+            fn @1 -> entry @1  (never)
 
         Basic Blocks:
             @0 $0 -> $1 {
@@ -545,17 +545,17 @@ Basic Blocks:
         let expected = r#"
 Init: @0
 Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
-    fn @2 -> entry @2  (outputs: 0)
-    fn @3 -> entry @3  (outputs: 0)
-    fn @4 -> entry @4  (outputs: 0)
+    fn @0 -> entry @0  (never)
+    fn @1 -> entry @1  (never)
+    fn @2 -> entry @2  (never)
+    fn @3 -> entry @3  (never)
+    fn @4 -> entry @4  (never)
     fn @5 -> entry @5  (outputs: 2)
-    fn @6 -> entry @6  (outputs: 0)
-    fn @7 -> entry @7  (outputs: 0)
-    fn @8 -> entry @8  (outputs: 0)
-    fn @9 -> entry @9  (outputs: 0)
-    fn @10 -> entry @10  (outputs: 0)
+    fn @6 -> entry @6  (never)
+    fn @7 -> entry @7  (never)
+    fn @8 -> entry @8  (never)
+    fn @9 -> entry @9  (never)
+    fn @10 -> entry @10  (never)
 
 Basic Blocks:
     @0 {
@@ -736,7 +736,7 @@ Basic Blocks:
         let expected = r#"
 Init: @0
 Functions:
-    fn @0 -> entry @0  (outputs: 0)
+    fn @0 -> entry @0  (never)
     fn @1 -> entry @1  (outputs: 1)
 
 Basic Blocks:
@@ -797,8 +797,8 @@ Basic Blocks:
         let expected = r#"
 Init: @0
 Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
+    fn @0 -> entry @0  (never)
+    fn @1 -> entry @1  (never)
 
 Basic Blocks:
     @0 {
@@ -865,8 +865,8 @@ Basic Blocks:
         let expected = r#"
 Init: @0
 Functions:
-    fn @0 -> entry @0  (outputs: 0)
-    fn @1 -> entry @1  (outputs: 0)
+    fn @0 -> entry @0  (never)
+    fn @1 -> entry @1  (never)
 
 Basic Blocks:
     @0 {

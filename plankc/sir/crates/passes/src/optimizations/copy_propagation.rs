@@ -77,8 +77,7 @@ mod tests {
             fn init:
                 entry {
                     b = const 0
-                    icall @test b
-                    stop
+                    icall_never @test b
                 }
             fn test:
                 entry b {
@@ -97,8 +96,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @1  (never)
 
             Basic Blocks:
                 @0 $0 {
@@ -112,8 +111,7 @@ mod tests {
 
                 @1 {
                     $6 = const 0x0
-                    icall @0 $6
-                    stop
+                    icall_never @0 $6
                 }
             "#,
         );
@@ -125,8 +123,7 @@ mod tests {
             fn init:
                 entry {
                     b = const 0
-                    icall @test b
-                    stop
+                    icall_never @test b
                 }
             fn test:
                 entry b -> a_out {
@@ -146,8 +143,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @2  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 -> $0 {
@@ -163,8 +160,7 @@ mod tests {
 
                 @2 {
                     $5 = const 0x0
-                    icall @0 $5
-                    stop
+                    icall_never @0 $5
                 }
             "#,
         );
@@ -176,8 +172,7 @@ mod tests {
             fn init:
                 entry {
                     x = const 0
-                    icall @test x
-                    stop
+                    icall_never @test x
                 }
             fn test:
                 entry x {
@@ -198,8 +193,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @3  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @3  (never)
 
             Basic Blocks:
                 @0 $0 {
@@ -217,8 +212,7 @@ mod tests {
 
                 @3 {
                     $2 = const 0x0
-                    icall @0 $2
-                    stop
+                    icall_never @0 $2
                 }
             "#,
         );
@@ -230,8 +224,7 @@ mod tests {
             fn init:
                 entry {
                     x = const 0
-                    icall @test x
-                    stop
+                    icall_never @test x
                 }
             fn test:
                 entry x {
@@ -255,8 +248,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @3  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @3  (never)
 
             Basic Blocks:
                 @0 $0 {
@@ -278,8 +271,7 @@ mod tests {
 
                 @3 {
                     $2 = const 0x0
-                    icall @0 $2
-                    stop
+                    icall_never @0 $2
                 }
             "#,
         );
@@ -291,8 +283,7 @@ mod tests {
             fn init:
                 entry {
                     b = const 0
-                    icall @caller b
-                    stop
+                    icall_never @caller b
                 }
             fn callee:
                 entry x -> result {
@@ -314,8 +305,8 @@ mod tests {
             Init: @2
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
-                fn @2 -> entry @2  (outputs: 0)
+                fn @1 -> entry @1  (never)
+                fn @2 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 -> $1 {
@@ -331,8 +322,7 @@ mod tests {
 
                 @2 {
                     $5 = const 0x0
-                    icall @1 $5
-                    stop
+                    icall_never @1 $5
                 }
             "#,
         );
@@ -344,8 +334,7 @@ mod tests {
             fn init:
                 entry {
                     b = const 0
-                    icall @test b
-                    stop
+                    icall_never @test b
                 }
             fn test:
                 entry b -> a b {
@@ -364,8 +353,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @2  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 -> $0 $0 {
@@ -380,8 +369,7 @@ mod tests {
 
                 @2 {
                     $5 = const 0x0
-                    icall @0 $5
-                    stop
+                    icall_never @0 $5
                 }
             "#,
         );

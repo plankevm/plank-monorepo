@@ -391,7 +391,7 @@ mod tests {
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
                 fn @1 -> entry @1  (outputs: 2)
-                fn @2 -> entry @2  (outputs: 0)
+                fn @2 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 $1 -> $2 {
@@ -439,7 +439,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
                 fn @1 -> entry @2  (outputs: 1)
 
             Basic Blocks:
@@ -546,8 +546,8 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @4  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @4  (never)
 
             Basic Blocks:
                 @0 {
@@ -614,7 +614,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -670,7 +670,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -711,7 +711,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -754,7 +754,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -783,7 +783,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {

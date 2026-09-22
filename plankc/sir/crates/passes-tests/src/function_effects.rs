@@ -74,8 +74,7 @@ fn infinite_loop() {
         r#"
         fn init:
             entry {
-                icall @infinity
-                stop
+                icall_never @infinity
             }
 
         fn infinity:
@@ -84,7 +83,7 @@ fn infinite_loop() {
             }
         "#,
         EmitConfig::init_only(),
-        [("init", Effect::TERMINATE), ("infinity", Effect::REVERT)],
+        [("init", Effect::REVERT), ("infinity", Effect::REVERT)],
     );
 }
 
