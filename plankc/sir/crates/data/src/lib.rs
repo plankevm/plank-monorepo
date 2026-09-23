@@ -634,9 +634,9 @@ mod tests {
         bb.add_operation(Operation::Add(InlineOperands { ins: [local0, local1], outs: [local2] }));
         bb.add_operation(Operation::Stop(()));
         bb.set_outputs(&[local2]);
-        let bb_id = bb.finish_with_internal_return().unwrap();
+        let bb_id = bb.finish_with_internal_return();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_ir_display(
@@ -668,7 +668,7 @@ mod tests {
         let mut bb0 = func0.begin_basic_block();
         bb0.add_operation(Operation::Stop(()));
         let bb0_id = bb0.finish_terminating().unwrap();
-        let func0_id = func0.finish(bb0_id);
+        let func0_id = func0.finish(bb0_id).unwrap();
 
         // Unreachable block 1
         let mut orphan1 = builder.begin_function();
@@ -684,8 +684,8 @@ mod tests {
         bb2.set_inputs(&[local0]);
         bb2.add_operation(Operation::SetCopy(InlineOperands { ins: [local0], outs: [local1] }));
         bb2.set_outputs(&[local1]);
-        let bb2_id = bb2.finish_with_internal_return().unwrap();
-        let _func1_id = func1.finish(bb2_id);
+        let bb2_id = bb2.finish_with_internal_return();
+        let _func1_id = func1.finish(bb2_id).unwrap();
 
         // Unreachable block 2
         let mut orphan2 = builder.begin_function();
@@ -755,7 +755,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_ir_display(

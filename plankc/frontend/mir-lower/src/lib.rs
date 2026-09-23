@@ -133,7 +133,7 @@ fn lower_function(
 
     let CFGSegment { bb_in: entry_bb_id, .. } =
         lower_basic_block(ctx, values, &mut new_func, mir_func, ctx.mir.fns[mir_func].body, true);
-    let fn_id = new_func.finish(entry_bb_id);
+    let fn_id = new_func.finish(entry_bb_id).expect("invalid MIR");
     ctx.mir_to_sir_functions.insert(mir_func, fn_id);
     fn_id
 }
@@ -312,7 +312,7 @@ fn lower_basic_block(
             },
             Instruction::Return(local) => {
                 current_bb.set_outputs(ctx.locals_map.get(local));
-                let end_id = current_bb.finish_with_internal_return().expect("invalid MIR");
+                let end_id = current_bb.finish_with_internal_return();
                 return CFGSegment {
                     bb_in: bb_in.unwrap_or(end_id),
                     bb_out: end_id,

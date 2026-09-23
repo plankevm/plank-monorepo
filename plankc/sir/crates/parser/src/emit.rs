@@ -522,7 +522,6 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
             }
         }
 
-        let mut other_iret = None;
         for bb in func.basic_blocks.iter() {
             let bb_id = bb_ids.get(bb.name.inner).expect("missing bb");
             let ctrl = match bb.control_flow.as_ref() {
@@ -618,27 +617,9 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                     Control::Switch(switch_builder.finish(condition.inner, fallback))
                 }
             };
-            let prev_iret = if let Control::InternalReturn = ctrl {
-                other_iret.replace(bb_id.span())
-            } else {
-                None
-            };
-
             func_builder.set_control(bb_id.inner, ctrl).map_err(|err| match err {
-                BuildError::ConflictingFunctionOutputs { set_outputs, implied_out } => {
-                    SirAstSemaError {
-                        spans: arena.alloc([
-                            prev_iret.expect("conflicting outputs without another iret?"),
-                            bb_id.span(),
-                        ]),
-                        reason: format_in!(
-                            arena,
-                            "Separate irets imply different outputs for function {:?} ({} vs. {})",
-                            func.name.inner,
-                            set_outputs,
-                            implied_out
-                        ),
-                    }
+                BuildError::ConflictingFunctionOutputs { .. } => {
+                    unreachable!("return counts are checked at function finalization")
                 }
                 BuildError::TerminatingBlockWithoutOp => SirAstSemaError {
                     spans: arena.alloc([bb_id.span()]),
@@ -656,7 +637,31 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
 
         let source = Some(sources.push(func.name.inner.to_owned()));
         let func_id = func_builder
-            .finish_with_source(entry_bb_id.expect("function didn't have at least 1 bb"), source);
+            .finish_with_source(entry_bb_id.expect("function didn't have at least 1 bb"), source)
+            .map_err(|err| {
+                let BuildError::ConflictingFunctionOutputs {
+                    first_block,
+                    conflicting_block,
+                    set_outputs,
+                    implied_out,
+                } = err
+                else {
+                    unreachable!("block controls are validated before function finalization")
+                };
+                let block_span = |block| {
+                    bb_ids.values().find(|id| id.inner == block).expect("missing block span").span()
+                };
+                SirAstSemaError {
+                    spans: arena.alloc([block_span(first_block), block_span(conflicting_block)]),
+                    reason: format_in!(
+                        arena,
+                        "Separate irets imply different outputs for function {:?} ({} vs. {})",
+                        func.name.inner,
+                        set_outputs,
+                        implied_out
+                    ),
+                }
+            })?;
         func_ids.insert(func.name.inner, func_id);
     }
 

@@ -155,7 +155,18 @@ Where `<N>` is a bit size from 8-256 in multiples of 8 (e.g., `mload256`, `mstor
 `const`, `large_const`, `data_offset`, `copy`
 
 ### IR Intrinsics
-`runtime_start_offset`, `init_end_offset`, `runtime_length`, `icall`, `noop`
+`runtime_start_offset`, `init_end_offset`, `runtime_length`, `icall`, `icall_never`, `noop`
+
+### Internal Calls
+
+- `icall @function args...` requires a returning callee and assigns its declared number of results,
+  including zero. Execution continues if the callee returns.
+- `icall_never @function args...` requires a `NEVER` callee, produces no results, and terminates the
+  block without a return continuation. It must be last, with no following control-flow statement
+  or trailing `invalid`.
+
+Argument counts must match the callee's inputs; mismatched call/return kinds are rejected.
+Return kinds are inferred, not annotated in the text; see [Internal Functions](README.md#internal-functions).
 
 ## Parser Usage
 
@@ -226,7 +237,7 @@ fn main:
 ### Function with Multiple Blocks and I/O
 
 ```
-fn main:
+fn arithmetic:
     entry lhs rhs -> sum_out diff_out {
         sum_out = add lhs rhs
         diff_out = sub lhs rhs
@@ -306,6 +317,29 @@ fn caller:
     }
 ```
 
+### Conditional Non-returning Call
+
+```
+fn init:
+    entry {
+        condition = calldatasize
+        => condition ? @terminate : @continue
+    }
+    terminate {
+        icall_never @halt
+    }
+    continue {
+        stop
+    }
+
+fn halt:
+    entry {
+        invalid
+    }
+```
+
+When `terminate` requires no work besides the call, the release backend can jump directly to `halt`.
+
 ### Data Segments
 
 ```
@@ -340,9 +374,10 @@ fn main:
 
 ### Control Flow Rules
 - Every basic block must end with either:
-  - A terminating operation (`stop`, `return`, `revert`, `invalid`, `selfdestruct`)
+  - A terminating operation (`stop`, `return`, `revert`, `invalid`, `selfdestruct`, `icall_never`)
   - An explicit control flow statement (`iret`, `=>`, switch)
 - `iret` is used for internal function returns
+- `icall_never` calls a non-returning function and ends the block without returning to the caller
 - Regular jumps use `=>` with a target label
 - Conditional branches use `=> condition ? @target_true : @target_false`
 - Switch statements provide multi-way branches based on a value

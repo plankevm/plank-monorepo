@@ -19,7 +19,8 @@ function points to its entry basic block. Internal functions must have disjoint 
 Internal functions can accept and return and arbitrary number of values explicitly.
 
 Internal functions denote the entry points to the contract. A contract MUST HAVE have an `init`
-entry point. Entry points must not have any input parameters. The init entrypoint denotes the code
+entry point. Entry points must have no inputs and have `ReturnKind::NEVER` (EVM `return` is allowed,
+but a reachable `iret` is not). The init entrypoint denotes the code
 that is executed at init-time and returns the deployed, runtime code. A contract SHOULD HAVE a
 runtime entry point (`main`) that denotes the code that will be deployed. It can be ommitted if the
 init entrypoint intends to not return code or return custom bytecode.
@@ -27,8 +28,11 @@ init entrypoint intends to not return code or return custom bytecode.
 Recursion (aka cycles in the call graph) is **not supported** at this time as it would heavily
 complicate reasonable code generation.
 
-Internal function inputs are defined by the entry basic block input count. Outputs are defined by
-the outputs of the basic blocks that end with `iret`.
+Internal function inputs are defined by the entry basic block input count. At function finalization,
+reachable `iret` blocks determine `ReturnKind::values(n)` and must agree on their output count.
+With no reachable `iret`, the kind is `ReturnKind::NEVER`: the function never returns internally.
+This differs from `ReturnKind::values(0)`, which returns without values. Unreachable returns do not
+affect the inferred kind.
 
 
 ### Basic Blocks
@@ -82,6 +86,7 @@ Besides low-level EVM operations some low-level abstractions are also provided a
 - Memory allocation & management: `malloc(size) -> ptr`, `mallocany(size) -> ptr`, `freeptr() -> ptr`, `salloc(const_size) -> ptr`, `sallocany(const_size) -> ptr`
 - Memory read/write: `mstore<x>(ptr, value)`, `mload<x>(ptr) -> value` (beyond the EVM's 256-bit MSTORE & MLOAD and 8-bit MSTORE8, bit sizes 8-256 are supported in increments of 8)
 - Internal Function Call: `icall(func, ...param locals) -> ...result locals`
+- Non-returning Internal Function Call: `icall_never(func, ...param locals)` (terminates the block)
 - Code offset to data object: `data_offset(data_obj) -> offset`
 - Assign/store constant: `const(const) -> const`, `large_const(const) -> const` (semantically equivalent, `const` just has a more
   efficient representation in the IR)
@@ -97,7 +102,7 @@ Besides low-level EVM operations some low-level abstractions are also provided a
 ### Control Flow
 
 Control flow occurs between basic blocks within a function. Available control flow primitives are:
-- termination (if the basic block ends in a terminating EVM op)
+- termination (if the basic block ends in a terminating EVM op or `icall_never`)
 - internal function return
 - unconditional goto to another basic block (BB) in the same function
 - conditional goto to another BB (branches based on whether value is zero or not)

@@ -628,13 +628,13 @@ mod tests {
         let mut entry = function.begin_basic_block();
         entry.add_operation(Operation::Stop(()));
         let entry = entry.finish_terminating().unwrap();
-        function.finish(entry)
+        function.finish(entry).unwrap()
     }
 
     fn add_returning_function(builder: &mut EthIRBuilder) -> FunctionId {
         let mut function = builder.begin_function();
-        let entry = function.begin_basic_block().finish_with_internal_return().unwrap();
-        function.finish(entry)
+        let entry = function.begin_basic_block().finish_with_internal_return();
+        function.finish(entry).unwrap()
     }
 
     #[test]
@@ -694,8 +694,8 @@ mod tests {
     fn test_rejects_internal_return_in_never_function() {
         let mut builder = EthIRBuilder::new();
         let mut function = builder.begin_function();
-        let entry = function.begin_basic_block().finish_with_internal_return().unwrap();
-        let function = function.finish(entry);
+        let entry = function.begin_basic_block().finish_with_internal_return();
+        let function = function.finish(entry).unwrap();
         let mut program = builder.build(function, None);
         program.functions[function] =
             sir_data::Function::new(entry, sir_data::ReturnKind::NEVER, None);
@@ -1076,7 +1076,7 @@ mod tests {
         merge.add_operation(Operation::Stop(()));
         merge.finish_terminating().unwrap();
 
-        let func_id = func.finish(entry_id);
+        let func_id = func.finish(entry_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1090,13 +1090,15 @@ mod tests {
         let mut builder = EthIRBuilder::new();
         let mut func = builder.begin_function();
         let invalid_bb = BasicBlockId::new(999);
+        let entry = func.ir_builder.next_basic_block_id();
 
         let mut bb = func.begin_basic_block();
         bb.add_operation(Operation::Noop(()));
-        let bb_id = bb.finish_with_continues_to(invalid_bb);
+        let bb_id = bb.finish_with_continues_to(entry);
 
-        let func_id = func.finish(bb_id);
-        let program = builder.build(func_id, None);
+        let func_id = func.finish(bb_id).unwrap();
+        let mut program = builder.build(func_id, None);
+        program.basic_blocks[bb_id].control = Control::ContinuesTo(invalid_bb);
 
         assert_eq!(
             Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
@@ -1118,7 +1120,7 @@ mod tests {
         }));
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1138,7 +1140,7 @@ mod tests {
             .try_add_op(OperationKind::InternalCallNever, &[], &[], OpExtraData::FuncId(never))
             .unwrap();
         let entry = entry.finish_terminating().unwrap();
-        let caller = caller.finish(entry);
+        let caller = caller.finish(entry).unwrap();
         let mut program = builder.build(caller, None);
         let operation = program.basic_blocks[entry].operations.start;
         let invalid_function = FunctionId::new(999);
@@ -1166,7 +1168,7 @@ mod tests {
             .unwrap();
         entry.add_operation(Operation::Stop(()));
         let entry = entry.finish_terminating().unwrap();
-        let caller = caller.finish(entry);
+        let caller = caller.finish(entry).unwrap();
         let mut program = builder.build(caller, None);
         let operation = program.basic_blocks[entry].operations.start;
         let Operation::InternalCall(call) = &mut program.operations[operation] else {
@@ -1192,7 +1194,7 @@ mod tests {
             .try_add_op(OperationKind::InternalCallNever, &[], &[], OpExtraData::FuncId(never))
             .unwrap();
         let entry = entry.finish_terminating().unwrap();
-        let caller = caller.finish(entry);
+        let caller = caller.finish(entry).unwrap();
         let mut program = builder.build(caller, None);
         let operation = program.basic_blocks[entry].operations.start;
         let Operation::InternalCallNever(call) = &mut program.operations[operation] else {
@@ -1286,8 +1288,8 @@ mod tests {
             ins_start: LocalIdx::new(0),
             outs_start: LocalIdx::new(0),
         }));
-        let bb_id = bb.finish_with_internal_return().unwrap();
-        func.finish(bb_id);
+        let bb_id = bb.finish_with_internal_return();
+        func.finish(bb_id).unwrap();
 
         let mut init = builder.begin_function();
         let mut entry = init.begin_basic_block();
@@ -1296,7 +1298,7 @@ mod tests {
             .unwrap();
         entry.add_operation(Operation::Stop(()));
         let entry = entry.finish_terminating().unwrap();
-        let init = init.finish(entry);
+        let init = init.finish(entry).unwrap();
         let program = builder.build(init, None);
 
         assert_eq!(
@@ -1319,7 +1321,7 @@ mod tests {
             inputs: Span::EMPTY,
         }));
         let bb_a_id = bb_a.finish_terminating().unwrap();
-        func_a.finish(bb_a_id);
+        func_a.finish(bb_a_id).unwrap();
 
         let mut func_b = builder.begin_function();
         let mut bb_b = func_b.begin_basic_block();
@@ -1328,7 +1330,7 @@ mod tests {
             inputs: Span::EMPTY,
         }));
         let bb_b_id = bb_b.finish_terminating().unwrap();
-        func_b.finish(bb_b_id);
+        func_b.finish(bb_b_id).unwrap();
 
         let program = builder.build(func_a_id, None);
 
@@ -1351,7 +1353,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1440,7 +1442,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1457,7 +1459,7 @@ mod tests {
         let mut init_bb = init_func.begin_basic_block();
         init_bb.add_operation(Operation::Stop(()));
         let init_bb_id = init_bb.finish_terminating().unwrap();
-        let init_func_id = init_func.finish(init_bb_id);
+        let init_func_id = init_func.finish(init_bb_id).unwrap();
 
         let mut main_func = builder.begin_function();
         let input1 = main_func.new_local();
@@ -1467,7 +1469,7 @@ mod tests {
         main_bb.set_inputs(&[input1, input2, input3]);
         main_bb.add_operation(Operation::Stop(()));
         let main_bb_id = main_bb.finish_terminating().unwrap();
-        let main_func_id = main_func.finish(main_bb_id);
+        let main_func_id = main_func.finish(main_bb_id).unwrap();
 
         let program = builder.build(init_func_id, Some(main_func_id));
 
@@ -1487,7 +1489,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1512,7 +1514,7 @@ mod tests {
             next_bb.finish_terminating().unwrap();
         }
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1539,7 +1541,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1566,7 +1568,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1591,7 +1593,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1614,7 +1616,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let program = builder.build(func_id, None);
 
         assert_eq!(
@@ -1631,7 +1633,7 @@ mod tests {
         let mut bb_shared = func_a.begin_basic_block();
         bb_shared.add_operation(Operation::Stop(()));
         let bb_shared_id = bb_shared.finish_terminating().unwrap();
-        let func_a_id = func_a.finish(bb_shared_id);
+        let func_a_id = func_a.finish(bb_shared_id).unwrap();
 
         let mut program = builder.build(func_a_id, None);
 
@@ -1666,7 +1668,7 @@ mod tests {
         bb2.add_operation(Operation::Stop(()));
         bb2.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb1_id);
+        let func_id = func.finish(bb1_id).unwrap();
         let mut program = builder.build(func_id, None);
 
         let bb2_id = BasicBlockId::new(1);
@@ -1694,7 +1696,7 @@ mod tests {
         bb2.add_operation(Operation::Stop(()));
         bb2.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb1_id);
+        let func_id = func.finish(bb1_id).unwrap();
         let mut program = builder.build(func_id, None);
 
         let bb2_id = BasicBlockId::new(1);
@@ -1722,7 +1724,7 @@ mod tests {
         bb.add_operation(Operation::Stop(()));
         let bb_id = bb.finish_terminating().unwrap();
 
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
         let mut program = builder.build(func_id, None);
 
         program.locals.truncate(0);

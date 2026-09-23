@@ -3,14 +3,19 @@ use crate::{
     *,
 };
 use alloy_primitives::U256;
-use plank_core::{Idx, IndexVec, must_use::MustUseStrict, span::IncIterable};
+use plank_core::{DenseIndexSet, Idx, IndexVec, must_use::MustUseStrict, span::IncIterable};
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
     #[error(
         "Basic block implies conflicting output for function, set != new implied: {set_outputs} != {implied_out}"
     )]
-    ConflictingFunctionOutputs { set_outputs: u32, implied_out: u32 },
+    ConflictingFunctionOutputs {
+        first_block: BasicBlockId,
+        conflicting_block: BasicBlockId,
+        set_outputs: u32,
+        implied_out: u32,
+    },
 
     #[error("attempted to set \"last op terminates\" control flow for non-terminating block")]
     TerminatingBlockWithoutOp,
@@ -36,6 +41,8 @@ pub struct EthIRBuilder {
     pub(crate) cases_bb_ids: IndexVec<CasesBasicBlocksIdx, BasicBlockId>,
 
     placehodler_control_blocks: Vec<BasicBlockId>,
+    return_kind_visited: DenseIndexSet<BasicBlockId>,
+    return_kind_worklist: Vec<BasicBlockId>,
 }
 
 impl EthIRBuilder {
@@ -53,6 +60,8 @@ impl EthIRBuilder {
             cases_bb_ids: IndexVec::new(),
 
             placehodler_control_blocks: Vec::with_capacity(16),
+            return_kind_visited: DenseIndexSet::new(),
+            return_kind_worklist: Vec::new(),
         }
     }
 
@@ -111,12 +120,7 @@ impl EthIRBuilder {
     // Function builder
     pub fn begin_function(&mut self) -> FunctionBuilder<'_> {
         let next_bb = self.basic_blocks.next_idx();
-        FunctionBuilder {
-            ir_builder: self,
-            first_bb: next_bb,
-            last_bb: next_bb,
-            iret_outputs: None,
-        }
+        FunctionBuilder { ir_builder: self, first_bb: next_bb, last_bb: next_bb }
     }
 }
 
@@ -131,7 +135,6 @@ pub struct FunctionBuilder<'ir> {
     pub ir_builder: &'ir mut EthIRBuilder,
     first_bb: BasicBlockId,
     last_bb: BasicBlockId,
-    iret_outputs: Option<u32>,
 }
 
 impl<'ir> FunctionBuilder<'ir> {
@@ -165,7 +168,6 @@ impl<'ir> FunctionBuilder<'ir> {
 
         let bb = *bb;
         self.validate_terminating(bb)?;
-        self.track_bb_internal_return(bb)?;
         Ok(())
     }
 
@@ -182,18 +184,6 @@ impl<'ir> FunctionBuilder<'ir> {
         bb_id
     }
 
-    fn track_bb_internal_return(&mut self, bb: BasicBlock) -> Result<(), BuildError> {
-        let Some(implied_out) = bb.implied_fn_out() else { return Ok(()) };
-        if let Some(set_outputs) = self.iret_outputs
-            && set_outputs != implied_out
-        {
-            return Err(BuildError::ConflictingFunctionOutputs { set_outputs, implied_out });
-        }
-        self.iret_outputs = Some(implied_out);
-
-        Ok(())
-    }
-
     fn validate_terminating(&mut self, bb: BasicBlock) -> Result<(), BuildError> {
         if !matches!(bb.control, Control::LastOpTerminates) {
             return Ok(());
@@ -205,15 +195,15 @@ impl<'ir> FunctionBuilder<'ir> {
         Ok(())
     }
 
-    pub fn finish(self, entry_bb_id: BasicBlockId) -> FunctionId {
+    pub fn finish(self, entry_bb_id: BasicBlockId) -> Result<FunctionId, BuildError> {
         self.finish_with_source(entry_bb_id, None)
     }
 
     pub fn finish_with_source(
-        self,
+        mut self,
         entry_bb_id: BasicBlockId,
         source: Option<OpaqueSourceId>,
-    ) -> FunctionId {
+    ) -> Result<FunctionId, BuildError> {
         let end_bb = self.ir_builder.basic_blocks.next_idx();
         let basic_blocks = self.first_bb..end_bb;
         assert!(
@@ -226,11 +216,64 @@ impl<'ir> FunctionBuilder<'ir> {
             self.ir_builder.placehodler_control_blocks
         );
 
-        let return_kind = match self.iret_outputs {
-            None => ReturnKind::NEVER,
-            Some(outputs) => ReturnKind::values(outputs),
-        };
-        self.ir_builder.functions.push(Function::new(entry_bb_id, return_kind, source))
+        let return_kind = self.infer_return_kind(entry_bb_id)?;
+        Ok(self.ir_builder.functions.push(Function::new(entry_bb_id, return_kind, source)))
+    }
+
+    fn infer_return_kind(&mut self, entry: BasicBlockId) -> Result<ReturnKind, BuildError> {
+        self.ir_builder.return_kind_visited.clear();
+        self.ir_builder.return_kind_worklist.clear();
+        self.ir_builder.return_kind_visited.add(entry);
+        self.ir_builder.return_kind_worklist.push(entry);
+        let mut first_return = None;
+
+        while let Some(block_id) = self.ir_builder.return_kind_worklist.pop() {
+            let block = &self.ir_builder.basic_blocks[block_id];
+            let mut enqueue = |target| {
+                assert!(
+                    (self.first_bb..self.ir_builder.basic_blocks.next_idx()).contains(&target),
+                    "control target outside function being finalized"
+                );
+                if self.ir_builder.return_kind_visited.add(target) {
+                    self.ir_builder.return_kind_worklist.push(target);
+                }
+            };
+
+            match block.control {
+                Control::InternalReturn => {
+                    let implied_out = block.outputs.len();
+                    if let Some((first_block, set_outputs)) = first_return {
+                        if set_outputs != implied_out {
+                            return Err(BuildError::ConflictingFunctionOutputs {
+                                first_block,
+                                conflicting_block: block_id,
+                                set_outputs,
+                                implied_out,
+                            });
+                        }
+                    } else {
+                        first_return = Some((block_id, implied_out));
+                    }
+                }
+                Control::ContinuesTo(target) => enqueue(target),
+                Control::Branches(branch) => {
+                    enqueue(branch.non_zero_target);
+                    enqueue(branch.zero_target);
+                }
+                Control::Switch(switch) => {
+                    let targets = self.ir_builder.cases[switch.cases].target_indices();
+                    for &target in self.ir_builder.cases_bb_ids[targets].iter() {
+                        enqueue(target);
+                    }
+                    if let Some(target) = switch.fallback {
+                        enqueue(target);
+                    }
+                }
+                Control::LastOpTerminates => {}
+            }
+        }
+
+        Ok(first_return.map_or(ReturnKind::NEVER, |(_, count)| ReturnKind::values(count)))
     }
 }
 
@@ -342,10 +385,8 @@ impl<'func, 'ir: 'func> BasicBlockBuilder<'func, 'ir> {
         self.finish(Control::Branches(branch)).0
     }
 
-    pub fn finish_with_internal_return(self) -> Result<BasicBlockId, BuildError> {
-        let (id, bb, fn_builder) = self.finish(Control::InternalReturn);
-        fn_builder.track_bb_internal_return(bb)?;
-        Ok(id)
+    pub fn finish_with_internal_return(self) -> BasicBlockId {
+        self.finish(Control::InternalReturn).0
     }
 
     pub fn finish_with_switch(self, switch: Switch) -> BasicBlockId {
@@ -456,7 +497,7 @@ mod tests {
         never_entry.set_inputs(&[input]);
         never_entry.add_operation(Operation::Stop(()));
         let never_entry = never_entry.finish_terminating().unwrap();
-        let never = never.finish(never_entry);
+        let never = never.finish(never_entry).unwrap();
 
         let mut caller = builder.begin_function();
         let input = caller.new_local();
@@ -466,7 +507,7 @@ mod tests {
             .try_add_op(OperationKind::InternalCallNever, &[input], &[], OpExtraData::FuncId(never))
             .unwrap();
         let caller_entry = caller_entry.finish_terminating().unwrap();
-        let caller = caller.finish(caller_entry);
+        let caller = caller.finish(caller_entry).unwrap();
 
         let program = builder.build(caller, None);
         let operation = program.basic_blocks[caller_entry].operations.start;
@@ -493,10 +534,10 @@ mod tests {
         .unwrap();
         bb.add_operation(op);
         bb.set_outputs(&[LocalId::new(0)]);
-        let bb_id = bb.finish_with_internal_return().unwrap();
+        let bb_id = bb.finish_with_internal_return();
 
         // Finish the function
-        let func_id = func.finish(bb_id);
+        let func_id = func.finish(bb_id).unwrap();
 
         // Build the program
         let program = builder.build(func_id, None);
@@ -514,12 +555,11 @@ mod tests {
         let mut never_entry = never.begin_basic_block();
         never_entry.add_operation(Operation::Stop(()));
         let never_entry = never_entry.finish_terminating().unwrap();
-        let never = never.finish(never_entry);
+        let never = never.finish(never_entry).unwrap();
 
         let mut returns_void = builder.begin_function();
-        let returns_void_entry =
-            returns_void.begin_basic_block().finish_with_internal_return().unwrap();
-        let returns_void = returns_void.finish(returns_void_entry);
+        let returns_void_entry = returns_void.begin_basic_block().finish_with_internal_return();
+        let returns_void = returns_void.finish(returns_void_entry).unwrap();
 
         let program = builder.build(never, None);
 
@@ -535,7 +575,7 @@ mod tests {
         let mut never_entry = never.begin_basic_block();
         never_entry.add_operation(Operation::Stop(()));
         let never_entry = never_entry.finish_terminating().unwrap();
-        let never = never.finish(never_entry);
+        let never = never.finish(never_entry).unwrap();
 
         let mut caller = builder.begin_function();
         let mut caller_entry = caller.begin_basic_block();
@@ -545,7 +585,63 @@ mod tests {
         assert!(matches!(error, OpBuildError::InternalCallToNever(function) if function == never));
         caller_entry.add_operation(Operation::Stop(()));
         let caller_entry = caller_entry.finish_terminating().unwrap();
-        caller.finish(caller_entry);
+        caller.finish(caller_entry).unwrap();
+    }
+
+    #[test]
+    fn conflicting_unreachable_returns_do_not_make_function_returning() {
+        let mut builder = EthIRBuilder::new();
+        let mut function = builder.begin_function();
+        let mut entry = function.begin_basic_block();
+        entry.add_operation(Operation::Stop(()));
+        let entry = entry.finish_terminating().unwrap();
+
+        function.begin_basic_block().finish_with_internal_return();
+        let value = function.new_local();
+        let mut unreachable_return = function.begin_basic_block();
+        unreachable_return.add_set_const_op(value, U256::ZERO);
+        unreachable_return.set_outputs(&[value]);
+        unreachable_return.finish_with_internal_return();
+
+        let function = function.finish(entry).unwrap();
+        assert_eq!(builder.get_func(function).unwrap().return_kind(), ReturnKind::NEVER);
+    }
+
+    #[test]
+    fn unreachable_return_does_not_change_output_count() {
+        let mut builder = EthIRBuilder::new();
+        let mut function = builder.begin_function();
+        let value = function.new_local();
+        let mut unreachable_return = function.begin_basic_block();
+        unreachable_return.add_set_const_op(value, U256::ZERO);
+        unreachable_return.set_outputs(&[value]);
+        unreachable_return.finish_with_internal_return();
+
+        let entry = function.begin_basic_block().finish_with_internal_return();
+        let function = function.finish(entry).unwrap();
+        assert_eq!(builder.get_func(function).unwrap().return_kind(), ReturnKind::values(0));
+    }
+
+    #[test]
+    fn switch_loop_with_reachable_return_is_returning() {
+        let mut builder = EthIRBuilder::new();
+        let mut function = builder.begin_function();
+        let condition = function.new_local();
+        let mut entry = function.begin_basic_block();
+        entry.set_inputs(&[condition]);
+        entry.set_outputs(&[condition]);
+        let entry = entry.finish_with_placeholder_control();
+        let unused = function.new_local();
+        let mut returning = function.begin_basic_block();
+        returning.set_inputs(&[unused]);
+        let returning = returning.finish_with_internal_return();
+        let mut switch = function.begin_switch();
+        switch.push_case(U256::ZERO, entry);
+        switch.push_case(U256::ONE, returning);
+        let switch = switch.finish(condition, Some(entry));
+        function.set_control(entry, Control::Switch(switch)).unwrap();
+        let function = function.finish(entry).unwrap();
+        assert_eq!(builder.get_func(function).unwrap().return_kind(), ReturnKind::values(0));
     }
 
     #[test]
@@ -580,8 +676,8 @@ mod tests {
         let mut builder = EthIRBuilder::new();
 
         let mut returning = builder.begin_function();
-        let returning_entry = returning.begin_basic_block().finish_with_internal_return().unwrap();
-        let returning = returning.finish(returning_entry);
+        let returning_entry = returning.begin_basic_block().finish_with_internal_return();
+        let returning = returning.finish(returning_entry).unwrap();
 
         let mut caller = builder.begin_function();
         let mut caller_entry = caller.begin_basic_block();
@@ -591,7 +687,7 @@ mod tests {
         assert!(matches!(error, OpBuildError::NeverCallReturns(function) if function == returning));
         caller_entry.add_operation(Operation::Stop(()));
         let caller_entry = caller_entry.finish_terminating().unwrap();
-        caller.finish(caller_entry);
+        caller.finish(caller_entry).unwrap();
     }
 
     #[test]
@@ -601,10 +697,10 @@ mod tests {
         let mut func = builder.begin_function();
 
         // Create basic blocks for switch targets
-        let bb0 = func.begin_basic_block().finish_with_internal_return().unwrap();
-        let bb1 = func.begin_basic_block().finish_with_internal_return().unwrap();
-        let bb2 = func.begin_basic_block().finish_with_internal_return().unwrap();
-        let fallback_bb = func.begin_basic_block().finish_with_internal_return().unwrap();
+        let bb0 = func.begin_basic_block().finish_with_internal_return();
+        let bb1 = func.begin_basic_block().finish_with_internal_return();
+        let bb2 = func.begin_basic_block().finish_with_internal_return();
+        let fallback_bb = func.begin_basic_block().finish_with_internal_return();
 
         // Create switch using builder
         let condition = func.new_local();
@@ -617,7 +713,7 @@ mod tests {
         // Create entry block with switch
         let entry_bb = func.begin_basic_block().finish_with_switch(switch);
 
-        let func_id = func.finish(entry_bb);
+        let func_id = func.finish(entry_bb).unwrap();
 
         let program = builder.build(func_id, None);
 
