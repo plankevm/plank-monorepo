@@ -35,19 +35,21 @@ pub fn build_graph_simple<'ir>(
 
     let mut previous_in_chain = None;
     for op in block.operations() {
-        let return_dest = match op.op() {
-            Operation::InternalCall(call) => {
-                let callee = program.function(call.function);
-                let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
-                if !callee_entry_layout.contains(&LayoutMember::ReturnDest) {
-                    None
-                } else {
-                    let kind = OpNodeKind::RetDestPush(op.id());
-                    let ret_dest_push = graph.begin_op(kind);
-                    Some(ret_dest_push.end_inputs_begin_outputs().add_output())
-                }
+        let return_dest = 'return_dest: {
+            let Operation::InternalCall(icall) = op.op() else {
+                break 'return_dest None;
+            };
+            let callee = program.function(icall.function);
+            let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
+            if !callee_entry_layout.contains(&LayoutMember::ReturnDest) {
+                break 'return_dest None;
             }
-            _ => None,
+
+            let kind = OpNodeKind::RetDestPush(op.id());
+            let ret_dest_push = graph.begin_op(kind);
+            let ret_dest_value = ret_dest_push.end_inputs_begin_outputs().add_output();
+
+            Some(ret_dest_value)
         };
 
         let kind = if op.op().kind().flippable() {

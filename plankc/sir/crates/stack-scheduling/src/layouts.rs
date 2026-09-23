@@ -141,10 +141,7 @@ pub fn build_basic_block_layout_sets(
 
         let layout = layout_sets.entry(in_group).or_insert_default();
 
-        if owner != program.init_entry
-            && Some(owner) != program.main_entry
-            && !program.functions[owner].return_kind().is_never()
-        {
+        if !program.functions[owner].return_kind().is_never() {
             layout.add(LayoutMember::ReturnDest);
         }
 

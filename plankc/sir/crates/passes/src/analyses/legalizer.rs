@@ -36,6 +36,10 @@ pub enum LegalizerError {
     InitHasInputs(u32),
     #[error("runtime entry block must not have inputs, found {0}")]
     RuntimeHasInputs(u32),
+    #[error("init entry function must never return internally")]
+    InitMayReturn,
+    #[error("runtime entry function must never return internally")]
+    RuntimeMayReturn,
     #[error("terminator operation {1} is not last in @{0}")]
     TerminatorNotLast(BasicBlockId, OperationIdx),
     #[error("terminator operation {1} in @{0} without LastOpTerminates control")]
@@ -112,7 +116,11 @@ impl Legalizer {
         if program.functions.get(program.init_entry).is_none() {
             return Err(LegalizerError::InvalidFunctionId(program.init_entry));
         }
-        let entry_bb = &program.basic_blocks[program.functions[program.init_entry].entry()];
+        let init = &program.functions[program.init_entry];
+        if !init.return_kind().is_never() {
+            return Err(LegalizerError::InitMayReturn);
+        }
+        let entry_bb = &program.basic_blocks[init.entry()];
         if !entry_bb.inputs.is_empty() {
             return Err(LegalizerError::InitHasInputs(entry_bb.inputs.len()));
         }
@@ -121,7 +129,11 @@ impl Legalizer {
             if program.functions.get(main_entry).is_none() {
                 return Err(LegalizerError::InvalidFunctionId(main_entry));
             }
-            let main_bb = &program.basic_blocks[program.functions[main_entry].entry()];
+            let main = &program.functions[main_entry];
+            if !main.return_kind().is_never() {
+                return Err(LegalizerError::RuntimeMayReturn);
+            }
+            let main_bb = &program.basic_blocks[main.entry()];
             if !main_bb.inputs.is_empty() {
                 return Err(LegalizerError::RuntimeHasInputs(main_bb.inputs.len()));
             }
@@ -632,6 +644,41 @@ mod tests {
             EmitConfig::init_only(),
         );
         assert!(Legalizer::default().run(&program, &AnalysesStore::default()).is_ok());
+    }
+
+    #[test]
+    fn test_rejects_returning_init() {
+        let mut builder = EthIRBuilder::new();
+        let init = add_returning_function(&mut builder);
+        let program = builder.build(init, None);
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()),
+            Err(LegalizerError::InitMayReturn)
+        );
+    }
+
+    #[test]
+    fn test_rejects_returning_runtime() {
+        let mut builder = EthIRBuilder::new();
+        let init = add_never_function(&mut builder);
+        let main = add_returning_function(&mut builder);
+        let program = builder.build(init, Some(main));
+
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()),
+            Err(LegalizerError::RuntimeMayReturn)
+        );
+    }
+
+    #[test]
+    fn test_accepts_never_returning_entry_points() {
+        let mut builder = EthIRBuilder::new();
+        let init = add_never_function(&mut builder);
+        let main = add_never_function(&mut builder);
+        let program = builder.build(init, Some(main));
+
+        assert_eq!(Legalizer::default().run(&program, &AnalysesStore::default()), Ok(()));
     }
 
     #[test]
@@ -1174,7 +1221,15 @@ mod tests {
         let bb_id = bb.finish_with_internal_return().unwrap();
         func.finish(bb_id);
 
-        let program = builder.build(func_id, None);
+        let mut init = builder.begin_function();
+        let mut entry = init.begin_basic_block();
+        entry
+            .try_add_op(OperationKind::InternalCall, &[], &[], OpExtraData::FuncId(func_id))
+            .unwrap();
+        entry.add_operation(Operation::Stop(()));
+        let entry = entry.finish_terminating().unwrap();
+        let init = init.finish(entry);
+        let program = builder.build(init, None);
 
         assert_eq!(
             Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
@@ -1514,7 +1569,7 @@ mod tests {
 
         let func_b_id = program.functions.push(sir_data::Function::new(
             bb_shared_id,
-            sir_data::ReturnKind::values(0),
+            sir_data::ReturnKind::NEVER,
             None,
         ));
         program.main_entry = Some(func_b_id);
@@ -1596,7 +1651,8 @@ mod tests {
         let mut bb = func.begin_basic_block();
         bb.add_operation(Operation::SetSmallConst(SetSmallConstData { sets: out_local, value: 1 }));
         bb.set_outputs(&[out_local]);
-        let bb_id = bb.finish_with_internal_return().unwrap();
+        bb.add_operation(Operation::Stop(()));
+        let bb_id = bb.finish_terminating().unwrap();
 
         let func_id = func.finish(bb_id);
         let mut program = builder.build(func_id, None);
