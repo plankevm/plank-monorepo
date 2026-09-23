@@ -1,4 +1,5 @@
 use crate::{
+    code_layout::CodeLayout,
     code_to_asm::{CodeToAsmEmitter, CodegenState},
     mark_map::{IndexableMarkSpan, MarkMap},
 };
@@ -30,13 +31,14 @@ pub(crate) struct EmitRuncode {
 
 pub(crate) struct InitcodeEmitted<'a> {
     emitter: CodeToAsmEmitter<'a>,
+    code_layout: CodeLayout,
     runtime_datas: DenseIndexSet<DataId>,
 }
 
 impl CodegenState for EmitInitcode {
     const ALLOW_INITCODE_INTROSPECTION: bool = true;
 
-    fn layout(&self) -> &static_mem::Layout {
+    fn memory_layout(&self) -> &static_mem::Layout {
         &self.memory
     }
 
@@ -61,7 +63,7 @@ impl CodegenState for EmitInitcode {
 impl CodegenState for EmitRuncode {
     const ALLOW_INITCODE_INTROSPECTION: bool = false;
 
-    fn layout(&self) -> &static_mem::Layout {
+    fn memory_layout(&self) -> &static_mem::Layout {
         &self.memory
     }
 
@@ -139,7 +141,10 @@ impl<'a> InitcodeEmitted<'a> {
             None => DenseIndexSet::new(),
         };
 
-        let mut emitter = CodeToAsmEmitter::new(ir, ops, visited_bbs, basic_blocks_worklist);
+        let entry_block = ir.function(ir.init_entry).entry().id();
+        let mut code_layout = CodeLayout::new(entry_block, visited_bbs, basic_blocks_worklist);
+        code_layout.compute(ir, entry_block);
+        let mut emitter = CodeToAsmEmitter::new(ir, ops);
         let mut state = EmitInitcode {
             memory: init_memory_layout,
             init_only_data: HashSet::with_capacity(INIT_ONLY_DATAS_START_CAPACITY),
@@ -147,7 +152,7 @@ impl<'a> InitcodeEmitted<'a> {
             runtime_datas,
         };
 
-        emitter.emit_from_entrypoint(&mut state, ir.init_entry, predecessors);
+        emitter.emit_from_code_layout(&mut state, &code_layout, predecessors);
 
         let init_only_datas = {
             let mut init_only_datas_undeterministic: Vec<_> =
@@ -161,7 +166,7 @@ impl<'a> InitcodeEmitted<'a> {
             emitter.asm.push_data(&ir.data_segments[data]);
         }
 
-        InitcodeEmitted { emitter, runtime_datas: state.runtime_datas }
+        InitcodeEmitted { emitter, code_layout, runtime_datas: state.runtime_datas }
     }
 
     pub fn finish_with_runcode(
@@ -170,13 +175,15 @@ impl<'a> InitcodeEmitted<'a> {
         run_memory_layout: static_mem::Layout,
         predecessors: &Predecessors,
     ) -> (Assembler, MarkMap) {
-        let InitcodeEmitted { mut emitter, runtime_datas } = self;
+        let InitcodeEmitted { mut emitter, mut code_layout, runtime_datas } = self;
+        let entry_block = emitter.ir.function(runtime_entrypoint).entry().id();
+        code_layout.compute(emitter.ir, entry_block);
 
         let mut state =
             EmitRuncode { memory: run_memory_layout, bb_marks: emitter.alloc_bb_marks() };
 
         emitter.asm.push_mark(emitter.mark_map.runcode_start);
-        emitter.emit_from_entrypoint(&mut state, runtime_entrypoint, predecessors);
+        emitter.emit_from_code_layout(&mut state, &code_layout, predecessors);
         for data in runtime_datas.iter() {
             emitter.asm.push_mark(emitter.mark_map.datas.get(data));
             emitter.asm.push_data(&emitter.ir.data_segments[data]);
@@ -187,7 +194,7 @@ impl<'a> InitcodeEmitted<'a> {
     }
 
     pub fn finish_init_only(self) -> (Assembler, MarkMap) {
-        let InitcodeEmitted { mut emitter, runtime_datas: _ } = self;
+        let InitcodeEmitted { mut emitter, .. } = self;
         emitter.asm.push_mark(emitter.mark_map.runcode_start);
         emitter.asm.push_mark(emitter.mark_map.initcode_end);
         (emitter.asm, emitter.mark_map)
