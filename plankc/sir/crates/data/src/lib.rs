@@ -459,15 +459,6 @@ pub struct BasicBlock {
     pub control: Control,
 }
 
-impl BasicBlock {
-    pub fn implied_fn_out(&self) -> Option<u32> {
-        match self.control {
-            Control::InternalReturn => Some(self.outputs.end - self.outputs.start),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Branch {
     pub condition: LocalId,

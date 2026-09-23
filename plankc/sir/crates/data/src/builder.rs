@@ -7,21 +7,22 @@ use plank_core::{DenseIndexSet, Idx, IndexVec, must_use::MustUseStrict, span::In
 
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
-    #[error(
-        "Basic block implies conflicting output for function, set != new implied: {set_outputs} != {implied_out}"
-    )]
-    ConflictingFunctionOutputs {
-        first_block: BasicBlockId,
-        conflicting_block: BasicBlockId,
-        set_outputs: u32,
-        implied_out: u32,
-    },
-
     #[error("attempted to set \"last op terminates\" control flow for non-terminating block")]
     TerminatingBlockWithoutOp,
 
     #[error("attempted to set control for non-placeholder block")]
     SettingControlForNonPlaceholder,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Basic block implies conflicting output for function, set != new implied: {set_outputs} != {implied_out}"
+)]
+pub struct ConflictingFunctionOutputs {
+    pub first_block: BasicBlockId,
+    pub conflicting_block: BasicBlockId,
+    pub set_outputs: u32,
+    pub implied_out: u32,
 }
 
 #[derive(Debug)]
@@ -195,7 +196,10 @@ impl<'ir> FunctionBuilder<'ir> {
         Ok(())
     }
 
-    pub fn finish(self, entry_bb_id: BasicBlockId) -> Result<FunctionId, BuildError> {
+    pub fn finish(
+        self,
+        entry_bb_id: BasicBlockId,
+    ) -> Result<FunctionId, ConflictingFunctionOutputs> {
         self.finish_with_source(entry_bb_id, None)
     }
 
@@ -203,7 +207,7 @@ impl<'ir> FunctionBuilder<'ir> {
         mut self,
         entry_bb_id: BasicBlockId,
         source: Option<OpaqueSourceId>,
-    ) -> Result<FunctionId, BuildError> {
+    ) -> Result<FunctionId, ConflictingFunctionOutputs> {
         let end_bb = self.ir_builder.basic_blocks.next_idx();
         let basic_blocks = self.first_bb..end_bb;
         assert!(
@@ -220,7 +224,10 @@ impl<'ir> FunctionBuilder<'ir> {
         Ok(self.ir_builder.functions.push(Function::new(entry_bb_id, return_kind, source)))
     }
 
-    fn infer_return_kind(&mut self, entry: BasicBlockId) -> Result<ReturnKind, BuildError> {
+    fn infer_return_kind(
+        &mut self,
+        entry: BasicBlockId,
+    ) -> Result<ReturnKind, ConflictingFunctionOutputs> {
         self.ir_builder.return_kind_visited.clear();
         self.ir_builder.return_kind_worklist.clear();
         self.ir_builder.return_kind_visited.add(entry);
@@ -244,7 +251,7 @@ impl<'ir> FunctionBuilder<'ir> {
                     let implied_out = block.outputs.len();
                     if let Some((first_block, set_outputs)) = first_return {
                         if set_outputs != implied_out {
-                            return Err(BuildError::ConflictingFunctionOutputs {
+                            return Err(ConflictingFunctionOutputs {
                                 first_block,
                                 conflicting_block: block_id,
                                 set_outputs,

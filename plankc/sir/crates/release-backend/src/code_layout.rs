@@ -26,13 +26,12 @@ pub(crate) struct CodeLayout {
 
 impl CodeLayout {
     pub fn new(
+        ir: &EthIRProgram,
         entry_block: BasicBlockId,
-        mut entrypoint_blocks: DenseIndexSet<BasicBlockId>,
-        mut worklist: Vec<BasicBlockId>,
+        entrypoint_blocks: DenseIndexSet<BasicBlockId>,
+        worklist: Vec<BasicBlockId>,
     ) -> Self {
-        entrypoint_blocks.clear();
-        worklist.clear();
-        Self {
+        let mut layout = Self {
             entry_block,
             entrypoint_blocks,
             control_candidates: Vec::new(),
@@ -40,7 +39,9 @@ impl CodeLayout {
             assigned_successors: DenseIndexMap::new(),
             with_assigned_predecessor: DenseIndexSet::new(),
             worklist,
-        }
+        };
+        layout.compute(ir, entry_block);
+        layout
     }
 
     pub fn compute(&mut self, ir: &EthIRProgram, entry_block: BasicBlockId) {

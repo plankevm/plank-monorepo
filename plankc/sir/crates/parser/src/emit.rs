@@ -618,9 +618,6 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                 }
             };
             func_builder.set_control(bb_id.inner, ctrl).map_err(|err| match err {
-                BuildError::ConflictingFunctionOutputs { .. } => {
-                    unreachable!("return counts are checked at function finalization")
-                }
                 BuildError::TerminatingBlockWithoutOp => SirAstSemaError {
                     spans: arena.alloc([bb_id.span()]),
                     reason: format_in!(
@@ -639,26 +636,18 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
         let func_id = func_builder
             .finish_with_source(entry_bb_id.expect("function didn't have at least 1 bb"), source)
             .map_err(|err| {
-                let BuildError::ConflictingFunctionOutputs {
-                    first_block,
-                    conflicting_block,
-                    set_outputs,
-                    implied_out,
-                } = err
-                else {
-                    unreachable!("block controls are validated before function finalization")
-                };
                 let block_span = |block| {
                     bb_ids.values().find(|id| id.inner == block).expect("missing block span").span()
                 };
                 SirAstSemaError {
-                    spans: arena.alloc([block_span(first_block), block_span(conflicting_block)]),
+                    spans: arena
+                        .alloc([block_span(err.first_block), block_span(err.conflicting_block)]),
                     reason: format_in!(
                         arena,
                         "Separate irets imply different outputs for function {:?} ({} vs. {})",
                         func.name.inner,
-                        set_outputs,
-                        implied_out
+                        err.set_outputs,
+                        err.implied_out
                     ),
                 }
             })?;

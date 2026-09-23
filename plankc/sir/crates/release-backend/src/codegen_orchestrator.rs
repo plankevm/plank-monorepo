@@ -142,8 +142,7 @@ impl<'a> InitcodeEmitted<'a> {
         };
 
         let entry_block = ir.function(ir.init_entry).entry().id();
-        let mut code_layout = CodeLayout::new(entry_block, visited_bbs, basic_blocks_worklist);
-        code_layout.compute(ir, entry_block);
+        let code_layout = CodeLayout::new(ir, entry_block, visited_bbs, basic_blocks_worklist);
         let mut emitter = CodeToAsmEmitter::new(ir, ops);
         let mut state = EmitInitcode {
             memory: init_memory_layout,
