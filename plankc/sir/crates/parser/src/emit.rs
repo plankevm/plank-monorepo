@@ -7,7 +7,7 @@ use bumpalo::{
 use plank_core::IndexVec;
 use sir_data::{
     BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, LocalId, OpaqueSourceId,
-    Operation, ReturnKind,
+    Operation,
     builder::{BuildError, EthIRBuilder},
     operation::{OpBuildError, OpExtraData, OperationKind},
 };
@@ -669,7 +669,7 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
     let init_func = ir_builder.get_func(init_entry).expect("func with ID not in builder");
     let init_func_inputs = init_func.get_inputs(ir_builder.view_bb_backing());
     let init_return_kind = init_func.return_kind();
-    if matches!(init_return_kind, ReturnKind::Values(count) if count != 0) || init_func_inputs != 0
+    if init_return_kind.count().is_some_and(|count| count != 0) || init_func_inputs != 0
     {
         let ast_func_node = ast
             .functions
@@ -697,7 +697,7 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
         let run_func = ir_builder.get_func(run_entry).expect("func with ID not in builder");
         let run_func_inputs = run_func.get_inputs(ir_builder.view_bb_backing());
         let run_return_kind = run_func.return_kind();
-        if matches!(run_return_kind, ReturnKind::Values(count) if count != 0)
+        if run_return_kind.count().is_some_and(|count| count != 0)
             || run_func_inputs != 0
         {
             let ast_func_node = ast

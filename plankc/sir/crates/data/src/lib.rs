@@ -81,11 +81,9 @@ impl EthIRProgram {
         writeln!(&mut output, "\n=== Functions ({}) ===", self.functions.len()).unwrap();
         for (id, func) in self.functions.enumerate_idx() {
             write!(&mut output, "@{id}: entry=@{}", func.entry()).unwrap();
-            match func.return_kind() {
-                ReturnKind::Never => writeln!(&mut output, ", never").unwrap(),
-                ReturnKind::Values(outputs) => {
-                    writeln!(&mut output, ", outputs={outputs}").unwrap()
-                }
+            match func.return_kind().count() {
+                None => writeln!(&mut output, ", never").unwrap(),
+                Some(outputs) => writeln!(&mut output, ", outputs={outputs}").unwrap(),
             }
         }
 
@@ -217,9 +215,9 @@ pub fn display_program(ir: &EthIRProgram) -> String {
     // Display functions
     for func in ir.functions_iter() {
         write!(&mut output, "    fn @{} -> entry @{}  ", func.id(), func.entry().id()).unwrap();
-        match func.return_kind() {
-            ReturnKind::Never => writeln!(&mut output, "(never)").unwrap(),
-            ReturnKind::Values(outputs) => writeln!(&mut output, "(outputs: {outputs})").unwrap(),
+        match func.return_kind().count() {
+            None => writeln!(&mut output, "(never)").unwrap(),
+            Some(outputs) => writeln!(&mut output, "(outputs: {outputs})").unwrap(),
         }
     }
 
@@ -388,16 +386,32 @@ impl fmt::Display for EthIRProgram {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReturnKind {
-    Never,
-    Values(u32),
+#[repr(transparent)]
+pub struct ReturnKind(u32);
+
+impl ReturnKind {
+    const NEVER_RAW: u32 = u32::MAX;
+    pub const NEVER: ReturnKind = ReturnKind(Self::NEVER_RAW);
+
+    pub const fn is_never(self) -> bool {
+        self.0 == Self::NEVER_RAW
+    }
+
+    pub const fn count(self) -> Option<u32> {
+        if self.is_never() { None } else { Some(self.0) }
+    }
+
+    pub const fn values(count: u32) -> ReturnKind {
+        assert!(count != Self::NEVER_RAW);
+        ReturnKind(count)
+    }
 }
 
 impl fmt::Display for ReturnKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Never => f.write_str("never"),
-            Self::Values(count) => count.fmt(f),
+        match self.count() {
+            None => f.write_str("never"),
+            Some(count) => count.fmt(f),
         }
     }
 }

@@ -227,8 +227,8 @@ impl<'ir> FunctionBuilder<'ir> {
         );
 
         let return_kind = match self.iret_outputs {
-            None => ReturnKind::Never,
-            Some(outputs) => ReturnKind::Values(outputs),
+            None => ReturnKind::NEVER,
+            Some(outputs) => ReturnKind::values(outputs),
         };
         self.ir_builder.functions.push(Function::new(entry_bb_id, return_kind, source))
     }
@@ -502,7 +502,7 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(program.init_entry, func_id);
-        assert_eq!(program.functions[func_id].return_kind(), ReturnKind::Values(1));
+        assert_eq!(program.functions[func_id].return_kind(), ReturnKind::values(1));
         assert_eq!(program.operations.len(), 1);
     }
 
@@ -523,8 +523,8 @@ mod tests {
 
         let program = builder.build(never, None);
 
-        assert_eq!(program.functions[never].return_kind(), ReturnKind::Never);
-        assert_eq!(program.functions[returns_void].return_kind(), ReturnKind::Values(0));
+        assert_eq!(program.functions[never].return_kind(), ReturnKind::NEVER);
+        assert_eq!(program.functions[returns_void].return_kind(), ReturnKind::values(0));
     }
 
     #[test]

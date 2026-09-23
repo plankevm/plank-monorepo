@@ -1,5 +1,5 @@
 use super::op_visitor::{OpVisitor, OpVisitorMut};
-use crate::{EthIRProgram, Function, ReturnKind, builder::EthIRBuilder, index::*};
+use crate::{EthIRProgram, Function, builder::EthIRBuilder, index::*};
 use alloy_primitives::{U256, ruint::FromUintError};
 use plank_core::{Idx, IndexVec, Span};
 
@@ -282,7 +282,7 @@ impl InternalCallData {
     }
 
     pub fn outputs_span(&self, functions: &IndexVec<FunctionId, Function>) -> Span<LocalIdx> {
-        let ReturnKind::Values(output_count) = functions[self.function].return_kind() else {
+        let Some(output_count) = functions[self.function].return_kind().count() else {
             unreachable!("invariant: internal call target @{} never returns", self.function);
         };
         Span::new(self.outs_start, self.outs_start + output_count)
@@ -424,7 +424,7 @@ impl FromOpData for InternalCallData {
         };
         let func = *builder.get_func(func_id).ok_or(OpBuildError::UndefinedFunction(func_id))?;
         let inputs = func.get_inputs(&builder.basic_blocks) as usize;
-        let ReturnKind::Values(outputs) = func.return_kind() else {
+        let Some(outputs) = func.return_kind().count() else {
             return Err(OpBuildError::InternalCallToNever(func_id));
         };
         let outputs = outputs as usize;
@@ -462,7 +462,7 @@ impl FromOpData for InternalCallNeverData {
         };
         let target =
             *builder.get_func(function).ok_or(OpBuildError::UndefinedFunction(function))?;
-        if !matches!(target.return_kind(), ReturnKind::Never) {
+        if !target.return_kind().is_never() {
             return Err(OpBuildError::NeverCallReturns(function));
         }
 

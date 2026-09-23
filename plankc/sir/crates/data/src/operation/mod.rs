@@ -593,7 +593,7 @@ mod tests {
     fn clone_operation_into_copies_internal_call_operands() {
         let mut source = EthIRProgram::default();
         let function =
-            source.functions.push(Function::new(BasicBlockId::ZERO, ReturnKind::Values(2), None));
+            source.functions.push(Function::new(BasicBlockId::ZERO, ReturnKind::values(2), None));
         source.locals.extend([LocalId::new(0), LocalId::new(1), LocalId::new(2), LocalId::new(3)]);
         let original = source.operations.push(Operation::InternalCall(InternalCallData {
             function,

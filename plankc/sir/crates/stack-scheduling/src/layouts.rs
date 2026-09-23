@@ -1,6 +1,6 @@
 use hashbrown::HashSet;
 use plank_core::{DenseIndexMap, newtype_index};
-use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId, ReturnKind};
+use sir_data::{BasicBlockId, ControlView, EthIRProgram, FunctionId, LocalId};
 use sir_passes::{
     AnalysesStore, ControlFlowGraphInOutBundling, InOutGroupId, analyses::Unreachable,
 };
@@ -143,7 +143,7 @@ pub fn build_basic_block_layout_sets(
 
         if owner != program.init_entry
             && Some(owner) != program.main_entry
-            && matches!(program.functions[owner].return_kind(), ReturnKind::Values(_))
+            && !program.functions[owner].return_kind().is_never()
         {
             layout.add(LayoutMember::ReturnDest);
         }

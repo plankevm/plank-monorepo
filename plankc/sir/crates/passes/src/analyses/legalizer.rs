@@ -5,7 +5,7 @@ use crate::{
 use plank_core::{DenseIndexSet, Idx, IndexVec, index_vec};
 use sir_data::{
     BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    LocalIdx, Operation, OperationIdx, ReturnKind, StaticAllocId,
+    LocalIdx, Operation, OperationIdx, StaticAllocId,
 };
 
 /// Identifies which IR construct a tracked span belongs to, used in span overlap diagnostics.
@@ -239,7 +239,7 @@ impl Legalizer {
                     let Some(function) = program.functions.get(data.function) else {
                         return Err(LegalizerError::InvalidFunctionId(data.function));
                     };
-                    if matches!(function.return_kind(), ReturnKind::Never) {
+                    if function.return_kind().is_never() {
                         return Err(LegalizerError::InternalCallToNever {
                             op: op_id,
                             function: data.function,
@@ -250,7 +250,7 @@ impl Legalizer {
                     let Some(function) = program.functions.get(data.function) else {
                         return Err(LegalizerError::InvalidFunctionId(data.function));
                     };
-                    if matches!(function.return_kind(), ReturnKind::Values(_)) {
+                    if !function.return_kind().is_never() {
                         return Err(LegalizerError::NeverCallReturns {
                             op: op_id,
                             function: data.function,
@@ -361,14 +361,14 @@ impl Legalizer {
         visited.add(bb);
 
         if matches!(program.basic_blocks[bb].control, Control::InternalReturn) {
-            match program.functions[fn_id].return_kind() {
-                ReturnKind::Never => {
+            match program.functions[fn_id].return_kind().count() {
+                None => {
                     return Err(LegalizerError::InternalReturnInNeverFunction {
                         function: fn_id,
                         block: bb,
                     });
                 }
-                ReturnKind::Values(expected_outputs) => {
+                Some(expected_outputs) => {
                     let actual_outputs = program.basic_blocks[bb].outputs.len();
                     if actual_outputs != expected_outputs {
                         return Err(LegalizerError::WrongOutputCount {
@@ -641,7 +641,8 @@ mod tests {
         let entry = function.begin_basic_block().finish_with_internal_return().unwrap();
         let function = function.finish(entry);
         let mut program = builder.build(function, None);
-        program.functions[function] = sir_data::Function::new(entry, ReturnKind::Never, None);
+        program.functions[function] =
+            sir_data::Function::new(entry, sir_data::ReturnKind::NEVER, None);
 
         assert_eq!(
             Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
@@ -1513,7 +1514,7 @@ mod tests {
 
         let func_b_id = program.functions.push(sir_data::Function::new(
             bb_shared_id,
-            sir_data::ReturnKind::Values(0),
+            sir_data::ReturnKind::values(0),
             None,
         ));
         program.main_entry = Some(func_b_id);
