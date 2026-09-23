@@ -326,3 +326,54 @@ fn runtime_entry_does_not_need_jumpdest() {
         "#,
     );
 }
+
+#[test]
+fn init_and_runtime_layouts_do_not_share_state() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                icall @init_helper
+                stop
+            }
+        fn init_helper:
+            entry {
+                iret
+            }
+        fn main:
+            entry {
+                icall @runtime_helper
+                stop
+            }
+        fn runtime_helper:
+            entry {
+                iret
+            }
+        "#,
+        EmitConfig::new("init", "main"),
+        r#"
+            .mark3:
+              PUSH .mark6
+              PUSH .mark2
+              JUMP
+            .mark6:
+              JUMPDEST
+              STOP
+            .mark2:
+              JUMPDEST
+              JUMP
+            .mark0:
+            .mark10:
+              PUSH (.mark11 - .mark0)
+              PUSH (.mark9 - .mark0)
+              JUMP
+            .mark11:
+              JUMPDEST
+              STOP
+            .mark9:
+              JUMPDEST
+              JUMP
+            .mark1:
+        "#,
+    );
+}

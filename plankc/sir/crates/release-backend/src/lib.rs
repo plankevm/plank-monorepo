@@ -5,6 +5,7 @@ use sir_passes::AnalysesStore;
 use sir_stack_scheduling::{self, ScheduleConfig};
 use sir_static_memory_allocator::BumpAllocateAll;
 
+mod code_layout;
 mod code_to_asm;
 mod codegen_orchestrator;
 mod mark_map;

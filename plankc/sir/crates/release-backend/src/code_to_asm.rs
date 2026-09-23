@@ -1,4 +1,7 @@
-use crate::mark_map::{IndexableMarkSpan, MarkMap};
+use crate::{
+    code_layout::{CodeLayout, Fallthrough},
+    mark_map::{IndexableMarkSpan, MarkMap},
+};
 use alloy_primitives::U256;
 use plank_core::{DenseIndexSet, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
@@ -31,46 +34,25 @@ pub(crate) struct CodeToAsmEmitter<'a> {
     pub asm: Assembler,
     pub ir: &'a EthIRProgram,
     ops: &'a ScheduledOps,
-    visited_bbs: DenseIndexSet<BasicBlockId>,
-    fallthrough_targets: DenseIndexSet<BasicBlockId>,
-    basic_blocks_worklist: Vec<BasicBlockId>,
+    layout: CodeLayout,
 }
 
 impl<'a> CodeToAsmEmitter<'a> {
     pub fn new(
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
-        mut visited_bbs: DenseIndexSet<BasicBlockId>,
-        mut basic_blocks_worklist: Vec<BasicBlockId>,
+        visited_bbs: DenseIndexSet<BasicBlockId>,
+        basic_blocks_worklist: Vec<BasicBlockId>,
     ) -> Self {
         let mark_map = MarkMap::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
-        let fallthrough_targets = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
+        let layout = CodeLayout::new(ir.basic_blocks.len(), visited_bbs, basic_blocks_worklist);
 
-        // Extra clear just to be safe.
-        visited_bbs.clear();
-        basic_blocks_worklist.clear();
-
-        Self { ir, ops, mark_map, visited_bbs, fallthrough_targets, basic_blocks_worklist, asm }
+        Self { ir, ops, mark_map, layout, asm }
     }
 
     pub fn alloc_bb_marks(&mut self) -> IndexableMarkSpan<BasicBlockId> {
         MarkMap::alloc_map(&mut self.mark_map.next_mark_id, self.ir.basic_blocks.len())
-    }
-
-    fn reset_for_entrypoint(&mut self) {
-        self.basic_blocks_worklist.clear();
-        self.visited_bbs.clear();
-        self.fallthrough_targets.clear();
-    }
-
-    fn enqueue_bb(&mut self, bb: BasicBlockId) -> bool {
-        if self.visited_bbs.add(bb) {
-            self.basic_blocks_worklist.push(bb);
-            true
-        } else {
-            false
-        }
     }
 
     pub fn emit_from_entrypoint(
@@ -79,7 +61,7 @@ impl<'a> CodeToAsmEmitter<'a> {
         entrypoint: FunctionId,
         predecessors: &Predecessors,
     ) {
-        self.reset_for_entrypoint();
+        self.layout.compute(self.ir, self.ops, entrypoint);
 
         if let Some(free_pointer) = state.layout().dyn_free_pointer {
             self.asm.push_minimal_u32(free_pointer.start_value.get());
@@ -88,16 +70,16 @@ impl<'a> CodeToAsmEmitter<'a> {
         }
 
         let entry_bb = self.ir.function(entrypoint).entry().id();
-        assert!(self.enqueue_bb(entry_bb));
 
         let mut icall_return_marks = ICallReturnMarks::new();
 
-        while let Some(bb_id) = self.basic_blocks_worklist.pop() {
+        for block_idx in 0..self.layout.blocks().len() {
+            let bb_id = self.layout.blocks()[block_idx];
             let jumpdest_mark = state.bb_marks().get(bb_id);
             self.asm.push_mark(jumpdest_mark);
             let omit_jumpdest = match predecessors.of(bb_id).len() {
                 0 => bb_id == entry_bb, // Entrypoints do not need `JUMPDEST`.
-                1 => self.fallthrough_targets.contains(bb_id),
+                1 => self.layout.is_fallthrough_target(bb_id),
                 _ => false,
             };
             if !omit_jumpdest {
@@ -145,49 +127,39 @@ impl<'a> CodeToAsmEmitter<'a> {
                     self.asm.push_op_byte(op::JUMP);
                 }
                 ControlView::ContinuesTo(to) => {
-                    if self.enqueue_bb(to) {
-                        self.fallthrough_targets.add(to);
-                    } else {
+                    if self.layout.selected_fallthrough(bb_id).is_none() {
                         self.emit_jump_to(state, to);
                     }
                 }
                 ControlView::Branches { condition: _, non_zero_target, zero_target } => {
-                    self.enqueue_bb(non_zero_target);
                     self.emit_jumpi_to(state, non_zero_target);
 
-                    if self.enqueue_bb(zero_target) {
-                        self.fallthrough_targets.add(zero_target);
-                    } else {
-                        self.emit_jump_to(state, zero_target);
+                    match self.layout.selected_fallthrough(bb_id) {
+                        None => self.emit_jump_to(state, zero_target),
+                        Some(fallthrough) => assert_eq!(
+                            fallthrough.target(),
+                            zero_target,
+                            "invariant: selected fallthrough does not match zero branch target"
+                        ),
                     }
                 }
                 ControlView::Switch(switch) => {
                     let switch_store_addr =
                         state.layout().switch_store.expect("missing switch allocation").get();
-                    let (fallthrough_target, fallthrough_case) = if let Some(target) =
-                        switch.fallback()
-                        && !self.visited_bbs.contains(target)
-                    {
-                        (Some(target), None)
-                    } else if let Some((idx, (value, target))) = switch
-                        .cases()
-                        .enumerate()
-                        .find(|(_, (_, target))| !self.visited_bbs.contains(*target))
-                    {
-                        (Some(target), Some((idx, value, target)))
-                    } else {
-                        (None, None)
-                    };
+                    let fallthrough = self.layout.selected_fallthrough(bb_id);
 
                     self.asm.push_minimal_u32(switch_store_addr);
                     self.asm.push_op_byte(op::MSTORE);
 
                     for (case_idx, (value, to)) in switch.cases().enumerate() {
-                        if fallthrough_case.is_some_and(|(idx, _, _)| idx == case_idx) {
+                        if matches!(
+                            fallthrough,
+                            Some(Fallthrough::SwitchCase { case_index, .. })
+                                if case_index == case_idx
+                        ) {
                             continue;
                         }
-                        assert_ne!(fallthrough_target, Some(to));
-                        self.enqueue_bb(to);
+                        assert_ne!(fallthrough.map(Fallthrough::target), Some(to));
                         self.asm.push_minimal_u32(switch_store_addr);
                         self.asm.push_op_byte(op::MLOAD);
                         self.asm.push_minimal_u256(value);
@@ -195,9 +167,12 @@ impl<'a> CodeToAsmEmitter<'a> {
                         self.emit_jumpi_to(state, to);
                     }
 
-                    if let Some((_, value, to)) = fallthrough_case {
+                    if let Some(Fallthrough::SwitchCase { block, case_index }) = fallthrough {
+                        let (value, to) = switch
+                            .cases()
+                            .nth(case_index)
+                            .expect("selected fallthrough case should exist");
                         if let Some(fallback) = switch.fallback() {
-                            assert!(self.visited_bbs.contains(fallback));
                             // Invert the match so `JUMPI` takes the fallback on mismatch and falls
                             // through on match.
                             self.asm.push_minimal_u32(switch_store_addr);
@@ -207,20 +182,13 @@ impl<'a> CodeToAsmEmitter<'a> {
                             self.asm.push_op_byte(op::ISZERO);
                             self.emit_jumpi_to(state, fallback);
                         }
-                        assert!(self.enqueue_bb(to));
-                        self.fallthrough_targets.add(to);
-                    } else if let Some(to) = fallthrough_target {
+                        assert_eq!(block, to);
+                    } else if let Some(Fallthrough::Block(to)) = fallthrough {
                         assert_eq!(switch.fallback(), Some(to));
-                        assert!(self.enqueue_bb(to));
-                        self.fallthrough_targets.add(to);
                     } else if let Some(to) = switch.fallback() {
                         self.emit_jump_to(state, to);
                     }
                 }
-            }
-
-            for succ in block.successors() {
-                self.enqueue_bb(succ);
             }
         }
     }
@@ -313,7 +281,6 @@ impl<'a> CodeToAsmEmitter<'a> {
         function: FunctionId,
     ) {
         let call_entry_bb = self.ir.function(function).entry().id();
-        self.enqueue_bb(call_entry_bb);
         let call_return_dest = {
             let (i, mark) = icall_return_marks
                 .iter()
@@ -333,7 +300,6 @@ impl<'a> CodeToAsmEmitter<'a> {
 
     fn emit_icall_never(&mut self, state: &impl CodegenState, function: FunctionId) {
         let call_entry_bb = self.ir.function(function).entry().id();
-        self.enqueue_bb(call_entry_bb);
         let bb_entry_mark = state.bb_marks().get(call_entry_bb);
         let function_entry_ref = state.mark_to_ref(&self.mark_map, bb_entry_mark);
 
