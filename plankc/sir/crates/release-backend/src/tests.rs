@@ -452,3 +452,126 @@ fn init_and_runtime_layouts_do_not_share_state() {
         "#,
     );
 }
+
+#[test]
+fn never_call_wrapper_is_replaced_with_prepared_argument() {
+    assert_asm(
+        r#"
+        fn init:
+            entry -> value {
+                value = caller
+                condition = calldatasize
+                => condition ? @terminate : @continue
+            }
+            terminate argument {
+                icall_never @halt argument
+            }
+            continue unused {
+                stop
+            }
+        fn halt:
+            entry offset {
+                revert offset offset
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark3:
+              CALLER
+              CALLDATASIZE
+              PUSH .mark2
+              JUMPI
+            .mark5:
+              STOP
+            .mark2:
+              JUMPDEST
+              DUP1
+              REVERT
+            .mark0:
+            .mark1:
+        "#,
+    );
+}
+
+#[test]
+fn never_call_wrapper_with_assigned_predecessor_is_retained() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                condition = calldatasize
+                => condition ? @continue : @terminate
+            }
+            terminate {
+                icall_never @halt
+            }
+            continue {
+                stop
+            }
+        fn halt:
+            entry {
+                invalid
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark3:
+              CALLDATASIZE
+              PUSH .mark5
+              JUMPI
+            .mark4:
+            .mark2:
+              JUMPDEST
+              INVALID
+            .mark5:
+              JUMPDEST
+              STOP
+            .mark0:
+            .mark1:
+        "#,
+    );
+}
+
+#[test]
+fn never_call_wrapper_with_extra_operations_is_not_replaced() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                condition = calldatasize
+                => condition ? @terminate : @continue
+            }
+            terminate {
+                value = const 0
+                icall_never @halt value
+            }
+            continue {
+                stop
+            }
+        fn halt:
+            entry offset {
+                revert offset offset
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark3:
+              CALLDATASIZE
+              PUSH .mark4
+              JUMPI
+            .mark5:
+              STOP
+            .mark2:
+              JUMPDEST
+              DUP1
+              REVERT
+            .mark4:
+              JUMPDEST
+              PUSH0
+              PUSH .mark2
+              JUMP
+            .mark0:
+            .mark1:
+        "#,
+    );
+}

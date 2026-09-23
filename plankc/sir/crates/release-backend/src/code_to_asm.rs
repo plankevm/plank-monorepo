@@ -72,10 +72,14 @@ impl<'a> CodeToAsmEmitter<'a> {
 
         self.emit_block_and_successors(state, code_layout, code_layout.entry_block(), predecessors);
 
-        for start in code_layout.blocks_without_assigned_predecessor() {
-            if !self.emitted_blocks.contains(start) {
-                self.emit_block_and_successors(state, code_layout, start, predecessors);
+        for block in code_layout.blocks_without_assigned_predecessor() {
+            if self.emitted_blocks.contains(block)
+                || (!self.function_entries.contains(block)
+                    && self.never_call_replacement_target(block).is_some())
+            {
+                continue;
             }
+            self.emit_block_and_successors(state, code_layout, block, predecessors);
         }
     }
 
@@ -240,6 +244,7 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_jump_to(&mut self, state: &impl CodegenState, target: BasicBlockId) {
+        let target = self.never_call_replacement_target(target).unwrap_or(target);
         let target_mark = state.bb_marks().get(target);
         let target_ref = state.mark_to_ref(&self.mark_map, target_mark);
         self.asm.push_reference(AsmReference::pushed(target_ref));
@@ -247,6 +252,7 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_jumpi_to(&mut self, state: &impl CodegenState, target: BasicBlockId) {
+        let target = self.never_call_replacement_target(target).unwrap_or(target);
         let target_mark = state.bb_marks().get(target);
         let target_ref = state.mark_to_ref(&self.mark_map, target_mark);
         self.asm.push_reference(AsmReference::pushed(target_ref));
@@ -352,6 +358,19 @@ impl<'a> CodeToAsmEmitter<'a> {
         self.emit_call_target(state, code_layout, predecessors, function);
         self.asm.push_mark(call_return_dest);
         self.asm.push_op_byte(op::JUMPDEST);
+    }
+
+    fn never_call_replacement_target(&self, block: BasicBlockId) -> Option<BasicBlockId> {
+        let &[StackOps::Op(operation)] =
+            self.ops.get(block).expect("reachable block not scheduled")
+        else {
+            return None;
+        };
+        let Operation::InternalCallNever(call) = self.ir.operations[operation] else {
+            return None;
+        };
+
+        Some(self.ir.function(call.function).entry().id())
     }
 
     fn emit_call_target(
