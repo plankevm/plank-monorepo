@@ -288,14 +288,12 @@ fn internal_call_entry_keeps_jumpdest() {
         r#"
             .mark3:
               PUSH .mark4
-              PUSH .mark2
+            .mark2:
+              JUMPDEST
               JUMP
             .mark4:
               JUMPDEST
               STOP
-            .mark2:
-              JUMPDEST
-              JUMP
             .mark0:
             .mark1:
         "#,
@@ -328,6 +326,87 @@ fn runtime_entry_does_not_need_jumpdest() {
 }
 
 #[test]
+fn first_internal_call_falls_through_to_callee() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                icall @helper
+                icall @helper
+                stop
+            }
+        fn helper:
+            entry {
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark3:
+              PUSH .mark4
+            .mark2:
+              JUMPDEST
+              JUMP
+            .mark4:
+              JUMPDEST
+              PUSH .mark5
+              PUSH .mark2
+              JUMP
+            .mark5:
+              JUMPDEST
+              STOP
+            .mark0:
+            .mark1:
+        "#,
+    );
+}
+
+#[test]
+fn callee_entry_follows_loop_latch() {
+    assert_asm(
+        r#"
+        fn init:
+            entry {
+                icall @helper
+                stop
+            }
+        fn helper:
+            header {
+                condition = gas
+                => condition ? @latch : @exit
+            }
+            latch {
+                => @header
+            }
+            exit {
+                iret
+            }
+        "#,
+        EmitConfig::init_only(),
+        r#"
+            .mark5:
+              PUSH .mark6
+              PUSH .mark2
+              JUMP
+            .mark6:
+              JUMPDEST
+              STOP
+            .mark3:
+              JUMPDEST
+            .mark2:
+              JUMPDEST
+              GAS
+              PUSH .mark3
+              JUMPI
+            .mark4:
+              JUMP
+            .mark0:
+            .mark1:
+        "#,
+    );
+}
+
+#[test]
 fn init_and_runtime_layouts_do_not_share_state() {
     assert_asm(
         r#"
@@ -354,25 +433,21 @@ fn init_and_runtime_layouts_do_not_share_state() {
         r#"
             .mark3:
               PUSH .mark6
-              PUSH .mark2
+            .mark2:
+              JUMPDEST
               JUMP
             .mark6:
               JUMPDEST
               STOP
-            .mark2:
-              JUMPDEST
-              JUMP
             .mark0:
             .mark10:
               PUSH (.mark11 - .mark0)
-              PUSH (.mark9 - .mark0)
+            .mark9:
+              JUMPDEST
               JUMP
             .mark11:
               JUMPDEST
               STOP
-            .mark9:
-              JUMPDEST
-              JUMP
             .mark1:
         "#,
     );

@@ -142,10 +142,24 @@ impl<'a> CodeToAsmEmitter<'a> {
                     self.asm.push_reference(AsmReference::pushed(mark_ref));
                 }
                 StackOps::Op(op_idx) => {
-                    self.emit_op(state, &mut icall_return_marks, op_idx, false);
+                    self.emit_op(
+                        state,
+                        code_layout,
+                        predecessors,
+                        &mut icall_return_marks,
+                        op_idx,
+                        false,
+                    );
                 }
                 StackOps::Flipped(op_idx) => {
-                    self.emit_op(state, &mut icall_return_marks, op_idx, true);
+                    self.emit_op(
+                        state,
+                        code_layout,
+                        predecessors,
+                        &mut icall_return_marks,
+                        op_idx,
+                        true,
+                    );
                 }
             }
         }
@@ -242,6 +256,8 @@ impl<'a> CodeToAsmEmitter<'a> {
     fn emit_op<State: CodegenState>(
         &mut self,
         state: &mut State,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
         icall_return_marks: &mut ICallReturnMarks,
         op_idx: OperationIdx,
         flipped: bool,
@@ -258,10 +274,17 @@ impl<'a> CodeToAsmEmitter<'a> {
         }
 
         match op {
-            Operation::InternalCall(args) => {
-                self.emit_icall(state, icall_return_marks, op_idx, args.function)
+            Operation::InternalCall(args) => self.emit_icall(
+                state,
+                code_layout,
+                predecessors,
+                icall_return_marks,
+                op_idx,
+                args.function,
+            ),
+            Operation::InternalCallNever(args) => {
+                self.emit_call_target(state, code_layout, predecessors, args.function)
             }
-            Operation::InternalCallNever(args) => self.emit_icall_never(state, args.function),
             Operation::DynamicAllocZeroed(_) => self.emit_dynamic_alloc_zeroed(state),
             Operation::DynamicAllocAnyBytes(_) => self.emit_dynamic_alloc_any_bytes(state),
             Operation::AcquireFreePointer(_) => self.emit_acquire_free_pointer(state),
@@ -307,12 +330,13 @@ impl<'a> CodeToAsmEmitter<'a> {
 
     fn emit_icall(
         &mut self,
-        state: &impl CodegenState,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
         icall_return_marks: &mut ICallReturnMarks,
         op_idx: OperationIdx,
         function: FunctionId,
     ) {
-        let call_entry_bb = self.ir.function(function).entry().id();
         let call_return_dest = {
             let (i, mark) = icall_return_marks
                 .iter()
@@ -325,18 +349,26 @@ impl<'a> CodeToAsmEmitter<'a> {
             mark
         };
 
-        self.emit_jump_to(state, call_entry_bb);
+        self.emit_call_target(state, code_layout, predecessors, function);
         self.asm.push_mark(call_return_dest);
         self.asm.push_op_byte(op::JUMPDEST);
     }
 
-    fn emit_icall_never(&mut self, state: &impl CodegenState, function: FunctionId) {
+    fn emit_call_target(
+        &mut self,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
+        function: FunctionId,
+    ) {
         let call_entry_bb = self.ir.function(function).entry().id();
-        let bb_entry_mark = state.bb_marks().get(call_entry_bb);
-        let function_entry_ref = state.mark_to_ref(&self.mark_map, bb_entry_mark);
-
-        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
-        self.asm.push_op_byte(op::JUMP);
+        if self.emitted_blocks.contains(call_entry_bb)
+            || code_layout.has_assigned_predecessor(call_entry_bb)
+        {
+            self.emit_jump_to(state, call_entry_bb);
+        } else {
+            self.emit_block_and_successors(state, code_layout, call_entry_bb, predecessors);
+        }
     }
 
     fn emit_dynamic_alloc_zeroed(&mut self, state: &impl CodegenState) {
