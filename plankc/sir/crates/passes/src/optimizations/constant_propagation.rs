@@ -561,8 +561,7 @@ mod tests {
         let input = r#"
             fn init:
                 entry {
-                    icall @caller
-                    stop
+                    icall_never @caller
                 }
 
             fn pair:
@@ -586,8 +585,8 @@ mod tests {
             Init: @2
             Functions:
                 fn @0 -> entry @0  (outputs: 2)
-                fn @1 -> entry @1  (outputs: 0)
-                fn @2 -> entry @2  (outputs: 0)
+                fn @1 -> entry @1  (never)
+                fn @2 -> entry @2  (never)
 
             Basic Blocks:
                 @0 -> $0 $1 {
@@ -602,8 +601,7 @@ mod tests {
                 }
 
                 @2 {
-                    icall @1
-                    stop
+                    icall_never @1
                 }
             "#,
         );
@@ -618,8 +616,7 @@ mod tests {
             fn init:
                 entry {
                     arg = address
-                    icall @test arg
-                    stop
+                    icall_never @test arg
                 }
             fn test:
                 entry x {
@@ -648,8 +645,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @4  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @4  (never)
 
             Basic Blocks:
                 @0 $0 {
@@ -676,8 +673,7 @@ mod tests {
 
                 @4 {
                     $9 = address
-                    icall @0 $9
-                    stop
+                    icall_never @0 $9
                 }
             "#,
         );
@@ -725,7 +721,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -783,7 +779,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -820,7 +816,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -862,7 +858,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -906,7 +902,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -933,8 +929,7 @@ mod tests {
             fn init:
                 entry {
                     arg = address
-                    icall @helper arg
-                    stop
+                    icall_never @helper arg
                 }
 
             fn helper:
@@ -956,8 +951,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @3  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @3  (never)
 
             Basic Blocks:
                 @0 $0 -> $0 {
@@ -975,8 +970,7 @@ mod tests {
 
                 @3 {
                     $4 = address
-                    icall @0 $4
-                    stop
+                    icall_never @0 $4
                 }
             "#,
         );
@@ -1073,7 +1067,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -1367,8 +1361,7 @@ mod tests {
             fn init:
                 entry {
                     arg = address
-                    icall @test arg
-                    stop
+                    icall_never @test arg
                 }
             fn test:
                 entry x {                          // x = $0
@@ -1404,8 +1397,7 @@ mod tests {
             fn init:
                 entry {
                     arg = address
-                    icall @test arg
-                    stop
+                    icall_never @test arg
                 }
             fn test:
                 entry cond {
@@ -1432,8 +1424,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @6  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @6  (never)
 
             Basic Blocks:
                 @0 $0 {
@@ -1464,8 +1456,7 @@ mod tests {
 
                 @6 {
                     $4 = address
-                    icall @0 $4
-                    stop
+                    icall_never @0 $4
                 }
             "#,
         );
@@ -1542,8 +1533,7 @@ mod tests {
             fn init:
                 entry {
                     arg = address
-                    icall @test arg
-                    stop
+                    icall_never @test arg
                 }
             fn test:
                 entry x {
@@ -1571,8 +1561,8 @@ mod tests {
             r#"
             Init: @1
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @5  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @5  (never)
 
             Basic Blocks:
                 @0 $0 {
@@ -1599,8 +1589,7 @@ mod tests {
 
                 @5 {
                     $5 = address
-                    icall @0 $5
-                    stop
+                    icall_never @0 $5
                 }
             "#,
         );

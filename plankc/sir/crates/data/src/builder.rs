@@ -111,7 +111,12 @@ impl EthIRBuilder {
     // Function builder
     pub fn begin_function(&mut self) -> FunctionBuilder<'_> {
         let next_bb = self.basic_blocks.next_idx();
-        FunctionBuilder { ir_builder: self, first_bb: next_bb, last_bb: next_bb, outputs: None }
+        FunctionBuilder {
+            ir_builder: self,
+            first_bb: next_bb,
+            last_bb: next_bb,
+            iret_outputs: None,
+        }
     }
 }
 
@@ -126,7 +131,7 @@ pub struct FunctionBuilder<'ir> {
     pub ir_builder: &'ir mut EthIRBuilder,
     first_bb: BasicBlockId,
     last_bb: BasicBlockId,
-    outputs: Option<u32>,
+    iret_outputs: Option<u32>,
 }
 
 impl<'ir> FunctionBuilder<'ir> {
@@ -179,12 +184,12 @@ impl<'ir> FunctionBuilder<'ir> {
 
     fn track_bb_internal_return(&mut self, bb: BasicBlock) -> Result<(), BuildError> {
         let Some(implied_out) = bb.implied_fn_out() else { return Ok(()) };
-        if let Some(set_outputs) = self.outputs
+        if let Some(set_outputs) = self.iret_outputs
             && set_outputs != implied_out
         {
             return Err(BuildError::ConflictingFunctionOutputs { set_outputs, implied_out });
         }
-        self.outputs = Some(implied_out);
+        self.iret_outputs = Some(implied_out);
 
         Ok(())
     }
@@ -221,11 +226,11 @@ impl<'ir> FunctionBuilder<'ir> {
             self.ir_builder.placehodler_control_blocks
         );
 
-        self.ir_builder.functions.push(Function::new(
-            entry_bb_id,
-            self.outputs.unwrap_or(0),
-            source,
-        ))
+        let return_kind = match self.iret_outputs {
+            None => ReturnKind::NEVER,
+            Some(outputs) => ReturnKind::values(outputs),
+        };
+        self.ir_builder.functions.push(Function::new(entry_bb_id, return_kind, source))
     }
 }
 
@@ -441,6 +446,34 @@ mod tests {
     use crate::operation::*;
     use alloy_primitives::uint;
 
+    fn build_internal_call_never_program()
+    -> (EthIRProgram, BasicBlockId, OperationIdx, FunctionId, LocalId) {
+        let mut builder = EthIRBuilder::new();
+
+        let mut never = builder.begin_function();
+        let input = never.new_local();
+        let mut never_entry = never.begin_basic_block();
+        never_entry.set_inputs(&[input]);
+        never_entry.add_operation(Operation::Stop(()));
+        let never_entry = never_entry.finish_terminating().unwrap();
+        let never = never.finish(never_entry);
+
+        let mut caller = builder.begin_function();
+        let input = caller.new_local();
+        let mut caller_entry = caller.begin_basic_block();
+        caller_entry.set_inputs(&[input]);
+        caller_entry
+            .try_add_op(OperationKind::InternalCallNever, &[input], &[], OpExtraData::FuncId(never))
+            .unwrap();
+        let caller_entry = caller_entry.finish_terminating().unwrap();
+        let caller = caller.finish(caller_entry);
+
+        let program = builder.build(caller, None);
+        let operation = program.basic_blocks[caller_entry].operations.start;
+
+        (program, caller_entry, operation, never, input)
+    }
+
     #[test]
     fn test_simple_function() {
         let mut builder = EthIRBuilder::new();
@@ -469,8 +502,96 @@ mod tests {
         let program = builder.build(func_id, None);
 
         assert_eq!(program.init_entry, func_id);
-        assert_eq!(program.functions[func_id].get_outputs(), 1);
+        assert_eq!(program.functions[func_id].return_kind(), ReturnKind::values(1));
         assert_eq!(program.operations.len(), 1);
+    }
+
+    #[test]
+    fn distinguishes_never_from_zero_return_values() {
+        let mut builder = EthIRBuilder::new();
+
+        let mut never = builder.begin_function();
+        let mut never_entry = never.begin_basic_block();
+        never_entry.add_operation(Operation::Stop(()));
+        let never_entry = never_entry.finish_terminating().unwrap();
+        let never = never.finish(never_entry);
+
+        let mut returns_void = builder.begin_function();
+        let returns_void_entry =
+            returns_void.begin_basic_block().finish_with_internal_return().unwrap();
+        let returns_void = returns_void.finish(returns_void_entry);
+
+        let program = builder.build(never, None);
+
+        assert_eq!(program.functions[never].return_kind(), ReturnKind::NEVER);
+        assert_eq!(program.functions[returns_void].return_kind(), ReturnKind::values(0));
+    }
+
+    #[test]
+    fn internal_call_rejects_never_returning_function() {
+        let mut builder = EthIRBuilder::new();
+
+        let mut never = builder.begin_function();
+        let mut never_entry = never.begin_basic_block();
+        never_entry.add_operation(Operation::Stop(()));
+        let never_entry = never_entry.finish_terminating().unwrap();
+        let never = never.finish(never_entry);
+
+        let mut caller = builder.begin_function();
+        let mut caller_entry = caller.begin_basic_block();
+        let error = caller_entry
+            .try_add_op(OperationKind::InternalCall, &[], &[], OpExtraData::FuncId(never))
+            .unwrap_err();
+        assert!(matches!(error, OpBuildError::InternalCallToNever(function) if function == never));
+        caller_entry.add_operation(Operation::Stop(()));
+        let caller_entry = caller_entry.finish_terminating().unwrap();
+        caller.finish(caller_entry);
+    }
+
+    #[test]
+    fn internal_call_never_accepts_never_returning_function() {
+        let (program, caller_entry, operation, _, _) = build_internal_call_never_program();
+
+        assert!(matches!(program.operations[operation], Operation::InternalCallNever(_)));
+        assert!(matches!(program.basic_blocks[caller_entry].control, Control::LastOpTerminates));
+    }
+
+    #[test]
+    fn internal_call_never_visitors_and_cloning() {
+        let (mut program, _, operation, never, input) = build_internal_call_never_program();
+
+        assert_eq!(program.operations[operation].inputs(&program), &[input]);
+        assert!(program.operations[operation].outputs(&program).is_empty());
+        let mut formatted = String::new();
+        program.operations[operation].op_fmt(&mut formatted, &program).unwrap();
+        assert_eq!(formatted, format!("icall_never @{} ${}", never, input));
+
+        let cloned = program.clone_operation(operation);
+        assert_eq!(program.operations[cloned].inputs(&program), &[input]);
+        assert!(program.operations[cloned].outputs(&program).is_empty());
+        assert_ne!(
+            program.operations[operation].allocated_spans(&program).input,
+            program.operations[cloned].allocated_spans(&program).input
+        );
+    }
+
+    #[test]
+    fn internal_call_never_rejects_returning_function() {
+        let mut builder = EthIRBuilder::new();
+
+        let mut returning = builder.begin_function();
+        let returning_entry = returning.begin_basic_block().finish_with_internal_return().unwrap();
+        let returning = returning.finish(returning_entry);
+
+        let mut caller = builder.begin_function();
+        let mut caller_entry = caller.begin_basic_block();
+        let error = caller_entry
+            .try_add_op(OperationKind::InternalCallNever, &[], &[], OpExtraData::FuncId(returning))
+            .unwrap_err();
+        assert!(matches!(error, OpBuildError::NeverCallReturns(function) if function == returning));
+        caller_entry.add_operation(Operation::Stop(()));
+        let caller_entry = caller_entry.finish_terminating().unwrap();
+        caller.finish(caller_entry);
     }
 
     #[test]

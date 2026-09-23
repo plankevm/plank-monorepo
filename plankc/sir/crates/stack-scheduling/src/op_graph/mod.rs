@@ -1,5 +1,7 @@
+use crate::layouts::{LayoutMember, LayoutsTracker};
+use hashbrown::HashMap;
 use plank_core::{Idx, IndexVec, Span, newtype_index};
-use sir_data::OperationIdx;
+use sir_data::{EthIRProgram, FunctionId, LocalId, OperationIdx};
 
 mod build_effectful;
 mod build_simple;
@@ -8,6 +10,7 @@ mod builder;
 pub use build_effectful::build_graph_effectful;
 pub use build_simple::build_graph_simple;
 pub use builder::OpGraphBuilder;
+use builder::{AddingInputs, OpBuilder};
 
 newtype_index! {
     pub struct OpNodeId;
@@ -20,6 +23,31 @@ pub enum OpNodeKind {
     Flippable(OperationIdx),
     RetDestPush(OperationIdx),
     Normal(OperationIdx),
+}
+
+fn add_call_inputs(
+    op_builder: &mut OpBuilder<'_, AddingInputs>,
+    callee: FunctionId,
+    call_inputs: &[LocalId],
+    program: &EthIRProgram,
+    layouts: &LayoutsTracker<'_>,
+    local_to_value: &HashMap<LocalId, ValueNodeId>,
+    return_dest: Option<ValueNodeId>,
+) {
+    let callee = program.function(callee);
+    let callee_entry_layout = layouts.get_input_layout(callee.entry().id());
+    for &member in callee_entry_layout.members_fifo() {
+        let value = match member {
+            LayoutMember::InputOutput(i) => local_to_value[&call_inputs[i as usize]],
+            LayoutMember::ReturnDest => {
+                return_dest.expect("invariant: callee layout requires a missing return destination")
+            }
+            LayoutMember::Local(_) => {
+                unreachable!("invariant: function entry layout contains a non-input local")
+            }
+        };
+        op_builder.add_input(value);
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

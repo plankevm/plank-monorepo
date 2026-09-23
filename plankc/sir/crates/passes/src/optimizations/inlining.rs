@@ -2,7 +2,8 @@ use hashbrown::HashMap;
 use plank_core::{DenseIndexSet, IncIterable, IndexVec, Span};
 use sir_data::{
     BasicBlock, BasicBlockId, Branch, Cases, Control, EthIRProgram, FunctionId, LocalId, LocalIdx,
-    Operation, OperationIdx, Switch, operation::InternalCallData,
+    Operation, OperationIdx, Switch,
+    operation::{InternalCallData, InternalCallNeverData},
 };
 
 use crate::{AnalysesStore, Pass};
@@ -25,10 +26,13 @@ impl Pass for Inliner {
 
         for &block in rpo.blocks_rpo() {
             for operation_id in program.basic_blocks[block].operations.iter() {
-                if let Operation::InternalCall(call) = program.operations[operation_id] {
-                    self.callsites[call.function].push(operation_id);
-                    self.callsite_blocks.insert(operation_id, block);
-                }
+                let callee = match program.operations[operation_id] {
+                    Operation::InternalCall(call) => call.function,
+                    Operation::InternalCallNever(call) => call.function,
+                    _ => continue,
+                };
+                self.callsites[callee].push(operation_id);
+                self.callsite_blocks.insert(operation_id, block);
             }
         }
 
@@ -60,11 +64,17 @@ impl Inliner {
                 .callsite_blocks
                 .remove(&callsite_operation)
                 .expect("tracked callsite should have a current block");
-            let Operation::InternalCall(call) = program.operations[callsite_operation] else {
-                unreachable!("tracked callsite should point to an internal call")
-            };
-            assert_eq!(call.function, function_id);
-            self.inline_callsite(program, callsite_block, callsite_operation, call);
+            match program.operations[callsite_operation] {
+                Operation::InternalCall(call) => {
+                    assert_eq!(call.function, function_id);
+                    self.inline_callsite(program, callsite_block, callsite_operation, call);
+                }
+                Operation::InternalCallNever(call) => {
+                    assert_eq!(call.function, function_id);
+                    self.inline_never_callsite(program, callsite_block, callsite_operation, call);
+                }
+                _ => unreachable!("tracked callsite should point to an internal call"),
+            }
         }
     }
 
@@ -82,28 +92,62 @@ impl Inliner {
             Span::new(original_callsite_block.operations.start, callsite_operation);
 
         let join_block = program.basic_blocks.push(BasicBlock {
-            inputs: call.outputs_span(program),
+            inputs: call.outputs_span(&program.functions),
             outputs: original_callsite_block.outputs,
             operations: Span::new(callsite_operation + 1, original_callsite_block.operations.end),
             control: original_callsite_block.control,
         });
 
         for moved_operation in program.basic_blocks[join_block].operations.iter() {
-            if let Operation::InternalCall(moved_call) = program.operations[moved_operation] {
-                let previous_callsite_block = self
-                    .callsite_blocks
-                    .insert(moved_operation, join_block)
-                    .expect("internal call should have a tracked block");
-                assert_eq!(previous_callsite_block, callsite_block);
-                assert!(
-                    self.callsites[moved_call.function].contains(&moved_operation),
-                    "internal call should be a tracked callsite"
-                );
-            }
+            let callee = match program.operations[moved_operation] {
+                Operation::InternalCall(call) => call.function,
+                Operation::InternalCallNever(call) => call.function,
+                _ => continue,
+            };
+            let previous_callsite_block = self
+                .callsite_blocks
+                .insert(moved_operation, join_block)
+                .expect("internal call should have a tracked block");
+            assert_eq!(previous_callsite_block, callsite_block);
+            assert!(
+                self.callsites[callee].contains(&moved_operation),
+                "internal call should be a tracked callsite"
+            );
         }
 
         let callee_entry = program.functions[call.function].entry();
-        let mut block_remapper = BlockRemapper::new(program, join_block);
+        let mut block_remapper = BlockRemapper::new(program, InlineReturnTarget::Join(join_block));
+        let remapped_entry = block_remapper.remap_block_id(callee_entry);
+        while let Some(source_block) = block_remapper.block_worklist.pop() {
+            block_remapper.remap_block(source_block);
+        }
+        program.basic_blocks[callsite_block].control = Control::ContinuesTo(remapped_entry);
+    }
+
+    fn inline_never_callsite(
+        &mut self,
+        program: &mut EthIRProgram,
+        callsite_block: BasicBlockId,
+        callsite_operation: OperationIdx,
+        call: InternalCallNeverData,
+    ) {
+        let original_callsite_block = program.basic_blocks[callsite_block];
+        assert_eq!(
+            callsite_operation + 1,
+            original_callsite_block.operations.end,
+            "invariant: `icall_never` is the final operation in its block"
+        );
+        assert!(
+            matches!(original_callsite_block.control, Control::LastOpTerminates),
+            "invariant: `icall_never` terminates its block"
+        );
+
+        program.basic_blocks[callsite_block].outputs = call.inputs;
+        program.basic_blocks[callsite_block].operations =
+            Span::new(original_callsite_block.operations.start, callsite_operation);
+
+        let callee_entry = program.functions[call.function].entry();
+        let mut block_remapper = BlockRemapper::new(program, InlineReturnTarget::Never);
         let remapped_entry = block_remapper.remap_block_id(callee_entry);
         while let Some(source_block) = block_remapper.block_worklist.pop() {
             block_remapper.remap_block(source_block);
@@ -112,16 +156,22 @@ impl Inliner {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum InlineReturnTarget {
+    Join(BasicBlockId),
+    Never,
+}
+
 struct BlockRemapper<'a> {
     program: &'a mut EthIRProgram,
-    return_target: BasicBlockId,
+    return_target: InlineReturnTarget,
     remapped_blocks: HashMap<BasicBlockId, BasicBlockId>,
     remapped_locals: HashMap<LocalId, LocalId>,
     block_worklist: Vec<BasicBlockId>,
 }
 
 impl<'a> BlockRemapper<'a> {
-    fn new(program: &'a mut EthIRProgram, return_target: BasicBlockId) -> Self {
+    fn new(program: &'a mut EthIRProgram, return_target: InlineReturnTarget) -> Self {
         Self {
             program,
             return_target,
@@ -201,7 +251,12 @@ impl<'a> BlockRemapper<'a> {
     fn remap_control(&mut self, source: Control) -> Control {
         match source {
             Control::LastOpTerminates => Control::LastOpTerminates,
-            Control::InternalReturn => Control::ContinuesTo(self.return_target),
+            Control::InternalReturn => match self.return_target {
+                InlineReturnTarget::Join(target) => Control::ContinuesTo(target),
+                InlineReturnTarget::Never => {
+                    unreachable!("invariant: never-returning function contains `iret`")
+                }
+            },
             Control::ContinuesTo(target) => Control::ContinuesTo(self.remap_block_id(target)),
             Control::Branches(branch) => {
                 let zero_target = self.remap_block_id(branch.zero_target);
@@ -321,7 +376,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @1  (never)
 
             Basic Blocks:
                 @0 $0 -> $1 {
@@ -341,6 +396,130 @@ mod tests {
                 @3 $4 -> $5 {
                     $5 = add $4 $4
                     => @2
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_single_never_callsite() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    value = const 1
+                    icall_never @halt value
+                }
+
+            fn halt:
+                entry value {
+                    condition = iszero value
+                    => condition ? @stop : @fail
+                }
+                stop { stop }
+                fail { invalid }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @1
+            Functions:
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @3  (never)
+
+            Basic Blocks:
+                @0 $0 {
+                    $1 = iszero $0
+                    => $1 ? @1 : @2
+                }
+
+                @1 {
+                    stop
+                }
+
+                @2 {
+                    invalid
+                }
+
+                @3 -> $2 {
+                    $2 = const 0x1
+                    => @4
+                }
+
+                @4 $3 {
+                    $4 = iszero $3
+                    => $4 ? @6 : @5
+                }
+
+                @5 {
+                    invalid
+                }
+
+                @6 {
+                    stop
+                }
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_moved_never_callsite() {
+        let actual = inline(
+            r#"
+            fn init:
+                entry {
+                    value = const 1
+                    result = icall @identity value
+                    icall_never @halt result
+                }
+
+            fn identity:
+                entry value -> value {
+                    iret
+                }
+
+            fn halt:
+                entry value {
+                    invalid
+                }
+            "#,
+        );
+
+        assert_ir_display(
+            &actual,
+            r#"
+            Init: @2
+            Functions:
+                fn @0 -> entry @0  (outputs: 1)
+                fn @1 -> entry @1  (never)
+                fn @2 -> entry @2  (never)
+
+            Basic Blocks:
+                @0 $0 -> $0 {
+                    iret
+                }
+
+                @1 $1 {
+                    invalid
+                }
+
+                @2 -> $2 {
+                    $2 = const 0x1
+                    => @4
+                }
+
+                @3 $3 -> $3 {
+                    => @5
+                }
+
+                @4 $4 -> $4 {
+                    => @3
+                }
+
+                @5 $5 {
+                    invalid
                 }
             "#,
         );
@@ -380,7 +559,7 @@ mod tests {
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
                 fn @1 -> entry @1  (outputs: 1)
-                fn @2 -> entry @2  (outputs: 0)
+                fn @2 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 $1 -> $2 {
@@ -440,7 +619,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 -> $0 {
@@ -497,7 +676,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @1  (never)
 
             Basic Blocks:
                 @0 $0 $1 $2 -> $3 {
@@ -555,7 +734,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @2  (outputs: 0)
+                fn @1 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 -> $0 {
@@ -622,7 +801,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @1  (never)
 
             Basic Blocks:
                 @0 $0 -> $4 {
@@ -682,7 +861,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @1  (never)
 
             Basic Blocks:
                 @0 $0 -> $4 {
@@ -742,7 +921,7 @@ mod tests {
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
                 fn @1 -> entry @1  (outputs: 1)
-                fn @2 -> entry @3  (outputs: 0)
+                fn @2 -> entry @3  (never)
 
             Basic Blocks:
                 @0 $0 -> $4 {
@@ -812,7 +991,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
+                fn @1 -> entry @1  (never)
 
             Basic Blocks:
                 @0 $0 -> $3 {
@@ -891,8 +1070,8 @@ mod tests {
             Run: @2
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @1  (outputs: 0)
-                fn @2 -> entry @2  (outputs: 0)
+                fn @1 -> entry @1  (never)
+                fn @2 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 -> $1 {
@@ -961,7 +1140,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
-                fn @1 -> entry @2  (outputs: 0)
+                fn @1 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 -> $0 {
@@ -1051,7 +1230,7 @@ mod tests {
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
                 fn @1 -> entry @3  (outputs: 1)
-                fn @2 -> entry @4  (outputs: 0)
+                fn @2 -> entry @4  (never)
 
             Basic Blocks:
                 @0 $0 $1 -> $1 {
@@ -1150,7 +1329,7 @@ mod tests {
             Init: @1
             Functions:
                 fn @0 -> entry @0  (outputs: 2)
-                fn @1 -> entry @3  (outputs: 0)
+                fn @1 -> entry @3  (never)
 
             Basic Blocks:
                 @0 $0 $1 -> $0 $1 {

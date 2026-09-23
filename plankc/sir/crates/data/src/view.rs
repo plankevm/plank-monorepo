@@ -1,6 +1,6 @@
 use crate::{
     BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter,
+    OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter, ReturnKind,
 };
 use std::fmt;
 
@@ -213,8 +213,8 @@ impl<'ir> FunctionView<'ir> {
         self.ir.functions[self.id].get_inputs(&self.ir.basic_blocks)
     }
 
-    pub fn num_outputs(&self) -> u32 {
-        self.ir.functions[self.id].get_outputs()
+    pub fn return_kind(&self) -> ReturnKind {
+        self.ir.functions[self.id].return_kind()
     }
 }
 

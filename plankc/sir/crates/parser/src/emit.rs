@@ -475,6 +475,22 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                             ),
                         },
                         OpBuildError::UndefinedFunction(_) => unreachable!("checked further up?"),
+                        OpBuildError::InternalCallToNever(function) => SirAstSemaError {
+                            spans: arena.alloc([stmt.op.span()]),
+                            reason: format_in!(
+                                arena,
+                                "`icall` cannot target never-returning function @{}",
+                                function
+                            ),
+                        },
+                        OpBuildError::NeverCallReturns(function) => SirAstSemaError {
+                            spans: arena.alloc([stmt.op.span()]),
+                            reason: format_in!(
+                                arena,
+                                "`icall_never` cannot target returning function @{}",
+                                function
+                            ),
+                        },
                     })?;
                     bb_builder.add_operation(operation);
                 }
@@ -652,7 +668,8 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
     };
     let init_func = ir_builder.get_func(init_entry).expect("func with ID not in builder");
     let init_func_inputs = init_func.get_inputs(ir_builder.view_bb_backing());
-    if init_func.get_outputs() != 0 || init_func_inputs != 0 {
+    let init_return_kind = init_func.return_kind();
+    if init_return_kind.count().is_some_and(|count| count != 0) || init_func_inputs != 0 {
         let ast_func_node = ast
             .functions
             .iter()
@@ -662,9 +679,9 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
             spans: arena.alloc([ast_func_node.name.span()]),
             reason: format_in!(
                 arena,
-                "Entry points are expected to have 0 inputs & outputs, got: {} inputs, {} outputs",
-                init_func.get_outputs(),
-                init_func_inputs
+                "Entry points are expected to have 0 inputs & outputs, got: {} inputs, returns {}",
+                init_func_inputs,
+                init_return_kind,
             ),
         });
     }
@@ -678,7 +695,8 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
         };
         let run_func = ir_builder.get_func(run_entry).expect("func with ID not in builder");
         let run_func_inputs = run_func.get_inputs(ir_builder.view_bb_backing());
-        if run_func.get_outputs() != 0 || run_func_inputs != 0 {
+        let run_return_kind = run_func.return_kind();
+        if run_return_kind.count().is_some_and(|count| count != 0) || run_func_inputs != 0 {
             let ast_func_node = ast
                 .functions
                 .iter()
@@ -688,9 +706,9 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                 spans: arena.alloc([ast_func_node.name.span()]),
                 reason: format_in!(
                     arena,
-                    "Entry points are expected to have 0 inputs & outputs, got: {} inputs, {} outputs",
+                    "Entry points are expected to have 0 inputs & outputs, got: {} inputs, returns {}",
                     run_func_inputs,
-                    run_func.get_outputs(),
+                    run_return_kind,
                 ),
             });
         }

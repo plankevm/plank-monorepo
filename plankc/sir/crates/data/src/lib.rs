@@ -80,8 +80,11 @@ impl EthIRProgram {
 
         writeln!(&mut output, "\n=== Functions ({}) ===", self.functions.len()).unwrap();
         for (id, func) in self.functions.enumerate_idx() {
-            writeln!(&mut output, "@{id}: entry=@{}, outputs={}", func.entry(), func.get_outputs())
-                .unwrap();
+            write!(&mut output, "@{id}: entry=@{}", func.entry()).unwrap();
+            match func.return_kind().count() {
+                None => writeln!(&mut output, ", never").unwrap(),
+                Some(outputs) => writeln!(&mut output, ", outputs={outputs}").unwrap(),
+            }
         }
 
         writeln!(&mut output, "\n=== Basic Blocks ({}) ===", self.basic_blocks.len()).unwrap();
@@ -211,14 +214,11 @@ pub fn display_program(ir: &EthIRProgram) -> String {
 
     // Display functions
     for func in ir.functions_iter() {
-        writeln!(
-            &mut output,
-            "    fn @{} -> entry @{}  (outputs: {})",
-            func.id(),
-            func.entry().id(),
-            func.num_outputs()
-        )
-        .unwrap();
+        write!(&mut output, "    fn @{} -> entry @{}  ", func.id(), func.entry().id()).unwrap();
+        match func.return_kind().count() {
+            None => writeln!(&mut output, "(never)").unwrap(),
+            Some(outputs) => writeln!(&mut output, "(outputs: {outputs})").unwrap(),
+        }
     }
 
     if !ir.functions.is_empty() {
@@ -317,6 +317,10 @@ impl fmt::Display for EthIRProgram {
                             function_worklist.push(icall.function);
                             write!(f, " @f{}", icall.function)?;
                         }
+                        Operation::InternalCallNever(icall) => {
+                            function_worklist.push(icall.function);
+                            write!(f, " @f{}", icall.function)?;
+                        }
                         Operation::StaticAllocZeroed(static_alloc)
                         | Operation::StaticAllocAnyBytes(static_alloc) => {
                             write!(f, " {}", static_alloc.size)?;
@@ -381,16 +385,51 @@ impl fmt::Display for EthIRProgram {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct ReturnKind(u32);
+
+impl ReturnKind {
+    const NEVER_RAW: u32 = u32::MAX;
+    pub const NEVER: ReturnKind = ReturnKind(Self::NEVER_RAW);
+
+    pub const fn is_never(self) -> bool {
+        self.0 == Self::NEVER_RAW
+    }
+
+    pub const fn count(self) -> Option<u32> {
+        if self.is_never() { None } else { Some(self.0) }
+    }
+
+    pub const fn values(count: u32) -> ReturnKind {
+        assert!(count != Self::NEVER_RAW);
+        ReturnKind(count)
+    }
+}
+
+impl fmt::Display for ReturnKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.count() {
+            None => f.write_str("never"),
+            Some(count) => count.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Function {
     entry_bb_id: BasicBlockId,
-    outputs: u32,
+    return_kind: ReturnKind,
     source: Option<OpaqueSourceId>,
 }
 
 impl Function {
-    pub fn new(entry_bb_id: BasicBlockId, outputs: u32, source: Option<OpaqueSourceId>) -> Self {
-        Self { entry_bb_id, outputs, source }
+    pub fn new(
+        entry_bb_id: BasicBlockId,
+        return_kind: ReturnKind,
+        source: Option<OpaqueSourceId>,
+    ) -> Self {
+        Self { entry_bb_id, return_kind, source }
     }
 
     pub fn entry(&self) -> BasicBlockId {
@@ -406,8 +445,8 @@ impl Function {
         inputs.end - inputs.start
     }
 
-    pub fn get_outputs(&self) -> u32 {
-        self.outputs
+    pub fn return_kind(&self) -> ReturnKind {
+        self.return_kind
     }
 }
 
@@ -661,7 +700,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
                 fn @1 -> entry @2  (outputs: 1)
 
             Basic Blocks:
@@ -724,7 +763,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {

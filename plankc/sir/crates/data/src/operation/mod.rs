@@ -140,6 +140,7 @@ impl OperationKind {
             | OperationKind::SetDataOffset
             | OperationKind::Noop
             | OperationKind::InternalCall
+            | OperationKind::InternalCallNever
             | OperationKind::RuntimeStartOffset
             | OperationKind::InitEndOffset
             | OperationKind::RuntimeLength => return None,
@@ -360,6 +361,7 @@ define_operations! {
 
     // ========== Internal Call ==========
     InternalCall(InternalCallData) "icall",
+    InternalCallNever(InternalCallNeverData) "icall_never",
 
     // ========== Bytecode Introspection ==========
     RuntimeStartOffset(InlineOperands<0, 1>) "runtime_start_offset",
@@ -376,6 +378,7 @@ impl OperationKind {
                 | OperationKind::Revert
                 | OperationKind::Invalid
                 | OperationKind::SelfDestruct
+                | OperationKind::InternalCallNever
         )
     }
 
@@ -472,7 +475,8 @@ impl OperationKind {
             | OperationKind::CodeCopy
             | OperationKind::ExtCodeCopy
             | OperationKind::ReturnDataCopy
-            | OperationKind::InternalCall => false,
+            | OperationKind::InternalCall
+            | OperationKind::InternalCallNever => false,
 
             // TODO: gas introspection semantic equivalence depends on high-level gas invocations
             // lining up with bytecode gas invocations
@@ -557,7 +561,7 @@ impl EthIRProgram {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasicBlockId, Function};
+    use crate::{BasicBlockId, Function, ReturnKind};
     use plank_core::{Idx, Span};
 
     #[test]
@@ -588,7 +592,8 @@ mod tests {
     #[test]
     fn clone_operation_into_copies_internal_call_operands() {
         let mut source = EthIRProgram::default();
-        let function = source.functions.push(Function::new(BasicBlockId::ZERO, 2, None));
+        let function =
+            source.functions.push(Function::new(BasicBlockId::ZERO, ReturnKind::values(2), None));
         source.locals.extend([LocalId::new(0), LocalId::new(1), LocalId::new(2), LocalId::new(3)]);
         let original = source.operations.push(Operation::InternalCall(InternalCallData {
             function,

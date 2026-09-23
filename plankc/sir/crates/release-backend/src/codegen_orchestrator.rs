@@ -5,7 +5,10 @@ use crate::{
 use hashbrown::HashSet;
 use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{Assembler, MarkId, MarkReference};
-use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Operation};
+use sir_data::{
+    BasicBlockId, DataId, EthIRProgram, FunctionId, Operation,
+    operation::{InternalCallData, InternalCallNeverData},
+};
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
 
@@ -92,8 +95,9 @@ fn collect_runtime_datas(
                 Operation::SetDataOffset(set_data) => {
                     runtime_datas.add(set_data.segment_id);
                 }
-                Operation::InternalCall(icall) => {
-                    let fn_entry = ir.functions[icall.function].entry();
+                Operation::InternalCall(InternalCallData { function, .. })
+                | Operation::InternalCallNever(InternalCallNeverData { function, .. }) => {
+                    let fn_entry = ir.functions[function].entry();
                     if visited_bbs.add(fn_entry) {
                         basic_blocks_worklist.push(fn_entry);
                     }

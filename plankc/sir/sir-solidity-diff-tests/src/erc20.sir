@@ -32,8 +32,7 @@ fn f24:
         => v85 ? @bb44 : @bb42
     }
     bb44 {
-        icall @f26
-        invalid
+        icall_never @f26
     }
     bb42 {
         => @bb43
@@ -141,8 +140,7 @@ fn main:
         v53 = icall @f8
         v54 = const 68
         v55 = calldataload v54
-        icall @f15 v52 v53 v55
-        invalid
+        icall_never @f15 v52 v53 v55
     }
     bb1 {
         v6 = const 1889567281
@@ -151,8 +149,7 @@ fn main:
     }
     bb35 {
         v51 = icall @f6
-        icall @f14 v51
-        invalid
+        icall_never @f14 v51
     }
     bb2 {
         v8 = const 2835717307
@@ -163,8 +160,7 @@ fn main:
         v48 = icall @f6
         v49 = const 36
         v50 = calldataload v49
-        icall @f13 v48 v50
-        invalid
+        icall_never @f13 v48 v50
     }
     bb3 {
         v10 = const 157198259
@@ -175,8 +171,7 @@ fn main:
         v45 = icall @f6
         v46 = const 36
         v47 = calldataload v46
-        icall @f12 v45 v47
-        invalid
+        icall_never @f12 v45 v47
     }
     bb4 {
         v12 = const 3573918927
@@ -195,8 +190,7 @@ fn main:
         v42 = calldataload v41
         v43 = const 196
         v44 = calldataload v43
-        icall @f11 v34 v35 v37 v39 v40 v42 v44
-        invalid
+        icall_never @f11 v34 v35 v37 v39 v40 v42 v44
     }
     bb5 {
         v14 = const 3714247998
@@ -206,8 +200,7 @@ fn main:
     bb31 {
         v32 = icall @f6
         v33 = icall @f8
-        icall @f9 v32 v33
-        invalid
+        icall_never @f9 v32 v33
     }
     bb6 {
         v16 = const 2127478272
@@ -216,8 +209,7 @@ fn main:
     }
     bb30 {
         v31 = icall @f6
-        icall @f7 v31
-        invalid
+        icall_never @f7 v31
     }
     bb7 {
         v18 = const 404098525
@@ -225,8 +217,7 @@ fn main:
         => v19 ? @bb29 : @bb8
     }
     bb29 {
-        icall @f5
-        invalid
+        icall_never @f5
     }
     bb8 {
         v20 = const 826074471
@@ -234,8 +225,7 @@ fn main:
         => v21 ? @bb28 : @bb9
     }
     bb28 {
-        icall @f4
-        invalid
+        icall_never @f4
     }
     bb9 {
         v22 = const 117300739
@@ -243,8 +233,7 @@ fn main:
         => v23 ? @bb27 : @bb10
     }
     bb27 {
-        icall @f3
-        invalid
+        icall_never @f3
     }
     bb10 {
         v24 = const 2514000705
@@ -252,8 +241,7 @@ fn main:
         => v25 ? @bb26 : @bb11
     }
     bb26 {
-        icall @f2
-        invalid
+        icall_never @f2
     }
     bb11 {
         v26 = const 910484757
@@ -261,8 +249,7 @@ fn main:
         => v27 ? @bb25 : @bb12
     }
     bb25 {
-        icall @f1
-        invalid
+        icall_never @f1
     }
     bb12 {
         => @bb13
@@ -359,8 +346,7 @@ fn f3:
 fn f4:
     bb134 {
         v370 = const 18
-        icall @f19 v370
-        invalid
+        icall_never @f19 v370
     }
 
 fn f19:
@@ -376,16 +362,14 @@ fn f5:
     bb133 {
         v368 = const 0
         v369 = sload v368
-        icall @f19 v369
-        invalid
+        icall_never @f19 v369
     }
 
 fn f7:
     bb128 v358 {
         v359 = icall @f38 v358
         v360 = sload v359
-        icall @f19 v360
-        invalid
+        icall_never @f19 v360
     }
 
 fn f38:
@@ -434,8 +418,7 @@ fn f9:
         => @bb122
     }
     bb122 v349 {
-        icall @f19 v349
-        invalid
+        icall_never @f19 v349
     }
     bb121 -> v348 {
         v347 = icall @f32 v343 v344
@@ -555,8 +538,7 @@ fn f42:
         => v245 ? @bb98 : @bb96
     }
     bb98 {
-        icall @f43
-        invalid
+        icall_never @f43
     }
     bb96 {
         => @bb97
@@ -681,8 +663,7 @@ fn f37:
         => v325 ? @bb113 : @bb111
     }
     bb113 {
-        icall @f47
-        invalid
+        icall_never @f47
     }
     bb111 {
         => @bb112
@@ -716,8 +697,7 @@ fn f33:
         => v197 ? @bb86 : @bb84
     }
     bb86 {
-        icall @f35
-        invalid
+        icall_never @f35
     }
     bb84 {
         => @bb85
@@ -778,8 +758,7 @@ fn f12:
         v186 = icall @f30
         icall @f34 v186 v182 v183
         v187 = const 1
-        icall @f19 v187
-        invalid
+        icall_never @f19 v187
     }
     bb79 -> v180 v174 v175 {
         v179 = large_const 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
@@ -792,8 +771,7 @@ fn f13:
         v172 = icall @f30
         icall @f18 v172 v170 v171
         v173 = const 1
-        icall @f19 v173
-        invalid
+        icall_never @f19 v173
     }
 
 fn f18:
@@ -819,8 +797,7 @@ fn f23:
         => v100 ? @bb49 : @bb47
     }
     bb49 {
-        icall @f26
-        invalid
+        icall_never @f26
     }
     bb47 {
         => @bb48
@@ -835,8 +812,7 @@ fn f22:
         => v102 ? @bb53 : @bb51
     }
     bb53 {
-        icall @f27
-        invalid
+        icall_never @f27
     }
     bb51 {
         => @bb52
@@ -861,8 +837,7 @@ fn f14:
     bb76 v167 {
         v168 = icall @f20 v167
         v169 = sload v168
-        icall @f19 v169
-        invalid
+        icall_never @f19 v169
     }
 
 fn f15:
@@ -871,8 +846,7 @@ fn f15:
         icall @f17 v59
         icall @f18 v56 v57 v58
         v60 = const 1
-        icall @f19 v60
-        invalid
+        icall_never @f19 v60
     }
 
 fn f17:
@@ -881,8 +855,7 @@ fn f17:
         => v125 ? @bb61 : @bb59
     }
     bb61 {
-        icall @f29
-        invalid
+        icall_never @f29
     }
     bb59 {
         => @bb60

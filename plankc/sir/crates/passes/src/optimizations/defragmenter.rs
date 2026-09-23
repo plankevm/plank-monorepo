@@ -1,6 +1,9 @@
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::{DenseIndexSet, Idx, Span, span::IncIterable};
-use sir_data::*;
+use sir_data::{
+    operation::{InternalCallData, InternalCallNeverData},
+    *,
+};
 
 use crate::{AnalysesStore, Pass, analyses::ReachableBlocks};
 
@@ -96,7 +99,7 @@ impl<'a> Rewriter<'a> {
         }
         let new_entry = self.state.block_map[&old_entry_id];
         self.dst.functions[new_id] =
-            Function::new(new_entry, old_func.num_outputs(), old_func.source());
+            Function::new(new_entry, old_func.return_kind(), old_func.source());
     }
 
     fn reserve_function_id(&mut self, old_id: FunctionId) -> FunctionId {
@@ -105,7 +108,7 @@ impl<'a> Rewriter<'a> {
             Entry::Vacant(entry) => {
                 let old_func = self.src.function(old_id);
                 let placeholder =
-                    Function::new(BasicBlockId::ZERO, old_func.num_outputs(), old_func.source());
+                    Function::new(BasicBlockId::ZERO, old_func.return_kind(), old_func.source());
                 let new_id = self.dst.functions.push(placeholder);
                 entry.insert(new_id);
                 new_id
@@ -178,13 +181,14 @@ impl<'a> Rewriter<'a> {
             Operation::SetDataOffset(data) => {
                 data.segment_id = self.emit_data(data.segment_id);
             }
-            Operation::InternalCall(data) => {
-                let old_function = data.function;
+            Operation::InternalCall(InternalCallData { function, .. })
+            | Operation::InternalCallNever(InternalCallNeverData { function, .. }) => {
+                let old_function = *function;
                 if let Some(&new_function) = self.state.function_map.get(&old_function) {
-                    data.function = new_function;
+                    *function = new_function;
                 } else {
                     self.state.func_worklist.push(old_function);
-                    data.function = self.reserve_function_id(old_function);
+                    *function = self.reserve_function_id(old_function);
                 }
             }
             _ => {}
@@ -387,7 +391,7 @@ mod tests {
             Functions:
                 fn @0 -> entry @0  (outputs: 1)
                 fn @1 -> entry @1  (outputs: 2)
-                fn @2 -> entry @2  (outputs: 0)
+                fn @2 -> entry @2  (never)
 
             Basic Blocks:
                 @0 $0 $1 -> $2 {
@@ -435,7 +439,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
                 fn @1 -> entry @2  (outputs: 1)
 
             Basic Blocks:
@@ -542,8 +546,8 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
-                fn @1 -> entry @4  (outputs: 0)
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @4  (never)
 
             Basic Blocks:
                 @0 {
@@ -610,7 +614,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -666,7 +670,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -707,7 +711,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -750,7 +754,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
@@ -779,7 +783,7 @@ mod tests {
             r#"
             Init: @0
             Functions:
-                fn @0 -> entry @0  (outputs: 0)
+                fn @0 -> entry @0  (never)
 
             Basic Blocks:
                 @0 {
