@@ -139,6 +139,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         self.eval_call(closure, args, call_span)
     }
 
+    // We don't know the struct's type until its methods have been collected,
+    // so we bind Self when looking up a method rather than when defining it.
     fn bind_method(&mut self, method: Method, ty: TypeId) -> ValueId {
         assert!(ty.is_struct(), "method Self binding must be a struct type");
         self.with_captures_buf(|this, offset| {

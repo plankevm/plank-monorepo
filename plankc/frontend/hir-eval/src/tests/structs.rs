@@ -303,6 +303,90 @@ fn qualified_method_as_function_value() {
 }
 
 #[test]
+fn test_method_reference_specialization() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime T: type) type {
+            struct {
+                value: T
+                fn new() Self { @uninit(Self) }
+            }
+        };
+
+        init {
+            let make_num: function = Make(u256).new;
+            let make_bool: function = Make(bool).new;
+            let a: Make(u256) = make_num();
+            let b: Make(bool) = make_bool();
+            let c: Make(u256) = Make(u256).new();
+            let d: Make(bool) = Make(bool).new();
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0() -> Make(u256) {
+            %0 : Make(u256) = Make(u256) {
+                0,
+            }
+            ret %0
+        }
+
+        @fn1() -> Make(bool) {
+            %0 : Make(bool) = Make(bool) {
+                false,
+            }
+            ret %0
+        }
+
+        ; init
+        @fn2() -> never {
+            %0 : Make(u256) = call @fn0()
+            %1 : Make(bool) = call @fn1()
+            %2 : Make(u256) = call @fn0()
+            %3 : Make(bool) = call @fn1()
+            %4 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_method_reference_preserves_captures() {
+    assert_lowers_to(
+        r#"
+        const Make = fn(comptime offset: u256) type {
+            struct {
+                fn add(value: u256) u256 { @evm_add(value, offset) }
+            }
+        };
+
+        init {
+            let add: function = Make(7).add;
+            let result = add(@evm_calldatasize());
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        @fn0(%0: u256) -> u256 {
+            %1 : u256 = %0
+            %2 : u256 = 7
+            %3 : u256 = @evm_add(%1, %2)
+            ret %3
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : u256 = @evm_calldatasize()
+            %1 : u256 = call @fn0(%0)
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_type_qualified_method_does_not_inject_receiver() {
     assert_diagnostics(
         r#"
