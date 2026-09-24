@@ -437,20 +437,58 @@ fn test_comptime_cbytes_literals() {
 }
 
 #[test]
-fn test_comptime_operator_wrong_arg_type_in_const() {
+fn test_binary_operator_type_error() {
     assert_diagnostics(
         r#"
         const y = 1 *% true;
         init { @evm_stop(); }
         "#,
         &[r#"
-        error: no valid match for builtin signature
+        error: invalid operands for operator
          --> main.plk:1:11
           |
         1 | const y = 1 *% true;
-          |           ^^^^^^^^^ `@evm_mul` cannot be called with (u256, bool)
+          |           ^^^^^^^^^ operator `*%` cannot be applied to (u256, bool)
           |
-          = note: `@evm_mul` accepts (u256, u256)
+          = note: operator `*%` accepts (u256, u256)
+        "#],
+    );
+}
+
+#[test]
+fn test_shift_type_error_preserves_operand_order() {
+    assert_diagnostics(
+        r#"
+        const y = true << 1;
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid operands for operator
+         --> main.plk:1:11
+          |
+        1 | const y = true << 1;
+          |           ^^^^^^^^^ operator `<<` cannot be applied to (bool, u256)
+          |
+          = note: operator `<<` accepts (u256, u256)
+        "#],
+    );
+}
+
+#[test]
+fn test_bitwise_not_type_error() {
+    assert_diagnostics(
+        r#"
+        const y = ~true;
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid operands for operator
+         --> main.plk:1:11
+          |
+        1 | const y = ~true;
+          |           ^^^^^ operator `~` cannot be applied to (bool)
+          |
+          = note: operator `~` accepts (u256)
         "#],
     );
 }

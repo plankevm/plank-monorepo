@@ -1,4 +1,7 @@
-use crate::scope::{Diverge, EvalValue, LocalState, Scope};
+use crate::{
+    diagnostics::SourceOperation,
+    scope::{Diverge, EvalValue, LocalState, Scope},
+};
 use alloy_primitives::U256;
 use plank_evm::EvmVersion;
 use plank_hir as hir;
@@ -35,7 +38,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     return Err(Poisoned);
                 }
                 if runtime.foldable() {
-                    self.eval_runtime_foldable_builtin(runtime, args, expr_span)
+                    self.eval_runtime_foldable_builtin(
+                        SourceOperation::Builtin(builtin),
+                        args,
+                        expr_span,
+                    )
                 } else {
                     self.eval_runtime_only_builtin(runtime, args, expr_span)
                 }
@@ -54,11 +61,14 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     pub fn eval_runtime_foldable_builtin(
         &mut self,
-        builtin: RuntimeBuiltin,
+        source_op: SourceOperation,
         args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span)?;
+        let Builtin::Runtime(builtin) = source_op.builtin() else {
+            unreachable!("invariant: runtime evaluator receives a runtime builtin")
+        };
+        let result_type = self.resolve_runtime_builtin_result_type(source_op, args, expr_span)?;
 
         let folded = self.with_values_buf(|this, values_buf_offset| {
             for &arg in args {
@@ -107,7 +117,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        let result_type = self.resolve_runtime_builtin_result_type(builtin, args, expr_span);
+        let result_type = self.resolve_runtime_builtin_result_type(
+            SourceOperation::Builtin(builtin.into()),
+            args,
+            expr_span,
+        );
         let poisoned_never =
             result_type.is_err() && builtin_sigs::builtin_returns_never(builtin.into());
 
@@ -129,10 +143,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
     fn resolve_runtime_builtin_result_type(
         &mut self,
-        builtin: RuntimeBuiltin,
+        source_op: SourceOperation,
         args: &[hir::LocalId],
         expr_span: SourceSpan,
     ) -> MaybePoisoned<TypeId> {
+        let builtin = source_op.builtin();
         let expr_loc = self.loc(expr_span);
         self.with_types_buf(|this, types_buf_offset| {
             for &arg in args {
@@ -141,10 +156,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             }
 
             let arg_types = &this.eval.types_buf[types_buf_offset..];
-            builtin_sigs::resolve_result_type(builtin.into(), arg_types).ok_or_else(|| {
-                this.diag_ctx.emit_no_matching_builtin_signature(
+            builtin_sigs::resolve_result_type(builtin, arg_types).ok_or_else(|| {
+                this.diag_ctx.emit_no_matching_signature(
                     this.eval.values,
-                    builtin.into(),
+                    source_op,
                     &this.eval.types_buf[types_buf_offset..],
                     expr_loc,
                 );
@@ -283,9 +298,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let requested_quota = match self.values.lookup(quota_value) {
                     Value::BigNum(requested_quota) => requested_quota,
                     other => {
-                        self.diag_ctx.emit_no_matching_builtin_signature(
+                        self.diag_ctx.emit_no_matching_signature(
                             self.eval.values,
-                            builtin,
+                            SourceOperation::Builtin(builtin),
                             &[other.get_type()],
                             expr_loc,
                         );
@@ -809,9 +824,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Ok(bytes);
         }
         let actual_ty = self.state_type(state);
-        self.diag_ctx.emit_no_matching_builtin_signature(
+        self.diag_ctx.emit_no_matching_signature(
             self.eval.values,
-            builtin,
+            SourceOperation::Builtin(builtin),
             &[actual_ty],
             self.loc(span),
         );
