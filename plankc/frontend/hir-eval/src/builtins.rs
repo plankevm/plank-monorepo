@@ -273,15 +273,83 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
                 let index =
                     self.find_struct_field_by_name(r#struct, name).unwrap_or(r#struct.fields.len());
-                let index = U256::from(index);
-                self.eval.values.intern_num(index)
+                self.eval.values.intern_num(U256::from(index))
             }
             Builtin::FieldCount => {
                 let &[r#struct] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(r#struct, builtin, expr_span)?;
                 let field_count = self.expect_compound(ty, builtin, expr_span)?.field_count();
-                let count = U256::from(field_count);
-                self.eval.values.intern_num(count)
+                self.eval.values.intern_num(U256::from(field_count))
+            }
+            Builtin::MethodCount => {
+                let &[ty_local] = args else { unreachable!("arg count checked") };
+                let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+                let method_count = self.expect_struct(ty, builtin, expr_span)?.methods.len();
+                self.eval.values.intern_num(U256::from(method_count))
+            }
+            Builtin::MethodName => {
+                let &[ty_local, index_local] = args else { unreachable!("arg count checked") };
+                let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+                let r#struct = self.expect_struct(ty, builtin, expr_span)?;
+                let index = self.expect_method_index_arg(
+                    index_local,
+                    builtin,
+                    expr_span,
+                    r#struct.methods.len(),
+                )?;
+                let method = r#struct.methods[index];
+                let contents = BytesId::from(method.name);
+                let len = u32::try_from(self.diag_ctx.session.lookup_bytes(contents).len())
+                    .expect("method name length fits u32");
+                self.eval.values.intern_bytes(contents, 0, len)
+            }
+            Builtin::GetMethod => {
+                let &[ty_local, selector_local] = args else { unreachable!("arg count checked") };
+                let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+                let r#struct = self.expect_struct(ty, builtin, expr_span)?;
+                let selector_binding = self.bindings[selector_local];
+                let LocalState::Comptime(selector) = selector_binding.state? else {
+                    self.diag_ctx.emit_expected_comptime_arg(builtin, "method selector", expr_loc);
+                    return Err(Poisoned);
+                };
+                let index = match self.values.lookup(selector) {
+                    Value::BigNum(index) => self.expect_method_index_in_bounds(
+                        index,
+                        selector_local,
+                        builtin,
+                        r#struct.methods.len(),
+                    )?,
+                    Value::Bytes(name) => {
+                        let Some(index) = self.find_struct_method_by_name(r#struct, name) else {
+                            self.diag_ctx.emit_unknown_method_name_selector(
+                                self.eval.values,
+                                builtin,
+                                ty,
+                                name,
+                                self.loc(selector_binding.use_span),
+                            );
+                            return Err(Poisoned);
+                        };
+                        index
+                    }
+                    other => {
+                        self.diag_ctx.emit_invalid_method_selector_type(
+                            self.eval.values,
+                            builtin,
+                            other.get_type(),
+                            self.loc(selector_binding.use_span),
+                        );
+                        return Err(Poisoned);
+                    }
+                };
+                self.bind_method_self(r#struct.methods[index], ty)
+            }
+            Builtin::HasMethod => {
+                let &[ty_local, name_local] = args else { unreachable!("arg count checked") };
+                let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
+                let r#struct = self.expect_struct(ty, builtin, expr_span)?;
+                let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
+                self.find_struct_method_by_name(r#struct, name).is_some().into()
             }
             Builtin::InComptime => self.comptime.into(),
             Builtin::SetEvalBranchQuota => {
@@ -698,6 +766,45 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<usize> {
         let index = self.expect_comptime_u256(index_arg, builtin, "field index", expr_span)?;
         self.expect_field_index_in_bounds(index, index_arg, builtin, field_count)
+    }
+
+    fn expect_method_index_arg(
+        &mut self,
+        index_arg: hir::LocalId,
+        builtin: Builtin,
+        expr_span: SourceSpan,
+        method_count: usize,
+    ) -> MaybePoisoned<usize> {
+        let index = self.expect_comptime_u256(index_arg, builtin, "method index", expr_span)?;
+        self.expect_method_index_in_bounds(index, index_arg, builtin, method_count)
+    }
+
+    fn expect_method_index_in_bounds(
+        &mut self,
+        index: U256,
+        index_arg: hir::LocalId,
+        builtin: Builtin,
+        method_count: usize,
+    ) -> MaybePoisoned<usize> {
+        match usize::try_from(index) {
+            Ok(index) if index < method_count => Ok(index),
+            _ => {
+                self.diag_ctx.emit_method_index_out_of_bounds(
+                    builtin,
+                    index,
+                    method_count,
+                    self.loc(self.bindings[index_arg].use_span),
+                );
+                Err(Poisoned)
+            }
+        }
+    }
+
+    fn find_struct_method_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
+        let name = self.diag_ctx.session.lookup_bytes_slice(name);
+        r#struct.methods.iter().position(|method| {
+            self.diag_ctx.session.lookup_bytes(BytesId::from(method.name)) == name
+        })
     }
 
     fn find_struct_field_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {

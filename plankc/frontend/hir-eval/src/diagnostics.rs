@@ -1069,6 +1069,69 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_method_index_out_of_bounds(
+        &mut self,
+        builtin: Builtin,
+        index: U256,
+        method_count: usize,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("method index out of bounds")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}`: method index {index} is out of bounds for type with {}",
+                    fmt_count(method_count, "method"),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_invalid_method_selector_type(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        actual_ty: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("invalid method selector")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}` method selector must be `{}` or `{}`, got `{}`",
+                    builtin_names::U256,
+                    builtin_names::CBYTES,
+                    self.types.format(self.session, values, actual_ty),
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_unknown_method_name_selector(
+        &mut self,
+        values: &ValueInterner,
+        builtin: Builtin,
+        struct_ty: TypeId,
+        method_name_bytes: CBytes,
+        loc: SrcLoc,
+    ) {
+        let mut method_name = String::new();
+        write_bytes_literal(&mut method_name, self.session.lookup_bytes_slice(method_name_bytes))
+            .expect("writing to string cannot fail");
+        Diagnostic::error("unknown method")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{builtin}`: `{}` has no method named {method_name}",
+                    self.types.format(self.session, values, struct_ty),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_bytes_slice_out_of_bounds(
         &mut self,
         start: U256,

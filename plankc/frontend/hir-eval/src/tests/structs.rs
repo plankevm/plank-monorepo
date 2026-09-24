@@ -1,6 +1,184 @@
 use super::*;
 
 #[test]
+fn test_method_count() {
+    assert_lowers_to(
+        r#"
+        const Empty = struct {};
+        const S = struct {
+            field: u256,
+            fn first() u256 { 1 }
+            fn second() u256 { 2 }
+        };
+        init {
+            let mut empty = @method_count(Empty);
+            let mut count = @method_count(S);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : u256 = 0
+            %1 : u256 = 2
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_method_name() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            fn zebra() u256 { 1 }
+            fn apple() u256 { 2 }
+        };
+        init {
+            let mut first = @method_name(S, 0) == "zebra";
+            let mut second = @method_name(S, 1) == "apple";
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = true
+            %2 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_get_method() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            value: u256,
+            fn unused(self: Self) u256 { 99 }
+            fn get(self: Self) u256 { self.value }
+        };
+        init {
+            let get_by_name = @get_method(S, "get");
+            let get_by_index = @get_method(S, 1);
+            let instance = S { value: 3 };
+            comptime {
+                let result_by_name = get_by_name(instance);
+                let result_by_index = get_by_index(instance);
+                if result_by_name != result_by_index {
+                    @compile_error("method lookups returned different results");
+                }
+                if result_by_name != 3 {
+                    @compile_error("expected the get method to return 3");
+                }
+            };
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_has_method() {
+    assert_lowers_to(
+        r#"
+        const S = struct {
+            field: u256,
+            fn method() u256 { 1 }
+        };
+        init {
+            let mut method = @has_method(S, "method");
+            let mut field = @has_method(S, "field");
+            let mut missing = @has_method(S, "missing");
+            @evm_stop();
+        }
+        "#,
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : bool = true
+            %1 : bool = false
+            %2 : bool = false
+            %3 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_method_name_out_of_bounds() {
+    assert_diagnostics(
+        r#"
+        const S = struct { fn method() u256 { 1 } };
+        init {
+            let name = @method_name(S, 1);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: method index out of bounds
+         --> main.plk:3:32
+          |
+        3 |     let name = @method_name(S, 1);
+          |                                ^ `@method_name`: method index 1 is out of bounds for type with 1 method
+        "#],
+    );
+}
+
+#[test]
+fn test_get_method_out_of_bounds() {
+    assert_diagnostics(
+        r#"
+        const S = struct { fn method() u256 { 1 } };
+        init {
+            let method = @get_method(S, 1);
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: method index out of bounds
+         --> main.plk:3:33
+          |
+        3 |     let method = @get_method(S, 1);
+          |                                 ^ `@get_method`: method index 1 is out of bounds for type with 1 method
+        "#],
+    );
+}
+
+#[test]
+fn test_get_method_unknown_name() {
+    assert_diagnostics(
+        r#"
+        const S = struct { fn method() u256 { 1 } };
+        init {
+            let method = @get_method(S, "missing");
+            @evm_stop();
+        }
+        "#,
+        &[r#"
+        error: unknown method
+         --> main.plk:3:33
+          |
+        3 |     let method = @get_method(S, "missing");
+          |                                 ^^^^^^^^^ `@get_method`: `S` has no method named "missing"
+        "#],
+    );
+}
+
+#[test]
 fn test_struct_field_access() {
     assert_lowers_to(
         r#"

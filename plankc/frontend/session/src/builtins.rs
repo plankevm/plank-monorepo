@@ -360,6 +360,10 @@ define_builtins! {
         FIELD_NAME "@field_name" => FieldName;
         FIELD_INDEX "@field_index" => FieldIndex;
         FIELD_COUNT "@field_count" => FieldCount;
+        METHOD_COUNT "@method_count" => MethodCount;
+        METHOD_NAME "@method_name" => MethodName;
+        GET_METHOD "@get_method" => GetMethod;
+        HAS_METHOD "@has_method" => HasMethod;
 
         // Comptime Bytes
         SLICE_CBYTES "@slice_cbytes" => SliceCBytes;
