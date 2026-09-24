@@ -1,5 +1,5 @@
 use crate::{
-    Compound, DefOrigin, FnDefId, Type, TypeId, TypeInterner, ValueId,
+    Compound, DefOrigin, FnDefId, LocalId, Type, TypeId, TypeInterner, ValueId,
     bignum_interner::{BigNumId, BigNumInterner},
 };
 use alloy_primitives::U256;
@@ -19,8 +19,16 @@ enum StoredValue {
     BigNum(BigNumId),
     Type(TypeId),
     Bytes(CBytes),
-    Closure { fn_def: FnDefId, def_loc: SrcLoc, captures: CaptureIdx },
-    Compound { ty: TypeId, fields: CompoundIdx },
+    Closure {
+        fn_def: FnDefId,
+        def_loc: SrcLoc,
+        captures: CaptureIdx,
+        self_binding: Option<SelfBinding>,
+    },
+    Compound {
+        ty: TypeId,
+        fields: CompoundIdx,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,8 +37,22 @@ pub enum Value<'a> {
     BigNum(U256),
     Type(TypeId),
     Bytes(CBytes),
-    Closure { fn_def: FnDefId, def_loc: SrcLoc, captures: &'a [(ValueId, DefOrigin)] },
-    Compound { ty: TypeId, fields: &'a [ValueId] },
+    Closure {
+        fn_def: FnDefId,
+        def_loc: SrcLoc,
+        captures: &'a [(ValueId, DefOrigin)],
+        self_binding: Option<SelfBinding>,
+    },
+    Compound {
+        ty: TypeId,
+        fields: &'a [ValueId],
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SelfBinding {
+    pub local: LocalId,
+    pub ty: TypeId,
 }
 
 impl Value<'_> {
@@ -74,8 +96,8 @@ fn stored_to_value<'a>(
         StoredValue::BigNum(bid) => Value::BigNum(big_nums.lookup(bid)),
         StoredValue::Type(t) => Value::Type(t),
         StoredValue::Bytes(bytes) => Value::Bytes(bytes),
-        StoredValue::Closure { fn_def, def_loc, captures: idx } => {
-            Value::Closure { fn_def, def_loc, captures: &captures[idx] }
+        StoredValue::Closure { fn_def, def_loc, captures: idx, self_binding } => {
+            Value::Closure { fn_def, def_loc, captures: &captures[idx], self_binding }
         }
         StoredValue::Compound { ty, fields } => Value::Compound { ty, fields: &children[fields] },
     }
@@ -162,11 +184,14 @@ impl ValueInterner {
                     Value::BigNum(n) => StoredValue::BigNum(self.big_nums.intern(n)),
                     Value::Type(t) => StoredValue::Type(t),
                     Value::Bytes(bytes) => StoredValue::Bytes(bytes),
-                    Value::Closure { fn_def, def_loc, captures } => StoredValue::Closure {
-                        fn_def,
-                        def_loc,
-                        captures: self.captures.push_copy_slice(captures),
-                    },
+                    Value::Closure { fn_def, def_loc, captures, self_binding } => {
+                        StoredValue::Closure {
+                            fn_def,
+                            def_loc,
+                            captures: self.captures.push_copy_slice(captures),
+                            self_binding,
+                        }
+                    }
                     Value::Compound { ty, fields } => {
                         StoredValue::Compound { ty, fields: self.children.push_copy_slice(fields) }
                     }

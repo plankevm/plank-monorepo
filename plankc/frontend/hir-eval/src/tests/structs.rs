@@ -271,10 +271,9 @@ fn qualified_method_with_self_arg() {
     );
 }
 
-/// This is not yet supported, would require a rework of how Self is lowered in HIR
 #[test]
 fn qualified_method_as_function_value() {
-    assert_diagnostics(
+    assert_lowers_to(
         r#"
         const S = struct {
             fn ze_method(self: Self) u256 { 3 }
@@ -286,18 +285,20 @@ fn qualified_method_as_function_value() {
             @evm_stop();
         }
         "#,
-        &[r#"
-        error: no fields on type
-         --> main.plk:6:23
-          |
-        1 | / const S = struct {
-        2 | |     fn ze_method(self: Self) u256 { 3 }
-        3 | | };
-          | |__- defined here
-        ...
-        6 |       let x: function = S.ze_method;
-          |                         ^ value of type `type` is not a struct type
-        "#],
+        r#"
+        ==== Functions ====
+        @fn0(%0: S) -> u256 {
+            %1 : u256 = 3
+            ret %1
+        }
+
+        ; init
+        @fn1() -> never {
+            %0 : S = S {    }
+            %1 : u256 = call @fn0(%0)
+            %2 : never = @evm_stop()
+        }
+        "#,
     );
 }
 
