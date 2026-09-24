@@ -169,7 +169,6 @@ impl crate::scope::Scope<'_, '_> {
                     expr,
                     None,
                     capture_buf_offset,
-                    None,
                     values_buf_offset,
                 );
                 this.eval.call_arg_spans.pop();
@@ -231,7 +230,6 @@ impl crate::scope::Scope<'_, '_> {
                     expr,
                     None,
                     capture_buf_offset,
-                    None,
                     values_buf_offset,
                 );
                 this.eval.call_arg_spans.pop();

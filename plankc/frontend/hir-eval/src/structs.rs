@@ -1,12 +1,11 @@
-use crate::{
-    functions::SelfBinding,
-    scope::{EvalValue, LocalState, Scope},
-};
+use crate::scope::{EvalValue, LocalState, Scope};
 use alloy_primitives::U256;
 use plank_hir::{self as hir, LocalId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
-use plank_values::{Compound, Field, Method, StructKey, StructView, Type, TypeId, Value};
+use plank_values::{
+    Compound, Field, Method, SelfBinding, StructKey, StructView, Type, TypeId, Value, ValueId,
+};
 use smallvec::SmallVec;
 
 impl<'eval, 'ctx> Scope<'eval, 'ctx> {
@@ -136,12 +135,33 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 &method_args
             }
         };
-        self.eval_call(
-            method.closure,
-            args,
-            call_span,
-            Some(SelfBinding { local: method.self_type, ty: struct_ty }),
-        )
+        let closure = self.bind_method(*method, struct_ty);
+        self.eval_call(closure, args, call_span)
+    }
+
+    // We don't know the struct's type until its methods have been collected,
+    // so we bind Self when looking up a method rather than when defining it.
+    fn bind_method(&mut self, method: Method, ty: TypeId) -> ValueId {
+        assert!(ty.is_struct(), "method Self binding must be a struct type");
+        self.with_captures_buf(|this, offset| {
+            let Value::Closure { fn_def, def_loc, captures, self_binding } =
+                this.eval.values.lookup(method.closure)
+            else {
+                unreachable!("method definitions always contain closures")
+            };
+            assert!(self_binding.is_none(), "closure already has a Self binding");
+            this.eval.captures_buf.extend_from_slice(captures);
+            let closure = this.eval.values.intern(Value::Closure {
+                fn_def,
+                def_loc,
+                captures: &this.eval.captures_buf[offset..],
+                self_binding: Some(SelfBinding { local: method.self_type, ty }),
+            });
+            if let Some(name) = this.eval.values.get_closure_name(method.closure) {
+                this.eval.values.try_name_closure(closure, name);
+            }
+            closure
+        })
     }
 
     pub(crate) fn eval_struct_member_access(
@@ -152,6 +172,22 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
     ) -> MaybePoisoned<EvalValue> {
         let state = self.bindings[object].state?;
         let object_ty = self.state_type(state);
+
+        if let LocalState::Comptime(value) = state
+            && let Value::Type(ty) = self.values.lookup(value)
+            && let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty)
+        {
+            let Some(&method) = r#struct.methods.iter().find(|method| method.name == member) else {
+                self.diag_ctx.emit_unknown_method(
+                    self.eval.values,
+                    ty,
+                    self.loc(expr_span),
+                    member,
+                );
+                return Err(Poisoned);
+            };
+            return Ok(EvalValue::Comptime(self.bind_method(method, ty)));
+        }
 
         if object_ty == TypeId::CBYTES {
             if member != builtins::LENGTH {
