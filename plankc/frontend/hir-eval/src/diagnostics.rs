@@ -1,11 +1,45 @@
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
-use plank_hir::{self as hir, operators::BinaryOp};
+use plank_hir::{
+    self as hir,
+    operators::{BinaryOp, UnaryOp},
+};
 use plank_session::{Builtin, builtins::builtin_names, diagnostic::fmt_count, *};
 use plank_values::{
     Compound, Field, Type, TypeFlags, TypeId, TypeInterner, ValueId, ValueInterner,
     builtins as builtin_sigs,
 };
+
+#[derive(Clone, Copy)]
+pub(crate) enum SourceOperation {
+    Builtin(Builtin),
+    Binary(BinaryOp),
+    Unary(UnaryOp),
+}
+
+impl SourceOperation {
+    pub fn builtin(self) -> Builtin {
+        match self {
+            Self::Builtin(builtin) => builtin,
+            Self::Binary(BinaryOp::Equals) => RuntimeBuiltin::Eq.into(),
+            Self::Binary(op) => {
+                op.runtime_equivalent().expect("invariant: operator uses builtin evaluation").into()
+            }
+            Self::Unary(UnaryOp::BitwiseNot) => RuntimeBuiltin::Not.into(),
+            Self::Unary(UnaryOp::Negate) => {
+                unreachable!("invariant: negation uses standard library evaluation")
+            }
+        }
+    }
+
+    fn description(self) -> String {
+        match self {
+            Self::Builtin(builtin) => format!("`{}`", builtin.name()),
+            Self::Binary(op) => format!("operator `{op}`"),
+            Self::Unary(op) => format!("operator `{op}`"),
+        }
+    }
+}
 
 pub(crate) struct BindingLoc {
     pub r#use: SrcLoc,
@@ -539,26 +573,53 @@ impl DiagCtx<'_> {
         }
     }
 
-    fn format_signatures_note(&self, values: &ValueInterner, builtin: Builtin) -> Option<String> {
+    fn format_operand_types(
+        &self,
+        values: &ValueInterner,
+        source_op: SourceOperation,
+        types: &[TypeId],
+    ) -> String {
         use std::fmt::Write;
 
-        let signatures = builtin_sigs::builtin_signatures(builtin);
+        let reordered;
+        let types = match (source_op, types) {
+            (
+                SourceOperation::Binary(BinaryOp::ShiftLeft | BinaryOp::ShiftRight),
+                &[shift, value],
+            ) => {
+                reordered = [value, shift];
+                &reordered
+            }
+            _ => types,
+        };
+
+        let mut formatted = String::new();
+        for (i, &ty) in types.iter().enumerate() {
+            if i > 0 {
+                formatted.push_str(", ");
+            }
+            let _ = write!(formatted, "{}", self.types.format(self.session, values, ty));
+        }
+        formatted
+    }
+
+    fn format_signatures_note(
+        &self,
+        values: &ValueInterner,
+        source_op: SourceOperation,
+    ) -> Option<String> {
+        let signatures = builtin_sigs::builtin_signatures(source_op.builtin());
         if signatures.is_empty() {
             return None;
         }
 
-        let mut note = format!("`{}` accepts ", builtin.name());
+        let mut note = format!("{} accepts ", source_op.description());
         for (i, sig) in signatures.iter().enumerate() {
             if i > 0 {
                 note.push_str(", ");
             }
             note.push('(');
-            for (j, &ty) in sig.inputs.iter().enumerate() {
-                if j > 0 {
-                    note.push_str(", ");
-                }
-                let _ = write!(note, "{}", self.types.format(self.session, values, ty));
-            }
+            note.push_str(&self.format_operand_types(values, source_op, sig.inputs));
             note.push(')');
         }
         Some(note)
@@ -583,42 +644,41 @@ impl DiagCtx<'_> {
             ),
         );
 
-        if let Some(note) = self.format_signatures_note(values, builtin) {
+        if let Some(note) = self.format_signatures_note(values, SourceOperation::Builtin(builtin)) {
             diag = diag.note(note);
         }
 
         diag.emit(self);
     }
 
-    pub fn emit_no_matching_builtin_signature(
+    pub fn emit_no_matching_signature(
         &mut self,
         values: &ValueInterner,
-        builtin: Builtin,
+        source_op: SourceOperation,
         arg_types: &[TypeId],
         loc: SrcLoc,
     ) {
-        use std::fmt::Write;
-
+        let builtin = source_op.builtin();
         if builtin_sigs::arg_count(builtin) != arg_types.len() {
             return self.emit_wrong_arg_count(values, builtin, arg_types.len(), loc);
         }
 
-        let name = builtin.name();
-        let mut args_str = String::new();
-        for (i, &ty) in arg_types.iter().enumerate() {
-            if i > 0 {
-                args_str.push_str(", ");
-            }
-            let _ = write!(args_str, "{}", self.types.format(self.session, values, ty));
-        }
+        let description = source_op.description();
+        let args_str = self.format_operand_types(values, source_op, arg_types);
 
-        let mut diag = Diagnostic::error("no valid match for builtin signature").primary(
-            loc.source,
-            loc.span,
-            format!("`{name}` cannot be called with ({args_str})"),
-        );
+        let (title, label) = match source_op {
+            SourceOperation::Builtin(_) => (
+                "no valid match for builtin signature",
+                format!("{description} cannot be called with ({args_str})"),
+            ),
+            SourceOperation::Binary(_) | SourceOperation::Unary(_) => (
+                "invalid operands for operator",
+                format!("{description} cannot be applied to ({args_str})"),
+            ),
+        };
+        let mut diag = Diagnostic::error(title).primary(loc.source, loc.span, label);
 
-        if let Some(note) = self.format_signatures_note(values, builtin) {
+        if let Some(note) = self.format_signatures_note(values, source_op) {
             diag = diag.note(note);
         }
 

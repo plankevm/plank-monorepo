@@ -7,7 +7,11 @@ use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, RuntimeBuiltin, SourceId, SourceSpan, SrcLoc};
 use plank_values::{PrimitiveType, TypeId, Value, ValueId};
 
-use crate::{diagnostics::DiagCtx, evaluator::Evaluator, scope::*};
+use crate::{
+    diagnostics::{DiagCtx, SourceOperation},
+    evaluator::Evaluator,
+    scope::*,
+};
 
 pub(crate) struct OperatorTable {
     binary: Vec<(BinaryOp, TypeId, ValueId)>,
@@ -101,7 +105,7 @@ impl crate::scope::Scope<'_, '_> {
             } else {
                 [lhs, rhs]
             };
-            return self.eval_runtime_foldable_builtin(builtin, &args, expr);
+            return self.eval_runtime_foldable_builtin(SourceOperation::Binary(op), &args, expr);
         }
 
         let lhs_binding = self.bindings[lhs];
@@ -183,7 +187,7 @@ impl crate::scope::Scope<'_, '_> {
         match op {
             UnaryOp::BitwiseNot => {
                 return self.eval_runtime_foldable_builtin(
-                    RuntimeBuiltin::Not,
+                    SourceOperation::Unary(op),
                     std::array::from_ref(&input),
                     expr,
                 );
@@ -276,7 +280,11 @@ impl crate::scope::Scope<'_, '_> {
             }
             (true, Ok(PrimitiveType::U256 | PrimitiveType::Bool)) => {
                 let args = [lhs, rhs];
-                self.eval_runtime_foldable_builtin(RuntimeBuiltin::Eq, &args, expr)
+                self.eval_runtime_foldable_builtin(
+                    SourceOperation::Binary(BinaryOp::Equals),
+                    &args,
+                    expr,
+                )
             }
             (op_equals, Err(_)) if ty == TypeId::VOID => {
                 // `void` is the empty tuple: `() == ()` is always `true`, `!=` always `false`.
