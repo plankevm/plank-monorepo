@@ -135,13 +135,13 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 &method_args
             }
         };
-        let closure = self.bind_method(*method, struct_ty);
+        let closure = self.bind_method_self(*method, struct_ty);
         self.eval_call(closure, args, call_span)
     }
 
     // We don't know the struct's type until its methods have been collected,
     // so we bind Self when looking up a method rather than when defining it.
-    fn bind_method(&mut self, method: Method, ty: TypeId) -> ValueId {
+    pub(crate) fn bind_method_self(&mut self, method: Method, ty: TypeId) -> ValueId {
         assert!(ty.is_struct(), "method Self binding must be a struct type");
         self.with_captures_buf(|this, offset| {
             let Value::Closure { fn_def, def_loc, captures, self_binding } =
@@ -186,7 +186,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 );
                 return Err(Poisoned);
             };
-            return Ok(EvalValue::Comptime(self.bind_method(method, ty)));
+            return Ok(EvalValue::Comptime(self.bind_method_self(method, ty)));
         }
 
         if object_ty == TypeId::CBYTES {

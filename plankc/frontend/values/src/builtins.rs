@@ -57,6 +57,7 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
     const NEVER: TypeId = TypeId::NEVER;
     const TYPE: TypeId = TypeId::TYPE;
     const CBYTES: TypeId = TypeId::CBYTES;
+    const FUNCTION: TypeId = TypeId::FUNCTION;
 
     match builtin {
         // Runtime foldable
@@ -218,6 +219,10 @@ pub fn builtin_signatures(builtin: Builtin) -> &'static [BuiltinSignature] {
         B::FieldName => &[sig!([TYPE, U256 => CBYTES])],
         B::FieldIndex => &[sig!([TYPE, CBYTES => U256])],
         B::FieldCount => &[sig!([TYPE => U256])],
+        B::MethodCount => &[sig!([TYPE => U256])],
+        B::MethodName => &[sig!([TYPE, U256 => CBYTES])],
+        B::GetMethod => &[sig!([TYPE, U256 => FUNCTION]), sig!([TYPE, CBYTES => FUNCTION])],
+        B::HasMethod => &[sig!([TYPE, CBYTES => BOOL])],
 
         B::SliceCBytes => &[sig!([CBYTES, U256, U256 => CBYTES])],
         B::PaddedReadCBytes => &[sig!([CBYTES, U256 => U256])],
