@@ -108,7 +108,7 @@ mod tests {
 
         func.set_control(bb0_id, Control::ContinuesTo(bb1_id)).unwrap();
 
-        let func_id = func.finish(bb0_id);
+        let func_id = func.finish(bb0_id).unwrap();
         let program = builder.build(func_id, None);
 
         let store = AnalysesStore::default();
@@ -131,7 +131,7 @@ mod tests {
         let mut bb0 = func.begin_basic_block();
         bb0.add_operation(Operation::Stop(()));
         let bb0_id = bb0.finish_terminating().unwrap();
-        let func_id = func.finish(bb0_id);
+        let func_id = func.finish(bb0_id).unwrap();
 
         let mut orphan_func = builder.begin_function();
         let mut bb1 = orphan_func.begin_basic_block();
@@ -165,13 +165,13 @@ mod tests {
 
         func0.set_control(bb0_id, Control::ContinuesTo(bb1_id)).unwrap();
 
-        let func0_id = func0.finish(bb0_id);
+        let func0_id = func0.finish(bb0_id).unwrap();
 
         let mut func1 = builder.begin_function();
         let mut bb2 = func1.begin_basic_block();
         bb2.add_operation(Operation::Noop(()));
-        let bb2_id = bb2.finish_with_internal_return().unwrap();
-        let func1_id = func1.finish(bb2_id);
+        let bb2_id = bb2.finish_with_internal_return();
+        let func1_id = func1.finish(bb2_id).unwrap();
 
         let program = builder.build(func0_id, Some(func1_id));
 
@@ -211,7 +211,7 @@ mod tests {
         )
         .unwrap();
 
-        let func_id = func.finish(bb0_id);
+        let func_id = func.finish(bb0_id).unwrap();
         let program = builder.build(func_id, None);
 
         let store = AnalysesStore::default();

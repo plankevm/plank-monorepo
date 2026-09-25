@@ -238,6 +238,38 @@ fn test_call_with_args() {
 }
 
 #[test]
+fn test_call_to_inferred_never_function_terminates_caller() {
+    assert_lowers_to(
+        r#"
+        const halt = fn () u256 {
+            @evm_stop();
+        };
+
+        init {
+            let value = halt();
+            @evm_sstore(0, value);
+            @evm_stop();
+        }
+        "#,
+        r#"
+        Init: @1
+        Functions:
+            fn @0 -> entry @0  (never)
+            fn @1 -> entry @1  (never)
+
+        Basic Blocks:
+            @0 {
+                stop
+            }
+
+            @1 {
+                icall_never @0
+            }
+        "#,
+    );
+}
+
+#[test]
 fn test_simple_if() {
     assert_lowers_to(
         r#"

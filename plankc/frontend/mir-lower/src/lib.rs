@@ -133,7 +133,7 @@ fn lower_function(
 
     let CFGSegment { bb_in: entry_bb_id, .. } =
         lower_basic_block(ctx, values, &mut new_func, mir_func, ctx.mir.fns[mir_func].body, true);
-    let fn_id = new_func.finish(entry_bb_id);
+    let fn_id = new_func.finish(entry_bb_id).expect("invalid MIR");
     ctx.mir_to_sir_functions.insert(mir_func, fn_id);
     fn_id
 }
@@ -246,31 +246,37 @@ fn lower_basic_block(
                     }
                 }
                 Expr::Call { callee, args } => {
-                    let ret_type = ctx.mir.fns[callee].return_type;
-                    ctx.locals_map.ensure_many(
-                        target,
-                        || current_bb.new_local(),
-                        ctx.size_in_locals(ret_type) as usize,
-                    );
+                    let callee = ctx.mir_to_sir_functions[callee];
+                    let return_kind = current_bb
+                        .as_mut()
+                        .get_func(callee)
+                        .expect("callee must be lowered before its caller")
+                        .return_kind();
                     ctx.locals_buf.clear();
                     for &arg in &ctx.mir.args[args] {
                         let inputs = ctx.locals_map.get(arg);
                         ctx.locals_buf.extend(inputs);
                     }
-                    let operation_kind = if ret_type == TypeId::NEVER {
-                        OperationKind::InternalCallNever
-                    } else {
-                        OperationKind::InternalCall
+                    let (operation_kind, outputs) = match return_kind.count() {
+                        Some(count) => {
+                            ctx.locals_map.ensure_many(
+                                target,
+                                || current_bb.new_local(),
+                                count as usize,
+                            );
+                            (OperationKind::InternalCall, ctx.locals_map.get(target))
+                        }
+                        None => (OperationKind::InternalCallNever, &[][..]),
                     };
                     current_bb
                         .try_add_op(
                             operation_kind,
                             &ctx.locals_buf,
-                            ctx.locals_map.get(target),
-                            OpExtraData::FuncId(ctx.mir_to_sir_functions[callee]),
+                            outputs,
+                            OpExtraData::FuncId(callee),
                         )
                         .expect("mir should guarantee valid construction");
-                    if ret_type == TypeId::NEVER {
+                    if return_kind.is_never() {
                         let end_id = current_bb
                             .finish_terminating()
                             .expect("error despite `InternalCallNever` being terminating");
@@ -312,7 +318,7 @@ fn lower_basic_block(
             },
             Instruction::Return(local) => {
                 current_bb.set_outputs(ctx.locals_map.get(local));
-                let end_id = current_bb.finish_with_internal_return().expect("invalid MIR");
+                let end_id = current_bb.finish_with_internal_return();
                 return CFGSegment {
                     bb_in: bb_in.unwrap_or(end_id),
                     bb_out: end_id,
