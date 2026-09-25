@@ -1,0 +1,23 @@
+const AsPrimitive = struct {
+    byte_size: u256,
+    to_raw: function,
+    unchecked_from_raw: function,
+};
+
+/// Returns the requested type if supported, otherwise `void`.
+const supports = fn (comptime requested: type, comptime supported: $L) type {
+    if !@is_tuple(L) {
+        @compile_error("supported interfaces must be a tuple");
+    }
+
+    let mut i = 0;
+    while i < @field_count(L) {
+        let interface: type = @get_field(supported, i);
+        if requested == interface {
+            return requested;
+        }
+        i = i +% 1;
+    }
+
+    void
+};

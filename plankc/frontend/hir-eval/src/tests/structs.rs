@@ -1,6 +1,93 @@
 use super::*;
 
 #[test]
+fn test_uint_as_primitive() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            use std::core::uint::{UInt, u64};
+            use std::error::comptime_assert;
+
+            init {
+                comptime {
+                    let as_primitive = u64.impl(AsPrimitive);
+                    let value: u64 = (as_primitive.unchecked_from_raw)(34);
+                    let raw = (as_primitive.to_raw)(value);
+                    comptime_assert(raw == 34, "u64 conversion must preserve the raw value");
+                    comptime_assert(as_primitive.byte_size == 8, "u64 must occupy 8 bytes");
+                    comptime_assert(UInt(7).impl(AsPrimitive).byte_size == 1, "7 bits must occupy 1 byte");
+                    comptime_assert(UInt(9).impl(AsPrimitive).byte_size == 2, "9 bits must occupy 2 bytes");
+                };
+                @evm_stop();
+            }
+            "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
+fn test_uint_as_primitive_invalid_width() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            use std::core::uint::UInt;
+
+            const oversized = UInt(264).impl(AsPrimitive);
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[r#"
+        error: AsPrimitive requires an integer width of at most 256 bits
+          --> std/core/uint.plk:19:21
+           |
+        19 |                     @compile_error("AsPrimitive requires an integer width of at most 256 bits");
+           |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+    );
+}
+
+#[test]
+fn test_addr_as_primitive() {
+    assert_lowers_to(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            use std::core::addr::addr;
+            use std::error::comptime_assert;
+
+            init {
+                comptime {
+                    let as_primitive = addr.impl(AsPrimitive);
+                    let expected = 0x1234567890abcdef1234567890abcdef12345678;
+                    let value: addr = (as_primitive.unchecked_from_raw)(expected);
+                    let raw = (as_primitive.to_raw)(value);
+                    comptime_assert(raw == expected, "address conversion must preserve the raw value");
+                    comptime_assert(as_primitive.byte_size == 20, "address must occupy 20 bytes");
+                };
+                @evm_stop();
+            }
+            "#,
+        ),
+        r#"
+        ==== Functions ====
+        ; init
+        @fn0() -> never {
+            %0 : never = @evm_stop()
+        }
+        "#,
+    );
+}
+
+#[test]
 fn test_method_count() {
     assert_lowers_to(
         r#"
