@@ -147,34 +147,7 @@ impl crate::scope::Scope<'_, '_> {
             return Ok(Ok(EvalValue::Comptime(value)));
         }
 
-        self.with_captures_buf(|this, capture_buf_offset| {
-            this.with_maybe_values_buf(|this, values_buf_offset| {
-                let Value::Closure { fn_def, captures, .. } = this.eval.values.lookup(closure_vid)
-                else {
-                    unreachable!("invariant: verified in build_table")
-                };
-                for &capture in captures {
-                    this.eval.captures_buf.push(capture);
-                }
-                let arg_spans = this
-                    .eval
-                    .call_arg_spans
-                    .push_copy_slice(&[lhs_binding.use_span, rhs_binding.use_span]);
-                let args = [lhs, rhs];
-                let res = this.eval_call_inner(
-                    closure_vid,
-                    fn_def,
-                    &args,
-                    arg_spans,
-                    expr,
-                    None,
-                    capture_buf_offset,
-                    values_buf_offset,
-                );
-                this.eval.call_arg_spans.pop();
-                res
-            })
-        })
+        self.eval_hir_call(closure_vid, &[lhs, rhs], expr)
     }
 
     pub fn eval_unary_op(
@@ -195,7 +168,7 @@ impl crate::scope::Scope<'_, '_> {
         }
 
         let binding = self.bindings[input];
-        let (state, use_span, _origin) = binding.poisoned()?;
+        let (state, _use_span, _origin) = binding.poisoned()?;
         let ty = self.state_type(state);
 
         let r#impl = self.eval.operator_table.negate.filter(|_| ty.is_assignable_to(TypeId::U256));
@@ -210,32 +183,7 @@ impl crate::scope::Scope<'_, '_> {
             return Ok(Ok(EvalValue::Comptime(self.eval.values.intern_num(res))));
         }
 
-        self.with_captures_buf(|this, capture_buf_offset| {
-            this.with_maybe_values_buf(|this, values_buf_offset| {
-                let Value::Closure { fn_def: fn_def_id, captures, .. } =
-                    this.eval.values.lookup(closure_vid)
-                else {
-                    unreachable!("invariant: verified in build_table")
-                };
-                for &capture in captures {
-                    this.eval.captures_buf.push(capture);
-                }
-                let arg_spans = this.eval.call_arg_spans.push_copy_slice(&[use_span]);
-                let args = [input];
-                let res = this.eval_call_inner(
-                    closure_vid,
-                    fn_def_id,
-                    &args,
-                    arg_spans,
-                    expr,
-                    None,
-                    capture_buf_offset,
-                    values_buf_offset,
-                );
-                this.eval.call_arg_spans.pop();
-                res
-            })
-        })
+        self.eval_hir_call(closure_vid, &[input], expr)
     }
 
     fn eval_equality(

@@ -2,9 +2,28 @@ use std::fixedbytes::bytes32;
 use std::regions::{bytes, memory};
 use std::option::{Option, Some, None, unwrap as option_unwrap};
 use std::core::uint::{u160, is_uint, try_cast_uint, cast_uint, unsafe_from_u256 as unsafe_uint_from_u256};
+use std::core::interfaces::{AsPrimitive, supports};
 
 const addr = struct {
     as_uint: u160,
+
+    fn to_raw(self: Self) u256 { cast_uint(self.as_uint, u256) }
+
+    fn unchecked_from_raw(raw: u256) Self {
+        Self { as_uint: unsafe_uint_from_u256(u160, raw) }
+    }
+
+    fn impl(comptime T: type) supports(T, (AsPrimitive,)) {
+        if T == AsPrimitive {
+            AsPrimitive {
+                byte_size: 20,
+                to_raw: Self.to_raw,
+                unchecked_from_raw: Self.unchecked_from_raw,
+            }
+        } else {
+            {}
+        }
+    }
 };
 
 
@@ -26,7 +45,7 @@ const addr_from_u256 = fn (raw: u256) addr {
 
 /// Safety: `raw` must be a valid 160-bit value.
 const unsafe_from_u256 = fn (raw: u256) addr {
-    addr { as_uint: unsafe_uint_from_u256(u160, raw) }
+    addr.unchecked_from_raw(raw)
 };
 
 const cast_addr = fn (this: addr, comptime Dst: type) Dst {

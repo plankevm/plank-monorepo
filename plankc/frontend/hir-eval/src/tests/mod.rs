@@ -3,6 +3,7 @@ mod calls;
 mod compile_log;
 mod comptime;
 mod imports;
+mod interfaces;
 mod logical_ops;
 mod matches;
 mod operators;
@@ -36,8 +37,7 @@ fn try_lower_with_version(
 
     let mut big_nums = ValueInterner::new();
     let hir = plank_hir::lower(&project, &mut big_nums, &mut session);
-    let mir =
-        crate::evaluate(&hir, project.core_ops_source, &mut big_nums, &mut session, evm_version);
+    let mir = crate::evaluate(&hir, project.core, &mut big_nums, &mut session, evm_version);
 
     (mir, big_nums, session)
 }

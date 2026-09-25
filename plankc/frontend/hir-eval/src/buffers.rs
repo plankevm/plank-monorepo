@@ -12,6 +12,17 @@ macro_rules! with_buf_methods {
 }
 
 impl crate::scope::Scope<'_, '_> {
+    pub fn with_call_args_buf<R>(
+        &mut self,
+        inner: impl FnOnce(&mut Self, crate::evaluator::CallArgIdx) -> R,
+    ) -> R {
+        let len = self.call_args_buf.len();
+        let start = self.call_args_buf.len_idx();
+        let result = inner(self, start);
+        self.call_args_buf.raw.truncate(len);
+        result
+    }
+
     with_buf_methods! {
         with_values_buf => values_buf;
         with_maybe_values_buf => maybe_values_buf;

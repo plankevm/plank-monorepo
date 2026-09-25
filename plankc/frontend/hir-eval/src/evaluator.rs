@@ -4,7 +4,7 @@ use plank_core::{
 use plank_evm::EvmVersion;
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
+use plank_session::{CoreModules, MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
 use plank_values::{
     Compound, DefOrigin, Field, Type, TypeId, TypeInterner, TypeName, Value, ValueId, ValueInterner,
 };
@@ -14,7 +14,7 @@ use crate::{
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
     operators::OperatorTable,
     quota::{ComptimeQuota, QuotaExhaustedError},
-    scope::{Diverge, EvalContext, LocalState, Scope},
+    scope::{Diverge, EvalContext, Local, LocalState, Scope},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +41,7 @@ impl ConstEvalResult {
 
 newtype_index! {
     pub(crate) struct CallArgSpansIdx;
+    pub(crate) struct CallArgIdx;
 }
 
 pub(crate) struct CallFrame {
@@ -86,8 +87,10 @@ pub(crate) struct Evaluator<'a> {
     pub lowered_fns_cache: LoweredFunctionsCache,
 
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
+    pub call_args_buf: IndexVec<CallArgIdx, Local>,
 
     pub operator_table: OperatorTable,
+    pub core: CoreModules,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -108,6 +111,7 @@ impl<'a> Evaluator<'a> {
         types: &'a TypeInterner,
         evaluated_fns_cache: &'a EvaluatedFunctionCache,
         values: &'a mut ValueInterner,
+        core: CoreModules,
         evm_version: EvmVersion,
     ) -> Self {
         Evaluator {
@@ -126,8 +130,10 @@ impl<'a> Evaluator<'a> {
             lowered_fns_cache: LoweredFunctionsCache::new(),
 
             call_arg_spans: ListOfLists::new(),
+            call_args_buf: IndexVec::new(),
 
             operator_table: OperatorTable::new(),
+            core,
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),

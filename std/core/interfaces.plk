@@ -1,0 +1,30 @@
+const AsPrimitive = struct {
+    /// Encoded width in bytes, from 0 to 32.
+    byte_size: u256,
+
+    /// Takes a value of the implementing type and returns its u256 representation.
+    /// Encoding uses the lowest byte_size bytes in big-endian order.
+    to_raw: function,
+
+    /// Takes a u256 representation and returns the implementing type.
+    /// The caller must ensure the input is valid for that type.
+    unchecked_from_raw: function,
+};
+
+/// Returns the requested type if supported, otherwise `void`.
+const supports = fn (comptime requested: type, comptime supported: $L) type {
+    if !@is_tuple(L) {
+        @compile_error("supported interfaces must be a tuple");
+    }
+
+    let mut i = 0;
+    while i < @field_count(L) {
+        let interface: type = @get_field(supported, i);
+        if requested == interface {
+            return requested;
+        }
+        i = i +% 1;
+    }
+
+    void
+};
