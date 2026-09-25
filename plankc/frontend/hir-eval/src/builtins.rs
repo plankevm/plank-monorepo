@@ -312,15 +312,20 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_expected_comptime_arg(builtin, "method selector", expr_loc);
                     return Err(Poisoned);
                 };
-                let index = match self.values.lookup(selector) {
-                    Value::BigNum(index) => self.expect_method_index_in_bounds(
-                        index,
-                        selector_local,
-                        builtin,
-                        r#struct.methods.len(),
-                    )?,
+                let method = match self.values.lookup(selector) {
+                    Value::BigNum(index) => {
+                        let index = self.expect_method_index_in_bounds(
+                            index,
+                            selector_local,
+                            builtin,
+                            r#struct.methods.len(),
+                        )?;
+                        r#struct.methods[index]
+                    }
                     Value::Bytes(name) => {
-                        let Some(index) = self.find_struct_method_by_name(r#struct, name) else {
+                        let Some(method) = self
+                            .find_method(r#struct, self.diag_ctx.session.lookup_bytes_slice(name))
+                        else {
                             self.diag_ctx.emit_unknown_method_name_selector(
                                 self.eval.values,
                                 builtin,
@@ -330,7 +335,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             );
                             return Err(Poisoned);
                         };
-                        index
+                        method
                     }
                     other => {
                         self.diag_ctx.emit_invalid_method_selector_type(
@@ -342,14 +347,16 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         return Err(Poisoned);
                     }
                 };
-                self.bind_method_self(r#struct.methods[index], ty)
+                self.bind_method_self(method, ty)
             }
             Builtin::HasMethod => {
                 let &[ty_local, name_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
-                self.find_struct_method_by_name(r#struct, name).is_some().into()
+                self.find_method(r#struct, self.diag_ctx.session.lookup_bytes_slice(name))
+                    .is_some()
+                    .into()
             }
             Builtin::InComptime => self.comptime.into(),
             Builtin::SetEvalBranchQuota => {
@@ -698,46 +705,60 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         };
 
-        let fields = match self.eval.values.lookup(tuple_vid) {
-            Value::Compound { ty, fields } if ty.is_tuple() => fields,
-            _ => {
-                let actual_ty = self.values.type_of_value(tuple_vid);
-                self.diag_ctx.emit_concat_cbytes_expected_tuple(
-                    self.eval.values,
-                    actual_ty,
-                    self.loc(expr_span),
-                );
+        self.with_values_buf(|this, offset| {
+            match this.eval.values.lookup(tuple_vid) {
+                Value::Compound { ty, fields } if ty.is_tuple() => {
+                    this.eval.values_buf.extend_from_slice(fields);
+                }
+                _ => {
+                    let actual_ty = this.values.type_of_value(tuple_vid);
+                    this.diag_ctx.emit_concat_cbytes_expected_tuple(
+                        this.eval.values,
+                        actual_ty,
+                        this.loc(expr_span),
+                    );
+                    return Err(Poisoned);
+                }
+            }
+
+            let mut buf = Vec::new();
+            let mut contains_invalid = false;
+            for index in offset..this.eval.values_buf.len() {
+                let field = this.eval.values_buf[index];
+                match this.values.lookup(field) {
+                    Value::BigNum(n) => buf.extend_from_slice(&n.to_be_bytes::<32>()),
+                    Value::Bytes(bytes) => {
+                        let slice = this.diag_ctx.session.lookup_bytes_slice(bytes);
+                        buf.extend_from_slice(slice);
+                    }
+                    Value::Compound { ty, .. } if ty.is_struct() => {
+                        match this.eval_as_primitive(field, expr_span) {
+                            Ok(Ok((raw, byte_size))) => {
+                                buf.extend_from_slice(
+                                    &raw.to_be_bytes::<32>()[32 - usize::from(byte_size)..],
+                                );
+                            }
+                            Ok(Err(diverge)) => return Ok(Err(diverge)),
+                            Err(Poisoned) => contains_invalid = true,
+                        }
+                    }
+                    other => {
+                        this.diag_ctx.emit_concat_cbytes_invalid_element(
+                            this.eval.values,
+                            other.get_type(),
+                            this.loc(expr_span),
+                        );
+                        contains_invalid = true;
+                    }
+                }
+            }
+            if contains_invalid {
                 return Err(Poisoned);
             }
-        };
-
-        let mut buf = Vec::new();
-        let mut contains_invalid = false;
-        for &field in fields {
-            match self.values.lookup(field) {
-                Value::BigNum(n) => {
-                    buf.extend_from_slice(&n.to_be_bytes::<32>());
-                }
-                Value::Bytes(bytes) => {
-                    let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
-                    buf.extend_from_slice(slice);
-                }
-                other => {
-                    self.diag_ctx.emit_concat_cbytes_invalid_element(
-                        self.eval.values,
-                        other.get_type(),
-                        self.loc(expr_span),
-                    );
-                    contains_invalid = true;
-                }
-            }
-        }
-        if contains_invalid {
-            return Err(Poisoned);
-        }
-        let cbytes = self.diag_ctx.session.intern_cbytes(&buf);
-        let value = self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
-        Ok(Ok(EvalValue::Comptime(value)))
+            let cbytes = this.diag_ctx.session.intern_cbytes(&buf);
+            let value = this.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
+            Ok(Ok(EvalValue::Comptime(value)))
+        })
     }
 
     fn eval_compile_log(
@@ -798,13 +819,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 Err(Poisoned)
             }
         }
-    }
-
-    fn find_struct_method_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
-        let name = self.diag_ctx.session.lookup_bytes_slice(name);
-        r#struct.methods.iter().position(|method| {
-            self.diag_ctx.session.lookup_bytes(BytesId::from(method.name)) == name
-        })
     }
 
     fn find_struct_field_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {

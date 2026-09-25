@@ -1,6 +1,6 @@
 use plank_evm::EvmVersion;
 use plank_hir::lower;
-use plank_session::{CoreSources, Session};
+use plank_session::{CoreModules, Session};
 use plank_source::{
     CorePaths, ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
@@ -77,7 +77,7 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     pub fn evaluate_hir(
         &mut self,
         hir: &plank_hir::Hir,
-        core: CoreSources,
+        core: CoreModules,
         evm_version: EvmVersion,
     ) -> plank_mir::Mir {
         plank_hir_eval::evaluate(hir, core, &mut self.values, &mut self.session, evm_version)

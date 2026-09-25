@@ -15,7 +15,7 @@ use plank_parser::{
     lexer::{Lexed, TokenSpan},
     parser::parse,
 };
-use plank_session::{CoreSources, Session, Source, SourceId, SourceSpan, StrId};
+use plank_session::{CoreModules, Session, Source, SourceId, SourceSpan, StrId};
 use std::path::{Path, PathBuf};
 
 newtype_index! {
@@ -45,7 +45,7 @@ pub struct ParsedSource {
 pub struct ParsedProject {
     pub parsed_sources: IndexVec<SourceId, ParsedSource>,
     pub imports: ListOfLists<SourceId, FileImport>,
-    pub core: CoreSources,
+    pub core: CoreModules,
 }
 
 struct ProjectParser<'a, F: SourceFs> {
@@ -291,7 +291,7 @@ pub fn parse_project(
             parser.resolve_or_parse_source(path)
         })
     };
-    let core = CoreSources {
+    let core = CoreModules {
         ops: parse_core_source(core_paths.ops.as_deref()),
         interfaces: parse_core_source(core_paths.interfaces.as_deref()),
     };

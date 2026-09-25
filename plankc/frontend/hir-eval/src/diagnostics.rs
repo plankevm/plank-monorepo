@@ -1,3 +1,4 @@
+use crate::interfaces::InterfaceImplError;
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{
@@ -992,7 +993,7 @@ impl DiagCtx<'_> {
                 loc.source,
                 loc.span,
                 format!(
-                    "`{}` tuple elements must be `{}` or `{}`, got `{}`",
+                    "`{}` tuple elements must be `{}`, `{}`, or implement `AsPrimitive`, got `{}`",
                     builtin_names::CONCAT_CBYTES,
                     builtin_names::U256,
                     builtin_names::CBYTES,
@@ -1364,6 +1365,73 @@ impl DiagCtx<'_> {
     pub fn emit_failed_to_resolve_std_fn(&mut self, source: SourceId, op_name: &str) {
         Diagnostic::error(format!("failed to resolve core operation handler `{op_name}`"))
             .element(Element::Origin { path: source })
+            .emit(self);
+    }
+
+    pub fn emit_cannot_resolve_std_interface(&mut self, name: StrId, loc: SrcLoc) {
+        let name = self.session.lookup_name(name);
+        Diagnostic::error("cannot resolve standard library interface")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`std::core::interfaces` must define `{name}` as a struct type"),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_interface_not_implemented(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        interface: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("interface not implemented")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{}` does not implement `{}`",
+                    self.types.format(self.session, values, ty),
+                    self.types.format(self.session, values, interface)
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_invalid_interface_impl(
+        &mut self,
+        values: &ValueInterner,
+        interface: TypeId,
+        error: InterfaceImplError,
+        loc: SrcLoc,
+    ) {
+        let interface = self.types.format(self.session, values, interface);
+        let label = match error {
+            InterfaceImplError::ReturnTypeMismatch { member, expected, actual } => format!(
+                "`{interface}` requires `{}` to return a value of type `{}`, but it returned `{}`",
+                self.session.lookup_name(member),
+                self.types.format(self.session, values, expected),
+                self.types.format(self.session, values, actual),
+            ),
+            InterfaceImplError::InvalidField { name, expected } => format!(
+                "`{interface}`: requires a `{}` field of type `{}`",
+                self.session.lookup_name(name),
+                self.types.format(self.session, values, expected),
+            ),
+        };
+        Diagnostic::error("invalid interface implementation")
+            .primary(loc.source, loc.span, label)
+            .emit(self);
+    }
+
+    pub fn emit_invalid_as_primitive_byte_size(&mut self, size: U256, loc: SrcLoc) {
+        Diagnostic::error("AsPrimitive byte size exceeds 32 bytes")
+            .primary(
+                loc.source,
+                loc.span,
+                format!("`AsPrimitive`: `byte_size` must be at most 32, got {size}"),
+            )
             .emit(self);
     }
 

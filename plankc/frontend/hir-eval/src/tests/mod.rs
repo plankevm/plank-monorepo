@@ -3,6 +3,7 @@ mod calls;
 mod compile_log;
 mod comptime;
 mod imports;
+mod interfaces;
 mod logical_ops;
 mod matches;
 mod operators;

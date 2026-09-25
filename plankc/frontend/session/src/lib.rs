@@ -26,7 +26,7 @@ impl SourceId {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct CoreSources {
+pub struct CoreModules {
     pub ops: Option<SourceId>,
     pub interfaces: Option<SourceId>,
 }
