@@ -38,9 +38,7 @@ impl Scope<'_, '_> {
         span: SourceSpan,
     ) -> MaybePoisoned<Result<ValueId, Diverge>> {
         let method = match self.types.lookup(ty) {
-            Type::Compound(Compound::Struct(r#struct)) => {
-                self.find_method(r#struct, b"impl")
-            }
+            Type::Compound(Compound::Struct(r#struct)) => self.find_method(r#struct, b"impl"),
             _ => None,
         };
         let Some(method) = method else {

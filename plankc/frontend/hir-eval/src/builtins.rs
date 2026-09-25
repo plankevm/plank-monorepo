@@ -734,9 +734,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     Value::Compound { ty, .. } if ty.is_struct() => {
                         match this.eval_as_primitive(field, expr_span) {
                             Ok(Ok((raw, byte_size))) => {
-                                buf.extend_from_slice(
-                                    &raw.to_be_bytes::<32>()[32 - usize::from(byte_size)..],
-                                );
+                                let bytes = raw.to_be_bytes::<32>();
+                                let start = bytes
+                                    .len()
+                                    .checked_sub(usize::from(byte_size))
+                                    .expect("AsPrimitive byte size was validated to fit in a u256");
+                                buf.extend_from_slice(&bytes[start..]);
                             }
                             Ok(Err(diverge)) => return Ok(Err(diverge)),
                             Err(Poisoned) => contains_invalid = true,

@@ -1,6 +1,13 @@
 const AsPrimitive = struct {
+    /// Encoded width in bytes, from 0 to 32.
     byte_size: u256,
+
+    /// Takes a value of the implementing type and returns its u256 representation.
+    /// Encoding uses the lowest byte_size bytes in big-endian order.
     to_raw: function,
+
+    /// Takes a u256 representation and returns the implementing type.
+    /// The caller must ensure the input is valid for that type.
     unchecked_from_raw: function,
 };
 
