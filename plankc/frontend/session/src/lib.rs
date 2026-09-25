@@ -25,6 +25,12 @@ impl SourceId {
     pub const ROOT: Self = Self::new(0);
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CoreSources {
+    pub ops: Option<SourceId>,
+    pub interfaces: Option<SourceId>,
+}
+
 pub type SourceSpan = Span<SourceByteOffset>;
 pub const ZERO_SPAN: SourceSpan = Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO);
 

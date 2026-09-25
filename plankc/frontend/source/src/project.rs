@@ -1,4 +1,5 @@
 use crate::{
+    CorePaths,
     diagnostics::{
         error_failed_to_canonicalize_entry, error_failed_to_canonicalize_import,
         error_failed_to_read_source, error_failed_to_resolve_import,
@@ -14,7 +15,7 @@ use plank_parser::{
     lexer::{Lexed, TokenSpan},
     parser::parse,
 };
-use plank_session::{Session, Source, SourceId, SourceSpan, StrId};
+use plank_session::{CoreSources, Session, Source, SourceId, SourceSpan, StrId};
 use std::path::{Path, PathBuf};
 
 newtype_index! {
@@ -44,7 +45,7 @@ pub struct ParsedSource {
 pub struct ParsedProject {
     pub parsed_sources: IndexVec<SourceId, ParsedSource>,
     pub imports: ListOfLists<SourceId, FileImport>,
-    pub core_ops_source: Option<SourceId>,
+    pub core: CoreSources,
 }
 
 struct ProjectParser<'a, F: SourceFs> {
@@ -257,7 +258,7 @@ impl<F: SourceFs> ProjectParser<'_, F> {
 
 pub fn parse_project(
     entry_path: &Path,
-    core_ops_path: Option<&Path>,
+    core_paths: &CorePaths,
     module_resolver: &ModuleResolver,
     session: &mut Session,
     fs: &impl SourceFs,
@@ -284,13 +285,16 @@ pub fn parse_project(
 
     assert_eq!(parser.parse_source(entry_path)?, SourceId::ROOT);
 
-    let core_ops_source = core_ops_path.and_then(|path| {
-        let path = match fs.canonicalize(path) {
-            Ok(path) => path,
-            Err(_) => return None,
-        };
-        parser.resolve_or_parse_source(path)
-    });
+    let mut parse_core_source = |path: Option<&Path>| {
+        path.and_then(|path| {
+            let path = fs.canonicalize(path).ok()?;
+            parser.resolve_or_parse_source(path)
+        })
+    };
+    let core = CoreSources {
+        ops: parse_core_source(core_paths.ops.as_deref()),
+        interfaces: parse_core_source(core_paths.interfaces.as_deref()),
+    };
 
     Some(ParsedProject {
         parsed_sources: parser
@@ -312,6 +316,6 @@ pub fn parse_project(
             }
             imports
         },
-        core_ops_source,
+        core,
     })
 }

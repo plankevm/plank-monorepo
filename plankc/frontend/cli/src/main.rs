@@ -255,7 +255,7 @@ fn build(plank_dir: Option<PathBuf>, args: BuildArgs) {
         eprintln!("{}", DisplayHir::new(&hir, &driver.values, &driver.session));
     }
 
-    let mir = driver.evaluate_hir(&hir, project.core_ops_source, args.evm_version.into());
+    let mir = driver.evaluate_hir(&hir, project.core, args.evm_version.into());
 
     if args.show_mir {
         if needs_separators {

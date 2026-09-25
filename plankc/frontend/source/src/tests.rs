@@ -1,4 +1,4 @@
-use crate::{FILE_EXTENSION, ModuleResolver, parse_project, source_fs::RealFs};
+use crate::{CorePaths, FILE_EXTENSION, ModuleResolver, parse_project, source_fs::RealFs};
 use plank_session::Session;
 use std::path::PathBuf;
 
@@ -48,9 +48,14 @@ fn source_content_matches_source_manager_path() {
         .register(session.intern("m"), dir.path().to_path_buf())
         .expect("module registration succeeds");
 
-    let project =
-        parse_project(&dir.path().join(source_file("main")), None, &modules, &mut session, &RealFs)
-            .expect("project should be parsed");
+    let project = parse_project(
+        &dir.path().join(source_file("main")),
+        &CorePaths::default(),
+        &modules,
+        &mut session,
+        &RealFs,
+    )
+    .expect("project should be parsed");
     assert!(!session.has_errors(), "parse errors: {:?}", session.diagnostics());
 
     for (id, _parsed_source) in project.parsed_sources.enumerate_idx() {

@@ -5,7 +5,7 @@ use plank_evm as _;
 use plank_evm::EvmVersion;
 use plank_hir::Hir;
 use plank_mir::Mir;
-use plank_session::{Session, SourceId};
+use plank_session::{CoreSources, Session};
 use plank_values::{TypeInterner, ValueInterner};
 
 mod buffers;
@@ -28,7 +28,7 @@ mod tests;
 
 pub fn evaluate(
     hir: &Hir,
-    core_ops_source: Option<SourceId>,
+    core: CoreSources,
     values: &mut ValueInterner,
     session: &mut Session,
     evm_version: EvmVersion,
@@ -38,7 +38,7 @@ pub fn evaluate(
     let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values, evm_version);
     let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
-    evaluator.operator_table = match core_ops_source {
+    evaluator.operator_table = match core.ops {
         Some(core_ops_source) => {
             OperatorTable::with_std_ops(hir, core_ops_source, &mut evaluator, &mut diag_ctx)
         }
