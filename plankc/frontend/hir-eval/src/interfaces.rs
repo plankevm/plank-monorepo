@@ -229,6 +229,10 @@ impl Scope<'_, '_> {
             );
             return Err(Poisoned);
         };
+        if raw.bit_len() > usize::from(byte_size) * 8 {
+            self.diag_ctx.emit_as_primitive_raw_out_of_range(raw, byte_size, self.loc(span));
+            return Err(Poisoned);
+        }
         Ok(Ok((raw, byte_size)))
     }
 }

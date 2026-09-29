@@ -13,7 +13,7 @@ const addr = struct {
         Self { as_uint: unsafe_uint_from_u256(u160, raw) }
     }
 
-    fn impl(comptime T: type) supports(T, (AsPrimitive,)) {
+    fn impl(comptime T: type) supports(T, AsPrimitive) {
         if T == AsPrimitive {
             AsPrimitive {
                 byte_size: 20,

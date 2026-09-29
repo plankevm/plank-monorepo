@@ -155,8 +155,9 @@ fn test_concat_custom_interface() {
         };
         init {
             comptime {
-                let encoded = @concat_cbytes(("[", Number(0) { raw: 42 }, Number(1) { raw: 0x1234 }, Number(32) { raw: 1 }, "]"));
-                comptime_assert(encoded == "[" hex"340000000000000000000000000000000000000000000000000000000000000001" "]", "custom encoding and nested calls");
+                let max_raw = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
+                let encoded = @concat_cbytes(("[", Number(0) { raw: 0 }, Number(1) { raw: 0xff }, Number(32) { raw: max_raw }, "]"));
+                comptime_assert(encoded == "[" hex"ff" hex"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" "]", "custom encoding and nested calls");
             };
             @evm_stop();
         }
@@ -169,6 +170,47 @@ fn test_concat_custom_interface() {
             %0 : never = @evm_stop()
         }
         "#,
+    );
+}
+
+#[test]
+fn test_concat_to_raw_out_of_range() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            const Number = fn(comptime bytes: u256) type {
+                struct {
+                    raw: u256,
+                    fn to_raw(self: Self) u256 { self.raw }
+                    fn from_raw(raw: u256) Self { Self { raw: raw } }
+                    fn impl(comptime T: type) AsPrimitive {
+                        AsPrimitive { byte_size: bytes, to_raw: Self.to_raw, unchecked_from_raw: Self.from_raw }
+                    }
+                }
+            };
+            const valid = @concat_cbytes((Number(1) { raw: 255 },));
+            const oversized = @concat_cbytes((Number(1) { raw: 256 },));
+            const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[
+            r#"
+            error: AsPrimitive value exceeds declared byte size
+              --> main.plk:13:19
+               |
+            13 | const oversized = @concat_cbytes((Number(1) { raw: 256 },));
+               |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 256, which does not fit in 1 byte
+            "#,
+            r#"
+            error: AsPrimitive value exceeds declared byte size
+              --> main.plk:14:20
+               |
+            14 | const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
+               |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 1, which does not fit in 0 bytes
+            "#,
+        ],
     );
 }
 

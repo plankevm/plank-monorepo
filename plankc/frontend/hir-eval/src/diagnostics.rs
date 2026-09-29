@@ -1453,6 +1453,19 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
+    pub fn emit_as_primitive_raw_out_of_range(&mut self, raw: U256, byte_size: u8, loc: SrcLoc) {
+        Diagnostic::error("AsPrimitive value exceeds declared byte size")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`to_raw` returned {raw}, which does not fit in {}",
+                    fmt_count(usize::from(byte_size), "byte"),
+                ),
+            )
+            .emit(self);
+    }
+
     pub fn emit_found_compile_log(&mut self, first_loc: SrcLoc) {
         Diagnostic::error("found compile log statement")
             .element(

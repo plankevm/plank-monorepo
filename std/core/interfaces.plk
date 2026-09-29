@@ -3,7 +3,7 @@ const AsPrimitive = struct {
     byte_size: u256,
 
     /// Takes a value of the implementing type and returns its u256 representation.
-    /// Encoding uses the lowest byte_size bytes in big-endian order.
+    /// The result must fit in byte_size bytes; encoding is big-endian.
     to_raw: function,
 
     /// Takes a u256 representation and returns the implementing type.
@@ -12,9 +12,13 @@ const AsPrimitive = struct {
 };
 
 /// Returns the requested type if supported, otherwise `void`.
+/// Accepts a single type or a tuple of types.
 const supports = fn (comptime requested: type, comptime supported: $L) type {
+    if L == type {
+        return if requested == supported { requested } else { void };
+    }
     if !@is_tuple(L) {
-        @compile_error("supported interfaces must be a tuple");
+        @compile_error("supported interfaces must be a type or a tuple of types");
     }
 
     let mut i = 0;
