@@ -115,6 +115,11 @@ impl Session {
         &self.lookup_bytes(bytes.contents)[bytes.start as usize..bytes.end as usize]
     }
 
+    pub fn find_name(&self, bytes: CBytes) -> Option<StrId> {
+        let name = std::str::from_utf8(self.lookup_bytes_slice(bytes)).ok()?;
+        self.interner.find_str(name)
+    }
+
     pub fn lookup_bytes_lossy(&self, bytes: CBytes) -> String {
         String::from_utf8_lossy(self.lookup_bytes_slice(bytes)).into_owned()
     }

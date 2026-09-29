@@ -153,6 +153,7 @@ fn test_get_method() {
         init {
             let get_by_name = @get_method(S, "get");
             let get_by_index = @get_method(S, 1);
+            let get_by_slice = @get_method(S, @slice_cbytes(hex"ff" "get" hex"ff", 1, 4));
             let instance = S { value: 3 };
             comptime {
                 let result_by_name = get_by_name(instance);
@@ -162,6 +163,9 @@ fn test_get_method() {
                 }
                 if result_by_name != 3 {
                     @compile_error("expected the get method to return 3");
+                }
+                if get_by_slice(instance) != result_by_name {
+                    @compile_error("sliced method name returned a different result");
                 }
             };
             @evm_stop();
@@ -189,6 +193,8 @@ fn test_has_method() {
             let mut method = @has_method(S, "method");
             let mut field = @has_method(S, "field");
             let mut missing = @has_method(S, "missing");
+            let mut sliced = @has_method(S, @slice_cbytes("_method_", 1, 7));
+            let mut invalid = @has_method(S, hex"ff");
             @evm_stop();
         }
         "#,
@@ -199,7 +205,9 @@ fn test_has_method() {
             %0 : bool = true
             %1 : bool = false
             %2 : bool = false
-            %3 : never = @evm_stop()
+            %3 : bool = true
+            %4 : bool = false
+            %5 : never = @evm_stop()
         }
         "#,
     );

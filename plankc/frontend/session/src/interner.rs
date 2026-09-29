@@ -9,8 +9,8 @@ newtype_index! {
 /// Index of an interned string.
 ///
 /// Sealed: outside this module it can only be obtained from
-/// [`Interner::intern_str`] (or the built-in known name consts, which are validated
-/// against the interner on session construction). This guarantees the indexed
+/// [`Interner::intern_str`] or [`Interner::find_str`] (or the built-in known name consts, which are
+/// validated against the interner on session construction). This guarantees the indexed
 /// content is valid UTF-8 as long as the id is resolved against the interner
 /// that minted it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -56,6 +56,10 @@ impl Interner {
 
     pub fn intern_str(&mut self, string: &str) -> StrId {
         StrId(self.bytes.intern(string.as_bytes()))
+    }
+
+    pub fn find_str(&self, string: &str) -> Option<StrId> {
+        self.bytes.find_id(string.as_bytes()).map(StrId)
     }
 
     pub fn intern_bytes(&mut self, bytes: &[u8]) -> BytesId {

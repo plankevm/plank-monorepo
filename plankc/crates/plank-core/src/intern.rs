@@ -25,6 +25,10 @@ impl<I: Idx> BytesInterner<I> {
         }
     }
 
+    pub fn find_id(&self, bytes: &[u8]) -> Option<I> {
+        self.bytes_to_idx.find(self.hasher.hash_one(bytes), |&i| &self.bytes[i] == bytes).copied()
+    }
+
     pub fn intern(&mut self, bytes: &[u8]) -> I {
         let entry = self.bytes_to_idx.entry(
             self.hasher.hash_one(bytes),

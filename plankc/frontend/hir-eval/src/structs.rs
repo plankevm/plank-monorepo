@@ -108,9 +108,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             );
             return Err(Poisoned);
         };
-        let Some(method) =
-            self.find_method(r#struct, self.diag_ctx.session.lookup_name(call.method).as_bytes())
-        else {
+        let Some(method) = self.find_method(r#struct, call.method) else {
             match r#struct.fields.iter().find(|field| field.name == call.method) {
                 Some(&field) => self.diag_ctx.emit_field_called_as_method(
                     r#struct.def_loc.source,
@@ -141,12 +139,8 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         self.eval_hir_call(closure, args, call_span)
     }
 
-    pub(crate) fn find_method(&self, r#struct: StructView<'_>, name: &[u8]) -> Option<Method> {
-        r#struct
-            .methods
-            .iter()
-            .find(|method| self.diag_ctx.session.lookup_name(method.name).as_bytes() == name)
-            .copied()
+    pub(crate) fn find_method(&self, r#struct: StructView<'_>, name: StrId) -> Option<Method> {
+        r#struct.methods.iter().find(|method| method.name == name).copied()
     }
 
     // We don't know the struct's type until its methods have been collected,
@@ -187,9 +181,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             && let Value::Type(ty) = self.values.lookup(value)
             && let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty)
         {
-            let Some(method) =
-                self.find_method(r#struct, self.diag_ctx.session.lookup_name(member).as_bytes())
-            else {
+            let Some(method) = self.find_method(r#struct, member) else {
                 self.diag_ctx.emit_unknown_method(
                     self.eval.values,
                     ty,

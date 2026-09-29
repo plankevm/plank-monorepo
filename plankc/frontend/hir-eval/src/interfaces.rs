@@ -37,8 +37,9 @@ impl Scope<'_, '_> {
         interface: TypeId,
         span: SourceSpan,
     ) -> MaybePoisoned<Result<ValueId, Diverge>> {
+        let impl_name = self.diag_ctx.session.intern("impl");
         let method = match self.types.lookup(ty) {
-            Type::Compound(Compound::Struct(r#struct)) => self.find_method(r#struct, b"impl"),
+            Type::Compound(Compound::Struct(r#struct)) => self.find_method(r#struct, impl_name),
             _ => None,
         };
         let Some(method) = method else {
@@ -67,7 +68,6 @@ impl Scope<'_, '_> {
             return Err(Poisoned);
         }
         if actual != interface {
-            let impl_name = self.diag_ctx.session.intern("impl");
             self.diag_ctx.emit_invalid_interface_impl(
                 self.eval.values,
                 interface,

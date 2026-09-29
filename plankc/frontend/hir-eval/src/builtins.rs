@@ -15,6 +15,7 @@ use plank_values::{
     ValueId, ValueInterner, builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
+use smallvec::SmallVec;
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -324,7 +325,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     }
                     Value::Bytes(name) => {
                         let Some(method) = self
-                            .find_method(r#struct, self.diag_ctx.session.lookup_bytes_slice(name))
+                            .diag_ctx
+                            .session
+                            .find_name(name)
+                            .and_then(|name| self.find_method(r#struct, name))
                         else {
                             self.diag_ctx.emit_unknown_method_name_selector(
                                 self.eval.values,
@@ -354,7 +358,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
-                self.find_method(r#struct, self.diag_ctx.session.lookup_bytes_slice(name))
+                self.diag_ctx
+                    .session
+                    .find_name(name)
+                    .and_then(|name| self.find_method(r#struct, name))
                     .is_some()
                     .into()
             }
@@ -705,63 +712,58 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         };
 
-        self.with_values_buf(|this, offset| {
-            match this.eval.values.lookup(tuple_vid) {
-                Value::Compound { ty, fields } if ty.is_tuple() => {
-                    this.eval.values_buf.extend_from_slice(fields);
-                }
-                _ => {
-                    let actual_ty = this.values.type_of_value(tuple_vid);
-                    this.diag_ctx.emit_concat_cbytes_expected_tuple(
-                        this.eval.values,
-                        actual_ty,
-                        this.loc(expr_span),
-                    );
-                    return Err(Poisoned);
-                }
-            }
-
-            let mut buf = Vec::new();
-            let mut contains_invalid = false;
-            for index in offset..this.eval.values_buf.len() {
-                let field = this.eval.values_buf[index];
-                match this.values.lookup(field) {
-                    Value::BigNum(n) => buf.extend_from_slice(&n.to_be_bytes::<32>()),
-                    Value::Bytes(bytes) => {
-                        let slice = this.diag_ctx.session.lookup_bytes_slice(bytes);
-                        buf.extend_from_slice(slice);
-                    }
-                    Value::Compound { ty, .. } if ty.is_struct() => {
-                        match this.eval_as_primitive(field, expr_span) {
-                            Ok(Ok((raw, byte_size))) => {
-                                let bytes = raw.to_be_bytes::<32>();
-                                let start = bytes
-                                    .len()
-                                    .checked_sub(usize::from(byte_size))
-                                    .expect("AsPrimitive byte size was validated to fit in a u256");
-                                buf.extend_from_slice(&bytes[start..]);
-                            }
-                            Ok(Err(diverge)) => return Ok(Err(diverge)),
-                            Err(Poisoned) => contains_invalid = true,
-                        }
-                    }
-                    other => {
-                        this.diag_ctx.emit_concat_cbytes_invalid_element(
-                            this.eval.values,
-                            other.get_type(),
-                            this.loc(expr_span),
-                        );
-                        contains_invalid = true;
-                    }
-                }
-            }
-            if contains_invalid {
+        let fields: SmallVec<[ValueId; 16]> = match self.eval.values.lookup(tuple_vid) {
+            Value::Compound { ty, fields } if ty.is_tuple() => SmallVec::from_slice(fields),
+            _ => {
+                let actual_ty = self.values.type_of_value(tuple_vid);
+                self.diag_ctx.emit_concat_cbytes_expected_tuple(
+                    self.eval.values,
+                    actual_ty,
+                    self.loc(expr_span),
+                );
                 return Err(Poisoned);
             }
-            let cbytes = this.diag_ctx.session.intern_cbytes(&buf);
-            let value = this.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
-            Ok(Ok(EvalValue::Comptime(value)))
-        })
+        };
+
+        let mut buf = Vec::new();
+        let mut contains_invalid = false;
+        for field in fields {
+            match self.values.lookup(field) {
+                Value::BigNum(n) => buf.extend_from_slice(&n.to_be_bytes::<32>()),
+                Value::Bytes(bytes) => {
+                    let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
+                    buf.extend_from_slice(slice);
+                }
+                Value::Compound { ty, .. } if ty.is_struct() => {
+                    match self.eval_as_primitive(field, expr_span) {
+                        Ok(Ok((raw, byte_size))) => {
+                            let bytes = raw.to_be_bytes::<32>();
+                            let start = bytes
+                                .len()
+                                .checked_sub(usize::from(byte_size))
+                                .expect("AsPrimitive byte size was validated to fit in a u256");
+                            buf.extend_from_slice(&bytes[start..]);
+                        }
+                        Ok(Err(diverge)) => return Ok(Err(diverge)),
+                        Err(Poisoned) => contains_invalid = true,
+                    }
+                }
+                other => {
+                    self.diag_ctx.emit_concat_cbytes_invalid_element(
+                        self.eval.values,
+                        other.get_type(),
+                        self.loc(expr_span),
+                    );
+                    contains_invalid = true;
+                }
+            }
+        }
+        if contains_invalid {
+            return Err(Poisoned);
+        }
+        let cbytes = self.diag_ctx.session.intern_cbytes(&buf);
+        let value = self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
+        Ok(Ok(EvalValue::Comptime(value)))
     }
 
     fn eval_compile_log(
@@ -825,11 +827,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     }
 
     fn find_struct_field_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
-        let name = self.diag_ctx.session.lookup_bytes_slice(name);
-        r#struct
-            .fields
-            .iter()
-            .position(|field| self.diag_ctx.session.lookup_bytes(BytesId::from(field.name)) == name)
+        let name = self.diag_ctx.session.find_name(name)?;
+        r#struct.fields.iter().position(|field| field.name == name)
     }
 
     fn resolve_field_selector(

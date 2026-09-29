@@ -1,8 +1,9 @@
-use plank_core::{IndexVec, Span};
+use plank_core::IndexVec;
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
 use plank_values::{Compound, DefOrigin, Type, TypeId, Value};
+use smallvec::SmallVec;
 
 mod cache;
 
@@ -10,7 +11,7 @@ use cache::*;
 pub(crate) use cache::{EvaluatedFunctionCache, LoweredFunctionsCache};
 
 use crate::{
-    evaluator::{CallArgIdx, CallArgSpansIdx, CallFrame},
+    evaluator::{CallArgSpansIdx, CallFrame},
     quota::ComptimeQuota,
     scope::{Diverge, EvalContext, EvalValue, Local, LocalState, Scope},
 };
@@ -44,7 +45,7 @@ struct Call<'a> {
 
     closure: ValueId,
     func: hir::FnDef,
-    args: Span<CallArgIdx>,
+    args: &'a [Local],
     params: &'a [hir::ParamInfo],
 
     validated: ArgParamComptimenessMatch,
@@ -73,7 +74,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &'s mut self,
         closure: ValueId,
         fn_def_id: hir::FnDefId,
-        args: Span<CallArgIdx>,
+        args: &'s [Local],
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         type_name: Option<StrId>,
@@ -126,8 +127,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
         }
 
-        for (&param, arg) in params.iter().zip(args) {
-            let binding = fn_scope.eval.call_args_buf[arg];
+        for (&param, &binding) in params.iter().zip(args) {
             let state = match binding.state {
                 Ok(state) => state,
                 Err(Poisoned) => {
@@ -277,13 +277,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[hir::LocalId],
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
-        self.with_call_args_buf(|this, start| {
-            for &arg in args {
-                this.eval.call_args_buf.push(this.bindings[arg]);
-            }
-            let args = Span::new(start, this.eval.call_args_buf.len_idx());
-            this.eval_call(closure, args, call_span)
-        })
+        let args: SmallVec<[Local; 16]> = args.iter().map(|&arg| self.bindings[arg]).collect();
+        self.eval_call(closure, &args, call_span)
     }
 
     pub(crate) fn eval_synthetic_call(
@@ -292,22 +287,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         args: &[ValueId],
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<ValueId, Diverge>> {
-        self.with_call_args_buf(|this, start| {
-            for &value in args {
-                this.eval.call_args_buf.push(Local::new(
-                    Ok(LocalState::Comptime(value)),
-                    call_span,
-                    DefOrigin::Local(call_span),
-                ));
-            }
-            let args = Span::new(start, this.eval.call_args_buf.len_idx());
-            this.with_comptime(|this| this.eval_call(closure, args, call_span)).map(|result| {
-                result.map(|value| match value {
-                    EvalValue::Comptime(value) => value,
-                    EvalValue::Runtime { .. } => {
-                        unreachable!("comptime call produced a runtime value")
-                    }
-                })
+        let args: SmallVec<[Local; 16]> = args
+            .iter()
+            .map(|&value| {
+                Local::new(Ok(LocalState::Comptime(value)), call_span, DefOrigin::Local(call_span))
+            })
+            .collect();
+        self.with_comptime(|this| this.eval_call(closure, &args, call_span)).map(|result| {
+            result.map(|value| match value {
+                EvalValue::Comptime(value) => value,
+                EvalValue::Runtime { .. } => {
+                    unreachable!("comptime call produced a runtime value")
+                }
             })
         })
     }
@@ -315,7 +306,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     fn eval_call(
         &mut self,
         closure: ValueId,
-        args: Span<CallArgIdx>,
+        args: &[Local],
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
@@ -330,10 +321,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 let type_name = this.values.get_closure_name(closure);
 
-                let arg_spans = this
-                    .eval
-                    .call_arg_spans
-                    .push_iter(args.iter().map(|arg| this.eval.call_args_buf[arg].use_span));
+                let arg_spans =
+                    this.eval.call_arg_spans.push_iter(args.iter().map(|arg| arg.use_span));
                 let eval_res = this.eval_call_inner(
                     closure,
                     fn_def_id,
@@ -355,11 +344,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         func: hir::FnDef,
         params: &[hir::ParamInfo],
-        args: Span<CallArgIdx>,
+        args: &[Local],
     ) -> MaybePoisoned<ArgParamComptimenessMatch> {
         let mut comptime_args_poisoned = false;
         for (param, arg) in params.iter().zip(args) {
-            let arg = self.eval.call_args_buf[arg];
             if (param.is_comptime || self.is_comptime())
                 && let Ok(LocalState::Runtime(_)) = arg.state
             {
@@ -376,7 +364,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         closure: ValueId,
         fn_def_id: hir::FnDefId,
-        args: Span<CallArgIdx>,
+        args: &[Local],
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         type_name: Option<StrId>,
@@ -387,10 +375,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let params = &self.hir.fn_params[fn_def_id];
         let call_loc = self.loc(call_span);
 
-        if params.len() != args.len() as usize {
+        if params.len() != args.len() {
             self.diag_ctx.emit_arg_count_mismatch(
                 params.len(),
-                args.len() as usize,
+                args.len(),
                 self.loc(call_span),
                 func.loc(func.param_list_span),
             );
@@ -418,9 +406,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         let eagerly_comptime = func.is_eager
-            && args.iter().all(|arg| {
-                matches!(self.eval.call_args_buf[arg].state, Ok(LocalState::Comptime(_)))
-            });
+            && args.iter().all(|arg| matches!(arg.state, Ok(LocalState::Comptime(_))));
 
         let (mut scope, call) = self.prepare_new_fn_scope_for_preamble_eval(
             closure,
@@ -462,7 +448,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         // Assemble comptime parameters for the function key.
         for (&param, arg) in call.params.iter().zip(call.args) {
-            let arg = self.eval.call_args_buf[arg];
             let param_key_value = match self.bindings[param.value].state {
                 Ok(LocalState::Comptime(value)) => Some(Ok(value)),
                 Err(Poisoned) => Some(Err(Poisoned)),
@@ -582,7 +567,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
             for (&param, arg) in call.params.iter().zip(call.args) {
-                let arg = self.eval.call_args_buf[arg];
                 let state = arg.state?;
                 let local = match state {
                     LocalState::Runtime(local) => local,
@@ -665,7 +649,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let mut poisoned = false;
         for (&param, arg) in call.params.iter().zip(call.args) {
-            let arg = self.eval.call_args_buf[arg];
             if param.is_comptime {
                 let ArgParamComptimenessMatch = call.validated;
                 continue;
