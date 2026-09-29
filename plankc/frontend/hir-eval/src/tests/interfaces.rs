@@ -1,6 +1,106 @@
 use super::*;
 
 #[test]
+fn test_interface_impl_is_resolved_once() {
+    assert_diagnostics_and_compile_logs(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            const S = struct {
+                raw: u256,
+                fn to_raw(self: Self) u256 { self.raw }
+                fn from_raw(raw: u256) Self { Self { raw: raw } }
+                fn impl(comptime T: type) (comptime {
+                    @compile_log("resolve impl");
+                    AsPrimitive
+                }) {
+                    AsPrimitive { byte_size: 1, to_raw: Self.to_raw, unchecked_from_raw: Self.from_raw }
+                }
+            };
+            const encoded = @concat_cbytes((S { raw: 1 }, S { raw: 2 }));
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[r#"
+        error: found compile log statement
+         --> main.plk:7:9
+          |
+        7 |         @compile_log("resolve impl");
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        "#],
+        &["\"resolve impl\""],
+    );
+}
+
+#[test]
+fn test_unsupported_interface_is_resolved_once() {
+    assert_diagnostics_and_compile_logs(
+        std_project(
+            r#"
+            const S = struct {
+                fn impl(comptime T: type) (comptime {
+                    @compile_log("unsupported");
+                    void
+                }) {}
+            };
+            const encoded = @concat_cbytes((S {}, S {}));
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[r#"
+        error: interface not implemented
+         --> main.plk:7:17
+          |
+        7 | const encoded = @concat_cbytes((S {}, S {}));
+          |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `S` does not implement `AsPrimitive`
+        "#],
+        &["\"unsupported\""],
+    );
+}
+
+#[test]
+fn test_invalid_interface_definition() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            const S = struct {};
+            const encoded = @concat_cbytes((S {},));
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "std/core/interfaces",
+            r#"
+            const AsPrimitive = struct {
+                byte_size: bool,
+                to_raw: function,
+            };
+        "#,
+        ),
+        &[
+            r#"
+            error: invalid interface definition
+             --> std/core/interfaces.plk:2:5
+              |
+            2 |     byte_size: bool,
+              |     ^^^^^^^^^^^^^^^ `AsPrimitive` field `byte_size` must have type `u256`, got `bool`
+            "#,
+            r#"
+            error: invalid interface definition
+             --> std/core/interfaces.plk:1:21
+              |
+            1 |   const AsPrimitive = struct {
+              |  _____________________^
+            2 | |     byte_size: bool,
+            3 | |     to_raw: function,
+            4 | | };
+              | |_^ `AsPrimitive` is missing required field `unchecked_from_raw: function`
+            "#,
+        ],
+    );
+}
+
+#[test]
 fn test_concat_as_primitive() {
     assert_lowers_to(
         std_project(
@@ -137,16 +237,26 @@ fn test_concat_invalid_byte_size() {
             }
         };
         const encoded = @concat_cbytes((S {},));
+        const repeated = @concat_cbytes((S {},));
         init { @evm_stop(); }
         "#,
         ),
-        &[r#"
-        error: AsPrimitive byte size exceeds 32 bytes
-         --> main.plk:9:17
-          |
-        9 | const encoded = @concat_cbytes((S {},));
-          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive`: `byte_size` must be at most 32, got 33
-        "#],
+        &[
+            r#"
+            error: AsPrimitive byte size exceeds 32 bytes
+             --> main.plk:9:17
+              |
+            9 | const encoded = @concat_cbytes((S {},));
+              |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive`: `byte_size` must be at most 32, got 33
+            "#,
+            r#"
+            error: AsPrimitive byte size exceeds 32 bytes
+              --> main.plk:10:18
+               |
+            10 | const repeated = @concat_cbytes((S {},));
+               |                  ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive`: `byte_size` must be at most 32, got 33
+            "#,
+        ],
     );
 }
 

@@ -1,4 +1,3 @@
-use crate::interfaces::InterfaceImplError;
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{
@@ -1399,28 +1398,47 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_invalid_interface_impl(
+    pub fn emit_interface_return_type_mismatch(
         &mut self,
         values: &ValueInterner,
         interface: TypeId,
-        error: InterfaceImplError,
+        member: StrId,
+        expected: TypeId,
+        actual: TypeId,
         loc: SrcLoc,
     ) {
         let interface = self.types.format(self.session, values, interface);
-        let label = match error {
-            InterfaceImplError::ReturnTypeMismatch { member, expected, actual } => format!(
-                "`{interface}` requires `{}` to return a value of type `{}`, but it returned `{}`",
-                self.session.lookup_name(member),
-                self.types.format(self.session, values, expected),
-                self.types.format(self.session, values, actual),
-            ),
-            InterfaceImplError::InvalidField { name, expected } => format!(
-                "`{interface}`: requires a `{}` field of type `{}`",
-                self.session.lookup_name(name),
-                self.types.format(self.session, values, expected),
-            ),
-        };
+        let label = format!(
+            "`{interface}` requires `{}` to return a value of type `{}`, but it returned `{}`",
+            self.session.lookup_name(member),
+            self.types.format(self.session, values, expected),
+            self.types.format(self.session, values, actual),
+        );
         Diagnostic::error("invalid interface implementation")
+            .primary(loc.source, loc.span, label)
+            .emit(self);
+    }
+
+    pub fn emit_invalid_interface_definition_field(
+        &mut self,
+        values: &ValueInterner,
+        interface: TypeId,
+        name: StrId,
+        expected: TypeId,
+        actual: Option<TypeId>,
+        loc: SrcLoc,
+    ) {
+        let interface = self.types.format(self.session, values, interface);
+        let name = self.session.lookup_name(name);
+        let expected = self.types.format(self.session, values, expected);
+        let label = match actual {
+            Some(actual) => format!(
+                "`{interface}` field `{name}` must have type `{expected}`, got `{}`",
+                self.types.format(self.session, values, actual)
+            ),
+            None => format!("`{interface}` is missing required field `{name}: {expected}`"),
+        };
+        Diagnostic::error("invalid interface definition")
             .primary(loc.source, loc.span, label)
             .emit(self);
     }
