@@ -1,30 +1,132 @@
 use alloy_primitives::U256;
 use hashbrown::HashMap;
 use plank_core::{Idx, RelSlice};
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId};
+use plank_session::{MaybePoisoned, Poisoned, Session, SourceSpan, SrcLoc, StrId};
 use plank_values::{Compound, Type, TypeId, Value, ValueId, ValueIdx};
 
 use crate::scope::{Diverge, Scope};
 
-#[derive(Clone, Copy)]
-enum CachedImplementation {
-    Implemented(ValueId),
-    NotImplemented,
+trait CompilerInterface: Sized {
+    fn validate_definition(
+        scope: &mut Scope<'_, '_>,
+        interface: TypeId,
+    ) -> MaybePoisoned<InterfaceDefinition>;
+
+    fn decode(
+        scope: &mut Scope<'_, '_>,
+        implementation: ValueId,
+        span: SourceSpan,
+    ) -> MaybePoisoned<Self>;
 }
 
-pub(crate) struct CachedInterface {
-    members: HashMap<StrId, ValueIdx>,
-    implementations: HashMap<TypeId, CachedImplementation>,
+#[derive(Clone, Copy)]
+enum CachedInterface {
+    Implemented(ValueId),
+    NotImplemented,
+    InvalidReturnType(TypeId),
+}
+
+struct InterfaceDefinition {
+    member_indices: HashMap<StrId, ValueIdx>,
+}
+
+pub(crate) struct InterfaceCache {
+    resolved_names: HashMap<StrId, MaybePoisoned<TypeId>>,
+    definitions: HashMap<TypeId, MaybePoisoned<InterfaceDefinition>>,
+    implementations: HashMap<(TypeId, TypeId), CachedInterface>,
+
+    impl_name: StrId,
+
+    // `AsPrimitive`
+    as_primitive_name: StrId,
+    byte_size_name: StrId,
+    to_raw_name: StrId,
+    unchecked_from_raw_name: StrId,
+}
+
+impl InterfaceCache {
+    pub(crate) fn new(session: &mut Session) -> Self {
+        Self {
+            resolved_names: HashMap::new(),
+            definitions: HashMap::new(),
+            implementations: HashMap::new(),
+
+            impl_name: session.intern("impl"),
+
+            as_primitive_name: session.intern("AsPrimitive"),
+            byte_size_name: session.intern("byte_size"),
+            to_raw_name: session.intern("to_raw"),
+            unchecked_from_raw_name: session.intern("unchecked_from_raw"),
+        }
+    }
 }
 
 impl Scope<'_, '_> {
-    fn resolve_std_interface(
+    fn resolve_interface<I: CompilerInterface>(
         &mut self,
-        name: StrId,
-        required_fields: &[(&str, TypeId)],
+        interface: TypeId,
+        ty: TypeId,
         span: SourceSpan,
-    ) -> MaybePoisoned<TypeId> {
-        if let Some(&resolved) = self.eval.resolved_core_interfaces.get(&name) {
+    ) -> MaybePoisoned<Result<I, Diverge>> {
+        let cached = match self.eval.interface_cache.implementations.get(&(interface, ty)) {
+            Some(&cached) => cached,
+            None => match self.cache_interface::<I>(interface, ty, span)? {
+                Ok(cached) => cached,
+                Err(diverge) => return Ok(Err(diverge)),
+            },
+        };
+        let implementation = match cached {
+            CachedInterface::Implemented(value) => value,
+            CachedInterface::NotImplemented => {
+                self.diag_ctx.emit_interface_not_implemented(
+                    self.eval.values,
+                    ty,
+                    interface,
+                    self.loc(span),
+                );
+                return Err(Poisoned);
+            }
+            CachedInterface::InvalidReturnType(actual) => {
+                self.diag_ctx.emit_interface_return_type_mismatch(
+                    self.eval.values,
+                    interface,
+                    self.eval.interface_cache.impl_name,
+                    interface,
+                    actual,
+                    self.loc(span),
+                );
+                return Err(Poisoned);
+            }
+        };
+        I::decode(self, implementation, span).map(Ok)
+    }
+
+    fn interface_member(&self, implementation: ValueId, name: StrId) -> ValueId {
+        let Value::Compound { ty, fields } = self.eval.values.lookup(implementation) else {
+            unreachable!("invariant: interface implementation was checked to be a struct")
+        };
+        let definition = self.eval.interface_cache.definitions[&ty].as_ref().expect(
+            "invariant: interface definition was validated before decoding its implementation",
+        );
+        let values = RelSlice::new(ValueIdx::ZERO, fields);
+        values[definition.member_indices[&name]]
+    }
+
+    fn cache_interface_definition<I: CompilerInterface>(
+        &mut self,
+        interface: TypeId,
+    ) -> MaybePoisoned<()> {
+        if let Some(definition) = self.eval.interface_cache.definitions.get(&interface) {
+            return definition.as_ref().map(|_| ()).map_err(|_| Poisoned);
+        }
+        let definition = I::validate_definition(self, interface);
+        let validity = definition.as_ref().map(|_| ()).map_err(|_| Poisoned);
+        self.eval.interface_cache.definitions.insert(interface, definition);
+        validity
+    }
+
+    fn resolve_std_interface(&mut self, name: StrId, span: SourceSpan) -> MaybePoisoned<TypeId> {
+        if let Some(&resolved) = self.eval.interface_cache.resolved_names.get(&name) {
             return resolved;
         }
         let resolved = (|| {
@@ -42,34 +144,29 @@ impl Scope<'_, '_> {
             if let Value::Type(ty) = self.values.lookup(value)
                 && ty.is_struct()
             {
-                self.cache_interface_definition(ty, required_fields)?;
                 return Ok(ty);
             }
             self.diag_ctx.emit_cannot_resolve_std_interface(name, self.hir.consts[const_id].loc());
             Err(Poisoned)
         })();
-        self.eval.resolved_core_interfaces.insert(name, resolved);
+        self.eval.interface_cache.resolved_names.insert(name, resolved);
         resolved
     }
 
-    fn cache_interface_definition(
+    fn validate_interface_definition(
         &mut self,
         interface: TypeId,
-        required_fields: &[(&str, TypeId)],
-    ) -> MaybePoisoned<()> {
-        if self.eval.interfaces.contains_key(&interface) {
-            return Ok(());
-        }
+        required_members: &[(StrId, TypeId)],
+    ) -> MaybePoisoned<InterfaceDefinition> {
         let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(interface) else {
-            unreachable!("interface was checked to be a struct type")
+            unreachable!("invariant: interface was checked to be a struct type")
         };
         let fields = RelSlice::<ValueIdx, _>::new(ValueIdx::ZERO, r#struct.fields);
-        let members: HashMap<_, _> =
+        let member_indices: HashMap<_, _> =
             fields.enumerate_idx().map(|(index, field)| (field.name, index)).collect();
         let mut invalid = false;
-        for &(name, expected) in required_fields {
-            let name = self.diag_ctx.session.intern(name);
-            let field = members.get(&name).map(|&index| fields[index]);
+        for &(name, expected) in required_members {
+            let field = member_indices.get(&name).map(|&index| fields[index]);
             if field.is_none_or(|field| field.ty != expected) {
                 let loc = field.map_or(r#struct.def_loc, |field| {
                     SrcLoc::new(r#struct.def_loc.source, field.def_span)
@@ -88,151 +185,121 @@ impl Scope<'_, '_> {
         if invalid {
             return Err(Poisoned);
         }
-        self.eval
-            .interfaces
-            .insert(interface, CachedInterface { members, implementations: HashMap::new() });
-        Ok(())
+        Ok(InterfaceDefinition { member_indices })
     }
 
-    fn resolve_interface_impl(
+    fn cache_interface<I: CompilerInterface>(
         &mut self,
-        ty: TypeId,
         interface: TypeId,
+        ty: TypeId,
         span: SourceSpan,
-        validate: impl FnOnce(&mut Self, ValueId) -> MaybePoisoned<()>,
-    ) -> MaybePoisoned<Result<CachedImplementation, Diverge>> {
-        if let Some(&cached) = self
-            .eval
-            .interfaces
-            .get(&interface)
-            .expect("invariant: interface definition is cached before resolving implementations")
-            .implementations
-            .get(&ty)
-        {
-            return Ok(Ok(cached));
-        }
-        let impl_name = self.diag_ctx.session.intern("impl");
+    ) -> MaybePoisoned<Result<CachedInterface, Diverge>> {
+        self.cache_interface_definition::<I>(interface)?;
         let method = match self.types.lookup(ty) {
-            Type::Compound(Compound::Struct(r#struct)) => self.find_method(r#struct, impl_name),
+            Type::Compound(Compound::Struct(r#struct)) => {
+                self.find_method(r#struct, self.eval.interface_cache.impl_name)
+            }
             _ => None,
         };
-        let cached = if let Some(method) = method {
+        let implementation = if let Some(method) = method {
             let closure = self.bind_method_self(method, ty);
             let argument = self.eval.values.intern_type(interface);
             let value = match self.eval_synthetic_call(closure, &[argument], span)? {
                 Ok(value) => value,
                 Err(diverge) => return Ok(Err(diverge)),
             };
-            let actual = self.values.type_of_value(value);
-            if actual != interface && actual != TypeId::VOID {
-                self.diag_ctx.emit_interface_return_type_mismatch(
-                    self.eval.values,
-                    interface,
-                    impl_name,
-                    interface,
-                    actual,
-                    self.loc(span),
-                );
-                return Err(Poisoned);
-            }
-            if actual == TypeId::VOID {
-                CachedImplementation::NotImplemented
-            } else {
-                validate(self, value)?;
-                CachedImplementation::Implemented(value)
+            match self.values.type_of_value(value) {
+                TypeId::VOID => CachedInterface::NotImplemented,
+                actual if actual == interface => CachedInterface::Implemented(value),
+                actual => CachedInterface::InvalidReturnType(actual),
             }
         } else {
-            CachedImplementation::NotImplemented
+            CachedInterface::NotImplemented
         };
-        self.eval
-            .interfaces
-            .get_mut(&interface)
-            .expect("invariant: interface definition is cached before resolving implementations")
-            .implementations
-            .insert(ty, cached);
-        Ok(Ok(cached))
+        self.eval.interface_cache.implementations.insert((interface, ty), implementation);
+        Ok(Ok(implementation))
+    }
+}
+
+struct AsPrimitive {
+    byte_size: u8,
+    to_raw: ValueId,
+}
+
+impl CompilerInterface for AsPrimitive {
+    fn validate_definition(
+        scope: &mut Scope<'_, '_>,
+        interface: TypeId,
+    ) -> MaybePoisoned<InterfaceDefinition> {
+        let required_members = [
+            (scope.eval.interface_cache.byte_size_name, TypeId::U256),
+            (scope.eval.interface_cache.to_raw_name, TypeId::FUNCTION),
+            (scope.eval.interface_cache.unchecked_from_raw_name, TypeId::FUNCTION),
+        ];
+        scope.validate_interface_definition(interface, &required_members)
     }
 
-    fn get_interface_field(&self, implementation: ValueId, name: StrId) -> ValueId {
-        let Value::Compound { ty, fields } = self.values.lookup(implementation) else {
-            unreachable!("invariant: interface implementation was checked to be a struct")
+    fn decode(
+        scope: &mut Scope<'_, '_>,
+        implementation: ValueId,
+        span: SourceSpan,
+    ) -> MaybePoisoned<Self> {
+        let byte_size_value =
+            scope.interface_member(implementation, scope.eval.interface_cache.byte_size_name);
+        let Value::BigNum(byte_size) = scope.values.lookup(byte_size_value) else {
+            unreachable!("invariant: interface definition validated byte_size as u256")
         };
-        let members = RelSlice::new(ValueIdx::ZERO, fields);
-        let index = self.eval.interfaces[&ty].members[&name];
-        members[index]
+        let byte_size = match u8::try_from(byte_size) {
+            Ok(size) if size <= 32 => size,
+            _ => {
+                scope.diag_ctx.emit_invalid_as_primitive_byte_size(byte_size, scope.loc(span));
+                return Err(Poisoned);
+            }
+        };
+        let to_raw = scope.interface_member(implementation, scope.eval.interface_cache.to_raw_name);
+        Ok(Self { byte_size, to_raw })
     }
+}
 
+impl Scope<'_, '_> {
     pub(crate) fn eval_as_primitive(
         &mut self,
         value: ValueId,
         span: SourceSpan,
     ) -> MaybePoisoned<Result<(U256, u8), Diverge>> {
-        let interface_name = self.diag_ctx.session.intern("AsPrimitive");
-        let interface_ty = self.resolve_std_interface(
-            interface_name,
-            &[
-                ("byte_size", TypeId::U256),
-                ("to_raw", TypeId::FUNCTION),
-                ("unchecked_from_raw", TypeId::FUNCTION),
-            ],
-            span,
-        )?;
-        let byte_size_name = self.diag_ctx.session.intern("byte_size");
-        let as_primitive = match self.resolve_interface_impl(
+        let interface =
+            self.resolve_std_interface(self.eval.interface_cache.as_primitive_name, span)?;
+        let implementation = match self.resolve_interface::<AsPrimitive>(
+            interface,
             self.values.type_of_value(value),
-            interface_ty,
             span,
-            |this, implementation| {
-                let byte_size_value = this.get_interface_field(implementation, byte_size_name);
-                let Value::BigNum(byte_size) = this.values.lookup(byte_size_value) else {
-                    unreachable!("invariant: interface definition validated byte_size as u256")
-                };
-                if byte_size > U256::from(32) {
-                    this.diag_ctx.emit_invalid_as_primitive_byte_size(byte_size, this.loc(span));
-                    return Err(Poisoned);
-                }
-                Ok(())
-            },
         )? {
-            Ok(CachedImplementation::Implemented(value)) => value,
-            Ok(CachedImplementation::NotImplemented) => {
-                self.diag_ctx.emit_interface_not_implemented(
-                    self.eval.values,
-                    self.values.type_of_value(value),
-                    interface_ty,
-                    self.loc(span),
-                );
-                return Err(Poisoned);
-            }
+            Ok(implementation) => implementation,
             Err(diverge) => return Ok(Err(diverge)),
         };
-        let byte_size_value = self.get_interface_field(as_primitive, byte_size_name);
-        let Value::BigNum(byte_size) = self.values.lookup(byte_size_value) else {
-            unreachable!("byte_size was checked to be u256")
-        };
-        let byte_size = u8::try_from(byte_size)
-            .expect("invariant: AsPrimitive byte_size was validated before caching");
-        let to_raw_name = self.diag_ctx.session.intern("to_raw");
-        let to_raw = self.get_interface_field(as_primitive, to_raw_name);
-        let to_raw_result = match self.eval_synthetic_call(to_raw, &[value], span)? {
+        let to_raw_result = match self.eval_synthetic_call(implementation.to_raw, &[value], span)? {
             Ok(result) => result,
             Err(diverge) => return Ok(Err(diverge)),
         };
         let Value::BigNum(raw) = self.values.lookup(to_raw_result) else {
             self.diag_ctx.emit_interface_return_type_mismatch(
                 self.eval.values,
-                interface_ty,
-                to_raw_name,
+                interface,
+                self.eval.interface_cache.to_raw_name,
                 TypeId::U256,
                 self.values.type_of_value(to_raw_result),
                 self.loc(span),
             );
             return Err(Poisoned);
         };
-        if raw.bit_len() > usize::from(byte_size) * 8 {
-            self.diag_ctx.emit_as_primitive_raw_out_of_range(raw, byte_size, self.loc(span));
+        if raw.bit_len() > usize::from(implementation.byte_size) * 8 {
+            self.diag_ctx.emit_as_primitive_raw_out_of_range(
+                raw,
+                implementation.byte_size,
+                self.loc(span),
+            );
             return Err(Poisoned);
         }
-        Ok(Ok((raw, byte_size)))
+        Ok(Ok((raw, implementation.byte_size)))
     }
 }

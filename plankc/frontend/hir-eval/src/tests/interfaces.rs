@@ -252,16 +252,26 @@ fn test_concat_invalid_impl_result() {
             r#"
         const S = struct { fn impl(comptime T: type) u256 { 1 } };
         const encoded = @concat_cbytes((S {},));
+        const repeated = @concat_cbytes((S {},));
         init { @evm_stop(); }
         "#,
         ),
-        &[r#"
-        error: invalid interface implementation
-         --> main.plk:2:17
-          |
-        2 | const encoded = @concat_cbytes((S {},));
-          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `impl` to return a value of type `AsPrimitive`, but it returned `u256`
-        "#],
+        &[
+            r#"
+            error: invalid interface implementation
+             --> main.plk:2:17
+              |
+            2 | const encoded = @concat_cbytes((S {},));
+              |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `impl` to return a value of type `AsPrimitive`, but it returned `u256`
+            "#,
+            r#"
+            error: invalid interface implementation
+             --> main.plk:3:18
+              |
+            3 | const repeated = @concat_cbytes((S {},));
+              |                  ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `impl` to return a value of type `AsPrimitive`, but it returned `u256`
+            "#,
+        ],
     );
 }
 

@@ -1,4 +1,3 @@
-use hashbrown::HashMap;
 use plank_core::{
     DenseIndexMap, IndexVec, dense_index_map::Entry, list_of_lists::ListOfLists, newtype_index,
 };
@@ -13,7 +12,7 @@ use plank_values::{
 use crate::{
     diagnostics::DiagCtx,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
-    interfaces::CachedInterface,
+    interfaces::InterfaceCache,
     operators::OperatorTable,
     quota::{ComptimeQuota, QuotaExhaustedError},
     scope::{Diverge, EvalContext, LocalState, Scope},
@@ -90,9 +89,8 @@ pub(crate) struct Evaluator<'a> {
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
     pub operator_table: OperatorTable,
-    pub interfaces: HashMap<TypeId, CachedInterface>,
+    pub interface_cache: InterfaceCache,
     pub core: CoreModules,
-    pub resolved_core_interfaces: HashMap<StrId, MaybePoisoned<TypeId>>,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -113,6 +111,7 @@ impl<'a> Evaluator<'a> {
         types: &'a TypeInterner,
         evaluated_fns_cache: &'a EvaluatedFunctionCache,
         values: &'a mut ValueInterner,
+        interface_cache: InterfaceCache,
         core: CoreModules,
         evm_version: EvmVersion,
     ) -> Self {
@@ -134,9 +133,8 @@ impl<'a> Evaluator<'a> {
             call_arg_spans: ListOfLists::new(),
 
             operator_table: OperatorTable::new(),
-            interfaces: HashMap::new(),
+            interface_cache,
             core,
-            resolved_core_interfaces: HashMap::new(),
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),

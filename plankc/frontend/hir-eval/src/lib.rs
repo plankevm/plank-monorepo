@@ -22,7 +22,9 @@ mod tuples;
 
 pub(crate) use evaluator::Evaluator;
 
-use crate::{functions::EvaluatedFunctionCache, operators::OperatorTable};
+use crate::{
+    functions::EvaluatedFunctionCache, interfaces::InterfaceCache, operators::OperatorTable,
+};
 
 #[cfg(test)]
 mod tests;
@@ -36,8 +38,16 @@ pub fn evaluate(
 ) -> Mir {
     let types = TypeInterner::new();
     let evaluated_fns_cache = EvaluatedFunctionCache::new();
-    let mut evaluator =
-        Evaluator::new(hir, &types, &evaluated_fns_cache, values, core, evm_version);
+    let interface_cache = InterfaceCache::new(session);
+    let mut evaluator = Evaluator::new(
+        hir,
+        &types,
+        &evaluated_fns_cache,
+        values,
+        interface_cache,
+        core,
+        evm_version,
+    );
     let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
     evaluator.operator_table = match core.ops {
