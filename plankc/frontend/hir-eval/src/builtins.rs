@@ -734,7 +734,9 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                     buf.extend_from_slice(slice);
                 }
-                Value::Compound { ty, .. } if ty.is_struct() => {
+                Value::Compound { ty, .. }
+                    if ty.is_struct() && self.eval.core.interfaces.is_some() =>
+                {
                     match self.eval_as_primitive(field, expr_span) {
                         Ok(Ok((raw, byte_size))) => {
                             let bytes = raw.to_be_bytes::<32>();

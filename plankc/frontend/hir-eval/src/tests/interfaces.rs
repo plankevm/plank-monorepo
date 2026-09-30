@@ -101,6 +101,78 @@ fn test_invalid_interface_definition() {
 }
 
 #[test]
+fn test_concat_struct_without_std() {
+    assert_diagnostics(
+        r#"
+        const S = struct {};
+        const encoded = @concat_cbytes((S {},));
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid cbytes concat element
+         --> main.plk:2:17
+          |
+        2 | const encoded = @concat_cbytes((S {},));
+          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256`, `cbytes`, or implement `AsPrimitive`, got `S`
+        "#],
+    );
+}
+
+#[test]
+fn test_std_without_interfaces() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            const S = struct {};
+            const encoded = @concat_cbytes((S {},));
+            const repeated = @concat_cbytes((S {},));
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "std/core/interfaces",
+            r#"
+            const Other = struct {};
+        "#,
+        ),
+        &[r#"
+        error: cannot resolve standard library interface
+         --> main.plk:2:17
+          |
+        2 | const encoded = @concat_cbytes((S {},));
+          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `std::core::interfaces` must define `AsPrimitive` as a struct type
+        "#],
+    );
+}
+
+#[test]
+fn test_std_as_primitive_not_a_struct() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            const S = struct {};
+            const encoded = @concat_cbytes((S {},));
+            const repeated = @concat_cbytes((S {},));
+            init { @evm_stop(); }
+            "#,
+        )
+        .add_file(
+            "std/core/interfaces",
+            r#"
+            const AsPrimitive = 5;
+        "#,
+        ),
+        &[r#"
+        error: cannot resolve standard library interface
+         --> std/core/interfaces.plk:1:1
+          |
+        1 | const AsPrimitive = 5;
+          | ^^^^^^^^^^^^^^^^^^^^^^ `std::core::interfaces` must define `AsPrimitive` as a struct type
+        "#],
+    );
+}
+
+#[test]
 fn test_concat_as_primitive() {
     assert_lowers_to(
         std_project(
