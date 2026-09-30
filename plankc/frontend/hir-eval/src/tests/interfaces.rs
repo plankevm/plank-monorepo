@@ -59,12 +59,39 @@ fn test_unsupported_interface_is_resolved_once() {
 }
 
 #[test]
+fn test_poisoned_interface_impl_is_resolved_once() {
+    assert_diagnostics_and_compile_logs(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            const S = struct {
+                fn impl(comptime T: type) (comptime {
+                    @compile_log("resolve impl");
+                    AsPrimitive
+                }) {
+                    @compile_error("broken impl");
+                }
+            };
+            const encoded = @concat_cbytes((S {}, S {}));
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[r#"
+        error: broken impl
+         --> main.plk:7:9
+          |
+        7 |         @compile_error("broken impl");
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+        &["\"resolve impl\""],
+    );
+}
+
+#[test]
 fn test_invalid_interface_definition() {
     assert_diagnostics(
         std_project(
             r#"
-            const S = struct {};
-            const encoded = @concat_cbytes((S {},));
             init { @evm_stop(); }
             "#,
         )
@@ -136,11 +163,8 @@ fn test_std_without_interfaces() {
         "#,
         ),
         &[r#"
-        error: cannot resolve standard library interface
-         --> main.plk:2:17
-          |
-        2 | const encoded = @concat_cbytes((S {},));
-          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `std::core::interfaces` must define `AsPrimitive` as a struct type
+        error: failed to resolve standard library interface `AsPrimitive`
+         --> std/core/interfaces.plk
         "#],
     );
 }
@@ -163,11 +187,11 @@ fn test_std_as_primitive_not_a_struct() {
         "#,
         ),
         &[r#"
-        error: cannot resolve standard library interface
+        error: invalid standard library interface
          --> std/core/interfaces.plk:1:1
           |
         1 | const AsPrimitive = 5;
-          | ^^^^^^^^^^^^^^^^^^^^^^ `std::core::interfaces` must define `AsPrimitive` as a struct type
+          | ^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` is not a struct type
         "#],
     );
 }

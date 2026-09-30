@@ -74,10 +74,7 @@ fn resolve_std_fn<'a>(
     diag_ctx: &mut DiagCtx<'a>,
 ) -> Option<ValueId> {
     let name_id = diag_ctx.session.intern(name);
-    let Some(const_id) = hir.consts.iter_idx().find(|id| {
-        let def = hir.consts[*id];
-        def.name == name_id && def.source_id == core_ops_source
-    }) else {
+    let Some(const_id) = hir.find_const(core_ops_source, name_id) else {
         diag_ctx.emit_failed_to_resolve_std_fn(core_ops_source, name);
         return None;
     };

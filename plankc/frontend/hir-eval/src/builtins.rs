@@ -735,15 +735,18 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     buf.extend_from_slice(slice);
                 }
                 Value::Compound { ty, .. }
-                    if ty.is_struct() && self.eval.core.interfaces.is_some() =>
+                    if ty.is_struct()
+                        && let Some(as_primitive) = self.eval.interface_cache.as_primitive() =>
                 {
-                    match self.eval_as_primitive(field, expr_span) {
+                    let encoded = as_primitive.and_then(|definition| {
+                        self.eval_as_primitive(definition, field, expr_span)
+                    });
+                    match encoded {
                         Ok(Ok((raw, byte_size))) => {
                             let bytes = raw.to_be_bytes::<32>();
-                            let start = bytes
-                                .len()
-                                .checked_sub(usize::from(byte_size))
-                                .expect("AsPrimitive byte size was validated to fit in a u256");
+                            let start = bytes.len().checked_sub(usize::from(byte_size)).expect(
+                                "invariant: AsPrimitive byte size was validated to be at most 32",
+                            );
                             buf.extend_from_slice(&bytes[start..]);
                         }
                         Ok(Err(diverge)) => return Ok(Err(diverge)),

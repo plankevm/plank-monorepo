@@ -1367,14 +1367,17 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_cannot_resolve_std_interface(&mut self, name: StrId, loc: SrcLoc) {
+    pub fn emit_failed_to_resolve_std_interface(&mut self, source: SourceId, name: StrId) {
         let name = self.session.lookup_name(name);
-        Diagnostic::error("cannot resolve standard library interface")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`std::core::interfaces` must define `{name}` as a struct type"),
-            )
+        Diagnostic::error(format!("failed to resolve standard library interface `{name}`"))
+            .element(Element::Origin { path: source })
+            .emit(self);
+    }
+
+    pub fn emit_std_interface_not_a_struct(&mut self, name: StrId, loc: SrcLoc) {
+        let name = self.session.lookup_name(name);
+        Diagnostic::error("invalid standard library interface")
+            .primary(loc.source, loc.span, format!("`{name}` is not a struct type"))
             .emit(self);
     }
 

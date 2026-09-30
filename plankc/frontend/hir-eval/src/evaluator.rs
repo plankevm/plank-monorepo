@@ -4,7 +4,7 @@ use plank_core::{
 use plank_evm::EvmVersion;
 use plank_hir::{self as hir, ConstId, Hir};
 use plank_mir as mir;
-use plank_session::{CoreModules, MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
+use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, ZERO_SPAN};
 use plank_values::{
     Compound, DefOrigin, Field, Type, TypeId, TypeInterner, TypeName, Value, ValueId, ValueInterner,
 };
@@ -90,7 +90,6 @@ pub(crate) struct Evaluator<'a> {
 
     pub operator_table: OperatorTable,
     pub interface_cache: InterfaceCache,
-    pub core: CoreModules,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -112,7 +111,6 @@ impl<'a> Evaluator<'a> {
         evaluated_fns_cache: &'a EvaluatedFunctionCache,
         values: &'a mut ValueInterner,
         interface_cache: InterfaceCache,
-        core: CoreModules,
         evm_version: EvmVersion,
     ) -> Self {
         Evaluator {
@@ -134,7 +132,6 @@ impl<'a> Evaluator<'a> {
 
             operator_table: OperatorTable::new(),
             interface_cache,
-            core,
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
