@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_interface_impl_is_resolved_once() {
+fn test_implemented_interface_is_resolved_once() {
     assert_diagnostics_and_compile_logs(
         std_project(
             r#"
@@ -33,7 +33,7 @@ fn test_interface_impl_is_resolved_once() {
 }
 
 #[test]
-fn test_unsupported_interface_is_resolved_once() {
+fn test_unimplemented_interface_is_resolved_once() {
     assert_diagnostics_and_compile_logs(
         std_project(
             r#"
@@ -59,7 +59,7 @@ fn test_unsupported_interface_is_resolved_once() {
 }
 
 #[test]
-fn test_poisoned_interface_impl_is_resolved_once() {
+fn test_poisoned_interface_is_resolved_once() {
     assert_diagnostics_and_compile_logs(
         std_project(
             r#"
@@ -84,6 +84,24 @@ fn test_poisoned_interface_impl_is_resolved_once() {
           |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
         "#],
         &["\"resolve impl\""],
+    );
+}
+
+#[test]
+fn test_concat_struct_without_std() {
+    assert_diagnostics(
+        r#"
+        const S = struct {};
+        const encoded = @concat_cbytes((S {},));
+        init { @evm_stop(); }
+        "#,
+        &[r#"
+        error: invalid cbytes concat element
+         --> main.plk:2:17
+          |
+        2 | const encoded = @concat_cbytes((S {},));
+          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256`, `cbytes`, or implement `AsPrimitive`, got `S`
+        "#],
     );
 }
 
@@ -124,24 +142,6 @@ fn test_invalid_interface_definition() {
               | |_^ `AsPrimitive` is missing required field `unchecked_from_raw: function`
             "#,
         ],
-    );
-}
-
-#[test]
-fn test_concat_struct_without_std() {
-    assert_diagnostics(
-        r#"
-        const S = struct {};
-        const encoded = @concat_cbytes((S {},));
-        init { @evm_stop(); }
-        "#,
-        &[r#"
-        error: invalid cbytes concat element
-         --> main.plk:2:17
-          |
-        2 | const encoded = @concat_cbytes((S {},));
-          |                 ^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256`, `cbytes`, or implement `AsPrimitive`, got `S`
-        "#],
     );
 }
 
@@ -227,7 +227,7 @@ fn test_concat_as_primitive() {
 }
 
 #[test]
-fn test_concat_custom_interface() {
+fn test_concat_custom_as_primitive() {
     assert_lowers_to(
         std_project(
             r#"
@@ -270,47 +270,6 @@ fn test_concat_custom_interface() {
 }
 
 #[test]
-fn test_concat_to_raw_out_of_range() {
-    assert_diagnostics(
-        std_project(
-            r#"
-            use std::core::interfaces::AsPrimitive;
-            const Number = fn(comptime bytes: u256) type {
-                struct {
-                    raw: u256,
-                    fn to_raw(self: Self) u256 { self.raw }
-                    fn from_raw(raw: u256) Self { Self { raw: raw } }
-                    fn impl(comptime T: type) AsPrimitive {
-                        AsPrimitive { byte_size: bytes, to_raw: Self.to_raw, unchecked_from_raw: Self.from_raw }
-                    }
-                }
-            };
-            const valid = @concat_cbytes((Number(1) { raw: 255 },));
-            const oversized = @concat_cbytes((Number(1) { raw: 256 },));
-            const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
-            init { @evm_stop(); }
-            "#,
-        ),
-        &[
-            r#"
-            error: `AsPrimitive` value exceeds declared byte size
-              --> main.plk:13:19
-               |
-            13 | const oversized = @concat_cbytes((Number(1) { raw: 256 },));
-               |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 256, which does not fit in 1 byte
-            "#,
-            r#"
-            error: `AsPrimitive` value exceeds declared byte size
-              --> main.plk:14:20
-               |
-            14 | const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
-               |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 1, which does not fit in 0 bytes
-            "#,
-        ],
-    );
-}
-
-#[test]
 fn test_concat_interface_not_implemented() {
     assert_diagnostics(
         std_project(
@@ -342,7 +301,7 @@ fn test_concat_interface_not_implemented() {
 }
 
 #[test]
-fn test_concat_invalid_impl_result() {
+fn test_concat_impl_wrong_return_type() {
     assert_diagnostics(
         std_project(
             r#"
@@ -409,7 +368,7 @@ fn test_concat_invalid_byte_size() {
 }
 
 #[test]
-fn test_concat_invalid_to_raw_result() {
+fn test_concat_to_raw_wrong_return_type() {
     assert_diagnostics(
         std_project(
             r#"
@@ -432,5 +391,46 @@ fn test_concat_invalid_to_raw_result() {
         9 | const encoded = @concat_cbytes((S {},));
           |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `to_raw` to return a value of type `u256`, but it returned `bool`
         "#],
+    );
+}
+
+#[test]
+fn test_concat_to_raw_exceeds_byte_size() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            use std::core::interfaces::AsPrimitive;
+            const Number = fn(comptime bytes: u256) type {
+                struct {
+                    raw: u256,
+                    fn to_raw(self: Self) u256 { self.raw }
+                    fn from_raw(raw: u256) Self { Self { raw: raw } }
+                    fn impl(comptime T: type) AsPrimitive {
+                        AsPrimitive { byte_size: bytes, to_raw: Self.to_raw, unchecked_from_raw: Self.from_raw }
+                    }
+                }
+            };
+            const valid = @concat_cbytes((Number(1) { raw: 255 },));
+            const oversized = @concat_cbytes((Number(1) { raw: 256 },));
+            const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[
+            r#"
+            error: `AsPrimitive` value exceeds declared byte size
+              --> main.plk:13:19
+               |
+            13 | const oversized = @concat_cbytes((Number(1) { raw: 256 },));
+               |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 256, which does not fit in 1 byte
+            "#,
+            r#"
+            error: `AsPrimitive` value exceeds declared byte size
+              --> main.plk:14:20
+               |
+            14 | const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
+               |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 1, which does not fit in 0 bytes
+            "#,
+        ],
     );
 }
