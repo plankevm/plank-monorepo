@@ -1,5 +1,4 @@
 use crate::{
-    CorePaths,
     diagnostics::{
         error_failed_to_canonicalize_entry, error_failed_to_canonicalize_import,
         error_failed_to_read_source, error_failed_to_resolve_import,
@@ -40,6 +39,21 @@ pub struct FileImport {
 pub struct ParsedSource {
     pub lexed: Lexed,
     pub cst: ConcreteSyntaxTree,
+}
+
+#[derive(Default)]
+pub struct CorePaths {
+    pub ops: Option<PathBuf>,
+    pub interfaces: Option<PathBuf>,
+}
+
+impl CorePaths {
+    pub fn from_std_root(root: &Path) -> Self {
+        Self {
+            ops: Some(root.join("core/ops.plk")),
+            interfaces: Some(root.join("core/interfaces.plk")),
+        }
+    }
 }
 
 pub struct ParsedProject {

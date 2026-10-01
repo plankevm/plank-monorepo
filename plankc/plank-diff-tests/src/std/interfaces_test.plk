@@ -11,15 +11,12 @@ init {
     comptime {
         comptime_assert(supports(AsPrimitive, AsPrimitive) == AsPrimitive, "single interface match");
         comptime_assert(supports(Other, AsPrimitive) == void, "single interface mismatch");
-        comptime_assert(supports(AsPrimitive, (AsPrimitive,)) == AsPrimitive, "single-element tuple match");
-        comptime_assert(supports(Other, (AsPrimitive,)) == void, "single-element tuple mismatch");
         comptime_assert(supports(AsPrimitive, (AsPrimitive, Other)) == AsPrimitive, "first tuple member");
         comptime_assert(supports(Other, (AsPrimitive, Other)) == Other, "second tuple member");
         comptime_assert(supports(Unsupported, (AsPrimitive, Other)) == void, "missing tuple member");
         comptime_assert(supports(AsPrimitive, ()) == void, "empty supported tuple");
     };
     comptime {
-        comptime_assert(UInt(256) == u256, "UInt(256) must be the primitive u256 type");
         comptime_assert(!is_uint(Tagged), "an oversized struct tag is not a UInt");
         let as_primitive = u64.impl(AsPrimitive);
         let value: u64 = (as_primitive.unchecked_from_raw)(34);

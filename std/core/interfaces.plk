@@ -1,9 +1,12 @@
+/// Implemented by types that can be represented as a single 256-bit word.
+/// To implement it, define `fn impl(comptime T: type) supports(T, AsPrimitive)`
+/// that returns an `AsPrimitive` value when `T == AsPrimitive` and `{}` otherwise.
 const AsPrimitive = struct {
-    /// Encoded width in bytes, from 0 to 32.
+    /// Encoded width in bytes, from 0 to 32; the value's low bytes are written big-endian.
     byte_size: u256,
 
     /// Takes a value of the implementing type and returns its u256 representation.
-    /// The result must fit in byte_size bytes; encoding is big-endian.
+    /// The result must fit in `byte_size` bytes.
     to_raw: function,
 
     /// Takes a u256 representation and returns the implementing type.
@@ -12,7 +15,7 @@ const AsPrimitive = struct {
 };
 
 /// Returns the requested type if supported, otherwise `void`.
-/// Accepts a single type or a tuple of types.
+/// Accepts a single type or a tuple of types. Use as the return type of `impl`.
 const supports = fn (comptime requested: type, comptime supported: $L) type {
     if L == type {
         return if requested == supported { requested } else { void };

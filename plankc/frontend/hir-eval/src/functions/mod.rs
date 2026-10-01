@@ -281,7 +281,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         self.eval_call(closure, &args, call_span)
     }
 
-    pub(crate) fn eval_synthetic_call(
+    pub(crate) fn eval_synthetic_comptime_call(
         &mut self,
         closure: ValueId,
         args: &[ValueId],

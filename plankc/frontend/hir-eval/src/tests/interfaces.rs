@@ -293,14 +293,14 @@ fn test_concat_to_raw_out_of_range() {
         ),
         &[
             r#"
-            error: AsPrimitive value exceeds declared byte size
+            error: `AsPrimitive` value exceeds declared byte size
               --> main.plk:13:19
                |
             13 | const oversized = @concat_cbytes((Number(1) { raw: 256 },));
                |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `to_raw` returned 256, which does not fit in 1 byte
             "#,
             r#"
-            error: AsPrimitive value exceeds declared byte size
+            error: `AsPrimitive` value exceeds declared byte size
               --> main.plk:14:20
                |
             14 | const zero_width = @concat_cbytes((Number(0) { raw: 1 },));
@@ -391,18 +391,18 @@ fn test_concat_invalid_byte_size() {
         ),
         &[
             r#"
-            error: AsPrimitive byte size exceeds 32 bytes
+            error: invalid interface implementation
              --> main.plk:9:17
               |
             9 | const encoded = @concat_cbytes((S {},));
-              |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive`: `byte_size` must be at most 32, got 33
+              |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `byte_size` to be at most 32, but it is 33
             "#,
             r#"
-            error: AsPrimitive byte size exceeds 32 bytes
+            error: invalid interface implementation
               --> main.plk:10:18
                |
             10 | const repeated = @concat_cbytes((S {},));
-               |                  ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive`: `byte_size` must be at most 32, got 33
+               |                  ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `byte_size` to be at most 32, but it is 33
             "#,
         ],
     );

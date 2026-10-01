@@ -1447,17 +1447,22 @@ impl DiagCtx<'_> {
     }
 
     pub fn emit_invalid_as_primitive_byte_size(&mut self, size: U256, loc: SrcLoc) {
-        Diagnostic::error("AsPrimitive byte size exceeds 32 bytes")
+        Diagnostic::error("invalid interface implementation")
             .primary(
                 loc.source,
                 loc.span,
-                format!("`AsPrimitive`: `byte_size` must be at most 32, got {size}"),
+                format!("`AsPrimitive` requires `byte_size` to be at most 32, but it is {size}"),
             )
             .emit(self);
     }
 
-    pub fn emit_as_primitive_raw_out_of_range(&mut self, raw: U256, byte_size: u8, loc: SrcLoc) {
-        Diagnostic::error("AsPrimitive value exceeds declared byte size")
+    pub fn emit_as_primitive_raw_exceeds_byte_size(
+        &mut self,
+        raw: U256,
+        byte_size: u8,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("`AsPrimitive` value exceeds declared byte size")
             .primary(
                 loc.source,
                 loc.span,

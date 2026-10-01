@@ -165,7 +165,7 @@ impl crate::scope::Scope<'_, '_> {
         }
 
         let binding = self.bindings[input];
-        let (state, _use_span, _origin) = binding.poisoned()?;
+        let state = binding.state?;
         let ty = self.state_type(state);
 
         let r#impl = self.eval.operator_table.negate.filter(|_| ty.is_assignable_to(TypeId::U256));
