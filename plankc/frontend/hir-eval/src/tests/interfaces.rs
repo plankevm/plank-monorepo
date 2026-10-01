@@ -252,8 +252,8 @@ fn test_concat_custom_as_primitive() {
         init {
             comptime {
                 let max_raw = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
-                let encoded = @concat_cbytes(("[", Number(0) { raw: 0 }, Number(1) { raw: 0xff }, Number(32) { raw: max_raw }, "]"));
-                comptime_assert(encoded == "[" hex"ff" hex"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" "]", "custom encoding and nested calls");
+                let encoded = @concat_cbytes(("[", Number(0) { raw: 0 }, Number(1) { raw: 0xc1 }, Number(32) { raw: max_raw }, "]"));
+                comptime_assert(encoded == "[" hex"c1" hex"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" "]", "custom encoding and nested calls");
             };
             @evm_stop();
         }
