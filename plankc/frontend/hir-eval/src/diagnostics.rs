@@ -41,6 +41,12 @@ impl SourceOperation {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum InterfaceMethod {
+    Impl,
+    ToRaw,
+}
+
 pub(crate) struct BindingLoc {
     pub r#use: SrcLoc,
     pub def: Option<SrcLoc>,
@@ -1405,15 +1411,17 @@ impl DiagCtx<'_> {
         &mut self,
         values: &ValueInterner,
         interface: TypeId,
-        member: StrId,
-        expected: TypeId,
+        method: InterfaceMethod,
         actual: TypeId,
         loc: SrcLoc,
     ) {
-        let interface = self.types.format(self.session, values, interface);
+        let (method, expected) = match method {
+            InterfaceMethod::Impl => ("impl", interface),
+            InterfaceMethod::ToRaw => ("to_raw", TypeId::U256),
+        };
         let label = format!(
-            "`{interface}` requires `{}` to return a value of type `{}`, but it returned `{}`",
-            self.session.lookup_name(member),
+            "`{}` requires `{method}` to return a value of type `{}`, but it returned `{}`",
+            self.types.format(self.session, values, interface),
             self.types.format(self.session, values, expected),
             self.types.format(self.session, values, actual),
         );

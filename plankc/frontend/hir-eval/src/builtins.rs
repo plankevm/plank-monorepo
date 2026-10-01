@@ -736,11 +736,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 Value::Compound { ty, .. }
                     if ty.is_struct()
-                        && let Some(as_primitive) = self.eval.interface_cache.as_primitive() =>
+                        && let Some(as_primitive) = self.eval.std_interfaces.as_primitive() =>
                 {
-                    let encoded = as_primitive.and_then(|definition| {
-                        self.eval_as_primitive(definition, field, expr_span)
-                    });
+                    let encoded =
+                        as_primitive.and_then(|def| self.eval_as_primitive(def, field, expr_span));
                     match encoded {
                         Ok(Ok((raw, byte_size))) => {
                             let bytes = raw.to_be_bytes::<32>();

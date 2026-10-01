@@ -5,172 +5,168 @@ use plank_session::{MaybePoisoned, Poisoned, Session, SourceId, SourceSpan, SrcL
 use plank_values::{Compound, FieldIdx, Type, TypeId, Value, ValueId, ValueInterner};
 
 use crate::{
-    diagnostics::DiagCtx,
+    diagnostics::{DiagCtx, InterfaceMethod},
     evaluator::Evaluator,
     scope::{Diverge, Scope},
 };
 
 #[derive(Clone, Copy)]
-enum CachedInterface {
-    Implemented(ValueId),
-    NotImplemented,
-    InvalidReturnType(TypeId),
+pub(crate) enum Implementation<I: StdInterface> {
+    Valid(I),
+    Missing,
+    WrongReturnType(TypeId),
+    Invalid(I::DecodeError),
     Poisoned,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct InterfaceDefinition<M> {
-    ty: TypeId,
-    members: M,
-}
-
-pub(crate) struct InterfaceCache {
-    implementations: HashMap<(TypeId, TypeId), CachedInterface>,
+pub(crate) struct StdInterfaces {
     impl_name: StrId,
 
     // `AsPrimitive`
-    as_primitive: Option<MaybePoisoned<InterfaceDefinition<AsPrimitiveMembers>>>,
-    as_primitive_name: StrId,
-    byte_size_name: StrId,
-    to_raw_name: StrId,
-    unchecked_from_raw_name: StrId,
+    as_primitive: Option<MaybePoisoned<AsPrimitiveDef>>,
+    as_primitive_implementations: HashMap<TypeId, Implementation<AsPrimitive>>,
 }
 
-impl InterfaceCache {
+impl StdInterfaces {
     pub(crate) fn new(session: &mut Session) -> Self {
         Self {
-            implementations: HashMap::new(),
             impl_name: session.intern("impl"),
 
             as_primitive: None,
-            as_primitive_name: session.intern("AsPrimitive"),
-            byte_size_name: session.intern("byte_size"),
-            to_raw_name: session.intern("to_raw"),
-            unchecked_from_raw_name: session.intern("unchecked_from_raw"),
+            as_primitive_implementations: HashMap::new(),
         }
     }
 
-    pub(crate) fn with_std_interfaces<'a>(
+    pub(crate) fn resolve<'a>(
         core_interfaces_source: SourceId,
         evaluator: &mut Evaluator<'a>,
         diag_ctx: &mut DiagCtx<'a>,
     ) -> Self {
-        let mut cache = Self::new(diag_ctx.session);
-        cache.as_primitive =
-            Some(resolve_as_primitive(&cache, core_interfaces_source, evaluator, diag_ctx));
-        cache
+        Self {
+            as_primitive: Some(resolve_as_primitive(core_interfaces_source, evaluator, diag_ctx)),
+            ..Self::new(diag_ctx.session)
+        }
     }
 
-    pub(crate) fn as_primitive(
-        &self,
-    ) -> Option<MaybePoisoned<InterfaceDefinition<AsPrimitiveMembers>>> {
+    pub(crate) fn as_primitive(&self) -> Option<MaybePoisoned<AsPrimitiveDef>> {
         self.as_primitive
     }
 }
 
-pub(crate) trait CompilerInterface: Sized {
-    type Members: Copy;
+pub(crate) trait StdInterface: Copy {
+    type Def: Copy;
+    type DecodeError: Copy;
+
+    fn interface_type(def: Self::Def) -> TypeId;
+
+    fn implementations(
+        interfaces: &mut StdInterfaces,
+    ) -> &mut HashMap<TypeId, Implementation<Self>>;
 
     fn decode(
-        scope: &mut Scope<'_, '_>,
-        definition: InterfaceDefinition<Self::Members>,
-        implementation: ValueId,
-        span: SourceSpan,
-    ) -> MaybePoisoned<Self>;
+        values: &ValueInterner,
+        def: Self::Def,
+        impl_value: ValueId,
+    ) -> Result<Self, Self::DecodeError>;
+
+    fn emit_decode_error(diag_ctx: &mut DiagCtx<'_>, error: Self::DecodeError, loc: SrcLoc);
 }
 
 impl Scope<'_, '_> {
     pub(crate) fn eval_as_primitive(
         &mut self,
-        definition: InterfaceDefinition<AsPrimitiveMembers>,
+        def: AsPrimitiveDef,
         value: ValueId,
         span: SourceSpan,
     ) -> MaybePoisoned<Result<(U256, u8), Diverge>> {
-        let implementation = match self.eval_interface::<AsPrimitive>(
-            definition,
+        let as_primitive = match self.implementation::<AsPrimitive>(
+            def,
             self.values.type_of_value(value),
             span,
         )? {
-            Ok(implementation) => implementation,
+            Ok(as_primitive) => as_primitive,
             Err(diverge) => return Ok(Err(diverge)),
         };
         let to_raw_result =
-            match self.eval_synthetic_comptime_call(implementation.to_raw, &[value], span)? {
+            match self.eval_synthetic_comptime_call(as_primitive.to_raw, &[value], span)? {
                 Ok(result) => result,
                 Err(diverge) => return Ok(Err(diverge)),
             };
         let Value::BigNum(raw) = self.values.lookup(to_raw_result) else {
             self.diag_ctx.emit_interface_return_type_mismatch(
                 self.eval.values,
-                definition.ty,
-                self.eval.interface_cache.to_raw_name,
-                TypeId::U256,
+                def.ty,
+                InterfaceMethod::ToRaw,
                 self.values.type_of_value(to_raw_result),
                 self.loc(span),
             );
             return Err(Poisoned);
         };
-        if raw.bit_len() > usize::from(implementation.byte_size) * 8 {
+        if raw.bit_len() > usize::from(as_primitive.byte_size) * 8 {
             self.diag_ctx.emit_as_primitive_raw_exceeds_byte_size(
                 raw,
-                implementation.byte_size,
+                as_primitive.byte_size,
                 self.loc(span),
             );
             return Err(Poisoned);
         }
-        Ok(Ok((raw, implementation.byte_size)))
+        Ok(Ok((raw, as_primitive.byte_size)))
     }
 
-    pub(crate) fn eval_interface<I: CompilerInterface>(
+    pub(crate) fn implementation<I: StdInterface>(
         &mut self,
-        definition: InterfaceDefinition<I::Members>,
+        def: I::Def,
         ty: TypeId,
         span: SourceSpan,
     ) -> MaybePoisoned<Result<I, Diverge>> {
-        let interface = definition.ty;
-        let cached = match self.eval.interface_cache.implementations.get(&(interface, ty)) {
-            Some(&cached) => cached,
-            None => match self.cache_interface(interface, ty, span) {
-                Ok(cached) => cached,
+        let implementation = match I::implementations(&mut self.eval.std_interfaces).get(&ty) {
+            Some(&implementation) => implementation,
+            None => match self.compute_implementation(def, ty, span) {
+                Ok(implementation) => implementation,
                 Err(diverge) => return Ok(Err(diverge)),
             },
         };
-        let implementation = match cached {
-            CachedInterface::Implemented(value) => value,
-            CachedInterface::NotImplemented => {
+        let interface = I::interface_type(def);
+        match implementation {
+            Implementation::Valid(decoded) => Ok(Ok(decoded)),
+            Implementation::Missing => {
                 self.diag_ctx.emit_interface_not_implemented(
                     self.eval.values,
                     ty,
                     interface,
                     self.loc(span),
                 );
-                return Err(Poisoned);
+                Err(Poisoned)
             }
-            CachedInterface::InvalidReturnType(actual) => {
+            Implementation::WrongReturnType(actual) => {
                 self.diag_ctx.emit_interface_return_type_mismatch(
                     self.eval.values,
                     interface,
-                    self.eval.interface_cache.impl_name,
-                    interface,
+                    InterfaceMethod::Impl,
                     actual,
                     self.loc(span),
                 );
-                return Err(Poisoned);
+                Err(Poisoned)
             }
-            CachedInterface::Poisoned => return Err(Poisoned),
-        };
-        I::decode(self, definition, implementation, span).map(Ok)
+            Implementation::Invalid(error) => {
+                let loc = self.loc(span);
+                I::emit_decode_error(self.diag_ctx, error, loc);
+                Err(Poisoned)
+            }
+            Implementation::Poisoned => Err(Poisoned),
+        }
     }
 
-    fn cache_interface(
+    fn compute_implementation<I: StdInterface>(
         &mut self,
-        interface: TypeId,
+        def: I::Def,
         ty: TypeId,
         span: SourceSpan,
-    ) -> Result<CachedInterface, Diverge> {
+    ) -> Result<Implementation<I>, Diverge> {
+        let interface = I::interface_type(def);
         let method = match self.types.lookup(ty) {
             Type::Compound(Compound::Struct(r#struct)) => {
-                self.find_method(r#struct, self.eval.interface_cache.impl_name)
+                self.find_method(r#struct, self.eval.std_interfaces.impl_name)
             }
             _ => None,
         };
@@ -179,74 +175,90 @@ impl Scope<'_, '_> {
             let argument = self.eval.values.intern_type(interface);
             match self.eval_synthetic_comptime_call(closure, &[argument], span) {
                 Ok(Ok(value)) => match self.values.type_of_value(value) {
-                    TypeId::VOID => CachedInterface::NotImplemented,
-                    actual if actual == interface => CachedInterface::Implemented(value),
-                    actual => CachedInterface::InvalidReturnType(actual),
+                    TypeId::VOID => Implementation::Missing,
+                    actual if actual == interface => {
+                        match I::decode(self.eval.values, def, value) {
+                            Ok(decoded) => Implementation::Valid(decoded),
+                            Err(error) => Implementation::Invalid(error),
+                        }
+                    }
+                    actual => Implementation::WrongReturnType(actual),
                 },
                 Ok(Err(diverge)) => return Err(diverge),
-                Err(Poisoned) => CachedInterface::Poisoned,
+                Err(Poisoned) => Implementation::Poisoned,
             }
         } else {
-            CachedInterface::NotImplemented
+            Implementation::Missing
         };
-        self.eval.interface_cache.implementations.insert((interface, ty), implementation);
+        I::implementations(&mut self.eval.std_interfaces).insert(ty, implementation);
         Ok(implementation)
     }
 }
 
+#[derive(Clone, Copy)]
 struct AsPrimitive {
     byte_size: u8,
     to_raw: ValueId,
 }
 
-impl CompilerInterface for AsPrimitive {
-    type Members = AsPrimitiveMembers;
+impl StdInterface for AsPrimitive {
+    type Def = AsPrimitiveDef;
+    type DecodeError = U256;
+
+    fn interface_type(def: AsPrimitiveDef) -> TypeId {
+        def.ty
+    }
+
+    fn implementations(
+        interfaces: &mut StdInterfaces,
+    ) -> &mut HashMap<TypeId, Implementation<Self>> {
+        &mut interfaces.as_primitive_implementations
+    }
 
     fn decode(
-        scope: &mut Scope<'_, '_>,
-        definition: InterfaceDefinition<AsPrimitiveMembers>,
-        implementation: ValueId,
-        span: SourceSpan,
-    ) -> MaybePoisoned<Self> {
-        let byte_size_value =
-            interface_member(scope.eval.values, implementation, definition.members.byte_size);
-        let to_raw = interface_member(scope.eval.values, implementation, definition.members.to_raw);
-        let Value::BigNum(byte_size) = scope.values.lookup(byte_size_value) else {
+        values: &ValueInterner,
+        def: AsPrimitiveDef,
+        impl_value: ValueId,
+    ) -> Result<Self, U256> {
+        let byte_size_value = interface_member(values, impl_value, def.byte_size);
+        let to_raw = interface_member(values, impl_value, def.to_raw);
+        let Value::BigNum(byte_size) = values.lookup(byte_size_value) else {
             unreachable!("invariant: interface definition validated byte_size as u256")
         };
-        let byte_size = match u8::try_from(byte_size) {
-            Ok(size) if size <= 32 => size,
-            _ => {
-                scope.diag_ctx.emit_invalid_as_primitive_byte_size(byte_size, scope.loc(span));
-                return Err(Poisoned);
-            }
-        };
-        Ok(Self { byte_size, to_raw })
+        match u8::try_from(byte_size) {
+            Ok(byte_size) if byte_size <= 32 => Ok(Self { byte_size, to_raw }),
+            _ => Err(byte_size),
+        }
+    }
+
+    fn emit_decode_error(diag_ctx: &mut DiagCtx<'_>, byte_size: U256, loc: SrcLoc) {
+        diag_ctx.emit_invalid_as_primitive_byte_size(byte_size, loc);
     }
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct AsPrimitiveMembers {
+pub(crate) struct AsPrimitiveDef {
+    ty: TypeId,
     byte_size: FieldIdx,
     to_raw: FieldIdx,
 }
 
 fn resolve_as_primitive<'a>(
-    cache: &InterfaceCache,
     source: SourceId,
     evaluator: &mut Evaluator<'a>,
     diag_ctx: &mut DiagCtx<'a>,
-) -> MaybePoisoned<InterfaceDefinition<AsPrimitiveMembers>> {
-    let name = cache.as_primitive_name;
+) -> MaybePoisoned<AsPrimitiveDef> {
+    let session = &mut *diag_ctx.session;
+    let name = session.intern("AsPrimitive");
     let required_members = [
-        (cache.byte_size_name, TypeId::U256),
-        (cache.to_raw_name, TypeId::FUNCTION),
-        (cache.unchecked_from_raw_name, TypeId::FUNCTION),
+        (session.intern("byte_size"), TypeId::U256),
+        (session.intern("to_raw"), TypeId::FUNCTION),
+        (session.intern("unchecked_from_raw"), TypeId::FUNCTION),
     ];
-    let interface = resolve_std_interface(source, name, evaluator, diag_ctx)?;
+    let ty = resolve_std_interface(source, name, evaluator, diag_ctx)?;
     let [byte_size, to_raw, _unchecked_from_raw] =
-        validate_interface_definition(interface, required_members, evaluator, diag_ctx)?;
-    Ok(InterfaceDefinition { ty: interface, members: AsPrimitiveMembers { byte_size, to_raw } })
+        validate_interface_definition(ty, required_members, evaluator, diag_ctx)?;
+    Ok(AsPrimitiveDef { ty, byte_size, to_raw })
 }
 
 fn resolve_std_interface<'a>(
@@ -306,8 +318,8 @@ fn validate_interface_definition<const N: usize>(
     Ok(indices.map(|index| index.expect("invariant: invalid members were reported above")))
 }
 
-fn interface_member(values: &ValueInterner, implementation: ValueId, index: FieldIdx) -> ValueId {
-    let Value::Compound { fields, .. } = values.lookup(implementation) else {
+fn interface_member(values: &ValueInterner, impl_value: ValueId, index: FieldIdx) -> ValueId {
+    let Value::Compound { fields, .. } = values.lookup(impl_value) else {
         unreachable!("invariant: interface implementation was checked to be a struct")
     };
     RelSlice::new(FieldIdx::ZERO, fields)[index]

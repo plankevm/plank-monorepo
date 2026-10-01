@@ -23,7 +23,7 @@ mod tuples;
 pub(crate) use evaluator::Evaluator;
 
 use crate::{
-    functions::EvaluatedFunctionCache, interfaces::InterfaceCache, operators::OperatorTable,
+    functions::EvaluatedFunctionCache, interfaces::StdInterfaces, operators::OperatorTable,
 };
 
 #[cfg(test)]
@@ -38,9 +38,9 @@ pub fn evaluate(
 ) -> Mir {
     let types = TypeInterner::new();
     let evaluated_fns_cache = EvaluatedFunctionCache::new();
-    let interface_cache = InterfaceCache::new(session);
+    let std_interfaces = StdInterfaces::new(session);
     let mut evaluator =
-        Evaluator::new(hir, &types, &evaluated_fns_cache, values, interface_cache, evm_version);
+        Evaluator::new(hir, &types, &evaluated_fns_cache, values, std_interfaces, evm_version);
     let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
     evaluator.operator_table = match core.ops {
@@ -50,11 +50,8 @@ pub fn evaluate(
         None => OperatorTable::new(),
     };
     if let Some(core_interfaces_source) = core.interfaces {
-        evaluator.interface_cache = InterfaceCache::with_std_interfaces(
-            core_interfaces_source,
-            &mut evaluator,
-            &mut diag_ctx,
-        );
+        evaluator.std_interfaces =
+            StdInterfaces::resolve(core_interfaces_source, &mut evaluator, &mut diag_ctx);
     }
 
     let mut init = None;

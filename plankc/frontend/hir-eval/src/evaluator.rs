@@ -12,7 +12,7 @@ use plank_values::{
 use crate::{
     diagnostics::DiagCtx,
     functions::{EvaluatedFunctionCache, LoweredFunctionsCache},
-    interfaces::InterfaceCache,
+    interfaces::StdInterfaces,
     operators::OperatorTable,
     quota::{ComptimeQuota, QuotaExhaustedError},
     scope::{Diverge, EvalContext, LocalState, Scope},
@@ -89,7 +89,7 @@ pub(crate) struct Evaluator<'a> {
     pub call_arg_spans: ListOfLists<CallArgSpansIdx, SourceSpan>,
 
     pub operator_table: OperatorTable,
-    pub interface_cache: InterfaceCache,
+    pub std_interfaces: StdInterfaces,
 
     pub instr_stack_buf: Vec<mir::Instruction>,
     pub types_buf: Vec<TypeId>,
@@ -110,7 +110,7 @@ impl<'a> Evaluator<'a> {
         types: &'a TypeInterner,
         evaluated_fns_cache: &'a EvaluatedFunctionCache,
         values: &'a mut ValueInterner,
-        interface_cache: InterfaceCache,
+        std_interfaces: StdInterfaces,
         evm_version: EvmVersion,
     ) -> Self {
         Evaluator {
@@ -131,7 +131,7 @@ impl<'a> Evaluator<'a> {
             call_arg_spans: ListOfLists::new(),
 
             operator_table: OperatorTable::new(),
-            interface_cache,
+            std_interfaces,
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),
