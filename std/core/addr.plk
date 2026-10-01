@@ -15,13 +15,11 @@ const addr = struct {
 
     fn impl(comptime T: type) supports(T, AsPrimitive) {
         if T == AsPrimitive {
-            AsPrimitive {
+            return AsPrimitive {
                 byte_size: 20,
                 to_raw: Self.to_raw,
                 unchecked_from_raw: Self.unchecked_from_raw,
-            }
-        } else {
-            {}
+            };
         }
     }
 };
