@@ -9,8 +9,8 @@ newtype_index! {
 /// Index of an interned string.
 ///
 /// Sealed: outside this module it can only be obtained from
-/// [`Interner::intern_str`] or [`Interner::find_str`] (or the built-in known name consts, which are
-/// validated against the interner on session construction). This guarantees the indexed
+/// [`Interner::intern_str`] (or the built-in known name consts, which are validated
+/// against the interner on session construction). This guarantees the indexed
 /// content is valid UTF-8 as long as the id is resolved against the interner
 /// that minted it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -19,7 +19,7 @@ pub struct StrId(InternIdx);
 /// Index of an interned byte string (arbitrary, not necessarily UTF-8).
 ///
 /// Sealed: outside this module it can only be obtained from
-/// [`Interner::intern_bytes`] or by converting a [`StrId`].
+/// [`Interner::intern_bytes`], [`Interner::intern_subslice`], or by converting a [`StrId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BytesId(InternIdx);
 
@@ -58,12 +58,12 @@ impl Interner {
         StrId(self.bytes.intern(string.as_bytes()))
     }
 
-    pub fn find_str(&self, string: &str) -> Option<StrId> {
-        self.bytes.find_id(string.as_bytes()).map(StrId)
-    }
-
     pub fn intern_bytes(&mut self, bytes: &[u8]) -> BytesId {
         BytesId(self.bytes.intern(bytes))
+    }
+
+    pub fn intern_subslice(&mut self, source: BytesId, start: usize, end: usize) -> BytesId {
+        BytesId(self.bytes.intern_subslice(source.0, start, end))
     }
 
     /// # Safety

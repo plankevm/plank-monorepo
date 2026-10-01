@@ -101,10 +101,14 @@ impl Session {
         self.interner.intern_bytes(bytes)
     }
 
-    pub fn intern_cbytes(&mut self, bytes: &[u8]) -> CBytes {
+    pub fn intern_bytes_to_cbytes(&mut self, bytes: &[u8]) -> CBytes {
         let contents = self.intern_bytes(bytes);
         let len = u32::try_from(bytes.len()).expect("cbytes length fits u32");
         CBytes { contents, start: 0, end: len }
+    }
+
+    pub fn intern_cbytes_to_bytes(&mut self, cbytes: CBytes) -> BytesId {
+        self.interner.intern_subslice(cbytes.contents, cbytes.start as usize, cbytes.end as usize)
     }
 
     pub fn lookup_bytes(&self, bytes: BytesId) -> &[u8] {
@@ -113,11 +117,6 @@ impl Session {
 
     pub fn lookup_bytes_slice(&self, bytes: CBytes) -> &[u8] {
         &self.lookup_bytes(bytes.contents)[bytes.start as usize..bytes.end as usize]
-    }
-
-    pub fn find_name(&self, bytes: CBytes) -> Option<StrId> {
-        let name = std::str::from_utf8(self.lookup_bytes_slice(bytes)).ok()?;
-        self.interner.find_str(name)
     }
 
     pub fn lookup_bytes_lossy(&self, bytes: CBytes) -> String {

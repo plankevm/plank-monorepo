@@ -1120,18 +1120,18 @@ impl DiagCtx<'_> {
         values: &ValueInterner,
         builtin: Builtin,
         struct_ty: TypeId,
-        method_name_bytes: CBytes,
+        method_name: BytesId,
         loc: SrcLoc,
     ) {
-        let mut method_name = String::new();
-        write_bytes_literal(&mut method_name, self.session.lookup_bytes_slice(method_name_bytes))
+        let mut method_name_literal = String::new();
+        write_bytes_literal(&mut method_name_literal, self.session.lookup_bytes(method_name))
             .expect("writing to string cannot fail");
         Diagnostic::error("unknown method")
             .primary(
                 loc.source,
                 loc.span,
                 format!(
-                    "`{builtin}`: `{}` has no method named {method_name}",
+                    "`{builtin}`: `{}` has no method named {method_name_literal}",
                     self.types.format(self.session, values, struct_ty),
                 ),
             )

@@ -248,7 +248,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.expect_struct(ty, builtin, expr_span)?;
                 let name =
                     self.types.format(self.diag_ctx.session, self.eval.values, ty).to_string();
-                let cbytes = self.diag_ctx.session.intern_cbytes(name.as_bytes());
+                let cbytes = self.diag_ctx.session.intern_bytes_to_cbytes(name.as_bytes());
                 self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end)
             }
             Builtin::FieldName => {
@@ -324,12 +324,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         r#struct.methods[index]
                     }
                     Value::Bytes(name) => {
-                        let Some(method) = self
-                            .diag_ctx
-                            .session
-                            .find_name(name)
-                            .and_then(|name| self.find_method(r#struct, name))
-                        else {
+                        let name = self.diag_ctx.session.intern_cbytes_to_bytes(name);
+                        let Some(method) = self.find_method(r#struct, name) else {
                             self.diag_ctx.emit_unknown_method_name_selector(
                                 self.eval.values,
                                 builtin,
@@ -339,6 +335,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             );
                             return Err(Poisoned);
                         };
+
                         method
                     }
                     other => {
@@ -358,12 +355,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
-                self.diag_ctx
-                    .session
-                    .find_name(name)
-                    .and_then(|name| self.find_method(r#struct, name))
-                    .is_some()
-                    .into()
+                let name = self.diag_ctx.session.intern_cbytes_to_bytes(name);
+                self.find_method(r#struct, name).is_some().into()
             }
             Builtin::InComptime => self.comptime.into(),
             Builtin::SetEvalBranchQuota => {
@@ -765,7 +758,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if contains_invalid {
             return Err(Poisoned);
         }
-        let cbytes = self.diag_ctx.session.intern_cbytes(&buf);
+        let cbytes = self.diag_ctx.session.intern_bytes_to_cbytes(&buf);
         let value = self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
         Ok(Ok(EvalValue::Comptime(value)))
     }
@@ -830,9 +823,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn find_struct_field_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
-        let name = self.diag_ctx.session.find_name(name)?;
-        r#struct.fields.iter().position(|field| field.name == name)
+    fn find_struct_field_by_name(
+        &mut self,
+        r#struct: StructView<'a>,
+        name: CBytes,
+    ) -> Option<usize> {
+        let name = self.diag_ctx.session.intern_cbytes_to_bytes(name);
+        r#struct.fields.iter().position(|field| BytesId::from(field.name) == name)
     }
 
     fn resolve_field_selector(

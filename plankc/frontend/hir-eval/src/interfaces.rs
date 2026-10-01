@@ -166,7 +166,7 @@ impl Scope<'_, '_> {
         let interface = I::interface_type(def);
         let method = match self.types.lookup(ty) {
             Type::Compound(Compound::Struct(r#struct)) => {
-                self.find_method(r#struct, self.eval.std_interfaces.impl_name)
+                self.find_method(r#struct, self.eval.std_interfaces.impl_name.into())
             }
             _ => None,
         };

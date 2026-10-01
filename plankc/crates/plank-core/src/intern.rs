@@ -25,11 +25,6 @@ impl<I: Idx> BytesInterner<I> {
         }
     }
 
-    /// Returns the id of `bytes` if already interned, without interning them.
-    pub fn find_id(&self, bytes: &[u8]) -> Option<I> {
-        self.bytes_to_idx.find(self.hasher.hash_one(bytes), |&i| &self.bytes[i] == bytes).copied()
-    }
-
     pub fn intern(&mut self, bytes: &[u8]) -> I {
         let entry = self.bytes_to_idx.entry(
             self.hasher.hash_one(bytes),
@@ -40,6 +35,23 @@ impl<I: Idx> BytesInterner<I> {
             Entry::Occupied(i) => *i.get(),
             Entry::Vacant(vacant) => {
                 let new_index = self.bytes.push_copy_slice(bytes);
+                vacant.insert(new_index);
+                new_index
+            }
+        }
+    }
+
+    pub fn intern_subslice(&mut self, source: I, start: usize, end: usize) -> I {
+        let bytes = &self.bytes[source][start..end];
+        let entry = self.bytes_to_idx.entry(
+            self.hasher.hash_one(bytes),
+            |&i| &self.bytes[i] == bytes,
+            |&i| self.hasher.hash_one(&self.bytes[i]),
+        );
+        match entry {
+            Entry::Occupied(i) => *i.get(),
+            Entry::Vacant(vacant) => {
+                let new_index = self.bytes.push_from_within(source, start, end);
                 vacant.insert(new_index);
                 new_index
             }
