@@ -110,7 +110,6 @@ impl<'a> Evaluator<'a> {
         types: &'a TypeInterner,
         evaluated_fns_cache: &'a EvaluatedFunctionCache,
         values: &'a mut ValueInterner,
-        std_interfaces: StdInterfaces,
         evm_version: EvmVersion,
     ) -> Self {
         Evaluator {
@@ -131,7 +130,7 @@ impl<'a> Evaluator<'a> {
             call_arg_spans: ListOfLists::new(),
 
             operator_table: OperatorTable::new(),
-            std_interfaces,
+            std_interfaces: StdInterfaces::default(),
 
             instr_stack_buf: Vec::new(),
             types_buf: Vec::new(),

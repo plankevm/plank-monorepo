@@ -1,5 +1,5 @@
 /// Implemented by types that can be represented as a single 256-bit word.
-/// To implement it, define `fn impl(comptime T: type) _` that returns a
+/// To implement it, define `fn impl(comptime T: type)` that returns an
 /// `AsPrimitive` when `T == AsPrimitive`.
 const AsPrimitive = struct {
     /// Encoded width in bytes, from 0 to 32; the value's low bytes are written big-endian.

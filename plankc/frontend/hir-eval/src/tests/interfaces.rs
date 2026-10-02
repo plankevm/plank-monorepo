@@ -244,8 +244,8 @@ fn test_concat_custom_as_primitive() {
                 fn from_raw(raw: u256) Self { Self { raw: raw } }
                 fn impl(comptime T: type) supports(T, (AsPrimitive,)) {
                     if T == AsPrimitive {
-                        AsPrimitive { byte_size: bytes, to_raw: Self.to_raw, unchecked_from_raw: Self.from_raw }
-                    } else { {} }
+                        return AsPrimitive { byte_size: bytes, to_raw: Self.to_raw, unchecked_from_raw: Self.from_raw };
+                    }
                 }
             }
         };
@@ -311,22 +311,15 @@ fn test_concat_impl_wrong_return_type() {
         init { @evm_stop(); }
         "#,
         ),
-        &[
-            r#"
-            error: invalid interface implementation
-             --> main.plk:2:17
-              |
-            2 | const encoded = @concat_cbytes((S {},));
-              |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `impl` to return a value of type `AsPrimitive`, but it returned `u256`
-            "#,
-            r#"
-            error: invalid interface implementation
-             --> main.plk:3:18
-              |
-            3 | const repeated = @concat_cbytes((S {},));
-              |                  ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `impl` to return a value of type `AsPrimitive`, but it returned `u256`
-            "#,
-        ],
+        &[r#"
+        error: invalid interface implementation
+         --> main.plk:1:20
+          |
+        1 | const S = struct { fn impl(comptime T: type) u256 { 1 } };
+          |                    ^^^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `impl` to return a value of type `AsPrimitive`, but it returned `u256`
+        2 | const encoded = @concat_cbytes((S {},));
+          |                 ----------------------- `S` required to implement `AsPrimitive` here
+        "#],
     );
 }
 
@@ -348,22 +341,16 @@ fn test_concat_invalid_byte_size() {
         init { @evm_stop(); }
         "#,
         ),
-        &[
-            r#"
-            error: invalid interface implementation
-             --> main.plk:9:17
-              |
-            9 | const encoded = @concat_cbytes((S {},));
-              |                 ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `byte_size` to be at most 32, but it is 33
-            "#,
-            r#"
-            error: invalid interface implementation
-              --> main.plk:10:18
-               |
-            10 | const repeated = @concat_cbytes((S {},));
-               |                  ^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `byte_size` to be at most 32, but it is 33
-            "#,
-        ],
+        &[r#"
+        error: invalid interface implementation
+         --> main.plk:5:5
+          |
+        5 |     fn impl(comptime T: type) AsPrimitive {
+          |     ^^^^^^^^^^^^^^^^^^^^^^^^^ `AsPrimitive` requires `byte_size` to be at most 32, but it is 33
+        ...
+        9 | const encoded = @concat_cbytes((S {},));
+          |                 ----------------------- `S` required to implement `AsPrimitive` here
+        "#],
     );
 }
 

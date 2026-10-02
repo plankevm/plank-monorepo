@@ -41,12 +41,6 @@ impl SourceOperation {
     }
 }
 
-#[derive(Clone, Copy)]
-pub(crate) enum InterfaceMethod {
-    Impl,
-    ToRaw,
-}
-
 pub(crate) struct BindingLoc {
     pub r#use: SrcLoc,
     pub def: Option<SrcLoc>,
@@ -1407,22 +1401,41 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_interface_return_type_mismatch(
+    pub fn emit_interface_impl_return_type_mismatch(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        interface: TypeId,
+        actual: TypeId,
+        impl_loc: SrcLoc,
+        use_loc: SrcLoc,
+    ) {
+        let ty = self.types.format(self.session, values, ty);
+        let interface = self.types.format(self.session, values, interface);
+        let actual = self.types.format(self.session, values, actual);
+        Diagnostic::error("invalid interface implementation")
+            .cross_source_annotations(
+                impl_loc,
+                format!(
+                    "`{interface}` requires `impl` to return a value of type `{interface}`, but it returned `{actual}`"
+                ),
+                use_loc,
+                format!("`{ty}` required to implement `{interface}` here"),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_as_primitive_to_raw_return_type_mismatch(
         &mut self,
         values: &ValueInterner,
         interface: TypeId,
-        method: InterfaceMethod,
         actual: TypeId,
         loc: SrcLoc,
     ) {
-        let (method, expected) = match method {
-            InterfaceMethod::Impl => ("impl", interface),
-            InterfaceMethod::ToRaw => ("to_raw", TypeId::U256),
-        };
         let label = format!(
-            "`{}` requires `{method}` to return a value of type `{}`, but it returned `{}`",
+            "`{}` requires `to_raw` to return a value of type `{}`, but it returned `{}`",
             self.types.format(self.session, values, interface),
-            self.types.format(self.session, values, expected),
+            self.types.format(self.session, values, TypeId::U256),
             self.types.format(self.session, values, actual),
         );
         Diagnostic::error("invalid interface implementation")
@@ -1454,12 +1467,23 @@ impl DiagCtx<'_> {
             .emit(self);
     }
 
-    pub fn emit_invalid_as_primitive_byte_size(&mut self, size: U256, loc: SrcLoc) {
+    pub fn emit_invalid_as_primitive_byte_size(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        interface: TypeId,
+        size: U256,
+        impl_loc: SrcLoc,
+        use_loc: SrcLoc,
+    ) {
+        let ty = self.types.format(self.session, values, ty);
+        let interface = self.types.format(self.session, values, interface);
         Diagnostic::error("invalid interface implementation")
-            .primary(
-                loc.source,
-                loc.span,
-                format!("`AsPrimitive` requires `byte_size` to be at most 32, but it is {size}"),
+            .cross_source_annotations(
+                impl_loc,
+                format!("`{interface}` requires `byte_size` to be at most 32, but it is {size}"),
+                use_loc,
+                format!("`{ty}` required to implement `{interface}` here"),
             )
             .emit(self);
     }
