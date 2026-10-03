@@ -1,8 +1,9 @@
-use plank_core::{DenseIndexMap, IndexVec};
+use plank_core::IndexVec;
 use plank_hir::{self as hir, ValueId};
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId, poison};
 use plank_values::{Compound, DefOrigin, Type, TypeId, Value};
+use smallvec::SmallVec;
 
 mod cache;
 
@@ -38,14 +39,13 @@ struct Call<'a> {
     source: SourceId,
     caller_comptime: bool,
     eagerly_comptime: bool,
-    caller_bindings: &'a DenseIndexMap<hir::LocalId, Local>,
     caller_mir_types: &'a mut IndexVec<mir::LocalId, TypeId>,
     span: SourceSpan,
     type_name: Option<StrId>,
 
     closure: ValueId,
     func: hir::FnDef,
-    args: &'a [hir::LocalId],
+    args: &'a [Local],
     params: &'a [hir::ParamInfo],
 
     validated: ArgParamComptimenessMatch,
@@ -74,7 +74,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &'s mut self,
         closure: ValueId,
         fn_def_id: hir::FnDefId,
-        args: &'s [hir::LocalId],
+        args: &'s [Local],
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         type_name: Option<StrId>,
@@ -87,7 +87,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let params = &self.eval.hir.fn_params[fn_def_id];
         let caller_comptime = self.is_comptime();
         let call_source = self.source;
-        let caller_bindings = &mut self.bindings;
         let caller_mir_types = &mut self.mir_types;
 
         let mut fn_scope = Scope::new(
@@ -128,8 +127,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
         }
 
-        for (&param, &arg) in params.iter().zip(args) {
-            let binding = caller_bindings[arg];
+        for (&param, &binding) in params.iter().zip(args) {
             let state = match binding.state {
                 Ok(state) => state,
                 Err(Poisoned) => {
@@ -174,7 +172,6 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             source: call_source,
             caller_comptime,
             eagerly_comptime,
-            caller_bindings,
             caller_mir_types,
             span: call_span,
             type_name,
@@ -271,13 +268,45 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             );
             return Err(Poisoned);
         }
-        self.eval_call(closure, &self.hir.args[args_id], call_span)
+        self.eval_hir_call(closure, &self.hir.args[args_id], call_span)
     }
 
-    pub(crate) fn eval_call(
+    pub(crate) fn eval_hir_call(
         &mut self,
         closure: ValueId,
         args: &[hir::LocalId],
+        call_span: SourceSpan,
+    ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
+        let args: SmallVec<[Local; 16]> = args.iter().map(|&arg| self.bindings[arg]).collect();
+        self.eval_call(closure, &args, call_span)
+    }
+
+    pub(crate) fn eval_synthetic_comptime_call(
+        &mut self,
+        closure: ValueId,
+        args: &[ValueId],
+        call_span: SourceSpan,
+    ) -> MaybePoisoned<Result<ValueId, Diverge>> {
+        let args: SmallVec<[Local; 16]> = args
+            .iter()
+            .map(|&value| {
+                Local::new(Ok(LocalState::Comptime(value)), call_span, DefOrigin::Local(call_span))
+            })
+            .collect();
+        self.with_comptime(|this| this.eval_call(closure, &args, call_span)).map(|result| {
+            result.map(|value| match value {
+                EvalValue::Comptime(value) => value,
+                EvalValue::Runtime { .. } => {
+                    unreachable!("comptime call produced a runtime value")
+                }
+            })
+        })
+    }
+
+    fn eval_call(
+        &mut self,
+        closure: ValueId,
+        args: &[Local],
         call_span: SourceSpan,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         self.with_captures_buf(|this, capture_buf_offset: usize| {
@@ -292,10 +321,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 }
                 let type_name = this.values.get_closure_name(closure);
 
-                let arg_spans = this
-                    .eval
-                    .call_arg_spans
-                    .push_iter(args.iter().map(|&arg| this.bindings[arg].use_span));
+                let arg_spans =
+                    this.eval.call_arg_spans.push_iter(args.iter().map(|arg| arg.use_span));
                 let eval_res = this.eval_call_inner(
                     closure,
                     fn_def_id,
@@ -317,11 +344,10 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         &mut self,
         func: hir::FnDef,
         params: &[hir::ParamInfo],
-        args: &[hir::LocalId],
+        args: &[Local],
     ) -> MaybePoisoned<ArgParamComptimenessMatch> {
         let mut comptime_args_poisoned = false;
-        for (param, &arg) in params.iter().zip(args) {
-            let arg = self.bindings[arg];
+        for (param, arg) in params.iter().zip(args) {
             if (param.is_comptime || self.is_comptime())
                 && let Ok(LocalState::Runtime(_)) = arg.state
             {
@@ -334,11 +360,11 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if comptime_args_poisoned { Err(Poisoned) } else { Ok(ArgParamComptimenessMatch) }
     }
 
-    pub(crate) fn eval_call_inner(
+    fn eval_call_inner(
         &mut self,
         closure: ValueId,
         fn_def_id: hir::FnDefId,
-        args: &[hir::LocalId],
+        args: &[Local],
         arg_spans: CallArgSpansIdx,
         call_span: SourceSpan,
         type_name: Option<StrId>,
@@ -380,9 +406,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
 
         let eagerly_comptime = func.is_eager
-            && args
-                .iter()
-                .all(|&arg| matches!(self.bindings[arg].state, Ok(LocalState::Comptime(_))));
+            && args.iter().all(|arg| matches!(arg.state, Ok(LocalState::Comptime(_))));
 
         let (mut scope, call) = self.prepare_new_fn_scope_for_preamble_eval(
             closure,
@@ -423,7 +447,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         let mut runtime_param_count = 0;
 
         // Assemble comptime parameters for the function key.
-        for (&param, &arg) in call.params.iter().zip(call.args) {
+        for (&param, arg) in call.params.iter().zip(call.args) {
             let param_key_value = match self.bindings[param.value].state {
                 Ok(LocalState::Comptime(value)) => Some(Ok(value)),
                 Err(Poisoned) => Some(Err(Poisoned)),
@@ -431,7 +455,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     runtime_param_count += 1;
                     // Parameters are initially runtime in runtime contexts. If the return type
                     // forces comptime evaluation, all arguments must be added to the key.
-                    match call.caller_bindings[arg].state {
+                    match arg.state {
                         Ok(LocalState::Comptime(value)) if preamble.is_comptime_only => {
                             Some(Ok(value))
                         }
@@ -542,8 +566,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         preamble: PreambleResult,
     ) -> MaybePoisoned<Result<EvalValue, Diverge>> {
         let (mir_args, validity) = self.eval.mir_args.push_with_res(|mut pusher| {
-            for (&param, &arg) in call.params.iter().zip(call.args) {
-                let state = call.caller_bindings[arg].state?;
+            for (&param, arg) in call.params.iter().zip(call.args) {
+                let state = arg.state?;
                 let local = match state {
                     LocalState::Runtime(local) => local,
                     LocalState::Comptime(value) => {
@@ -624,13 +648,12 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         cache_state.set(EvaluatedFnState::Done(Err(Poisoned)));
 
         let mut poisoned = false;
-        for (&param, &arg) in call.params.iter().zip(call.args) {
+        for (&param, arg) in call.params.iter().zip(call.args) {
             if param.is_comptime {
                 let ArgParamComptimenessMatch = call.validated;
                 continue;
             }
-            let Ok((state, _arg_use_span, arg_origin)) = call.caller_bindings[arg].poisoned()
-            else {
+            let Ok((state, _arg_use_span, arg_origin)) = arg.poisoned() else {
                 poisoned = true;
                 continue;
             };

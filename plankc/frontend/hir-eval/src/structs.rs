@@ -2,7 +2,7 @@ use crate::scope::{EvalValue, LocalState, Scope};
 use alloy_primitives::U256;
 use plank_hir::{self as hir, LocalId};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
+use plank_session::{BytesId, MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
 use plank_values::{
     Compound, Field, Method, SelfBinding, StructKey, StructView, Type, TypeId, Value, ValueId,
 };
@@ -108,7 +108,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             );
             return Err(Poisoned);
         };
-        let Some(method) = r#struct.methods.iter().find(|method| method.name == call.method) else {
+        let Some(method) = self.find_method(r#struct, call.method.into()) else {
             match r#struct.fields.iter().find(|field| field.name == call.method) {
                 Some(&field) => self.diag_ctx.emit_field_called_as_method(
                     r#struct.def_loc.source,
@@ -135,8 +135,12 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 &method_args
             }
         };
-        let closure = self.bind_method_self(*method, struct_ty);
-        self.eval_call(closure, args, call_span)
+        let closure = self.bind_method_self(method, struct_ty);
+        self.eval_hir_call(closure, args, call_span)
+    }
+
+    pub(crate) fn find_method(&self, r#struct: StructView<'_>, name: BytesId) -> Option<Method> {
+        r#struct.methods.iter().find(|method| BytesId::from(method.name) == name).copied()
     }
 
     // We don't know the struct's type until its methods have been collected,
@@ -177,7 +181,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             && let Value::Type(ty) = self.values.lookup(value)
             && let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty)
         {
-            let Some(&method) = r#struct.methods.iter().find(|method| method.name == member) else {
+            let Some(method) = self.find_method(r#struct, member.into()) else {
                 self.diag_ctx.emit_unknown_method(
                     self.eval.values,
                     ty,

@@ -15,6 +15,7 @@ use plank_values::{
     ValueId, ValueInterner, builtins as builtin_sigs,
 };
 use sha2::{Digest, Sha256};
+use smallvec::SmallVec;
 
 impl<'a, 'ctx> Scope<'a, 'ctx> {
     pub(crate) fn eval_builtin_call(
@@ -247,7 +248,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                 self.expect_struct(ty, builtin, expr_span)?;
                 let name =
                     self.types.format(self.diag_ctx.session, self.eval.values, ty).to_string();
-                let cbytes = self.diag_ctx.session.intern_cbytes(name.as_bytes());
+                let cbytes = self.diag_ctx.session.intern_bytes_to_cbytes(name.as_bytes());
                 self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end)
             }
             Builtin::FieldName => {
@@ -312,15 +313,19 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                     self.diag_ctx.emit_expected_comptime_arg(builtin, "method selector", expr_loc);
                     return Err(Poisoned);
                 };
-                let index = match self.values.lookup(selector) {
-                    Value::BigNum(index) => self.expect_method_index_in_bounds(
-                        index,
-                        selector_local,
-                        builtin,
-                        r#struct.methods.len(),
-                    )?,
+                let method = match self.values.lookup(selector) {
+                    Value::BigNum(index) => {
+                        let index = self.expect_method_index_in_bounds(
+                            index,
+                            selector_local,
+                            builtin,
+                            r#struct.methods.len(),
+                        )?;
+                        r#struct.methods[index]
+                    }
                     Value::Bytes(name) => {
-                        let Some(index) = self.find_struct_method_by_name(r#struct, name) else {
+                        let name = self.diag_ctx.session.intern_cbytes_to_bytes(name);
+                        let Some(method) = self.find_method(r#struct, name) else {
                             self.diag_ctx.emit_unknown_method_name_selector(
                                 self.eval.values,
                                 builtin,
@@ -330,7 +335,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                             );
                             return Err(Poisoned);
                         };
-                        index
+
+                        method
                     }
                     other => {
                         self.diag_ctx.emit_invalid_method_selector_type(
@@ -342,14 +348,15 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
                         return Err(Poisoned);
                     }
                 };
-                self.bind_method_self(r#struct.methods[index], ty)
+                self.bind_method_self(method, ty)
             }
             Builtin::HasMethod => {
                 let &[ty_local, name_local] = args else { unreachable!("arg count checked") };
                 let ty = self.expect_type_arg(ty_local, builtin, expr_span)?;
                 let r#struct = self.expect_struct(ty, builtin, expr_span)?;
                 let name = self.expect_bytes_arg(name_local, builtin, expr_span)?;
-                self.find_struct_method_by_name(r#struct, name).is_some().into()
+                let name = self.diag_ctx.session.intern_cbytes_to_bytes(name);
+                self.find_method(r#struct, name).is_some().into()
             }
             Builtin::InComptime => self.comptime.into(),
             Builtin::SetEvalBranchQuota => {
@@ -698,8 +705,8 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
             return Err(Poisoned);
         };
 
-        let fields = match self.eval.values.lookup(tuple_vid) {
-            Value::Compound { ty, fields } if ty.is_tuple() => fields,
+        let fields: SmallVec<[ValueId; 16]> = match self.eval.values.lookup(tuple_vid) {
+            Value::Compound { ty, fields } if ty.is_tuple() => SmallVec::from_slice(fields),
             _ => {
                 let actual_ty = self.values.type_of_value(tuple_vid);
                 self.diag_ctx.emit_concat_cbytes_expected_tuple(
@@ -713,14 +720,31 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
 
         let mut buf = Vec::new();
         let mut contains_invalid = false;
-        for &field in fields {
+        for field in fields {
             match self.values.lookup(field) {
-                Value::BigNum(n) => {
-                    buf.extend_from_slice(&n.to_be_bytes::<32>());
-                }
+                Value::BigNum(n) => buf.extend_from_slice(&n.to_be_bytes::<32>()),
                 Value::Bytes(bytes) => {
                     let slice = self.diag_ctx.session.lookup_bytes_slice(bytes);
                     buf.extend_from_slice(slice);
+                }
+                Value::Compound { ty, .. }
+                    if ty.is_struct()
+                        && let Some(as_primitive_def) =
+                            self.eval.std_interfaces.as_primitive_def() =>
+                {
+                    let encoded = as_primitive_def
+                        .and_then(|def| self.eval_as_primitive_to_raw(def, field, expr_span));
+                    match encoded {
+                        Ok(Ok((raw, byte_size))) => {
+                            let bytes = raw.to_be_bytes::<32>();
+                            let start = bytes.len().checked_sub(usize::from(byte_size)).expect(
+                                "invariant: AsPrimitive byte size was validated to be at most 32",
+                            );
+                            buf.extend_from_slice(&bytes[start..]);
+                        }
+                        Ok(Err(diverge)) => return Ok(Err(diverge)),
+                        Err(Poisoned) => contains_invalid = true,
+                    }
                 }
                 other => {
                     self.diag_ctx.emit_concat_cbytes_invalid_element(
@@ -735,7 +759,7 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         if contains_invalid {
             return Err(Poisoned);
         }
-        let cbytes = self.diag_ctx.session.intern_cbytes(&buf);
+        let cbytes = self.diag_ctx.session.intern_bytes_to_cbytes(&buf);
         let value = self.eval.values.intern_bytes(cbytes.contents, cbytes.start, cbytes.end);
         Ok(Ok(EvalValue::Comptime(value)))
     }
@@ -800,19 +824,13 @@ impl<'a, 'ctx> Scope<'a, 'ctx> {
         }
     }
 
-    fn find_struct_method_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
-        let name = self.diag_ctx.session.lookup_bytes_slice(name);
-        r#struct.methods.iter().position(|method| {
-            self.diag_ctx.session.lookup_bytes(BytesId::from(method.name)) == name
-        })
-    }
-
-    fn find_struct_field_by_name(&self, r#struct: StructView<'a>, name: CBytes) -> Option<usize> {
-        let name = self.diag_ctx.session.lookup_bytes_slice(name);
-        r#struct
-            .fields
-            .iter()
-            .position(|field| self.diag_ctx.session.lookup_bytes(BytesId::from(field.name)) == name)
+    fn find_struct_field_by_name(
+        &mut self,
+        r#struct: StructView<'a>,
+        name: CBytes,
+    ) -> Option<usize> {
+        let name = self.diag_ctx.session.intern_cbytes_to_bytes(name);
+        r#struct.fields.iter().position(|field| BytesId::from(field.name) == name)
     }
 
     fn resolve_field_selector(

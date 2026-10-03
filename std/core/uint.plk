@@ -1,12 +1,30 @@
 use std::option::{Option, None, Some};
+use std::core::interfaces::{AsPrimitive, supports};
 
 const UInt = fn (comptime Size: u256) type {
+    if Size > 256 {
+        @compile_error("UInt width must be at most 256 bits");
+    }
     if Size == 256 {
         return u256;
     }
 
     struct Size {
-        _raw_repr: u256
+        _raw_repr: u256,
+
+        fn to_raw(self: Self) u256 { self._raw_repr }
+
+        fn unchecked_from_raw(raw: u256) Self { Self { _raw_repr: raw } }
+
+        fn impl(comptime T: type) supports(T, AsPrimitive) {
+            if T == AsPrimitive {
+                return AsPrimitive {
+                    byte_size: Size +/ 8,
+                    to_raw: Self.to_raw,
+                    unchecked_from_raw: Self.unchecked_from_raw,
+                };
+            }
+        }
     }
 };
 
@@ -54,7 +72,7 @@ const is_uint = fn (comptime T: type) bool {
     }
 
     let supposed_size = @type_index(T);
-    _type_of(supposed_size) == u256 and UInt(supposed_size) == T
+    _type_of(supposed_size) == u256 and supposed_size <= 256 and UInt(supposed_size) == T
 };
 
 const bit_size = fn (comptime T: type) u256 {

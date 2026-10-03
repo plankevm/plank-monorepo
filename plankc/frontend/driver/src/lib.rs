@@ -1,8 +1,8 @@
 use plank_evm::EvmVersion;
 use plank_hir::lower;
-use plank_session::{Session, SourceId};
+use plank_session::{CoreModules, Session};
 use plank_source::{
-    CORE_OPS_PATH, ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
+    CorePaths, ModuleResolver, ParsedProject, diagnostics, parse_project, source_fs::SourceFs,
 };
 use plank_values::ValueInterner;
 use sir_passes::{OptimizationLevel, PassManager};
@@ -66,14 +66,8 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     }
 
     pub fn load_project(&mut self, entry_path: &Path) -> Option<ParsedProject> {
-        let core_ops_path = self.std_root.as_ref().map(|root| root.join(CORE_OPS_PATH));
-        parse_project(
-            entry_path,
-            core_ops_path.as_deref(),
-            &self.module_resolver,
-            &mut self.session,
-            self.fs,
-        )
+        let core_paths = self.std_root.as_deref().map(CorePaths::from_std_root).unwrap_or_default();
+        parse_project(entry_path, &core_paths, &self.module_resolver, &mut self.session, self.fs)
     }
 
     pub fn lower_hir(&mut self, project: &ParsedProject) -> plank_hir::Hir {
@@ -83,16 +77,10 @@ impl<'a, F: SourceFs> Driver<'a, F> {
     pub fn evaluate_hir(
         &mut self,
         hir: &plank_hir::Hir,
-        core_ops_source: Option<SourceId>,
+        core: CoreModules,
         evm_version: EvmVersion,
     ) -> plank_mir::Mir {
-        plank_hir_eval::evaluate(
-            hir,
-            core_ops_source,
-            &mut self.values,
-            &mut self.session,
-            evm_version,
-        )
+        plank_hir_eval::evaluate(hir, core, &mut self.values, &mut self.session, evm_version)
     }
 
     pub fn emit_bytecode_with_backend(

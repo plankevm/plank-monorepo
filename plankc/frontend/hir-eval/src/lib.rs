@@ -5,7 +5,7 @@ use plank_evm as _;
 use plank_evm::EvmVersion;
 use plank_hir::Hir;
 use plank_mir::Mir;
-use plank_session::{Session, SourceId};
+use plank_session::{CoreModules, Session};
 use plank_values::{TypeInterner, ValueInterner};
 
 mod buffers;
@@ -13,6 +13,7 @@ mod builtins;
 mod diagnostics;
 mod evaluator;
 mod functions;
+mod interfaces;
 mod operators;
 mod quota;
 mod scope;
@@ -21,14 +22,16 @@ mod tuples;
 
 pub(crate) use evaluator::Evaluator;
 
-use crate::{functions::EvaluatedFunctionCache, operators::OperatorTable};
+use crate::{
+    functions::EvaluatedFunctionCache, interfaces::StdInterfaces, operators::OperatorTable,
+};
 
 #[cfg(test)]
 mod tests;
 
 pub fn evaluate(
     hir: &Hir,
-    core_ops_source: Option<SourceId>,
+    core: CoreModules,
     values: &mut ValueInterner,
     session: &mut Session,
     evm_version: EvmVersion,
@@ -38,12 +41,16 @@ pub fn evaluate(
     let mut evaluator = Evaluator::new(hir, &types, &evaluated_fns_cache, values, evm_version);
     let mut diag_ctx = diagnostics::DiagCtx::new(session, &types);
 
-    evaluator.operator_table = match core_ops_source {
+    evaluator.operator_table = match core.ops {
         Some(core_ops_source) => {
             OperatorTable::with_std_ops(hir, core_ops_source, &mut evaluator, &mut diag_ctx)
         }
         None => OperatorTable::new(),
     };
+    if let Some(core_interfaces_source) = core.interfaces {
+        evaluator.std_interfaces =
+            StdInterfaces::from_std(core_interfaces_source, &mut evaluator, &mut diag_ctx);
+    }
 
     let mut init = None;
     let mut run = None;

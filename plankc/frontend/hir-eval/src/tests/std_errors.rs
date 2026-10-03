@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn test_uint_invalid_width() {
+    assert_diagnostics(
+        std_project(
+            r#"
+            use std::core::uint::UInt;
+
+            const oversized = UInt(257);
+            init { @evm_stop(); }
+            "#,
+        ),
+        &[r#"
+        error: UInt width must be at most 256 bits
+         --> std/core/uint.plk:6:9
+          |
+        6 |         @compile_error("UInt width must be at most 256 bits");
+          |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ custom compile error triggered here
+        "#],
+    );
+}
+
+#[test]
 fn test_runtime_slice_rejects_cbytes_elements() {
     assert_diagnostics(
         std_project(

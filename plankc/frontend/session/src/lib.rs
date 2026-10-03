@@ -25,6 +25,12 @@ impl SourceId {
     pub const ROOT: Self = Self::new(0);
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CoreModules {
+    pub ops: Option<SourceId>,
+    pub interfaces: Option<SourceId>,
+}
+
 pub type SourceSpan = Span<SourceByteOffset>;
 pub const ZERO_SPAN: SourceSpan = Span::new(SourceByteOffset::ZERO, SourceByteOffset::ZERO);
 
@@ -95,10 +101,14 @@ impl Session {
         self.interner.intern_bytes(bytes)
     }
 
-    pub fn intern_cbytes(&mut self, bytes: &[u8]) -> CBytes {
+    pub fn intern_bytes_to_cbytes(&mut self, bytes: &[u8]) -> CBytes {
         let contents = self.intern_bytes(bytes);
         let len = u32::try_from(bytes.len()).expect("cbytes length fits u32");
         CBytes { contents, start: 0, end: len }
+    }
+
+    pub fn intern_cbytes_to_bytes(&mut self, cbytes: CBytes) -> BytesId {
+        self.interner.intern_subslice(cbytes.contents, cbytes.start as usize, cbytes.end as usize)
     }
 
     pub fn lookup_bytes(&self, bytes: BytesId) -> &[u8] {

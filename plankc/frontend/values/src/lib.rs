@@ -13,6 +13,8 @@ pub use value_interner::*;
 
 newtype_index! {
     pub struct ValueId;
+    /// Position of a field within a compound type or value.
+    pub struct FieldIdx;
     pub struct FnDefId;
     pub struct LocalId;
     pub struct ConstId;

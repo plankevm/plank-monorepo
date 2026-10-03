@@ -19,7 +19,7 @@ pub struct StrId(InternIdx);
 /// Index of an interned byte string (arbitrary, not necessarily UTF-8).
 ///
 /// Sealed: outside this module it can only be obtained from
-/// [`Interner::intern_bytes`] or by converting a [`StrId`].
+/// [`Interner::intern_bytes`], [`Interner::intern_subslice`], or by converting a [`StrId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BytesId(InternIdx);
 
@@ -60,6 +60,10 @@ impl Interner {
 
     pub fn intern_bytes(&mut self, bytes: &[u8]) -> BytesId {
         BytesId(self.bytes.intern(bytes))
+    }
+
+    pub fn intern_subslice(&mut self, source: BytesId, start: usize, end: usize) -> BytesId {
+        BytesId(self.bytes.intern_subslice(source.0, start, end))
     }
 
     /// # Safety
