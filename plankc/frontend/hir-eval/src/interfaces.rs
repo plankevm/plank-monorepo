@@ -10,6 +10,14 @@ use crate::{
     scope::{Diverge, Scope},
 };
 
+/// Method a type defines to opt into interfaces; called with the interface type as its argument.
+pub(crate) const IMPL_METHOD: &str = "impl";
+
+pub(crate) const AS_PRIMITIVE: &str = "AsPrimitive";
+pub(crate) const AS_PRIMITIVE_BYTE_SIZE: &str = "byte_size";
+pub(crate) const AS_PRIMITIVE_TO_RAW: &str = "to_raw";
+pub(crate) const AS_PRIMITIVE_UNCHECKED_FROM_RAW: &str = "unchecked_from_raw";
+
 #[derive(Clone, Copy)]
 enum ImplStatus {
     Valid(AsPrimitiveImpl),
@@ -120,7 +128,7 @@ impl Scope<'_, '_> {
         ty: TypeId,
         span: SourceSpan,
     ) -> Result<ImplStatus, Diverge> {
-        let impl_name = self.diag_ctx.session.intern("impl");
+        let impl_name = self.diag_ctx.session.intern(IMPL_METHOD);
         let method = match self.types.lookup(ty) {
             Type::Compound(Compound::Struct(r#struct)) => {
                 self.find_method(r#struct, impl_name.into())
@@ -214,10 +222,10 @@ fn resolve_as_primitive_def<'a>(
     diag_ctx: &mut DiagCtx<'a>,
 ) -> MaybePoisoned<AsPrimitiveDef> {
     let session = &mut *diag_ctx.session;
-    let name = session.intern("AsPrimitive");
-    let byte_size = session.intern("byte_size");
-    let to_raw = session.intern("to_raw");
-    let unchecked_from_raw = session.intern("unchecked_from_raw");
+    let name = session.intern(AS_PRIMITIVE);
+    let byte_size = session.intern(AS_PRIMITIVE_BYTE_SIZE);
+    let to_raw = session.intern(AS_PRIMITIVE_TO_RAW);
+    let unchecked_from_raw = session.intern(AS_PRIMITIVE_UNCHECKED_FROM_RAW);
 
     let hir = evaluator.hir;
     let Some(const_id) = hir.find_const(source, name) else {

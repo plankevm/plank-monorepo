@@ -1,3 +1,4 @@
+use crate::interfaces::{AS_PRIMITIVE, AS_PRIMITIVE_BYTE_SIZE, AS_PRIMITIVE_TO_RAW, IMPL_METHOD};
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{
@@ -992,7 +993,7 @@ impl DiagCtx<'_> {
                 loc.source,
                 loc.span,
                 format!(
-                    "`{}` tuple elements must be `{}`, `{}`, or implement `AsPrimitive`, got `{}`",
+                    "`{}` tuple elements must be `{}`, `{}`, or implement `{AS_PRIMITIVE}`, got `{}`",
                     builtin_names::CONCAT_CBYTES,
                     builtin_names::U256,
                     builtin_names::CBYTES,
@@ -1416,7 +1417,7 @@ impl DiagCtx<'_> {
             .cross_source_annotations(
                 impl_loc,
                 format!(
-                    "`{interface}` requires `impl` to return a value of type `{interface}`, but it returned `{actual}`"
+                    "`{interface}` requires `{IMPL_METHOD}` to return a value of type `{interface}`, but it returned `{actual}`"
                 ),
                 use_loc,
                 format!("`{ty}` required to implement `{interface}` here"),
@@ -1432,7 +1433,7 @@ impl DiagCtx<'_> {
         loc: SrcLoc,
     ) {
         let label = format!(
-            "`{}` requires `to_raw` to return a value of type `{}`, but it returned `{}`",
+            "`{}` requires `{AS_PRIMITIVE_TO_RAW}` to return a value of type `{}`, but it returned `{}`",
             self.types.format(self.session, values, interface),
             self.types.format(self.session, values, TypeId::U256),
             self.types.format(self.session, values, actual),
@@ -1480,7 +1481,7 @@ impl DiagCtx<'_> {
         Diagnostic::error("invalid interface implementation")
             .cross_source_annotations(
                 impl_loc,
-                format!("`{interface}` requires `byte_size` to be at most 32, but it is {size}"),
+                format!("`{interface}` requires `{AS_PRIMITIVE_BYTE_SIZE}` to be at most 32, but it is {size}"),
                 use_loc,
                 format!("`{ty}` required to implement `{interface}` here"),
             )
@@ -1493,12 +1494,12 @@ impl DiagCtx<'_> {
         byte_size: u8,
         loc: SrcLoc,
     ) {
-        Diagnostic::error("`AsPrimitive` value exceeds declared byte size")
+        Diagnostic::error(format!("`{AS_PRIMITIVE}` value exceeds declared byte size"))
             .primary(
                 loc.source,
                 loc.span,
                 format!(
-                    "`to_raw` returned {raw}, which does not fit in {}",
+                    "`{AS_PRIMITIVE_TO_RAW}` returned {raw}, which does not fit in {}",
                     fmt_count(usize::from(byte_size), "byte"),
                 ),
             )
