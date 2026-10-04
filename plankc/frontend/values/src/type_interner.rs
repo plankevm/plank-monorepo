@@ -1,5 +1,6 @@
 use plank_core::{
-    Idx, IndexSlice, Span, chunked_arena::ChunkedArena, list_of_lists::ListOfLists, newtype_index,
+    IndexSlice, chunked_arena::ChunkedArena, list_of_lists::ListOfLists, newtype_index,
+    span::ToUsize,
 };
 use std::{
     cell::{Cell, UnsafeCell},
@@ -608,19 +609,15 @@ pub enum Compound<'a> {
 }
 
 impl Compound<'_> {
-    pub fn field_count(&self) -> usize {
+    pub fn fields_idx(&self) -> FieldIdx {
         match self {
-            Compound::Struct(r#struct) => r#struct.fields.len(),
-            Compound::Tuple(tuple) => tuple.fields.len(),
+            Compound::Struct(r#struct) => r#struct.fields.len_idx(),
+            Compound::Tuple(tuple) => tuple.fields.len_idx(),
         }
     }
 
-    pub fn field_indices(&self) -> impl Iterator<Item = FieldIdx> + use<> {
-        let field_count = match self {
-            Compound::Struct(r#struct) => r#struct.fields.len_idx(),
-            Compound::Tuple(tuple) => tuple.fields.len_idx(),
-        };
-        Span::new(FieldIdx::ZERO, field_count).iter()
+    pub fn field_count(&self) -> usize {
+        self.fields_idx().to_usize()
     }
 
     pub fn field_type(&self, i: FieldIdx) -> TypeId {
@@ -670,6 +667,7 @@ impl fmt::Debug for TypeInterner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plank_core::Idx;
     use plank_session::{SourceId, SrcLoc, ZERO_SPAN, builtins};
 
     fn dummy_src_loc(id: u32) -> SrcLoc {

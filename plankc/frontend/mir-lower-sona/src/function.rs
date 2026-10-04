@@ -1,5 +1,5 @@
 use crate::module::{DataGlobals, RuntimeShapes, SectionContext, runtime_shape};
-use plank_core::{DenseIndexMap, Idx};
+use plank_core::{DenseIndexMap, Idx, Span};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::RuntimeBuiltin;
 use plank_values::{FieldIdx, Type as PlankType, TypeId, Value, ValueId, ValueInterner};
@@ -409,7 +409,7 @@ impl<'a> FunctionLowerer<'a> {
         assert_eq!(compound.field_count(), element_count);
         let struct_ty = self.shape(ty)?;
         let mut aggregate = self.fb.make_undef_value(struct_ty);
-        for i in compound.field_indices() {
+        for i in Span::new(FieldIdx::ZERO, compound.fields_idx()).iter() {
             if let Some(element_value) = get_element(self, i) {
                 let idx = self.imm_256(i.get());
                 aggregate = self.fb.insert_inst(
