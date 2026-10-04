@@ -1,5 +1,6 @@
 use crate::scope::{EvalValue, LocalState, Scope};
 use alloy_primitives::U256;
+use plank_core::IndexSlice;
 use plank_hir::{self as hir, LocalId};
 use plank_mir as mir;
 use plank_session::{BytesId, MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
@@ -78,7 +79,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let r#struct = this.eval.types.intern_struct(StructKey {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
-                fields: &this.eval.fields_buf[fields_buf_offset..],
+                fields: IndexSlice::from_raw(&this.eval.fields_buf[fields_buf_offset..]),
                 methods: &methods,
             });
 
@@ -218,7 +219,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         };
 
         let Some((field_index, &field)) =
-            (0u32..).zip(r#struct.fields).find(|&(_i, &field)| field.name == member)
+            r#struct.fields.enumerate_idx().find(|&(_, field)| field.name == member)
         else {
             self.diag_ctx.emit_struct_unknown_field_access(
                 self.eval.values,
@@ -234,7 +235,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 let Value::Compound { ty: _, fields } = self.values.lookup(vid) else {
                     unreachable!("invariant: `state_type` != type of value")
                 };
-                Ok(EvalValue::Comptime(fields[field_index as usize]))
+                Ok(EvalValue::Comptime(fields[field_index]))
             }
             LocalState::Runtime(local) => Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess { object: local, field_index },
@@ -319,7 +320,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         }
 
         validity.map(|()| {
-            let field_values = &self.eval.values_buf[values_buf_offset..];
+            let field_values = IndexSlice::from_raw(&self.eval.values_buf[values_buf_offset..]);
             assert_eq!(field_values.len(), def.fields.len());
             EvalValue::Comptime(
                 self.eval.values.intern(Value::Compound { ty: struct_ty, fields: field_values }),
@@ -419,7 +420,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         validity.map(|()| match first_runtime_field {
             None => {
-                let field_values = &self.eval.values_buf[values_buf_offset..];
+                let field_values = IndexSlice::from_raw(&self.eval.values_buf[values_buf_offset..]);
                 assert_eq!(field_values.len(), def.fields.len());
                 EvalValue::Comptime(
                     self.eval

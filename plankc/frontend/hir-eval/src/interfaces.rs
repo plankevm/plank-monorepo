@@ -1,6 +1,6 @@
 use alloy_primitives::U256;
 use hashbrown::HashMap;
-use plank_core::{Idx, RelSlice, Span};
+use plank_core::Span;
 use plank_session::{MaybePoisoned, Poisoned, SourceId, SourceSpan, SrcLoc, StrId};
 use plank_values::{Compound, FieldIdx, Type, TypeId, Value, ValueId, ValueInterner};
 
@@ -191,7 +191,6 @@ fn decode_as_primitive_impl(
     let Value::Compound { fields, .. } = values.lookup(impl_value) else {
         unreachable!("invariant: interface implementation was checked to be a struct")
     };
-    let fields = RelSlice::new(FieldIdx::ZERO, fields);
     let to_raw = fields[def.to_raw];
     let Value::BigNum(byte_size) = values.lookup(fields[def.byte_size]) else {
         unreachable!("invariant: interface definition validated byte_size as u256")
@@ -238,7 +237,7 @@ fn resolve_as_primitive_def<'a>(
         return Err(Poisoned);
     };
 
-    let fields = RelSlice::<FieldIdx, _>::new(FieldIdx::ZERO, r#struct.fields);
+    let fields = r#struct.fields;
     let mut required_field = |name: StrId, expected: TypeId| {
         let found = fields.enumerate_idx().find(|(_, field)| field.name == name);
         let valid = found.filter(|(_, field)| field.ty == expected).map(|(index, _)| index);

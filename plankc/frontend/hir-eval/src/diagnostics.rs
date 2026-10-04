@@ -1267,15 +1267,14 @@ impl DiagCtx<'_> {
                     )
             }
             Type::Compound(Compound::Tuple(tuple)) => {
-                let field_pos = tuple
+                let (field_pos, &element) = tuple
                     .fields
-                    .iter()
-                    .position(|element| {
-                        let r#type = self.types.lookup(*element);
+                    .enumerate_idx()
+                    .find(|(_, element)| {
+                        let r#type = self.types.lookup(**element);
                         r#type.flags().contains(TypeFlags::UNINIT_INCOMPATIBLE)
                     })
                     .expect("empty tuple not uninit incompatible");
-                let element = tuple.fields[field_pos];
                 Diagnostic::error("tuple contains field that cannot be uninitialized").primary(
                     expr.source,
                     expr.span,

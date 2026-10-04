@@ -6,7 +6,7 @@ use plank_core::{
     newtype_index,
 };
 use plank_session::{BytesId, RuntimeBuiltin};
-use plank_values::{TypeId, TypeInterner, ValueId};
+use plank_values::{FieldIdx, TypeId, TypeInterner, ValueId};
 
 newtype_index! {
     pub struct FnId;
@@ -30,7 +30,7 @@ pub enum Expr {
     },
     FieldAccess {
         object: LocalId,
-        field_index: u32,
+        field_index: FieldIdx,
     },
     CompoundLit {
         ty: TypeId,

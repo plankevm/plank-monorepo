@@ -1,10 +1,10 @@
 use crate::{
-    Compound, DefOrigin, FnDefId, LocalId, Type, TypeId, TypeInterner, ValueId,
+    Compound, DefOrigin, FieldIdx, FnDefId, LocalId, Type, TypeId, TypeInterner, ValueId,
     bignum_interner::{BigNumId, BigNumInterner},
 };
 use alloy_primitives::U256;
 use hashbrown::{DefaultHashBuilder, HashMap, HashTable, hash_map, hash_table::Entry};
-use plank_core::{IndexVec, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{IndexSlice, IndexVec, list_of_lists::ListOfLists, newtype_index};
 use plank_session::{BytesId, CBytes, Session, SrcLoc, StrId, write_bytes_literal};
 use std::{fmt, hash::BuildHasher};
 
@@ -45,7 +45,7 @@ pub enum Value<'a> {
     },
     Compound {
         ty: TypeId,
-        fields: &'a [ValueId],
+        fields: &'a IndexSlice<FieldIdx, ValueId>,
     },
 }
 
@@ -99,7 +99,9 @@ fn stored_to_value<'a>(
         StoredValue::Closure { fn_def, def_loc, captures: idx, self_binding } => {
             Value::Closure { fn_def, def_loc, captures: &captures[idx], self_binding }
         }
-        StoredValue::Compound { ty, fields } => Value::Compound { ty, fields: &children[fields] },
+        StoredValue::Compound { ty, fields } => {
+            Value::Compound { ty, fields: IndexSlice::from_raw(&children[fields]) }
+        }
     }
 }
 
@@ -115,7 +117,7 @@ impl ValueInterner {
             closure_names: HashMap::new(),
         };
         assert_eq!(
-            new_interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] }),
+            new_interner.intern(Value::Compound { ty: TypeId::VOID, fields: IndexSlice::empty() }),
             ValueId::VOID
         );
         assert_eq!(new_interner.intern(Value::Bool(false)), ValueId::FALSE);
@@ -192,9 +194,10 @@ impl ValueInterner {
                             self_binding,
                         }
                     }
-                    Value::Compound { ty, fields } => {
-                        StoredValue::Compound { ty, fields: self.children.push_copy_slice(fields) }
-                    }
+                    Value::Compound { ty, fields } => StoredValue::Compound {
+                        ty,
+                        fields: self.children.push_copy_slice(fields.as_raw_slice()),
+                    },
                 };
                 let id = self.values.push(stored);
                 vacant.insert(id);
@@ -300,8 +303,8 @@ mod tests {
     #[test]
     fn intern_primitives_dedup() {
         let mut interner = ValueInterner::new();
-        let v1 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] });
-        let v2 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] });
+        let v1 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: IndexSlice::empty() });
+        let v2 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: IndexSlice::empty() });
         assert_eq!(v1, v2);
 
         let b1 = interner.intern(Value::Bool(true));
@@ -314,14 +317,23 @@ mod tests {
     #[test]
     fn intern_compound_dedup() {
         let mut interner = ValueInterner::new();
-        let v1 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: &[] });
+        let v1 = interner.intern(Value::Compound { ty: TypeId::VOID, fields: IndexSlice::empty() });
         let ty = interner.intern(Value::Type(TypeId::new(1)));
 
-        let s1 = interner.intern(Value::Compound { ty: TypeId::new(1), fields: &[v1, ty] });
-        let s2 = interner.intern(Value::Compound { ty: TypeId::new(1), fields: &[v1, ty] });
+        let s1 = interner.intern(Value::Compound {
+            ty: TypeId::new(1),
+            fields: IndexSlice::from_raw(&[v1, ty]),
+        });
+        let s2 = interner.intern(Value::Compound {
+            ty: TypeId::new(1),
+            fields: IndexSlice::from_raw(&[v1, ty]),
+        });
         assert_eq!(s1, s2);
 
-        let s3 = interner.intern(Value::Compound { ty: TypeId::new(2), fields: &[v1, ty] });
+        let s3 = interner.intern(Value::Compound {
+            ty: TypeId::new(2),
+            fields: IndexSlice::from_raw(&[v1, ty]),
+        });
         assert_ne!(s1, s3);
     }
 

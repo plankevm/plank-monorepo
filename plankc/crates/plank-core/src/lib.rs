@@ -15,7 +15,7 @@ pub use crate::{
     dense_index_map::DenseIndexMap,
     dense_index_set::DenseIndexSet,
     index::Idx,
-    index_vec::{IndexVec, RelSlice, RelSliceMut},
+    index_vec::{IndexSlice, IndexVec, RelSlice, RelSliceMut},
     span::{IncIterable, Span},
 };
 
