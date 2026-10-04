@@ -4,11 +4,10 @@ pub mod project;
 pub mod source_fs;
 
 pub use module::ModuleResolver;
-pub use project::{ParsedProject, ParsedSource, parse_project};
+pub use project::{CorePaths, ParsedProject, ParsedSource, parse_project};
 pub use source_fs::SourceFs;
 
 pub const FILE_EXTENSION: &str = "plk";
-pub const CORE_OPS_PATH: &str = "core/ops.plk";
 
 #[cfg(test)]
 mod tests;

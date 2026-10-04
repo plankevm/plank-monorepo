@@ -277,5 +277,14 @@ pub struct Hir {
     pub fn_captures: ListOfLists<FnDefId, CaptureInfo>,
 }
 
+impl Hir {
+    pub fn find_const(&self, source: SourceId, name: StrId) -> Option<ConstId> {
+        self.consts.iter_idx().find(|&id| {
+            let def = self.consts[id];
+            def.source_id == source && def.name == name
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests;

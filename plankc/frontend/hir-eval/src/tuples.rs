@@ -1,4 +1,5 @@
 use crate::scope::{EvalValue, LocalState, Scope};
+use plank_core::IndexSlice;
 use plank_hir as hir;
 use plank_mir as mir;
 use plank_session::{MaybePoisoned, Poisoned, SourceSpan};
@@ -20,10 +21,9 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 return Err(Poisoned);
             }
 
-            let tuple = this
-                .eval
-                .types
-                .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
+            let tuple = this.eval.types.intern_tuple(TupleKey {
+                fields: IndexSlice::from_raw(&this.eval.types_buf[types_buf_offset..]),
+            });
 
             Ok(TypeId::from_tuple(tuple))
         })
@@ -64,16 +64,15 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 validity?;
 
                 // Mixed comptime/runtime checked independently
-                let tuple = this
-                    .eval
-                    .types
-                    .intern_tuple(TupleKey { fields: &this.eval.types_buf[types_buf_offset..] });
+                let tuple = this.eval.types.intern_tuple(TupleKey {
+                    fields: IndexSlice::from_raw(&this.eval.types_buf[types_buf_offset..]),
+                });
                 let ty = TypeId::from_tuple(tuple);
 
                 if let Some(runtime_span) = first_runtime_span {
                     this.eval_runtime_tuple_lit(ty, fields, lit_span, runtime_span)
                 } else {
-                    let fields = &this.eval.values_buf[values_buf_offset..];
+                    let fields = IndexSlice::from_raw(&this.eval.values_buf[values_buf_offset..]);
                     let tuple = this.eval.values.intern(Value::Compound { ty, fields });
                     Ok(EvalValue::Comptime(tuple))
                 }

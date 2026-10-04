@@ -3,10 +3,12 @@ mod builtins;
 #[cfg(test)]
 mod tests;
 
-use plank_core::{DenseIndexMap, Idx};
+use plank_core::{DenseIndexMap, Idx, IndexSlice};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::{BytesId, Session};
-use plank_values::{Compound, PrimitiveType, Type, TypeId, Value, ValueId, ValueInterner};
+use plank_values::{
+    Compound, FieldIdx, PrimitiveType, Type, TypeId, Value, ValueId, ValueInterner,
+};
 use sir_data::{
     self as sir, Branch, Control, EthIRProgram, Operation,
     builder::{BasicBlockBuilder, EthIRBuilder, FunctionBuilder},
@@ -460,7 +462,7 @@ fn materialize_constant_compound_literal(
     values: &ValueInterner,
     bb: &mut BasicBlockBuilder<'_, '_>,
     targets: &mut impl Iterator<Item = sir::LocalId>,
-    fields: &[ValueId],
+    fields: &IndexSlice<FieldIdx, ValueId>,
 ) {
     for &field in fields {
         match values.lookup(field) {
@@ -513,26 +515,25 @@ fn lower_field_access(
     target: mir::LocalId,
     mir_func: mir::FnId,
     object: mir::LocalId,
-    field_index: u32,
+    field_index: FieldIdx,
 ) {
     let object_type = ctx.mir.fn_locals[mir_func][object.idx()];
     let Type::Compound(compound) = ctx.mir.types.lookup(object_type) else {
         unreachable!("MIR invariant: field access on non-compound");
     };
-    let size = ctx.size_in_locals(compound.field_type(field_index as usize));
+    let size = ctx.size_in_locals(compound.field_type(field_index));
     if size == 0 {
         return;
     }
 
     let flattened_fields_offset = match compound {
-        Compound::Struct(r#struct) => r#struct.fields[..field_index as usize]
+        Compound::Struct(r#struct) => r#struct.fields[..field_index]
             .iter()
             .map(|&field| ctx.size_in_locals(field.ty))
             .sum::<u32>(),
-        Compound::Tuple(tuple) => tuple.fields[..field_index as usize]
-            .iter()
-            .map(|&ty| ctx.size_in_locals(ty))
-            .sum::<u32>(),
+        Compound::Tuple(tuple) => {
+            tuple.fields[..field_index].iter().map(|&ty| ctx.size_in_locals(ty)).sum::<u32>()
+        }
     } as usize;
 
     ctx.locals_map.ensure_many(target, || bb.new_local(), size as usize);

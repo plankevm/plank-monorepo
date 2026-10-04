@@ -3296,7 +3296,7 @@ fn test_concat_cbytes_rejects_invalid_element() {
          --> main.plk:1:13
           |
         1 | const bad = @concat_cbytes(("hello", true));
-          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256` or `cbytes`, got `bool`
+          |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `@concat_cbytes` tuple elements must be `u256`, `cbytes`, or implement `AsPrimitive`, got `bool`
         "#],
     );
 }

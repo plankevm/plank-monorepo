@@ -1,4 +1,7 @@
-use plank_core::{chunked_arena::ChunkedArena, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{
+    IndexSlice, chunked_arena::ChunkedArena, list_of_lists::ListOfLists, newtype_index,
+    span::ToUsize,
+};
 use std::{
     cell::{Cell, UnsafeCell},
     fmt,
@@ -7,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    LocalId, ValueId, ValueInterner,
+    FieldIdx, LocalId, ValueId, ValueInterner,
     primitive_types::{PrimitiveType, TypeFlags},
 };
 use hashbrown::{DefaultHashBuilder, HashTable, hash_table::Entry};
@@ -61,7 +64,7 @@ pub struct StructView<'a> {
     pub flags: TypeFlags,
     pub type_index: ValueId,
     pub name: &'a Cell<Option<TypeName>>,
-    pub fields: &'a [Field],
+    pub fields: &'a IndexSlice<FieldIdx, Field>,
     pub methods: &'a [Method],
 }
 
@@ -80,14 +83,14 @@ impl<'a> StructView<'a> {
 pub struct StructKey<'a> {
     pub type_index: ValueId,
     pub def_loc: SrcLoc,
-    pub fields: &'a [Field],
+    pub fields: &'a IndexSlice<FieldIdx, Field>,
     pub methods: &'a [Method],
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct TupleView<'a> {
     pub flags: TypeFlags,
-    pub fields: &'a [TypeId],
+    pub fields: &'a IndexSlice<FieldIdx, TypeId>,
 }
 
 impl<'a> TupleView<'a> {
@@ -98,7 +101,7 @@ impl<'a> TupleView<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TupleKey<'a> {
-    pub fields: &'a [TypeId],
+    pub fields: &'a IndexSlice<FieldIdx, TypeId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,7 +310,7 @@ impl TypeInterner {
             hasher: DefaultHashBuilder::default(),
             type_name_args: UnsafeCell::new(ListOfLists::new()),
         };
-        let empty_tuple = interner.intern_tuple(TupleKey { fields: &[] });
+        let empty_tuple = interner.intern_tuple(TupleKey { fields: IndexSlice::empty() });
         assert_eq!(
             TypeId::from_tuple(empty_tuple),
             TypeId::VOID,
@@ -397,7 +400,10 @@ impl TypeInterner {
                 flags: header.flags,
                 type_index: header.type_index,
                 name: &header.name,
-                fields: core::slice::from_raw_parts(fields_start, header.total_fields as usize),
+                fields: IndexSlice::from_raw(core::slice::from_raw_parts(
+                    fields_start,
+                    header.total_fields as usize,
+                )),
                 methods: core::slice::from_raw_parts(methods_start, header.total_methods as usize),
             }
         }
@@ -411,7 +417,10 @@ impl TypeInterner {
 
             TupleView {
                 flags: header.flags,
-                fields: core::slice::from_raw_parts(elements_start, header.total_fields as usize),
+                fields: IndexSlice::from_raw(core::slice::from_raw_parts(
+                    elements_start,
+                    header.total_fields as usize,
+                )),
             }
         }
     }
@@ -512,7 +521,7 @@ impl TypeInterner {
 
     fn push_struct(&self, r#struct: StructKey<'_>) -> StructRef {
         let required_space = std::mem::size_of::<StructHeader>()
-            + std::mem::size_of_val(r#struct.fields)
+            + std::mem::size_of_val(r#struct.fields.as_raw_slice())
             + std::mem::size_of_val(r#struct.methods);
 
         let flags = r#struct
@@ -561,7 +570,7 @@ impl TypeInterner {
 
     fn push_tuple(&self, tuple: TupleKey<'_>) -> TupleRef {
         let required_space =
-            std::mem::size_of::<TupleHeader>() + std::mem::size_of_val(tuple.fields);
+            std::mem::size_of::<TupleHeader>() + std::mem::size_of_val(tuple.fields.as_raw_slice());
 
         const {
             assert!(align_of::<TupleHeader>() <= MIN_COMPOUND_ALIGN);
@@ -600,14 +609,18 @@ pub enum Compound<'a> {
 }
 
 impl Compound<'_> {
-    pub fn field_count(&self) -> usize {
+    pub fn fields_idx(&self) -> FieldIdx {
         match self {
-            Compound::Struct(r#struct) => r#struct.fields.len(),
-            Compound::Tuple(tuple) => tuple.fields.len(),
+            Compound::Struct(r#struct) => r#struct.fields.len_idx(),
+            Compound::Tuple(tuple) => tuple.fields.len_idx(),
         }
     }
 
-    pub fn field_type(&self, i: usize) -> TypeId {
+    pub fn field_count(&self) -> usize {
+        self.fields_idx().to_usize()
+    }
+
+    pub fn field_type(&self, i: FieldIdx) -> TypeId {
         match self {
             Compound::Struct(r#struct) => r#struct.fields[i].ty,
             Compound::Tuple(tuple) => tuple.fields[i],
@@ -662,7 +675,12 @@ mod tests {
     }
 
     fn dummy_struct_info(fields: &[Field]) -> StructKey<'_> {
-        StructKey { type_index: ValueId::VOID, def_loc: dummy_src_loc(0), fields, methods: &[] }
+        StructKey {
+            type_index: ValueId::VOID,
+            def_loc: dummy_src_loc(0),
+            fields: IndexSlice::from_raw(fields),
+            methods: &[],
+        }
     }
 
     #[test]
@@ -699,19 +717,19 @@ mod tests {
         let first = interner.intern_struct(StructKey {
             type_index: ValueId::VOID,
             def_loc: dummy_src_loc(0),
-            fields: &fields,
+            fields: IndexSlice::from_raw(&fields),
             methods: &first_methods,
         });
         let duplicate = interner.intern_struct(StructKey {
             type_index: ValueId::VOID,
             def_loc: dummy_src_loc(0),
-            fields: &fields,
+            fields: IndexSlice::from_raw(&fields),
             methods: &first_methods,
         });
         let second = interner.intern_struct(StructKey {
             type_index: ValueId::VOID,
             def_loc: dummy_src_loc(0),
-            fields: &fields,
+            fields: IndexSlice::from_raw(&fields),
             methods: &second_methods,
         });
 
@@ -734,7 +752,8 @@ mod tests {
             assert!(r#struct.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
         }
 
-        let tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
+        let tuple =
+            interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&[TypeId::U256]) });
         assert!(matches!(tuple.0.kind(), CompoundKind::Tuple(_)));
         assert!(tuple.0.offset().is_multiple_of(MIN_COMPOUND_ALIGN as u32));
     }
@@ -747,13 +766,13 @@ mod tests {
         let a_info = StructKey {
             type_index: ValueId::VOID,
             def_loc: dummy_src_loc(0),
-            fields: &fields,
+            fields: IndexSlice::from_raw(&fields),
             methods: &[],
         };
         let b_info = StructKey {
             type_index: ValueId::VOID,
             def_loc: dummy_src_loc(1),
-            fields: &fields,
+            fields: IndexSlice::from_raw(&fields),
             methods: &[],
         };
 
@@ -787,19 +806,19 @@ mod tests {
         let interner = TypeInterner::new();
         let elements = [TypeId::U256, TypeId::BOOL];
 
-        let a = interner.intern_tuple(TupleKey { fields: &elements });
-        let b = interner.intern_tuple(TupleKey { fields: &elements });
+        let a = interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&elements) });
+        let b = interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&elements) });
         assert_eq!(a, b);
 
         let different = [TypeId::BOOL, TypeId::U256];
-        let c = interner.intern_tuple(TupleKey { fields: &different });
+        let c = interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&different) });
         assert_ne!(a, c);
     }
 
     #[test]
     fn empty_tuple_is_void() {
         let interner = TypeInterner::new();
-        let tuple = interner.intern_tuple(TupleKey { fields: &[] });
+        let tuple = interner.intern_tuple(TupleKey { fields: IndexSlice::empty() });
         let tuple_ty = TypeId::from_tuple(tuple);
 
         assert_eq!(tuple_ty, TypeId::VOID);
@@ -813,10 +832,12 @@ mod tests {
     fn tuple_comptime_only_tracks_elements() {
         let interner = TypeInterner::new();
 
-        let comptime_tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::TYPE] });
+        let comptime_tuple =
+            interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&[TypeId::TYPE]) });
         assert!(interner.is_comptime_only(TypeId::from_tuple(comptime_tuple)));
 
-        let runtime_tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
+        let runtime_tuple =
+            interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&[TypeId::U256]) });
         assert!(!interner.is_comptime_only(TypeId::from_tuple(runtime_tuple)));
     }
 
@@ -834,8 +855,8 @@ mod tests {
         assert!(interner.is_comptime_only(TypeId::from_struct(first_struct)));
 
         let fields = &[TypeId::TYPE, TypeId::U256];
-        let first_tuple = interner.intern_tuple(TupleKey { fields });
-        let second_tuple = interner.intern_tuple(TupleKey { fields });
+        let first_tuple = interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(fields) });
+        let second_tuple = interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(fields) });
         assert_eq!(first_tuple, second_tuple);
         assert!(interner.is_comptime_only(TypeId::from_tuple(first_tuple)));
     }
@@ -847,7 +868,8 @@ mod tests {
         let field = Field { name: sess.intern("name"), ty: TypeId::U256, def_span: ZERO_SPAN };
 
         let r#struct = interner.intern_struct(dummy_struct_info(&[field]));
-        let tuple = interner.intern_tuple(TupleKey { fields: &[TypeId::U256] });
+        let tuple =
+            interner.intern_tuple(TupleKey { fields: IndexSlice::from_raw(&[TypeId::U256]) });
 
         assert_ne!(TypeId::from_struct(r#struct), TypeId::from_tuple(tuple));
     }

@@ -1,8 +1,9 @@
 use crate::scope::{EvalValue, LocalState, Scope};
 use alloy_primitives::U256;
+use plank_core::IndexSlice;
 use plank_hir::{self as hir, LocalId};
 use plank_mir as mir;
-use plank_session::{MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
+use plank_session::{BytesId, MaybePoisoned, Poisoned, SourceSpan, SrcLoc, StrId, builtins};
 use plank_values::{
     Compound, Field, Method, SelfBinding, StructKey, StructView, Type, TypeId, Value, ValueId,
 };
@@ -78,7 +79,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             let r#struct = this.eval.types.intern_struct(StructKey {
                 def_loc: this.loc(def_expr_span),
                 type_index: type_index?,
-                fields: &this.eval.fields_buf[fields_buf_offset..],
+                fields: IndexSlice::from_raw(&this.eval.fields_buf[fields_buf_offset..]),
                 methods: &methods,
             });
 
@@ -108,7 +109,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             );
             return Err(Poisoned);
         };
-        let Some(method) = r#struct.methods.iter().find(|method| method.name == call.method) else {
+        let Some(method) = self.find_method(r#struct, call.method.into()) else {
             match r#struct.fields.iter().find(|field| field.name == call.method) {
                 Some(&field) => self.diag_ctx.emit_field_called_as_method(
                     r#struct.def_loc.source,
@@ -135,8 +136,12 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 &method_args
             }
         };
-        let closure = self.bind_method_self(*method, struct_ty);
-        self.eval_call(closure, args, call_span)
+        let closure = self.bind_method_self(method, struct_ty);
+        self.eval_hir_call(closure, args, call_span)
+    }
+
+    pub(crate) fn find_method(&self, r#struct: StructView<'_>, name: BytesId) -> Option<Method> {
+        r#struct.methods.iter().find(|method| BytesId::from(method.name) == name).copied()
     }
 
     // We don't know the struct's type until its methods have been collected,
@@ -177,7 +182,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
             && let Value::Type(ty) = self.values.lookup(value)
             && let Type::Compound(Compound::Struct(r#struct)) = self.types.lookup(ty)
         {
-            let Some(&method) = r#struct.methods.iter().find(|method| method.name == member) else {
+            let Some(method) = self.find_method(r#struct, member.into()) else {
                 self.diag_ctx.emit_unknown_method(
                     self.eval.values,
                     ty,
@@ -214,7 +219,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         };
 
         let Some((field_index, &field)) =
-            (0u32..).zip(r#struct.fields).find(|&(_i, &field)| field.name == member)
+            r#struct.fields.enumerate_idx().find(|&(_, field)| field.name == member)
         else {
             self.diag_ctx.emit_struct_unknown_field_access(
                 self.eval.values,
@@ -230,7 +235,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
                 let Value::Compound { ty: _, fields } = self.values.lookup(vid) else {
                     unreachable!("invariant: `state_type` != type of value")
                 };
-                Ok(EvalValue::Comptime(fields[field_index as usize]))
+                Ok(EvalValue::Comptime(fields[field_index]))
             }
             LocalState::Runtime(local) => Ok(EvalValue::Runtime {
                 expr: mir::Expr::FieldAccess { object: local, field_index },
@@ -315,7 +320,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
         }
 
         validity.map(|()| {
-            let field_values = &self.eval.values_buf[values_buf_offset..];
+            let field_values = IndexSlice::from_raw(&self.eval.values_buf[values_buf_offset..]);
             assert_eq!(field_values.len(), def.fields.len());
             EvalValue::Comptime(
                 self.eval.values.intern(Value::Compound { ty: struct_ty, fields: field_values }),
@@ -415,7 +420,7 @@ impl<'eval, 'ctx> Scope<'eval, 'ctx> {
 
         validity.map(|()| match first_runtime_field {
             None => {
-                let field_values = &self.eval.values_buf[values_buf_offset..];
+                let field_values = IndexSlice::from_raw(&self.eval.values_buf[values_buf_offset..]);
                 assert_eq!(field_values.len(), def.fields.len());
                 EvalValue::Comptime(
                     self.eval

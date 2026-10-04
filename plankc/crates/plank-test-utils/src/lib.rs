@@ -1,7 +1,6 @@
 use plank_session::{Diagnostic, Session};
 use plank_source::{
-    CORE_OPS_PATH, FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project,
-    source_fs::InMemoryFs,
+    CorePaths, FILE_EXTENSION, ModuleResolver, ParsedProject, parse_project, source_fs::InMemoryFs,
 };
 use std::path::{Path, PathBuf};
 
@@ -59,7 +58,7 @@ pub struct TestProject {
     entry_path: PathBuf,
     fs: InMemoryFs,
     modules: Vec<(String, PathBuf)>,
-    core_ops_path: Option<PathBuf>,
+    core_paths: CorePaths,
 }
 
 impl From<&str> for TestProject {
@@ -73,7 +72,12 @@ impl TestProject {
         let entry_name = format!("main.{FILE_EXTENSION}");
         let mut fs = InMemoryFs::new();
         fs.add_file(&entry_name, dedent_preserve_indent(source));
-        Self { entry_path: PathBuf::from(entry_name), fs, modules: Vec::new(), core_ops_path: None }
+        Self {
+            entry_path: PathBuf::from(entry_name),
+            fs,
+            modules: Vec::new(),
+            core_paths: CorePaths::default(),
+        }
     }
 
     pub fn add_file(mut self, name: &str, source: &str) -> Self {
@@ -90,7 +94,7 @@ impl TestProject {
     pub fn with_core_ops(mut self, source: &str) -> Self {
         let path = PathBuf::from("__core_ops.plk");
         self.fs.add_file(&path, dedent_preserve_indent(source));
-        self.core_ops_path = Some(path);
+        self.core_paths.ops = Some(path);
         self
     }
 
@@ -116,7 +120,7 @@ impl TestProject {
 
         walk(&mut self.fs, dir, &prefix);
         self.modules.push(("std".to_string(), prefix.clone()));
-        self.core_ops_path = Some(prefix.join(CORE_OPS_PATH));
+        self.core_paths = CorePaths::from_std_root(&prefix);
         self
     }
 
@@ -127,14 +131,8 @@ impl TestProject {
                 .register(session.intern(&name), root)
                 .expect("module registration succeeds");
         }
-        parse_project(
-            &self.entry_path,
-            self.core_ops_path.as_deref(),
-            &module_resolver,
-            session,
-            &self.fs,
-        )
-        .expect("project should be parsed")
+        parse_project(&self.entry_path, &self.core_paths, &module_resolver, session, &self.fs)
+            .expect("project should be parsed")
     }
 }
 

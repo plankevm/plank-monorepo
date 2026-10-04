@@ -1,0 +1,40 @@
+/// Implemented by types that can be represented as a single 256-bit word.
+/// To implement it, define `fn impl(comptime T: type)` that returns an
+/// `AsPrimitive` when `T == AsPrimitive`.
+const AsPrimitive = struct {
+    /// Encoded width in bytes, from 0 to 32; the value's low bytes are written big-endian.
+    byte_size: u256,
+
+    /// Takes a value of the implementing type and returns its u256 representation.
+    /// The result must fit in `byte_size` bytes.
+    to_raw: function,
+
+    /// Takes a u256 representation and returns the implementing type.
+    /// The caller must ensure the input is valid for that type.
+    unchecked_from_raw: function,
+};
+
+/// Returns the requested type if supported, otherwise `void`.
+/// Accepts a single type or a tuple of types. Use as the return type of `impl`.
+const supports = fn (comptime requested: type, comptime supported: $L) type {
+    if L == type {
+        return if requested == supported { requested } else { void };
+    }
+    if !@is_tuple(L) {
+        @compile_error("supported interfaces must be a type or a tuple of types");
+    }
+
+    let mut i = 0;
+    while i < @field_count(L) {
+        if @field_type(L, i) != type {
+            @compile_error("supported interfaces must be a type or tuple of types");
+        }
+
+        if requested == @get_field(supported, i) {
+            return requested;
+        }
+        i = i + 1;
+    }
+
+    void
+};

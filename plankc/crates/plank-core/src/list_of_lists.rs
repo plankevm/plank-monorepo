@@ -144,4 +144,11 @@ impl<I: Idx, T: Copy> ListOfLists<I, T> {
     pub fn push_copy_slice(&mut self, slice: &[T]) -> I {
         self.push_iter(slice.iter().copied())
     }
+
+    pub fn push_from_within(&mut self, source: I, start: usize, end: usize) -> I {
+        let source_start = self.starts[source] as usize;
+        let new_start = self.values.len();
+        self.values.extend_from_within(source_start + start..source_start + end);
+        self.starts.push(new_start.try_into().expect("list offset exceeds the start index type"))
+    }
 }

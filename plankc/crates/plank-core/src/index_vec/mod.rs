@@ -387,6 +387,11 @@ impl<I: Idx, T, A: Allocator> IndexVec<I, T, A> {
         self.raw.as_slice()
     }
 
+    #[inline]
+    pub fn as_index_slice(&self) -> &IndexSlice<I, T> {
+        IndexSlice::from_raw(self.raw.as_slice())
+    }
+
     /// Returns a mutable reference to the underlying slice.
     #[inline]
     pub fn as_raw_slice_mut(&mut self) -> &mut [T] {

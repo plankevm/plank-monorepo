@@ -1,8 +1,8 @@
 use crate::module::{DataGlobals, RuntimeShapes, SectionContext, runtime_shape};
-use plank_core::{DenseIndexMap, Idx};
+use plank_core::{DenseIndexMap, Idx, Span};
 use plank_mir::{self as mir, Expr, Instruction, Mir};
 use plank_session::RuntimeBuiltin;
-use plank_values::{Type as PlankType, TypeId, Value, ValueId, ValueInterner};
+use plank_values::{FieldIdx, Type as PlankType, TypeId, Value, ValueId, ValueInterner};
 use smallvec::SmallVec;
 use sonatina_ir::{
     BlockId, HasInst, I256, Immediate, Inst, Type as SonaType, ValueId as SonaValueId,
@@ -212,7 +212,7 @@ impl<'a> FunctionLowerer<'a> {
             }
             Expr::CompoundLit { ty, fields } => {
                 let value = self.build_aggregate(ty, self.mir.args[fields].len(), |this, i| {
-                    this.read_local(this.mir.args[fields][i])
+                    this.read_local(this.mir.args[fields][i.idx()])
                 });
                 self.write_local(target, value);
             }
@@ -401,19 +401,17 @@ impl<'a> FunctionLowerer<'a> {
         &mut self,
         ty: TypeId,
         element_count: usize,
-        mut get_element: impl FnMut(&mut Self, usize) -> Option<SonaValueId>,
+        mut get_element: impl FnMut(&mut Self, FieldIdx) -> Option<SonaValueId>,
     ) -> Option<SonaValueId> {
-        let expected_count = match self.mir.types.lookup(ty) {
-            PlankType::Compound(compound) => compound.field_count(),
-            PlankType::Primitive(_) => panic!("aggregate on primitive"),
+        let PlankType::Compound(compound) = self.mir.types.lookup(ty) else {
+            panic!("aggregate on primitive")
         };
-        assert_eq!(expected_count, element_count);
+        assert_eq!(compound.field_count(), element_count);
         let struct_ty = self.shape(ty)?;
         let mut aggregate = self.fb.make_undef_value(struct_ty);
-        for i in 0..element_count {
+        for i in Span::new(FieldIdx::ZERO, compound.fields_idx()).iter() {
             if let Some(element_value) = get_element(self, i) {
-                let i = u32::try_from(i).expect("aggregate element index must fit in u32");
-                let idx = self.imm_256(i);
+                let idx = self.imm_256(i.get());
                 aggregate = self.fb.insert_inst(
                     InsertValue::new_unchecked(self.is, aggregate, idx, element_value),
                     struct_ty,
@@ -423,14 +421,14 @@ impl<'a> FunctionLowerer<'a> {
         Some(aggregate)
     }
 
-    fn read_field(&mut self, object: mir::LocalId, field_index: u32) -> Option<SonaValueId> {
+    fn read_field(&mut self, object: mir::LocalId, field_index: FieldIdx) -> Option<SonaValueId> {
         let object_type = self.mir.fn_locals[self.fn_id][object.idx()];
         let PlankType::Compound(compound) = self.mir.types.lookup(object_type) else {
             panic!("field access on non-compound");
         };
-        let field_ty = self.shape(compound.field_type(field_index as usize))?;
+        let field_ty = self.shape(compound.field_type(field_index))?;
         let object_value = self.read_value(object);
-        let idx = self.imm_256(field_index);
+        let idx = self.imm_256(field_index.get());
         Some(self.fb.insert_inst(ExtractValue::new_unchecked(self.is, object_value, idx), field_ty))
     }
 

@@ -1,3 +1,4 @@
+use crate::interfaces::{AS_PRIMITIVE, AS_PRIMITIVE_BYTE_SIZE, AS_PRIMITIVE_TO_RAW, IMPL_METHOD};
 use alloy_primitives::U256;
 use plank_core::{Span, must_use::MustUseStrict};
 use plank_hir::{
@@ -992,7 +993,7 @@ impl DiagCtx<'_> {
                 loc.source,
                 loc.span,
                 format!(
-                    "`{}` tuple elements must be `{}` or `{}`, got `{}`",
+                    "`{}` tuple elements must be `{}`, `{}`, or implement `{AS_PRIMITIVE}`, got `{}`",
                     builtin_names::CONCAT_CBYTES,
                     builtin_names::U256,
                     builtin_names::CBYTES,
@@ -1114,18 +1115,18 @@ impl DiagCtx<'_> {
         values: &ValueInterner,
         builtin: Builtin,
         struct_ty: TypeId,
-        method_name_bytes: CBytes,
+        method_name: BytesId,
         loc: SrcLoc,
     ) {
-        let mut method_name = String::new();
-        write_bytes_literal(&mut method_name, self.session.lookup_bytes_slice(method_name_bytes))
+        let mut method_name_literal = String::new();
+        write_bytes_literal(&mut method_name_literal, self.session.lookup_bytes(method_name))
             .expect("writing to string cannot fail");
         Diagnostic::error("unknown method")
             .primary(
                 loc.source,
                 loc.span,
                 format!(
-                    "`{builtin}`: `{}` has no method named {method_name}",
+                    "`{builtin}`: `{}` has no method named {method_name_literal}",
                     self.types.format(self.session, values, struct_ty),
                 ),
             )
@@ -1267,15 +1268,14 @@ impl DiagCtx<'_> {
                     )
             }
             Type::Compound(Compound::Tuple(tuple)) => {
-                let field_pos = tuple
+                let (field_pos, &element) = tuple
                     .fields
-                    .iter()
-                    .position(|element| {
-                        let r#type = self.types.lookup(*element);
+                    .enumerate_idx()
+                    .find(|(_, element)| {
+                        let r#type = self.types.lookup(**element);
                         r#type.flags().contains(TypeFlags::UNINIT_INCOMPATIBLE)
                     })
                     .expect("empty tuple not uninit incompatible");
-                let element = tuple.fields[field_pos];
                 Diagnostic::error("tuple contains field that cannot be uninitialized").primary(
                     expr.source,
                     expr.span,
@@ -1364,6 +1364,145 @@ impl DiagCtx<'_> {
     pub fn emit_failed_to_resolve_std_fn(&mut self, source: SourceId, op_name: &str) {
         Diagnostic::error(format!("failed to resolve core operation handler `{op_name}`"))
             .element(Element::Origin { path: source })
+            .emit(self);
+    }
+
+    pub fn emit_failed_to_resolve_std_interface(&mut self, source: SourceId, name: StrId) {
+        let name = self.session.lookup_name(name);
+        Diagnostic::error(format!("failed to resolve standard library interface `{name}`"))
+            .element(Element::Origin { path: source })
+            .emit(self);
+    }
+
+    pub fn emit_std_interface_not_a_struct(&mut self, name: StrId, loc: SrcLoc) {
+        let name = self.session.lookup_name(name);
+        Diagnostic::error("invalid standard library interface")
+            .primary(loc.source, loc.span, format!("`{name}` is not a struct type"))
+            .emit(self);
+    }
+
+    pub fn emit_interface_not_implemented(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        interface: TypeId,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error("interface not implemented")
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{}` does not implement `{}`",
+                    self.types.format(self.session, values, ty),
+                    self.types.format(self.session, values, interface)
+                ),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_interface_impl_return_type_mismatch(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        interface: TypeId,
+        actual: TypeId,
+        impl_loc: SrcLoc,
+        use_loc: SrcLoc,
+    ) {
+        let ty = self.types.format(self.session, values, ty);
+        let interface = self.types.format(self.session, values, interface);
+        let actual = self.types.format(self.session, values, actual);
+        Diagnostic::error("invalid interface implementation")
+            .cross_source_annotations(
+                impl_loc,
+                format!(
+                    "`{interface}` requires `{IMPL_METHOD}` to return a value of type `{interface}`, but it returned `{actual}`"
+                ),
+                use_loc,
+                format!("`{ty}` required to implement `{interface}` here"),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_as_primitive_to_raw_return_type_mismatch(
+        &mut self,
+        values: &ValueInterner,
+        interface: TypeId,
+        actual: TypeId,
+        loc: SrcLoc,
+    ) {
+        let label = format!(
+            "`{}` requires `{AS_PRIMITIVE_TO_RAW}` to return a value of type `{}`, but it returned `{}`",
+            self.types.format(self.session, values, interface),
+            self.types.format(self.session, values, TypeId::U256),
+            self.types.format(self.session, values, actual),
+        );
+        Diagnostic::error("invalid interface implementation")
+            .primary(loc.source, loc.span, label)
+            .emit(self);
+    }
+
+    pub fn emit_invalid_interface_definition_field(
+        &mut self,
+        values: &ValueInterner,
+        interface: TypeId,
+        name: StrId,
+        expected: TypeId,
+        actual: Option<TypeId>,
+        loc: SrcLoc,
+    ) {
+        let interface = self.types.format(self.session, values, interface);
+        let name = self.session.lookup_name(name);
+        let expected = self.types.format(self.session, values, expected);
+        let label = match actual {
+            Some(actual) => format!(
+                "`{interface}` field `{name}` must have type `{expected}`, got `{}`",
+                self.types.format(self.session, values, actual)
+            ),
+            None => format!("`{interface}` is missing required field `{name}: {expected}`"),
+        };
+        Diagnostic::error("invalid interface definition")
+            .primary(loc.source, loc.span, label)
+            .emit(self);
+    }
+
+    pub fn emit_invalid_as_primitive_byte_size(
+        &mut self,
+        values: &ValueInterner,
+        ty: TypeId,
+        interface: TypeId,
+        size: U256,
+        impl_loc: SrcLoc,
+        use_loc: SrcLoc,
+    ) {
+        let ty = self.types.format(self.session, values, ty);
+        let interface = self.types.format(self.session, values, interface);
+        Diagnostic::error("invalid interface implementation")
+            .cross_source_annotations(
+                impl_loc,
+                format!("`{interface}` requires `{AS_PRIMITIVE_BYTE_SIZE}` to be at most 32, but it is {size}"),
+                use_loc,
+                format!("`{ty}` required to implement `{interface}` here"),
+            )
+            .emit(self);
+    }
+
+    pub fn emit_as_primitive_raw_exceeds_byte_size(
+        &mut self,
+        raw: U256,
+        byte_size: u8,
+        loc: SrcLoc,
+    ) {
+        Diagnostic::error(format!("`{AS_PRIMITIVE}` value exceeds declared byte size"))
+            .primary(
+                loc.source,
+                loc.span,
+                format!(
+                    "`{AS_PRIMITIVE_TO_RAW}` returned {raw}, which does not fit in {}",
+                    fmt_count(usize::from(byte_size), "byte"),
+                ),
+            )
             .emit(self);
     }
 
