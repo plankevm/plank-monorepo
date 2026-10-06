@@ -1,5 +1,5 @@
 use crate::codegen_orchestrator::InitcodeEmitted;
-use plank_core::Idx;
+use plank_core::{DenseIndexSet, Idx};
 use sir_data::EthIRProgram;
 use sir_passes::AnalysesStore;
 use sir_stack_scheduling::{self, ScheduleConfig};
@@ -28,16 +28,24 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
 
     let (stack_ops, _layouts, last_alloc_id) =
         sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
-    let init_memory_layout =
-        BumpAllocateAll::generate(program, program.init_entry, &stack_ops, last_alloc_id.idx());
-
-    let in_progress_codegen = InitcodeEmitted::emit_init(program, &stack_ops, init_memory_layout);
+    let in_progress_codegen =
+        InitcodeEmitted::emit_init(program, &stack_ops, |scratch_immutables| {
+            BumpAllocateAll::generate(
+                program,
+                program.init_entry,
+                &stack_ops,
+                scratch_immutables,
+                last_alloc_id.idx(),
+            )
+        });
     let (asm, marks) = match program.main_entry {
         Some(runtime_entrypoint) => {
+            // `setimmutable` is init-only, the runtime never needs scratch space for it.
             let run_memory_layout = BumpAllocateAll::generate(
                 program,
                 runtime_entrypoint,
                 &stack_ops,
+                &DenseIndexSet::new(),
                 last_alloc_id.idx(),
             );
             in_progress_codegen.finish_with_runcode(runtime_entrypoint, run_memory_layout)

@@ -205,11 +205,11 @@ impl<'ir> Translator<'ir> {
                 }
                 ControlView::Switch(switch) => {
                     self.emit_local_load(switch.condition());
-                    self.asm.push_minimal_u32(self.memory_layout.switch_store);
+                    self.asm.push_minimal_u32(self.memory_layout.scratch_slot);
                     self.asm.push_op_byte(op::MSTORE);
 
                     for (value, bb) in switch.cases() {
-                        self.asm.push_minimal_u32(self.memory_layout.switch_store);
+                        self.asm.push_minimal_u32(self.memory_layout.scratch_slot);
                         self.asm.push_op_byte(op::MLOAD);
                         self.asm.push_minimal_u256(value);
                         self.asm.push_op_byte(op::EQ);

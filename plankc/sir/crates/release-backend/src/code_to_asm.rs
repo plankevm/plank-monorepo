@@ -152,7 +152,7 @@ impl<'a> CodeToAsmEmitter<'a> {
                 }
                 ControlView::Switch(switch) => {
                     let switch_store_addr =
-                        state.layout().switch_store.expect("missing switch allocation").get();
+                        state.layout().scratch_slot.expect("missing switch scratch slot").get();
 
                     self.asm.push_minimal_u32(switch_store_addr);
                     self.asm.push_op_byte(op::MSTORE);
@@ -258,6 +258,7 @@ impl<'a> CodeToAsmEmitter<'a> {
                 self.immutable_refs.emit_set(
                     &mut self.asm,
                     self.mark_map.runcode_start,
+                    state.layout().scratch_slot,
                     set.immutable,
                     size,
                 );

@@ -356,15 +356,14 @@ fn main:
 - `setimmutable` may only be used in functions reachable from `init` and not from `main`, and only
   if the program has a `main`.
 - `runtime_ptr` must point to a full copy of the runtime code already in memory (the
-  `runtime_length` bytes starting at `runtime_start_offset`). This is not checked: any other pointer
-  is undefined behavior, the patch writes at the placeholder offsets relative to `runtime_ptr` and
-  will clobber whatever memory is there.
-- `value` must already fit in the immutable's size, it is not masked. Excess high bits are
-  undefined behavior (the current backends happen to drop them).
-- Each immutable must be set at most once per deployment: placeholders are patched assuming they
-  are still zero (setting twice ORs the values).
-- Patching an immutable smaller than 32 bytes may read and write back (unchanged) up to 31 bytes past
-  the end of the runtime copy, which can expand memory.
+  `runtime_length` bytes starting at `runtime_start_offset`) that was obtained from an allocation
+  (`malloc`, `salloc`, ...). This is not checked: any other pointer is undefined behavior, the patch
+  writes at the placeholder offsets relative to `runtime_ptr` and will clobber whatever memory is
+  there.
+- Only the placeholder bytes of the runtime copy are written: adjacent runtime code is untouched and
+  no memory past the end of the copy is accessed.
+- Only the low `size` bytes of `value` are written (big-endian), any higher bits are ignored.
+- Setting an immutable again overwrites its placeholders with the new value.
 - If no `getimmutable` for an immutable is reachable from `main`, its `setimmutable` compiles to a
   no-op.
 

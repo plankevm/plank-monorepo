@@ -1,4 +1,4 @@
-use crate::Translator;
+use crate::{Translator, static_memory_layout::EVM_WORD_IN_BYTES};
 use plank_core::Span;
 use sir_assembler::{AsmReference, MarkReference, op};
 use sir_data::{LocalId, OperationIdx, operation::*};
@@ -184,12 +184,15 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
         self.translator.emit_local_store(data.out);
     }
 
-    /// Placeholders are zero in the copied runtime so OR-ing the left-aligned value into the word
-    /// starting at each placeholder patches it without disturbing the surrounding code.
+    /// The value is staged in the scratch slot so that only its low `size` bytes can be copied
+    /// into each placeholder, leaving the surrounding runtime code untouched.
     fn visit_set_immutable(&mut self, data: &'d SetImmutableData) {
         assert!(self.translator.translating_init_code, "setimmutable in runtime code");
         let size = self.translator.ir.immutables[data.immutable] as u32;
         let runtime_start = self.translator.mark_map.runtime_start;
+        let scratch_slot = self.translator.memory_layout.scratch_slot;
+        let copy_src = scratch_slot + EVM_WORD_IN_BYTES - size;
+        let mut value_staged = false;
         for i in 0..self.translator.immutable_refs.len() {
             let imm_ref = &self.translator.immutable_refs[i];
             if imm_ref.immutable != data.immutable {
@@ -197,19 +200,18 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
             }
             let placeholder_offset =
                 MarkReference::Delta(Span::new(runtime_start, imm_ref.placeholder));
-            self.translator.emit_local_load(data.value()); // [value]
-            self.translator.asm.push_minimal_u32(256 - size * 8); // [shift, value]
-            self.translator.asm.push_op_byte(op::SHL); // [aligned_value]
-            self.translator.emit_local_load(data.runtime_ptr()); // [runtime_ptr, aligned_value]
-            self.translator.asm.push_reference(AsmReference::pushed(placeholder_offset)); // [offset, runtime_ptr, aligned_value]
-            self.translator.asm.push_op_byte(op::ADD); // [ptr, aligned_value]
-            self.translator.asm.push_op_byte(op::DUP1); // [ptr, ptr, aligned_value]
-            self.translator.asm.push_op_byte(op::MLOAD); // [word, ptr, aligned_value]
-            self.translator.asm.push_op_byte(op::DUP3); // [aligned_value, word, ptr, aligned_value]
-            self.translator.asm.push_op_byte(op::OR); // [patched_word, ptr, aligned_value]
-            self.translator.asm.push_op_byte(op::SWAP1); // [ptr, patched_word, aligned_value]
-            self.translator.asm.push_op_byte(op::MSTORE); // [aligned_value]
-            self.translator.asm.push_op_byte(op::POP); // []
+            if !value_staged {
+                value_staged = true;
+                self.translator.emit_local_load(data.value()); // [value]
+                self.translator.asm.push_minimal_u32(scratch_slot); // [scratch, value]
+                self.translator.asm.push_op_byte(op::MSTORE); // []
+            }
+            self.translator.asm.push_minimal_u32(size); // [size]
+            self.translator.asm.push_minimal_u32(copy_src); // [src, size]
+            self.translator.emit_local_load(data.runtime_ptr()); // [runtime_ptr, src, size]
+            self.translator.asm.push_reference(AsmReference::pushed(placeholder_offset)); // [offset, runtime_ptr, src, size]
+            self.translator.asm.push_op_byte(op::ADD); // [dst, src, size]
+            self.translator.asm.push_op_byte(op::MCOPY); // []
         }
     }
 

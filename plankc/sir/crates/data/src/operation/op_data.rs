@@ -267,8 +267,9 @@ impl GetImmutableData {
     }
 }
 
-/// `value` is expected to already fit in the immutable's byte size and `runtime_ptr` to point to a
-/// full in-memory copy of the runtime code, neither is checked (see `sir/docs/ir_text_format.md`).
+/// Writes the low `size` bytes of `value` into the immutable's placeholders. `runtime_ptr` must
+/// point to a full in-memory copy of the runtime code, this is not checked (see
+/// `sir/docs/ir_text_format.md`).
 #[derive(Debug, Clone, Copy)]
 pub struct SetImmutableData {
     pub ins: [LocalId; 2],

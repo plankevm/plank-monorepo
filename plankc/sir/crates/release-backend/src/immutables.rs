@@ -1,41 +1,41 @@
 //! Immutables are compiled into `PUSH<size>` placeholders with zeroed immediates in the runtime
 //! code. `setimmutable` patches every placeholder of its immutable in the runtime code copy that
-//! initcode is assembling in memory (at `runtime_ptr`), so the copy must already be in place and
-//! each placeholder must still be zero.
+//! initcode is assembling in memory (at `runtime_ptr`), so the copy must already be in place. Each
+//! placeholder is overwritten, a repeated `setimmutable` replaces the previously set value.
 //!
 //! ## Write strategies
 //!
 //! Stack on entry is `[value, runtime_ptr]` (top last), `N` is the number of placeholders and the
 //! gas numbers exclude memory expansion:
 //!
-//! | size     | strategy           | gas       |
-//! |----------|--------------------|-----------|
-//! | any, N=0 | discard            | 4         |
-//! | 32       | `mstore` each      | 15N - 6   |
-//! | 1        | `mstore8` each     | 15N - 6   |
-//! | 2..=31   | OR-merge (N=1)     | 38        |
-//! | 2..=31   | OR-merge + `mcopy` | 21N + 12  |
+//! | size     | strategy               | gas       |
+//! |----------|------------------------|-----------|
+//! | any, N=0 | discard                | 4         |
+//! | 32       | `mstore` each          | 15N - 6   |
+//! | 1        | `mstore8` each         | 15N - 6   |
+//! | 2..=31   | scratch + `mcopy` each | 21N + 9   |
 //!
-//! For partial sizes the value is shifted to be left-aligned once and OR-ed into the word that
-//! starts at the first placeholder (27 gas), all other placeholders are then filled with a
-//! `size`-byte `mcopy` from the first one (21 gas each, 18 for the last). OR-merging every
-//! placeholder instead costs `27N + 11` gas and more bytes. A `mcopy` costs 21 gas vs. 15 for
-//! `mstore`/`mstore8`, which is why it's not used for full words or single bytes. The OR-merge's
-//! word may extend up to 31 bytes past the runtime copy; those bytes are written back unchanged.
+//! For partial sizes the value is `mstore`d to the scratch slot once (12 gas) and its low `size`
+//! bytes are then `mcopy`d into every placeholder (21 gas each, 18 for the last). Only the
+//! placeholder bytes are written, so adjacent runtime code is left untouched and no memory past
+//! the runtime copy is accessed. A `mcopy` costs 21 gas vs. 15 for `mstore`/`mstore8`, which is
+//! why it's not used for full words or single bytes. In all cases only the low `size` bytes of
+//! `value` end up in the placeholder.
 
-use plank_core::Span;
+use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{ImmutableId, OperationIdx, operation::IRMemoryIOByteSize};
+use sir_data::{EthIRProgram, ImmutableId, OperationIdx, operation::IRMemoryIOByteSize};
+use sir_static_memory_allocator::EvmMemAddr;
 use smallvec::SmallVec;
 
 const PLACEHOLDERS_INLINE_CAPACITY: usize = 8;
+const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WriteStrategy {
     Discard,
     StoreEach { store_op: u8 },
-    OrMerge,
-    OrMergeThenCopy,
+    CopyFromScratch,
 }
 
 impl WriteStrategy {
@@ -44,8 +44,7 @@ impl WriteStrategy {
             (_, 0) => Self::Discard,
             (IRMemoryIOByteSize::B32, _) => Self::StoreEach { store_op: op::MSTORE },
             (IRMemoryIOByteSize::B1, _) => Self::StoreEach { store_op: op::MSTORE8 },
-            (_, 1) => Self::OrMerge,
-            (_, _) => Self::OrMergeThenCopy,
+            (_, _) => Self::CopyFromScratch,
         }
     }
 }
@@ -86,6 +85,18 @@ impl ImmutableRefs {
         asm.push_placeholder_push(size as u8, imm_ref.placeholder);
     }
 
+    /// The immutables whose `setimmutable` needs the scratch slot.
+    pub fn scratch_immutables(&self, ir: &EthIRProgram) -> DenseIndexSet<ImmutableId> {
+        let mut scratch_immutables = DenseIndexSet::with_capacity_in_bits(ir.immutables.len());
+        for imm_ref in &self.refs {
+            let size = ir.immutables[imm_ref.immutable];
+            if WriteStrategy::select(size, 1) == WriteStrategy::CopyFromScratch {
+                scratch_immutables.add(imm_ref.immutable);
+            }
+        }
+        scratch_immutables
+    }
+
     /// Every collected placeholder mark must be placed, otherwise `setimmutable` would patch
     /// whatever code ends up at the unplaced mark's default offset.
     pub fn assert_all_emitted(&self) {
@@ -99,6 +110,7 @@ impl ImmutableRefs {
         &self,
         asm: &mut Assembler,
         runcode_start: MarkId,
+        scratch_slot: Option<EvmMemAddr>,
         immutable: ImmutableId,
         size: IRMemoryIOByteSize,
     ) {
@@ -133,59 +145,34 @@ impl ImmutableRefs {
                 asm.push_op_byte(op::ADD); //              [value, dst]
                 asm.push_op_byte(store_op); //             []
             }
-            WriteStrategy::OrMerge => {
-                Self::emit_left_align(asm, size); //       [ptr, aligned]
-                asm.push_op_byte(op::SWAP1); //            [aligned, ptr]
-                push_offset(asm, placeholders[0]); //      [aligned, ptr, offset]
-                asm.push_op_byte(op::ADD); //              [aligned, dst]
-                asm.push_op_byte(op::DUP1); //             [aligned, dst, dst]
-                asm.push_op_byte(op::MLOAD); //            [aligned, dst, word]
-                asm.push_op_byte(op::DUP3); //             [aligned, dst, word, aligned]
-                asm.push_op_byte(op::OR); //               [aligned, dst, patched_word]
-                asm.push_op_byte(op::SWAP1); //            [aligned, patched_word, dst]
-                asm.push_op_byte(op::MSTORE); //           [aligned]
-                asm.push_op_byte(op::POP); //              []
-            }
-            WriteStrategy::OrMergeThenCopy => {
-                let (&first, rest) = placeholders.split_first().expect("no placeholders");
-                let (&last, middle) = rest.split_last().expect("less than 2 placeholders");
+            WriteStrategy::CopyFromScratch => {
+                let (&last, rest) = placeholders.split_last().expect("no placeholders");
+                let scratch = scratch_slot.expect("missing setimmutable scratch slot").get();
                 let copy_size = size as u32;
+                let src = scratch + EVM_WORD_IN_BYTES - copy_size;
 
-                Self::emit_left_align(asm, size); //       [ptr, aligned]
-                asm.push_op_byte(op::DUP2); //             [ptr, aligned, ptr]
-                push_offset(asm, first); //                [ptr, aligned, ptr, offset]
-                asm.push_op_byte(op::ADD); //              [ptr, aligned, src]
-                asm.push_op_byte(op::SWAP1); //            [ptr, src, aligned]
-                asm.push_op_byte(op::DUP2); //             [ptr, src, aligned, src]
-                asm.push_op_byte(op::MLOAD); //            [ptr, src, aligned, word]
-                asm.push_op_byte(op::OR); //               [ptr, src, patched_word]
-                asm.push_op_byte(op::DUP2); //             [ptr, src, patched_word, src]
-                asm.push_op_byte(op::MSTORE); //           [ptr, src]
-                for &placeholder in middle {
-                    asm.push_minimal_u32(copy_size); //         [ptr, src, size]
-                    asm.push_op_byte(op::DUP2); //         [ptr, src, size, src]
-                    asm.push_op_byte(op::DUP4); //         [ptr, src, size, src, ptr]
-                    push_offset(asm, placeholder); //      [ptr, src, size, src, ptr, offset]
-                    asm.push_op_byte(op::ADD); //          [ptr, src, size, src, dst]
-                    asm.push_op_byte(op::MCOPY); //        [ptr, src]
+                // input: [value, ptr]
+                asm.push_minimal_u32(copy_size); //        [value, ptr, size]
+                asm.push_op_byte(op::SWAP2); //            [size, ptr, value]
+                asm.push_minimal_u32(scratch); //          [size, ptr, value, scratch]
+                asm.push_op_byte(op::MSTORE); //           [size, ptr]
+                for &placeholder in rest {
+                    asm.push_op_byte(op::DUP2); //         [size, ptr, size]
+                    asm.push_minimal_u32(src); //          [size, ptr, size, src]
+                    asm.push_op_byte(op::DUP3); //         [size, ptr, size, src, ptr]
+                    push_offset(asm, placeholder); //      [size, ptr, size, src, ptr, offset]
+                    asm.push_op_byte(op::ADD); //          [size, ptr, size, src, dst]
+                    asm.push_op_byte(op::MCOPY); //        [size, ptr]
                 }
-                asm.push_minimal_u32(copy_size); //        [ptr, src, size]
-                asm.push_op_byte(op::SWAP2); //            [size, src, ptr]
+                asm.push_minimal_u32(src); //              [size, ptr, src]
+                asm.push_op_byte(op::SWAP1); //            [size, src, ptr]
                 push_offset(asm, last); //                 [size, src, ptr, offset]
                 asm.push_op_byte(op::ADD); //              [size, src, dst]
                 asm.push_op_byte(op::MCOPY); //            []
             }
         }
     }
-
-    fn emit_left_align(asm: &mut Assembler, size: IRMemoryIOByteSize) {
-        // input: [value, ptr]
-        asm.push_op_byte(op::SWAP1); //                    [ptr, value]
-        asm.push_minimal_u32(256 - u32::from(size.bits())); // [ptr, value, shift]
-        asm.push_op_byte(op::SHL); //                      [ptr, aligned]
-    }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +202,8 @@ mod tests {
         gas
     }
 
+    const TEST_SCRATCH_SLOT: EvmMemAddr = EvmMemAddr::new(0x40);
+
     struct Emitted {
         asm: String,
         set_gas: u32,
@@ -232,7 +221,7 @@ mod tests {
         refs.push(ImmutableId::new(1), OperationIdx::new(ref_count), next_mark.get_and_inc());
 
         let mut asm = Assembler::with_capacity(256, 32);
-        refs.emit_set(&mut asm, runcode_start, immutable, size);
+        refs.emit_set(&mut asm, runcode_start, Some(TEST_SCRATCH_SLOT), immutable, size);
         asm.push_mark(runcode_start);
         for i in 0..=ref_count {
             refs.emit_placeholder(&mut asm, size, OperationIdx::new(i));
@@ -259,10 +248,10 @@ mod tests {
             WriteStrategy::select(S::B1, 3),
             WriteStrategy::StoreEach { store_op: op::MSTORE8 }
         );
-        assert_eq!(WriteStrategy::select(S::B2, 1), WriteStrategy::OrMerge);
-        assert_eq!(WriteStrategy::select(S::B31, 1), WriteStrategy::OrMerge);
-        assert_eq!(WriteStrategy::select(S::B2, 2), WriteStrategy::OrMergeThenCopy);
-        assert_eq!(WriteStrategy::select(S::B31, 5), WriteStrategy::OrMergeThenCopy);
+        assert_eq!(WriteStrategy::select(S::B2, 1), WriteStrategy::CopyFromScratch);
+        assert_eq!(WriteStrategy::select(S::B31, 1), WriteStrategy::CopyFromScratch);
+        assert_eq!(WriteStrategy::select(S::B2, 2), WriteStrategy::CopyFromScratch);
+        assert_eq!(WriteStrategy::select(S::B31, 5), WriteStrategy::CopyFromScratch);
     }
 
     #[test]
@@ -271,9 +260,8 @@ mod tests {
         for n in 1..=5 {
             assert_eq!(emit_set_with_refs(S::B32, n).set_gas, 15 * n - 6, "mstore, n={n}");
             assert_eq!(emit_set_with_refs(S::B1, n).set_gas, 15 * n - 6, "mstore8, n={n}");
-            let or_merge = if n == 1 { 38 } else { 21 * n + 12 };
-            assert_eq!(emit_set_with_refs(S::B7, n).set_gas, or_merge, "or-merge, n={n}");
-            assert!(or_merge <= 27 * n + 11, "or-merge + mcopy no worse than or-merge each");
+            assert_eq!(emit_set_with_refs(S::B7, n).set_gas, 21 * n + 9, "scratch copy, n={n}");
+            assert_eq!(emit_set_with_refs(S::B31, n).set_gas, 21 * n + 9, "scratch copy, n={n}");
         }
         assert_eq!(emit_set_with_refs(S::B7, 0).set_gas, 4);
     }
@@ -285,8 +273,11 @@ mod tests {
         for n in 1..=5 {
             let n_usize = n as usize;
             assert_eq!(emit_set_with_refs(S::B32, n).set_bytes, 6 * n_usize - 2, "mstore, n={n}");
-            let or_merge = if n == 1 { 15 } else { 8 * n_usize + 5 };
-            assert_eq!(emit_set_with_refs(S::B7, n).set_bytes, or_merge, "or-merge, n={n}");
+            assert_eq!(
+                emit_set_with_refs(S::B7, n).set_bytes,
+                8 * n_usize + 5,
+                "scratch copy, n={n}"
+            );
         }
     }
 
@@ -377,24 +368,20 @@ mod tests {
     }
 
     #[test]
-    fn or_merge_single_reference() {
+    fn scratch_copy_single_reference() {
         assert_set_asm(
             IRMemoryIOByteSize::B20,
             1,
             r#"
-              SWAP1
-              PUSH1 0x60
-              SHL
+              PUSH1 0x14
+              SWAP2
+              PUSH1 0x40
+              MSTORE
+              PUSH1 0x4c
               SWAP1
               PUSH (.mark1 - .mark0)
               ADD
-              DUP1
-              MLOAD
-              DUP3
-              OR
-              SWAP1
-              MSTORE
-              POP
+              MCOPY
             .mark0:
               PUSH20 0x (truncated)
             .mark1:
@@ -409,31 +396,29 @@ mod tests {
     }
 
     #[test]
-    fn or_merge_then_mcopy() {
+    fn scratch_copy_each_reference() {
         assert_set_asm(
             IRMemoryIOByteSize::B7,
             3,
             r#"
-              SWAP1
-              PUSH1 0xc8
-              SHL
+              PUSH1 0x07
+              SWAP2
+              PUSH1 0x40
+              MSTORE
               DUP2
+              PUSH1 0x59
+              DUP3
               PUSH (.mark1 - .mark0)
               ADD
-              SWAP1
+              MCOPY
               DUP2
-              MLOAD
-              OR
-              DUP2
-              MSTORE
-              PUSH1 0x07
-              DUP2
-              DUP4
+              PUSH1 0x59
+              DUP3
               PUSH (.mark2 - .mark0)
               ADD
               MCOPY
-              PUSH1 0x07
-              SWAP2
+              PUSH1 0x59
+              SWAP1
               PUSH (.mark3 - .mark0)
               ADD
               MCOPY
