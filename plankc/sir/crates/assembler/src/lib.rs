@@ -327,6 +327,16 @@ impl Assembler {
         self.push_minimal_u256(U256::from(value));
     }
 
+    /// Emits a `PUSH<size>` with a zeroed immediate, placing `immediate_mark` right before the
+    /// immediate so it can be patched later.
+    #[track_caller]
+    pub fn push_placeholder_push(&mut self, size: u8, immediate_mark: MarkId) {
+        assert!((1..=32).contains(&size), "invalid placeholder push size {size}");
+        self.push_op_byte(op::PUSH1 + size - 1);
+        self.push_mark(immediate_mark);
+        self.push_data(&[0; 32][..size as usize]);
+    }
+
     pub fn push_data(&mut self, data: &[u8]) {
         match self.sections.last_mut() {
             Some(StoredAsmSection::Data(bytes_span)) => {

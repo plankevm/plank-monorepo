@@ -84,6 +84,10 @@ impl BasicBlockOwnershipAndReachability {
             }
         }
 
+        for (immutable, size) in program.immutables.enumerate_idx() {
+            writeln!(&mut output, "immutable %{immutable} {}", *size as u8).unwrap();
+        }
+
         output
     }
 }

@@ -7,6 +7,7 @@ use plank_core::{Idx, IndexVec, Span};
 pub enum OpExtraData {
     DataId(DataId),
     FuncId(FunctionId),
+    ImmutableId(ImmutableId),
     Num(U256),
     Empty,
 }
@@ -247,6 +248,47 @@ impl SetDataOffsetData {
 
     pub(crate) fn get_visited_mut<'d, O, V: OpVisitorMut<'d, O>>(&'d mut self, visitor: V) -> O {
         visitor.visit_set_data_offset_mut(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GetImmutableData {
+    pub out: LocalId,
+    pub immutable: ImmutableId,
+}
+
+impl GetImmutableData {
+    pub(crate) fn get_visited<'d, O, V: OpVisitor<'d, O>>(&'d self, visitor: &mut V) -> O {
+        visitor.visit_get_immutable(self)
+    }
+
+    pub(crate) fn get_visited_mut<'d, O, V: OpVisitorMut<'d, O>>(&'d mut self, visitor: V) -> O {
+        visitor.visit_get_immutable_mut(self)
+    }
+}
+
+/// `value` is expected to already fit in the immutable's byte size.
+#[derive(Debug, Clone, Copy)]
+pub struct SetImmutableData {
+    pub ins: [LocalId; 2],
+    pub immutable: ImmutableId,
+}
+
+impl SetImmutableData {
+    pub fn runtime_ptr(&self) -> LocalId {
+        self.ins[0]
+    }
+
+    pub fn value(&self) -> LocalId {
+        self.ins[1]
+    }
+
+    pub(crate) fn get_visited<'d, O, V: OpVisitor<'d, O>>(&'d self, visitor: &mut V) -> O {
+        visitor.visit_set_immutable(self)
+    }
+
+    pub(crate) fn get_visited_mut<'d, O, V: OpVisitorMut<'d, O>>(&'d mut self, visitor: V) -> O {
+        visitor.visit_set_immutable_mut(self)
     }
 }
 
@@ -620,5 +662,47 @@ impl FromOpData for SetDataOffsetData {
         check_outs_count(outs, 1)?;
 
         Ok(SetDataOffsetData { sets: outs[0], segment_id })
+    }
+}
+
+impl FromOpData for GetImmutableData {
+    fn try_build_op(
+        ins: &[LocalId],
+        outs: &[LocalId],
+        extra: OpExtraData,
+        _builder: &mut EthIRBuilder,
+    ) -> Result<Self, OpBuildError> {
+        let OpExtraData::ImmutableId(immutable) = extra else {
+            return Err(OpBuildError::UnexpectedExtraData {
+                received: extra,
+                expected: "ImmutableId",
+            });
+        };
+
+        check_ins_count(ins, 0)?;
+        check_outs_count(outs, 1)?;
+
+        Ok(GetImmutableData { out: outs[0], immutable })
+    }
+}
+
+impl FromOpData for SetImmutableData {
+    fn try_build_op(
+        ins: &[LocalId],
+        outs: &[LocalId],
+        extra: OpExtraData,
+        _builder: &mut EthIRBuilder,
+    ) -> Result<Self, OpBuildError> {
+        let OpExtraData::ImmutableId(immutable) = extra else {
+            return Err(OpBuildError::UnexpectedExtraData {
+                received: extra,
+                expected: "ImmutableId",
+            });
+        };
+
+        check_ins_count(ins, 2)?;
+        check_outs_count(outs, 0)?;
+
+        Ok(SetImmutableData { ins: [ins[0], ins[1]], immutable })
     }
 }

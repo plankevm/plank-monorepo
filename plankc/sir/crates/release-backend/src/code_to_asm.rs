@@ -1,4 +1,7 @@
-use crate::mark_map::{IndexableMarkSpan, MarkMap};
+use crate::{
+    immutables::ImmutableRefs,
+    mark_map::{IndexableMarkSpan, MarkMap},
+};
 use alloy_primitives::U256;
 use plank_core::{DenseIndexSet, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
@@ -29,6 +32,7 @@ pub(crate) struct CodeToAsmEmitter<'a> {
     pub mark_map: MarkMap,
     pub asm: Assembler,
     pub ir: &'a EthIRProgram,
+    pub immutable_refs: ImmutableRefs,
     ops: &'a ScheduledOps,
     visited_bbs: DenseIndexSet<BasicBlockId>,
     basic_blocks_worklist: Vec<BasicBlockId>,
@@ -38,17 +42,18 @@ impl<'a> CodeToAsmEmitter<'a> {
     pub fn new(
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
+        mark_map: MarkMap,
+        immutable_refs: ImmutableRefs,
         mut visited_bbs: DenseIndexSet<BasicBlockId>,
         mut basic_blocks_worklist: Vec<BasicBlockId>,
     ) -> Self {
-        let mark_map = MarkMap::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
 
         // Extra clear just to be safe.
         visited_bbs.clear();
         basic_blocks_worklist.clear();
 
-        Self { ir, ops, mark_map, visited_bbs, basic_blocks_worklist, asm }
+        Self { ir, immutable_refs, ops, mark_map, visited_bbs, basic_blocks_worklist, asm }
     }
 
     pub fn alloc_bb_marks(&mut self) -> IndexableMarkSpan<BasicBlockId> {
@@ -235,6 +240,27 @@ impl<'a> CodeToAsmEmitter<'a> {
             Operation::RuntimeLength(_) => {
                 let asm_ref = AsmReference::pushed(MarkReference::Delta(self.mark_map.runcode()));
                 self.asm.push_reference(asm_ref);
+            }
+            Operation::GetImmutable(get) => {
+                assert!(
+                    !State::ALLOW_INITCODE_INTROSPECTION,
+                    "use of `getimmutable` outside of runtime code"
+                );
+                let size = self.ir.immutables[get.immutable];
+                self.immutable_refs.emit_placeholder(&mut self.asm, size, op_idx);
+            }
+            Operation::SetImmutable(set) => {
+                assert!(
+                    State::ALLOW_INITCODE_INTROSPECTION,
+                    "use of `setimmutable` outside of initcode"
+                );
+                let size = self.ir.immutables[set.immutable];
+                self.immutable_refs.emit_set(
+                    &mut self.asm,
+                    self.mark_map.runcode_start,
+                    set.immutable,
+                    size,
+                );
             }
             Operation::SetCopy(_) | Operation::Noop(()) => {
                 // interpreted as a stack operation "setcopy" would pop and push back the top

@@ -88,6 +88,21 @@ impl<'d, 'fmt, 'ir, W: fmt::Write> OpVisitor<'d, fmt::Result> for OpFormatter<'f
         write!(self.write, "${} = {} .{}", data.sets, self.mnemonic, data.segment_id)
     }
 
+    fn visit_get_immutable(&mut self, data: &'d GetImmutableData) -> fmt::Result {
+        write!(self.write, "${} = {} %{}", data.out, self.mnemonic, data.immutable)
+    }
+
+    fn visit_set_immutable(&mut self, data: &'d SetImmutableData) -> fmt::Result {
+        write!(
+            self.write,
+            "{} %{} ${} ${}",
+            self.mnemonic,
+            data.immutable,
+            data.runtime_ptr(),
+            data.value()
+        )
+    }
+
     fn visit_icall(&mut self, data: &'d InternalCallData) -> fmt::Result {
         let ins = &self.ir.locals[data.ins_start..data.outs_start];
         let outs = &self.ir.locals[data.outputs_span(&self.ir.functions)];

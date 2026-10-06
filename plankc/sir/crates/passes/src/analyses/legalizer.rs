@@ -4,8 +4,8 @@ use crate::{
 };
 use plank_core::{DenseIndexSet, Idx, IndexVec, index_vec};
 use sir_data::{
-    BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    LocalIdx, Operation, OperationIdx, StaticAllocId,
+    BasicBlock, BasicBlockId, Control, DataId, EthIRProgram, FunctionId, ImmutableId, LargeConstId,
+    LocalId, LocalIdx, Operation, OperationIdx, StaticAllocId,
 };
 
 /// Identifies which IR construct a tracked span belongs to, used in span overlap diagnostics.
@@ -52,6 +52,14 @@ pub enum LegalizerError {
     InvalidSegmentId(DataId),
     #[error("invalid static allocation id {0}")]
     InvalidStaticAllocId(StaticAllocId),
+    #[error("invalid immutable id %{0}")]
+    InvalidImmutableId(ImmutableId),
+    #[error("operation {op} uses `getimmutable` in a function reachable from init")]
+    GetImmutableReachableFromInit { op: OperationIdx },
+    #[error("operation {op} uses `setimmutable` in a function reachable from main")]
+    SetImmutableReachableFromMain { op: OperationIdx },
+    #[error("operation {op} uses `setimmutable` but the program has no main")]
+    SetImmutableWithoutMain { op: OperationIdx },
     #[error("overlapping spans: {0} and {1}")]
     OverlappingSpans(SpanSource, SpanSource),
     #[error("span out of bounds: {0}")]
@@ -108,6 +116,7 @@ impl Legalizer {
         self.validate_blocks(program)?;
         let rpo = store.reverse_post_order(program);
         self.validate_cfg(program, &rpo)?;
+        self.validate_immutable_contexts(program)?;
         let dominators = store.dominators(program);
         self.validate_local_ids(program, &rpo, &dominators)
     }
@@ -246,6 +255,16 @@ impl Legalizer {
                     if data.alloc_id >= program.next_static_alloc_id =>
                 {
                     return Err(LegalizerError::InvalidStaticAllocId(data.alloc_id));
+                }
+                Operation::GetImmutable(data)
+                    if program.immutables.get(data.immutable).is_none() =>
+                {
+                    return Err(LegalizerError::InvalidImmutableId(data.immutable));
+                }
+                Operation::SetImmutable(data)
+                    if program.immutables.get(data.immutable).is_none() =>
+                {
+                    return Err(LegalizerError::InvalidImmutableId(data.immutable));
                 }
                 Operation::InternalCall(data) => {
                     let Some(function) = program.functions.get(data.function) else {
@@ -423,6 +442,56 @@ impl Legalizer {
             self.validate_cfg_visit_block(program, fn_id, succ, visited)?;
         }
         Ok(())
+    }
+
+    /// `getimmutable` reads the deployed code so it may only run in main, `setimmutable` patches
+    /// the runtime code copy so it may only run in init and requires a main.
+    fn validate_immutable_contexts(&self, program: &EthIRProgram) -> Result<(), LegalizerError> {
+        let reachable_from_init = self.functions_reachable_from(program, program.init_entry);
+        let reachable_from_main =
+            program.main_entry.map(|main_entry| self.functions_reachable_from(program, main_entry));
+
+        for (bb_id, owner) in self.block_owner.enumerate_idx() {
+            let Some(owner) = *owner else { continue };
+            for op_id in program.basic_blocks[bb_id].operations.iter() {
+                match program.operations[op_id] {
+                    Operation::GetImmutable(_) if reachable_from_init.contains(owner) => {
+                        return Err(LegalizerError::GetImmutableReachableFromInit { op: op_id });
+                    }
+                    Operation::SetImmutable(_) => match &reachable_from_main {
+                        None if reachable_from_init.contains(owner) => {
+                            return Err(LegalizerError::SetImmutableWithoutMain { op: op_id });
+                        }
+                        Some(reachable_from_main) if reachable_from_main.contains(owner) => {
+                            return Err(LegalizerError::SetImmutableReachableFromMain {
+                                op: op_id,
+                            });
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn functions_reachable_from(
+        &self,
+        program: &EthIRProgram,
+        entry: FunctionId,
+    ) -> DenseIndexSet<FunctionId> {
+        let mut reachable = DenseIndexSet::with_capacity_in_bits(program.functions.len());
+        reachable.add(entry);
+        let mut worklist = vec![entry];
+        while let Some(caller) = worklist.pop() {
+            for &(_, callee) in self.call_edges.iter().filter(|(from, _)| *from == caller) {
+                if reachable.add(callee) {
+                    worklist.push(callee);
+                }
+            }
+        }
+        reachable
     }
 
     fn validate_local_ids(
@@ -608,8 +677,9 @@ mod tests {
         Branch,
         builder::EthIRBuilder,
         operation::{
-            InlineOperands, InternalCallData, InternalCallNeverData, OpExtraData, OperationKind,
-            SetDataOffsetData, SetLargeConstData, SetSmallConstData, StaticAllocData,
+            GetImmutableData, IRMemoryIOByteSize, InlineOperands, InternalCallData,
+            InternalCallNeverData, OpExtraData, OperationKind, SetDataOffsetData, SetImmutableData,
+            SetLargeConstData, SetSmallConstData, StaticAllocData,
         },
     };
     use sir_parser::{EmitConfig, parse_without_legalization};
@@ -1504,6 +1574,188 @@ mod tests {
         assert_eq!(
             Legalizer::default().run(&program, &AnalysesStore::default()).unwrap_err(),
             LegalizerError::InvalidSegmentId(invalid_id)
+        );
+    }
+
+    fn legalize_with_main(source: &str) -> Result<(), LegalizerError> {
+        let program = parse_without_legalization(source, EmitConfig::default());
+        Legalizer::default().run(&program, &AnalysesStore::default())
+    }
+
+    #[test]
+    fn test_accepts_immutables_set_in_init_get_in_main() {
+        let result = legalize_with_main(
+            r#"
+            immutable a 20
+            fn init:
+                entry {
+                    buf = freeptr
+                    x = caller
+                    icall @setter buf x
+                    stop
+                }
+            fn setter:
+                entry buf x {
+                    setimmutable %a buf x
+                    iret
+                }
+            fn main:
+                entry {
+                    y = icall @getter
+                    stop
+                }
+            fn getter:
+                entry -> y {
+                    y = getimmutable %a
+                    iret
+                }
+            "#,
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn test_rejects_getimmutable_in_init() {
+        let result = legalize_with_main(
+            r#"
+            immutable a 20
+            fn init:
+                entry {
+                    x = getimmutable %a
+                    stop
+                }
+            fn main:
+                entry {
+                    stop
+                }
+            "#,
+        );
+        assert_eq!(
+            result,
+            Err(LegalizerError::GetImmutableReachableFromInit { op: OperationIdx::new(0) })
+        );
+    }
+
+    #[test]
+    fn test_rejects_getimmutable_in_function_shared_with_init() {
+        let result = legalize_with_main(
+            r#"
+            immutable a 20
+            fn init:
+                entry {
+                    y = icall @getter
+                    stop
+                }
+            fn getter:
+                entry -> y {
+                    y = getimmutable %a
+                    iret
+                }
+            fn main:
+                entry {
+                    y = icall @getter
+                    stop
+                }
+            "#,
+        );
+        assert_eq!(
+            result,
+            Err(LegalizerError::GetImmutableReachableFromInit { op: OperationIdx::new(0) })
+        );
+    }
+
+    #[test]
+    fn test_rejects_setimmutable_in_main() {
+        let result = legalize_with_main(
+            r#"
+            immutable a 20
+            fn init:
+                entry {
+                    stop
+                }
+            fn main:
+                entry {
+                    buf = freeptr
+                    x = caller
+                    setimmutable %a buf x
+                    stop
+                }
+            "#,
+        );
+        assert_eq!(
+            result,
+            Err(LegalizerError::SetImmutableReachableFromMain { op: OperationIdx::new(3) })
+        );
+    }
+
+    #[test]
+    fn test_rejects_setimmutable_without_main() {
+        let program = parse_without_legalization(
+            r#"
+            immutable a 20
+            fn init:
+                entry {
+                    buf = freeptr
+                    x = caller
+                    setimmutable %a buf x
+                    stop
+                }
+            "#,
+            EmitConfig::init_only(),
+        );
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()),
+            Err(LegalizerError::SetImmutableWithoutMain { op: OperationIdx::new(2) })
+        );
+    }
+
+    #[test]
+    fn test_rejects_invalid_immutable_id() {
+        let mut builder = EthIRBuilder::new();
+        let valid = builder.new_immutable(IRMemoryIOByteSize::B4);
+        let invalid = ImmutableId::new(1);
+        assert_eq!(valid, ImmutableId::new(0));
+
+        let mut init = builder.begin_function();
+        let ptr = init.new_local();
+        let value = init.new_local();
+        let mut bb = init.begin_basic_block();
+        bb.add_operation(Operation::AcquireFreePointer(InlineOperands { ins: [], outs: [ptr] }));
+        bb.add_operation(Operation::CallValue(InlineOperands { ins: [], outs: [value] }));
+        bb.add_operation(Operation::SetImmutable(SetImmutableData {
+            ins: [ptr, value],
+            immutable: invalid,
+        }));
+        bb.add_operation(Operation::Stop(()));
+        let init_entry = bb.finish_terminating().unwrap();
+        let init = init.finish(init_entry);
+
+        let mut main = builder.begin_function();
+        let out = main.new_local();
+        let mut bb = main.begin_basic_block();
+        bb.add_operation(Operation::GetImmutable(GetImmutableData { out, immutable: valid }));
+        bb.add_operation(Operation::Stop(()));
+        let main_entry = bb.finish_terminating().unwrap();
+        let main = main.finish(main_entry);
+
+        let program = builder.build(init, Some(main));
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()),
+            Err(LegalizerError::InvalidImmutableId(invalid))
+        );
+
+        let mut program = program;
+        let Operation::SetImmutable(set) = &mut program.operations[OperationIdx::new(2)] else {
+            unreachable!()
+        };
+        set.immutable = valid;
+        let Operation::GetImmutable(get) = &mut program.operations[OperationIdx::new(4)] else {
+            unreachable!()
+        };
+        get.immutable = invalid;
+        assert_eq!(
+            Legalizer::default().run(&program, &AnalysesStore::default()),
+            Err(LegalizerError::InvalidImmutableId(invalid))
         );
     }
 

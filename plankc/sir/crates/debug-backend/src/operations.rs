@@ -1,9 +1,11 @@
 use crate::Translator;
-use sir_assembler::{AsmReference, op};
-use sir_data::{LocalId, operation::*};
+use plank_core::Span;
+use sir_assembler::{AsmReference, MarkReference, op};
+use sir_data::{LocalId, OperationIdx, operation::*};
 
 struct OpcodeTranslator<'t, 'ir> {
     translator: &'t mut Translator<'ir>,
+    op_idx: OperationIdx,
     op_kind: OperationKind,
     evm_op: Option<u8>,
 }
@@ -166,6 +168,51 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
         self.translator.emit_local_store(data.sets);
     }
 
+    fn visit_get_immutable(&mut self, data: &'d GetImmutableData) {
+        assert!(!self.translator.translating_init_code, "getimmutable in init code");
+        let size = self.translator.ir.immutables[data.immutable] as u8;
+        let imm_ref = self
+            .translator
+            .immutable_refs
+            .iter_mut()
+            .find(|imm_ref| imm_ref.get_op == self.op_idx)
+            .expect("getimmutable not collected as runtime reference");
+        assert!(!imm_ref.emitted, "getimmutable placeholder emitted twice");
+        imm_ref.emitted = true;
+        let placeholder = imm_ref.placeholder;
+        self.translator.asm.push_placeholder_push(size, placeholder);
+        self.translator.emit_local_store(data.out);
+    }
+
+    /// Placeholders are zero in the copied runtime so OR-ing the left-aligned value into the word
+    /// starting at each placeholder patches it without disturbing the surrounding code.
+    fn visit_set_immutable(&mut self, data: &'d SetImmutableData) {
+        assert!(self.translator.translating_init_code, "setimmutable in runtime code");
+        let size = self.translator.ir.immutables[data.immutable] as u32;
+        let runtime_start = self.translator.mark_map.runtime_start;
+        for i in 0..self.translator.immutable_refs.len() {
+            let imm_ref = &self.translator.immutable_refs[i];
+            if imm_ref.immutable != data.immutable {
+                continue;
+            }
+            let placeholder_offset =
+                MarkReference::Delta(Span::new(runtime_start, imm_ref.placeholder));
+            self.translator.emit_local_load(data.value()); // [value]
+            self.translator.asm.push_minimal_u32(256 - size * 8); // [shift, value]
+            self.translator.asm.push_op_byte(op::SHL); // [aligned_value]
+            self.translator.emit_local_load(data.runtime_ptr()); // [runtime_ptr, aligned_value]
+            self.translator.asm.push_reference(AsmReference::pushed(placeholder_offset)); // [offset, runtime_ptr, aligned_value]
+            self.translator.asm.push_op_byte(op::ADD); // [ptr, aligned_value]
+            self.translator.asm.push_op_byte(op::DUP1); // [ptr, ptr, aligned_value]
+            self.translator.asm.push_op_byte(op::MLOAD); // [word, ptr, aligned_value]
+            self.translator.asm.push_op_byte(op::DUP3); // [aligned_value, word, ptr, aligned_value]
+            self.translator.asm.push_op_byte(op::OR); // [patched_word, ptr, aligned_value]
+            self.translator.asm.push_op_byte(op::SWAP1); // [ptr, patched_word, aligned_value]
+            self.translator.asm.push_op_byte(op::MSTORE); // [aligned_value]
+            self.translator.asm.push_op_byte(op::POP); // []
+        }
+    }
+
     fn visit_icall(&mut self, data: &'d InternalCallData) {
         self.translator.memory_layout.emit_copy_for_basic_block_inputs(
             &mut self.translator.asm,
@@ -206,8 +253,12 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
     }
 }
 
-pub(crate) fn translate_operation(translator: &mut Translator, op: Operation) {
+pub(crate) fn translate_operation(
+    translator: &mut Translator,
+    op_idx: OperationIdx,
+    op: Operation,
+) {
     let evm_op = op.kind().as_literal_evm_op();
-    let mut opcode_translator = OpcodeTranslator { translator, op_kind: op.kind(), evm_op };
+    let mut opcode_translator = OpcodeTranslator { translator, op_idx, op_kind: op.kind(), evm_op };
     op.visit_data(&mut opcode_translator);
 }

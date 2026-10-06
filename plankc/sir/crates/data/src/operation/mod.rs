@@ -143,7 +143,9 @@ impl OperationKind {
             | OperationKind::InternalCallNever
             | OperationKind::RuntimeStartOffset
             | OperationKind::InitEndOffset
-            | OperationKind::RuntimeLength => return None,
+            | OperationKind::RuntimeLength
+            | OperationKind::GetImmutable
+            | OperationKind::SetImmutable => return None,
 
             // ========== EVM Arithmetic ==========
             OperationKind::Add => op::ADD,
@@ -367,6 +369,10 @@ define_operations! {
     RuntimeStartOffset(InlineOperands<0, 1>) "runtime_start_offset",
     InitEndOffset(InlineOperands<0, 1>) "init_end_offset",
     RuntimeLength(InlineOperands<0, 1>) "runtime_length",
+
+    // ========== Immutables ==========
+    GetImmutable(GetImmutableData) "getimmutable",
+    SetImmutable(SetImmutableData) "setimmutable",
 }
 
 impl OperationKind {
@@ -449,7 +455,8 @@ impl OperationKind {
             | OperationKind::Noop
             | OperationKind::RuntimeStartOffset
             | OperationKind::InitEndOffset
-            | OperationKind::RuntimeLength => true,
+            | OperationKind::RuntimeLength
+            | OperationKind::GetImmutable => true,
 
             OperationKind::SStore
             | OperationKind::TStore
@@ -476,7 +483,8 @@ impl OperationKind {
             | OperationKind::ExtCodeCopy
             | OperationKind::ReturnDataCopy
             | OperationKind::InternalCall
-            | OperationKind::InternalCallNever => false,
+            | OperationKind::InternalCallNever
+            | OperationKind::SetImmutable => false,
 
             // TODO: gas introspection semantic equivalence depends on high-level gas invocations
             // lining up with bytecode gas invocations

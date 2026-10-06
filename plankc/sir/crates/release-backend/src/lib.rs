@@ -7,6 +7,7 @@ use sir_static_memory_allocator::BumpAllocateAll;
 
 mod code_to_asm;
 mod codegen_orchestrator;
+mod immutables;
 mod mark_map;
 
 pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode: &mut Vec<u8>) {

@@ -1,5 +1,8 @@
 use crate::{
-    operation::{OpBuildError, OpExtraData, OperationKind, SetLargeConstData, SetSmallConstData},
+    operation::{
+        IRMemoryIOByteSize, OpBuildError, OpExtraData, OperationKind, SetLargeConstData,
+        SetSmallConstData,
+    },
     *,
 };
 use alloy_primitives::U256;
@@ -28,6 +31,7 @@ pub struct EthIRBuilder {
     pub(crate) basic_blocks: IndexVec<BasicBlockId, BasicBlock>,
     pub(crate) operations: IndexVec<OperationIdx, Operation>,
     pub(crate) data_segments: ListOfLists<DataId, u8>,
+    pub(crate) immutables: IndexVec<ImmutableId, IRMemoryIOByteSize>,
 
     // IR Data
     pub(crate) locals: IndexVec<LocalIdx, LocalId>,
@@ -47,6 +51,7 @@ impl EthIRBuilder {
             basic_blocks: IndexVec::new(),
             operations: IndexVec::new(),
             data_segments: ListOfLists::new(),
+            immutables: IndexVec::new(),
             locals: IndexVec::new(),
             large_consts: IndexVec::new(),
             cases: IndexVec::new(),
@@ -64,6 +69,7 @@ impl EthIRBuilder {
             basic_blocks: self.basic_blocks,
             operations: self.operations,
             data_segments: self.data_segments,
+            immutables: self.immutables,
             locals: self.locals,
             large_consts: self.large_consts,
             cases: self.cases,
@@ -106,6 +112,10 @@ impl EthIRBuilder {
 
     pub fn push_data_bytes(&mut self, bytes: &[u8]) -> DataId {
         self.data_segments.push_copy_slice(bytes)
+    }
+
+    pub fn new_immutable(&mut self, size: IRMemoryIOByteSize) -> ImmutableId {
+        self.immutables.push(size)
     }
 
     // Function builder

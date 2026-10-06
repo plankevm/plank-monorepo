@@ -34,6 +34,8 @@ pub trait OpVisitor<'d, VisitOut> {
     fn visit_set_small_const(&mut self, data: &'d SetSmallConstData) -> VisitOut;
     fn visit_set_large_const(&mut self, data: &'d SetLargeConstData) -> VisitOut;
     fn visit_set_data_offset(&mut self, data: &'d SetDataOffsetData) -> VisitOut;
+    fn visit_get_immutable(&mut self, data: &'d GetImmutableData) -> VisitOut;
+    fn visit_set_immutable(&mut self, data: &'d SetImmutableData) -> VisitOut;
     fn visit_icall(&mut self, data: &'d InternalCallData) -> VisitOut;
     fn visit_icall_never(&mut self, data: &'d InternalCallNeverData) -> VisitOut;
     fn visit_void(&mut self) -> VisitOut;
@@ -56,6 +58,8 @@ pub trait OpVisitorMut<'d, VisitOut> {
     fn visit_set_small_const_mut(self, data: &'d mut SetSmallConstData) -> VisitOut;
     fn visit_set_large_const_mut(self, data: &'d mut SetLargeConstData) -> VisitOut;
     fn visit_set_data_offset_mut(self, data: &'d mut SetDataOffsetData) -> VisitOut;
+    fn visit_get_immutable_mut(self, data: &'d mut GetImmutableData) -> VisitOut;
+    fn visit_set_immutable_mut(self, data: &'d mut SetImmutableData) -> VisitOut;
     fn visit_icall_mut(self, data: &'d mut InternalCallData) -> VisitOut;
     fn visit_icall_never_mut(self, data: &'d mut InternalCallNeverData) -> VisitOut;
     fn visit_void_mut(self) -> VisitOut;
@@ -97,6 +101,12 @@ impl<'a> OpVisitor<'a, &'a [LocalId]> for InputsGetter<'a> {
     }
     fn visit_set_data_offset(&mut self, _data: &'a SetDataOffsetData) -> &'a [LocalId] {
         &[]
+    }
+    fn visit_get_immutable(&mut self, _data: &'a GetImmutableData) -> &'a [LocalId] {
+        &[]
+    }
+    fn visit_set_immutable(&mut self, data: &'a SetImmutableData) -> &'a [LocalId] {
+        &data.ins
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> &'a [LocalId] {
         data.get_inputs(self.ir)
@@ -145,6 +155,12 @@ impl<'a> OpVisitor<'a, &'a [LocalId]> for OutputsGetter<'a> {
     }
     fn visit_set_data_offset(&mut self, data: &'a SetDataOffsetData) -> &'a [LocalId] {
         std::slice::from_ref(&data.sets)
+    }
+    fn visit_get_immutable(&mut self, data: &'a GetImmutableData) -> &'a [LocalId] {
+        std::slice::from_ref(&data.out)
+    }
+    fn visit_set_immutable(&mut self, _data: &'a SetImmutableData) -> &'a [LocalId] {
+        &[]
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> &'a [LocalId] {
         data.get_outputs(self.ir)
@@ -209,6 +225,10 @@ impl<F: FnMut(Span<LocalIdx>) -> LocalIdx> OpVisitorMut<'_, ()> for &mut Operati
 
     fn visit_set_data_offset_mut(self, _data: &mut SetDataOffsetData) {}
 
+    fn visit_get_immutable_mut(self, _data: &mut GetImmutableData) {}
+
+    fn visit_set_immutable_mut(self, _data: &mut SetImmutableData) {}
+
     fn visit_icall_mut(self, data: &mut InternalCallData) {
         let input_count = data.outs_start - data.ins_start;
         let old_operands = Span::new(data.ins_start, data.outputs_span(self.functions).end);
@@ -263,6 +283,14 @@ impl<'a> OpVisitorMut<'a, &'a mut [LocalId]> for InputsMutGetter<'a> {
 
     fn visit_set_data_offset_mut(self, _data: &'a mut SetDataOffsetData) -> &'a mut [LocalId] {
         &mut []
+    }
+
+    fn visit_get_immutable_mut(self, _data: &'a mut GetImmutableData) -> &'a mut [LocalId] {
+        &mut []
+    }
+
+    fn visit_set_immutable_mut(self, data: &'a mut SetImmutableData) -> &'a mut [LocalId] {
+        &mut data.ins
     }
 
     fn visit_icall_mut(self, data: &'a mut InternalCallData) -> &'a mut [LocalId] {
@@ -324,6 +352,14 @@ impl<'a> OpVisitorMut<'a, &'a mut [LocalId]> for OutputsMutGetter<'a> {
         std::slice::from_mut(&mut data.sets)
     }
 
+    fn visit_get_immutable_mut(self, data: &'a mut GetImmutableData) -> &'a mut [LocalId] {
+        std::slice::from_mut(&mut data.out)
+    }
+
+    fn visit_set_immutable_mut(self, _data: &'a mut SetImmutableData) -> &'a mut [LocalId] {
+        &mut []
+    }
+
     fn visit_icall_mut(self, data: &'a mut InternalCallData) -> &'a mut [LocalId] {
         &mut self.locals[data.outputs_span(self.functions)]
     }
@@ -375,6 +411,12 @@ impl<'a> OpVisitor<'a, AllocatedSpans> for AllocatedSpansGetter<'a> {
         AllocatedSpans::NONE
     }
     fn visit_set_data_offset(&mut self, _data: &'a SetDataOffsetData) -> AllocatedSpans {
+        AllocatedSpans::NONE
+    }
+    fn visit_get_immutable(&mut self, _data: &'a GetImmutableData) -> AllocatedSpans {
+        AllocatedSpans::NONE
+    }
+    fn visit_set_immutable(&mut self, _data: &'a SetImmutableData) -> AllocatedSpans {
         AllocatedSpans::NONE
     }
     fn visit_icall(&mut self, data: &'a InternalCallData) -> AllocatedSpans {
