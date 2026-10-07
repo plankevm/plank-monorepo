@@ -1,8 +1,8 @@
 use hashbrown::{HashMap, HashSet};
 use plank_core::DenseIndexSet;
 use sir_data::{
-    BasicBlockId, ControlView, EthIRProgram, FunctionId, ImmutableId, Operation, StaticAllocId,
-    operation::{InternalCallData, InternalCallNeverData, SetImmutableData},
+    BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId,
+    operation::{InternalCallData, InternalCallNeverData},
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 
@@ -17,13 +17,13 @@ impl BumpAllocateAll {
         ir: &EthIRProgram,
         entry_func: FunctionId,
         stack_ops: &ScheduledOps,
-        scratch_immutables: &DenseIndexSet<ImmutableId>,
+        immutables_need_scratch: bool,
         total_allocs_hint: usize,
     ) -> Layout {
         let mut layout_generator = MemoryLayoutCollector {
             ir,
             stack_ops,
-            scratch_immutables,
+            immutables_need_scratch,
             seen_functions: DenseIndexSet::with_capacity_in_bits(ir.functions.len()),
             seen_blocks: DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len()),
             function_worklist: Vec::with_capacity(ir.functions.len()),
@@ -71,8 +71,7 @@ impl StaticBumpTracker {
 struct MemoryLayoutCollector<'ir, 'ops> {
     ir: &'ir EthIRProgram,
     stack_ops: &'ops ScheduledOps,
-    /// Immutables whose `setimmutable` lowering uses the scratch slot.
-    scratch_immutables: &'ops DenseIndexSet<ImmutableId>,
+    immutables_need_scratch: bool,
     seen_functions: DenseIndexSet<FunctionId>,
     seen_blocks: DenseIndexSet<BasicBlockId>,
     function_worklist: Vec<FunctionId>,
@@ -144,9 +143,7 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
             {
                 self.function_worklist.push(function);
             }
-            Operation::SetImmutable(SetImmutableData { immutable, .. })
-                if self.scratch_immutables.contains(immutable) =>
-            {
+            Operation::SetImmutable(_) if self.immutables_need_scratch => {
                 self.alloc_scratch_slot();
             }
             _ => {}

@@ -108,16 +108,12 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
         let runtime_start = self.translator.mark_map.runtime_start;
         let scratch_slot = self.translator.memory_layout.scratch_slot;
         let copy_src = scratch_slot + EVM_WORD_IN_BYTES - size;
-        let mut value_staged = false;
+        self.translator.emit_local_load(data.value()); // [value]
+        self.translator.asm.push_minimal_u32(scratch_slot); // [scratch, value]
+        self.translator.asm.push_op_byte(op::MSTORE); // []
         for rel_placeholder in self.translator.immutable_refs.placeholders(data.immutable) {
             let placeholder = self.translator.mark_map.immutable_refs + rel_placeholder;
             let placeholder_offset = MarkReference::Delta(Span::new(runtime_start, placeholder));
-            if !value_staged {
-                value_staged = true;
-                self.translator.emit_local_load(data.value()); // [value]
-                self.translator.asm.push_minimal_u32(scratch_slot); // [scratch, value]
-                self.translator.asm.push_op_byte(op::MSTORE); // []
-            }
             self.translator.asm.push_minimal_u32(size); // [size]
             self.translator.asm.push_minimal_u32(copy_src); // [src, size]
             self.translator.emit_local_load(data.runtime_ptr()); // [runtime_ptr, src, size]

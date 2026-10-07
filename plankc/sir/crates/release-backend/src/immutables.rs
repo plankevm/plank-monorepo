@@ -1,7 +1,8 @@
 //! Immutables are compiled into `PUSH<size>` placeholders with zeroed immediates in the runtime
 //! code. `setimmutable` patches every placeholder of its immutable in the runtime code copy that
 //! initcode is assembling in memory (at `runtime_ptr`), so the copy must already be in place. Each
-//! placeholder is overwritten, a repeated `setimmutable` replaces the previously set value.
+//! placeholder is overwritten, a repeated `setimmutable` replaces the previously set value. An
+//! immutable without placeholders just has its operands popped.
 //!
 //! ## Write strategies
 //!
@@ -10,10 +11,11 @@
 //!
 //! | size     | strategy               | gas       |
 //! |----------|------------------------|-----------|
-//! | any, N=0 | discard                | 4         |
 //! | 32       | `mstore` each          | 15N - 6   |
 //! | 1        | `mstore8` each         | 15N - 6   |
 //! | 2..=31   | scratch + `mcopy` each | 21N + 9   |
+//!
+//! The scratch slot is reserved whenever the runtime references any immutable of a partial size.
 //!
 //! For partial sizes the value is `mstore`d to the scratch slot once (12 gas) and its low `size`
 //! bytes are then `mcopy`d into every placeholder (21 gas each, 18 for the last). Only the
@@ -22,7 +24,7 @@
 //! why it's not used for full words or single bytes. In all cases only the low `size` bytes of
 //! `value` end up in the placeholder.
 
-use plank_core::{DenseIndexSet, Idx, IndexVec, Span};
+use plank_core::{Idx, IndexVec, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{EthIRProgram, ImmutableId, operation::ByteSize};
 use sir_static_memory_allocator::EvmMemAddr;
@@ -33,18 +35,16 @@ const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WriteStrategy {
-    Discard,
     StoreEach { store_op: u8 },
     CopyFromScratch,
 }
 
 impl WriteStrategy {
-    pub fn select(size: ByteSize, placeholder_count: usize) -> Self {
-        match (size, placeholder_count) {
-            (_, 0) => Self::Discard,
-            (ByteSize::B32, _) => Self::StoreEach { store_op: op::MSTORE },
-            (ByteSize::B1, _) => Self::StoreEach { store_op: op::MSTORE8 },
-            (_, _) => Self::CopyFromScratch,
+    pub fn select(size: ByteSize) -> Self {
+        match size {
+            ByteSize::B32 => Self::StoreEach { store_op: op::MSTORE },
+            ByteSize::B1 => Self::StoreEach { store_op: op::MSTORE8 },
+            _ => Self::CopyFromScratch,
         }
     }
 }
@@ -93,16 +93,11 @@ impl ImmutableRefs {
         asm.push_placeholder_push(size, self.marks_start + self.ends[immutable]);
     }
 
-    /// The immutables whose `setimmutable` needs the scratch slot.
-    pub fn scratch_immutables(&self, ir: &EthIRProgram) -> DenseIndexSet<ImmutableId> {
-        let mut scratch_immutables = DenseIndexSet::with_capacity_in_bits(ir.immutables.len());
-        for (immutable, &size) in ir.immutables.enumerate_idx() {
-            let placeholder_count = self.placeholders(immutable).len() as usize;
-            if WriteStrategy::select(size, placeholder_count) == WriteStrategy::CopyFromScratch {
-                scratch_immutables.add(immutable);
-            }
-        }
-        scratch_immutables
+    pub fn needs_scratch(&self, ir: &EthIRProgram) -> bool {
+        ir.immutables.enumerate_idx().any(|(immutable, &size)| {
+            WriteStrategy::select(size) == WriteStrategy::CopyFromScratch
+                && !self.placeholders(immutable).is_empty()
+        })
     }
 
     pub fn emit_set(
@@ -120,14 +115,15 @@ impl ImmutableRefs {
             asm.push_reference(AsmReference::pushed(offset));
         };
 
+        let Some((&last, rest)) = placeholders.split_last() else {
+            asm.push_op_byte(op::POP);
+            asm.push_op_byte(op::POP);
+            return;
+        };
+
         // Stack comments show deepest => highest.
-        match WriteStrategy::select(size, placeholders.len()) {
-            WriteStrategy::Discard => {
-                asm.push_op_byte(op::POP);
-                asm.push_op_byte(op::POP);
-            }
+        match WriteStrategy::select(size) {
             WriteStrategy::StoreEach { store_op } => {
-                let (&last, rest) = placeholders.split_last().expect("no placeholders");
                 for &placeholder in rest {
                     // input: [value, ptr]
                     asm.push_op_byte(op::DUP2); //         [value, ptr, value]
@@ -141,7 +137,6 @@ impl ImmutableRefs {
                 asm.push_op_byte(store_op); //             []
             }
             WriteStrategy::CopyFromScratch => {
-                let (&last, rest) = placeholders.split_last().expect("no placeholders");
                 let scratch = scratch_slot.expect("missing setimmutable scratch slot").get();
                 let copy_size = size as u32;
                 let src = scratch + EVM_WORD_IN_BYTES - copy_size;
@@ -233,20 +228,16 @@ mod tests {
     #[test]
     fn strategy_selection() {
         use ByteSize as S;
-        assert_eq!(WriteStrategy::select(S::B32, 0), WriteStrategy::Discard);
-        assert_eq!(WriteStrategy::select(S::B7, 0), WriteStrategy::Discard);
         assert_eq!(
-            WriteStrategy::select(S::B32, 3),
+            WriteStrategy::select(S::B32),
             WriteStrategy::StoreEach { store_op: op::MSTORE }
         );
         assert_eq!(
-            WriteStrategy::select(S::B1, 3),
+            WriteStrategy::select(S::B1),
             WriteStrategy::StoreEach { store_op: op::MSTORE8 }
         );
-        assert_eq!(WriteStrategy::select(S::B2, 1), WriteStrategy::CopyFromScratch);
-        assert_eq!(WriteStrategy::select(S::B31, 1), WriteStrategy::CopyFromScratch);
-        assert_eq!(WriteStrategy::select(S::B2, 2), WriteStrategy::CopyFromScratch);
-        assert_eq!(WriteStrategy::select(S::B31, 5), WriteStrategy::CopyFromScratch);
+        assert_eq!(WriteStrategy::select(S::B2), WriteStrategy::CopyFromScratch);
+        assert_eq!(WriteStrategy::select(S::B31), WriteStrategy::CopyFromScratch);
     }
 
     #[test]
@@ -284,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn discard_unreferenced() {
+    fn pop_unreferenced() {
         assert_set_asm(
             ByteSize::B7,
             0,

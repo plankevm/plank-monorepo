@@ -364,8 +364,6 @@ fn main:
   no memory past the end of the copy is accessed.
 - Only the low `size` bytes of `value` are written (big-endian), any higher bits are ignored.
 - Setting an immutable again overwrites its placeholders with the new value.
-- If no `getimmutable` for an immutable is reachable from `main`, its `setimmutable` compiles to a
-  no-op.
 
 ## Grammar Notes
 

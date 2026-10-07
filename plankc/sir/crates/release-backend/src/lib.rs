@@ -1,5 +1,5 @@
 use crate::codegen_orchestrator::InitcodeEmitted;
-use plank_core::{DenseIndexSet, Idx};
+use plank_core::Idx;
 use sir_data::EthIRProgram;
 use sir_passes::AnalysesStore;
 use sir_stack_scheduling::{self, ScheduleConfig};
@@ -29,12 +29,12 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
     let (stack_ops, _layouts, last_alloc_id) =
         sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
     let in_progress_codegen =
-        InitcodeEmitted::emit_init(program, &stack_ops, |scratch_immutables| {
+        InitcodeEmitted::emit_init(program, &stack_ops, |immutables_need_scratch| {
             BumpAllocateAll::generate(
                 program,
                 program.init_entry,
                 &stack_ops,
-                scratch_immutables,
+                immutables_need_scratch,
                 last_alloc_id.idx(),
             )
         });
@@ -45,7 +45,7 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
                 program,
                 runtime_entrypoint,
                 &stack_ops,
-                &DenseIndexSet::new(),
+                false,
                 last_alloc_id.idx(),
             );
             in_progress_codegen.finish_with_runcode(runtime_entrypoint, run_memory_layout)

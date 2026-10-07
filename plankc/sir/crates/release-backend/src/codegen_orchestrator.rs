@@ -6,7 +6,7 @@ use crate::{
 use hashbrown::HashSet;
 use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{Assembler, MarkId, MarkReference};
-use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, ImmutableId, Operation};
+use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Operation};
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
 
@@ -103,7 +103,7 @@ impl<'a> InitcodeEmitted<'a> {
     pub fn emit_init(
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
-        generate_init_memory_layout: impl FnOnce(&DenseIndexSet<ImmutableId>) -> static_mem::Layout,
+        generate_init_memory_layout: impl FnOnce(bool) -> static_mem::Layout,
     ) -> Self {
         let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_START_CAPACITY);
@@ -127,8 +127,7 @@ impl<'a> InitcodeEmitted<'a> {
             None => DenseIndexSet::new(),
         };
 
-        let init_memory_layout =
-            generate_init_memory_layout(&immutable_refs.scratch_immutables(ir));
+        let init_memory_layout = generate_init_memory_layout(immutable_refs.needs_scratch(ir));
         let mut emitter = CodeToAsmEmitter::new(
             ir,
             ops,
