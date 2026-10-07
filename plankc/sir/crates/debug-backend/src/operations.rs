@@ -1,11 +1,10 @@
 use crate::{Translator, static_memory_layout::EVM_WORD_IN_BYTES};
 use plank_core::Span;
 use sir_assembler::{AsmReference, MarkReference, op};
-use sir_data::{LocalId, OperationIdx, operation::*};
+use sir_data::{LocalId, operation::*};
 
 struct OpcodeTranslator<'t, 'ir> {
     translator: &'t mut Translator<'ir>,
-    op_idx: OperationIdx,
 }
 
 impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
@@ -95,15 +94,8 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
     fn emit_get_immutable(&mut self, data: GetImmutableData) {
         assert!(!self.translator.translating_init_code, "getimmutable in init code");
         let size = self.translator.ir.immutables[data.immutable];
-        let imm_ref = self
-            .translator
-            .immutable_refs
-            .iter_mut()
-            .find(|imm_ref| imm_ref.get_op == self.op_idx)
-            .expect("getimmutable not collected as runtime reference");
-        assert!(!imm_ref.emitted, "getimmutable placeholder emitted twice");
-        imm_ref.emitted = true;
-        let placeholder = imm_ref.placeholder;
+        let placeholder = self.translator.mark_map.immutable_refs
+            + self.translator.immutable_refs.take_placeholder(data.immutable);
         self.translator.asm.push_placeholder_push(size, placeholder);
         self.translator.emit_local_store(data.out);
     }
@@ -117,13 +109,9 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
         let scratch_slot = self.translator.memory_layout.scratch_slot;
         let copy_src = scratch_slot + EVM_WORD_IN_BYTES - size;
         let mut value_staged = false;
-        for i in 0..self.translator.immutable_refs.len() {
-            let imm_ref = &self.translator.immutable_refs[i];
-            if imm_ref.immutable != data.immutable {
-                continue;
-            }
-            let placeholder_offset =
-                MarkReference::Delta(Span::new(runtime_start, imm_ref.placeholder));
+        for rel_placeholder in self.translator.immutable_refs.placeholders(data.immutable) {
+            let placeholder = self.translator.mark_map.immutable_refs + rel_placeholder;
+            let placeholder_offset = MarkReference::Delta(Span::new(runtime_start, placeholder));
             if !value_staged {
                 value_staged = true;
                 self.translator.emit_local_load(data.value()); // [value]
@@ -179,12 +167,8 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
     }
 }
 
-pub(crate) fn translate_operation(
-    translator: &mut Translator,
-    op_idx: OperationIdx,
-    op: Operation,
-) {
-    let mut t = OpcodeTranslator { translator, op_idx };
+pub(crate) fn translate_operation(translator: &mut Translator, op: Operation) {
+    let mut t = OpcodeTranslator { translator };
     if let Some(evm_op) = op.kind().as_literal_evm_op() {
         let ir = t.translator.ir;
         t.emit_simple_operation(evm_op, op.inputs(ir), op.outputs(ir));

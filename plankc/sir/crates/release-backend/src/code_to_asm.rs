@@ -247,7 +247,7 @@ impl<'a> CodeToAsmEmitter<'a> {
                     "use of `getimmutable` outside of runtime code"
                 );
                 let size = self.ir.immutables[get.immutable];
-                self.immutable_refs.emit_placeholder(&mut self.asm, size, op_idx);
+                self.immutable_refs.emit_placeholder(&mut self.asm, size, get.immutable);
             }
             Operation::SetImmutable(set) => {
                 assert!(

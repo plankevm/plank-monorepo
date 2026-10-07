@@ -1,8 +1,7 @@
-use plank_core::{DenseIndexSet, Idx, IncIterable, Span};
+use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span, index_vec};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
     BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, ImmutableId, LocalId, Operation,
-    OperationIdx,
 };
 
 use crate::static_memory_layout::StaticMemoryLayout;
@@ -18,12 +17,13 @@ pub(crate) struct MarkMap {
     run_basic_block_marks_start: MarkId,
     data_marks_start: MarkId,
     runtime_start: MarkId,
+    immutable_refs: MarkId,
     initcode_end: MarkId,
     next_mark_id: MarkId,
 }
 
 impl MarkMap {
-    fn new(ir: &EthIRProgram) -> Self {
+    fn new(ir: &EthIRProgram, total_immutable_refs: u32) -> Self {
         let mut next_mark_id = MarkId::ZERO;
 
         let init_basic_block_marks_start = next_mark_id;
@@ -36,6 +36,10 @@ impl MarkMap {
         next_mark_id += ir.data_segments.len() as u32;
 
         let runtime_start = next_mark_id.get_and_inc();
+
+        let immutable_refs = next_mark_id;
+        next_mark_id += total_immutable_refs;
+
         let bytecode_end = next_mark_id.get_and_inc();
 
         Self {
@@ -43,6 +47,7 @@ impl MarkMap {
             run_basic_block_marks_start,
             data_marks_start,
             runtime_start,
+            immutable_refs,
             initcode_end: bytecode_end,
             next_mark_id,
         }
@@ -65,30 +70,46 @@ impl MarkMap {
     }
 }
 
-/// A `getimmutable` in the runtime code whose placeholder `PUSH` immediate starts at `placeholder`.
-pub(crate) struct ImmutableRef {
-    pub immutable: ImmutableId,
-    pub get_op: OperationIdx,
-    pub placeholder: MarkId,
-    pub emitted: bool,
+/// Per immutable, the end of its contiguous range of placeholder marks relative to
+/// `MarkMap::immutable_refs`. Translating a `getimmutable` takes a placeholder by decrementing the
+/// end, so `placeholders` is only valid before runtime code is translated.
+pub(crate) struct ImmutableRefs {
+    ends: IndexVec<ImmutableId, u32>,
 }
 
-fn collect_immutable_refs(ir: &EthIRProgram, mark_map: &mut MarkMap) -> Vec<ImmutableRef> {
-    let mut refs = Vec::new();
-    let Some(main_entry) = ir.main_entry else { return refs };
-    let mut visited = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
-    let mut worklist = Vec::new();
-    ir.for_each_reachable_operation(main_entry, &mut visited, &mut worklist, |op| {
-        if let Operation::GetImmutable(get) = op.op() {
-            refs.push(ImmutableRef {
-                immutable: get.immutable,
-                get_op: op.id(),
-                placeholder: mark_map.allocate_mark(),
-                emitted: false,
+impl ImmutableRefs {
+    fn collect_from(ir: &EthIRProgram) -> ImmutableRefs {
+        let mut ends = index_vec![0; ir.immutables.len()];
+        if let Some(main_entry) = ir.main_entry {
+            let mut visited = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
+            let mut worklist = Vec::new();
+            ir.for_each_reachable_operation(main_entry, &mut visited, &mut worklist, |op| {
+                if let Operation::GetImmutable(get) = op.op() {
+                    ends[get.immutable] += 1;
+                }
             });
         }
-    });
-    refs
+        let mut end = 0;
+        for count in ends.iter_mut() {
+            end += *count;
+            *count = end;
+        }
+        ImmutableRefs { ends }
+    }
+
+    fn total_refs(&self) -> u32 {
+        self.ends.last().copied().unwrap_or(0)
+    }
+
+    pub fn take_placeholder(&mut self, immutable: ImmutableId) -> u32 {
+        self.ends[immutable] -= 1;
+        self.ends[immutable]
+    }
+
+    pub fn placeholders(&self, immutable: ImmutableId) -> std::ops::Range<u32> {
+        let start = self.ends[ImmutableId::ZERO..immutable].last().copied().unwrap_or(0);
+        start..self.ends[immutable]
+    }
 }
 
 pub(crate) struct Translator<'ir> {
@@ -99,7 +120,7 @@ pub(crate) struct Translator<'ir> {
     pub bbs_to_be_translated: Vec<(FunctionId, BasicBlockId)>,
     pub translating_init_code: bool,
     pub asm: Assembler,
-    pub immutable_refs: Vec<ImmutableRef>,
+    pub immutable_refs: ImmutableRefs,
 }
 
 impl<'ir> Translator<'ir> {
@@ -132,8 +153,8 @@ impl<'ir> Translator<'ir> {
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
         let translated_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let bbs_to_be_translated = Vec::with_capacity(8);
-        let mut mark_map = MarkMap::new(ir);
-        let immutable_refs = collect_immutable_refs(ir, &mut mark_map);
+        let immutable_refs = ImmutableRefs::collect_from(ir);
+        let mark_map = MarkMap::new(ir, immutable_refs.total_refs());
         Self {
             ir,
             memory_layout,
@@ -178,7 +199,7 @@ impl<'ir> Translator<'ir> {
             let block = self.ir.block(bb_id);
             self.memory_layout.emit_transfer_basic_block_outputs(&mut self.asm, block.inputs());
             for op_view in block.operations() {
-                operations::translate_operation(self, op_view.id(), op_view.op());
+                operations::translate_operation(self, op_view.op());
             }
             self.memory_layout.emit_copy_for_basic_block_inputs(&mut self.asm, block.outputs());
 
@@ -245,11 +266,6 @@ pub fn ir_to_bytecode(ir: &EthIRProgram, result: &mut Vec<u8>) {
     if let Some(main_entry) = ir.main_entry {
         translator.translate_basic_blocks_from_entry_point(main_entry);
     }
-
-    assert!(
-        translator.immutable_refs.iter().all(|imm_ref| imm_ref.emitted),
-        "immutable placeholder collected but never emitted"
-    );
 
     for (data_id, bytes) in ir.data_segments.enumerate_idx() {
         let mark = translator.mark_map.get_data_mark(data_id);

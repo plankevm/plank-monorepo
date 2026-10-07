@@ -4,7 +4,7 @@ use crate::{
     mark_map::{IndexableMarkSpan, MarkMap},
 };
 use hashbrown::HashSet;
-use plank_core::{DenseIndexSet, IncIterable, Span};
+use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{Assembler, MarkId, MarkReference};
 use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, ImmutableId, Operation};
 use sir_stack_scheduling::ScheduledOps;
@@ -91,11 +91,12 @@ fn collect_runtime_references(
                 runtime_datas.add(set_data.segment_id);
             }
             Operation::GetImmutable(get) => {
-                immutable_refs.push(get.immutable, op.id(), next_mark_id.get_and_inc());
+                immutable_refs.count_ref(get.immutable);
             }
             _ => {}
         }
     });
+    immutable_refs.alloc_marks(next_mark_id);
 }
 
 impl<'a> InitcodeEmitted<'a> {
@@ -107,7 +108,7 @@ impl<'a> InitcodeEmitted<'a> {
         let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_START_CAPACITY);
         let mut mark_map = MarkMap::new(ir);
-        let mut immutable_refs = ImmutableRefs::default();
+        let mut immutable_refs = ImmutableRefs::new(ir);
         let runtime_datas = match ir.main_entry {
             Some(runtime_entrypoint) => {
                 let mut runtime_datas =
@@ -172,7 +173,6 @@ impl<'a> InitcodeEmitted<'a> {
 
         emitter.asm.push_mark(emitter.mark_map.runcode_start);
         emitter.emit_from_entrypoint(&mut state, runtime_entrypoint);
-        emitter.immutable_refs.assert_all_emitted();
         for data in runtime_datas.iter() {
             emitter.asm.push_mark(emitter.mark_map.datas.get(data));
             emitter.asm.push_data(&emitter.ir.data_segments[data]);

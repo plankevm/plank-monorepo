@@ -22,9 +22,9 @@
 //! why it's not used for full words or single bytes. In all cases only the low `size` bytes of
 //! `value` end up in the placeholder.
 
-use plank_core::{DenseIndexSet, Span};
+use plank_core::{DenseIndexSet, Idx, IndexVec, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{EthIRProgram, ImmutableId, OperationIdx, operation::ByteSize};
+use sir_data::{EthIRProgram, ImmutableId, operation::ByteSize};
 use sir_static_memory_allocator::EvmMemAddr;
 use smallvec::SmallVec;
 
@@ -49,56 +49,60 @@ impl WriteStrategy {
     }
 }
 
+/// Placeholder marks of the `getimmutable` operations reachable from the runtime entry point,
+/// contiguous per immutable. `ends` holds each immutable's range end relative to `marks_start`;
+/// emitting a placeholder takes it by decrementing the end, so `placeholders` is only valid before
+/// runcode is emitted.
 #[derive(Debug)]
-struct ImmutableRef {
-    immutable: ImmutableId,
-    get_op: OperationIdx,
-    placeholder: MarkId,
-    emitted: bool,
-}
-
-/// The `getimmutable` operations reachable from the runtime entry point, each with the mark of its
-/// placeholder's immediate.
-#[derive(Debug, Default)]
 pub(crate) struct ImmutableRefs {
-    refs: Vec<ImmutableRef>,
+    marks_start: MarkId,
+    ends: IndexVec<ImmutableId, u32>,
 }
 
 impl ImmutableRefs {
-    pub fn push(&mut self, immutable: ImmutableId, get_op: OperationIdx, placeholder: MarkId) {
-        self.refs.push(ImmutableRef { immutable, get_op, placeholder, emitted: false });
+    pub fn new(ir: &EthIRProgram) -> Self {
+        Self { marks_start: MarkId::ZERO, ends: IndexVec::from_vec(vec![0; ir.immutables.len()]) }
     }
 
-    pub fn emit_placeholder(&mut self, asm: &mut Assembler, size: ByteSize, op: OperationIdx) {
-        let imm_ref = self
-            .refs
-            .iter_mut()
-            .find(|imm_ref| imm_ref.get_op == op)
-            .expect("getimmutable not collected as runtime reference");
-        assert!(!imm_ref.emitted, "getimmutable placeholder emitted twice");
-        imm_ref.emitted = true;
-        asm.push_placeholder_push(size, imm_ref.placeholder);
+    pub fn count_ref(&mut self, immutable: ImmutableId) {
+        self.ends[immutable] += 1;
+    }
+
+    pub fn alloc_marks(&mut self, next_mark_id: &mut MarkId) {
+        let mut end = 0;
+        for count in self.ends.iter_mut() {
+            end += *count;
+            *count = end;
+        }
+        self.marks_start = *next_mark_id;
+        *next_mark_id += end;
+    }
+
+    fn placeholders(&self, immutable: ImmutableId) -> Span<MarkId> {
+        let start = self.ends[ImmutableId::ZERO..immutable].last().copied().unwrap_or(0);
+        Span::new(self.marks_start + start, self.marks_start + self.ends[immutable])
+    }
+
+    pub fn emit_placeholder(
+        &mut self,
+        asm: &mut Assembler,
+        size: ByteSize,
+        immutable: ImmutableId,
+    ) {
+        self.ends[immutable] -= 1;
+        asm.push_placeholder_push(size, self.marks_start + self.ends[immutable]);
     }
 
     /// The immutables whose `setimmutable` needs the scratch slot.
     pub fn scratch_immutables(&self, ir: &EthIRProgram) -> DenseIndexSet<ImmutableId> {
         let mut scratch_immutables = DenseIndexSet::with_capacity_in_bits(ir.immutables.len());
-        for imm_ref in &self.refs {
-            let size = ir.immutables[imm_ref.immutable];
-            if WriteStrategy::select(size, 1) == WriteStrategy::CopyFromScratch {
-                scratch_immutables.add(imm_ref.immutable);
+        for (immutable, &size) in ir.immutables.enumerate_idx() {
+            let placeholder_count = self.placeholders(immutable).len() as usize;
+            if WriteStrategy::select(size, placeholder_count) == WriteStrategy::CopyFromScratch {
+                scratch_immutables.add(immutable);
             }
         }
         scratch_immutables
-    }
-
-    /// Every collected placeholder mark must be placed, otherwise `setimmutable` would patch
-    /// whatever code ends up at the unplaced mark's default offset.
-    pub fn assert_all_emitted(&self) {
-        assert!(
-            self.refs.iter().all(|imm_ref| imm_ref.emitted),
-            "immutable placeholder collected but never emitted"
-        );
     }
 
     pub fn emit_set(
@@ -109,12 +113,8 @@ impl ImmutableRefs {
         immutable: ImmutableId,
         size: ByteSize,
     ) {
-        let placeholders: SmallVec<[MarkId; PLACEHOLDERS_INLINE_CAPACITY]> = self
-            .refs
-            .iter()
-            .filter(|imm_ref| imm_ref.immutable == immutable)
-            .map(|imm_ref| imm_ref.placeholder)
-            .collect();
+        let placeholders: SmallVec<[MarkId; PLACEHOLDERS_INLINE_CAPACITY]> =
+            self.placeholders(immutable).iter().collect();
         let push_offset = |asm: &mut Assembler, placeholder: MarkId| {
             let offset = MarkReference::Delta(Span::new(runcode_start, placeholder));
             asm.push_reference(AsmReference::pushed(offset));
@@ -171,7 +171,7 @@ impl ImmutableRefs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plank_core::{Idx, IncIterable};
+    use plank_core::IncIterable;
 
     fn static_gas(code: &[u8]) -> u32 {
         let mut gas = 0;
@@ -209,20 +209,20 @@ mod tests {
         let mut next_mark = MarkId::ZERO;
         let runcode_start = next_mark.get_and_inc();
         let immutable = ImmutableId::new(0);
-        let mut refs = ImmutableRefs::default();
-        for i in 0..ref_count {
-            refs.push(immutable, OperationIdx::new(i), next_mark.get_and_inc());
-        }
-        refs.push(ImmutableId::new(1), OperationIdx::new(ref_count), next_mark.get_and_inc());
+        let mut refs = ImmutableRefs {
+            marks_start: MarkId::ZERO,
+            ends: IndexVec::from_vec(vec![ref_count, 1]),
+        };
+        refs.alloc_marks(&mut next_mark);
 
         let mut asm = Assembler::with_capacity(256, 32);
         refs.emit_set(&mut asm, runcode_start, Some(TEST_SCRATCH_SLOT), immutable, size);
         asm.push_mark(runcode_start);
         for i in 0..=ref_count {
-            refs.emit_placeholder(&mut asm, size, OperationIdx::new(i));
+            let emitted = if i < ref_count { immutable } else { ImmutableId::new(1) };
+            refs.emit_placeholder(&mut asm, size, emitted);
             asm.push_op_byte(op::POP);
         }
-        refs.assert_all_emitted();
 
         let mut code = Vec::new();
         let mark_offsets = asm.assemble(&mut code, Some(next_mark.idx())).unwrap();
@@ -316,11 +316,11 @@ mod tests {
               MSTORE
             .mark0:
               PUSH32 0x (truncated)
-            .mark1:
+            .mark2:
               data 0x0000000000000000000000000000000000000000000000000000000000000000 (32 bytes)
               POP
               PUSH32 0x (truncated)
-            .mark2:
+            .mark1:
               data 0x0000000000000000000000000000000000000000000000000000000000000000 (32 bytes)
               POP
               PUSH32 0x (truncated)
@@ -347,11 +347,11 @@ mod tests {
               MSTORE8
             .mark0:
               PUSH1 0x (truncated)
-            .mark1:
+            .mark2:
               data 0x00 (1 bytes)
               POP
               PUSH1 0x (truncated)
-            .mark2:
+            .mark1:
               data 0x00 (1 bytes)
               POP
               PUSH1 0x (truncated)
@@ -419,7 +419,7 @@ mod tests {
               MCOPY
             .mark0:
               PUSH7 0x (truncated)
-            .mark1:
+            .mark3:
               data 0x00000000000000 (7 bytes)
               POP
               PUSH7 0x (truncated)
@@ -427,7 +427,7 @@ mod tests {
               data 0x00000000000000 (7 bytes)
               POP
               PUSH7 0x (truncated)
-            .mark3:
+            .mark1:
               data 0x00000000000000 (7 bytes)
               POP
               PUSH7 0x (truncated)
