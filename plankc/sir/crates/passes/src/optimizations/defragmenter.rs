@@ -76,6 +76,8 @@ impl<'a> Rewriter<'a> {
 
         self.patch_block_control();
 
+        // Immutable IDs are kept stable as their declarations are part of the program's interface.
+        self.dst.immutables.clone_from(&self.src.immutables);
         self.dst.init_entry = self.state.function_map[&self.src.init_entry];
         self.dst.main_entry = self.src.main_entry.map(|m| self.state.function_map[&m]);
     }
@@ -463,6 +465,61 @@ mod tests {
             "#,
         );
         assert_eq!(Legalizer::default().run(&ir, &store), Ok(()));
+    }
+
+    #[test]
+    fn test_preserves_immutables() {
+        let input = r#"
+            immutable unused 4
+            immutable used 20
+            fn init:
+                entry {
+                    ptr = freeptr
+                    value = caller
+                    setimmutable %used ptr value
+                    stop
+                }
+            fn main:
+                entry {
+                    value = getimmutable %used
+                    key = const 0
+                    sstore key value
+                    stop
+                }
+        "#;
+        let mut ir = parse_or_panic(input, EmitConfig::default());
+        let store = AnalysesStore::default();
+        run_pass(&mut Defragmenter::default(), &mut ir, &store);
+        Legalizer::default().run(&ir, &store).unwrap();
+
+        assert_ir_display(
+            &ir,
+            r#"
+            Init: @1
+            Run: @0
+            Functions:
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @1  (never)
+
+            Basic Blocks:
+                @0 {
+                    $0 = getimmutable %1
+                    $1 = const 0x0
+                    sstore $1 $0
+                    stop
+                }
+
+                @1 {
+                    $2 = freeptr
+                    $3 = caller
+                    setimmutable %1 $2 $3
+                    stop
+                }
+
+            immutable %0 4
+            immutable %1 20
+            "#,
+        );
     }
 
     #[test]

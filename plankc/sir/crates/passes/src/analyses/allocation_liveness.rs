@@ -107,6 +107,9 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
             value == local
         }
         Operation::InternalCall(_) | Operation::InternalCallNever(_) => true,
+        // Writes at `runtime_ptr + offset` for offsets only known at codegen and bakes `value`
+        // into the deployed code.
+        Operation::SetImmutable(_) => true,
 
         Operation::Add(_)
         | Operation::Mul(_)
@@ -173,7 +176,8 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
         | Operation::Noop(())
         | Operation::RuntimeStartOffset(_)
         | Operation::InitEndOffset(_)
-        | Operation::RuntimeLength(_) => false,
+        | Operation::RuntimeLength(_)
+        | Operation::GetImmutable(_) => false,
     }
 }
 

@@ -185,7 +185,10 @@ impl Effect {
             | OperationKind::Noop
             | OperationKind::RuntimeStartOffset
             | OperationKind::InitEndOffset
-            | OperationKind::RuntimeLength => Effect::PURE,
+            | OperationKind::RuntimeLength
+            | OperationKind::GetImmutable => Effect::PURE,
+
+            OperationKind::SetImmutable => Effect::MEMORY_WRITE,
         };
 
         Ok(e)

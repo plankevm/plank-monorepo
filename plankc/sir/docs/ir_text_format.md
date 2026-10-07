@@ -17,11 +17,13 @@ This grammar uses regex-style operators: `*` (zero or more), `+` (one or more), 
 ### Program Structure
 
 ```ebnf
-program          = (function | data_segment)*
+program          = (function | data_segment | immutable_def)*
 
 function         = "fn" ident ":" newline basic_block+
 
 data_segment     = "data" ident hex_lit newline
+
+immutable_def    = "immutable" ident number newline   // size in bytes, 1..=32
 ```
 
 ### Basic Blocks
@@ -50,6 +52,7 @@ mnemonic         = ident
 param            = ident        // local variable reference
                  | label        // function/block reference
                  | data_ref     // data segment reference
+                 | immutable_ref // immutable reference
                  | number       // immediate value
 ```
 
@@ -87,12 +90,13 @@ block_comment    = "/*" (any_char - "*/")* "*/"
 comment          = line_comment | block_comment
 
 // Keywords
-keyword          = "fn" | "data" | "switch" | "default" | "iret"
+keyword          = "fn" | "data" | "immutable" | "switch" | "default" | "iret"
 
 // Identifiers
 ident            = (letter | "_") (letter | digit | "_")*
 label            = "@" ident
 data_ref         = "." ident
+immutable_ref    = "%" (letter | digit | "_")+
 
 // Literals
 decimal_lit      = digit+
@@ -154,6 +158,9 @@ Where `<N>` is a bit size from 8-256 in multiples of 8 (e.g., `mload256`, `mstor
 
 ### IR Intrinsics
 `runtime_start_offset`, `init_end_offset`, `runtime_length`, `icall`, `noop`
+
+### Immutables
+`getimmutable %name` (main only), `setimmutable %name runtime_ptr value` (init only, requires a main)
 
 ## Parser Usage
 
@@ -317,6 +324,46 @@ fn main:
         stop
     }
 ```
+
+### Immutables
+
+Immutables are values set by initcode and baked into the deployed runtime code. Unlike Solidity
+they may be smaller than 32 bytes.
+
+```
+immutable owner 20
+
+fn init:
+    entry {
+        off = runtime_start_offset
+        len = runtime_length
+        buf = malloc len
+        codecopy buf off len
+        who = caller
+        setimmutable %owner buf who
+        return buf len
+    }
+
+fn main:
+    entry {
+        owner = getimmutable %owner
+        // ...
+        stop
+    }
+```
+
+- `getimmutable` may only be used in functions reachable from `main` and not from `init`.
+- `setimmutable` may only be used in functions reachable from `init` and not from `main`, and only
+  if the program has a `main`.
+- `runtime_ptr` must point to a full copy of the runtime code already in memory (the
+  `runtime_length` bytes starting at `runtime_start_offset`) that was obtained from an allocation
+  (`malloc`, `salloc`, ...). This is not checked: any other pointer is undefined behavior, the patch
+  writes at the placeholder offsets relative to `runtime_ptr` and will clobber whatever memory is
+  there.
+- Only the placeholder bytes of the runtime copy are written: adjacent runtime code is untouched and
+  no memory past the end of the copy is accessed.
+- Only the low `size` bytes of `value` are written (big-endian), any higher bits are ignored.
+- Setting an immutable again overwrites its placeholders with the new value.
 
 ## Grammar Notes
 

@@ -1,14 +1,12 @@
 use crate::{
     code_to_asm::{CodeToAsmEmitter, CodegenState},
+    immutables::ImmutableRefs,
     mark_map::{IndexableMarkSpan, MarkMap},
 };
 use hashbrown::HashSet;
 use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{Assembler, MarkId, MarkReference};
-use sir_data::{
-    BasicBlockId, DataId, EthIRProgram, FunctionId, Operation,
-    operation::{InternalCallData, InternalCallNeverData},
-};
+use sir_data::{BasicBlockId, DataId, EthIRProgram, FunctionId, Operation};
 use sir_stack_scheduling::ScheduledOps;
 use sir_static_memory_allocator as static_mem;
 
@@ -78,58 +76,50 @@ impl CodegenState for EmitRuncode {
     }
 }
 
-fn collect_runtime_datas(
+fn collect_runtime_references(
     ir: &EthIRProgram,
     visited_bbs: &mut DenseIndexSet<BasicBlockId>,
     basic_blocks_worklist: &mut Vec<BasicBlockId>,
     runtime_datas: &mut DenseIndexSet<DataId>,
+    immutable_refs: &mut ImmutableRefs,
+    next_mark_id: &mut MarkId,
     runtime_entrypoint: FunctionId,
 ) {
-    let entry_bb = ir.function(runtime_entrypoint).entry().id();
-    visited_bbs.add(entry_bb);
-    basic_blocks_worklist.push(entry_bb);
-    while let Some(bb_id) = basic_blocks_worklist.pop() {
-        let block = ir.block(bb_id);
-        for op in block.operations() {
-            match op.op() {
-                Operation::SetDataOffset(set_data) => {
-                    runtime_datas.add(set_data.segment_id);
-                }
-                Operation::InternalCall(InternalCallData { function, .. })
-                | Operation::InternalCallNever(InternalCallNeverData { function, .. }) => {
-                    let fn_entry = ir.functions[function].entry();
-                    if visited_bbs.add(fn_entry) {
-                        basic_blocks_worklist.push(fn_entry);
-                    }
-                }
-                _ => {}
+    ir.for_each_reachable_operation(runtime_entrypoint, visited_bbs, basic_blocks_worklist, |op| {
+        match op.op() {
+            Operation::SetDataOffset(set_data) => {
+                runtime_datas.add(set_data.segment_id);
             }
-        }
-        for succ in block.successors() {
-            if visited_bbs.add(succ) {
-                basic_blocks_worklist.push(succ);
+            Operation::GetImmutable(get) => {
+                immutable_refs.count_ref(get.immutable);
             }
+            _ => {}
         }
-    }
+    });
+    immutable_refs.alloc_marks(next_mark_id);
 }
 
 impl<'a> InitcodeEmitted<'a> {
     pub fn emit_init(
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
-        init_memory_layout: static_mem::Layout,
+        generate_init_memory_layout: impl FnOnce(bool) -> static_mem::Layout,
     ) -> Self {
         let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_START_CAPACITY);
+        let mut mark_map = MarkMap::new(ir);
+        let mut immutable_refs = ImmutableRefs::new(ir);
         let runtime_datas = match ir.main_entry {
             Some(runtime_entrypoint) => {
                 let mut runtime_datas =
                     DenseIndexSet::with_capacity_in_bits(ir.data_segments.len());
-                collect_runtime_datas(
+                collect_runtime_references(
                     ir,
                     &mut visited_bbs,
                     &mut basic_blocks_worklist,
                     &mut runtime_datas,
+                    &mut immutable_refs,
+                    &mut mark_map.next_mark_id,
                     runtime_entrypoint,
                 );
                 runtime_datas
@@ -137,7 +127,15 @@ impl<'a> InitcodeEmitted<'a> {
             None => DenseIndexSet::new(),
         };
 
-        let mut emitter = CodeToAsmEmitter::new(ir, ops, visited_bbs, basic_blocks_worklist);
+        let init_memory_layout = generate_init_memory_layout(immutable_refs.needs_scratch(ir));
+        let mut emitter = CodeToAsmEmitter::new(
+            ir,
+            ops,
+            mark_map,
+            immutable_refs,
+            visited_bbs,
+            basic_blocks_worklist,
+        );
         let mut state = EmitInitcode {
             memory: init_memory_layout,
             init_only_data: HashSet::with_capacity(INIT_ONLY_DATAS_START_CAPACITY),

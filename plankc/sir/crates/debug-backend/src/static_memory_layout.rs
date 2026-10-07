@@ -2,7 +2,7 @@ use plank_core::Idx;
 use sir_assembler::{Assembler, op};
 use sir_data::{EthIRProgram, FunctionId, LocalId};
 
-const EVM_WORD_IN_BYTES: u32 = 0x20;
+pub(crate) const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 type EvmMemAddr = u32;
 
@@ -19,7 +19,9 @@ impl StaticMemoryAllocator for EvmMemAddr {
 }
 
 pub struct StaticMemoryLayout {
-    pub switch_store: EvmMemAddr,
+    /// Shared by `Switch` lowering and `setimmutable`, neither keeps it live past its own control
+    /// transfer / operation.
+    pub scratch_slot: EvmMemAddr,
     pub free_pointer: EvmMemAddr,
     pub basic_block_locals_transfer: EvmMemAddr,
     pub locals_start: EvmMemAddr,
@@ -30,7 +32,7 @@ pub struct StaticMemoryLayout {
 impl StaticMemoryLayout {
     pub fn new(ir: &EthIRProgram) -> Self {
         let mut next_free = 0;
-        let switch_store = next_free.alloc_bytes(EVM_WORD_IN_BYTES);
+        let scratch_slot = next_free.alloc_bytes(EVM_WORD_IN_BYTES);
         let free_pointer = next_free.alloc_bytes(EVM_WORD_IN_BYTES);
 
         let max_locals_transfer = ir
@@ -47,7 +49,7 @@ impl StaticMemoryLayout {
             next_free.alloc_bytes(ir.functions.len() as u32 * EVM_WORD_IN_BYTES);
 
         Self {
-            switch_store,
+            scratch_slot,
             free_pointer,
             basic_block_locals_transfer,
             locals_start,

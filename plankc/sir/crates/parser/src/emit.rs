@@ -6,10 +6,10 @@ use bumpalo::{
 };
 use plank_core::IndexVec;
 use sir_data::{
-    BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, LocalId, OpaqueSourceId,
-    Operation,
+    BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, ImmutableId, LocalId,
+    OpaqueSourceId, Operation,
     builder::{BuildError, EthIRBuilder},
-    operation::{OpBuildError, OpExtraData, OperationKind},
+    operation::{ByteSize, OpBuildError, OpExtraData, OperationKind},
 };
 use smallvec::SmallVec;
 use std::collections::{HashMap, hash_map::Entry};
@@ -103,7 +103,7 @@ macro_rules! format_in {
 
 fn param_supplies_extra(kind: OperationKind, param: &ParamExpr<'_, '_>) -> bool {
     match param {
-        ParamExpr::FuncRef(_) | ParamExpr::DataRef(_) => true,
+        ParamExpr::FuncRef(_) | ParamExpr::DataRef(_) | ParamExpr::ImmutableRef(_) => true,
         ParamExpr::Num(_) => matches!(
             kind,
             OperationKind::SetSmallConst
@@ -196,6 +196,34 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
             return Err(SirAstSemaError {
                 spans: arena.alloc([data_def.name.span(), other.span()]),
                 reason: format_in!(arena, "Duplicate data definition: {:?}", name),
+            });
+        }
+    }
+
+    let mut immutable_names: HashMap<&'src str, Spanned<ImmutableId>> =
+        HashMap::with_capacity(ast.immutables.len());
+    for immutable_def in &ast.immutables {
+        let name = immutable_def.name.inner;
+        let Some(size) =
+            u8::try_from(immutable_def.size.inner).ok().and_then(ByteSize::try_from_u8)
+        else {
+            return Err(SirAstSemaError {
+                spans: arena.alloc([immutable_def.size.span()]),
+                reason: format_in!(
+                    arena,
+                    "Immutable {:?} size {} not in valid range [1; 32]",
+                    name,
+                    immutable_def.size.inner
+                ),
+            });
+        };
+        let id = ir_builder.new_immutable(size);
+        if let Some(other) =
+            immutable_names.insert(name, Spanned::new(id, immutable_def.name.span()))
+        {
+            return Err(SirAstSemaError {
+                spans: arena.alloc([immutable_def.name.span(), other.span()]),
+                reason: format_in!(arena, "Duplicate immutable definition: {:?}", name),
             });
         }
     }
@@ -359,7 +387,10 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                                 bb_builder.add_set_const_op(local, num.inner);
                                 local
                             }
-                            ParamExpr::FuncRef(_) | ParamExpr::DataRef(_) | ParamExpr::Num(_) => {
+                            ParamExpr::FuncRef(_)
+                            | ParamExpr::DataRef(_)
+                            | ParamExpr::ImmutableRef(_)
+                            | ParamExpr::Num(_) => {
                                 continue;
                             }
                         };
@@ -407,6 +438,24 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                                         ),
                                     }),
                             ),
+                            ParamExpr::ImmutableRef(immutable_ref) => Some(
+                                immutable_names
+                                    .get(immutable_ref.inner)
+                                    .map(|immutable| {
+                                        Spanned::new(
+                                            OpExtraData::ImmutableId(immutable.inner),
+                                            immutable_ref.span(),
+                                        )
+                                    })
+                                    .ok_or_else(|| SirAstSemaError {
+                                        spans: arena.alloc([immutable_ref.span()]),
+                                        reason: format_in!(
+                                            arena,
+                                            "Undefined immutable {:?}",
+                                            immutable_ref.inner
+                                        ),
+                                    }),
+                            ),
                             ParamExpr::Num(num) if param_supplies_extra(kind, param) => {
                                 Some(Ok(Spanned::new(OpExtraData::Num(num.inner), num.span())))
                             }
@@ -417,7 +466,10 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
                     if let Some(another_extra) = extras.next().transpose()? {
                         return Err(SirAstSemaError {
                             spans: arena.alloc([another_extra.span()]),
-                            reason: format_in!(arena, "Max one @func/.data/<num> per op accepted"),
+                            reason: format_in!(
+                                arena,
+                                "Max one @func/.data/%immutable/<num> per op accepted"
+                            ),
                         });
                     }
 

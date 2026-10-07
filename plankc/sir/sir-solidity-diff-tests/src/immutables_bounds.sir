@@ -1,0 +1,43 @@
+immutable b1 1
+immutable b2 2
+immutable b31 31
+immutable b32 32
+
+fn init:
+    entry {
+        runtime_off = runtime_start_offset
+        runtime_len = runtime_length
+        buf = const 0x10000
+        codecopy buf runtime_off runtime_len
+        zero = const 0
+        v = calldataload zero
+        setimmutable %b1 buf v
+        setimmutable %b31 buf v
+        setimmutable %b32 buf v
+        setimmutable %b2 buf v
+        return buf runtime_len
+    }
+
+fn main:
+    entry {
+        out = sallocany 192
+        b1 = getimmutable %b1
+        mstore256 out b1
+        b31_a = getimmutable %b31
+        p1 = add out 32
+        mstore256 p1 b31_a
+        b32 = getimmutable %b32
+        p2 = add out 64
+        mstore256 p2 b32
+        b31_b = getimmutable %b31
+        p3 = add out 96
+        mstore256 p3 b31_b
+        b2_a = getimmutable %b2
+        p4 = add out 128
+        mstore256 p4 b2_a
+        b2_b = getimmutable %b2
+        p5 = add out 160
+        mstore256 p5 b2_b
+        len = const 192
+        return out len
+    }

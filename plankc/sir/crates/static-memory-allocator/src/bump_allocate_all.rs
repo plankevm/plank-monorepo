@@ -17,18 +17,20 @@ impl BumpAllocateAll {
         ir: &EthIRProgram,
         entry_func: FunctionId,
         stack_ops: &ScheduledOps,
+        immutables_need_scratch: bool,
         total_allocs_hint: usize,
     ) -> Layout {
         let mut layout_generator = MemoryLayoutCollector {
             ir,
             stack_ops,
+            immutables_need_scratch,
             seen_functions: DenseIndexSet::with_capacity_in_bits(ir.functions.len()),
             seen_blocks: DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len()),
             function_worklist: Vec::with_capacity(ir.functions.len()),
             block_worklist: Vec::with_capacity(ir.basic_blocks.len()),
             bump: StaticBumpTracker { next_free: EvmMemAddr::new(0) },
             dyn_free_pointer: None,
-            switch_store: None,
+            scratch_slot: None,
             alloc_start: HashMap::with_capacity(total_allocs_hint),
             alloc_needs_zeroing: HashSet::with_capacity(total_allocs_hint),
         };
@@ -44,7 +46,7 @@ impl BumpAllocateAll {
                 store_slot,
                 start_value: layout_generator.bump.next_free,
             }),
-            switch_store: layout_generator.switch_store,
+            scratch_slot: layout_generator.scratch_slot,
             alloc_start: layout_generator.alloc_start,
             alloc_needs_zeroing: layout_generator.alloc_needs_zeroing,
         }
@@ -69,13 +71,14 @@ impl StaticBumpTracker {
 struct MemoryLayoutCollector<'ir, 'ops> {
     ir: &'ir EthIRProgram,
     stack_ops: &'ops ScheduledOps,
+    immutables_need_scratch: bool,
     seen_functions: DenseIndexSet<FunctionId>,
     seen_blocks: DenseIndexSet<BasicBlockId>,
     function_worklist: Vec<FunctionId>,
     block_worklist: Vec<BasicBlockId>,
     bump: StaticBumpTracker,
     dyn_free_pointer: Option<EvmMemAddr>,
-    switch_store: Option<EvmMemAddr>,
+    scratch_slot: Option<EvmMemAddr>,
     alloc_start: HashMap<StaticAllocId, EvmMemAddr>,
     alloc_needs_zeroing: HashSet<StaticAllocId>,
 }
@@ -110,10 +113,8 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
                 }
             }
 
-            if let ControlView::Switch(_) = block.control()
-                && self.switch_store.is_none()
-            {
-                self.switch_store = Some(self.bump.alloc(EVM_WORD_IN_BYTES));
+            if let ControlView::Switch(_) = block.control() {
+                self.alloc_scratch_slot();
             }
 
             self.block_worklist
@@ -142,7 +143,16 @@ impl<'ir, 'ops> MemoryLayoutCollector<'ir, 'ops> {
             {
                 self.function_worklist.push(function);
             }
+            Operation::SetImmutable(_) if self.immutables_need_scratch => {
+                self.alloc_scratch_slot();
+            }
             _ => {}
+        }
+    }
+
+    fn alloc_scratch_slot(&mut self) {
+        if self.scratch_slot.is_none() {
+            self.scratch_slot = Some(self.bump.alloc(EVM_WORD_IN_BYTES));
         }
     }
 

@@ -30,7 +30,9 @@ pub struct DynFreePointer {
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub dyn_free_pointer: Option<DynFreePointer>,
-    pub switch_store: Option<EvmMemAddr>,
+    /// Word shared by `Switch` lowering and `setimmutable` patching. Both only use it within a
+    /// single control transfer / operation, so their uses never overlap.
+    pub scratch_slot: Option<EvmMemAddr>,
     pub alloc_start: HashMap<StaticAllocId, EvmMemAddr>,
     pub alloc_needs_zeroing: HashSet<StaticAllocId>,
 }
