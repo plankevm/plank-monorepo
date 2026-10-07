@@ -4,8 +4,6 @@ use sir_data::{LocalId, operation::*};
 
 struct OpcodeTranslator<'t, 'ir> {
     translator: &'t mut Translator<'ir>,
-    op_kind: OperationKind,
-    evm_op: Option<u8>,
 }
 
 impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
@@ -48,82 +46,8 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
         self.translator.asm.push_op_byte(op::MSTORE); // [free_ptr]
         self.translator.emit_local_store(ptr_out_local);
     }
-}
 
-impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
-    fn visit_inline_operands<const INS: usize, const OUTS: usize>(
-        &mut self,
-        operands: &'d InlineOperands<INS, OUTS>,
-    ) {
-        match self.op_kind {
-            OperationKind::DynamicAllocZeroed | OperationKind::DynamicAllocAnyBytes => {
-                self.emit_dynamic_memory_alloc(operands.ins[0], operands.outs[0])
-            }
-            OperationKind::AcquireFreePointer => {
-                self.translator.emit_free_ptr_load();
-                self.translator.emit_local_store(operands.outs[0]);
-            }
-            OperationKind::SetCopy => {
-                self.translator.emit_local_load(operands.ins[0]);
-                self.translator.emit_local_store(operands.outs[0]);
-            }
-            OperationKind::RuntimeStartOffset => {
-                debug_assert!(
-                    self.translator.translating_init_code,
-                    "unexpected runtime_start_offset in run code"
-                );
-                self.translator.asm.push_reference(AsmReference::new_direct(
-                    self.translator.mark_map.runtime_start,
-                ));
-                self.translator.emit_local_store(operands.outs[0]);
-            }
-            OperationKind::InitEndOffset => {
-                debug_assert!(
-                    self.translator.translating_init_code,
-                    "unexpected init_end_offset in run code"
-                );
-                self.translator.asm.push_reference(AsmReference::new_direct(
-                    self.translator.mark_map.initcode_end,
-                ));
-                self.translator.emit_local_store(operands.outs[0]);
-            }
-            OperationKind::RuntimeLength => {
-                self.translator.asm.push_reference(AsmReference::new_delta(
-                    self.translator.mark_map.runtime_start,
-                    self.translator.mark_map.initcode_end,
-                ));
-                self.translator.emit_local_store(operands.outs[0])
-            }
-            _ => {
-                let evm_op = self
-                    .evm_op
-                    .unwrap_or_else(|| panic!("Expected {:?} to be EVM op", self.op_kind));
-                self.emit_simple_operation(evm_op, &operands.ins, &operands.outs);
-            }
-        }
-    }
-
-    fn visit_allocated_ins<const INS: usize, const OUTS: usize>(
-        &mut self,
-        data: &'d AllocatedIns<INS, OUTS>,
-    ) {
-        let evm_op = self.evm_op.expect("all allocated input operand ops to be EVM");
-        self.emit_simple_operation(evm_op, data.get_inputs(self.translator.ir), &data.outs);
-    }
-
-    fn visit_void(&mut self) {
-        if let Some(evm_op) = self.evm_op {
-            self.translator.asm.push_op_byte(evm_op);
-        } else {
-            debug_assert_eq!(self.op_kind, OperationKind::Noop, "expected only noop to have void");
-        };
-    }
-
-    fn visit_static_alloc(&mut self, data: &'d StaticAllocData) {
-        self.emit_static_memory_alloc(data.size, data.ptr_out);
-    }
-
-    fn visit_memory_load(&mut self, data: &'d MemoryLoadData) {
+    fn emit_memory_load(&mut self, data: MemoryLoadData) {
         let load_size = data.size as u32;
         self.translator.emit_local_load(data.ptr);
         self.translator.asm.push_op_byte(op::MLOAD);
@@ -132,7 +56,7 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
         self.translator.emit_local_store(data.out);
     }
 
-    fn visit_memory_store(&mut self, data: &'d MemoryStoreData) {
+    fn emit_memory_store(&mut self, data: MemoryStoreData) {
         let load_size = data.size as u32;
         let shift_to_clean_word = load_size * 8;
         self.translator.emit_local_load(data.ptr()); // [ptr]
@@ -150,23 +74,23 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
         self.translator.asm.push_op_byte(op::MSTORE); // []
     }
 
-    fn visit_set_small_const(&mut self, data: &'d SetSmallConstData) {
+    fn emit_set_small_const(&mut self, data: SetSmallConstData) {
         self.translator.asm.push_minimal_u32(data.value);
         self.translator.emit_local_store(data.sets);
     }
 
-    fn visit_set_large_const(&mut self, data: &'d SetLargeConstData) {
+    fn emit_set_large_const(&mut self, data: SetLargeConstData) {
         self.translator.asm.push_minimal_u256(self.translator.ir.large_consts[data.value]);
         self.translator.emit_local_store(data.sets);
     }
 
-    fn visit_set_data_offset(&mut self, data: &'d SetDataOffsetData) {
+    fn emit_set_data_offset(&mut self, data: SetDataOffsetData) {
         let data_offset_mark = self.translator.mark_map.get_data_mark(data.segment_id);
         self.translator.emit_code_offset_push(data_offset_mark);
         self.translator.emit_local_store(data.sets);
     }
 
-    fn visit_icall(&mut self, data: &'d InternalCallData) {
+    fn emit_icall(&mut self, data: InternalCallData) {
         self.translator.memory_layout.emit_copy_for_basic_block_inputs(
             &mut self.translator.asm,
             data.get_inputs(self.translator.ir),
@@ -192,7 +116,7 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
         self.translator.bbs_to_be_translated.push((data.function, func_entry_bb));
     }
 
-    fn visit_icall_never(&mut self, data: &'d InternalCallNeverData) {
+    fn emit_icall_never(&mut self, data: InternalCallNeverData) {
         self.translator.memory_layout.emit_copy_for_basic_block_inputs(
             &mut self.translator.asm,
             data.get_inputs(self.translator.ir),
@@ -207,7 +131,63 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
 }
 
 pub(crate) fn translate_operation(translator: &mut Translator, op: Operation) {
-    let evm_op = op.kind().as_literal_evm_op();
-    let mut opcode_translator = OpcodeTranslator { translator, op_kind: op.kind(), evm_op };
-    op.visit_data(&mut opcode_translator);
+    let mut t = OpcodeTranslator { translator };
+    if let Some(evm_op) = op.kind().as_literal_evm_op() {
+        let ir = t.translator.ir;
+        t.emit_simple_operation(evm_op, op.inputs(ir), op.outputs(ir));
+        return;
+    }
+
+    match op {
+        Operation::DynamicAllocZeroed(data) | Operation::DynamicAllocAnyBytes(data) => {
+            t.emit_dynamic_memory_alloc(data.ins[0], data.outs[0])
+        }
+        Operation::AcquireFreePointer(data) => {
+            t.translator.emit_free_ptr_load();
+            t.translator.emit_local_store(data.outs[0]);
+        }
+        Operation::SetCopy(data) => {
+            t.translator.emit_local_load(data.ins[0]);
+            t.translator.emit_local_store(data.outs[0]);
+        }
+        Operation::RuntimeStartOffset(data) => {
+            debug_assert!(
+                t.translator.translating_init_code,
+                "unexpected runtime_start_offset in run code"
+            );
+            t.translator
+                .asm
+                .push_reference(AsmReference::new_direct(t.translator.mark_map.runtime_start));
+            t.translator.emit_local_store(data.outs[0]);
+        }
+        Operation::InitEndOffset(data) => {
+            debug_assert!(
+                t.translator.translating_init_code,
+                "unexpected init_end_offset in run code"
+            );
+            t.translator
+                .asm
+                .push_reference(AsmReference::new_direct(t.translator.mark_map.initcode_end));
+            t.translator.emit_local_store(data.outs[0]);
+        }
+        Operation::RuntimeLength(data) => {
+            t.translator.asm.push_reference(AsmReference::new_delta(
+                t.translator.mark_map.runtime_start,
+                t.translator.mark_map.initcode_end,
+            ));
+            t.translator.emit_local_store(data.outs[0])
+        }
+        Operation::Noop(()) => {}
+        Operation::StaticAllocZeroed(data) | Operation::StaticAllocAnyBytes(data) => {
+            t.emit_static_memory_alloc(data.size, data.ptr_out)
+        }
+        Operation::MemoryLoad(data) => t.emit_memory_load(data),
+        Operation::MemoryStore(data) => t.emit_memory_store(data),
+        Operation::SetSmallConst(data) => t.emit_set_small_const(data),
+        Operation::SetLargeConst(data) => t.emit_set_large_const(data),
+        Operation::SetDataOffset(data) => t.emit_set_data_offset(data),
+        Operation::InternalCall(data) => t.emit_icall(data),
+        Operation::InternalCallNever(data) => t.emit_icall_never(data),
+        _ => unreachable!("op neither 'special' or literal EVM: {:?}", op.kind()),
+    }
 }
