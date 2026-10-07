@@ -1,12 +1,13 @@
 pub mod effects;
 pub mod op_data;
-mod op_fmt;
-pub mod op_visitor;
 
-use crate::{EthIRProgram, builder::EthIRBuilder, index::LocalId};
+use crate::{
+    EthIRProgram, Function,
+    builder::EthIRBuilder,
+    index::{FunctionId, LocalId, LocalIdx, OperationIdx},
+};
 pub use op_data::*;
-use op_fmt::OpFormatter;
-pub use op_visitor::*;
+use plank_core::{IndexVec, Span};
 use std::fmt;
 
 macro_rules! define_operations {
@@ -26,26 +27,58 @@ macro_rules! define_operations {
                 }
             }
 
-            pub fn visit_data<'d, O, V: OpVisitor<'d, O>>(&'d self, visitor: &mut V) -> O {
+            pub fn inputs<'a>(&'a self, ir: &'a EthIRProgram) -> &'a [LocalId] {
                 match self {
-                    $(Self::$name(data) => data.get_visited(visitor),)+
+                    $(Self::$name(data) => data.inputs(ir),)+
                 }
             }
 
-            pub fn visit_data_mut<'d, O, V: OpVisitorMut<'d, O>>(&'d mut self, visitor: V) -> O {
+            pub fn outputs<'a>(&'a self, ir: &'a EthIRProgram) -> &'a [LocalId] {
                 match self {
-                    $(Self::$name(data) => data.get_visited_mut(visitor),)+
+                    $(Self::$name(data) => data.outputs(ir),)+
+                }
+            }
+
+            pub fn inputs_mut<'a>(
+                &'a mut self,
+                locals: &'a mut IndexVec<LocalIdx, LocalId>,
+            ) -> &'a mut [LocalId] {
+                match self {
+                    $(Self::$name(data) => data.inputs_mut(locals),)+
+                }
+            }
+
+            pub fn outputs_mut<'a>(
+                &'a mut self,
+                locals: &'a mut IndexVec<LocalIdx, LocalId>,
+                functions: &'a IndexVec<FunctionId, Function>,
+            ) -> &'a mut [LocalId] {
+                match self {
+                    $(Self::$name(data) => data.outputs_mut(locals, functions),)+
+                }
+            }
+
+            pub fn allocated_spans(&self, ir: &EthIRProgram) -> AllocatedSpans {
+                match self {
+                    $(Self::$name(data) => data.allocated_spans(ir),)+
+                }
+            }
+
+            fn clone_allocated(
+                &mut self,
+                functions: &IndexVec<FunctionId, Function>,
+                mut clone_span: impl FnMut(Span<LocalIdx>) -> LocalIdx,
+            ) {
+                match self {
+                    $(Self::$name(data) => data.clone_allocated(functions, &mut clone_span),)+
                 }
             }
 
             pub fn op_fmt(&self, f: &mut impl fmt::Write, ir: &EthIRProgram) -> fmt::Result {
                 let mnemonic = self.kind().mnemonic();
-                let mut formatter = OpFormatter {
-                    ir,
-                    write: f,
-                    mnemonic,
-                };
-                self.visit_data(&mut formatter)
+                match self {
+                    $(Self::$name(data) => data.fmt_op(f, ir, mnemonic),)+
+                }
             }
 
             pub fn try_build(kind: OperationKind, ins: &[LocalId], outs: &[LocalId], extra: OpExtraData, builder: &mut EthIRBuilder) -> Result<Self, OpBuildError> {
@@ -485,45 +518,6 @@ impl OperationKind {
     }
 }
 
-use crate::{
-    Function,
-    index::{FunctionId, LocalIdx, OperationIdx},
-};
-use op_visitor::{
-    AllocatedSpansGetter, InputsGetter, InputsMutGetter, OperationCloner, OutputsGetter,
-    OutputsMutGetter,
-};
-use plank_core::{IndexVec, Span};
-
-impl Operation {
-    pub fn inputs<'a>(&'a self, ir: &'a EthIRProgram) -> &'a [LocalId] {
-        self.visit_data(&mut InputsGetter { ir })
-    }
-
-    pub fn outputs<'a>(&'a self, ir: &'a EthIRProgram) -> &'a [LocalId] {
-        self.visit_data(&mut OutputsGetter { ir })
-    }
-
-    pub fn inputs_mut<'a>(
-        &'a mut self,
-        locals: &'a mut IndexVec<LocalIdx, LocalId>,
-    ) -> &'a mut [LocalId] {
-        self.visit_data_mut(InputsMutGetter { locals })
-    }
-
-    pub fn outputs_mut<'a>(
-        &'a mut self,
-        locals: &'a mut IndexVec<LocalIdx, LocalId>,
-        functions: &'a IndexVec<FunctionId, Function>,
-    ) -> &'a mut [LocalId] {
-        self.visit_data_mut(OutputsMutGetter { locals, functions })
-    }
-
-    pub fn allocated_spans(&self, ir: &EthIRProgram) -> AllocatedSpans {
-        self.visit_data(&mut AllocatedSpansGetter { ir })
-    }
-}
-
 impl EthIRProgram {
     /// Returns a copy of `operation` whose arena-backed data is stored in `destination`.
     pub fn clone_operation_into(
@@ -532,28 +526,22 @@ impl EthIRProgram {
         destination: &mut EthIRProgram,
     ) -> Operation {
         let mut cloned = self.operations[operation];
-        cloned.visit_data_mut(&mut OperationCloner::new(
-            &self.functions,
-            |span: Span<LocalIdx>| {
-                let start = destination.locals.next_idx();
-                destination.locals.extend(self.locals[span].iter().copied());
-                start
-            },
-        ));
+        cloned.clone_allocated(&self.functions, |span| {
+            let start = destination.locals.next_idx();
+            destination.locals.extend(self.locals[span].iter().copied());
+            start
+        });
         cloned
     }
 
     /// Clones an operation and its arena-backed operands within the same `EthIRProgram`.
     pub fn clone_operation(&mut self, operation: OperationIdx) -> OperationIdx {
         let mut cloned = self.operations[operation];
-        cloned.visit_data_mut(&mut OperationCloner::new(
-            &self.functions,
-            |span: Span<LocalIdx>| {
-                let start = self.locals.next_idx();
-                self.locals.extend_from_within(span.usize_range());
-                start
-            },
-        ));
+        cloned.clone_allocated(&self.functions, |span| {
+            let start = self.locals.next_idx();
+            self.locals.extend_from_within(span.usize_range());
+            start
+        });
         self.operations.push(cloned)
     }
 }
