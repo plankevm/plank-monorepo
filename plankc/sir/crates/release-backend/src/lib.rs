@@ -7,6 +7,7 @@ use sir_static_memory_allocator::BumpAllocateAll;
 
 mod code_to_asm;
 mod codegen_orchestrator;
+mod immutables;
 mod mark_map;
 
 pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode: &mut Vec<u8>) {
@@ -27,16 +28,24 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
 
     let (stack_ops, _layouts, last_alloc_id) =
         sir_stack_scheduling::schedule(program, analyses, ScheduleConfig::PRE_AMSTERDAM);
-    let init_memory_layout =
-        BumpAllocateAll::generate(program, program.init_entry, &stack_ops, last_alloc_id.idx());
-
-    let in_progress_codegen = InitcodeEmitted::emit_init(program, &stack_ops, init_memory_layout);
+    let in_progress_codegen =
+        InitcodeEmitted::emit_init(program, &stack_ops, |immutables_need_scratch| {
+            BumpAllocateAll::generate(
+                program,
+                program.init_entry,
+                &stack_ops,
+                immutables_need_scratch,
+                last_alloc_id.idx(),
+            )
+        });
     let (asm, marks) = match program.main_entry {
         Some(runtime_entrypoint) => {
+            // `setimmutable` is init-only, the runtime never needs scratch space for it.
             let run_memory_layout = BumpAllocateAll::generate(
                 program,
                 runtime_entrypoint,
                 &stack_ops,
+                false,
                 last_alloc_id.idx(),
             );
             in_progress_codegen.finish_with_runcode(runtime_entrypoint, run_memory_layout)

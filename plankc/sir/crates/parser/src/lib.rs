@@ -888,4 +888,172 @@ data .1 0xdeadbeef
 
         assert_parse_format(input, expected, EmitConfig::init_only());
     }
+
+    const IMMUTABLES_SOURCE: &str = r#"
+        immutable owner 20
+        fn init:
+            entry {
+                off = runtime_start_offset
+                len = runtime_length
+                buf = malloc len
+                codecopy buf off len
+                who = caller
+                setimmutable %owner buf who
+                setimmutable %flag buf 1
+                return buf len
+            }
+
+        immutable flag 1
+
+        fn main:
+            entry {
+                o = getimmutable %owner
+                f = getimmutable %flag
+                w = getimmutable %word
+                stop
+            }
+        data payload 0xdeadbeef
+
+        immutable word 32
+    "#;
+
+    #[test]
+    fn test_immutables_parse_and_display() {
+        let expected = r#"
+Init: @0
+Run: @1
+Functions:
+    fn @0 -> entry @0  (never)
+    fn @1 -> entry @1  (never)
+
+Basic Blocks:
+    @0 {
+        $0 = runtime_start_offset
+        $1 = runtime_length
+        $2 = malloc $1
+        codecopy $2 $0 $1
+        $3 = caller
+        setimmutable %0 $2 $3
+        $4 = const 0x1
+        setimmutable %1 $2 $4
+        return $2 $1
+    }
+
+    @1 {
+        $5 = getimmutable %0
+        $6 = getimmutable %1
+        $7 = getimmutable %2
+        stop
+    }
+
+data .0 0xdeadbeef
+immutable %0 20
+immutable %1 1
+immutable %2 32
+        "#;
+
+        assert_parse_format(IMMUTABLES_SOURCE, expected, EmitConfig::default());
+    }
+
+    #[test]
+    fn test_immutables_text_roundtrip() {
+        let program = parse_or_panic(IMMUTABLES_SOURCE, EmitConfig::default());
+        let printed = program.to_string();
+        assert_eq!(
+            printed,
+            r#"fn init:
+    bb0 {
+        v0 = runtime_start_offset
+        v1 = runtime_length
+        v2 = malloc v1
+        codecopy v2 v0 v1
+        v3 = caller
+        setimmutable %i0 v2 v3
+        v4 = const 1
+        setimmutable %i1 v2 v4
+        return v2 v1
+    }
+fn main:
+    bb1 {
+        v5 = getimmutable %i0
+        v6 = getimmutable %i1
+        v7 = getimmutable %i2
+        stop
+    }
+
+immutable i0 20
+immutable i1 1
+immutable i2 32
+"#
+        );
+
+        let reparsed = parse_or_panic(&printed, EmitConfig::default());
+        assert_eq!(reparsed.immutables.as_raw_slice(), program.immutables.as_raw_slice());
+        assert_eq!(reparsed.to_string(), printed);
+    }
+
+    #[test]
+    fn test_error_undefined_immutable() {
+        let source = r#"
+            fn init:
+                entry {
+                    stop
+                }
+            fn main:
+                entry {
+                    x = getimmutable %missing
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::default()).unwrap_err();
+        assert_eq!(err, r#"Undefined immutable "missing""#);
+    }
+
+    #[test]
+    fn test_error_duplicate_immutable() {
+        let source = r#"
+            immutable a 4
+            immutable a 8
+            fn init:
+                entry {
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(err, r#"Duplicate immutable definition: "a""#);
+    }
+
+    #[test]
+    fn test_error_immutable_size_out_of_range() {
+        for (size, shown) in [("0", "0"), ("33", "33"), ("0x100", "256")] {
+            let source = format!(
+                r#"
+                immutable a {size}
+                fn init:
+                    entry {{
+                        stop
+                    }}
+                "#
+            );
+            let err = parse_to_result(&source, EmitConfig::init_only()).unwrap_err();
+            assert_eq!(err, format!(r#"Immutable "a" size {shown} not in valid range [1; 32]"#));
+        }
+    }
+
+    #[test]
+    fn test_error_getimmutable_without_reference() {
+        let source = r#"
+            fn init:
+                entry {
+                    stop
+                }
+            fn main:
+                entry {
+                    x = getimmutable
+                    stop
+                }
+        "#;
+        let err = parse_to_result(source, EmitConfig::default()).unwrap_err();
+        assert_eq!(err, r#"Operation "getimmutable" expects extra =ImmutableId, got: Empty"#);
+    }
 }

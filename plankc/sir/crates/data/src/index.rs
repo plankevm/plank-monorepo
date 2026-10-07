@@ -11,6 +11,7 @@ newtype_index! {
     pub struct LargeConstId;
     pub struct CasesId;
     pub struct StaticAllocId;
+    pub struct ImmutableId;
 
     pub struct OpaqueSourceId;
 }

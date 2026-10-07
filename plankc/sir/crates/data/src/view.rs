@@ -1,7 +1,9 @@
 use crate::{
     BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, LargeConstId, LocalId,
     OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter, ReturnKind,
+    operation::{InternalCallData, InternalCallNeverData},
 };
+use plank_core::DenseIndexSet;
 use std::fmt;
 
 #[derive(Clone, Copy)]
@@ -237,5 +239,40 @@ impl EthIRProgram {
 
     pub fn operations(&self) -> impl Iterator<Item = OperationView<'_>> {
         self.operations.iter_idx().map(move |id| OperationView { id, ir: self })
+    }
+
+    /// Visits every operation in the blocks reachable from `entry`, following both control flow
+    /// and internal calls. `visited` and `worklist` are scratch buffers, cleared before use.
+    pub fn for_each_reachable_operation<'ir>(
+        &'ir self,
+        entry: FunctionId,
+        visited: &mut DenseIndexSet<BasicBlockId>,
+        worklist: &mut Vec<BasicBlockId>,
+        mut visit: impl FnMut(OperationView<'ir>),
+    ) {
+        visited.clear();
+        worklist.clear();
+        let entry_bb = self.functions[entry].entry();
+        visited.add(entry_bb);
+        worklist.push(entry_bb);
+        while let Some(bb_id) = worklist.pop() {
+            let block = self.block(bb_id);
+            for op in block.operations() {
+                if let Operation::InternalCall(InternalCallData { function, .. })
+                | Operation::InternalCallNever(InternalCallNeverData { function, .. }) = op.op()
+                {
+                    let fn_entry = self.functions[function].entry();
+                    if visited.add(fn_entry) {
+                        worklist.push(fn_entry);
+                    }
+                }
+                visit(op);
+            }
+            for succ in block.successors() {
+                if visited.add(succ) {
+                    worklist.push(succ);
+                }
+            }
+        }
     }
 }

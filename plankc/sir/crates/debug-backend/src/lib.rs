@@ -1,6 +1,8 @@
-use plank_core::{DenseIndexSet, Idx, IncIterable, Span};
+use plank_core::{DenseIndexSet, Idx, IncIterable, IndexVec, Span, index_vec};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, LocalId};
+use sir_data::{
+    BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, ImmutableId, LocalId, Operation,
+};
 
 use crate::static_memory_layout::StaticMemoryLayout;
 
@@ -15,12 +17,13 @@ pub(crate) struct MarkMap {
     run_basic_block_marks_start: MarkId,
     data_marks_start: MarkId,
     runtime_start: MarkId,
+    immutable_refs: MarkId,
     initcode_end: MarkId,
     next_mark_id: MarkId,
 }
 
 impl MarkMap {
-    fn new(ir: &EthIRProgram) -> Self {
+    fn new(ir: &EthIRProgram, total_immutable_refs: u32) -> Self {
         let mut next_mark_id = MarkId::ZERO;
 
         let init_basic_block_marks_start = next_mark_id;
@@ -33,6 +36,10 @@ impl MarkMap {
         next_mark_id += ir.data_segments.len() as u32;
 
         let runtime_start = next_mark_id.get_and_inc();
+
+        let immutable_refs = next_mark_id;
+        next_mark_id += total_immutable_refs;
+
         let bytecode_end = next_mark_id.get_and_inc();
 
         Self {
@@ -40,6 +47,7 @@ impl MarkMap {
             run_basic_block_marks_start,
             data_marks_start,
             runtime_start,
+            immutable_refs,
             initcode_end: bytecode_end,
             next_mark_id,
         }
@@ -62,6 +70,48 @@ impl MarkMap {
     }
 }
 
+/// Per immutable, the end of its contiguous range of placeholder marks relative to
+/// `MarkMap::immutable_refs`. Translating a `getimmutable` takes a placeholder by decrementing the
+/// end, so `placeholders` is only valid before runtime code is translated.
+pub(crate) struct ImmutableRefs {
+    ends: IndexVec<ImmutableId, u32>,
+}
+
+impl ImmutableRefs {
+    fn collect_from(ir: &EthIRProgram) -> ImmutableRefs {
+        let mut ends = index_vec![0; ir.immutables.len()];
+        if let Some(main_entry) = ir.main_entry {
+            let mut visited = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
+            let mut worklist = Vec::new();
+            ir.for_each_reachable_operation(main_entry, &mut visited, &mut worklist, |op| {
+                if let Operation::GetImmutable(get) = op.op() {
+                    ends[get.immutable] += 1;
+                }
+            });
+        }
+        let mut end = 0;
+        for count in ends.iter_mut() {
+            end += *count;
+            *count = end;
+        }
+        ImmutableRefs { ends }
+    }
+
+    fn total_refs(&self) -> u32 {
+        self.ends.last().copied().unwrap_or(0)
+    }
+
+    pub fn take_placeholder(&mut self, immutable: ImmutableId) -> u32 {
+        self.ends[immutable] -= 1;
+        self.ends[immutable]
+    }
+
+    pub fn placeholders(&self, immutable: ImmutableId) -> std::ops::Range<u32> {
+        let start = self.ends[ImmutableId::ZERO..immutable].last().copied().unwrap_or(0);
+        start..self.ends[immutable]
+    }
+}
+
 pub(crate) struct Translator<'ir> {
     pub ir: &'ir EthIRProgram,
     pub memory_layout: StaticMemoryLayout,
@@ -70,6 +120,7 @@ pub(crate) struct Translator<'ir> {
     pub bbs_to_be_translated: Vec<(FunctionId, BasicBlockId)>,
     pub translating_init_code: bool,
     pub asm: Assembler,
+    pub immutable_refs: ImmutableRefs,
 }
 
 impl<'ir> Translator<'ir> {
@@ -102,7 +153,8 @@ impl<'ir> Translator<'ir> {
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
         let translated_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let bbs_to_be_translated = Vec::with_capacity(8);
-        let mark_map = MarkMap::new(ir);
+        let immutable_refs = ImmutableRefs::collect_from(ir);
+        let mark_map = MarkMap::new(ir, immutable_refs.total_refs());
         Self {
             ir,
             memory_layout,
@@ -111,6 +163,7 @@ impl<'ir> Translator<'ir> {
             mark_map,
             translated_bbs,
             translating_init_code: true,
+            immutable_refs,
         }
     }
 
@@ -173,11 +226,11 @@ impl<'ir> Translator<'ir> {
                 }
                 ControlView::Switch(switch) => {
                     self.emit_local_load(switch.condition());
-                    self.asm.push_minimal_u32(self.memory_layout.switch_store);
+                    self.asm.push_minimal_u32(self.memory_layout.scratch_slot);
                     self.asm.push_op_byte(op::MSTORE);
 
                     for (value, bb) in switch.cases() {
-                        self.asm.push_minimal_u32(self.memory_layout.switch_store);
+                        self.asm.push_minimal_u32(self.memory_layout.scratch_slot);
                         self.asm.push_op_byte(op::MLOAD);
                         self.asm.push_minimal_u256(value);
                         self.asm.push_op_byte(op::EQ);
