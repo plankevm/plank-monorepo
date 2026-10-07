@@ -170,7 +170,7 @@ impl<'d, 't, 'ir> OpVisitor<'d, ()> for OpcodeTranslator<'t, 'ir> {
 
     fn visit_get_immutable(&mut self, data: &'d GetImmutableData) {
         assert!(!self.translator.translating_init_code, "getimmutable in init code");
-        let size = self.translator.ir.immutables[data.immutable] as u8;
+        let size = self.translator.ir.immutables[data.immutable];
         let imm_ref = self
             .translator
             .immutable_refs

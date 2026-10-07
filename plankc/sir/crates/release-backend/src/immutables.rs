@@ -24,7 +24,7 @@
 
 use plank_core::{DenseIndexSet, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{EthIRProgram, ImmutableId, OperationIdx, operation::IRMemoryIOByteSize};
+use sir_data::{EthIRProgram, ImmutableId, OperationIdx, operation::ByteSize};
 use sir_static_memory_allocator::EvmMemAddr;
 use smallvec::SmallVec;
 
@@ -39,11 +39,11 @@ pub(crate) enum WriteStrategy {
 }
 
 impl WriteStrategy {
-    pub fn select(size: IRMemoryIOByteSize, placeholder_count: usize) -> Self {
+    pub fn select(size: ByteSize, placeholder_count: usize) -> Self {
         match (size, placeholder_count) {
             (_, 0) => Self::Discard,
-            (IRMemoryIOByteSize::B32, _) => Self::StoreEach { store_op: op::MSTORE },
-            (IRMemoryIOByteSize::B1, _) => Self::StoreEach { store_op: op::MSTORE8 },
+            (ByteSize::B32, _) => Self::StoreEach { store_op: op::MSTORE },
+            (ByteSize::B1, _) => Self::StoreEach { store_op: op::MSTORE8 },
             (_, _) => Self::CopyFromScratch,
         }
     }
@@ -69,12 +69,7 @@ impl ImmutableRefs {
         self.refs.push(ImmutableRef { immutable, get_op, placeholder, emitted: false });
     }
 
-    pub fn emit_placeholder(
-        &mut self,
-        asm: &mut Assembler,
-        size: IRMemoryIOByteSize,
-        op: OperationIdx,
-    ) {
+    pub fn emit_placeholder(&mut self, asm: &mut Assembler, size: ByteSize, op: OperationIdx) {
         let imm_ref = self
             .refs
             .iter_mut()
@@ -82,7 +77,7 @@ impl ImmutableRefs {
             .expect("getimmutable not collected as runtime reference");
         assert!(!imm_ref.emitted, "getimmutable placeholder emitted twice");
         imm_ref.emitted = true;
-        asm.push_placeholder_push(size as u8, imm_ref.placeholder);
+        asm.push_placeholder_push(size, imm_ref.placeholder);
     }
 
     /// The immutables whose `setimmutable` needs the scratch slot.
@@ -112,7 +107,7 @@ impl ImmutableRefs {
         runcode_start: MarkId,
         scratch_slot: Option<EvmMemAddr>,
         immutable: ImmutableId,
-        size: IRMemoryIOByteSize,
+        size: ByteSize,
     ) {
         let placeholders: SmallVec<[MarkId; PLACEHOLDERS_INLINE_CAPACITY]> = self
             .refs
@@ -197,7 +192,7 @@ mod tests {
                 | op::PUSH1..=op::PUSH32 => 3,
                 _ => panic!("unexpected opcode {}", op::name(opcode)),
             };
-            pc += 1 + op::push_size(opcode).unwrap_or(0) as usize;
+            pc += 1 + op::push_size(opcode).map_or(0, |size| size as usize);
         }
         gas
     }
@@ -210,7 +205,7 @@ mod tests {
         set_bytes: usize,
     }
 
-    fn emit_set_with_refs(size: IRMemoryIOByteSize, ref_count: u32) -> Emitted {
+    fn emit_set_with_refs(size: ByteSize, ref_count: u32) -> Emitted {
         let mut next_mark = MarkId::ZERO;
         let runcode_start = next_mark.get_and_inc();
         let immutable = ImmutableId::new(0);
@@ -237,7 +232,7 @@ mod tests {
 
     #[test]
     fn strategy_selection() {
-        use IRMemoryIOByteSize as S;
+        use ByteSize as S;
         assert_eq!(WriteStrategy::select(S::B32, 0), WriteStrategy::Discard);
         assert_eq!(WriteStrategy::select(S::B7, 0), WriteStrategy::Discard);
         assert_eq!(
@@ -256,7 +251,7 @@ mod tests {
 
     #[test]
     fn strategy_gas_matches_documented_costs() {
-        use IRMemoryIOByteSize as S;
+        use ByteSize as S;
         for n in 1..=5 {
             assert_eq!(emit_set_with_refs(S::B32, n).set_gas, 15 * n - 6, "mstore, n={n}");
             assert_eq!(emit_set_with_refs(S::B1, n).set_gas, 15 * n - 6, "mstore8, n={n}");
@@ -268,7 +263,7 @@ mod tests {
 
     #[test]
     fn strategy_sizes() {
-        use IRMemoryIOByteSize as S;
+        use ByteSize as S;
         // Offsets are < 256 here, so each offset push is 2 bytes.
         for n in 1..=5 {
             let n_usize = n as usize;
@@ -281,7 +276,7 @@ mod tests {
         }
     }
 
-    fn assert_set_asm(size: IRMemoryIOByteSize, ref_count: u32, expected: &str) {
+    fn assert_set_asm(size: ByteSize, ref_count: u32, expected: &str) {
         pretty_assertions::assert_str_eq!(
             plank_test_utils::dedent_preserve_indent(&emit_set_with_refs(size, ref_count).asm),
             plank_test_utils::dedent_preserve_indent(expected)
@@ -291,7 +286,7 @@ mod tests {
     #[test]
     fn discard_unreferenced() {
         assert_set_asm(
-            IRMemoryIOByteSize::B7,
+            ByteSize::B7,
             0,
             r#"
               POP
@@ -308,7 +303,7 @@ mod tests {
     #[test]
     fn mstore_each_full_word() {
         assert_set_asm(
-            IRMemoryIOByteSize::B32,
+            ByteSize::B32,
             2,
             r#"
               DUP2
@@ -339,7 +334,7 @@ mod tests {
     #[test]
     fn mstore8_each_single_byte() {
         assert_set_asm(
-            IRMemoryIOByteSize::B1,
+            ByteSize::B1,
             2,
             r#"
               DUP2
@@ -370,7 +365,7 @@ mod tests {
     #[test]
     fn scratch_copy_single_reference() {
         assert_set_asm(
-            IRMemoryIOByteSize::B20,
+            ByteSize::B20,
             1,
             r#"
               PUSH1 0x14
@@ -398,7 +393,7 @@ mod tests {
     #[test]
     fn scratch_copy_each_reference() {
         assert_set_asm(
-            IRMemoryIOByteSize::B7,
+            ByteSize::B7,
             3,
             r#"
               PUSH1 0x07

@@ -7,7 +7,7 @@ use plank_core::{DenseIndexSet, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
     BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, Operation, OperationIdx,
-    operation::{IRMemoryIOByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
+    operation::{ByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;
@@ -370,7 +370,7 @@ impl<'a> CodeToAsmEmitter<'a> {
 
     fn emit_memory_load(&mut self, data: MemoryLoadData) {
         match data.size {
-            IRMemoryIOByteSize::B32 => self.asm.push_op_byte(op::MLOAD),
+            ByteSize::B32 => self.asm.push_op_byte(op::MLOAD),
             non_native_load_size => {
                 self.asm.push_op_byte(op::MLOAD);
                 self.asm.push_minimal_u32(256 - u32::from(non_native_load_size.bits()));
@@ -380,7 +380,7 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_memory_store(&mut self, data: MemoryStoreData) {
-        use IRMemoryIOByteSize as MemSize;
+        use ByteSize as MemSize;
 
         match data.size {
             MemSize::B1 => self.asm.push_op_byte(op::MSTORE8),

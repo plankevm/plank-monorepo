@@ -3,7 +3,7 @@ pub mod index;
 pub mod operation;
 pub mod view;
 
-use crate::operation::IRMemoryIOByteSize;
+use crate::operation::ByteSize;
 pub use crate::{index::*, operation::Operation, view::*};
 use alloy_primitives::U256;
 use plank_core::{Idx, IndexVec, RelSlice, Span, list_of_lists::ListOfLists};
@@ -21,7 +21,7 @@ pub struct EthIRProgram {
     pub basic_blocks: IndexVec<BasicBlockId, BasicBlock>,
     pub operations: IndexVec<OperationIdx, Operation>,
     pub data_segments: ListOfLists<DataId, u8>,
-    pub immutables: IndexVec<ImmutableId, IRMemoryIOByteSize>,
+    pub immutables: IndexVec<ImmutableId, ByteSize>,
     // IR Data
     pub locals: IndexVec<LocalIdx, LocalId>,
     pub large_consts: IndexVec<LargeConstId, U256>,
@@ -811,8 +811,8 @@ mod tests {
         use crate::{builder::EthIRBuilder, operation::*};
 
         let mut builder = EthIRBuilder::new();
-        let owner = builder.new_immutable(IRMemoryIOByteSize::B20);
-        let flag = builder.new_immutable(IRMemoryIOByteSize::B1);
+        let owner = builder.new_immutable(ByteSize::B20);
+        let flag = builder.new_immutable(ByteSize::B1);
 
         let mut init = builder.begin_function();
         let ptr = init.new_local();

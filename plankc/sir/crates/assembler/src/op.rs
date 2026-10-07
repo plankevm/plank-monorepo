@@ -1,3 +1,5 @@
+use crate::ByteSize;
+
 pub const STOP: u8 = 0x00;
 // Basic Arithmetic 0x01 - 0x0b
 pub const ADD: u8 = 0x01;
@@ -316,9 +318,9 @@ pub fn name(opcode: u8) -> &'static str {
     }
 }
 
-pub fn push_size(opcode: u8) -> Option<u8> {
+pub fn push_size(opcode: u8) -> Option<ByteSize> {
     match opcode {
-        PUSH1..=PUSH32 => Some(opcode - PUSH1 + 1),
+        PUSH1..=PUSH32 => ByteSize::try_from_u8(opcode - PUSH1 + 1),
         _ => None,
     }
 }

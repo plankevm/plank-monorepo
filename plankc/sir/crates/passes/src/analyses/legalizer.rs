@@ -677,9 +677,9 @@ mod tests {
         Branch,
         builder::EthIRBuilder,
         operation::{
-            GetImmutableData, IRMemoryIOByteSize, InlineOperands, InternalCallData,
-            InternalCallNeverData, OpExtraData, OperationKind, SetDataOffsetData, SetImmutableData,
-            SetLargeConstData, SetSmallConstData, StaticAllocData,
+            ByteSize, GetImmutableData, InlineOperands, InternalCallData, InternalCallNeverData,
+            OpExtraData, OperationKind, SetDataOffsetData, SetImmutableData, SetLargeConstData,
+            SetSmallConstData, StaticAllocData,
         },
     };
     use sir_parser::{EmitConfig, parse_without_legalization};
@@ -1712,7 +1712,7 @@ mod tests {
     #[test]
     fn test_rejects_invalid_immutable_id() {
         let mut builder = EthIRBuilder::new();
-        let valid = builder.new_immutable(IRMemoryIOByteSize::B4);
+        let valid = builder.new_immutable(ByteSize::B4);
         let invalid = ImmutableId::new(1);
         assert_eq!(valid, ImmutableId::new(0));
 

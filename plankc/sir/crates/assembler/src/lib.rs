@@ -3,8 +3,11 @@ use plank_core::{
     Idx, IndexVec, Span, const_print::const_assert_mem_size, index_vec, newtype_index,
 };
 
+mod byte_size;
 mod display;
 pub mod op;
+
+pub use byte_size::ByteSize;
 
 const ASSUMED_MARK_COUNT_WITHOUT_HINT: usize = 128;
 const MAX_ASSEMBLER_CONVERGENCE_ITERS: usize = 1024;
@@ -21,6 +24,17 @@ pub enum RefSize {
     S2 = 2,
     S3 = 3,
     S4 = 4,
+}
+
+impl From<RefSize> for ByteSize {
+    fn from(size: RefSize) -> Self {
+        match size {
+            RefSize::S1 => Self::B1,
+            RefSize::S2 => Self::B2,
+            RefSize::S3 => Self::B3,
+            RefSize::S4 => Self::B4,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -308,13 +322,13 @@ impl Assembler {
             return;
         }
 
-        let push_size = 32 - value.leading_zeros() / 8;
-        assert!(push_size <= u8::MAX as usize);
-        let push_op = op::PUSH1 + push_size as u8 - 1;
-        assert!((op::PUSH1..=op::PUSH32).contains(&push_op));
+        let push_size = u8::try_from(32 - value.leading_zeros() / 8)
+            .ok()
+            .and_then(ByteSize::try_from_u8)
+            .expect("nonzero U256 needs 1..=32 bytes");
 
-        self.push_op_byte(push_op);
-        for &byte in value.to_le_bytes::<32>()[..push_size].iter().rev() {
+        self.push_op_byte(push_size.push_opcode());
+        for &byte in value.to_le_bytes::<32>()[..push_size as usize].iter().rev() {
             self.push_op_byte(byte);
         }
     }
@@ -329,10 +343,8 @@ impl Assembler {
 
     /// Emits a `PUSH<size>` with a zeroed immediate, placing `immediate_mark` right before the
     /// immediate so it can be patched later.
-    #[track_caller]
-    pub fn push_placeholder_push(&mut self, size: u8, immediate_mark: MarkId) {
-        assert!((1..=32).contains(&size), "invalid placeholder push size {size}");
-        self.push_op_byte(op::PUSH1 + size - 1);
+    pub fn push_placeholder_push(&mut self, size: ByteSize, immediate_mark: MarkId) {
+        self.push_op_byte(size.push_opcode());
         self.push_mark(immediate_mark);
         self.push_data(&[0; 32][..size as usize]);
     }
@@ -476,7 +488,7 @@ impl Assembler {
                         let ref_size = mark_ref.set_size.unwrap_or(ref_size);
                         let value_bytes = value.to_le_bytes();
                         if mark_ref.pushed {
-                            result.push(op::PUSH1 + ref_size as u8 - 1);
+                            result.push(ByteSize::from(ref_size).push_opcode());
                         }
                         for i in (0..ref_size as usize).rev() {
                             result.push(value_bytes[i]);

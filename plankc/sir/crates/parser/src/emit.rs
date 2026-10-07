@@ -9,7 +9,7 @@ use sir_data::{
     BasicBlockId, Branch, Control, DataId, EthIRProgram, FunctionId, ImmutableId, LocalId,
     OpaqueSourceId, Operation,
     builder::{BuildError, EthIRBuilder},
-    operation::{IRMemoryIOByteSize, OpBuildError, OpExtraData, OperationKind},
+    operation::{ByteSize, OpBuildError, OpExtraData, OperationKind},
 };
 use smallvec::SmallVec;
 use std::collections::{HashMap, hash_map::Entry};
@@ -205,7 +205,7 @@ pub fn emit_ir_with_sources<'ast, 'arena: 'ast, 'src: 'arena>(
     for immutable_def in &ast.immutables {
         let name = immutable_def.name.inner;
         let Some(size) =
-            u8::try_from(immutable_def.size.inner).ok().and_then(IRMemoryIOByteSize::try_from_u8)
+            u8::try_from(immutable_def.size.inner).ok().and_then(ByteSize::try_from_u8)
         else {
             return Err(SirAstSemaError {
                 spans: arena.alloc([immutable_def.size.span()]),

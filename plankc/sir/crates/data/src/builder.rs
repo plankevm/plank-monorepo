@@ -1,7 +1,6 @@
 use crate::{
     operation::{
-        IRMemoryIOByteSize, OpBuildError, OpExtraData, OperationKind, SetLargeConstData,
-        SetSmallConstData,
+        ByteSize, OpBuildError, OpExtraData, OperationKind, SetLargeConstData, SetSmallConstData,
     },
     *,
 };
@@ -31,7 +30,7 @@ pub struct EthIRBuilder {
     pub(crate) basic_blocks: IndexVec<BasicBlockId, BasicBlock>,
     pub(crate) operations: IndexVec<OperationIdx, Operation>,
     pub(crate) data_segments: ListOfLists<DataId, u8>,
-    pub(crate) immutables: IndexVec<ImmutableId, IRMemoryIOByteSize>,
+    pub(crate) immutables: IndexVec<ImmutableId, ByteSize>,
 
     // IR Data
     pub(crate) locals: IndexVec<LocalIdx, LocalId>,
@@ -114,7 +113,7 @@ impl EthIRBuilder {
         self.data_segments.push_copy_slice(bytes)
     }
 
-    pub fn new_immutable(&mut self, size: IRMemoryIOByteSize) -> ImmutableId {
+    pub fn new_immutable(&mut self, size: ByteSize) -> ImmutableId {
         self.immutables.push(size)
     }
 
