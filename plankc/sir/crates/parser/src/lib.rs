@@ -134,6 +134,61 @@ mod tests {
     }
 
     #[test]
+    fn unreachable_irets_do_not_make_functions_returning() {
+        let source = r#"
+            fn init:
+                entry {
+                    icall_never @halt
+                }
+                unused {
+                    iret
+                }
+            fn halt:
+                entry {
+                    invalid
+                }
+                unused {
+                    iret
+                }
+        "#;
+        let (program, sources) = parse_or_panic_with_sources(source, EmitConfig::init_only());
+        for name in ["init", "halt"] {
+            let function = sources.function_by_name(&program, name).unwrap();
+            assert_eq!(program.functions[function].return_kind(), sir_data::ReturnKind::NEVER);
+        }
+    }
+
+    #[test]
+    fn conflicting_reachable_return_counts_report_both_blocks() {
+        let source = r#"
+            fn init:
+                entry {
+                    stop
+                }
+            fn helper:
+                entry condition {
+                    => condition ? @empty : @returning
+                }
+                empty {
+                    iret
+                }
+                returning -> value {
+                    value = const 1
+                    iret
+                }
+        "#;
+        let arena = bumpalo::Bump::new();
+        let ast = parser::parse(source, &arena).unwrap();
+        let error = emit::emit_ir(&arena, &ast, EmitConfig::init_only()).unwrap_err();
+        assert_eq!(
+            error.reason.as_str(),
+            r#"Separate irets imply different outputs for function "helper" (1 vs. 0)"#
+        );
+        let spans: Vec<_> = error.spans.iter().map(|span| &source[span.clone()]).collect();
+        assert_eq!(spans, ["returning", "empty"]);
+    }
+
+    #[test]
     fn test_error_undefined_local_in_param() {
         let source = r#"
             fn init:

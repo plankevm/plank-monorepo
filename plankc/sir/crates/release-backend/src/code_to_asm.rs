@@ -1,11 +1,16 @@
-use crate::mark_map::{IndexableMarkSpan, MarkMap};
+use crate::{
+    code_layout::CodeLayout,
+    mark_map::{IndexableMarkSpan, MarkMap},
+};
 use alloy_primitives::U256;
 use plank_core::{DenseIndexSet, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
     BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, Operation, OperationIdx,
+    SwitchView,
     operation::{IRMemoryIOByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
 };
+use sir_passes::Predecessors;
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;
 use smallvec::SmallVec;
@@ -19,7 +24,7 @@ type ICallReturnMarks = SmallVec<[(OperationIdx, MarkId); ICALL_RETURN_MARKS_INL
 pub(crate) trait CodegenState {
     const ALLOW_INITCODE_INTROSPECTION: bool;
 
-    fn layout(&self) -> &static_mem::Layout;
+    fn memory_layout(&self) -> &static_mem::Layout;
     fn bb_marks(&self) -> IndexableMarkSpan<BasicBlockId>;
     fn mark_to_ref(&self, marks: &MarkMap, mark: MarkId) -> MarkReference;
     fn data_to_ref(&mut self, marks: &MarkMap, data: DataId) -> MarkReference;
@@ -30,157 +35,235 @@ pub(crate) struct CodeToAsmEmitter<'a> {
     pub asm: Assembler,
     pub ir: &'a EthIRProgram,
     ops: &'a ScheduledOps,
-    visited_bbs: DenseIndexSet<BasicBlockId>,
-    basic_blocks_worklist: Vec<BasicBlockId>,
+    emitted_blocks: DenseIndexSet<BasicBlockId>,
+    function_entries: DenseIndexSet<BasicBlockId>,
 }
 
 impl<'a> CodeToAsmEmitter<'a> {
-    pub fn new(
-        ir: &'a EthIRProgram,
-        ops: &'a ScheduledOps,
-        mut visited_bbs: DenseIndexSet<BasicBlockId>,
-        mut basic_blocks_worklist: Vec<BasicBlockId>,
-    ) -> Self {
+    pub fn new(ir: &'a EthIRProgram, ops: &'a ScheduledOps) -> Self {
         let mark_map = MarkMap::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
+        let emitted_blocks = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
+        let mut function_entries = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
+        for function in ir.functions.iter() {
+            function_entries.add(function.entry());
+        }
 
-        // Extra clear just to be safe.
-        visited_bbs.clear();
-        basic_blocks_worklist.clear();
-
-        Self { ir, ops, mark_map, visited_bbs, basic_blocks_worklist, asm }
+        Self { ir, ops, mark_map, asm, emitted_blocks, function_entries }
     }
 
     pub fn alloc_bb_marks(&mut self) -> IndexableMarkSpan<BasicBlockId> {
         MarkMap::alloc_map(&mut self.mark_map.next_mark_id, self.ir.basic_blocks.len())
     }
 
-    fn reset_for_entrypoint(&mut self) {
-        self.basic_blocks_worklist.clear();
-        self.visited_bbs.clear();
-    }
+    pub fn emit_from_code_layout(
+        &mut self,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
+    ) {
+        self.emitted_blocks.clear();
 
-    fn enqueue_bb(&mut self, bb: BasicBlockId) -> bool {
-        if self.visited_bbs.add(bb) {
-            self.basic_blocks_worklist.push(bb);
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn emit_from_entrypoint(&mut self, state: &mut impl CodegenState, entrypoint: FunctionId) {
-        self.reset_for_entrypoint();
-
-        if let Some(free_pointer) = state.layout().dyn_free_pointer {
+        if let Some(free_pointer) = state.memory_layout().dyn_free_pointer {
             self.asm.push_minimal_u32(free_pointer.start_value.get());
             self.asm.push_minimal_u32(free_pointer.store_slot.get());
             self.asm.push_op_byte(op::MSTORE);
         }
 
-        let entry_bb = self.ir.function(entrypoint).entry().id();
-        assert!(self.enqueue_bb(entry_bb));
+        self.emit_block_and_successors(state, code_layout, code_layout.entry_block(), predecessors);
 
+        for block in code_layout.blocks_without_assigned_predecessor() {
+            if self.emitted_blocks.contains(block)
+                || (!self.function_entries.contains(block)
+                    && self.never_call_replacement_target(block).is_some())
+            {
+                continue;
+            }
+            self.emit_block_and_successors(state, code_layout, block, predecessors);
+        }
+    }
+
+    fn emit_block_and_successors(
+        &mut self,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        start: BasicBlockId,
+        predecessors: &Predecessors,
+    ) {
+        let mut next_block = Some(start);
+        while let Some(bb_id) = next_block {
+            self.emit_block(state, code_layout, bb_id, predecessors);
+            next_block = code_layout.assigned_successor(bb_id);
+        }
+    }
+
+    fn emit_block(
+        &mut self,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        bb_id: BasicBlockId,
+        predecessors: &Predecessors,
+    ) {
+        assert!(self.emitted_blocks.add(bb_id), "block emitted more than once");
         let mut icall_return_marks = ICallReturnMarks::new();
-
-        while let Some(bb_id) = self.basic_blocks_worklist.pop() {
-            let jumpdest_mark = state.bb_marks().get(bb_id);
-            self.asm.push_mark(jumpdest_mark);
+        let assigned_successor = code_layout.assigned_successor(bb_id);
+        let jumpdest_mark = state.bb_marks().get(bb_id);
+        self.asm.push_mark(jumpdest_mark);
+        let omit_jumpdest = match predecessors.of(bb_id).len() {
+            0 => bb_id == code_layout.entry_block(), // Entrypoints do not need `JUMPDEST`.
+            1 => {
+                code_layout.has_assigned_predecessor(bb_id)
+                    && !self.function_entries.contains(bb_id)
+            }
+            _ => false,
+        };
+        if !omit_jumpdest {
             self.asm.push_op_byte(op::JUMPDEST);
+        }
 
-            let bb_ops = self.ops.get(bb_id).expect("reachable block not scheduled");
-            for &op in bb_ops {
-                match op {
-                    StackOps::Swap(depth) => self.asm.push_swap(depth),
-                    StackOps::Dup(depth) => self.asm.push_dup(depth),
-                    StackOps::Pop => self.asm.push_op_byte(op::POP),
-                    StackOps::Exchange(n, m) => self.asm.push_exchange(n, m),
-                    StackOps::Store(alloc) => {
-                        let addr = state.layout().alloc_start[&alloc];
-                        self.asm.push_minimal_u32(addr.get());
-                        self.asm.push_op_byte(op::MSTORE);
-                    }
-                    StackOps::Load(alloc) => {
-                        let addr = state.layout().alloc_start[&alloc];
-                        self.asm.push_minimal_u32(addr.get());
-                        self.asm.push_op_byte(op::MLOAD);
-                    }
-                    StackOps::CallRetPush(op_idx) => {
-                        let return_dest_mark = self.mark_map.next_mark_id.get_and_inc();
-                        icall_return_marks.push((op_idx, return_dest_mark));
-
-                        let mark_ref = state.mark_to_ref(&self.mark_map, return_dest_mark);
-                        self.asm.push_reference(AsmReference::pushed(mark_ref));
-                    }
-                    StackOps::Op(op_idx) => {
-                        self.emit_op(state, &mut icall_return_marks, op_idx, false);
-                    }
-                    StackOps::Flipped(op_idx) => {
-                        self.emit_op(state, &mut icall_return_marks, op_idx, true);
-                    }
-                }
-            }
-
-            let block = self.ir.block(bb_id);
-
-            match block.control() {
-                ControlView::LastOpTerminates => { /* scheduled and handled above */ }
-                ControlView::InternalReturn => {
-                    self.asm.push_op_byte(op::JUMP);
-                }
-                ControlView::ContinuesTo(to) => {
-                    let to_mark = state.bb_marks().get(to);
-                    let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
-                    self.asm.push_reference(AsmReference::pushed(to_ref));
-                    self.asm.push_op_byte(op::JUMP);
-                }
-                ControlView::Branches { condition: _, non_zero_target, zero_target } => {
-                    let non_zero_mark = state.bb_marks().get(non_zero_target);
-                    let non_zero_ref = state.mark_to_ref(&self.mark_map, non_zero_mark);
-                    let zero_mark = state.bb_marks().get(zero_target);
-                    let zero_ref = state.mark_to_ref(&self.mark_map, zero_mark);
-
-                    self.asm.push_reference(AsmReference::pushed(non_zero_ref));
-                    self.asm.push_op_byte(op::JUMPI);
-                    self.asm.push_reference(AsmReference::pushed(zero_ref));
-                    self.asm.push_op_byte(op::JUMP);
-                }
-                ControlView::Switch(switch) => {
-                    let switch_store_addr =
-                        state.layout().switch_store.expect("missing switch allocation").get();
-
-                    self.asm.push_minimal_u32(switch_store_addr);
+        let bb_ops = self.ops.get(bb_id).expect("reachable block not scheduled");
+        for &op in bb_ops {
+            match op {
+                StackOps::Swap(depth) => self.asm.push_swap(depth),
+                StackOps::Dup(depth) => self.asm.push_dup(depth),
+                StackOps::Pop => self.asm.push_op_byte(op::POP),
+                StackOps::Exchange(n, m) => self.asm.push_exchange(n, m),
+                StackOps::Store(alloc) => {
+                    let addr = state.memory_layout().alloc_start[&alloc];
+                    self.asm.push_minimal_u32(addr.get());
                     self.asm.push_op_byte(op::MSTORE);
-
-                    for (value, to) in switch.cases() {
-                        let to_mark = state.bb_marks().get(to);
-                        let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
-                        self.asm.push_minimal_u32(switch_store_addr);
-                        self.asm.push_op_byte(op::MLOAD);
-                        self.asm.push_minimal_u256(value);
-                        self.asm.push_op_byte(op::EQ);
-                        self.asm.push_reference(AsmReference::pushed(to_ref));
-                        self.asm.push_op_byte(op::JUMPI);
-                    }
-
-                    if let Some(to) = switch.fallback() {
-                        let to_mark = state.bb_marks().get(to);
-                        let to_ref = state.mark_to_ref(&self.mark_map, to_mark);
-                        self.asm.push_reference(AsmReference::pushed(to_ref));
-                        self.asm.push_op_byte(op::JUMP);
-                    }
                 }
-            }
+                StackOps::Load(alloc) => {
+                    let addr = state.memory_layout().alloc_start[&alloc];
+                    self.asm.push_minimal_u32(addr.get());
+                    self.asm.push_op_byte(op::MLOAD);
+                }
+                StackOps::CallRetPush(op_idx) => {
+                    let return_dest_mark = self.mark_map.next_mark_id.get_and_inc();
+                    icall_return_marks.push((op_idx, return_dest_mark));
 
-            for succ in block.successors() {
-                self.enqueue_bb(succ);
+                    let mark_ref = state.mark_to_ref(&self.mark_map, return_dest_mark);
+                    self.asm.push_reference(AsmReference::pushed(mark_ref));
+                }
+                StackOps::Op(op_idx) => {
+                    self.emit_op(
+                        state,
+                        code_layout,
+                        predecessors,
+                        &mut icall_return_marks,
+                        op_idx,
+                        false,
+                    );
+                }
+                StackOps::Flipped(op_idx) => {
+                    self.emit_op(
+                        state,
+                        code_layout,
+                        predecessors,
+                        &mut icall_return_marks,
+                        op_idx,
+                        true,
+                    );
+                }
             }
         }
+
+        let block = self.ir.block(bb_id);
+
+        match block.control() {
+            ControlView::LastOpTerminates => { /* scheduled and handled above */ }
+            ControlView::InternalReturn => {
+                self.asm.push_op_byte(op::JUMP);
+            }
+            ControlView::ContinuesTo(to) => {
+                if assigned_successor.is_none() {
+                    self.emit_jump_to(state, to);
+                } else {
+                    assert_eq!(assigned_successor, Some(to));
+                }
+            }
+            ControlView::Branches { condition: _, non_zero_target, zero_target } => {
+                self.emit_jumpi_to(state, non_zero_target);
+
+                match assigned_successor {
+                    None => self.emit_jump_to(state, zero_target),
+                    Some(target) => assert_eq!(
+                        target, zero_target,
+                        "invariant: selected fallthrough does not match zero branch target"
+                    ),
+                }
+            }
+            ControlView::Switch(switch) => {
+                self.emit_switch(state, switch, assigned_successor);
+            }
+        }
+        assert!(icall_return_marks.is_empty(), "unconsumed internal call return marks");
+    }
+
+    fn emit_switch(
+        &mut self,
+        state: &impl CodegenState,
+        switch: SwitchView<'_>,
+        assigned_successor: Option<BasicBlockId>,
+    ) {
+        let switch_store_addr =
+            state.memory_layout().switch_store.expect("missing switch allocation").get();
+        let mut selected_case = None;
+
+        self.asm.push_minimal_u32(switch_store_addr);
+        self.asm.push_op_byte(op::MSTORE);
+
+        for (value, to) in switch.cases() {
+            if assigned_successor == Some(to) {
+                assert!(selected_case.replace(value).is_none());
+                continue;
+            }
+            self.asm.push_minimal_u32(switch_store_addr);
+            self.asm.push_op_byte(op::MLOAD);
+            self.asm.push_minimal_u256(value);
+            self.asm.push_op_byte(op::EQ);
+            self.emit_jumpi_to(state, to);
+        }
+
+        if let Some(value) = selected_case {
+            if let Some(fallback) = switch.fallback() {
+                // Invert the match so `JUMPI` takes the fallback on mismatch and falls
+                // through on match.
+                self.asm.push_minimal_u32(switch_store_addr);
+                self.asm.push_op_byte(op::MLOAD);
+                self.asm.push_minimal_u256(value);
+                self.asm.push_op_byte(op::EQ);
+                self.asm.push_op_byte(op::ISZERO);
+                self.emit_jumpi_to(state, fallback);
+            }
+        } else if let Some(to) = assigned_successor {
+            assert_eq!(switch.fallback(), Some(to));
+        } else if let Some(to) = switch.fallback() {
+            self.emit_jump_to(state, to);
+        }
+    }
+
+    fn emit_jump_to(&mut self, state: &impl CodegenState, target: BasicBlockId) {
+        let target = self.never_call_replacement_target(target).unwrap_or(target);
+        let target_mark = state.bb_marks().get(target);
+        let target_ref = state.mark_to_ref(&self.mark_map, target_mark);
+        self.asm.push_reference(AsmReference::pushed(target_ref));
+        self.asm.push_op_byte(op::JUMP);
+    }
+
+    fn emit_jumpi_to(&mut self, state: &impl CodegenState, target: BasicBlockId) {
+        let target = self.never_call_replacement_target(target).unwrap_or(target);
+        let target_mark = state.bb_marks().get(target);
+        let target_ref = state.mark_to_ref(&self.mark_map, target_mark);
+        self.asm.push_reference(AsmReference::pushed(target_ref));
+        self.asm.push_op_byte(op::JUMPI);
     }
 
     fn emit_op<State: CodegenState>(
         &mut self,
         state: &mut State,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
         icall_return_marks: &mut ICallReturnMarks,
         op_idx: OperationIdx,
         flipped: bool,
@@ -197,10 +280,17 @@ impl<'a> CodeToAsmEmitter<'a> {
         }
 
         match op {
-            Operation::InternalCall(args) => {
-                self.emit_icall(state, icall_return_marks, op_idx, args.function)
+            Operation::InternalCall(args) => self.emit_icall(
+                state,
+                code_layout,
+                predecessors,
+                icall_return_marks,
+                op_idx,
+                args.function,
+            ),
+            Operation::InternalCallNever(args) => {
+                self.emit_call_target(state, code_layout, predecessors, args.function)
             }
-            Operation::InternalCallNever(args) => self.emit_icall_never(state, args.function),
             Operation::DynamicAllocZeroed(_) => self.emit_dynamic_alloc_zeroed(state),
             Operation::DynamicAllocAnyBytes(_) => self.emit_dynamic_alloc_any_bytes(state),
             Operation::AcquireFreePointer(_) => self.emit_acquire_free_pointer(state),
@@ -246,17 +336,13 @@ impl<'a> CodeToAsmEmitter<'a> {
 
     fn emit_icall(
         &mut self,
-        state: &impl CodegenState,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
         icall_return_marks: &mut ICallReturnMarks,
         op_idx: OperationIdx,
         function: FunctionId,
     ) {
-        let function_entry_ref = {
-            let call_entry_bb = self.ir.function(function).entry().id();
-            self.enqueue_bb(call_entry_bb);
-            let bb_entry_mark = state.bb_marks().get(call_entry_bb);
-            state.mark_to_ref(&self.mark_map, bb_entry_mark)
-        };
         let call_return_dest = {
             let (i, mark) = icall_return_marks
                 .iter()
@@ -269,25 +355,46 @@ impl<'a> CodeToAsmEmitter<'a> {
             mark
         };
 
-        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
-        self.asm.push_op_byte(op::JUMP);
+        self.emit_call_target(state, code_layout, predecessors, function);
         self.asm.push_mark(call_return_dest);
         self.asm.push_op_byte(op::JUMPDEST);
     }
 
-    fn emit_icall_never(&mut self, state: &impl CodegenState, function: FunctionId) {
-        let call_entry_bb = self.ir.function(function).entry().id();
-        self.enqueue_bb(call_entry_bb);
-        let bb_entry_mark = state.bb_marks().get(call_entry_bb);
-        let function_entry_ref = state.mark_to_ref(&self.mark_map, bb_entry_mark);
+    fn never_call_replacement_target(&self, block: BasicBlockId) -> Option<BasicBlockId> {
+        let &[StackOps::Op(operation)] =
+            self.ops.get(block).expect("reachable block not scheduled")
+        else {
+            return None;
+        };
+        let Operation::InternalCallNever(call) = self.ir.operations[operation] else {
+            return None;
+        };
 
-        self.asm.push_reference(AsmReference::pushed(function_entry_ref));
-        self.asm.push_op_byte(op::JUMP);
+        Some(self.ir.function(call.function).entry().id())
+    }
+
+    fn emit_call_target(
+        &mut self,
+        state: &mut impl CodegenState,
+        code_layout: &CodeLayout,
+        predecessors: &Predecessors,
+        function: FunctionId,
+    ) {
+        let call_entry_bb = self.ir.function(function).entry().id();
+        if self.emitted_blocks.contains(call_entry_bb)
+            || code_layout.has_assigned_predecessor(call_entry_bb)
+        {
+            self.emit_jump_to(state, call_entry_bb);
+        } else {
+            self.emit_block_and_successors(state, code_layout, call_entry_bb, predecessors);
+        }
     }
 
     fn emit_dynamic_alloc_zeroed(&mut self, state: &impl CodegenState) {
-        let free_pointer =
-            state.layout().dyn_free_pointer.expect("dynamic allocation without free pointer slot");
+        let free_pointer = state
+            .memory_layout()
+            .dyn_free_pointer
+            .expect("dynamic allocation without free pointer slot");
         let free_ptr_slot = free_pointer.store_slot.get();
 
         // Stack shown deepest => highest; input:    [alloc_size]
@@ -305,8 +412,10 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_dynamic_alloc_any_bytes(&mut self, state: &impl CodegenState) {
-        let free_pointer =
-            state.layout().dyn_free_pointer.expect("dynamic allocation without free pointer slot");
+        let free_pointer = state
+            .memory_layout()
+            .dyn_free_pointer
+            .expect("dynamic allocation without free pointer slot");
         let free_ptr_slot = free_pointer.store_slot.get();
 
         // Stack shown deepest => highest; input:    [alloc_size]
@@ -321,7 +430,7 @@ impl<'a> CodeToAsmEmitter<'a> {
 
     fn emit_acquire_free_pointer(&mut self, state: &impl CodegenState) {
         let free_pointer = state
-            .layout()
+            .memory_layout()
             .dyn_free_pointer
             .expect("free pointer acquisition without free pointer slot");
         self.asm.push_minimal_u32(free_pointer.store_slot.get());
@@ -329,10 +438,10 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_static_alloc(&mut self, state: &impl CodegenState, args: StaticAllocData) {
-        let layout = state.layout();
-        let addr = layout.alloc_start[&args.alloc_id];
+        let memory_layout = state.memory_layout();
+        let addr = memory_layout.alloc_start[&args.alloc_id];
         self.asm.push_minimal_u32(addr.get()); //       [alloc_ptr]
-        let needs_zeroing = layout.alloc_needs_zeroing.contains(&args.alloc_id);
+        let needs_zeroing = memory_layout.alloc_needs_zeroing.contains(&args.alloc_id);
         if needs_zeroing {
             self.asm.push_minimal_u32(args.size); //    [alloc_ptr, alloc_size]
             self.asm.push_op_byte(op::CALLDATASIZE); // [alloc_ptr, alloc_size, cd_size]
