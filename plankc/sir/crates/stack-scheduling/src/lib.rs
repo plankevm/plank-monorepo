@@ -1,6 +1,4 @@
-use std::num::NonZero;
-
-use plank_core::{DenseIndexMap, Idx, list_of_lists::ListOfLists, newtype_index};
+use plank_core::{DenseIndexMap, list_of_lists::ListOfLists, newtype_index};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sir_data::{BasicBlockId, BlockView, ControlView, EthIRProgram, StaticAllocId};
@@ -12,9 +10,11 @@ pub mod display;
 pub mod op_graph;
 pub mod validation;
 
-use crate::{op_graph::build_graph_effectful, stack::StackOps};
-
-mod depth_first_search;
+use crate::{
+    op_graph::{OpGraph, build_graph_effectful},
+    scheduler::SearchResult,
+    stack::StackOps,
+};
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
@@ -60,6 +60,25 @@ pub struct ScheduledOps {
     ops: ListOfLists<StackOpIdx, StackOps>,
 }
 
+pub fn schedule_graph(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    next_alloc_id: StaticAllocId,
+    shuffle: ShuffleConfig,
+) -> SearchResult {
+    schedule_graph_with_effort(graph, finalization, next_alloc_id, shuffle, 0)
+}
+
+pub fn schedule_graph_with_effort(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    next_alloc_id: StaticAllocId,
+    shuffle: ShuffleConfig,
+    _effort: u32,
+) -> SearchResult {
+    scheduler::schedule(finalization, next_alloc_id, shuffle, graph)
+}
+
 impl ScheduledOps {
     pub fn get(&self, bb: BasicBlockId) -> Option<&[StackOps]> {
         self.bb_to_ops.get(bb).map(|&idx| &self.ops[idx])
@@ -67,36 +86,6 @@ impl ScheduledOps {
 
     pub fn enumerate_idx(&self) -> impl Iterator<Item = (BasicBlockId, &[StackOps])> {
         self.bb_to_ops.iter().map(|(bb_id, &idx)| (bb_id, &self.ops[idx]))
-    }
-}
-
-pub fn schedule_graph(
-    graph: &op_graph::OpGraph,
-    finalization: BlockFinalization,
-) -> GraphScheduleResult {
-    schedule_graph_with_effort(
-        graph,
-        finalization,
-        NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
-    )
-}
-
-pub fn schedule_graph_with_effort(
-    graph: &op_graph::OpGraph,
-    finalization: BlockFinalization,
-    max_candidates: NonZero<usize>,
-) -> GraphScheduleResult {
-    let result = scheduler::schedule(
-        finalization,
-        StaticAllocId::ZERO,
-        ShuffleConfig::PRE_AMSTERDAM,
-        depth_first_search::SearchConfig { max_candidates },
-        graph,
-    );
-    GraphScheduleResult {
-        ops: result.ops,
-        spill_count: result.spill_count,
-        candidate_limit_reached: result.candidate_limit_reached,
     }
 }
 
@@ -148,9 +137,6 @@ pub fn schedule<'ir>(
                     BlockFinalization::from_block(block),
                     local_alloc_start,
                     config,
-                    depth_first_search::SearchConfig {
-                        max_candidates: NonZero::new(DEFAULT_MAX_SEARCH_CANDIDATES).unwrap(),
-                    },
                     &graph,
                 );
                 (block.id(), result)

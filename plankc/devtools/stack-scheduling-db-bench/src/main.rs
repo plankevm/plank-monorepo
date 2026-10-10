@@ -1,6 +1,8 @@
 mod stats;
 
 use indicatif::{ProgressBar, ProgressStyle};
+use plank_core::Idx;
+use sir_data::StaticAllocId;
 use sir_stack_scheduling::{
     BlockFinalization,
     display::{graph as render_graph, trace},
@@ -76,7 +78,7 @@ fn evaluate(args: &[String]) -> Result<String, String> {
     if mode != "--evaluate" {
         return Err("expected --evaluate; evaluation never modifies the database".into());
     }
-    let effort = effort.parse::<std::num::NonZero<usize>>().map_err(|e| e.to_string())?;
+    let effort = effort.parse::<u32>().map_err(|e| e.to_string())?;
     let start = Instant::now();
     let rows = CanonicalDatabase::open(std::path::Path::new(database))?.all()?;
     if rows.is_empty() {
@@ -92,6 +94,8 @@ fn evaluate(args: &[String]) -> Result<String, String> {
         let result = sir_stack_scheduling::schedule_graph_with_effort(
             &graph,
             canonical.finalization,
+            StaticAllocId::ZERO,
+            ShuffleConfig::PRE_AMSTERDAM,
             effort,
         );
         scheduling_time += schedule_start.elapsed();
@@ -99,7 +103,7 @@ fn evaluate(args: &[String]) -> Result<String, String> {
         total_gas += gas_cost(&result.ops, ShuffleConfig::PRE_AMSTERDAM);
     }
     Ok(serde_json::json!({
-        "graphs": rows.len(), "effort": effort.get(), "total_gas": total_gas,
+        "graphs": rows.len(), "effort": effort, "total_gas": total_gas,
         "scheduler_seconds": scheduling_time.as_secs_f64(),
         "elapsed_seconds": start.elapsed().as_secs_f64(),
     })
@@ -123,12 +127,13 @@ fn process_graph(row: &mut CanonicalBlockRow, stats: &mut Stats) -> Result<(), S
     let graph = canonical.to_op_graph().map_err(|error| {
         format!("graph {} cannot be reconstructed: {error}", row.canonical_hash)
     })?;
-    let result = schedule_graph(&graph, finalization);
+    let result =
+        schedule_graph(&graph, finalization, StaticAllocId::ZERO, ShuffleConfig::PRE_AMSTERDAM);
     validate_schedule(&row.canonical_hash, &graph, finalization, &result.ops)?;
 
     let local_gas = gas_cost(&result.ops, ShuffleConfig::PRE_AMSTERDAM);
     let best_known_gas = row.best_gas_cost;
-    stats.record(best_known_gas, local_gas, result.candidate_limit_reached, row.manually_optimized);
+    stats.record(best_known_gas, local_gas, false, row.manually_optimized);
     if local_gas < best_known_gas {
         row.best_schedule = serde_json::to_string(&result.ops).map_err(|error| {
             format!("failed to encode schedule {}: {error}", row.canonical_hash)

@@ -17,49 +17,6 @@ fn only_contains_unique(values: &[ValueNodeId]) -> bool {
     values.iter().enumerate().all(|(i, value)| !values[i + 1..].contains(value))
 }
 
-pub(crate) fn copy_schedule_op<Sink: FnMut(StackOps)>(
-    config: ShuffleConfig,
-    stack: &mut TrackedStack<Sink>,
-    graph: &OpGraph,
-    op_id: OpNodeId,
-    flipped: bool,
-) {
-    let op = graph.get_op(op_id);
-    let mut flipped_inputs = SmallVec::<[ValueNodeId; 32]>::new();
-    let inputs = if flipped {
-        flipped_inputs.extend_from_slice(op.inputs_fifo);
-        flipped_inputs.swap(0, 1);
-        flipped_inputs.as_slice()
-    } else {
-        op.inputs_fifo
-    };
-
-    while inputs.iter().rev().enumerate().any(|(pushed, &value)| {
-        stack.get_spilled(value).is_none()
-            && stack
-                .find_first(value)
-                .is_none_or(|depth| usize::from(depth) + pushed > usize::from(config.max_dup_depth))
-    }) {
-        let top = stack.top().expect("an input is neither on the stack nor spilled");
-        if stack.get_spilled(top).is_some() {
-            stack.pop();
-        } else {
-            stack.spill_top();
-        }
-    }
-
-    for &value in inputs.iter().rev() {
-        if let Some(depth) =
-            stack.find_first(value).filter(|&depth| depth <= u16::from(config.max_dup_depth))
-        {
-            stack.dup(depth.try_into().expect("depth was checked against the u8 limit"));
-        } else {
-            stack.unspill(value);
-        }
-    }
-    stack.op(graph, op_id, flipped);
-}
-
 pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     config: ShuffleConfig,
     stack: &mut TrackedStack<Sink>,
@@ -67,18 +24,6 @@ pub(crate) fn greedy_schedule_op<Sink: FnMut(StackOps)>(
     op_id: OpNodeId,
     complete: OpSet<'_>,
     flipped: bool,
-) {
-    greedy_schedule_op_preserving(config, stack, graph, op_id, complete, flipped, None);
-}
-
-pub(crate) fn greedy_schedule_op_preserving<Sink: FnMut(StackOps)>(
-    config: ShuffleConfig,
-    stack: &mut TrackedStack<Sink>,
-    graph: &OpGraph,
-    op_id: OpNodeId,
-    complete: OpSet<'_>,
-    flipped: bool,
-    preserve: Option<ValueNodeId>,
 ) {
     assert!(only_contains_unique(stack.fifo()), "expecting all start stack values to be unique");
 
@@ -96,11 +41,7 @@ pub(crate) fn greedy_schedule_op_preserving<Sink: FnMut(StackOps)>(
         .fifo()
         .iter()
         .copied()
-        .filter(|value| {
-            Some(*value) != preserve
-                && graph.is_last_use(complete, *value)
-                && inputs.contains(value)
-        })
+        .filter(|value| graph.is_last_use(complete, *value) && inputs.contains(value))
         .collect::<SmallVec<[_; 32]>>();
 
     let head = unique_last_uses_on_stack.len().try_into().expect("overflow");

@@ -43,13 +43,16 @@ pub fn validate(
     finalization: BlockFinalization,
     config: ShuffleConfig,
     first_spill: StaticAllocId,
+    end_alloc_id: StaticAllocId,
     operations: &[StackOps],
-) -> Result<StaticAllocId, ValidationError> {
+) -> Result<(), ValidationError> {
     let mut replay = Replay::new(graph, finalization, config, first_spill)?;
     for (index, &operation) in operations.iter().enumerate() {
         replay.apply(index, operation)?;
     }
-    replay.finish()
+    let actual_end_alloc_id = replay.finish()?;
+    assert_eq!(end_alloc_id, actual_end_alloc_id);
+    Ok(())
 }
 
 pub(crate) struct Replay<'graph> {

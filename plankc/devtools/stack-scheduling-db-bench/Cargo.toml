@@ -11,10 +11,10 @@ serde_json = "1"
 sir-data.workspace = true
 sir-stack-scheduling.workspace = true
 sir-stack-scheduling-common.workspace = true
+plank-core.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-plank-core.workspace = true
 plank-test-utils.workspace = true
 
 [lints]
