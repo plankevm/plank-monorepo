@@ -21,9 +21,9 @@ program          = (function | data_segment | immutable_def)*
 
 function         = "fn" ident ":" newline basic_block+
 
-data_segment     = "data" ident hex_lit newline
+data_segment     = "data" ident hex_lit newline*
 
-immutable_def    = "immutable" ident number newline   // size in bytes, 1..=32
+immutable_def    = "immutable" ident number newline*   // size in bytes, 1..=32
 ```
 
 ### Basic Blocks
@@ -371,6 +371,10 @@ fn main:
 - Newlines are significant: they terminate statements and separate blocks
 - Spaces and tabs are insignificant within lines
 - Empty lines are allowed and ignored
+
+### Top-Level Items
+- Functions, data segments and immutables may appear in any order and interleave
+- Keywords (including `immutable`) are reserved and can't be used as local or block names
 
 ### Parameter Flexibility
 - Operations accept any mix of parameter types (locals, labels, data refs, numbers)
