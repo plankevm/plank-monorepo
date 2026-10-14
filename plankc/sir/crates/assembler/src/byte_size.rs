@@ -79,8 +79,8 @@ impl ByteSize {
         }
     }
 
-    pub fn bits(&self) -> u16 {
-        (*self as u16) * 8
+    pub fn bits(self) -> u16 {
+        (self as u16) * 8
     }
 
     pub fn push_opcode(self) -> u8 {
