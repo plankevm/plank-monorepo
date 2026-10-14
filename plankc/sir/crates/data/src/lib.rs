@@ -9,6 +9,8 @@ use alloy_primitives::U256;
 use plank_core::{Idx, IndexVec, RelSlice, Span, list_of_lists::ListOfLists};
 use std::{collections::HashSet, fmt};
 
+pub const EVM_WORD_IN_BYTES: u32 = 0x20;
+
 /// Implemented in a data oriented way. Instead of each basic block and function holding its own
 /// vector of items they're all stored contiguously in the top level program
 #[derive(Debug, Clone)]

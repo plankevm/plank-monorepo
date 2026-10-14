@@ -1,8 +1,6 @@
 use plank_core::Idx;
 use sir_assembler::{Assembler, op};
-use sir_data::{EthIRProgram, FunctionId, LocalId};
-
-pub(crate) const EVM_WORD_IN_BYTES: u32 = 0x20;
+use sir_data::{EVM_WORD_IN_BYTES, EthIRProgram, FunctionId, LocalId};
 
 type EvmMemAddr = u32;
 

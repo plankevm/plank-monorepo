@@ -1,14 +1,13 @@
 use hashbrown::{HashMap, HashSet};
 use plank_core::DenseIndexSet;
 use sir_data::{
-    BasicBlockId, ControlView, EthIRProgram, FunctionId, Operation, StaticAllocId,
+    BasicBlockId, ControlView, EVM_WORD_IN_BYTES, EthIRProgram, FunctionId, Operation,
+    StaticAllocId,
     operation::{InternalCallData, InternalCallNeverData},
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 
 use crate::{DynFreePointer, EvmMemAddr, Layout};
-
-const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 pub struct BumpAllocateAll;
 

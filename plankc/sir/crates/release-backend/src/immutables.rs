@@ -6,10 +6,8 @@
 
 use plank_core::{IncIterable, IndexVec, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
-use sir_data::{EthIRProgram, ImmutableId, operation::ByteSize};
+use sir_data::{EVM_WORD_IN_BYTES, EthIRProgram, ImmutableId, operation::ByteSize};
 use sir_static_memory_allocator::EvmMemAddr;
-
-const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WriteStrategy {

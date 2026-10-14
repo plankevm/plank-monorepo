@@ -1,7 +1,7 @@
-use crate::{Translator, static_memory_layout::EVM_WORD_IN_BYTES};
+use crate::Translator;
 use plank_core::Span;
 use sir_assembler::{AsmReference, MarkReference, op};
-use sir_data::{LocalId, operation::*};
+use sir_data::{EVM_WORD_IN_BYTES, LocalId, operation::*};
 
 struct OpcodeTranslator<'t, 'ir> {
     translator: &'t mut Translator<'ir>,
