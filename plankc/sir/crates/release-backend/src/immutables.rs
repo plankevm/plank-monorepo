@@ -166,10 +166,9 @@ mod tests {
         while pc < code.len() {
             let opcode = code[pc];
             gas += match opcode {
-                op::PUSH0 => 2,
+                op::PUSH0 | op::POP => 2,
                 op::MCOPY => 3 + 3,
-                op::POP
-                | op::ADD
+                op::ADD
                 | op::OR
                 | op::SHL
                 | op::MLOAD
@@ -240,7 +239,7 @@ mod tests {
             assert_eq!(emit_set_with_refs(S::B7, n).set_gas, 21 * n + 9, "scratch copy, n={n}");
             assert_eq!(emit_set_with_refs(S::B31, n).set_gas, 21 * n + 9, "scratch copy, n={n}");
         }
-        assert_eq!(emit_set_with_refs(S::B7, 0).set_gas, 6);
+        assert_eq!(emit_set_with_refs(S::B7, 0).set_gas, 4);
     }
 
     #[test]
