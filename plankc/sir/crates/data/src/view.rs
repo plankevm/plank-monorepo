@@ -1,7 +1,7 @@
 use crate::{
-    BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter, ReturnKind,
-    operation::{InternalCallData, InternalCallNeverData},
+    BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, ImmutableId, LargeConstId,
+    LocalId, OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter, ReturnKind,
+    operation::{ByteSize, InternalCallData, InternalCallNeverData},
 };
 use plank_core::DenseIndexSet;
 use std::fmt;
@@ -220,6 +220,27 @@ impl<'ir> FunctionView<'ir> {
     }
 }
 
+pub struct ImmutableView<'ir> {
+    id: ImmutableId,
+    ir: &'ir EthIRProgram,
+}
+
+impl ImmutableView<'_> {
+    pub fn id(&self) -> ImmutableId {
+        self.id
+    }
+
+    pub fn size(&self) -> ByteSize {
+        self.ir.immutables[self.id]
+    }
+}
+
+impl fmt::Display for ImmutableView<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "immutable %{} {}", self.id, self.size() as u8)
+    }
+}
+
 impl EthIRProgram {
     pub fn block(&self, id: BasicBlockId) -> BlockView<'_> {
         BlockView { id, ir: self }
@@ -239,6 +260,10 @@ impl EthIRProgram {
 
     pub fn operations(&self) -> impl Iterator<Item = OperationView<'_>> {
         self.operations.iter_idx().map(move |id| OperationView { id, ir: self })
+    }
+
+    pub fn immutables_iter(&self) -> impl Iterator<Item = ImmutableView<'_>> {
+        self.immutables.iter_idx().map(move |id| ImmutableView { id, ir: self })
     }
 
     pub fn for_each_reachable_operation<'ir>(

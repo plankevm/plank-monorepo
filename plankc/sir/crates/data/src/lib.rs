@@ -256,8 +256,8 @@ pub fn display_program(ir: &EthIRProgram) -> String {
         }
     }
 
-    for (immutable, size) in ir.immutables.enumerate_idx() {
-        writeln!(&mut output, "immutable %{immutable} {}", *size as u8).unwrap();
+    for immutable in ir.immutables_iter() {
+        writeln!(&mut output, "{immutable}").unwrap();
     }
 
     output
