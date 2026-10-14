@@ -49,57 +49,48 @@ impl WriteStrategy {
     }
 }
 
-/// Placeholder marks of the `getimmutable` operations reachable from the runtime entry point,
-/// contiguous per immutable. `ends` holds each immutable's range end relative to `marks_start`;
-/// emitting a placeholder takes it by decrementing the end, so `placeholders` is only valid before
-/// runcode is emitted.
-#[derive(Debug)]
-pub(crate) struct ImmutableRefs {
-    marks_start: MarkId,
+pub(crate) struct Counting {
+    counts: IndexVec<ImmutableId, u32>,
+}
+pub(crate) struct EmittingSets {
     ends: IndexVec<ImmutableId, u32>,
+    marks_start: MarkId,
+}
+pub(crate) struct EmittingGets {
+    offsets: IndexVec<ImmutableId, u32>,
+    marks_start: MarkId,
 }
 
-impl ImmutableRefs {
+/// Placeholder marks of the `getimmutable` operations reachable from the runtime entry point,
+/// contiguous per immutable. Placeholders are counted, then their marks allocated so initcode can
+/// emit the `setimmutable` writes, then runcode takes them by decrementing each immutable's range
+/// end.
+pub(crate) struct ImmutableRefs<State>(State);
+
+impl ImmutableRefs<Counting> {
     pub fn new(ir: &EthIRProgram) -> Self {
-        Self { marks_start: MarkId::ZERO, ends: IndexVec::from_vec(vec![0; ir.immutables.len()]) }
+        Self(Counting { counts: IndexVec::from_vec(vec![0; ir.immutables.len()]) })
     }
 
     pub fn count_ref(&mut self, immutable: ImmutableId) {
-        self.ends[immutable] += 1;
+        self.0.counts[immutable] += 1;
     }
 
-    pub fn alloc_marks(&mut self, next_mark_id: &mut MarkId) {
+    pub fn alloc_marks(self, next_mark_id: &mut MarkId) -> ImmutableRefs<EmittingSets> {
+        let mut ends = self.0.counts;
         let mut end = 0;
-        for count in self.ends.iter_mut() {
+        for count in ends.iter_mut() {
             end += *count;
             *count = end;
         }
-        self.marks_start = *next_mark_id;
+
+        let marks_start = *next_mark_id;
         *next_mark_id += end;
+        ImmutableRefs(EmittingSets { ends, marks_start })
     }
+}
 
-    fn placeholders(&self, immutable: ImmutableId) -> Span<MarkId> {
-        let start = self.ends[ImmutableId::ZERO..immutable].last().copied().unwrap_or(0);
-        Span::new(self.marks_start + start, self.marks_start + self.ends[immutable])
-    }
-
-    pub fn emit_placeholder(
-        &mut self,
-        asm: &mut Assembler,
-        size: ByteSize,
-        immutable: ImmutableId,
-    ) {
-        self.ends[immutable] -= 1;
-        asm.push_placeholder_push(size, self.marks_start + self.ends[immutable]);
-    }
-
-    pub fn needs_scratch(&self, ir: &EthIRProgram) -> bool {
-        ir.immutables.enumerate_idx().any(|(immutable, &size)| {
-            WriteStrategy::select(size) == WriteStrategy::CopyFromScratch
-                && !self.placeholders(immutable).is_empty()
-        })
-    }
-
+impl ImmutableRefs<EmittingSets> {
     pub fn emit_set(
         &self,
         asm: &mut Assembler,
@@ -162,7 +153,36 @@ impl ImmutableRefs {
             }
         }
     }
+
+    fn placeholders(&self, immutable: ImmutableId) -> Span<MarkId> {
+        let start = immutable.checked_sub(1).map(|i| self.0.ends[i]).unwrap_or(0);
+        Span::new(self.0.marks_start + start, self.0.marks_start + self.0.ends[immutable])
+    }
+
+    pub fn needs_scratch(&self, ir: &EthIRProgram) -> bool {
+        ir.immutables.enumerate_idx().any(|(immutable, &size)| {
+            WriteStrategy::select(size) == WriteStrategy::CopyFromScratch
+                && !self.placeholders(immutable).is_empty()
+        })
+    }
+
+    pub fn into_emit_gets(self) -> ImmutableRefs<EmittingGets> {
+        ImmutableRefs(EmittingGets { marks_start: self.0.marks_start, offsets: self.0.ends })
+    }
 }
+
+impl ImmutableRefs<EmittingGets> {
+    pub fn emit_placeholder(
+        &mut self,
+        asm: &mut Assembler,
+        size: ByteSize,
+        immutable: ImmutableId,
+    ) {
+        self.0.offsets[immutable] -= 1;
+        asm.push_placeholder_push(size, self.0.marks_start + self.0.offsets[immutable]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,14 +225,12 @@ mod tests {
         let mut next_mark = MarkId::ZERO;
         let runcode_start = next_mark.get_and_inc();
         let immutable = ImmutableId::new(0);
-        let mut refs = ImmutableRefs {
-            marks_start: MarkId::ZERO,
-            ends: IndexVec::from_vec(vec![ref_count, 1]),
-        };
-        refs.alloc_marks(&mut next_mark);
+        let refs = ImmutableRefs(Counting { counts: IndexVec::from_vec(vec![ref_count, 1]) })
+            .alloc_marks(&mut next_mark);
 
         let mut asm = Assembler::with_capacity(256, 32);
         refs.emit_set(&mut asm, runcode_start, Some(TEST_SCRATCH_SLOT), immutable, size);
+        let mut refs = refs.into_emit_gets();
         asm.push_mark(runcode_start);
         for i in 0..=ref_count {
             let emitted = if i < ref_count { immutable } else { ImmutableId::new(1) };
