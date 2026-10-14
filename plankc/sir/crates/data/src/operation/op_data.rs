@@ -521,9 +521,6 @@ impl InlineOpData for GetImmutableData {
     }
 }
 
-/// Writes the low `size` bytes of `value` into the immutable's placeholders. `runtime_ptr` must
-/// point to a full in-memory copy of the runtime code, this is not checked (see
-/// `sir/docs/ir_text_format.md`).
 #[derive(Debug, Clone, Copy)]
 pub struct SetImmutableData {
     pub ins: [LocalId; 2],

@@ -444,8 +444,6 @@ impl Legalizer {
         Ok(())
     }
 
-    /// `getimmutable` reads the deployed code so it may only run in main, `setimmutable` patches
-    /// the runtime code copy so it may only run in init and requires a main.
     fn validate_immutable_contexts(&self, program: &EthIRProgram) -> Result<(), LegalizerError> {
         let reachable_from_init = self.functions_reachable_from(program, program.init_entry);
         let reachable_from_main =

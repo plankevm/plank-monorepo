@@ -100,26 +100,24 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
         self.translator.emit_local_store(data.out);
     }
 
-    /// The value is staged in the scratch slot so that only its low `size` bytes can be copied
-    /// into each placeholder, leaving the surrounding runtime code untouched.
     fn emit_set_immutable(&mut self, data: SetImmutableData) {
         assert!(self.translator.translating_init_code, "setimmutable in runtime code");
         let size = self.translator.ir.immutables[data.immutable] as u32;
         let runtime_start = self.translator.mark_map.runtime_start;
         let scratch_slot = self.translator.memory_layout.scratch_slot;
         let copy_src = scratch_slot + EVM_WORD_IN_BYTES - size;
-        self.translator.emit_local_load(data.value()); // [value]
-        self.translator.asm.push_minimal_u32(scratch_slot); // [scratch, value]
-        self.translator.asm.push_op_byte(op::MSTORE); // []
+        self.translator.emit_local_load(data.value());
+        self.translator.asm.push_minimal_u32(scratch_slot);
+        self.translator.asm.push_op_byte(op::MSTORE);
         for rel_placeholder in self.translator.immutable_refs.placeholders(data.immutable) {
             let placeholder = self.translator.mark_map.immutable_refs + rel_placeholder;
             let placeholder_offset = MarkReference::Delta(Span::new(runtime_start, placeholder));
-            self.translator.asm.push_minimal_u32(size); // [size]
-            self.translator.asm.push_minimal_u32(copy_src); // [src, size]
-            self.translator.emit_local_load(data.runtime_ptr()); // [runtime_ptr, src, size]
-            self.translator.asm.push_reference(AsmReference::pushed(placeholder_offset)); // [offset, runtime_ptr, src, size]
-            self.translator.asm.push_op_byte(op::ADD); // [dst, src, size]
-            self.translator.asm.push_op_byte(op::MCOPY); // []
+            self.translator.asm.push_minimal_u32(size);
+            self.translator.asm.push_minimal_u32(copy_src);
+            self.translator.emit_local_load(data.runtime_ptr());
+            self.translator.asm.push_reference(AsmReference::pushed(placeholder_offset));
+            self.translator.asm.push_op_byte(op::ADD);
+            self.translator.asm.push_op_byte(op::MCOPY);
         }
     }
 

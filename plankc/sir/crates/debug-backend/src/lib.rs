@@ -70,9 +70,6 @@ impl MarkMap {
     }
 }
 
-/// Per immutable, the end of its contiguous range of placeholder marks relative to
-/// `MarkMap::immutable_refs`. Translating a `getimmutable` takes a placeholder by decrementing the
-/// end, so `placeholders` is only valid before runtime code is translated.
 pub(crate) struct ImmutableRefs {
     ends: IndexVec<ImmutableId, u32>,
 }

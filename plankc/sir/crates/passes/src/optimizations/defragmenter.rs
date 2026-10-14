@@ -76,7 +76,6 @@ impl<'a> Rewriter<'a> {
 
         self.patch_block_control();
 
-        // Immutable IDs are kept stable as their declarations are part of the program's interface.
         self.dst.immutables.clone_from(&self.src.immutables);
         self.dst.init_entry = self.state.function_map[&self.src.init_entry];
         self.dst.main_entry = self.src.main_entry.map(|m| self.state.function_map[&m]);

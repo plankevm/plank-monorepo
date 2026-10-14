@@ -40,7 +40,6 @@ pub fn ir_to_bytecode(program: &EthIRProgram, analyses: &AnalysesStore, bytecode
         });
     let (asm, marks) = match program.main_entry {
         Some(runtime_entrypoint) => {
-            // `setimmutable` is init-only, the runtime never needs scratch space for it.
             let run_memory_layout = BumpAllocateAll::generate(
                 program,
                 runtime_entrypoint,

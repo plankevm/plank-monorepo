@@ -403,7 +403,6 @@ define_operations! {
     InitEndOffset(InlineOperands<0, 1>) "init_end_offset",
     RuntimeLength(InlineOperands<0, 1>) "runtime_length",
 
-    // ========== Immutables ==========
     GetImmutable(GetImmutableData) "getimmutable",
     SetImmutable(SetImmutableData) "setimmutable",
 }

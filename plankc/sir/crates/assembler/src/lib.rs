@@ -341,8 +341,6 @@ impl Assembler {
         self.push_minimal_u256(U256::from(value));
     }
 
-    /// Emits a `PUSH<size>` with a zeroed immediate, placing `immediate_mark` right before the
-    /// immediate so it can be patched later.
     pub fn push_placeholder_push(&mut self, size: ByteSize, immediate_mark: MarkId) {
         self.push_op_byte(size.push_opcode());
         self.push_mark(immediate_mark);

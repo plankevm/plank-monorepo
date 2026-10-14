@@ -1,28 +1,8 @@
-//! Immutables are compiled into `PUSH<size>` placeholders with zeroed immediates in the runtime
-//! code. `setimmutable` patches every placeholder of its immutable in the runtime code copy that
-//! initcode is assembling in memory (at `runtime_ptr`), so the copy must already be in place. Each
-//! placeholder is overwritten, a repeated `setimmutable` replaces the previously set value. An
-//! immutable without placeholders just has its operands popped.
-//!
-//! ## Write strategies
-//!
-//! Stack on entry is `[value, runtime_ptr]` (top last), `N` is the number of placeholders and the
-//! gas numbers exclude memory expansion:
-//!
-//! | size     | strategy               | gas       |
-//! |----------|------------------------|-----------|
-//! | 32       | `mstore` each          | 15N - 6   |
-//! | 1        | `mstore8` each         | 15N - 6   |
-//! | 2..=31   | scratch + `mcopy` each | 21N + 9   |
-//!
-//! The scratch slot is reserved whenever the runtime references any immutable of a partial size.
-//!
 //! For partial sizes the value is `mstore`d to the scratch slot once (12 gas) and its low `size`
 //! bytes are then `mcopy`d into every placeholder (21 gas each, 18 for the last). Only the
 //! placeholder bytes are written, so adjacent runtime code is left untouched and no memory past
 //! the runtime copy is accessed. A `mcopy` costs 21 gas vs. 15 for `mstore`/`mstore8`, which is
-//! why it's not used for full words or single bytes. In all cases only the low `size` bytes of
-//! `value` end up in the placeholder.
+//! why it's not used for full words or single bytes.
 
 use plank_core::{Idx, IndexVec, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
@@ -59,10 +39,6 @@ pub(crate) struct EmittingGets {
     marks_start: MarkId,
 }
 
-/// Placeholder marks of the `getimmutable` operations reachable from the runtime entry point,
-/// contiguous per immutable. Placeholders are counted, then their marks allocated so initcode can
-/// emit the `setimmutable` writes, then runcode takes them by decrementing each immutable's range
-/// end.
 pub(crate) struct ImmutableRefs<State>(State);
 
 impl ImmutableRefs<Counting> {
@@ -111,44 +87,41 @@ impl ImmutableRefs<EmittingSets> {
         let last = placeholders.end - 1;
         let rest = Span::new(placeholders.start, last);
 
-        // Stack comments show deepest => highest.
         match WriteStrategy::select(size) {
             WriteStrategy::StoreEach { store_op } => {
                 for placeholder in rest {
-                    // input: [value, ptr]
-                    asm.push_op_byte(op::DUP2); //         [value, ptr, value]
-                    asm.push_op_byte(op::DUP2); //         [value, ptr, value, ptr]
-                    push_offset(asm, placeholder); //      [value, ptr, value, ptr, offset]
-                    asm.push_op_byte(op::ADD); //          [value, ptr, value, dst]
-                    asm.push_op_byte(store_op); //         [value, ptr]
+                    asm.push_op_byte(op::DUP2);
+                    asm.push_op_byte(op::DUP2);
+                    push_offset(asm, placeholder);
+                    asm.push_op_byte(op::ADD);
+                    asm.push_op_byte(store_op);
                 }
-                push_offset(asm, last); //                 [value, ptr, offset]
-                asm.push_op_byte(op::ADD); //              [value, dst]
-                asm.push_op_byte(store_op); //             []
+                push_offset(asm, last);
+                asm.push_op_byte(op::ADD);
+                asm.push_op_byte(store_op);
             }
             WriteStrategy::CopyFromScratch => {
                 let scratch = scratch_slot.expect("missing setimmutable scratch slot").get();
                 let copy_size = size as u32;
                 let src = scratch + EVM_WORD_IN_BYTES - copy_size;
 
-                // input: [value, ptr]
-                asm.push_minimal_u32(copy_size); //        [value, ptr, size]
-                asm.push_op_byte(op::SWAP2); //            [size, ptr, value]
-                asm.push_minimal_u32(scratch); //          [size, ptr, value, scratch]
-                asm.push_op_byte(op::MSTORE); //           [size, ptr]
+                asm.push_minimal_u32(copy_size);
+                asm.push_op_byte(op::SWAP2);
+                asm.push_minimal_u32(scratch);
+                asm.push_op_byte(op::MSTORE);
                 for placeholder in rest {
-                    asm.push_op_byte(op::DUP2); //         [size, ptr, size]
-                    asm.push_minimal_u32(src); //          [size, ptr, size, src]
-                    asm.push_op_byte(op::DUP3); //         [size, ptr, size, src, ptr]
-                    push_offset(asm, placeholder); //      [size, ptr, size, src, ptr, offset]
-                    asm.push_op_byte(op::ADD); //          [size, ptr, size, src, dst]
-                    asm.push_op_byte(op::MCOPY); //        [size, ptr]
+                    asm.push_op_byte(op::DUP2);
+                    asm.push_minimal_u32(src);
+                    asm.push_op_byte(op::DUP3);
+                    push_offset(asm, placeholder);
+                    asm.push_op_byte(op::ADD);
+                    asm.push_op_byte(op::MCOPY);
                 }
-                asm.push_minimal_u32(src); //              [size, ptr, src]
-                asm.push_op_byte(op::SWAP1); //            [size, src, ptr]
-                push_offset(asm, last); //                 [size, src, ptr, offset]
-                asm.push_op_byte(op::ADD); //              [size, src, dst]
-                asm.push_op_byte(op::MCOPY); //            []
+                asm.push_minimal_u32(src);
+                asm.push_op_byte(op::SWAP1);
+                push_offset(asm, last);
+                asm.push_op_byte(op::ADD);
+                asm.push_op_byte(op::MCOPY);
             }
         }
     }
@@ -273,7 +246,6 @@ mod tests {
     #[test]
     fn strategy_sizes() {
         use ByteSize as S;
-        // Offsets are < 256 here, so each offset push is 2 bytes.
         for n in 1..=5 {
             let n_usize = n as usize;
             assert_eq!(emit_set_with_refs(S::B32, n).set_bytes, 6 * n_usize - 2, "mstore, n={n}");

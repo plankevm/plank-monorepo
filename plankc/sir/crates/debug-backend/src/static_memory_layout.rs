@@ -19,8 +19,6 @@ impl StaticMemoryAllocator for EvmMemAddr {
 }
 
 pub struct StaticMemoryLayout {
-    /// Shared by `Switch` lowering and `setimmutable`, neither keeps it live past its own control
-    /// transfer / operation.
     pub scratch_slot: EvmMemAddr,
     pub free_pointer: EvmMemAddr,
     pub basic_block_locals_transfer: EvmMemAddr,

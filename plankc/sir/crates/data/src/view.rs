@@ -241,8 +241,6 @@ impl EthIRProgram {
         self.operations.iter_idx().map(move |id| OperationView { id, ir: self })
     }
 
-    /// Visits every operation in the blocks reachable from `entry`, following both control flow
-    /// and internal calls. `visited` and `worklist` are scratch buffers, cleared before use.
     pub fn for_each_reachable_operation<'ir>(
         &'ir self,
         entry: FunctionId,

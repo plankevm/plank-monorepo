@@ -1,6 +1,5 @@
 use crate::op;
 
-/// A byte count in `1..=32`: the size of a `PUSH<n>` immediate or of a partial EVM word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ByteSize {
