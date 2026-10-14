@@ -28,9 +28,7 @@ use plank_core::{Idx, IndexVec, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{EthIRProgram, ImmutableId, operation::ByteSize};
 use sir_static_memory_allocator::EvmMemAddr;
-use smallvec::SmallVec;
 
-const PLACEHOLDERS_INLINE_CAPACITY: usize = 8;
 const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,23 +97,24 @@ impl ImmutableRefs<EmittingSets> {
         immutable: ImmutableId,
         size: ByteSize,
     ) {
-        let placeholders: SmallVec<[MarkId; PLACEHOLDERS_INLINE_CAPACITY]> =
-            self.placeholders(immutable).iter().collect();
+        let placeholders = self.placeholders(immutable);
         let push_offset = |asm: &mut Assembler, placeholder: MarkId| {
             let offset = MarkReference::Delta(Span::new(runcode_start, placeholder));
             asm.push_reference(AsmReference::pushed(offset));
         };
 
-        let Some((&last, rest)) = placeholders.split_last() else {
+        if placeholders.is_empty() {
             asm.push_op_byte(op::POP);
             asm.push_op_byte(op::POP);
             return;
-        };
+        }
+        let last = placeholders.end - 1;
+        let rest = Span::new(placeholders.start, last);
 
         // Stack comments show deepest => highest.
         match WriteStrategy::select(size) {
             WriteStrategy::StoreEach { store_op } => {
-                for &placeholder in rest {
+                for placeholder in rest {
                     // input: [value, ptr]
                     asm.push_op_byte(op::DUP2); //         [value, ptr, value]
                     asm.push_op_byte(op::DUP2); //         [value, ptr, value, ptr]
@@ -137,7 +136,7 @@ impl ImmutableRefs<EmittingSets> {
                 asm.push_op_byte(op::SWAP2); //            [size, ptr, value]
                 asm.push_minimal_u32(scratch); //          [size, ptr, value, scratch]
                 asm.push_op_byte(op::MSTORE); //           [size, ptr]
-                for &placeholder in rest {
+                for placeholder in rest {
                     asm.push_op_byte(op::DUP2); //         [size, ptr, size]
                     asm.push_minimal_u32(src); //          [size, ptr, size, src]
                     asm.push_op_byte(op::DUP3); //         [size, ptr, size, src, ptr]
