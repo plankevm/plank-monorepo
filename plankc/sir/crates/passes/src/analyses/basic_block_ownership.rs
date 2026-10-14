@@ -84,6 +84,10 @@ impl BasicBlockOwnershipAndReachability {
             }
         }
 
+        for immutable in program.immutables_iter() {
+            writeln!(&mut output, "{immutable}").unwrap();
+        }
+
         output
     }
 }

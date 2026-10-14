@@ -1,7 +1,9 @@
 use crate::{
-    BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, LargeConstId, LocalId,
-    OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter, ReturnKind,
+    BasicBlockId, CasesId, CasesIter, Control, EthIRProgram, FunctionId, ImmutableId, LargeConstId,
+    LocalId, OpaqueSourceId, Operation, OperationIdx, OutgoingConnectionsIter, ReturnKind,
+    operation::{ByteSize, InternalCallData, InternalCallNeverData},
 };
+use plank_core::DenseIndexSet;
 use std::fmt;
 
 #[derive(Clone, Copy)]
@@ -218,6 +220,27 @@ impl<'ir> FunctionView<'ir> {
     }
 }
 
+pub struct ImmutableView<'ir> {
+    id: ImmutableId,
+    ir: &'ir EthIRProgram,
+}
+
+impl ImmutableView<'_> {
+    pub fn id(&self) -> ImmutableId {
+        self.id
+    }
+
+    pub fn size(&self) -> ByteSize {
+        self.ir.immutables[self.id]
+    }
+}
+
+impl fmt::Display for ImmutableView<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "immutable %{} {}", self.id, self.size() as u8)
+    }
+}
+
 impl EthIRProgram {
     pub fn block(&self, id: BasicBlockId) -> BlockView<'_> {
         BlockView { id, ir: self }
@@ -237,5 +260,42 @@ impl EthIRProgram {
 
     pub fn operations(&self) -> impl Iterator<Item = OperationView<'_>> {
         self.operations.iter_idx().map(move |id| OperationView { id, ir: self })
+    }
+
+    pub fn immutables_iter(&self) -> impl Iterator<Item = ImmutableView<'_>> {
+        self.immutables.iter_idx().map(move |id| ImmutableView { id, ir: self })
+    }
+
+    pub fn for_each_reachable_operation<'ir>(
+        &'ir self,
+        entry: FunctionId,
+        visited: &mut DenseIndexSet<BasicBlockId>,
+        worklist: &mut Vec<BasicBlockId>,
+        mut visit: impl FnMut(OperationView<'ir>),
+    ) {
+        visited.clear();
+        worklist.clear();
+        let entry_bb = self.functions[entry].entry();
+        visited.add(entry_bb);
+        worklist.push(entry_bb);
+        while let Some(bb_id) = worklist.pop() {
+            let block = self.block(bb_id);
+            for op in block.operations() {
+                if let Operation::InternalCall(InternalCallData { function, .. })
+                | Operation::InternalCallNever(InternalCallNeverData { function, .. }) = op.op()
+                {
+                    let fn_entry = self.functions[function].entry();
+                    if visited.add(fn_entry) {
+                        worklist.push(fn_entry);
+                    }
+                }
+                visit(op);
+            }
+            for succ in block.successors() {
+                if visited.add(succ) {
+                    worklist.push(succ);
+                }
+            }
+        }
     }
 }

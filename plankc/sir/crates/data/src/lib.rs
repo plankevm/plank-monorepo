@@ -3,10 +3,13 @@ pub mod index;
 pub mod operation;
 pub mod view;
 
+use crate::operation::ByteSize;
 pub use crate::{index::*, operation::Operation, view::*};
 use alloy_primitives::U256;
 use plank_core::{Idx, IndexVec, RelSlice, Span, list_of_lists::ListOfLists};
 use std::{collections::HashSet, fmt};
+
+pub const EVM_WORD_IN_BYTES: u32 = 0x20;
 
 /// Implemented in a data oriented way. Instead of each basic block and function holding its own
 /// vector of items they're all stored contiguously in the top level program
@@ -20,6 +23,7 @@ pub struct EthIRProgram {
     pub basic_blocks: IndexVec<BasicBlockId, BasicBlock>,
     pub operations: IndexVec<OperationIdx, Operation>,
     pub data_segments: ListOfLists<DataId, u8>,
+    pub immutables: IndexVec<ImmutableId, ByteSize>,
     // IR Data
     pub locals: IndexVec<LocalIdx, LocalId>,
     pub large_consts: IndexVec<LargeConstId, U256>,
@@ -39,6 +43,7 @@ impl Default for EthIRProgram {
             basic_blocks: Default::default(),
             operations: Default::default(),
             data_segments: Default::default(),
+            immutables: Default::default(),
             locals: Default::default(),
             large_consts: Default::default(),
             cases: Default::default(),
@@ -58,6 +63,7 @@ impl EthIRProgram {
         self.basic_blocks.clear();
         self.operations.clear();
         self.data_segments.clear();
+        self.immutables.clear();
         self.locals.clear();
         self.large_consts.clear();
         self.cases.clear();
@@ -160,6 +166,11 @@ impl EthIRProgram {
             writeln!(&mut output, " ({} bytes)", data.len()).unwrap();
         }
 
+        writeln!(&mut output, "\n=== Immutables ({}) ===", self.immutables.len()).unwrap();
+        for (id, size) in self.immutables.enumerate_idx() {
+            writeln!(&mut output, "%{id}: {} bytes", *size as u8).unwrap();
+        }
+
         writeln!(&mut output, "\n=== Cases ({}) ===", self.cases.len()).unwrap();
         for (id, case) in self.cases.enumerate_idx() {
             writeln!(
@@ -243,6 +254,10 @@ pub fn display_program(ir: &EthIRProgram) -> String {
             }
             writeln!(&mut output).unwrap();
         }
+    }
+
+    for immutable in ir.immutables_iter() {
+        writeln!(&mut output, "{immutable}").unwrap();
     }
 
     output
@@ -331,6 +346,12 @@ impl fmt::Display for EthIRProgram {
                         Operation::MemoryStore(mem_store) => {
                             write!(f, "{}", mem_store.size.bits())?;
                         }
+                        Operation::GetImmutable(get) => {
+                            write!(f, " %i{}", get.immutable)?;
+                        }
+                        Operation::SetImmutable(set) => {
+                            write!(f, " %i{}", set.immutable)?;
+                        }
                         _ => {}
                     }
                     for &inp in op.inputs() {
@@ -379,6 +400,14 @@ impl fmt::Display for EthIRProgram {
                 data,
                 alloy_primitives::hex::display(&self.data_segments[data])
             )?;
+        }
+
+        if !self.immutables.is_empty() {
+            writeln!(f)?;
+        }
+
+        for (immutable, size) in self.immutables.enumerate_idx() {
+            writeln!(f, "immutable i{immutable} {}", *size as u8)?;
         }
 
         Ok(())
@@ -775,6 +804,66 @@ mod tests {
             data .0 0x1234
             data .1 0x56789abc
             data .2 0xdef0
+            "#,
+        );
+    }
+
+    #[test]
+    fn test_display_with_immutables() {
+        use crate::{builder::EthIRBuilder, operation::*};
+
+        let mut builder = EthIRBuilder::new();
+        let owner = builder.new_immutable(ByteSize::B20);
+        let flag = builder.new_immutable(ByteSize::B1);
+
+        let mut init = builder.begin_function();
+        let ptr = init.new_local();
+        let value = init.new_local();
+        let mut bb = init.begin_basic_block();
+        bb.add_operation(Operation::AcquireFreePointer(InlineOperands { ins: [], outs: [ptr] }));
+        bb.add_operation(Operation::Caller(InlineOperands { ins: [], outs: [value] }));
+        bb.add_operation(Operation::SetImmutable(SetImmutableData {
+            ins: [ptr, value],
+            immutable: owner,
+        }));
+        bb.add_operation(Operation::Stop(()));
+        let init_entry = bb.finish_terminating().unwrap();
+        let init = init.finish(init_entry);
+
+        let mut main = builder.begin_function();
+        let out = main.new_local();
+        let mut bb = main.begin_basic_block();
+        bb.add_operation(Operation::GetImmutable(GetImmutableData { out, immutable: flag }));
+        bb.add_operation(Operation::Stop(()));
+        let main_entry = bb.finish_terminating().unwrap();
+        let main = main.finish(main_entry);
+
+        let program = builder.build(init, Some(main));
+
+        assert_ir_display(
+            &program,
+            r#"
+            Init: @0
+            Run: @1
+            Functions:
+                fn @0 -> entry @0  (never)
+                fn @1 -> entry @1  (never)
+
+            Basic Blocks:
+                @0 {
+                    $0 = freeptr
+                    $1 = caller
+                    setimmutable %0 $0 $1
+                    stop
+                }
+
+                @1 {
+                    $2 = getimmutable %1
+                    stop
+                }
+
+            immutable %0 20
+            immutable %1 1
             "#,
         );
     }

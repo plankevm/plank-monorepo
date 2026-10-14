@@ -15,5 +15,9 @@ hashbrown.workspace = true
 smallvec.workspace = true
 alloy-primitives.workspace = true
 
+[dev-dependencies]
+pretty_assertions.workspace = true
+plank-test-utils.workspace = true
+
 [lints]
 workspace = true

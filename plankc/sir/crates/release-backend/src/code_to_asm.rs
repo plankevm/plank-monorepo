@@ -3,8 +3,9 @@ use alloy_primitives::U256;
 use plank_core::{DenseIndexSet, IncIterable};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{
-    BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, Operation, OperationIdx,
-    operation::{IRMemoryIOByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
+    BasicBlockId, ControlView, DataId, EthIRProgram, FunctionId, ImmutableId, Operation,
+    OperationIdx,
+    operation::{ByteSize, MemoryLoadData, MemoryStoreData, StaticAllocData},
 };
 use sir_stack_scheduling::{ScheduledOps, stack::StackOps};
 use sir_static_memory_allocator as static_mem;
@@ -23,6 +24,14 @@ pub(crate) trait CodegenState {
     fn bb_marks(&self) -> IndexableMarkSpan<BasicBlockId>;
     fn mark_to_ref(&self, marks: &MarkMap, mark: MarkId) -> MarkReference;
     fn data_to_ref(&mut self, marks: &MarkMap, data: DataId) -> MarkReference;
+    fn get_immutable(&mut self, asm: &mut Assembler, immutable: ImmutableId, size: ByteSize);
+    fn set_immutable(
+        &self,
+        asm: &mut Assembler,
+        marks: &MarkMap,
+        immutable: ImmutableId,
+        size: ByteSize,
+    );
 }
 
 pub(crate) struct CodeToAsmEmitter<'a> {
@@ -38,10 +47,10 @@ impl<'a> CodeToAsmEmitter<'a> {
     pub fn new(
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
+        mark_map: MarkMap,
         mut visited_bbs: DenseIndexSet<BasicBlockId>,
         mut basic_blocks_worklist: Vec<BasicBlockId>,
     ) -> Self {
-        let mark_map = MarkMap::new(ir);
         let asm = Assembler::with_capacity(ASM_BYTES_CAPACITY, ASM_SECTIONS_CAPACITY);
 
         // Extra clear just to be safe.
@@ -147,7 +156,7 @@ impl<'a> CodeToAsmEmitter<'a> {
                 }
                 ControlView::Switch(switch) => {
                     let switch_store_addr =
-                        state.layout().switch_store.expect("missing switch allocation").get();
+                        state.layout().scratch_slot.expect("missing switch scratch slot").get();
 
                     self.asm.push_minimal_u32(switch_store_addr);
                     self.asm.push_op_byte(op::MSTORE);
@@ -235,6 +244,14 @@ impl<'a> CodeToAsmEmitter<'a> {
             Operation::RuntimeLength(_) => {
                 let asm_ref = AsmReference::pushed(MarkReference::Delta(self.mark_map.runcode()));
                 self.asm.push_reference(asm_ref);
+            }
+            Operation::GetImmutable(get) => {
+                let size = self.ir.immutables[get.immutable];
+                state.get_immutable(&mut self.asm, get.immutable, size);
+            }
+            Operation::SetImmutable(set) => {
+                let size = self.ir.immutables[set.immutable];
+                state.set_immutable(&mut self.asm, &self.mark_map, set.immutable, size);
             }
             Operation::SetCopy(_) | Operation::Noop(()) => {
                 // interpreted as a stack operation "setcopy" would pop and push back the top
@@ -343,7 +360,7 @@ impl<'a> CodeToAsmEmitter<'a> {
 
     fn emit_memory_load(&mut self, data: MemoryLoadData) {
         match data.size {
-            IRMemoryIOByteSize::B32 => self.asm.push_op_byte(op::MLOAD),
+            ByteSize::B32 => self.asm.push_op_byte(op::MLOAD),
             non_native_load_size => {
                 self.asm.push_op_byte(op::MLOAD);
                 self.asm.push_minimal_u32(256 - u32::from(non_native_load_size.bits()));
@@ -353,7 +370,7 @@ impl<'a> CodeToAsmEmitter<'a> {
     }
 
     fn emit_memory_store(&mut self, data: MemoryStoreData) {
-        use IRMemoryIOByteSize as MemSize;
+        use ByteSize as MemSize;
 
         match data.size {
             MemSize::B1 => self.asm.push_op_byte(op::MSTORE8),

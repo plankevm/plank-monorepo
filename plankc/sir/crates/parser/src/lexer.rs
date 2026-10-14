@@ -44,6 +44,8 @@ pub enum Token {
 
     #[token("data")]
     Data,
+    #[token("immutable")]
+    Immutable,
     #[token("fn")]
     Fn,
     #[token("switch")]
@@ -59,6 +61,8 @@ pub enum Token {
     Label,
     #[regex(r"\.[a-zA-Z_][a-zA-Z0-9_]*")]
     DataRef,
+    #[regex("%[a-zA-Z0-9_]+")]
+    ImmutableRef,
 
     #[regex("-?[0-9]+")]
     DecLiteral,
@@ -92,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_basic_tokens() {
-        let input = "fn data : -> => ? = _ { } @label .dataref 123 0xFF";
+        let input = "fn data : -> => ? = _ { } @label .dataref 123 0xFF immutable %imm";
         let result = Token::lexer(input).collect::<Result<Vec<_>, _>>().unwrap();
 
         assert_eq!(result[0], Token::Fn);
@@ -109,6 +113,8 @@ mod tests {
         assert_eq!(result[11], Token::DataRef);
         assert_eq!(result[12], Token::DecLiteral);
         assert_eq!(result[13], Token::HexLiteral);
+        assert_eq!(result[14], Token::Immutable);
+        assert_eq!(result[15], Token::ImmutableRef);
     }
 
     #[test]

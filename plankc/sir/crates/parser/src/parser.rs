@@ -61,6 +61,19 @@ impl<T> std::ops::DerefMut for Spanned<T> {
 pub struct Ast<'arena, 'src> {
     pub functions: BVec<'arena, Function<'arena, 'src>>,
     pub data_segments: BVec<'arena, DataSegment<'arena, 'src>>,
+    pub immutables: BVec<'arena, ImmutableDef<'src>>,
+}
+
+#[derive(Debug)]
+pub struct ImmutableDef<'src> {
+    pub name: Spanned<&'src str>,
+    pub size: Spanned<U256>,
+}
+
+enum TopLevelItem<'arena, 'src> {
+    Function(Function<'arena, 'src>),
+    Data(DataSegment<'arena, 'src>),
+    Immutable(ImmutableDef<'src>),
 }
 
 #[derive(Debug)]
@@ -96,6 +109,7 @@ pub enum ParamExpr<'arena, 'src> {
     NameRef(Spanned<&'src str>),
     FuncRef(Spanned<&'src str>),
     DataRef(Spanned<&'src str>),
+    ImmutableRef(Spanned<&'src str>),
     Num(Box<'arena, Spanned<U256>>),
 }
 
@@ -155,6 +169,11 @@ fn parser<'arena, 'src: 'arena>(
         Spanned::new(s.strip_prefix('.').expect("invalid data ref"), e.span())
     });
 
+    let immutable_ref = select! { Token::ImmutableRef => () }.map_with(|_, e| {
+        let s: &str = &source[e.span()];
+        Spanned::new(s.strip_prefix('%').expect("invalid immutable ref"), e.span())
+    });
+
     let dec_literal_as_u256 = select! { Token::DecLiteral => () }.map_with(|_, e| {
         let s: &str = &source[e.span()];
         match s.strip_prefix('-') {
@@ -199,6 +218,7 @@ fn parser<'arena, 'src: 'arena>(
                     ident.map(ParamExpr::NameRef),
                     label.map(ParamExpr::FuncRef),
                     data_ref.map(ParamExpr::DataRef),
+                    immutable_ref.map(ParamExpr::ImmutableRef),
                     u256_value.map(|v| ParamExpr::Num(arena.alloc(v))),
                 ))
                 .repeated(),
@@ -349,31 +369,41 @@ fn parser<'arena, 'src: 'arena>(
             hex::decode_to_slice(hex_str, bytes).expect("hex not decoded despite validation");
             Ok(Spanned::new(bytes, e.span()))
         }))
-        .then_ignore(just(Token::Newline).ignored().or_not())
+        .then_ignore(just(Token::Newline).ignored().repeated())
         .map(|(name, data)| DataSegment { name, data });
 
-    // Top-level program: func_def* data_segment_def*
+    let immutable_def = just(Token::Immutable)
+        .ignore_then(ident)
+        .then(u256_value)
+        .then_ignore(just(Token::Newline).ignored().repeated())
+        .map(|(name, size)| ImmutableDef { name, size });
+
+    let top_level_item = choice((
+        function.map(TopLevelItem::Function),
+        data_def.map(TopLevelItem::Data),
+        immutable_def.map(TopLevelItem::Immutable),
+    ));
+
     just(Token::Newline)
         .ignored()
         .repeated()
         .ignore_then(
             empty()
-                .map(|_| BVec::with_capacity_in(DEFAULT_TOP_LEVEL_ITEMS_CAPACITY, arena))
-                .foldl(function.repeated(), |mut functions, f| {
-                    functions.push(f);
-                    functions
+                .map(|_| Ast {
+                    functions: BVec::with_capacity_in(DEFAULT_TOP_LEVEL_ITEMS_CAPACITY, arena),
+                    data_segments: BVec::with_capacity_in(DEFAULT_TOP_LEVEL_ITEMS_CAPACITY, arena),
+                    immutables: BVec::new_in(arena),
                 })
-                .then(
-                    empty()
-                        .map(|_| BVec::with_capacity_in(DEFAULT_TOP_LEVEL_ITEMS_CAPACITY, arena))
-                        .foldl(data_def.repeated(), |mut data_segments, d| {
-                            data_segments.push(d);
-                            data_segments
-                        }),
-                ),
+                .foldl(top_level_item.repeated(), |mut ast, item| {
+                    match item {
+                        TopLevelItem::Function(f) => ast.functions.push(f),
+                        TopLevelItem::Data(d) => ast.data_segments.push(d),
+                        TopLevelItem::Immutable(i) => ast.immutables.push(i),
+                    }
+                    ast
+                }),
         )
         .then_ignore(end())
-        .map(|(functions, data_segments)| Ast { functions, data_segments })
 }
 
 #[cfg(test)]

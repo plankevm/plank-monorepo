@@ -107,6 +107,7 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
             value == local
         }
         Operation::InternalCall(_) | Operation::InternalCallNever(_) => true,
+        Operation::SetImmutable(_) => true,
 
         Operation::Add(_)
         | Operation::Mul(_)
@@ -173,7 +174,8 @@ fn operation_causes_ptr_escape(program: &EthIRProgram, op: Operation, local: Loc
         | Operation::Noop(())
         | Operation::RuntimeStartOffset(_)
         | Operation::InitEndOffset(_)
-        | Operation::RuntimeLength(_) => false,
+        | Operation::RuntimeLength(_)
+        | Operation::GetImmutable(_) => false,
     }
 }
 

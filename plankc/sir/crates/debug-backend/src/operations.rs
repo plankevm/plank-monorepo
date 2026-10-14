@@ -1,6 +1,7 @@
 use crate::Translator;
-use sir_assembler::{AsmReference, op};
-use sir_data::{LocalId, operation::*};
+use plank_core::Span;
+use sir_assembler::{AsmReference, MarkReference, op};
+use sir_data::{EVM_WORD_IN_BYTES, LocalId, operation::*};
 
 struct OpcodeTranslator<'t, 'ir> {
     translator: &'t mut Translator<'ir>,
@@ -88,6 +89,36 @@ impl<'t, 'ir> OpcodeTranslator<'t, 'ir> {
         let data_offset_mark = self.translator.mark_map.get_data_mark(data.segment_id);
         self.translator.emit_code_offset_push(data_offset_mark);
         self.translator.emit_local_store(data.sets);
+    }
+
+    fn emit_get_immutable(&mut self, data: GetImmutableData) {
+        assert!(!self.translator.translating_init_code, "getimmutable in init code");
+        let size = self.translator.ir.immutables[data.immutable];
+        let placeholder = self.translator.mark_map.immutable_refs
+            + self.translator.immutable_refs.take_placeholder(data.immutable);
+        self.translator.asm.push_placeholder_push(size, placeholder);
+        self.translator.emit_local_store(data.out);
+    }
+
+    fn emit_set_immutable(&mut self, data: SetImmutableData) {
+        assert!(self.translator.translating_init_code, "setimmutable in runtime code");
+        let size = self.translator.ir.immutables[data.immutable] as u32;
+        let runtime_start = self.translator.mark_map.runtime_start;
+        let scratch_slot = self.translator.memory_layout.scratch_slot;
+        let copy_src = scratch_slot + EVM_WORD_IN_BYTES - size;
+        self.translator.emit_local_load(data.value());
+        self.translator.asm.push_minimal_u32(scratch_slot);
+        self.translator.asm.push_op_byte(op::MSTORE);
+        for rel_placeholder in self.translator.immutable_refs.placeholders(data.immutable) {
+            let placeholder = self.translator.mark_map.immutable_refs + rel_placeholder;
+            let placeholder_offset = MarkReference::Delta(Span::new(runtime_start, placeholder));
+            self.translator.asm.push_minimal_u32(size);
+            self.translator.asm.push_minimal_u32(copy_src);
+            self.translator.emit_local_load(data.runtime_ptr());
+            self.translator.asm.push_reference(AsmReference::pushed(placeholder_offset));
+            self.translator.asm.push_op_byte(op::ADD);
+            self.translator.asm.push_op_byte(op::MCOPY);
+        }
     }
 
     fn emit_icall(&mut self, data: InternalCallData) {
@@ -186,6 +217,8 @@ pub(crate) fn translate_operation(translator: &mut Translator, op: Operation) {
         Operation::SetSmallConst(data) => t.emit_set_small_const(data),
         Operation::SetLargeConst(data) => t.emit_set_large_const(data),
         Operation::SetDataOffset(data) => t.emit_set_data_offset(data),
+        Operation::GetImmutable(data) => t.emit_get_immutable(data),
+        Operation::SetImmutable(data) => t.emit_set_immutable(data),
         Operation::InternalCall(data) => t.emit_icall(data),
         Operation::InternalCallNever(data) => t.emit_icall_never(data),
         _ => unreachable!("op neither 'special' or literal EVM: {:?}", op.kind()),
