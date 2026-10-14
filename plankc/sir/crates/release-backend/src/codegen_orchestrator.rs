@@ -142,7 +142,7 @@ impl<'a> InitcodeEmitted<'a> {
     pub fn emit_init(
         ir: &'a EthIRProgram,
         ops: &'a ScheduledOps,
-        generate_init_memory_layout: impl FnOnce(bool) -> static_mem::Layout,
+        total_allocs_hint: usize,
     ) -> Self {
         let mut visited_bbs = DenseIndexSet::with_capacity_in_bits(ir.basic_blocks.len());
         let mut basic_blocks_worklist = Vec::with_capacity(BB_WORKLIST_START_CAPACITY);
@@ -166,7 +166,13 @@ impl<'a> InitcodeEmitted<'a> {
             None => (DenseIndexSet::new(), immutable_refs.alloc_marks(&mut mark_map.next_mark_id)),
         };
 
-        let init_memory_layout = generate_init_memory_layout(immutables.needs_scratch(ir));
+        let init_memory_layout = static_mem::BumpAllocateAll::generate(
+            ir,
+            ir.init_entry,
+            ops,
+            immutables.needs_scratch(ir),
+            total_allocs_hint,
+        );
         let mut emitter =
             CodeToAsmEmitter::new(ir, ops, mark_map, visited_bbs, basic_blocks_worklist);
         let mut state = EmitInitcode {
