@@ -4,7 +4,7 @@
 //! the runtime copy is accessed. A `mcopy` costs 21 gas vs. 15 for `mstore`/`mstore8`, which is
 //! why it's not used for full words or single bytes.
 
-use plank_core::{Idx, IndexVec, Span};
+use plank_core::{IncIterable, IndexVec, Span};
 use sir_assembler::{AsmReference, Assembler, MarkId, MarkReference, op};
 use sir_data::{EthIRProgram, ImmutableId, operation::ByteSize};
 use sir_static_memory_allocator::EvmMemAddr;
@@ -31,12 +31,10 @@ pub(crate) struct Counting {
     counts: IndexVec<ImmutableId, u32>,
 }
 pub(crate) struct EmittingSets {
-    ends: IndexVec<ImmutableId, u32>,
-    marks_start: MarkId,
+    placeholders: IndexVec<ImmutableId, Span<MarkId>>,
 }
 pub(crate) struct EmittingGets {
-    offsets: IndexVec<ImmutableId, u32>,
-    marks_start: MarkId,
+    unemitted: IndexVec<ImmutableId, Span<MarkId>>,
 }
 
 pub(crate) struct ImmutableRefs<State>(State);
@@ -51,16 +49,17 @@ impl ImmutableRefs<Counting> {
     }
 
     pub fn alloc_marks(self, next_mark_id: &mut MarkId) -> ImmutableRefs<EmittingSets> {
-        let mut ends = self.0.counts;
-        let mut end = 0;
-        for count in ends.iter_mut() {
-            end += *count;
-            *count = end;
-        }
-
-        let marks_start = *next_mark_id;
-        *next_mark_id += end;
-        ImmutableRefs(EmittingSets { ends, marks_start })
+        let placeholders = self
+            .0
+            .counts
+            .iter()
+            .map(|&count| {
+                let start = *next_mark_id;
+                *next_mark_id += count;
+                Span::new(start, *next_mark_id)
+            })
+            .collect();
+        ImmutableRefs(EmittingSets { placeholders })
     }
 }
 
@@ -73,7 +72,7 @@ impl ImmutableRefs<EmittingSets> {
         immutable: ImmutableId,
         size: ByteSize,
     ) {
-        let placeholders = self.placeholders(immutable);
+        let placeholders = self.0.placeholders[immutable];
         let push_offset = |asm: &mut Assembler, placeholder: MarkId| {
             let offset = MarkReference::Delta(Span::new(runcode_start, placeholder));
             asm.push_reference(AsmReference::pushed(offset));
@@ -126,20 +125,15 @@ impl ImmutableRefs<EmittingSets> {
         }
     }
 
-    fn placeholders(&self, immutable: ImmutableId) -> Span<MarkId> {
-        let start = immutable.checked_sub(1).map(|i| self.0.ends[i]).unwrap_or(0);
-        Span::new(self.0.marks_start + start, self.0.marks_start + self.0.ends[immutable])
-    }
-
     pub fn needs_scratch(&self, ir: &EthIRProgram) -> bool {
         ir.immutables.enumerate_idx().any(|(immutable, &size)| {
             WriteStrategy::select(size) == WriteStrategy::CopyFromScratch
-                && !self.placeholders(immutable).is_empty()
+                && !self.0.placeholders[immutable].is_empty()
         })
     }
 
     pub fn into_emit_gets(self) -> ImmutableRefs<EmittingGets> {
-        ImmutableRefs(EmittingGets { marks_start: self.0.marks_start, offsets: self.0.ends })
+        ImmutableRefs(EmittingGets { unemitted: self.0.placeholders })
     }
 }
 
@@ -147,18 +141,26 @@ impl ImmutableRefs<EmittingGets> {
     pub fn emit_placeholder(
         &mut self,
         asm: &mut Assembler,
-        size: ByteSize,
         immutable: ImmutableId,
+        size: ByteSize,
     ) {
-        self.0.offsets[immutable] -= 1;
-        asm.push_placeholder_push(size, self.0.marks_start + self.0.offsets[immutable]);
+        let unemitted = &mut self.0.unemitted[immutable];
+        assert!(!unemitted.is_empty(), "more `getimmutable` emitted than counted");
+        asm.push_placeholder_push(size, unemitted.end.dec_and_get());
+    }
+
+    pub fn assert_all_emitted(&self) {
+        assert!(
+            self.0.unemitted.iter().all(Span::is_empty),
+            "fewer `getimmutable` emitted than counted"
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plank_core::IncIterable;
+    use plank_core::Idx;
 
     fn static_gas(code: &[u8]) -> u32 {
         let mut gas = 0;
@@ -205,7 +207,7 @@ mod tests {
         asm.push_mark(runcode_start);
         for i in 0..=ref_count {
             let emitted = if i < ref_count { immutable } else { ImmutableId::new(1) };
-            refs.emit_placeholder(&mut asm, size, emitted);
+            refs.emit_placeholder(&mut asm, emitted, size);
             asm.push_op_byte(op::POP);
         }
 
@@ -213,6 +215,35 @@ mod tests {
         let mark_offsets = asm.assemble(&mut code, Some(next_mark.idx())).unwrap();
         let set_code = &code[..mark_offsets[runcode_start] as usize];
         Emitted { asm: asm.to_string(), set_gas: static_gas(set_code), set_bytes: set_code.len() }
+    }
+
+    fn emit_gets(counts: Vec<u32>, emitted: &[u32]) {
+        let mut next_mark = MarkId::ZERO;
+        let mut refs = ImmutableRefs(Counting { counts: IndexVec::from_vec(counts) })
+            .alloc_marks(&mut next_mark)
+            .into_emit_gets();
+        let mut asm = Assembler::with_capacity(256, 32);
+        for &immutable in emitted {
+            refs.emit_placeholder(&mut asm, ImmutableId::new(immutable), ByteSize::B1);
+        }
+        refs.assert_all_emitted();
+    }
+
+    #[test]
+    fn emitting_counted_gets_passes() {
+        emit_gets(vec![1, 2], &[1, 0, 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "more `getimmutable` emitted than counted")]
+    fn over_emission_panics_without_reaching_previous_span() {
+        emit_gets(vec![1, 1], &[1, 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "fewer `getimmutable` emitted than counted")]
+    fn under_emission_panics() {
+        emit_gets(vec![1, 2], &[0, 1]);
     }
 
     #[test]

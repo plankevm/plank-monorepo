@@ -45,11 +45,6 @@ pub trait Idx:
         // Safety: Successful `checked_add` guarantees `c >= a` and `a > 0` therefore `c > 0`.
         a.checked_add(b).map(|c| Self::from_raw(unsafe { NonZero::new_unchecked(c) }))
     }
-
-    fn checked_sub(self, b: u32) -> Option<Self> {
-        let a = self.to_raw().get();
-        a.checked_sub(b).and_then(NonZero::new).map(Self::from_raw)
-    }
 }
 
 #[macro_export]

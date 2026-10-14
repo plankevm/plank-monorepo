@@ -101,7 +101,7 @@ impl CodegenState for EmitRuncode {
     }
 
     fn get_immutable(&mut self, asm: &mut Assembler, immutable: ImmutableId, size: ByteSize) {
-        self.immutables.emit_placeholder(asm, size, immutable);
+        self.immutables.emit_placeholder(asm, immutable, size);
     }
 
     fn set_immutable(
@@ -213,6 +213,7 @@ impl<'a> InitcodeEmitted<'a> {
 
         emitter.asm.push_mark(emitter.mark_map.runcode_start);
         emitter.emit_from_entrypoint(&mut state, runtime_entrypoint);
+        state.immutables.assert_all_emitted();
         for data in runtime_datas.iter() {
             emitter.asm.push_mark(emitter.mark_map.datas.get(data));
             emitter.asm.push_data(&emitter.ir.data_segments[data]);
