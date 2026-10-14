@@ -7,7 +7,8 @@ fn init:
     entry {
         runtime_off = runtime_start_offset
         runtime_len = runtime_length
-        buf = const 0x10000
+        buf_len = add runtime_len 32
+        buf = malloc buf_len
         codecopy buf runtime_off runtime_len
         zero = const 0
         v = calldataload zero
@@ -15,6 +16,14 @@ fn init:
         setimmutable %b31 buf v
         setimmutable %b32 buf v
         setimmutable %b2 buf v
+        past_copy = add buf runtime_len
+        spill = mload256 past_copy
+        => spill ? @wrote_past_copy : @done
+    }
+    wrote_past_copy {
+        invalid
+    }
+    done {
         return buf runtime_len
     }
 

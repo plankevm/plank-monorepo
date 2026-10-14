@@ -3,11 +3,11 @@ pragma solidity ^0.8.0;
 
 import {BaseTest} from "./BaseTest.sol";
 
-/// @dev `src/immutables_bounds.sir` copies the runtime to the fixed address `RUNTIME_PTR` and sets
-/// every immutable to the first calldata word. With the release backend (O2) its `b2` placeholder is
-/// in the last 32 bytes of the runtime, so patching it with a whole word would write past the copy.
+/// @dev `src/immutables_bounds.sir` copies the runtime into an allocation 32 bytes longer than it and
+/// sets every immutable to the first calldata word, then hits `invalid` if the spare bytes were written.
+/// With the release backend (O2) its `b2` placeholder is in the last 32 bytes of the runtime, so patching
+/// it with a whole word would write past the copy.
 contract ImmutablesBoundsTest is BaseTest {
-    uint64 constant RUNTIME_PTR = 0x10000;
     uint256 constant PLACEHOLDER_BYTES = 1 + 2 * 31 + 32 + 2 * 2;
 
     bytes initcode;
@@ -62,7 +62,6 @@ contract ImmutablesBoundsTest is BaseTest {
     function test_noMemoryWritesPastRuntimeCopy() public {
         address fresh = makeAddr("fresh");
         vm.etch(fresh, initcode);
-        vm.expectSafeMemoryCall(0x60, RUNTIME_PTR + uint64(zeroed.code.length));
         (bool success,) = fresh.call(abi.encode(type(uint256).max));
         assertTrue(success);
     }
