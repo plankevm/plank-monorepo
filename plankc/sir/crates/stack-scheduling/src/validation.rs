@@ -283,23 +283,27 @@ mod tests {
 
     fn validate_pre_amsterdam(
         graph: &OpGraph,
+        end_alloc_id: StaticAllocId,
         operations: &[StackOps],
-    ) -> Result<StaticAllocId, ValidationError> {
+    ) -> Result<(), ValidationError> {
         validate(
             graph,
             BlockFinalization::ShuffleToOutputs,
             ShuffleConfig::PRE_AMSTERDAM,
             StaticAllocId::ZERO,
+            end_alloc_id,
             operations,
         )
     }
 
     #[test]
     fn validates_operations_and_final_stack() {
-        assert_eq!(
-            validate_pre_amsterdam(&unary_graph(), &[StackOps::Op(OperationIdx::ZERO)]).unwrap(),
-            StaticAllocId::ZERO
-        );
+        validate_pre_amsterdam(
+            &unary_graph(),
+            StaticAllocId::ZERO,
+            &[StackOps::Op(OperationIdx::ZERO)],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -315,6 +319,7 @@ mod tests {
         graph.push_end_stack_value(output);
         let error = validate_pre_amsterdam(
             &graph.finish(),
+            StaticAllocId::ZERO,
             &[StackOps::Swap(1), StackOps::Op(OperationIdx::ZERO)],
         )
         .unwrap_err();
@@ -336,6 +341,7 @@ mod tests {
             BlockFinalization::LastOpTerminates,
             ShuffleConfig::PRE_AMSTERDAM,
             StaticAllocId::ZERO,
+            StaticAllocId::ZERO,
             &[StackOps::Op(OperationIdx::ZERO + 1), StackOps::Op(OperationIdx::ZERO)],
         )
         .unwrap_err();
@@ -346,15 +352,19 @@ mod tests {
     fn rejects_illegal_and_incomplete_schedules() {
         let graph = unary_graph();
         assert_eq!(
-            validate_pre_amsterdam(&graph, &[StackOps::Swap(0)]).unwrap_err().to_string(),
+            validate_pre_amsterdam(&graph, StaticAllocId::ZERO, &[StackOps::Swap(0)])
+                .unwrap_err()
+                .to_string(),
             "stack operation 1: Swap(0) is not legal for the shuffle configuration"
         );
         assert_eq!(
-            validate_pre_amsterdam(&graph, &[StackOps::Exchange(1, 1)]).unwrap_err().to_string(),
+            validate_pre_amsterdam(&graph, StaticAllocId::ZERO, &[StackOps::Exchange(1, 1)])
+                .unwrap_err()
+                .to_string(),
             "stack operation 1: Exchange(1, 1) is not legal for the shuffle configuration"
         );
         assert_eq!(
-            validate_pre_amsterdam(&graph, &[]).unwrap_err().to_string(),
+            validate_pre_amsterdam(&graph, StaticAllocId::ZERO, &[]).unwrap_err().to_string(),
             "schedule does not execute op0"
         );
     }
@@ -367,11 +377,15 @@ mod tests {
             StackOps::Load(StaticAllocId::ZERO),
             StackOps::Op(OperationIdx::ZERO),
         ];
-        assert_eq!(validate_pre_amsterdam(&graph, &operations).unwrap(), StaticAllocId::ZERO + 1);
+        validate_pre_amsterdam(&graph, StaticAllocId::ZERO + 1, &operations).unwrap();
         assert_eq!(
-            validate_pre_amsterdam(&graph, &[StackOps::Store(StaticAllocId::ZERO + 1)])
-                .unwrap_err()
-                .to_string(),
+            validate_pre_amsterdam(
+                &graph,
+                StaticAllocId::ZERO,
+                &[StackOps::Store(StaticAllocId::ZERO + 1)]
+            )
+            .unwrap_err()
+            .to_string(),
             "stack operation 1: store 1 is out of sequence, expected store0"
         );
     }

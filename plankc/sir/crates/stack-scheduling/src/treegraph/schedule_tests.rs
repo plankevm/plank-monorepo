@@ -1,12 +1,9 @@
-use std::num::NonZero;
-
 use plank_core::Idx;
 use proptest::prelude::*;
 use sir_data::{OperationIdx, StaticAllocId};
 
 use crate::{
     BlockFinalization,
-    depth_first_search::SearchConfig,
     op_graph::{OpGraph, OpGraphBuilder, OpNodeKind},
     scheduler,
     stack::ShuffleConfig,
@@ -89,9 +86,6 @@ proptest! {
             finalization,
             StaticAllocId::ZERO,
             ShuffleConfig::PRE_AMSTERDAM,
-            SearchConfig {
-                max_candidates: NonZero::new(20).unwrap(),
-            },
             &graph,
         );
         let validation = validation::validate(
@@ -99,6 +93,7 @@ proptest! {
             finalization,
             ShuffleConfig::PRE_AMSTERDAM,
             StaticAllocId::ZERO,
+            StaticAllocId::ZERO + result.spill_count,
             &result.ops,
         );
         prop_assert!(validation.is_ok(), "{validation:?}");
