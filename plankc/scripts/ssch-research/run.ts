@@ -14,17 +14,18 @@ const { values: opt, positionals } = parseArgs({
     stall: { type: "string", default: "6" },
     planners: { type: "string", default: "3" },
     directions: { type: "string", default: "4" },
-    "time-cap": { type: "string", default: "23" },
     model: { type: "string", default: "claude-bridge/claude-opus-5-5:high" },
   },
 });
 if (positionals.length !== 1) {
-  console.log("Usage: bun scripts/ssch-research/run.ts RUN_DIR [--workers 2] [--attempts 20] [--hours 24] [--stall 6] [--planners 3] [--directions 4] [--time-cap 23] [--model M]");
+  console.log("Usage: bun scripts/ssch-research/run.ts RUN_DIR [--workers 2] [--attempts 20] [--hours 24] [--stall 6] [--planners 3] [--directions 4] [--model M]");
   process.exit(1);
 }
 const RUN = resolve(positionals[0]!);
 const WORKERS = Number(opt.workers), MAX_ATTEMPTS = Number(opt.attempts), STALL = Number(opt.stall);
-const PLANNERS = Number(opt.planners), DIRECTIONS = Number(opt.directions), TIME_CAP = Number(opt["time-cap"]);
+const PLANNERS = Number(opt.planners), DIRECTIONS = Number(opt.directions);
+// Validation runs twice: low effort is a pass/fail speed gate, high effort is what's compared on gas.
+const LOW_EFFORT = 512, LOW_TIME_CAP = 1, HIGH_EFFORT = 131072, HIGH_TIME_CAP = 23;
 const DEADLINE = Date.now() + Number(opt.hours) * 3_600_000;
 
 const DATA = `${homedir()}/.local/share/plank-ssch-research/20260922-125218`;
@@ -36,12 +37,13 @@ const ARCHIVE = `${RUN}/archive.jsonl`;
 const BRANCH = `ssch-research/${basename(RUN)}`;
 const PER_GRAPH = `${RUN}/champion-per-graph.tsv`;
 // Only the auth extension: the user's other extensions (notifications, handoffs) must not fire from agents.
-const PI = ["pi", "-p", "--no-session", "--no-extensions", "-e", `${homedir()}/.pi/agent/extensions/claude-auth.ts`, "--model", opt.model!];
+const PI = ["pi", "-p", "--no-extensions", "-e", `${homedir()}/.pi/agent/extensions/claude-auth.ts`, "--model", opt.model!];
 
 interface Bench { total_gas: number; best_known_gas: number; graphs_at_best_known: number; scheduler_seconds: number; wall_seconds: number }
+interface Tier { total_gas: number; wall_seconds: number }
 interface Attempt {
   kind: "attempt"; id: number; commit: string; accepted: boolean; direction?: string;
-  research?: Bench; validation?: { total_gas: number; wall_seconds: number }; error?: string; loc: number; notes: string;
+  research?: Bench; validation_low?: Tier; validation?: Tier; error?: string; loc: number; notes: string;
 }
 interface Plan { kind: "plan"; directions: string[] }
 type Entry = Attempt | Plan;
@@ -81,6 +83,13 @@ function sh(cmd: string[], cwd: string, env: Record<string, string> = {}, timeou
   });
 }
 
+// A reused id (after a discarded attempt or interrupted plan) must start a new session, not continue the old one.
+function session(name: string) {
+  const file = `${RUN}/logs/${name}.jsonl`;
+  rmSync(file, { force: true });
+  return ["--session", file];
+}
+
 const log = (message: string) => console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
 const entries = (): Entry[] => existsSync(ARCHIVE) ? readFileSync(ARCHIVE, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
 const attempts = () => entries().filter((e): e is Attempt => e.kind === "attempt");
@@ -106,8 +115,8 @@ function loc(cwd: string) {
     .reduce((sum, f) => sum + readFileSync(resolve(cwd, f), "utf8").split("\n").length, 0);
 }
 
-async function bench(cwd: string, target: string, db: string, perGraph?: string): Promise<Bench | string> {
-  const args = [`${target}/release/ssch`, "bench", "--json", "-d", db, ...(perGraph ? ["--per-graph", perGraph] : [])];
+async function bench(cwd: string, target: string, db: string, effort: number, perGraph?: string): Promise<Bench | string> {
+  const args = [`${target}/release/ssch`, "bench", "--json", "-e", String(effort), "-d", db, ...(perGraph ? ["--per-graph", perGraph] : [])];
   const r = await sh(args, cwd, {}, 600);
   if (r.code !== 0) return `bench failed: ${(r.err || r.out).slice(-2000)}`;
   return { ...JSON.parse(r.out), wall_seconds: r.seconds };
@@ -121,15 +130,19 @@ async function judge(entry: Attempt, cwd: string, target: string, isBaseline: bo
   }
   const perGraph = `${cwd}/tmp/per-graph.tsv`;
   mkdirSync(`${cwd}/tmp`, { recursive: true });
-  const research = await bench(cwd, target, RESEARCH_DB, perGraph);
+  const research = await bench(cwd, target, RESEARCH_DB, HIGH_EFFORT, perGraph);
   if (typeof research === "string") return void (entry.error = research);
   entry.research = research;
   const best = isBaseline ? undefined : champion();
   if (best && research.total_gas >= best.research!.total_gas) return;
-  const validation = await bench(cwd, target, VALIDATION_DB);
-  if (typeof validation === "string") return void (entry.error = "validation run failed (details withheld)");
-  entry.validation = { total_gas: validation.total_gas, wall_seconds: validation.wall_seconds };
-  entry.accepted = isBaseline || (validation.total_gas < best!.validation!.total_gas && validation.wall_seconds <= TIME_CAP);
+  const low = await bench(cwd, target, VALIDATION_DB, LOW_EFFORT);
+  if (typeof low === "string") return void (entry.error = "validation run failed (details withheld)");
+  entry.validation_low = { total_gas: low.total_gas, wall_seconds: low.wall_seconds };
+  if (!isBaseline && low.wall_seconds >= LOW_TIME_CAP) return;
+  const high = await bench(cwd, target, VALIDATION_DB, HIGH_EFFORT);
+  if (typeof high === "string") return void (entry.error = "validation run failed (details withheld)");
+  entry.validation = { total_gas: high.total_gas, wall_seconds: high.wall_seconds };
+  entry.accepted = isBaseline || (high.total_gas < best!.validation!.total_gas && high.wall_seconds <= HIGH_TIME_CAP);
   if (entry.accepted) {
     copyFileSync(perGraph, PER_GRAPH);
     git(TOP, "update-ref", `refs/heads/${BRANCH}/champion`, entry.commit);
@@ -139,7 +152,7 @@ async function judge(entry: Attempt, cwd: string, target: string, isBaseline: bo
 function researcherPrompt(id: number, cwd: string, start: string, direction?: string) {
   return `You are improving the stack scheduler of the Plank compiler: crate \`sir-stack-scheduling\` (sir/crates/stack-scheduling), which turns a basic block's operation graph into stack operations (dupN, swapN, pop, ops, spills) for the EVM.
 
-Goal: lower total gas on graphs you cannot see, staying under ${TIME_CAP}s for 1,498 graphs, with an algorithm a human can understand and reimplement from sir/crates/stack-scheduling/ALGORITHM.md.
+Goal: lower total gas on graphs you cannot see, within the time limits below, with an algorithm a human can understand and reimplement from sir/crates/stack-scheduling/ALGORITHM.md.
 
 Worktree: ${cwd}, branch ${BRANCH}/${id}, starting at the current champion ${start}.
 Archive of all previous attempts, failures included, each a git commit with notes: ${ARCHIVE}. The champion is the last entry with "accepted": true. You may start from any archived commit (git reset --hard <commit>) or combine several (cherry-pick, merge).${direction ? `\n\nDirection to explore, proposed by a planner: ${direction}` : ""}
@@ -148,11 +161,11 @@ Research data: corpus/stack-scheduling-db/canonical-blocks.sqlite3, 6,992 graphs
 Tools (cargo build --release -p ssch; binary at $CARGO_TARGET_DIR/release/ssch):
 - ssch bench [--json] [--worst N] [--per-graph out.tsv]: schedules and validates every graph, compares with best known.
 - ssch inspect <hash> | --random: shows a graph and replays its best-known schedule.
-The effort argument is unused; define it however you like. You may rewrite or replace anything in sir-stack-scheduling.
+Effort is passed with ssch bench -e N. On the hidden validation set (1,498 graphs), effort ${LOW_EFFORT} must finish in under ${LOW_TIME_CAP}s and effort ${HIGH_EFFORT} in at most ${HIGH_TIME_CAP}s; gas is compared at effort ${HIGH_EFFORT}. You may rewrite or replace anything in sir-stack-scheduling.
 
 Rules: no per-graph constants or memorized schedules; schedules must be valid; don't look for validation or test data; never pass --save or write to any database.
 
-Judging: build, cargo nextest run -p sir-stack-scheduling -p ssch, research bench, and, if research gas beats the champion, total gas and time on a hidden validation set. Any validation gain makes you champion.
+Judging: build, cargo nextest run -p sir-stack-scheduling -p ssch, research bench at effort ${HIGH_EFFORT}, and, if research gas beats the champion, total gas and time on the hidden validation set at both efforts. Any validation gain within the time limits makes you champion.
 
 Deliverable: commit your work on this branch with ALGORITHM.md up to date. Your final reply goes into the archive for future researchers: first line \`parent: <commit>\`, then what you tried, the numbers, and what you learned. Plain and concise.`;
 }
@@ -171,7 +184,7 @@ async function attempt(id: number, slot: number, direction?: string) {
     log(`attempt ${id} researching${direction ? `: ${direction}` : ""}`);
     const prompt = `${RUN}/prompts/${id}.md`;
     writeFileSync(prompt, researcherPrompt(id, cwd, start, direction));
-    const r = await sh([...PI, "--tools", "read,bash,edit,write", `@${prompt}`], cwd, { CARGO_TARGET_DIR: target });
+    const r = await sh([...PI, ...session(String(id)), "--tools", "read,bash,edit,write", `@${prompt}`], cwd, { CARGO_TARGET_DIR: target });
     notes = r.code === 0 ? r.out.trim() : `agent exited ${r.code}: ${r.err.slice(-1000)}`;
     git(wt, "add", "-A");
     if (git(wt, "status", "--porcelain")) git(wt, "commit", "-qm", `ssch-research ${id}: uncommitted leftovers`);
@@ -183,8 +196,10 @@ async function attempt(id: number, slot: number, direction?: string) {
   await turn;
   record(entry);
   git(TOP, "worktree", "remove", "--force", wt);
-  log(`attempt ${id}: ${entry.accepted ? "NEW CHAMPION" : "rejected"} research=${entry.research?.total_gas ?? "-"} validation=${entry.validation?.total_gas ?? "-"}${entry.error ? ` error=${entry.error.split("\n")[0]}` : ""}`);
+  log(`attempt ${id}: ${entry.accepted ? "NEW CHAMPION" : "rejected"} research=${entry.research?.total_gas ?? "-"} validation low=${tier(entry.validation_low)} high=${tier(entry.validation)}${entry.error ? ` error=${entry.error.split("\n")[0]}` : ""}`);
 }
+
+const tier = (t?: Tier) => t ? `${t.total_gas} gas/${t.wall_seconds.toFixed(2)}s` : "-";
 
 function dashboardViews() {
   if (!existsSync(PER_GRAPH)) return [];
@@ -214,7 +229,8 @@ async function plan() {
   let algorithm = "(none written yet)";
   try { algorithm = git(TOP, "show", `${best.commit}:plankc/sir/crates/stack-scheduling/ALGORITHM.md`); } catch {}
   const summaries = attempts().map(a => `- attempt ${a.id} ${a.commit.slice(0, 8)} ${a.accepted ? "ACCEPTED" : "rejected"} research=${a.research?.total_gas ?? "-"}${a.error ? ` error: ${a.error.split("\n")[0]}` : ""}\n  ${a.notes.slice(0, 600).replaceAll("\n", "\n  ")}`);
-  const replies = await Promise.all(Array.from({ length: PLANNERS }, () => {
+  const round = entries().filter(e => e.kind === "plan").length;
+  const replies = await Promise.all(Array.from({ length: PLANNERS }, (_, i) => {
     const views = shuffle(dashboardViews()).slice(0, 2).join("\n\n");
     const archive = shuffle(summaries).slice(0, Math.ceil(summaries.length / 2)).join("\n");
     const prompt = `You plan research on the stack scheduler of an EVM compiler: it turns a basic block's operation graph into stack operations (dupN, swapN, pop, ops, spills), minimising gas. Gap = our gas minus the best-known schedule's gas for a graph.
@@ -229,16 +245,17 @@ Part of the archive of previous attempts:
 ${archive}
 
 Propose ${DIRECTIONS} distinct research directions, each with your probability that it beats the champion. Exactly one per line, formatted \`p=0.NN | direction\`, nothing else.`;
-    return sh([...PI, "--no-tools", prompt], RUN);
+    return sh([...PI, ...session(`plan-${round}-${i}`), "--no-tools", prompt], RUN);
   }));
   const proposals = replies.flatMap(r => r.out.split("\n")).map(l => l.trim()).filter(l => l.startsWith("p="));
-  const dedup = await sh([...PI, "--no-tools", `Remove near-duplicates from these research directions, keeping the clearer wording. Output the remaining lines unchanged, one per line, nothing else.\n\n${proposals.join("\n")}`], RUN);
+  const dedup = await sh([...PI, ...session(`plan-${round}-dedup`), "--no-tools", `Remove near-duplicates from these research directions, keeping the clearer wording. Output the remaining lines unchanged, one per line, nothing else.\n\n${proposals.join("\n")}`], RUN);
   const directions = dedup.out.split("\n").map(l => l.trim()).filter(l => l.startsWith("p="));
   record({ kind: "plan", directions: directions.length ? directions : proposals });
   log(`planned ${directions.length} directions`);
 }
 
 mkdirSync(`${RUN}/prompts`, { recursive: true });
+mkdirSync(`${RUN}/logs`, { recursive: true });
 for (const dir of existsSync(`${RUN}/wt`) ? readdirSync(`${RUN}/wt`) : []) {
   log(`discarding incomplete attempt ${dir}`);
   rmSync(`${RUN}/wt/${dir}`, { recursive: true, force: true });
