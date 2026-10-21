@@ -163,7 +163,7 @@ Tools (cargo build --release -p ssch; binary at $CARGO_TARGET_DIR/release/ssch):
 - ssch inspect <hash> | --random: shows a graph and replays its best-known schedule.
 Effort is passed with ssch bench -e N. On the hidden validation set (1,498 graphs), effort ${LOW_EFFORT} must finish in under ${LOW_TIME_CAP}s and effort ${HIGH_EFFORT} in at most ${HIGH_TIME_CAP}s; gas is compared at effort ${HIGH_EFFORT}. You may rewrite or replace anything in sir-stack-scheduling.
 
-Rules: no per-graph constants or memorized schedules; schedules must be valid; don't look for validation or test data; never pass --save or write to any database.
+Rules: no per-graph constants or memorized schedules; schedules must be valid; don't look for validation or test data; never pass --save or write to any database; don't write to the archive, the judge records your attempt.
 
 Judging: build, cargo nextest run -p sir-stack-scheduling -p ssch, research bench at effort ${HIGH_EFFORT}, and, if research gas beats the champion, total gas and time on the hidden validation set at both efforts. Any validation gain within the time limits makes you champion.
 
