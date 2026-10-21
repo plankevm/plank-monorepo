@@ -1,7 +1,7 @@
-use crate::{CanonicalBlockRow, canonical_blocks_path, normalize_hash};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use sir_stack_scheduling::{
-    op_graph::CanonicalBlock,
+    BlockFinalization,
+    op_graph::{CanonicalBlock, OpGraph},
     stack::{ShuffleConfig, StackOps, gas_cost},
 };
 use std::{path::Path, time::Duration};
@@ -9,6 +9,45 @@ use std::{path::Path, time::Duration};
 const SCHEMA_VERSION: i64 = 2;
 const COLUMNS: &str =
     "canonical_hash, canonical_graph, best_schedule, best_gas_cost, manually_optimized";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalBlockRow {
+    pub canonical_hash: String,
+    pub canonical_graph: String,
+    pub best_schedule: String,
+    pub best_gas_cost: u64,
+    pub manually_optimized: bool,
+}
+
+pub struct DatabaseEntry {
+    pub canonical_hash: String,
+    pub graph: OpGraph,
+    pub finalization: BlockFinalization,
+    pub schedule: Box<[StackOps]>,
+    pub gas_cost: u64,
+}
+
+impl TryFrom<CanonicalBlockRow> for DatabaseEntry {
+    type Error = String;
+
+    fn try_from(row: CanonicalBlockRow) -> Result<Self, String> {
+        let canonical = serde_json::from_str::<CanonicalBlock>(&row.canonical_graph)
+            .map_err(|error| format!("canonical graph is invalid: {error}"))?;
+        let finalization = canonical.finalization;
+        let graph = canonical
+            .to_op_graph()
+            .map_err(|error| format!("canonical graph is invalid: {error}"))?;
+        let schedule = serde_json::from_str(&row.best_schedule)
+            .map_err(|error| format!("best schedule is invalid: {error}"))?;
+        Ok(Self {
+            canonical_hash: row.canonical_hash,
+            graph,
+            finalization,
+            schedule,
+            gas_cost: row.best_gas_cost,
+        })
+    }
+}
 
 pub struct CanonicalDatabase {
     connection: Connection,
@@ -84,9 +123,12 @@ impl CanonicalDatabase {
     }
 }
 
-fn open(database: &Path, flags: OpenFlags) -> Result<Connection, String> {
-    let path = canonical_blocks_path(database);
-    let connection = Connection::open_with_flags(&path, flags)
+pub fn normalize_hash(hash: &str) -> String {
+    if hash.starts_with("ssb1:") { hash.to_owned() } else { format!("ssb1:{hash}") }
+}
+
+fn open(path: &Path, flags: OpenFlags) -> Result<Connection, String> {
+    let connection = Connection::open_with_flags(path, flags)
         .map_err(|error| format!("failed to open '{}': {error}", path.display()))?;
     connection.busy_timeout(Duration::from_secs(30)).map_err(|error| error.to_string())?;
     let version: i64 = connection
@@ -151,104 +193,43 @@ pub fn improve_schedule(
     Ok(ScheduleUpdate::Improved { previous_cost, new_cost: schedule_cost })
 }
 
-/// Creates or seeds a database without discarding existing graphs, cheaper schedules, or manual
-/// status.
-pub fn seed_canonical_database(path: &Path, rows: &[CanonicalBlockRow]) -> Result<(), String> {
-    let mut connection = Connection::open(path).map_err(|error| error.to_string())?;
-    connection.busy_timeout(Duration::from_secs(30)).map_err(|error| error.to_string())?;
-    connection.pragma_update(None, "journal_mode", "WAL").map_err(|error| error.to_string())?;
-    let transaction = connection
-        .transaction_with_behavior(TransactionBehavior::Immediate)
-        .map_err(|error| error.to_string())?;
-    let version: i64 = transaction
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|error| error.to_string())?;
-    if version == 1 {
-        transaction
-            .execute_batch(
-                "ALTER TABLE canonical_blocks ADD COLUMN manually_optimized INTEGER NOT NULL
-                    DEFAULT FALSE CHECK (manually_optimized IN (FALSE, TRUE));",
-            )
-            .map_err(|error| error.to_string())?;
-    } else if version != 0 && version != SCHEMA_VERSION {
-        return Err(format!("unsupported canonical database version {version}"));
-    }
-    transaction
+#[cfg(test)]
+pub fn create_test_database(path: &Path, rows: &[CanonicalBlockRow]) {
+    let connection = Connection::open(path).unwrap();
+    connection
         .execute_batch(
-            "CREATE TABLE IF NOT EXISTS canonical_blocks (
-            canonical_hash TEXT PRIMARY KEY,
-            canonical_graph TEXT NOT NULL,
-            best_schedule TEXT NOT NULL,
-            best_gas_cost INTEGER NOT NULL CHECK (best_gas_cost >= 0),
-            manually_optimized INTEGER NOT NULL DEFAULT FALSE
-                CHECK (manually_optimized IN (FALSE, TRUE))
-        ) WITHOUT ROWID;
-        PRAGMA user_version = 2;",
+            "CREATE TABLE canonical_blocks (
+                canonical_hash TEXT PRIMARY KEY,
+                canonical_graph TEXT NOT NULL,
+                best_schedule TEXT NOT NULL,
+                best_gas_cost INTEGER NOT NULL CHECK (best_gas_cost >= 0),
+                manually_optimized INTEGER NOT NULL DEFAULT FALSE
+                    CHECK (manually_optimized IN (FALSE, TRUE))
+            ) WITHOUT ROWID;
+            PRAGMA user_version = 2;",
         )
-        .map_err(|error| error.to_string())?;
-    {
-        let mut existing = transaction
-            .prepare("SELECT canonical_graph FROM canonical_blocks WHERE canonical_hash = ?1")
-            .map_err(|error| error.to_string())?;
-        let mut insert = transaction
-            .prepare(
-                "INSERT INTO canonical_blocks
-                (canonical_hash, canonical_graph, best_schedule, best_gas_cost, manually_optimized)
-             VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT (canonical_hash) DO UPDATE SET
-                best_schedule = CASE
-                    WHEN excluded.best_gas_cost < canonical_blocks.best_gas_cost
-                    THEN excluded.best_schedule ELSE canonical_blocks.best_schedule END,
-                best_gas_cost = MIN(excluded.best_gas_cost, canonical_blocks.best_gas_cost),
-                manually_optimized = MAX(
-                    excluded.manually_optimized, canonical_blocks.manually_optimized
-                )
-             WHERE excluded.best_gas_cost < canonical_blocks.best_gas_cost
-                OR excluded.manually_optimized > canonical_blocks.manually_optimized",
-            )
-            .map_err(|error| error.to_string())?;
-        for row in rows {
-            let graph = serde_json::from_str::<CanonicalBlock>(&row.canonical_graph)
-                .map_err(|error| error.to_string())?;
-            let previous: Option<String> = existing
-                .query_row([&row.canonical_hash], |row| row.get(0))
-                .optional()
-                .map_err(|error| error.to_string())?;
-            if let Some(previous) = previous {
-                let previous = serde_json::from_str::<CanonicalBlock>(&previous)
-                    .map_err(|error| error.to_string())?;
-                if previous != graph {
-                    return Err(format!("canonical graph changed for {}", row.canonical_hash));
-                }
-            }
-            let schedule = serde_json::from_str::<Box<[StackOps]>>(&row.best_schedule)
-                .map_err(|error| error.to_string())?;
-            if gas_cost(&schedule, ShuffleConfig::PRE_AMSTERDAM) != row.best_gas_cost {
-                return Err(format!(
-                    "schedule cost disagrees with stored cost for {}",
-                    row.canonical_hash
-                ));
-            }
-            let sql_cost = i64::try_from(row.best_gas_cost).map_err(|error| error.to_string())?;
-            insert
-                .execute(params![
+        .unwrap();
+    for row in rows {
+        connection
+            .execute(
+                &format!("INSERT INTO canonical_blocks ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5)"),
+                params![
                     row.canonical_hash,
                     row.canonical_graph,
                     row.best_schedule,
-                    sql_cost,
+                    i64::try_from(row.best_gas_cost).unwrap(),
                     row.manually_optimized
-                ])
-                .map_err(|error| error.to_string())?;
-        }
+                ],
+            )
+            .unwrap();
     }
-    transaction.commit().map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use plank_core::Idx;
-    use sir_stack_scheduling::{BlockFinalization, op_graph::CanonicalValueId};
+    use sir_stack_scheduling::op_graph::CanonicalValueId;
 
     fn row(hash: &str, pairs: usize) -> CanonicalBlockRow {
         let graph = CanonicalBlock::new(
@@ -269,78 +250,36 @@ mod tests {
     }
 
     #[test]
-    fn reseeding_retains_improvements_and_adds_new_graphs() {
+    fn improvements_keep_only_cheaper_schedules_and_manual_status() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("canonical-blocks.sqlite3");
-        Connection::open(&path).unwrap();
-        seed_canonical_database(&path, &[row("ssb1:a", 3), row("ssb1:b", 2)]).unwrap();
-        Connection::open(&path)
-            .unwrap()
-            .execute(
-                "UPDATE canonical_blocks SET manually_optimized = TRUE WHERE canonical_hash = ?1",
-                ["ssb1:a"],
-            )
-            .unwrap();
-        improve_schedule(&path, "ssb1:a", &[]).unwrap();
-        let candidates = [row("ssb1:a", 3), row("ssb1:b", 1), row("ssb1:c", 2)];
-        seed_canonical_database(&path, &candidates).unwrap();
-        seed_canonical_database(&path, &candidates).unwrap();
-        let mut optimized = row("ssb1:a", 0);
-        optimized.manually_optimized = true;
+        let mut manual = row("ssb1:a", 3);
+        manual.manually_optimized = true;
+        create_test_database(&path, &[manual, row("ssb1:b", 1)]);
+
+        let cheaper = [StackOps::Dup(0), StackOps::Pop];
+        assert_eq!(
+            improve_schedule(&path, "a", &cheaper).unwrap(),
+            ScheduleUpdate::Improved { previous_cost: 18, new_cost: 6 }
+        );
+        assert_eq!(
+            improve_schedule(&path, "ssb1:b", &cheaper).unwrap(),
+            ScheduleUpdate::NotImproved { current_cost: 6 }
+        );
+
+        let mut improved = row("ssb1:a", 1);
+        improved.manually_optimized = true;
         assert_eq!(
             CanonicalDatabase::open(&path).unwrap().all().unwrap().as_ref(),
-            &[optimized, row("ssb1:b", 1), row("ssb1:c", 2)]
+            &[improved, row("ssb1:b", 1)]
         );
-    }
-
-    #[test]
-    fn migrates_version_one_databases_with_unoptimized_existing_rows() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("canonical-blocks.sqlite3");
-        let legacy = row("ssb1:a", 1);
-        let connection = Connection::open(&path).unwrap();
-        connection
-            .execute_batch(
-                "CREATE TABLE canonical_blocks (
-                    canonical_hash TEXT PRIMARY KEY,
-                    canonical_graph TEXT NOT NULL,
-                    best_schedule TEXT NOT NULL,
-                    best_gas_cost INTEGER NOT NULL CHECK (best_gas_cost >= 0)
-                ) WITHOUT ROWID;
-                PRAGMA user_version = 1;",
-            )
-            .unwrap();
-        let legacy_cost = i64::try_from(legacy.best_gas_cost).unwrap();
-        connection
-            .execute(
-                "INSERT INTO canonical_blocks
-                    (canonical_hash, canonical_graph, best_schedule, best_gas_cost)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    legacy.canonical_hash,
-                    legacy.canonical_graph,
-                    legacy.best_schedule,
-                    legacy_cost
-                ],
-            )
-            .unwrap();
-        drop(connection);
-
-        seed_canonical_database(&path, &[]).unwrap();
-
-        assert_eq!(CanonicalDatabase::open(&path).unwrap().all().unwrap().as_ref(), &[legacy]);
-        let version: i64 = Connection::open(path)
-            .unwrap()
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .unwrap();
-        assert_eq!(version, SCHEMA_VERSION);
     }
 
     #[test]
     fn partial_hashes_must_be_unique() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("canonical-blocks.sqlite3");
-        seed_canonical_database(&path, &[row("ssb1:aa", 1), row("ssb1:ab", 2)]).unwrap();
+        create_test_database(&path, &[row("ssb1:aa", 1), row("ssb1:ab", 2)]);
         let database = CanonicalDatabase::open(&path).unwrap();
         assert_eq!(database.find("aa").unwrap().canonical_hash, "ssb1:aa");
         assert_eq!(database.find("ab").unwrap().canonical_hash, "ssb1:ab");

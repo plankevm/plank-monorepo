@@ -1,24 +1,22 @@
 [package]
-name = "sir-stack-scheduling-common"
+name = "ssch"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
 
 [dependencies]
+clap.workspace = true
+indicatif = "0.18"
 plank-core.workspace = true
 rusqlite = { version = "0.38", features = ["bundled"] }
 serde_json.workspace = true
-serde.workspace = true
 sir-data.workspace = true
 sir-stack-scheduling.workspace = true
-sir-parser.workspace = true
-sir-passes.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 plank-test-utils.workspace = true
-pretty_assertions.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

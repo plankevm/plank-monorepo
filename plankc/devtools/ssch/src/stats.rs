@@ -18,7 +18,6 @@ struct ComparisonStats {
     local_total_gas: u64,
     improvements: usize,
     gas_saved: u64,
-    capped_searches: usize,
     deltas: Vec<i64>,
 }
 
@@ -31,20 +30,14 @@ impl Stats {
         }
     }
 
-    pub fn record(
-        &mut self,
-        best_known_gas: u64,
-        local_gas: u64,
-        candidate_limit_reached: bool,
-        manually_optimized: bool,
-    ) {
-        self.entire_corpus.record(best_known_gas, local_gas, candidate_limit_reached);
+    pub fn record(&mut self, best_known_gas: u64, local_gas: u64, manually_optimized: bool) {
+        self.entire_corpus.record(best_known_gas, local_gas);
         if manually_optimized {
-            self.manually_optimized.record(best_known_gas, local_gas, candidate_limit_reached);
+            self.manually_optimized.record(best_known_gas, local_gas);
         }
     }
 
-    pub fn render(mut self, elapsed: Duration) -> String {
+    pub fn render(mut self, elapsed: Duration, scheduler_time: Duration) -> String {
         self.entire_corpus.prepare();
         self.manually_optimized.prepare();
 
@@ -52,9 +45,10 @@ impl Stats {
         writeln!(output, "Stack scheduling benchmark").unwrap();
         writeln!(
             output,
-            "Processed {} graphs in {:.2}s",
+            "Processed {} graphs in {:.2}s ({:.2}s scheduling)",
             format_usize(self.entire_corpus.graph_count),
-            elapsed.as_secs_f64()
+            elapsed.as_secs_f64(),
+            scheduler_time.as_secs_f64()
         )
         .unwrap();
 
@@ -97,11 +91,6 @@ impl Stats {
                 format_u64(self.entire_corpus.gas_saved),
                 format_u64(self.manually_optimized.gas_saved),
             ),
-            (
-                "Candidate limit reached",
-                format_usize(self.entire_corpus.capped_searches),
-                format_usize(self.manually_optimized.capped_searches),
-            ),
         ] {
             writeln!(
                 output,
@@ -135,12 +124,11 @@ impl ComparisonStats {
             local_total_gas: 0,
             improvements: 0,
             gas_saved: 0,
-            capped_searches: 0,
             deltas: Vec::with_capacity(graph_count),
         }
     }
 
-    fn record(&mut self, best_known_gas: u64, local_gas: u64, candidate_limit_reached: bool) {
+    fn record(&mut self, best_known_gas: u64, local_gas: u64) {
         self.best_known_total_gas = self
             .best_known_total_gas
             .checked_add(best_known_gas)
@@ -158,7 +146,6 @@ impl ComparisonStats {
                 .checked_add(u64::try_from(delta).expect("positive gas delta does not fit u64"))
                 .expect("saved gas overflow");
         }
-        self.capped_searches += usize::from(candidate_limit_reached);
     }
 
     fn prepare(&mut self) {
@@ -238,16 +225,16 @@ mod tests {
     #[test]
     fn renders_complete_statistics_for_the_corpus_and_manually_optimized_subset() {
         let mut stats = Stats::new(5, 3);
-        stats.record(10, 15, false, false);
-        stats.record(10, 12, true, true);
-        stats.record(10, 10, false, false);
-        stats.record(10, 8, false, true);
-        stats.record(10, 3, false, true);
+        stats.record(10, 15, false);
+        stats.record(10, 12, true);
+        stats.record(10, 10, false);
+        stats.record(10, 8, true);
+        stats.record(10, 3, true);
 
         let expected = dedent_preserve_indent(
             r#"
             Stack scheduling benchmark
-            Processed 5 graphs in 1.25s
+            Processed 5 graphs in 1.25s (0.75s scheduling)
 
             Metric                            Entire corpus     Hand-optimized
             ──────────────────────────────────────────────────────────────────
@@ -257,7 +244,6 @@ mod tests {
             Relative score                          104.17%            130.43%
             Scheduler improvements                        2                  2
             Gas saved                                     9                  9
-            Candidate limit reached                       1                  1
 
             Gas delta: best known − current scheduler
             Negative values mean the current scheduler is worse.
@@ -268,18 +254,18 @@ mod tests {
             Hand-optimized           -2     -2     -2      2      7      7      7
             "#,
         );
-        assert_eq!(stats.render(Duration::from_millis(1250)), expected);
+        assert_eq!(stats.render(Duration::from_millis(1250), Duration::from_millis(750)), expected);
     }
 
     #[test]
     fn renders_an_empty_manually_optimized_subset() {
         let mut stats = Stats::new(1, 0);
-        stats.record(10, 10, false, false);
+        stats.record(10, 10, false);
 
         let expected = dedent_preserve_indent(
             r#"
             Stack scheduling benchmark
-            Processed 1 graphs in 0.00s
+            Processed 1 graphs in 0.00s (0.00s scheduling)
 
             Metric                            Entire corpus     Hand-optimized
             ──────────────────────────────────────────────────────────────────
@@ -289,7 +275,6 @@ mod tests {
             Relative score                          100.00%                n/a
             Scheduler improvements                        0                  0
             Gas saved                                     0                  0
-            Candidate limit reached                       0                  0
 
             Gas delta: best known − current scheduler
             Negative values mean the current scheduler is worse.
@@ -300,7 +285,7 @@ mod tests {
             Hand-optimized            —      —      —      —      —      —      —
             "#,
         );
-        assert_eq!(stats.render(Duration::ZERO), expected);
+        assert_eq!(stats.render(Duration::ZERO, Duration::ZERO), expected);
     }
 
     #[test]

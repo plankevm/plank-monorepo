@@ -246,16 +246,12 @@ export async function runBatch(argv = process.argv.slice(2), injectedFactory?: S
 		return 0;
 	}
 
-	const binaries = new Map(
-		["inspect", "submit"].map((name) => [name, resolve(ROOT, `target/release/sir-stack-scheduling-db-${name}`)]),
-	);
-	for (const binary of binaries.values()) {
-		try {
-			await access(binary, constants.X_OK);
-		} catch {
-			console.error(`error: build the release tools first: ${binary}`);
-			return 2;
-		}
+	const binary = resolve(ROOT, "target/release/ssch");
+	try {
+		await access(binary, constants.X_OK);
+	} catch {
+		console.error(`error: build the release tools first: ${binary}`);
+		return 2;
 	}
 
 	process.env.PI_OFFLINE = "1";
@@ -401,9 +397,12 @@ export async function runBatch(argv = process.argv.slice(2), injectedFactory?: S
 
 		mkdirSync(scratch, { recursive: true });
 		await Bun.write(resolve(directory, "graph.json"), row.canonical_graph);
-		for (const [name, binary] of binaries) {
+		for (const name of ["inspect", "submit"]) {
 			const wrapper = resolve(directory, name);
-			writeFileSync(wrapper, `#!/bin/sh\nexec ${shellQuote(binary)} --database ${shellQuote(options.database)} "$@"\n`);
+			writeFileSync(
+				wrapper,
+				`#!/bin/sh\nexec ${shellQuote(binary)} ${name} --database ${shellQuote(options.database)} "$@"\n`,
+			);
 			chmodSync(wrapper, 0o755);
 		}
 		const eventLog = resolve(directory, "pi.jsonl");
