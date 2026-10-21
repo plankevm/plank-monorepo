@@ -2,7 +2,7 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 const { values: opt, positionals } = parseArgs({
@@ -33,6 +33,7 @@ const VALIDATION_DB = `${DATA}/validation.sqlite3`;
 const PLANKC = resolve(import.meta.dir, "../..");
 const TOP = git(PLANKC, "rev-parse", "--show-toplevel");
 const ARCHIVE = `${RUN}/archive.jsonl`;
+const BRANCH = `ssch-research/${basename(RUN)}`;
 const PER_GRAPH = `${RUN}/champion-per-graph.tsv`;
 // Only the auth extension: the user's other extensions (notifications, handoffs) must not fire from agents.
 const PI = ["pi", "-p", "--no-session", "--no-extensions", "-e", `${homedir()}/.pi/agent/extensions/claude-auth.ts`, "--model", opt.model!];
@@ -131,7 +132,7 @@ async function judge(entry: Attempt, cwd: string, target: string, isBaseline: bo
   entry.accepted = isBaseline || (validation.total_gas < best!.validation!.total_gas && validation.wall_seconds <= TIME_CAP);
   if (entry.accepted) {
     copyFileSync(perGraph, PER_GRAPH);
-    git(TOP, "update-ref", "refs/heads/ssch-research/champion", entry.commit);
+    git(TOP, "update-ref", `refs/heads/${BRANCH}/champion`, entry.commit);
   }
 }
 
@@ -140,7 +141,7 @@ function researcherPrompt(id: number, cwd: string, start: string, direction?: st
 
 Goal: lower total gas on graphs you cannot see, staying under ${TIME_CAP}s for 1,498 graphs, with an algorithm a human can understand and reimplement from sir/crates/stack-scheduling/ALGORITHM.md.
 
-Worktree: ${cwd}, branch ssch-research/${id}, starting at the current champion ${start}.
+Worktree: ${cwd}, branch ${BRANCH}/${id}, starting at the current champion ${start}.
 Archive of all previous attempts, failures included, each a git commit with notes: ${ARCHIVE}. The champion is the last entry with "accepted": true. You may start from any archived commit (git reset --hard <commit>) or combine several (cherry-pick, merge).${direction ? `\n\nDirection to explore, proposed by a planner: ${direction}` : ""}
 
 Research data: corpus/stack-scheduling-db/canonical-blocks.sqlite3, 6,992 graphs with the best-known schedule for each (read-only). Looking at individual graphs is expected.
@@ -160,7 +161,7 @@ async function attempt(id: number, slot: number, direction?: string) {
   const isBaseline = id === 0;
   const start = isBaseline ? git(TOP, "rev-parse", "HEAD") : champion().commit;
   const wt = `${RUN}/wt/${id}`, cwd = `${wt}/plankc`, target = `${RUN}/target-${slot}`;
-  git(TOP, "worktree", "add", "-f", "-B", `ssch-research/${id}`, wt, start);
+  git(TOP, "worktree", "add", "-f", "-B", `${BRANCH}/${id}`, wt, start);
   const db = `${cwd}/corpus/stack-scheduling-db/canonical-blocks.sqlite3`;
   mkdirSync(resolve(db, ".."), { recursive: true });
   copyFileSync(RESEARCH_DB, db);
@@ -244,8 +245,8 @@ for (const dir of existsSync(`${RUN}/wt`) ? readdirSync(`${RUN}/wt`) : []) {
 }
 git(TOP, "worktree", "prune");
 const recorded = new Set(attempts().map(a => String(a.id)));
-for (const branch of git(TOP, "branch", "--list", "--format=%(refname:short)", "ssch-research/*").split("\n").filter(Boolean)) {
-  const id = branch.split("/")[1]!;
+for (const branch of git(TOP, "branch", "--list", "--format=%(refname:short)", `${BRANCH}/*`).split("\n").filter(Boolean)) {
+  const id = branch.split("/").at(-1)!;
   if (/^\d+$/.test(id) && !recorded.has(id)) git(TOP, "branch", "-D", branch);
 }
 

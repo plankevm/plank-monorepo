@@ -15,13 +15,13 @@ Options (defaults): `--workers 2 --attempts 20 --hours 24 --stall 6 --planners 3
 ## How it works
 
 - Attempt 0 judges the current `HEAD` and becomes the first champion.
-- Each attempt gets a worktree on branch `ssch-research/<id>` that starts at the champion, plus a
+- Each attempt gets a worktree on branch `ssch-research/<run>/<id>` that starts at the champion, plus a
   read-only copy of the research DB. A fresh agent works there and commits. It may also start from
   or combine any earlier attempt.
 - The judge builds, runs `cargo nextest run -p sir-stack-scheduling -p ssch` and benchmarks the
   research set, where an invalid schedule is a failure. If the candidate beats the champion's
   research gas, the judge also runs the validation set. The candidate becomes champion (branch
-  `ssch-research/champion`) if its validation gas is lower at all and its run takes under
+  `ssch-research/<run>/champion`) if its validation gas is lower at all and its run takes under
   `--time-cap` seconds.
 - After `--stall` attempts in a row without a new champion, planners each look at part of the
   champion's per-graph dashboard and part of the archive. Each proposes directions; an LLM drops
