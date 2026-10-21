@@ -30,6 +30,18 @@ enum Command {
         #[arg(long)]
         save: bool,
 
+        /// Print the summary as a single JSON object instead of the text report.
+        #[arg(long)]
+        json: bool,
+
+        /// Append the N graphs with the largest gap to the best-known schedule.
+        #[arg(long, value_name = "N")]
+        worst: Option<usize>,
+
+        /// Write a TSV row per graph (sorted by gap, largest first) to PATH.
+        #[arg(long, value_name = "PATH")]
+        per_graph: Option<PathBuf>,
+
         #[command(flatten)]
         database: DatabaseArg,
     },
@@ -77,8 +89,9 @@ fn default_database_path() -> PathBuf {
 
 fn main() -> ExitCode {
     let result = match Cli::parse().command {
-        Command::Bench { effort, save, database } => {
-            bench::run(&database.path, effort, save).map(|output| (output, true))
+        Command::Bench { effort, save, json, worst, per_graph, database } => {
+            let options = bench::Options { effort, save, json, worst, per_graph };
+            bench::run(&database.path, &options).map(|output| (output, true))
         }
         Command::Inspect { hash, random, database } => {
             inspect::run(&database.path, hash.as_deref(), random).map(|output| (output, true))
