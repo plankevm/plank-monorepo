@@ -1,0 +1,281 @@
+#!/usr/bin/env bun
+import { spawn, execFileSync, type ChildProcess } from "node:child_process";
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { parseArgs } from "node:util";
+
+const { values: opt, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    workers: { type: "string", default: "2" },
+    attempts: { type: "string", default: "20" },
+    hours: { type: "string", default: "24" },
+    stall: { type: "string", default: "6" },
+    planners: { type: "string", default: "3" },
+    directions: { type: "string", default: "4" },
+    "time-cap": { type: "string", default: "23" },
+    model: { type: "string", default: "claude-bridge/claude-opus-5-5:high" },
+  },
+});
+if (positionals.length !== 1) {
+  console.log("Usage: bun scripts/ssch-research/run.ts RUN_DIR [--workers 2] [--attempts 20] [--hours 24] [--stall 6] [--planners 3] [--directions 4] [--time-cap 23] [--model M]");
+  process.exit(1);
+}
+const RUN = resolve(positionals[0]!);
+const WORKERS = Number(opt.workers), MAX_ATTEMPTS = Number(opt.attempts), STALL = Number(opt.stall);
+const PLANNERS = Number(opt.planners), DIRECTIONS = Number(opt.directions), TIME_CAP = Number(opt["time-cap"]);
+const DEADLINE = Date.now() + Number(opt.hours) * 3_600_000;
+
+const DATA = `${homedir()}/.local/share/plank-ssch-research/20260922-125218`;
+const RESEARCH_DB = `${DATA}/research.sqlite3`;
+const VALIDATION_DB = `${DATA}/validation.sqlite3`;
+const PLANKC = resolve(import.meta.dir, "../..");
+const TOP = git(PLANKC, "rev-parse", "--show-toplevel");
+const ARCHIVE = `${RUN}/archive.jsonl`;
+const PER_GRAPH = `${RUN}/champion-per-graph.tsv`;
+// Only the auth extension: the user's other extensions (notifications, handoffs) must not fire from agents.
+const PI = ["pi", "-p", "--no-session", "--no-extensions", "-e", `${homedir()}/.pi/agent/extensions/claude-auth.ts`, "--model", opt.model!];
+
+interface Bench { total_gas: number; best_known_gas: number; graphs_at_best_known: number; scheduler_seconds: number; wall_seconds: number }
+interface Attempt {
+  kind: "attempt"; id: number; commit: string; accepted: boolean; direction?: string;
+  research?: Bench; validation?: { total_gas: number; wall_seconds: number }; error?: string; loc: number; notes: string;
+}
+interface Plan { kind: "plan"; directions: string[] }
+type Entry = Attempt | Plan;
+
+let stopping = false;
+let judging = Promise.resolve();
+const children = new Set<ChildProcess>();
+process.on("SIGINT", () => {
+  if (stopping) {
+    for (const child of children) try { process.kill(-child.pid!, "SIGKILL"); } catch {}
+    console.log("\nAborted. Rerun the same command to resume.");
+    process.exit(130);
+  }
+  stopping = true;
+  console.log("\nStopping after the current attempts finish. Ctrl-C again aborts now.");
+});
+
+function git(cwd: string, ...args: string[]) {
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+// Children get their own process group so the terminal's Ctrl-C reaches only this script.
+function sh(cmd: string[], cwd: string, env: Record<string, string> = {}, timeoutSeconds?: number) {
+  return new Promise<{ code: number | null; out: string; err: string; seconds: number }>(done => {
+    const start = performance.now();
+    const child = spawn(cmd[0]!, cmd.slice(1), { cwd, detached: true, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    children.add(child);
+    let out = "", err = "";
+    child.stdout!.on("data", chunk => (out += chunk));
+    child.stderr!.on("data", chunk => (err += chunk));
+    const timer = timeoutSeconds ? setTimeout(() => process.kill(-child.pid!, "SIGKILL"), timeoutSeconds * 1000) : undefined;
+    child.on("close", code => {
+      clearTimeout(timer);
+      children.delete(child);
+      done({ code, out, err, seconds: (performance.now() - start) / 1000 });
+    });
+  });
+}
+
+const log = (message: string) => console.log(`[${new Date().toLocaleTimeString()}] ${message}`);
+const entries = (): Entry[] => existsSync(ARCHIVE) ? readFileSync(ARCHIVE, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+const attempts = () => entries().filter((e): e is Attempt => e.kind === "attempt");
+const champion = () => attempts().findLast(a => a.accepted)!;
+const record = (entry: Entry) => appendFileSync(ARCHIVE, JSON.stringify(entry) + "\n");
+
+function stalled() {
+  const all = entries();
+  const since = all.findLastIndex(e => e.kind === "plan" || e.accepted);
+  return all.slice(since + 1).length;
+}
+
+function pendingDirections(claimed: Set<string>) {
+  const all = entries();
+  const plan = all.findLastIndex(e => e.kind === "plan");
+  if (plan < 0) return [];
+  const used = new Set(all.slice(plan).flatMap(e => e.kind === "attempt" && e.direction ? [e.direction] : []));
+  return (all[plan] as Plan).directions.filter(d => !used.has(d) && !claimed.has(d));
+}
+
+function loc(cwd: string) {
+  return git(cwd, "ls-files", "sir/crates/stack-scheduling").split("\n").filter(f => f.endsWith(".rs"))
+    .reduce((sum, f) => sum + readFileSync(resolve(cwd, f), "utf8").split("\n").length, 0);
+}
+
+async function bench(cwd: string, target: string, db: string, perGraph?: string): Promise<Bench | string> {
+  const args = [`${target}/release/ssch`, "bench", "--json", "-d", db, ...(perGraph ? ["--per-graph", perGraph] : [])];
+  const r = await sh(args, cwd, {}, 600);
+  if (r.code !== 0) return `bench failed: ${(r.err || r.out).slice(-2000)}`;
+  return { ...JSON.parse(r.out), wall_seconds: r.seconds };
+}
+
+async function judge(entry: Attempt, cwd: string, target: string, isBaseline: boolean) {
+  const env = { CARGO_TARGET_DIR: target };
+  for (const cmd of [["cargo", "build", "--release", "-p", "ssch"], ["cargo", "nextest", "run", "-p", "sir-stack-scheduling", "-p", "ssch"]]) {
+    const r = await sh(cmd, cwd, env, 3600);
+    if (r.code !== 0) return void (entry.error = `${cmd.slice(0, 2).join(" ")} failed:\n${(r.err + r.out).slice(-2000)}`);
+  }
+  const perGraph = `${cwd}/tmp/per-graph.tsv`;
+  mkdirSync(`${cwd}/tmp`, { recursive: true });
+  const research = await bench(cwd, target, RESEARCH_DB, perGraph);
+  if (typeof research === "string") return void (entry.error = research);
+  entry.research = research;
+  const best = isBaseline ? undefined : champion();
+  if (best && research.total_gas >= best.research!.total_gas) return;
+  const validation = await bench(cwd, target, VALIDATION_DB);
+  if (typeof validation === "string") return void (entry.error = "validation run failed (details withheld)");
+  entry.validation = { total_gas: validation.total_gas, wall_seconds: validation.wall_seconds };
+  entry.accepted = isBaseline || (validation.total_gas < best!.validation!.total_gas && validation.wall_seconds <= TIME_CAP);
+  if (entry.accepted) {
+    copyFileSync(perGraph, PER_GRAPH);
+    git(TOP, "update-ref", "refs/heads/ssch-research/champion", entry.commit);
+  }
+}
+
+function researcherPrompt(id: number, cwd: string, start: string, direction?: string) {
+  return `You are improving the stack scheduler of the Plank compiler: crate \`sir-stack-scheduling\` (sir/crates/stack-scheduling), which turns a basic block's operation graph into stack operations (dupN, swapN, pop, ops, spills) for the EVM.
+
+Goal: lower total gas on graphs you cannot see, staying under ${TIME_CAP}s for 1,498 graphs, with an algorithm a human can understand and reimplement from sir/crates/stack-scheduling/ALGORITHM.md.
+
+Worktree: ${cwd}, branch ssch-research/${id}, starting at the current champion ${start}.
+Archive of all previous attempts, failures included, each a git commit with notes: ${ARCHIVE}. The champion is the last entry with "accepted": true. You may start from any archived commit (git reset --hard <commit>) or combine several (cherry-pick, merge).${direction ? `\n\nDirection to explore, proposed by a planner: ${direction}` : ""}
+
+Research data: corpus/stack-scheduling-db/canonical-blocks.sqlite3, 6,992 graphs with the best-known schedule for each (read-only). Looking at individual graphs is expected.
+Tools (cargo build --release -p ssch; binary at $CARGO_TARGET_DIR/release/ssch):
+- ssch bench [--json] [--worst N] [--per-graph out.tsv]: schedules and validates every graph, compares with best known.
+- ssch inspect <hash> | --random: shows a graph and replays its best-known schedule.
+The effort argument is unused; define it however you like. You may rewrite or replace anything in sir-stack-scheduling.
+
+Rules: no per-graph constants or memorized schedules; schedules must be valid; don't look for validation or test data; never pass --save or write to any database.
+
+Judging: build, cargo nextest run -p sir-stack-scheduling -p ssch, research bench, and, if research gas beats the champion, total gas and time on a hidden validation set. Any validation gain makes you champion.
+
+Deliverable: commit your work on this branch with ALGORITHM.md up to date. Your final reply goes into the archive for future researchers: first line \`parent: <commit>\`, then what you tried, the numbers, and what you learned. Plain and concise.`;
+}
+
+async function attempt(id: number, slot: number, direction?: string) {
+  const isBaseline = id === 0;
+  const start = isBaseline ? git(TOP, "rev-parse", "HEAD") : champion().commit;
+  const wt = `${RUN}/wt/${id}`, cwd = `${wt}/plankc`, target = `${RUN}/target-${slot}`;
+  git(TOP, "worktree", "add", "-f", "-B", `ssch-research/${id}`, wt, start);
+  const db = `${cwd}/corpus/stack-scheduling-db/canonical-blocks.sqlite3`;
+  mkdirSync(resolve(db, ".."), { recursive: true });
+  copyFileSync(RESEARCH_DB, db);
+  chmodSync(db, 0o444);
+  let notes = "baseline";
+  if (!isBaseline) {
+    log(`attempt ${id} researching${direction ? `: ${direction}` : ""}`);
+    const prompt = `${RUN}/prompts/${id}.md`;
+    writeFileSync(prompt, researcherPrompt(id, cwd, start, direction));
+    const r = await sh([...PI, "--tools", "read,bash,edit,write", `@${prompt}`], cwd, { CARGO_TARGET_DIR: target });
+    notes = r.code === 0 ? r.out.trim() : `agent exited ${r.code}: ${r.err.slice(-1000)}`;
+    git(wt, "add", "-A");
+    if (git(wt, "status", "--porcelain")) git(wt, "commit", "-qm", `ssch-research ${id}: uncommitted leftovers`);
+  }
+  const entry: Attempt = { kind: "attempt", id, commit: git(wt, "rev-parse", "HEAD"), accepted: false, direction, loc: loc(cwd), notes };
+  // Judging is serialized so champion updates and timings don't race.
+  const turn = judging.then(() => (log(`attempt ${id} judging ${entry.commit.slice(0, 8)}`), judge(entry, cwd, target, isBaseline)));
+  judging = turn.catch(() => {});
+  await turn;
+  record(entry);
+  git(TOP, "worktree", "remove", "--force", wt);
+  log(`attempt ${id}: ${entry.accepted ? "NEW CHAMPION" : "rejected"} research=${entry.research?.total_gas ?? "-"} validation=${entry.validation?.total_gas ?? "-"}${entry.error ? ` error=${entry.error.split("\n")[0]}` : ""}`);
+}
+
+function dashboardViews() {
+  if (!existsSync(PER_GRAPH)) return [];
+  const rows = readFileSync(PER_GRAPH, "utf8").trim().split("\n").slice(1).map(line => line.split("\t"))
+    .map(([hash, ops, inputs, outputs, gas, best, gap]) => ({ hash: hash!, ops: +ops!, inputs: +inputs!, outputs: +outputs!, gas: +gas!, best: +best!, gap: +gap! }));
+  const buckets = (key: "ops" | "inputs" | "outputs") => {
+    const edges = [-1, 4, 8, 16, 32, Infinity];
+    const lines = edges.slice(0, -1).map((low, i) => {
+      const group = rows.filter(r => r[key] > low && r[key] <= edges[i + 1]!);
+      return `${key} ${low + 1}-${edges[i + 1]}: ${group.length} graphs, ${group.filter(r => r.gap > 0).length} above best known, total gap ${group.reduce((s, r) => s + r.gap, 0)}`;
+    });
+    return `Gap by ${key}:\n${lines.join("\n")}`;
+  };
+  const table = (title: string, picked: typeof rows) => `${title}\nhash\tops\tinputs\toutputs\tgas\tbest\tgap\n${picked.map(r => [r.hash.slice(0, 17), r.ops, r.inputs, r.outputs, r.gas, r.best, r.gap].join("\t")).join("\n")}`;
+  return [buckets("ops"), buckets("inputs"), buckets("outputs"),
+    table("Worst 15 graphs:", rows.slice(0, 15)),
+    table("15 random graphs above best known:", shuffle(rows.filter(r => r.gap > 0)).slice(0, 15))];
+}
+
+function shuffle<T>(items: T[]) {
+  return items.map(item => [Math.random(), item] as const).sort((a, b) => a[0] - b[0]).map(([, item]) => item);
+}
+
+async function plan() {
+  log(`stalled for ${stalled()} attempts; asking ${PLANNERS} planners`);
+  const best = champion();
+  let algorithm = "(none written yet)";
+  try { algorithm = git(TOP, "show", `${best.commit}:plankc/sir/crates/stack-scheduling/ALGORITHM.md`); } catch {}
+  const summaries = attempts().map(a => `- attempt ${a.id} ${a.commit.slice(0, 8)} ${a.accepted ? "ACCEPTED" : "rejected"} research=${a.research?.total_gas ?? "-"}${a.error ? ` error: ${a.error.split("\n")[0]}` : ""}\n  ${a.notes.slice(0, 600).replaceAll("\n", "\n  ")}`);
+  const replies = await Promise.all(Array.from({ length: PLANNERS }, () => {
+    const views = shuffle(dashboardViews()).slice(0, 2).join("\n\n");
+    const archive = shuffle(summaries).slice(0, Math.ceil(summaries.length / 2)).join("\n");
+    const prompt = `You plan research on the stack scheduler of an EVM compiler: it turns a basic block's operation graph into stack operations (dupN, swapN, pop, ops, spills), minimising gas. Gap = our gas minus the best-known schedule's gas for a graph.
+
+Champion's ALGORITHM.md:
+${algorithm}
+
+Partial dashboard of the champion on the research set:
+${views}
+
+Part of the archive of previous attempts:
+${archive}
+
+Propose ${DIRECTIONS} distinct research directions, each with your probability that it beats the champion. Exactly one per line, formatted \`p=0.NN | direction\`, nothing else.`;
+    return sh([...PI, "--no-tools", prompt], RUN);
+  }));
+  const proposals = replies.flatMap(r => r.out.split("\n")).map(l => l.trim()).filter(l => l.startsWith("p="));
+  const dedup = await sh([...PI, "--no-tools", `Remove near-duplicates from these research directions, keeping the clearer wording. Output the remaining lines unchanged, one per line, nothing else.\n\n${proposals.join("\n")}`], RUN);
+  const directions = dedup.out.split("\n").map(l => l.trim()).filter(l => l.startsWith("p="));
+  record({ kind: "plan", directions: directions.length ? directions : proposals });
+  log(`planned ${directions.length} directions`);
+}
+
+mkdirSync(`${RUN}/prompts`, { recursive: true });
+for (const dir of existsSync(`${RUN}/wt`) ? readdirSync(`${RUN}/wt`) : []) {
+  log(`discarding incomplete attempt ${dir}`);
+  rmSync(`${RUN}/wt/${dir}`, { recursive: true, force: true });
+}
+git(TOP, "worktree", "prune");
+const recorded = new Set(attempts().map(a => String(a.id)));
+for (const branch of git(TOP, "branch", "--list", "--format=%(refname:short)", "ssch-research/*").split("\n").filter(Boolean)) {
+  const id = branch.split("/")[1]!;
+  if (/^\d+$/.test(id) && !recorded.has(id)) git(TOP, "branch", "-D", branch);
+}
+
+if (!attempts().length) {
+  log("judging the baseline (attempt 0)");
+  await attempt(0, 0);
+  if (!champion()) throw new Error(`baseline failed: ${attempts()[0]!.error}`);
+}
+
+const running = new Map<number, Promise<void>>();
+const freeSlots = Array.from({ length: WORKERS }, (_, i) => i);
+const claimed = new Set<string>();
+let nextId = Math.max(...attempts().map(a => a.id)) + 1;
+while (true) {
+  const budgetLeft = attempts().length - 1 + running.size < MAX_ATTEMPTS && Date.now() < DEADLINE;
+  if (!stopping && budgetLeft && running.size < WORKERS) {
+    const direction = pendingDirections(claimed)[0];
+    if (direction || stalled() < STALL) {
+      const id = nextId++, slot = freeSlots.pop()!;
+      if (direction) claimed.add(direction);
+      const done = attempt(id, slot, direction).catch(error => {
+        log(`attempt ${id} crashed, stopping: ${error}`);
+        stopping = true;
+      });
+      running.set(id, done.then(() => { running.delete(id); freeSlots.push(slot); }));
+      continue;
+    }
+    if (!running.size) { await plan(); continue; }
+  }
+  if (!running.size) break;
+  await Promise.race(running.values());
+}
+log(`stopped; champion ${champion().commit} validation=${champion().validation!.total_gas}. Rerun the same command to resume.`);
