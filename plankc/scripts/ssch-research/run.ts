@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -11,6 +11,7 @@ const { values: opt, positionals } = parseArgs({
     workers: { type: "string", default: "2" },
     attempts: { type: "string", default: "20" },
     hours: { type: "string", default: "24" },
+    minutes: { type: "string", default: "60" },
     stall: { type: "string", default: "6" },
     planners: { type: "string", default: "3" },
     directions: { type: "string", default: "4" },
@@ -18,7 +19,7 @@ const { values: opt, positionals } = parseArgs({
   },
 });
 if (positionals.length !== 1) {
-  console.log("Usage: bun scripts/ssch-research/run.ts RUN_DIR [--workers 2] [--attempts 20] [--hours 24] [--stall 6] [--planners 3] [--directions 4] [--model M]");
+  console.log("Usage: bun scripts/ssch-research/run.ts RUN_DIR [--workers 2] [--attempts 20] [--hours 24] [--minutes 60] [--stall 6] [--planners 3] [--directions 4] [--model M]");
   process.exit(1);
 }
 const RUN = resolve(positionals[0]!);
@@ -27,6 +28,8 @@ const PLANNERS = Number(opt.planners), DIRECTIONS = Number(opt.directions);
 // Validation runs twice: low effort is a pass/fail speed gate, high effort is what's compared on gas.
 const LOW_EFFORT = 1000, LOW_TIME_CAP = 1, HIGH_EFFORT = 23000, HIGH_TIME_CAP = 23;
 const DEADLINE = Date.now() + Number(opt.hours) * 3_600_000;
+// Each researcher's time budget; time while the run is stopped or the machine sleeps doesn't count.
+const AGENT_MINUTES = Number(opt.minutes);
 
 const DATA = `${homedir()}/.local/share/plank-ssch-research/20260922-125218`;
 const RESEARCH_DB = `${DATA}/research.sqlite3`;
@@ -36,8 +39,9 @@ const TOP = git(PLANKC, "rev-parse", "--show-toplevel");
 const ARCHIVE = `${RUN}/archive.jsonl`;
 const BRANCH = `ssch-research/${basename(RUN)}`;
 const PER_GRAPH = `${RUN}/champion-per-graph.tsv`;
+const PIDS = `${RUN}/pids`;
 // Only the auth extension: the user's other extensions (notifications, handoffs) must not fire from agents.
-const PI = ["pi", "-p", "--no-extensions", "-e", `${homedir()}/.pi/agent/extensions/claude-auth.ts`, "--model", opt.model!];
+const PI = ["pi", "-p", "--no-extensions", "-e", `${homedir()}/.pi/agent/extensions/claude-auth.ts`, "-e", `${import.meta.dir}/time-left.ts`, "--model", opt.model!];
 
 interface Bench { total_gas: number; best_known_gas: number; graphs_at_best_known: number; scheduler_seconds: number; wall_seconds: number }
 interface Tier { total_gas: number; wall_seconds: number }
@@ -47,13 +51,14 @@ interface Attempt {
 }
 interface Plan { kind: "plan"; directions: string[] }
 type Entry = Attempt | Plan;
+// An attempt in progress, persisted in wt/<id>.json so a killed run resumes it. The agent is done once notes or timedOut is set.
+interface Live { id: number; slot: number; start: string; direction?: string; deadline: number; updated: number; notes?: string; timedOut?: boolean }
 
 let stopping = false;
-let judging = Promise.resolve();
-const children = new Set<ChildProcess>();
+const children = new Map<ChildProcess, string>();
 process.on("SIGINT", () => {
   if (stopping) {
-    for (const child of children) try { process.kill(-child.pid!, "SIGKILL"); } catch {}
+    for (const child of children) killTree(child.pid!);
     console.log("\nAborted. Rerun the same command to resume.");
     process.exit(130);
   }
@@ -66,21 +71,46 @@ function git(cwd: string, ...args: string[]) {
 }
 
 // Children get their own process group so the terminal's Ctrl-C reaches only this script.
-function sh(cmd: string[], cwd: string, env: Record<string, string> = {}, timeoutSeconds?: number) {
+function sh(cmd: string[], cwd: string, env: Record<string, string> = {}, timeoutSeconds?: number, onSpawn?: (child: ChildProcess) => void) {
   return new Promise<{ code: number | null; out: string; err: string; seconds: number }>(done => {
     const start = performance.now();
     const child = spawn(cmd[0]!, cmd.slice(1), { cwd, detached: true, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
-    children.add(child);
+    children.set(child, startTime(child.pid!));
+    savePids();
+    onSpawn?.(child);
     let out = "", err = "";
     child.stdout!.on("data", chunk => (out += chunk));
     child.stderr!.on("data", chunk => (err += chunk));
-    const timer = timeoutSeconds ? setTimeout(() => process.kill(-child.pid!, "SIGKILL"), timeoutSeconds * 1000) : undefined;
+    const timer = timeoutSeconds ? setTimeout(() => killTree(child.pid!), timeoutSeconds * 1000) : undefined;
     child.on("close", code => {
       clearTimeout(timer);
       children.delete(child);
+      savePids();
       done({ code, out, err, seconds: (performance.now() - start) / 1000 });
     });
   });
+}
+
+// pi's bash tool gives each command its own process group, so killing pi's group would leave them running.
+function killTree(pid: number) {
+  const procs = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8" }).trim().split("\n").map(l => l.trim().split(/\s+/).map(Number));
+  const tree = [pid];
+  for (let i = 0; i < tree.length; i++) for (const [p, parent] of procs) if (parent === tree[i]) tree.push(p!);
+  for (const p of tree) try { process.kill(p, "SIGKILL"); } catch {}
+}
+
+function startTime(pid: number) {
+  try { return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim(); } catch { return ""; }
+}
+
+// A killed run leaves its detached children running; the next run kills them before starting its own.
+// The start time guards against killing an unrelated process that reused the pid after a reboot.
+const savePids = () => writeFileSync(PIDS, [...children].map(([c, start]) => `${c.pid}\t${start}`).join("\n"));
+function killOrphans() {
+  for (const line of existsSync(PIDS) ? readFileSync(PIDS, "utf8").split("\n").filter(Boolean) : []) {
+    const [pid, start] = line.split("\t");
+    if (start && startTime(Number(pid)) === start) killTree(Number(pid));
+  }
 }
 
 // A reused id (after a discarded attempt or interrupted plan) must start a new session, not continue the old one.
@@ -102,12 +132,12 @@ function stalled() {
   return all.slice(since + 1).length;
 }
 
-function pendingDirections(claimed: Set<string>) {
+function pendingDirections() {
   const all = entries();
   const plan = all.findLastIndex(e => e.kind === "plan");
   if (plan < 0) return [];
   const used = new Set(all.slice(plan).flatMap(e => e.kind === "attempt" && e.direction ? [e.direction] : []));
-  return (all[plan] as Plan).directions.filter(d => !used.has(d) && !claimed.has(d));
+  return (all[plan] as Plan).directions.filter(d => !used.has(d));
 }
 
 function loc(cwd: string) {
@@ -167,36 +197,89 @@ Rules: no per-graph constants or memorized schedules; schedules must be valid; d
 
 Judging: build, cargo nextest run -p sir-stack-scheduling -p ssch, research bench at effort ${HIGH_EFFORT}, and, if research gas beats the champion, total gas and time on the hidden validation set at both efforts. Any validation gain within the time limits makes you champion.
 
+Time: you have ${AGENT_MINUTES} minutes for this attempt. If you haven't committed and replied by then, you are stopped and the attempt fails without being judged. Call the time_left tool to see how many seconds remain, and leave yourself time to commit and write your reply. Always give bash commands a timeout (the bash tool's timeout parameter), so a slow build, bench or debug run can't silently use up your time.
+
 Deliverable: commit your work on this branch with ALGORITHM.md up to date. Your final reply goes into the archive for future researchers: first line \`parent: <commit>\`, then what you tried, the numbers, and what you learned. Plain and concise.`;
 }
 
-async function attempt(id: number, slot: number, direction?: string) {
-  const isBaseline = id === 0;
-  const start = isBaseline ? git(TOP, "rev-parse", "HEAD") : champion().commit;
-  const wt = `${RUN}/wt/${id}`, cwd = `${wt}/plankc`, target = `${RUN}/target-${slot}`;
+const stateFile = (id: number) => `${RUN}/wt/${id}.json`;
+const save = (live: Live) => writeFileSync(stateFile(live.id), JSON.stringify(live));
+const paths = (live: Live) => ({ wt: `${RUN}/wt/${live.id}`, cwd: `${RUN}/wt/${live.id}/plankc`, target: `${RUN}/target-${live.slot}` });
+
+function prepare(id: number, slot: number, direction?: string): Live {
+  const start = id === 0 ? git(TOP, "rev-parse", "HEAD") : champion().commit;
+  const live: Live = { id, slot, start, direction, deadline: Date.now() + AGENT_MINUTES * 60_000, updated: Date.now() };
+  const { wt, cwd } = paths(live);
   git(TOP, "worktree", "add", "-f", "-B", `${BRANCH}/${id}`, wt, start);
   const db = `${cwd}/corpus/stack-scheduling-db/canonical-blocks.sqlite3`;
   mkdirSync(resolve(db, ".."), { recursive: true });
   copyFileSync(RESEARCH_DB, db);
   chmodSync(db, 0o444);
-  let notes = "baseline";
-  if (!isBaseline) {
-    log(`attempt ${id} researching${direction ? `: ${direction}` : ""}`);
-    const prompt = `${RUN}/prompts/${id}.md`;
-    writeFileSync(prompt, researcherPrompt(id, cwd, start, direction));
-    const r = await sh([...PI, ...session(String(id)), "--tools", "read,bash,edit,write", `@${prompt}`], cwd, { CARGO_TARGET_DIR: target });
-    notes = r.code === 0 ? r.out.trim() : `agent exited ${r.code}: ${r.err.slice(-1000)}`;
-    git(wt, "add", "-A");
-    if (git(wt, "status", "--porcelain")) git(wt, "commit", "-qm", `ssch-research ${id}: uncommitted leftovers`);
+  if (id === 0) live.notes = "baseline";
+  else writeFileSync(`${RUN}/prompts/${id}.md`, researcherPrompt(id, cwd, start, direction));
+  save(live);
+  return live;
+}
+
+async function research(live: Live) {
+  const { cwd, target } = paths(live);
+  const file = `${RUN}/logs/${live.id}.jsonl`;
+  const resumed = existsSync(file) && statSync(file).size > 0;
+  // The run was stopped since the last update; that time isn't the agent's.
+  live.deadline += Date.now() - live.updated;
+  live.updated = Date.now();
+  save(live);
+  const left = () => Math.round((live.deadline - Date.now()) / 1000);
+  if (left() <= 0) return void save(Object.assign(live, { timedOut: true }));
+  log(`attempt ${live.id} ${resumed ? `resuming, ${left()}s left` : "researching"}${live.direction ? `: ${live.direction}` : ""}`);
+  const message = resumed
+    ? ["--session", file, `You were interrupted and have now been resumed. ${left()} seconds left. Continue where you left off; the deliverable and reply format are unchanged.`]
+    : [...session(String(live.id)), `@${RUN}/prompts/${live.id}.md`];
+  let child: ChildProcess | undefined;
+  const ticker = setInterval(() => {
+    const now = Date.now();
+    // A long gap between ticks means the machine slept, which doesn't count either.
+    if (now - live.updated > 30_000) live.deadline += now - live.updated;
+    live.updated = now;
+    if (now >= live.deadline && !live.timedOut) {
+      live.timedOut = true;
+      killTree(child!.pid!);
+    }
+    save(live);
+  }, 5000);
+  const r = await sh([...PI, ...message.slice(0, -1), "--tools", "read,bash,edit,write,time_left", message.at(-1)!], cwd,
+    { CARGO_TARGET_DIR: target, SSCH_STATE: stateFile(live.id) }, undefined, c => (child = c));
+  clearInterval(ticker);
+  if (!live.timedOut) live.notes = r.code === 0 ? r.out.trim() : `agent exited ${r.code}: ${r.err.slice(-1000)}`;
+  save(live);
+}
+
+async function finish(live: Live) {
+  const { wt, cwd, target } = paths(live);
+  // A run killed between recording and cleanup must not record the attempt twice.
+  if (attempts().some(a => a.id === live.id)) return void cleanup(live);
+  git(wt, "add", "-A");
+  if (git(wt, "status", "--porcelain")) git(wt, "commit", "-qm", `ssch-research ${live.id}: uncommitted leftovers`);
+  const entry: Attempt = { kind: "attempt", id: live.id, commit: git(wt, "rev-parse", "HEAD"), accepted: false, direction: live.direction, loc: loc(cwd), notes: live.notes ?? "" };
+  if (live.timedOut) entry.error = "timeout: no submission within the time budget";
+  else {
+    log(`attempt ${live.id} judging ${entry.commit.slice(0, 8)}`);
+    await judge(entry, cwd, target, live.id === 0);
   }
-  const entry: Attempt = { kind: "attempt", id, commit: git(wt, "rev-parse", "HEAD"), accepted: false, direction, loc: loc(cwd), notes };
-  // Judging is serialized so champion updates and timings don't race.
-  const turn = judging.then(() => (log(`attempt ${id} judging ${entry.commit.slice(0, 8)}`), judge(entry, cwd, target, isBaseline)));
-  judging = turn.catch(() => {});
-  await turn;
   record(entry);
-  git(TOP, "worktree", "remove", "--force", wt);
-  log(`attempt ${id}: ${entry.accepted ? "NEW CHAMPION" : "rejected"} research=${entry.research?.total_gas ?? "-"} validation low=${tier(entry.validation_low)} high=${tier(entry.validation)}${entry.error ? ` error=${entry.error.split("\n")[0]}` : ""}`);
+  cleanup(live);
+  log(`attempt ${live.id}: ${entry.accepted ? "NEW CHAMPION" : "rejected"} research=${entry.research?.total_gas ?? "-"} validation low=${tier(entry.validation_low)} high=${tier(entry.validation)}${entry.error ? ` error=${entry.error.split("\n")[0]}` : ""}`);
+}
+
+function cleanup(live: Live) {
+  git(TOP, "worktree", "remove", "--force", paths(live).wt);
+  rmSync(stateFile(live.id));
+}
+
+// Agents work in parallel; judging waits until all of them are done so no agent load skews the timing caps.
+async function round(lives: Live[]) {
+  await Promise.all(lives.filter(l => l.notes === undefined && !l.timedOut).map(research));
+  for (const live of lives) await finish(live);
 }
 
 const tier = (t?: Tier) => t ? `${t.total_gas} gas/${t.wall_seconds.toFixed(2)}s` : "-";
@@ -256,44 +339,43 @@ Propose ${DIRECTIONS} distinct research directions, each with your probability t
 
 mkdirSync(`${RUN}/prompts`, { recursive: true });
 mkdirSync(`${RUN}/logs`, { recursive: true });
-for (const dir of existsSync(`${RUN}/wt`) ? readdirSync(`${RUN}/wt`) : []) {
-  log(`discarding incomplete attempt ${dir}`);
+mkdirSync(`${RUN}/wt`, { recursive: true });
+killOrphans();
+const inProgress = readdirSync(`${RUN}/wt`).filter(f => f.endsWith(".json")).map(f => JSON.parse(readFileSync(`${RUN}/wt/${f}`, "utf8")) as Live);
+for (const dir of readdirSync(`${RUN}/wt`).filter(f => !f.endsWith(".json") && !inProgress.some(l => String(l.id) === f))) {
+  log(`discarding incomplete setup ${dir}`);
   rmSync(`${RUN}/wt/${dir}`, { recursive: true, force: true });
 }
 git(TOP, "worktree", "prune");
-const recorded = new Set(attempts().map(a => String(a.id)));
+const known = new Set([...attempts(), ...inProgress].map(a => String(a.id)));
 for (const branch of git(TOP, "branch", "--list", "--format=%(refname:short)", `${BRANCH}/*`).split("\n").filter(Boolean)) {
   const id = branch.split("/").at(-1)!;
-  if (/^\d+$/.test(id) && !recorded.has(id)) git(TOP, "branch", "-D", branch);
+  if (/^\d+$/.test(id) && !known.has(id)) git(TOP, "branch", "-D", branch);
 }
 
+async function guarded(lives: Live[]) {
+  try { await round(lives); } catch (error) {
+    log(`round crashed, stopping: ${error}`);
+    stopping = true;
+  }
+}
+
+if (inProgress.length) {
+  log(`resuming attempts ${inProgress.map(l => l.id).join(", ")}`);
+  await guarded(inProgress.sort((a, b) => a.id - b.id));
+}
 if (!attempts().length) {
   log("judging the baseline (attempt 0)");
-  await attempt(0, 0);
+  await round([prepare(0, 0)]);
   if (!champion()) throw new Error(`baseline failed: ${attempts()[0]!.error}`);
 }
 
-const running = new Map<number, Promise<void>>();
-const freeSlots = Array.from({ length: WORKERS }, (_, i) => i);
-const claimed = new Set<string>();
 let nextId = Math.max(...attempts().map(a => a.id)) + 1;
-while (true) {
-  const budgetLeft = attempts().length - 1 + running.size < MAX_ATTEMPTS && Date.now() < DEADLINE;
-  if (!stopping && budgetLeft && running.size < WORKERS) {
-    const direction = pendingDirections(claimed)[0];
-    if (direction || stalled() < STALL) {
-      const id = nextId++, slot = freeSlots.pop()!;
-      if (direction) claimed.add(direction);
-      const done = attempt(id, slot, direction).catch(error => {
-        log(`attempt ${id} crashed, stopping: ${error}`);
-        stopping = true;
-      });
-      running.set(id, done.then(() => { running.delete(id); freeSlots.push(slot); }));
-      continue;
-    }
-    if (!running.size) { await plan(); continue; }
-  }
-  if (!running.size) break;
-  await Promise.race(running.values());
+while (!stopping && Date.now() < DEADLINE) {
+  const size = Math.min(WORKERS, MAX_ATTEMPTS - (attempts().length - 1));
+  if (size <= 0) break;
+  if (stalled() >= STALL && !pendingDirections().length) { await plan(); continue; }
+  const directions = pendingDirections();
+  await guarded(Array.from({ length: size }, (_, slot) => prepare(nextId++, slot, directions[slot])));
 }
 log(`stopped; champion ${champion().commit} validation=${champion().validation!.total_gas}. Rerun the same command to resume.`);
