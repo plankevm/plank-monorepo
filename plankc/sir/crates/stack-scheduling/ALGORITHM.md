@@ -44,12 +44,20 @@ deadline bound, so extra threads use more cores but no extra wall time.
    - For larger graphs, all 12 threads run step 3.
 3. If the A* succeeds, it sets a stop flag that ends the policy searches, and its schedule is
    returned.
-4. Otherwise the cheapest search result goes on to steps 4 and 5, which stay single-threaded.
+4. Otherwise the search results are deduplicated. Each distinct result runs steps 4 and 5
+   on its own thread: polish, then the beam schedule replaces it if cheaper, then windows
+   with their own `0.25`-share deadline. The cheapest finished schedule wins. A search result
+   that is slightly worse before the windows sometimes ends cheaper after them. Sequential
+   runs have a single result, so they finish it on the calling thread.
 
 On the research corpus at effort 23000 this cut gas from 163,023 to 160,791 (−1.4%). Wall
 time went from 91.5 s to 96.4 s, mostly thread overhead on small graphs. Most of the gain
 came from graphs with 17+ ops. Running the A* next to the searches, instead of before them,
 helped graphs of 6–16 ops by about 230 gas.
+
+Finishing every distinct search result instead of only the cheapest cut gas by about 700
+more (160,509 → 159,807 in the same contended batch). It helped every size bucket and cost
+about 2% wall time, which comes from waiting for the slowest finisher.
 
 ## 1. Exact search for small graphs (`exact.rs`)
 

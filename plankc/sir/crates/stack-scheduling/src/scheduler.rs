@@ -286,12 +286,9 @@ pub fn schedule_with_effort(
             searched
                 .extend(workers.into_iter().map(|worker| worker.join().expect("search panicked")));
             searched
-                .into_iter()
-                .min_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle))
-                .expect("at least one search ran")
         })
     };
-    let (ops, new_next_alloc_id) = if let Some((exact_deadline, beam_deadline)) = exact_deadline {
+    let mut searched = if let Some((exact_deadline, beam_deadline)) = exact_deadline {
         // The A* (then the beam search) runs on its own thread for the whole search budget, next
         // to the policy searches. A proven optimum stops the searches.
         let (exact, searched) = std::thread::scope(|scope| {
@@ -320,23 +317,44 @@ pub fn schedule_with_effort(
     } else if parallel {
         parallel_search(threads as u64)
     } else {
-        search(0)
+        vec![search(0)]
     };
-    let ops = if effort > 0 { polish(graph, shuffle, next_alloc_id, &ops) } else { ops };
-    let (ops, new_next_alloc_id) = match beam {
-        Some(beam)
-            if crate::stack::gas_cost(&beam, shuffle) < crate::stack::gas_cost(&ops, shuffle) =>
-        {
-            (beam.into_boxed_slice(), next_alloc_id)
-        }
-        _ => (ops, new_next_alloc_id),
+    searched.sort_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle));
+    searched.dedup_by(|(a, _), (b, _)| a == b);
+    let finish = |(ops, new_next_alloc_id): (Box<[StackOps]>, StaticAllocId)| {
+        let ops = if effort > 0 { polish(graph, shuffle, next_alloc_id, &ops) } else { ops };
+        let (ops, new_next_alloc_id) = match &beam {
+            Some(beam)
+                if crate::stack::gas_cost(beam, shuffle)
+                    < crate::stack::gas_cost(&ops, shuffle) =>
+            {
+                (beam.clone().into_boxed_slice(), next_alloc_id)
+            }
+            _ => (ops, new_next_alloc_id),
+        };
+        let ops = if effort > 0 {
+            let deadline = Instant::now() + window_budget;
+            reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, deadline)
+                .map_or(ops, Vec::into_boxed_slice)
+        } else {
+            ops
+        };
+        (ops, new_next_alloc_id)
     };
-    let ops = if effort > 0 {
-        let deadline = Instant::now() + window_budget;
-        reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, deadline)
-            .map_or(ops, Vec::into_boxed_slice)
+    // Every distinct search result is polished and window-optimized on its own thread: a
+    // slightly worse search result sometimes ends cheaper after the windows.
+    let (ops, new_next_alloc_id) = if searched.len() > 1 {
+        std::thread::scope(|scope| {
+            let finishers: Vec<_> =
+                searched.into_iter().map(|found| scope.spawn(move || finish(found))).collect();
+            finishers
+                .into_iter()
+                .map(|finisher| finisher.join().expect("finishing panicked"))
+                .min_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle))
+                .expect("at least one search ran")
+        })
     } else {
-        ops
+        finish(searched.pop().expect("at least one search ran"))
     };
     let spill_count = new_next_alloc_id - next_alloc_id;
 
