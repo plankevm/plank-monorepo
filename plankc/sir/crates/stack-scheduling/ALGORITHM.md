@@ -94,12 +94,18 @@ A `Policy` is a genome:
 - `pre_swaps: [u8; 3]`: swaps applied after the pre-spills (0 = none, depths beyond the stack
   are skipped). They sink pass-through inputs towards their output slots while still in reach.
 - `op_swaps[op]`: two swap slots of depth 1–16 (0 = none, depths beyond the stack are skipped)
-  applied right before preparing the operands of `op`. The greedy operand preparer only cares about the
+  applied right before preparing the operands of `op`. Mutations only pick depths up to the
+  deepest stack seen so far in the search minus one, since deeper swaps are skipped anyway. The greedy operand preparer only cares about the
   next operation. This gene lets the search park a value at the depth it is wanted later, so
   later operations and the final layout need fewer moves. On the research corpus it was the
   single largest improvement (−2.7% gas).
 - `pre_shuffle`: permute the remaining inputs once up front into consumption order (inputs used
   by operations in policy order, then pass-through inputs in output order).
+
+Ready operations are tracked incrementally: each operation counts its unfinished immediate
+predecessors (transitive reduction of the dependency graph) and joins the ready list when the
+count reaches zero. A `Cheapest` flip runs the operand preparer for both orientations on copies
+of the stack and replays the cheaper one's moves.
 
 Each operation's operands are brought to the top by the greedy intra-op scheduler
 (`greedy_intra_op_scheduler`): dup the operands that are still needed later, swap last uses
@@ -114,7 +120,16 @@ Hill climbing with iterated-local-search restarts:
   otherwise change priorities (swap two, move an op just before another, or randomise one).
   Each candidate gets 1–2 mutations.
 - A candidate is evaluated by running the greedy scheduler while counting gas only. It is
-  aborted as soon as it costs more than the current genome. Equal cost is accepted, so the
+  aborted as soon as it costs more than the current genome.
+- Evaluations resume instead of starting over. The search keeps a trace of the current genome's
+  greedy run: for every step, the op run and the state before it (stack, spilled values, gas so
+  far). A candidate with the same prelude (pre_spill, pre_swaps, pre_shuffle, and if
+  pre_shuffle is on the same priorities, since the shuffle layout depends on them) picks
+  ops by its own priorities while they match the trace and the op has the same op-swaps and
+  flip; the greedy run then starts from the checkpoint of the first differing step. If no step
+  differs the candidate costs the same as the current genome. An accepted candidate's new steps
+  replace the trace from that point on. Results are identical to a full run; on graphs with
+  many ops this roughly halves the work per candidate. Equal cost is accepted, so the
   search can drift across plateaus.
 - After `max(2000, 400 * ops)` candidates without improvement, restart from the best genome
   with `3 + ops/8` random mutations. Tiny graphs with fewer than 4 choices just stop.
