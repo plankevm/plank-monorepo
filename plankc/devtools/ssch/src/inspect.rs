@@ -1,5 +1,6 @@
 use crate::database::{CanonicalDatabase, DatabaseEntry};
 use sir_data::StaticAllocId;
+use plank_core::Idx;
 use sir_stack_scheduling::{
     BlockFinalization,
     display::{ScheduleTrace, graph, trace},
@@ -20,6 +21,9 @@ pub fn run(database: &Path, hash: Option<&str>, random: bool) -> Result<String, 
     if let Some(error) = trace.error {
         return Err(error.to_string());
     }
+    let ours = sir_stack_scheduling::schedule_graph_with_effort(&entry.graph, entry.finalization, StaticAllocId::ZERO, ShuffleConfig::PRE_AMSTERDAM, 23000);
+    let ours_trace = trace_schedule(&entry.graph, entry.finalization, &ours.ops);
+    eprintln!("ours (gas {}):\n{}", sir_stack_scheduling::stack::gas_cost(&ours.ops, ShuffleConfig::PRE_AMSTERDAM), ours_trace.rendering);
     Ok(format!(
         "hash: {}\n\ngraph:\n{}\n\nbest schedule (gas: {}):\n{}",
         entry.canonical_hash,
