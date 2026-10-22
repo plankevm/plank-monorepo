@@ -279,7 +279,7 @@ fn astar(
 }
 
 /// The beam only beats the policy search on graphs slightly beyond the exact A*'s reach.
-const MAX_BEAM_OPS: u32 = 16;
+pub const MAX_BEAM_OPS: u32 = 16;
 /// Ops beyond this no longer fit the `done` bitmask.
 const MAX_MASK_OPS: u32 = 63;
 const FIRST_BEAM_WIDTH: usize = 4;
