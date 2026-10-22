@@ -558,22 +558,45 @@ fn schedule_step<Sink: FnMut(StackOps)>(
             stack.swap(swap);
         }
     }
-    let flipped = matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_))
-        && match policy.flips[op.idx()] {
-            FlipChoice::Straight => false,
-            FlipChoice::Flipped => true,
-            FlipChoice::Cheapest => {
-                let op_cost = |flipped| {
-                    let gas = Cell::new(0u64);
-                    let mut trial_stack =
-                        stack.clone_with(|op: StackOps| gas.set(gas.get() + u64::from(op.gas_cost(config))));
-                    greedy_schedule_op(config, &mut trial_stack, graph, op, complete, flipped);
-                    drop(trial_stack);
-                    gas.get()
-                };
-                op_cost(true) < op_cost(false)
+    let flipped = match (graph.get_op(op).kind, policy.flips[op.idx()]) {
+        (OpNodeKind::Flippable(_), FlipChoice::Flipped) => true,
+        (OpNodeKind::Flippable(_), FlipChoice::Cheapest) => {
+            let trial = |flipped| {
+                let mut ops = Vec::new();
+                let mut trial_stack = stack.clone_with(|op| ops.push(op));
+                greedy_schedule_op(config, &mut trial_stack, graph, op, complete, flipped);
+                drop(trial_stack);
+                ops
+            };
+            let flipped_ops = trial(true);
+            let straight_ops = trial(false);
+            // The operand preparer is deterministic, so replaying the cheaper trial equals
+            // preparing that orientation again.
+            let ops = if crate::stack::gas_cost(&flipped_ops, config)
+                < crate::stack::gas_cost(&straight_ops, config)
+            {
+                flipped_ops
+            } else {
+                straight_ops
+            };
+            for stack_op in ops {
+                match stack_op {
+                    StackOps::Pop => stack.pop(),
+                    StackOps::Swap(depth) => stack.swap(depth),
+                    StackOps::Dup(depth) => stack.dup(depth),
+                    StackOps::Store(expected) => assert_eq!(stack.spill_top(), expected),
+                    StackOps::Load(allocation) => stack.load(allocation),
+                    StackOps::Op(_) => stack.op(graph, op, false),
+                    StackOps::Flipped(_) => stack.op(graph, op, true),
+                    StackOps::Exchange(_, _) | StackOps::CallRetPush(_) => {
+                        unreachable!("operand preparer produced an unsupported operation")
+                    }
+                }
             }
-        };
+            return;
+        }
+        _ => false,
+    };
     greedy_schedule_op(config, stack, graph, op, complete, flipped);
 }
 
