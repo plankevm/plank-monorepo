@@ -46,8 +46,8 @@ A `Policy` is a genome:
   least 14 inputs (up to 8), and otherwise only over the run of dead inputs on top.
 - `pre_swaps: [u8; 3]`: swaps applied after the pre-spills (0 = none, depths beyond the stack
   are skipped). They sink pass-through inputs towards their output slots while still in reach.
-- `op_swaps[op]`: a swap of depth 1–16 (0 = none, depths beyond the stack are skipped) applied
-  right before preparing the operands of `op`. The greedy operand preparer only cares about the
+- `op_swaps[op]`: two swap slots of depth 1–16 (0 = none, depths beyond the stack are skipped)
+  applied right before preparing the operands of `op`. The greedy operand preparer only cares about the
   next operation. This gene lets the search park a value at the depth it is wanted later, so
   later operations and the final layout need fewer moves. On the research corpus it was the
   single largest improvement (−2.7% gas).
@@ -63,7 +63,7 @@ permutes the stack into the output layout, popping dead values and loading spill
 
 Hill climbing with iterated-local-search restarts:
 - Mutations: toggle pre_shuffle (1/16); set or clear a pre-swap (1/16); change pre_spill by ±1
-  (1/16 when allowed); set an op swap to a random depth or clear it (1/2 of the remaining); cycle a flip choice;
+  (1/16 when allowed); set one op-swap slot to a random depth or clear it (1/2 of the remaining); cycle a flip choice;
   otherwise change priorities (swap two, move an op just before another, or randomise one).
   Each candidate gets 1–2 mutations.
 - A candidate is evaluated by running the greedy scheduler while counting gas only. It is

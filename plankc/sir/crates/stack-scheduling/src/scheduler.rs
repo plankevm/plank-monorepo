@@ -74,9 +74,9 @@ pub struct Policy {
     /// Swaps applied right after the pre-spills (depth 0 = none). They let a pass-through input
     /// sink towards its output slot while it is still cheap to reach.
     pub pre_swaps: [u8; PRE_SWAPS],
-    /// Per operation: a swap applied right before preparing its operands (0 = none), to park a
-    /// value at the depth it is wanted later.
-    pub op_swaps: Vec<u8>,
+    /// Per operation: up to two swaps applied right before preparing its operands (0 = none), to
+    /// park values at the depth they are wanted later.
+    pub op_swaps: Vec<[u8; 2]>,
 }
 
 impl Policy {
@@ -88,7 +88,7 @@ impl Policy {
             pre_shuffle: false,
             pre_spill: 0,
             pre_swaps: [0; PRE_SWAPS],
-            op_swaps: vec![0; n],
+            op_swaps: vec![[0; 2]; n],
         }
     }
 }
@@ -364,7 +364,7 @@ fn mutate(
         return;
     }
     if rng.below(2) == 0 {
-        let swap = &mut policy.op_swaps[rng.below(n)];
+        let swap = &mut policy.op_swaps[rng.below(n)][rng.below(2)];
         *swap = if *swap != 0 && rng.below(2) == 0 { 0 } else { 1 + rng.below(16) as u8 };
         return;
     }
@@ -449,9 +449,10 @@ pub fn greedy_schedule(
         else {
             break 'schedule;
         };
-        let swap = policy.op_swaps[op.idx()];
-        if swap != 0 && usize::from(swap) < stack.len() as usize {
-            stack.swap(swap);
+        for swap in policy.op_swaps[op.idx()] {
+            if swap != 0 && usize::from(swap) < stack.len() as usize {
+                stack.swap(swap);
+            }
         }
         let flipped = matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_))
             && match policy.flips[op.idx()] {
