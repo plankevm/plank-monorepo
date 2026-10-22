@@ -227,6 +227,7 @@ pub fn schedule_with_effort(
     let tree_dag = Dag::new(&trees.graph);
     let dag = Dag::new(graph);
     let search = |seed: u64| {
+        let tree_effort = effort - effort / 4;
         let run = |graph: &OpGraph, dag: &Dag, policy: &Policy| {
             let mut ops = Vec::new();
             let new_next_alloc_id = greedy_schedule(
@@ -250,7 +251,7 @@ pub fn schedule_with_effort(
                 shuffle,
                 &trees.graph,
                 &tree_dag,
-                effort.div_ceil(2),
+                tree_effort,
                 Policy::graph_order(&trees.graph),
                 seed,
                 &stop,
@@ -259,7 +260,7 @@ pub fn schedule_with_effort(
             (trees.expand_schedule(graph, &ops), next, policy)
         };
         // Tree graphs fix the order inside each tree, which occasionally rules out the best
-        // schedule, so the untransformed graph gets the other half of the budget.
+        // schedule, so the untransformed graph gets the remaining quarter of the budget.
         if effort > 0 {
             let seed_policy = Policy::replaying(graph, &tree_ops, &tree_policy);
             let policy = search_policy(
@@ -267,7 +268,7 @@ pub fn schedule_with_effort(
                 shuffle,
                 graph,
                 &dag,
-                effort / 2,
+                effort - tree_effort,
                 seed_policy,
                 seed,
                 &stop,

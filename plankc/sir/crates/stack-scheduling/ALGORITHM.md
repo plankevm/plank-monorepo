@@ -166,11 +166,15 @@ Hill climbing with iterated-local-search restarts:
 
 The search runs twice:
 1. On the tree graph (`treegraph`, after Park et al.): single-use chains are contracted into
-   trees with a fixed internal order, which shrinks the search space. It gets half the effort.
+   trees with a fixed internal order, which shrinks the search space. It gets 3/4 of the effort.
    The result is expanded back to the original operations.
 2. On the untransformed graph, seeded with the tree winner's order, flips, pre_shuffle,
    pre_spill and pre_swaps. Op swaps start at 0 because tree operations do not map one-to-one
-   to graph operations. Tree contraction sometimes rules out the best order. It gets the other half.
+   to graph operations. Tree contraction sometimes rules out the best order. It gets the remaining
+   quarter. Split tried on the research corpus at effort 23000 (tree share, gas against the 1/2
+   split in the same load): 1/3 +336, alternating 1/4 and 1/2 by thread +280, 2/3 −213 and
+   −102, 3/4 −207. The tree search finds most of the gain; the flat search mostly polishes.
+   Gains are largest on graphs with 33+ ops.
 
 The cheaper of the two schedules is kept. The winner's final shuffle is redone with the
 slower, thorough shuffle strategies.
