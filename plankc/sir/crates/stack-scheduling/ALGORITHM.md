@@ -116,6 +116,18 @@ A `Policy` is a genome:
   single largest improvement (−2.7% gas).
 - `pre_shuffle`: permute the remaining inputs once up front into consumption order (inputs used
   by operations in policy order, then pass-through inputs in output order).
+- `shuffle_before: Option<op>`: right before preparing the operands of this op (before its
+  op-swaps), permute the whole stack with the greedy shuffler into: values read by unfinished
+  operations, in policy order, that are not block outputs; then the block outputs present on
+  the stack, in output order (deepest occurrence kept, each value once since the operand
+  preparer needs a duplicate-free stack). Other values are popped. Many blocks are cheapest
+  when one long permutation runs after an op or two has shrunk the stack, e.g. `a3d63cc9`
+  (4 ops, 13 inputs: run one op, rotate 10 values, run the rest; 45 → 39 gas). Mutation: 1/16
+  of the remaining, set to a random op or clear. A resumed evaluation diverges at the step whose
+  op has the shuffle in either genome (and, if the candidate's, when priorities differ, since
+  the layout depends on them). Not carried from the tree search to the flat search. On the
+  research corpus at effort 23000: −1,344 gas (159,567 → 158,223, side by side), same wall
+  time, gains in every size bucket, most on 6–32 ops. Two shuffle slots: no gain; rate 1/8: worse.
 
 Ready operations are tracked incrementally: each operation counts its unfinished immediate
 predecessors (transitive reduction of the dependency graph) and joins the ready list when the
@@ -131,7 +143,7 @@ permutes the stack into the output layout, popping dead values and loading spill
 
 Hill climbing with iterated-local-search restarts:
 - Mutations: toggle pre_shuffle (1/16); set or clear a pre-swap (1/16); change pre_spill by ±1
-  (1/16 when allowed); set one op-swap slot to a random depth or clear it (1/2 of the remaining); cycle a flip choice;
+  (1/16 when allowed); set or clear shuffle_before (1/16); set one op-swap slot to a random depth or clear it (1/2 of the remaining); cycle a flip choice;
   otherwise change priorities (swap two, move an op just before another, or randomise one).
   Each candidate gets 1–2 mutations.
 - A candidate is evaluated by running the greedy scheduler while counting gas only. It is
