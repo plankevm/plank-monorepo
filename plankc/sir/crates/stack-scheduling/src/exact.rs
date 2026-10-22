@@ -116,6 +116,15 @@ impl Problem<'_> {
         for value in 0..self.readers.len() {
             let produced = state.done & self.producer_bit[value] == self.producer_bit[value];
             if !produced {
+                // The producer creates exactly one copy, so every further use needs a dup and an
+                // unused result needs a pop. Producers outside the goal never run.
+                if self.goal_done & self.producer_bit[value] == self.producer_bit[value] {
+                    let needed = self.needed(value, state.done);
+                    bound += needed.saturating_sub(1);
+                    if needed == 0 && self.finalization == BlockFinalization::ShuffleToOutputs {
+                        bound += 1;
+                    }
+                }
                 continue;
             }
             let needed = self.needed(value, state.done);
