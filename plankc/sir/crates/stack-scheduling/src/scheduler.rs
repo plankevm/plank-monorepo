@@ -229,7 +229,7 @@ pub fn schedule_with_effort(
         }
         _ => (ops, new_next_alloc_id),
     };
-    let ops = if new_next_alloc_id == next_alloc_id && effort > 0 {
+    let ops = if effort > 0 {
         let deadline = Instant::now() + window_budget;
         reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, deadline)
             .map_or(ops, Vec::into_boxed_slice)

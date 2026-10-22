@@ -604,11 +604,11 @@ struct Boundary {
     /// Index into the schedule right after the boundary.
     position: usize,
     stack: EvmStack,
-    /// The operation the boundary follows, `None` for the start and a trailing shuffle.
+    /// The operation the boundary follows, `None` for the start, spills and a trailing shuffle.
     op: Option<OpNodeId>,
 }
 
-/// Local exact re-optimization of a finished spill-free schedule: the stack states right after
+/// Local exact re-optimization of a finished schedule: the stack states right after
 /// each operation are fixed points, and the moves and operations between two points a few
 /// operations apart (sizes from [`WINDOW_OPS`]) are re-solved by the A* with the end state as
 /// goal. A window is replaced whenever the A* finds strictly fewer moves; returns `None` if
@@ -630,6 +630,8 @@ pub fn reoptimize_windows(
                     | StackOps::Op(_)
                     | StackOps::Flipped(_)
                     | StackOps::CallRetPush(_)
+                    | StackOps::Store(_)
+                    | StackOps::Load(_)
             )
         })
     {
@@ -681,12 +683,26 @@ fn sweep_windows(
     loop {
         let mut boundaries = vec![Boundary { position: 0, stack: input_stack(graph), op: None }];
         let mut stack = boundaries[0].stack.clone();
+        let mut spilled = Vec::new();
         for (position, &operation) in schedule.iter().enumerate() {
             match operation {
                 StackOps::Swap(depth) => stack.swap_with_top(depth.into()),
                 StackOps::Dup(depth) => stack.duplicate(depth.into()),
                 StackOps::Pop => {
                     stack.pop().expect("pop on empty stack");
+                }
+                // Spills stay where they are: they are fixed boundaries no window crosses.
+                StackOps::Store(_) | StackOps::Load(_) => {
+                    if let StackOps::Load(alloc) = operation {
+                        stack.push(spilled[(alloc - next_alloc_id) as usize]);
+                    } else {
+                        spilled.push(stack.pop().expect("store on empty stack"));
+                    }
+                    boundaries.push(Boundary {
+                        position: position + 1,
+                        stack: stack.clone(),
+                        op: None,
+                    });
                 }
                 _ => {
                     let op = op_of(operation).expect("scheduled operation missing from graph");
@@ -719,6 +735,7 @@ fn sweep_windows(
             let window = &schedule[from.position..to.position];
             let moves = window.iter().filter(|op| op.gas_cost(config) > 0).count() as u32;
             if moves == 0
+                || window.iter().any(|op| matches!(op, StackOps::Store(_) | StackOps::Load(_)))
                 || from.stack.fifo().len() > MAX_STACK
                 || to.stack.fifo().len() > MAX_STACK
             {
