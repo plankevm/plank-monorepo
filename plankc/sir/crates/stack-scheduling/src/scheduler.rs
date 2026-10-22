@@ -53,6 +53,8 @@ const RESTART_KICK_OPS_PER_MUTATION: usize = 8;
 const PRE_SPILL_MIN_INPUTS: u32 = 14;
 const MAX_PRE_SPILL: u8 = 8;
 const PRE_SWAPS: usize = 3;
+/// Graphs with at most this many operations only mutate op swaps up to the deepest stack seen.
+const OP_SWAP_DEPTH_CAP_MAX_OPS: usize = 32;
 
 pub struct SearchResult {
     pub ops: Box<[StackOps]>,
@@ -309,6 +311,10 @@ fn search_policy(
         graph.input_values_fifo().iter().take_while(|&value| is_dead(graph, value)).count() as u8
     };
     let max_pre_swap_depth = (graph.input_values_fifo().len().saturating_sub(1) as u8).min(16);
+    // Swaps deeper than any stack the search has seen only waste candidates on small graphs.
+    // Larger graphs search better with the full range: such genes are latent, not wasted.
+    let cap_op_swap_depth = n <= OP_SWAP_DEPTH_CAP_MAX_OPS;
+    let mut max_op_swap_depth = if cap_op_swap_depth { deepest_swap(&trace.steps) } else { 16 };
     let restarts_allowed = n + flippable.len() >= MIN_CHOICES_FOR_RESTARTS;
     let mut stagnant = 0u32;
     let mut current = best.clone();
@@ -322,7 +328,14 @@ fn search_policy(
             }
             current.clone_from(&best);
             for _ in 0..RESTART_KICK_BASE + n / RESTART_KICK_OPS_PER_MUTATION {
-                mutate(&mut current, &flippable, max_pre_spill, max_pre_swap_depth, &mut rng);
+                mutate(
+                    &mut current,
+                    &flippable,
+                    max_pre_spill,
+                    max_pre_swap_depth,
+                    max_op_swap_depth,
+                    &mut rng,
+                );
             }
             current_gas = policy_gas_resumed(
                 finalization,
@@ -336,6 +349,9 @@ fn search_policy(
             )
             .expect("unbounded")
             .0;
+            if cap_op_swap_depth {
+                max_op_swap_depth = max_op_swap_depth.max(deepest_swap(&trace.steps));
+            }
             stagnant = 0;
         }
         candidate.priority.clone_from(&current.priority);
@@ -346,7 +362,14 @@ fn search_policy(
         candidate.op_swaps.clone_from(&current.op_swaps);
         let mutations = 1 + rng.below(3).saturating_sub(1);
         for _ in 0..mutations {
-            mutate(&mut candidate, &flippable, max_pre_spill, max_pre_swap_depth, &mut rng);
+            mutate(
+                &mut candidate,
+                &flippable,
+                max_pre_spill,
+                max_pre_swap_depth,
+                max_op_swap_depth,
+                &mut rng,
+            );
         }
         stagnant += 1;
         if let Some((gas, divergence)) = policy_gas_resumed(
@@ -359,6 +382,9 @@ fn search_policy(
             Some(current_gas),
             &mut recorded,
         ) {
+            if cap_op_swap_depth {
+                max_op_swap_depth = max_op_swap_depth.max(deepest_swap(&recorded));
+            }
             trace.steps.truncate(divergence);
             trace.steps.append(&mut recorded);
             if gas < current_gas {
@@ -381,6 +407,7 @@ fn mutate(
     flippable: &[usize],
     max_pre_spill: u8,
     max_pre_swap_depth: u8,
+    max_op_swap_depth: u8,
     rng: &mut Rng,
 ) {
     let n = policy.priority.len();
@@ -408,7 +435,11 @@ fn mutate(
     }
     if rng.below(2) == 0 {
         let swap = &mut policy.op_swaps[rng.below(n)][rng.below(2)];
-        *swap = if *swap != 0 && rng.below(2) == 0 { 0 } else { 1 + rng.below(16) as u8 };
+        *swap = if *swap != 0 && rng.below(2) == 0 {
+            0
+        } else {
+            1 + rng.below(usize::from(max_op_swap_depth)) as u8
+        };
         return;
     }
     if !flippable.is_empty() && (n == 1 || rng.below(4) == 0) {
@@ -600,6 +631,12 @@ fn schedule_step<Sink: FnMut(StackOps)>(
     greedy_schedule_op(config, stack, graph, op, complete, flipped);
 }
 
+/// Deepest swap any of `steps` could perform, at least 1.
+fn deepest_swap(steps: &[Checkpoint]) -> u8 {
+    let deepest = steps.iter().map(|step| step.stack.len()).max().unwrap_or(0);
+    deepest.saturating_sub(1).clamp(1, 16) as u8
+}
+
 /// Greedy state right before one step of a [`Trace`].
 struct Checkpoint {
     op: OpNodeId,
@@ -683,7 +720,12 @@ fn policy_gas_resumed(
         Some((_, trace, _)) if same_prelude => {
             let step = &trace.steps[divergence];
             gas.set(step.gas);
-            TrackedStack::new_from_parts(StaticAllocId::ZERO, sink, &step.stack, step.spilled.clone())
+            TrackedStack::new_from_parts(
+                StaticAllocId::ZERO,
+                sink,
+                &step.stack,
+                step.spilled.clone(),
+            )
         }
         _ => {
             let mut inner = EvmStack::new();
