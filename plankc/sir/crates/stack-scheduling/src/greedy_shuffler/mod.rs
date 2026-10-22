@@ -24,14 +24,6 @@ pub struct GreedyShuffler<'a, Sink: FnMut(StackOps)> {
     push_first: bool,
 }
 
-pub fn shuffle<Sink: FnMut(StackOps)>(
-    config: ShuffleConfig,
-    current: &mut TrackedStack<Sink>,
-    graph: &OpGraph,
-) {
-    shuffle_to(config, current, graph.output_values_fifo(), graph.total_ops() == 0);
-}
-
 pub fn shuffle_to<Sink: FnMut(StackOps)>(
     config: ShuffleConfig,
     current: &mut TrackedStack<Sink>,

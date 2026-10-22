@@ -24,6 +24,12 @@ const SEARCH_NANOS_PER_EFFORT: u64 = 400;
 /// size, so small graphs whose neighbourhood is exhausted do not burn their whole budget.
 const STAGNATION_PER_OP: u32 = 400;
 const STAGNATION_MIN: u32 = 2_000;
+/// Graphs with fewer orderable operations plus flip choices are exhausted by plain hill climbing.
+const MIN_CHOICES_FOR_RESTARTS: usize = 4;
+/// A restart applies `RESTART_KICK_BASE + ops / RESTART_KICK_OPS_PER_MUTATION` random mutations
+/// to the best policy found so far.
+const RESTART_KICK_BASE: usize = 3;
+const RESTART_KICK_OPS_PER_MUTATION: usize = 8;
 
 pub struct SearchResult {
     pub ops: Box<[StackOps]>,
@@ -90,6 +96,7 @@ pub fn schedule_with_effort(
         &trees.graph,
         &policy,
         None,
+        effort > 0,
     )
     .expect("unbounded schedule cannot be cut off");
     let spill_count = new_next_alloc_id - next_alloc_id;
@@ -133,6 +140,7 @@ fn policy_gas(
         graph,
         policy,
         bound.map(|bound| (&gas, bound)),
+        false,
     )?;
     Some(gas.get())
 }
@@ -163,24 +171,42 @@ fn search_policy(
     let mut best_gas = policy_gas(finalization, config, graph, &best, None).expect("unbounded");
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D));
     let stagnation_limit = STAGNATION_MIN.max(STAGNATION_PER_OP * n as u32);
+    let restarts_allowed = n + flippable.len() >= MIN_CHOICES_FOR_RESTARTS;
     let mut stagnant = 0u32;
+    let mut current = best.clone();
+    let mut current_gas = best_gas;
     let mut candidate = best.clone();
 
-    while best_gas > 0 && stagnant < stagnation_limit && start.elapsed() < budget {
-        candidate.priority.clone_from(&best.priority);
-        candidate.flips.clone_from(&best.flips);
-        candidate.pre_shuffle = best.pre_shuffle;
+    while best_gas > 0 && start.elapsed() < budget {
+        if stagnant >= stagnation_limit {
+            if !restarts_allowed {
+                break;
+            }
+            current.clone_from(&best);
+            for _ in 0..RESTART_KICK_BASE + n / RESTART_KICK_OPS_PER_MUTATION {
+                mutate(&mut current, &flippable, &mut rng);
+            }
+            current_gas = policy_gas(finalization, config, graph, &current, None).expect("unbounded");
+            stagnant = 0;
+        }
+        candidate.priority.clone_from(&current.priority);
+        candidate.flips.clone_from(&current.flips);
+        candidate.pre_shuffle = current.pre_shuffle;
         let mutations = 1 + rng.below(3).saturating_sub(1);
         for _ in 0..mutations {
             mutate(&mut candidate, &flippable, &mut rng);
         }
         stagnant += 1;
-        if let Some(gas) = policy_gas(finalization, config, graph, &candidate, Some(best_gas)) {
-            if gas < best_gas {
+        if let Some(gas) = policy_gas(finalization, config, graph, &candidate, Some(current_gas)) {
+            if gas < current_gas {
                 stagnant = 0;
             }
-            best_gas = gas;
-            std::mem::swap(&mut best, &mut candidate);
+            current_gas = gas;
+            std::mem::swap(&mut current, &mut candidate);
+            if current_gas < best_gas {
+                best_gas = current_gas;
+                best.clone_from(&current);
+            }
         }
     }
 
@@ -220,7 +246,9 @@ fn mutate(policy: &mut Policy, flippable: &[usize], rng: &mut Rng) {
 }
 
 /// Schedules every operation greedily in the order given by `policy`. With a `bound`, gives up
-/// and returns `None` as soon as the accumulated gas exceeds it.
+/// and returns `None` as soon as the accumulated gas exceeds it. `thorough_final_shuffle` also
+/// tries the scrambled final shuffle strategies, which never cost more but are too slow to run
+/// for every search candidate.
 pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),
     finalization: BlockFinalization,
@@ -229,6 +257,7 @@ pub fn greedy_schedule(
     graph: &OpGraph,
     policy: &Policy,
     bound: Option<(&Cell<u64>, u64)>,
+    thorough_final_shuffle: bool,
 ) -> Option<StaticAllocId> {
     let exceeded = || bound.is_some_and(|(gas, bound)| gas.get() > bound);
     let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
@@ -288,7 +317,12 @@ pub fn greedy_schedule(
     }
 
     if finalization == BlockFinalization::ShuffleToOutputs {
-        greedy_shuffler::shuffle(config, &mut stack, graph);
+        greedy_shuffler::shuffle_to(
+            config,
+            &mut stack,
+            graph.output_values_fifo(),
+            thorough_final_shuffle || graph.total_ops() == 0,
+        );
     }
     if exceeded() {
         return None;
