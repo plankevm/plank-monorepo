@@ -779,11 +779,21 @@ fn sweep_windows(
             let moves = window.iter().filter(|op| op.gas_cost(config) > 0).count() as u32;
             if moves == 0
                 || window.iter().any(|op| matches!(op, StackOps::Store(_) | StackOps::Load(_)))
-                || from.stack.fifo().len() > MAX_STACK
-                || to.stack.fifo().len() > MAX_STACK
             {
                 continue;
             }
+            // On deep stacks only the top `MAX_STACK - 1` values are re-solved (one slot is left
+            // for a dup); the values below must be the same at both ends and are never touched.
+            let (from_fifo, to_fifo) = (from.stack.fifo(), to.stack.fifo());
+            let deepest = from_fifo.len().max(to_fifo.len());
+            let untouched = if deepest > MAX_STACK { deepest + 1 - MAX_STACK } else { 0 };
+            if untouched > from_fifo.len().min(to_fifo.len())
+                || from_fifo[from_fifo.len() - untouched..] != to_fifo[to_fifo.len() - untouched..]
+            {
+                continue;
+            }
+            let from_top = &from_fifo[..from_fifo.len() - untouched];
+            let to_top = &to_fifo[..to_fifo.len() - untouched];
             let terminates = end_index == boundaries.len() - 1
                 && to.position == schedule.len()
                 && finalization == BlockFinalization::LastOpTerminates;
@@ -794,22 +804,15 @@ fn sweep_windows(
             let (window_finalization, goal) = if terminates {
                 (BlockFinalization::LastOpTerminates, &[][..])
             } else {
-                (BlockFinalization::ShuffleToOutputs, to.stack.fifo())
+                (BlockFinalization::ShuffleToOutputs, to_top)
             };
-            let Some((problem, state)) = build_problem(
-                graph,
-                window_finalization,
-                config,
-                true,
-                ops,
-                from.stack.fifo(),
-                goal,
-            ) else {
+            let Some((problem, state)) =
+                build_problem(graph, window_finalization, config, true, ops, from_top, goal)
+            else {
                 continue;
             };
             if let Some((nodes, goal)) = astar(&problem, state, moves, deadline) {
-                let replacement =
-                    replay_from(graph, next_alloc_id, from.stack.fifo(), &nodes, goal);
+                let replacement = replay_from(graph, next_alloc_id, from_fifo, &nodes, goal);
                 improvement = Some((from.position, to.position, replacement, start_index));
                 break;
             }
