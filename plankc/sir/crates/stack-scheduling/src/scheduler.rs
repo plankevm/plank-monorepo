@@ -5,11 +5,11 @@ use std::{
 
 use crate::{
     BlockFinalization,
-    exact::exact_schedule,
+    exact::{beam_schedule, exact_schedule, reoptimize_windows},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    polish::polish,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut, ValueNodeId},
+    polish::polish,
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
     validation,
@@ -24,6 +24,10 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 const SEARCH_NANOS_PER_EFFORT: u64 = 400;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
 const EXACT_BUDGET_SHARE: f64 = 0.5;
+/// Share of the budget left after the exact A* that the beam search may use.
+const BEAM_BUDGET_SHARE: f64 = 0.3;
+/// Share of the whole budget reserved for [`reoptimize_windows`] on the final schedule.
+const WINDOW_BUDGET_SHARE: f64 = 0.25;
 /// Stops the search once this many consecutive candidates failed to improve, scaled by graph
 /// size, so small graphs whose neighbourhood is exhausted do not burn their whole budget.
 const STAGNATION_PER_OP: u32 = 400;
@@ -122,7 +126,10 @@ pub fn schedule_with_effort(
     graph: &OpGraph,
     effort: u32,
 ) -> SearchResult {
-    let mut effort = effort;
+    let window_budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT)
+        .mul_f64(WINDOW_BUDGET_SHARE);
+    let mut effort = (f64::from(effort) * (1.0 - WINDOW_BUDGET_SHARE)) as u32;
+    let mut beam = None;
     if effort > 0 {
         let start = Instant::now();
         let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
@@ -131,12 +138,16 @@ pub fn schedule_with_effort(
             exact_schedule(graph, finalization, shuffle, next_alloc_id, false, u32::MAX, deadline);
         if let Some(restricted) = restricted {
             let moves = restricted.iter().filter(|op| op.gas_cost(shuffle) > 0).count() as u32;
-            let ops = exact_schedule(graph, finalization, shuffle, next_alloc_id, true, moves, deadline)
-                .unwrap_or(restricted);
+            let ops =
+                exact_schedule(graph, finalization, shuffle, next_alloc_id, true, moves, deadline)
+                    .unwrap_or(restricted);
             validation::validate(graph, finalization, shuffle, next_alloc_id, next_alloc_id, &ops)
                 .expect("exact scheduler produced an invalid schedule");
             return SearchResult { ops: ops.into_boxed_slice(), spill_count: 0 };
         }
+        let remaining = budget.saturating_sub(start.elapsed());
+        let beam_deadline = Instant::now() + remaining.mul_f64(BEAM_BUDGET_SHARE);
+        beam = beam_schedule(graph, finalization, shuffle, next_alloc_id, u32::MAX, beam_deadline);
         let spent = start.elapsed().as_nanos() as u64 / SEARCH_NANOS_PER_EFFORT;
         effort = effort.saturating_sub(spent as u32).max(1);
     }
@@ -182,8 +193,23 @@ pub fn schedule_with_effort(
     } else {
         (tree_ops, tree_next_alloc_id)
     };
-    let spill_count = new_next_alloc_id - next_alloc_id;
     let ops = if effort > 0 { polish(graph, shuffle, next_alloc_id, &ops) } else { ops };
+    let (ops, new_next_alloc_id) = match beam {
+        Some(beam)
+            if crate::stack::gas_cost(&beam, shuffle) < crate::stack::gas_cost(&ops, shuffle) =>
+        {
+            (beam.into_boxed_slice(), next_alloc_id)
+        }
+        _ => (ops, new_next_alloc_id),
+    };
+    let ops = if new_next_alloc_id == next_alloc_id && effort > 0 {
+        let deadline = Instant::now() + window_budget;
+        reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, deadline)
+            .map_or(ops, Vec::into_boxed_slice)
+    } else {
+        ops
+    };
+    let spill_count = new_next_alloc_id - next_alloc_id;
 
     validation::validate(graph, finalization, shuffle, next_alloc_id, new_next_alloc_id, &ops)
         .expect("stack scheduler produced an invalid schedule");
@@ -247,7 +273,6 @@ fn search_policy(
         .map(|op| op.idx())
         .collect();
 
-
     let start = Instant::now();
     let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
     let mut best_gas = policy_gas(finalization, config, graph, &best, None).expect("unbounded");
@@ -268,7 +293,8 @@ fn search_policy(
             for _ in 0..RESTART_KICK_BASE + n / RESTART_KICK_OPS_PER_MUTATION {
                 mutate(&mut current, &flippable, &mut rng);
             }
-            current_gas = policy_gas(finalization, config, graph, &current, None).expect("unbounded");
+            current_gas =
+                policy_gas(finalization, config, graph, &current, None).expect("unbounded");
             stagnant = 0;
         }
         candidate.priority.clone_from(&current.priority);

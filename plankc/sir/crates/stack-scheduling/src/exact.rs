@@ -7,11 +7,7 @@
 //! never lowers it, so the first goal popped from the queue is optimal among spill-free
 //! schedules that keep the stack within `dup`/`swap` reach.
 
-use std::{
-    cmp::Reverse,
-    collections::BinaryHeap,
-    time::Instant,
-};
+use std::{cmp::Reverse, collections::BinaryHeap, time::Instant};
 
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::Idx;
@@ -19,7 +15,7 @@ use sir_data::StaticAllocId;
 
 use crate::{
     BlockFinalization,
-    op_graph::{OpGraph, OpNodeId, OpNodeKind},
+    op_graph::{OpGraph, OpNodeId, OpNodeKind, ValueNodeId},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
 };
 
@@ -31,7 +27,7 @@ const MAX_OPS: u32 = 10;
 /// that briefly exceed it.
 const MAX_BOUNDARY_VALUES: usize = 12;
 const MAX_VALUES: u32 = 255;
-const DEADLINE_CHECK_INTERVAL: usize = 256;
+const DEADLINE_CHECK_INTERVAL: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct State {
@@ -75,7 +71,7 @@ struct Problem<'g> {
     inputs: Vec<Vec<u8>>,
     outputs: Vec<Vec<u8>>,
     flippable: Vec<bool>,
-    all_done: u64,
+    goal_done: u64,
     goal_stack: Vec<u8>,
     surplus_dups: bool,
 }
@@ -112,7 +108,7 @@ impl Problem<'_> {
                 bound += have.saturating_sub(needed);
             }
         }
-        if bound == 0 && state.done == self.all_done {
+        if bound == 0 && state.done == self.goal_done {
             // Only the permutation is left: a swap fixes at most one position below the top.
             let misplaced = state
                 .fifo()
@@ -127,7 +123,7 @@ impl Problem<'_> {
     }
 
     fn is_goal(&self, state: &State) -> bool {
-        state.done == self.all_done
+        state.done == self.goal_done
             && (self.finalization == BlockFinalization::LastOpTerminates
                 || state.fifo() == self.goal_stack.as_slice())
     }
@@ -163,6 +159,16 @@ pub fn exact_schedule(
         State { done: 0, len: input_count as u8, stack }
     };
 
+    let (nodes, goal) = astar(&problem, start, move_limit, deadline)?;
+    Some(replay(graph, next_alloc_id, &nodes, goal))
+}
+
+fn astar(
+    problem: &Problem<'_>,
+    start: State,
+    move_limit: u32,
+    deadline: Instant,
+) -> Option<(Vec<Node>, u32)> {
     let mut nodes = vec![Node { state: start, parent: 0, step: Move::Start }];
     let mut best_cost = HashMap::new();
     best_cost.insert(start, 0u32);
@@ -176,13 +182,13 @@ pub fn exact_schedule(
             continue;
         }
         if problem.is_goal(&state) {
-            return Some(replay(graph, next_alloc_id, &nodes, index));
+            return Some((nodes, index));
         }
         expanded += 1;
-        if expanded % DEADLINE_CHECK_INTERVAL == 0 && Instant::now() >= deadline {
+        if expanded.is_multiple_of(DEADLINE_CHECK_INTERVAL) && Instant::now() >= deadline {
             return None;
         }
-        for_each_successor(&problem, &state, |next, step, step_cost| {
+        for_each_successor(problem, &state, |next, step, step_cost| {
             let next_cost = cost + step_cost;
             match best_cost.entry(next) {
                 Entry::Occupied(mut entry) => {
@@ -205,6 +211,139 @@ pub fn exact_schedule(
         });
     }
     None
+}
+
+/// The beam only beats the policy search on graphs slightly beyond the exact A*'s reach.
+const MAX_BEAM_OPS: u32 = 16;
+/// Ops beyond this no longer fit the `done` bitmask.
+const MAX_MASK_OPS: u32 = 63;
+const FIRST_BEAM_WIDTH: usize = 4;
+/// Operands-ready operations can be executed in any interleaving, so the free closure of a layer
+/// is capped at this many states per beam slot.
+const CLOSURE_PER_WIDTH: usize = 8;
+
+/// Anytime beam search over the same states and moves as [`exact_schedule`] for graphs the A*
+/// cannot finish: layer `k` holds states reached with `k` stack moves (operations are free and
+/// join the layer they are executed in), only the `width` states with the smallest lower bound
+/// are expanded further. Reruns with doubled width until `deadline`, keeping the cheapest
+/// schedule. Returns `None` if no beam reached the goal within `move_limit` moves.
+pub fn beam_schedule(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    config: ShuffleConfig,
+    next_alloc_id: StaticAllocId,
+    mut move_limit: u32,
+    deadline: Instant,
+) -> Option<Vec<StackOps>> {
+    let input_count = graph.input_values_fifo().len() as usize;
+    if graph.total_ops() > MAX_BEAM_OPS
+        || graph.total_values() > MAX_VALUES
+        || input_count > MAX_BOUNDARY_VALUES
+        || graph.output_values_fifo().len() > MAX_BOUNDARY_VALUES
+    {
+        return None;
+    }
+    let problem = build_problem(graph, finalization, config, false);
+    let start = {
+        let mut stack = [0u8; MAX_STACK];
+        for (slot, value) in stack.iter_mut().zip(graph.input_values_fifo().iter()) {
+            *slot = value.idx() as u8;
+        }
+        State { done: 0, len: input_count as u8, stack }
+    };
+    problem.estimate(&start)?;
+    let mut best = None;
+    let mut width = FIRST_BEAM_WIDTH;
+    loop {
+        match beam_pass(&problem, start, width, move_limit, deadline) {
+            BeamPass::Found(moves, nodes, goal) => {
+                move_limit = moves;
+                best = Some(replay(graph, next_alloc_id, &nodes, goal));
+            }
+            BeamPass::NotFound => {}
+            BeamPass::OutOfTime => return best,
+        }
+        if Instant::now() >= deadline || move_limit == 0 {
+            return best;
+        }
+        width = width.saturating_mul(2);
+    }
+}
+
+enum BeamPass {
+    Found(u32, Vec<Node>, u32),
+    NotFound,
+    OutOfTime,
+}
+
+fn beam_pass(
+    problem: &Problem<'_>,
+    start: State,
+    width: usize,
+    move_limit: u32,
+    deadline: Instant,
+) -> BeamPass {
+    let mut nodes = vec![Node { state: start, parent: 0, step: Move::Start }];
+    let mut seen = hashbrown::HashSet::new();
+    seen.insert(start);
+    let mut layer = vec![0u32];
+    let mut ranked = Vec::new();
+    let mut expanded = 0usize;
+    for moves in 0..move_limit {
+        let mut cursor = 0;
+        let closure_cap = layer.len() + CLOSURE_PER_WIDTH * width;
+        while cursor < layer.len() {
+            let index = layer[cursor];
+            cursor += 1;
+            let state = nodes[index as usize].state;
+            if problem.is_goal(&state) {
+                return BeamPass::Found(moves, nodes, index);
+            }
+            if cursor.is_multiple_of(DEADLINE_CHECK_INTERVAL) && Instant::now() >= deadline {
+                return BeamPass::OutOfTime;
+            }
+            if layer.len() >= closure_cap {
+                continue;
+            }
+            for_each_successor(problem, &state, |next, step, step_cost| {
+                if step_cost == 0 && seen.insert(next) {
+                    nodes.push(Node { state: next, parent: index, step });
+                    layer.push((nodes.len() - 1) as u32);
+                }
+            });
+        }
+        ranked.clear();
+        for &index in &layer {
+            let state = &nodes[index as usize].state;
+            if let Some(estimate) = problem.estimate(state)
+                && moves + estimate < move_limit
+            {
+                ranked.push((estimate, Reverse(state.done.count_ones()), index));
+            }
+        }
+        if ranked.len() > width {
+            ranked.select_nth_unstable(width);
+            ranked.truncate(width);
+        }
+        layer.clear();
+        for &(_, _, index) in &ranked {
+            let state = nodes[index as usize].state;
+            expanded += 1;
+            if expanded.is_multiple_of(DEADLINE_CHECK_INTERVAL) && Instant::now() >= deadline {
+                return BeamPass::OutOfTime;
+            }
+            for_each_successor(problem, &state, |next, step, step_cost| {
+                if step_cost == 1 && seen.insert(next) {
+                    nodes.push(Node { state: next, parent: index, step });
+                    layer.push((nodes.len() - 1) as u32);
+                }
+            });
+        }
+        if layer.is_empty() {
+            return BeamPass::NotFound;
+        }
+    }
+    BeamPass::NotFound
 }
 
 fn build_problem(
@@ -242,7 +381,7 @@ fn build_problem(
     for &value in graph.output_values_fifo() {
         output_uses[value.idx()] += 1;
     }
-    let all_done = (1u64 << graph.total_ops()) - 1;
+    let goal_done = (1u64 << graph.total_ops()) - 1;
     Problem {
         graph,
         finalization,
@@ -254,25 +393,34 @@ fn build_problem(
         inputs,
         outputs,
         flippable,
-        all_done,
+        goal_done,
         goal_stack: graph.output_values_fifo().iter().map(|value| value.idx() as u8).collect(),
         surplus_dups,
     }
 }
 
-fn for_each_successor(problem: &Problem<'_>, state: &State, mut visit: impl FnMut(State, Move, u32)) {
+fn for_each_successor(
+    problem: &Problem<'_>,
+    state: &State,
+    mut visit: impl FnMut(State, Move, u32),
+) {
     let fifo = state.fifo();
     let len = fifo.len();
     for op in problem.graph.op_ids() {
         let bit = 1u64 << op.idx();
         let index = op.idx();
-        if state.done & bit != 0 || state.done & problem.predecessors[index] != problem.predecessors[index]
+        if state.done & bit != 0
+            || problem.goal_done & bit == 0
+            || state.done & problem.predecessors[index] != problem.predecessors[index]
         {
             continue;
         }
         let inputs = &problem.inputs[index];
-        let orientations: &[bool] =
-            if problem.flippable[index] && inputs[0] != inputs[1] { &[false, true] } else { &[false] };
+        let orientations: &[bool] = if problem.flippable[index] && inputs[0] != inputs[1] {
+            &[false, true]
+        } else {
+            &[false]
+        };
         for &flipped in orientations {
             if len < inputs.len() {
                 continue;
@@ -289,7 +437,8 @@ fn for_each_successor(problem: &Problem<'_>, state: &State, mut visit: impl FnMu
             if new_len > MAX_STACK {
                 continue;
             }
-            let mut next = State { done: state.done | bit, len: new_len as u8, stack: [0; MAX_STACK] };
+            let mut next =
+                State { done: state.done | bit, len: new_len as u8, stack: [0; MAX_STACK] };
             next.stack[..outputs.len()].copy_from_slice(outputs);
             next.stack[outputs.len()..new_len].copy_from_slice(&fifo[inputs.len()..]);
             visit(next, Move::Op(op, flipped), 0);
@@ -304,7 +453,8 @@ fn for_each_successor(problem: &Problem<'_>, state: &State, mut visit: impl FnMu
             let value = fifo[depth];
             // One surplus copy can pay off: duplicating a deep last use and popping the stale
             // original later is often cheaper than digging the original up.
-            let copies_after = if problem.surplus_dups { copies_of(value) } else { copies_of(value) + 1 };
+            let copies_after =
+                if problem.surplus_dups { copies_of(value) } else { copies_of(value) + 1 };
             if surplus(value, copies_after) {
                 continue;
             }
@@ -338,6 +488,17 @@ fn replay(
     nodes: &[Node],
     goal: u32,
 ) -> Vec<StackOps> {
+    let start = input_stack(graph);
+    replay_from(graph, next_alloc_id, start.fifo(), nodes, goal)
+}
+
+fn replay_from(
+    graph: &OpGraph,
+    next_alloc_id: StaticAllocId,
+    start: &[ValueNodeId],
+    nodes: &[Node],
+    goal: u32,
+) -> Vec<StackOps> {
     let mut steps = Vec::new();
     let mut index = goal;
     while index != 0 {
@@ -347,11 +508,8 @@ fn replay(
     steps.reverse();
 
     let mut ops = Vec::new();
-    let mut inner = EvmStack::new();
-    for input in graph.input_values_fifo().iter().rev() {
-        inner.push(input);
-    }
-    let mut stack = TrackedStack::new_from_evm(next_alloc_id, |op| ops.push(op), inner, 0);
+    let mut stack =
+        TrackedStack::new_from_parts(next_alloc_id, |op| ops.push(op), start, Vec::new());
     for step in steps {
         match step {
             Move::Start => unreachable!("only the root node is a start"),
@@ -363,4 +521,202 @@ fn replay(
     }
     drop(stack);
     ops
+}
+
+/// Window sizes, in operations, swept by [`reoptimize_windows`] from small to large.
+const WINDOW_OPS: std::ops::RangeInclusive<usize> = 2..=8;
+
+struct Boundary {
+    /// Index into the schedule right after the boundary.
+    position: usize,
+    stack: EvmStack,
+    done: u64,
+}
+
+/// Local exact re-optimization of a finished spill-free schedule: the stack states right after
+/// each operation are fixed points, and the moves and operations between two points a few
+/// operations apart (sizes from [`WINDOW_OPS`]) are re-solved by the A* with the end state as
+/// goal. A window is replaced whenever the A* finds strictly fewer moves; returns `None` if
+/// nothing improved before `deadline`.
+pub fn reoptimize_windows(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    config: ShuffleConfig,
+    next_alloc_id: StaticAllocId,
+    schedule: &[StackOps],
+    deadline: Instant,
+) -> Option<Vec<StackOps>> {
+    if graph.total_ops() > MAX_MASK_OPS
+        || graph.total_values() > MAX_VALUES
+        || !schedule.iter().all(|op| {
+            matches!(
+                op,
+                StackOps::Swap(_)
+                    | StackOps::Dup(_)
+                    | StackOps::Pop
+                    | StackOps::Op(_)
+                    | StackOps::Flipped(_)
+                    | StackOps::CallRetPush(_)
+            )
+        })
+    {
+        return None;
+    }
+    let base = build_problem(graph, finalization, config, true);
+    let mut schedule = schedule.to_vec();
+    let mut improved_any = false;
+    for window_ops in WINDOW_OPS {
+        if Instant::now() >= deadline {
+            break;
+        }
+        improved_any |= sweep_windows(
+            graph,
+            finalization,
+            config,
+            next_alloc_id,
+            &base,
+            &mut schedule,
+            window_ops,
+            deadline,
+        );
+    }
+    improved_any.then_some(schedule)
+}
+
+/// Re-solves every window of `window_ops` operations until a sweep finds no improvement.
+#[allow(clippy::too_many_arguments)]
+fn sweep_windows(
+    graph: &OpGraph,
+    finalization: BlockFinalization,
+    config: ShuffleConfig,
+    next_alloc_id: StaticAllocId,
+    base: &Problem<'_>,
+    schedule: &mut Vec<StackOps>,
+    window_ops: usize,
+    deadline: Instant,
+) -> bool {
+    let op_of = |operation: StackOps| {
+        let (index, ret_dest_push) = match operation {
+            StackOps::Op(index) | StackOps::Flipped(index) => (index, false),
+            StackOps::CallRetPush(index) => (index, true),
+            _ => return None,
+        };
+        graph.op_ids().find(|&op| match graph.get_op(op).kind {
+            OpNodeKind::Flippable(idx) | OpNodeKind::Normal(idx) => !ret_dest_push && idx == index,
+            OpNodeKind::RetDestPush(idx) => ret_dest_push && idx == index,
+        })
+    };
+    let mut improved_any = false;
+    let mut first = 0;
+    loop {
+        let mut boundaries = vec![Boundary { position: 0, stack: input_stack(graph), done: 0 }];
+        let mut stack = boundaries[0].stack.clone();
+        let mut done = 0u64;
+        for (position, &operation) in schedule.iter().enumerate() {
+            match operation {
+                StackOps::Swap(depth) => stack.swap_with_top(depth.into()),
+                StackOps::Dup(depth) => stack.duplicate(depth.into()),
+                StackOps::Pop => {
+                    stack.pop().expect("pop on empty stack");
+                }
+                _ => {
+                    let op = op_of(operation).expect("scheduled operation missing from graph");
+                    let view = graph.get_op(op);
+                    for _ in view.inputs_fifo {
+                        stack.pop().expect("missing input");
+                    }
+                    for &output in view.outputs_fifo.iter().rev() {
+                        stack.push(output);
+                    }
+                    done |= 1 << op.idx();
+                    boundaries.push(Boundary {
+                        position: position + 1,
+                        stack: stack.clone(),
+                        done,
+                    });
+                }
+            }
+        }
+        if boundaries.last().is_some_and(|last| last.position < schedule.len()) {
+            boundaries.push(Boundary { position: schedule.len(), stack: stack.clone(), done });
+        }
+
+        let mut improvement = None;
+        for start_index in first..boundaries.len().saturating_sub(1) {
+            if Instant::now() >= deadline {
+                return improved_any;
+            }
+            let end_index = (start_index + window_ops).min(boundaries.len() - 1);
+            let (from, to) = (&boundaries[start_index], &boundaries[end_index]);
+            let window = &schedule[from.position..to.position];
+            let moves = window.iter().filter(|op| op.gas_cost(config) > 0).count() as u32;
+            if moves == 0
+                || from.stack.fifo().len() > MAX_STACK
+                || to.stack.fifo().len() > MAX_STACK
+            {
+                continue;
+            }
+            let terminates = end_index == boundaries.len() - 1
+                && to.position == schedule.len()
+                && finalization == BlockFinalization::LastOpTerminates;
+            let mut problem = Problem {
+                graph,
+                finalization: if terminates {
+                    BlockFinalization::LastOpTerminates
+                } else {
+                    BlockFinalization::ShuffleToOutputs
+                },
+                config,
+                readers: base
+                    .readers
+                    .iter()
+                    .map(|readers| {
+                        readers.iter().copied().filter(|&(bit, _)| to.done & bit != 0).collect()
+                    })
+                    .collect(),
+                output_uses: vec![0; base.output_uses.len()],
+                producer_bit: base.producer_bit.clone(),
+                predecessors: base.predecessors.clone(),
+                inputs: base.inputs.clone(),
+                outputs: base.outputs.clone(),
+                flippable: base.flippable.clone(),
+                goal_done: to.done,
+                goal_stack: to.stack.fifo().iter().map(|value| value.idx() as u8).collect(),
+                surplus_dups: true,
+            };
+            if !terminates {
+                for &value in to.stack.fifo() {
+                    problem.output_uses[value.idx()] += 1;
+                }
+            }
+            let mut state = State {
+                done: from.done,
+                len: from.stack.fifo().len() as u8,
+                stack: [0; MAX_STACK],
+            };
+            for (slot, value) in state.stack.iter_mut().zip(from.stack.fifo()) {
+                *slot = value.idx() as u8;
+            }
+            if let Some((nodes, goal)) = astar(&problem, state, moves, deadline) {
+                let replacement =
+                    replay_from(graph, next_alloc_id, from.stack.fifo(), &nodes, goal);
+                improvement = Some((from.position, to.position, replacement, start_index));
+                break;
+            }
+        }
+        let Some((from, to, replacement, start_index)) = improvement else {
+            return improved_any;
+        };
+        schedule.splice(from..to, replacement);
+        improved_any = true;
+        first = start_index.saturating_sub(window_ops);
+    }
+}
+
+fn input_stack(graph: &OpGraph) -> EvmStack {
+    let mut stack = EvmStack::new();
+    for input in graph.input_values_fifo().iter().rev() {
+        stack.push(input);
+    }
+    stack
 }
