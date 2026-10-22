@@ -319,6 +319,9 @@ pub fn schedule_with_effort(
     } else {
         vec![search(0)]
     };
+    if parallel && let Some(beam) = &beam {
+        searched.push((beam.clone().into_boxed_slice(), next_alloc_id));
+    }
     searched.sort_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle));
     searched.dedup_by(|(a, _), (b, _)| a == b);
     let finish = |(ops, new_next_alloc_id): (Box<[StackOps]>, StaticAllocId)| {

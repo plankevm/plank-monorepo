@@ -44,7 +44,8 @@ deadline bound, so extra threads use more cores but no extra wall time.
    - For larger graphs, all 12 threads run step 3.
 3. If the A* succeeds, it sets a stop flag that ends the policy searches, and its schedule is
    returned.
-4. Otherwise the search results are deduplicated. Each distinct result runs steps 4 and 5
+4. Otherwise the search results, plus the beam schedule if there is one, are deduplicated.
+   Each distinct result runs steps 4 and 5
    on its own thread: polish, then the beam schedule replaces it if cheaper, then windows
    with their own `0.25`-share deadline. The cheapest finished schedule wins. A search result
    that is slightly worse before the windows sometimes ends cheaper after them. Sequential
@@ -57,7 +58,9 @@ helped graphs of 6–16 ops by about 230 gas.
 
 Finishing every distinct search result instead of only the cheapest cut gas by about 700
 more (160,509 → 159,807 in the same contended batch). It helped every size bucket and cost
-about 2% wall time, which comes from waiting for the slowest finisher.
+about 2% wall time, which comes from waiting for the slowest finisher. Finishing the beam
+schedule as a candidate of its own, rather than only swapping it in when it is cheaper
+before the windows, saved about 100 more gas on graphs of 16 ops or fewer.
 
 ## 1. Exact search for small graphs (`exact.rs`)
 
