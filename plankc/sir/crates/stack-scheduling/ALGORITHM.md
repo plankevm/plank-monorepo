@@ -12,11 +12,11 @@ greedy pass on the tree graph, steps 2 and 3 with no search).
 
 ## 0. Time budget
 
-The per-graph budget is `effort' * 400ns` with `effort' = effort + effort² / 22000`. At low
+The per-graph budget is `effort' * 400ns` with `effort' = effort + effort² / 16000`. At low
 effort every graph uses its full budget. At high effort most small graphs stop early (solved
 exactly or search stagnates), so the remaining graphs get more time per unit of effort. For
 ~1,500 graphs the total stays below `effort` milliseconds (measured: about 0.6× at effort
-1000 and 0.7× at effort 23000).
+1000 and an estimated 0.8× at effort 23000).
 
 With effort > 0, 25% of that budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
 re-optimization (step 5); the rest is the search budget `B` for steps 1-4.
@@ -27,7 +27,8 @@ For graphs with at most 10 operations, at most 12 boundary values and no need to
 over states (stack contents, set of completed operations). Moves are swap/dup/pop (unit
 cost), and executing a ready operation whose operands are already on top is free. The
 heuristic is admissible: copies each live value still lacks, plus surplus copies that must be
-popped, plus a swap bound. A value with a single copy, no remaining readers and exactly one
+popped, plus a swap bound. A value whose producer has not run yet will appear exactly once, so
+it still needs `uses - 1` dups, or one pop if it has no use. A value with a single copy, no remaining readers and exactly one
 output slot can only change how many values sit below it through a swap that moves it. Each
 swap moves two values, so ⌈misplaced such values / 2⌉ swaps are still needed. Once all
 operations are done, the bound is the larger of that and the number of misplaced positions
@@ -105,13 +106,16 @@ kept.
 
 ## 5. Window re-optimization
 
-`exact::reoptimize_windows`, on any spill-free final schedule of a graph with ≤63 ops. Replay
-the schedule and record a boundary state (stack, done mask) right after every op, plus the final
-state. For window sizes w = 2, 3, ..., 8 ops: for each boundary i, take boundaries i and i+w
-(clamped to the end), and re-solve the segment between them with the A* of step 1
-(its pass-through swap bound uses the end boundary's stack as the goal) where
+`exact::reoptimize_windows`, on the final schedule of any graph. Replay the schedule and record
+a boundary state (stack, op just run) right after every op and every spill `store`/`load`, plus
+the final state. For window sizes w = 2, 3, ..., 10 boundaries: for each boundary i, take
+boundaries i and i+w (clamped to the end), skip the segment between them if it contains a
+spill or a stack deeper than 17, and otherwise re-solve it with the A* of step 1 on a local
+subproblem where
 
-- only ops done at the end boundary may run (op readers outside the window are ignored),
+- only the segment's ops run; they get local bits and the values involved local ids (block
+  size does not matter), op readers and predecessors outside the window are ignored,
+- the pass-through swap bound uses the end boundary's stack as the goal,
 - the goal is exactly the end boundary's stack (or, for the final window of a
   `LastOpTerminates` block, just "all ops done"),
 - the move limit is the segment's current number of moves, so only strictly better segments

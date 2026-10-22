@@ -475,11 +475,7 @@ fn goal_heights(goal_stack: &[u8], output_uses: &[u32]) -> Vec<u8> {
     goal_height
 }
 
-fn for_each_successor(
-    problem: &Problem,
-    state: &State,
-    mut visit: impl FnMut(State, Move, u32),
-) {
+fn for_each_successor(problem: &Problem, state: &State, mut visit: impl FnMut(State, Move, u32)) {
     let fifo = state.fifo();
     let len = fifo.len();
     for (index, &op) in problem.ops.iter().enumerate() {
@@ -622,19 +618,18 @@ pub fn reoptimize_windows(
     deadline: Instant,
 ) -> Option<Vec<StackOps>> {
     if !schedule.iter().all(|op| {
-            matches!(
-                op,
-                StackOps::Swap(_)
-                    | StackOps::Dup(_)
-                    | StackOps::Pop
-                    | StackOps::Op(_)
-                    | StackOps::Flipped(_)
-                    | StackOps::CallRetPush(_)
-                    | StackOps::Store(_)
-                    | StackOps::Load(_)
-            )
-        })
-    {
+        matches!(
+            op,
+            StackOps::Swap(_)
+                | StackOps::Dup(_)
+                | StackOps::Pop
+                | StackOps::Op(_)
+                | StackOps::Flipped(_)
+                | StackOps::CallRetPush(_)
+                | StackOps::Store(_)
+                | StackOps::Load(_)
+        )
+    }) {
         return None;
     }
     let mut schedule = schedule.to_vec();
