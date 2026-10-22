@@ -27,6 +27,30 @@ mostly finish early. On the research corpus this cost about +10% wall time and s
 With effort > 0, 25% of that budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
 re-optimization (step 5); the rest is the search budget `B` for steps 1-4.
 
+## 0b. Parallel search
+
+If the search budget `B` is at least 2,500 effort units (1 ms), steps 1–3 use up to 12 threads
+(`SEARCH_THREADS`, capped by the available cores). Lower budgets, such as most graphs at effort
+1000, run sequentially, because spawning threads costs tens of microseconds. All steps are
+deadline bound, so extra threads use more cores but no extra wall time.
+
+1. The A* of step 1 first runs alone for `0.1 B`. Easy graphs are solved here and never start
+   threads.
+2. If that fails:
+   - For graphs with at most 16 ops, one thread restarts the A* with a deadline of `0.5 B`,
+     then runs the beam search of step 1b until `B`. The other 11 threads each run the full
+     step 3 (tree search, then flat search) for the remaining budget. Each gets a different
+     random seed.
+   - For larger graphs, all 12 threads run step 3.
+3. If the A* succeeds, it sets a stop flag that ends the policy searches, and its schedule is
+   returned.
+4. Otherwise the cheapest search result goes on to steps 4 and 5, which stay single-threaded.
+
+On the research corpus at effort 23000 this cut gas from 163,023 to 160,791 (−1.4%). Wall
+time went from 91.5 s to 96.4 s, mostly thread overhead on small graphs. Most of the gain
+came from graphs with 17+ ops. Running the A* next to the searches, instead of before them,
+helped graphs of 6–16 ops by about 230 gas.
+
 ## 1. Exact search for small graphs (`exact.rs`)
 
 For graphs with at most 10 operations, at most 12 boundary values and no need to spill, run A*
