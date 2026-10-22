@@ -74,9 +74,9 @@ pub fn schedule_graph_with_effort(
     finalization: BlockFinalization,
     next_alloc_id: StaticAllocId,
     shuffle: ShuffleConfig,
-    _effort: u32,
+    effort: u32,
 ) -> SearchResult {
-    scheduler::schedule(finalization, next_alloc_id, shuffle, graph)
+    scheduler::schedule_with_effort(finalization, next_alloc_id, shuffle, graph, effort)
 }
 
 impl ScheduledOps {

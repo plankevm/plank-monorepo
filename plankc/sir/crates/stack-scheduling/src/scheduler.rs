@@ -1,3 +1,8 @@
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
+
 use crate::{
     BlockFinalization,
     greedy_intra_op_scheduler::greedy_schedule_op,
@@ -7,15 +12,52 @@ use crate::{
     treegraph::build_tree_graph,
     validation,
 };
+use plank_core::Idx;
 use sir_data::StaticAllocId;
 use smallvec::SmallVec;
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
+/// Search wall time granted per unit of effort for a single graph. Effort is calibrated so that
+/// a validation set of ~1,500 graphs takes roughly `effort` milliseconds in total.
+const SEARCH_NANOS_PER_EFFORT: u64 = 400;
+/// Stops the search once this many consecutive candidates failed to improve, scaled by graph
+/// size, so small graphs whose neighbourhood is exhausted do not burn their whole budget.
+const STAGNATION_PER_OP: u32 = 400;
+const STAGNATION_MIN: u32 = 2_000;
 
 pub struct SearchResult {
     pub ops: Box<[StackOps]>,
     pub spill_count: u32,
 }
+
+/// How a flippable operation chooses its operand order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlipChoice {
+    /// Pick the orientation whose operand preparation is cheaper right now.
+    Cheapest,
+    Straight,
+    Flipped,
+}
+
+/// Genome steering [`greedy_schedule`]: among ready operations the one with the smallest
+/// priority is scheduled next.
+#[derive(Debug, Clone)]
+pub struct Policy {
+    pub priority: Vec<u32>,
+    pub flips: Vec<FlipChoice>,
+}
+
+impl Policy {
+    fn graph_order(graph: &OpGraph) -> Self {
+        let n = graph.total_ops() as usize;
+        Self {
+            priority: (0..n as u32).map(|i| i * PRIORITY_SPACING).collect(),
+            flips: vec![FlipChoice::Cheapest; n],
+        }
+    }
+}
+
+const PRIORITY_SPACING: u32 = 1 << 16;
 
 pub fn schedule(
     finalization: BlockFinalization,
@@ -23,11 +65,30 @@ pub fn schedule(
     shuffle: ShuffleConfig,
     graph: &OpGraph,
 ) -> SearchResult {
+    schedule_with_effort(finalization, next_alloc_id, shuffle, graph, 0)
+}
+
+pub fn schedule_with_effort(
+    finalization: BlockFinalization,
+    next_alloc_id: StaticAllocId,
+    shuffle: ShuffleConfig,
+    graph: &OpGraph,
+    effort: u32,
+) -> SearchResult {
     let trees = build_tree_graph(graph);
+    let policy = search_policy(finalization, shuffle, &trees.graph, effort);
 
     let mut ops = Vec::new();
-    let new_next_alloc_id =
-        greedy_schedule(|op| ops.push(op), finalization, next_alloc_id, shuffle, &trees.graph);
+    let new_next_alloc_id = greedy_schedule(
+        |op| ops.push(op),
+        finalization,
+        next_alloc_id,
+        shuffle,
+        &trees.graph,
+        &policy,
+        None,
+    )
+    .expect("unbounded schedule cannot be cut off");
     let spill_count = new_next_alloc_id - next_alloc_id;
 
     let ops = trees.expand_schedule(graph, &ops);
@@ -38,13 +99,132 @@ pub fn schedule(
     SearchResult { ops, spill_count }
 }
 
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+fn policy_gas(
+    finalization: BlockFinalization,
+    config: ShuffleConfig,
+    graph: &OpGraph,
+    policy: &Policy,
+    bound: Option<u64>,
+) -> Option<u64> {
+    let gas = Cell::new(0u64);
+    greedy_schedule(
+        |op| gas.set(gas.get() + u64::from(op.gas_cost(config))),
+        finalization,
+        StaticAllocId::ZERO,
+        config,
+        graph,
+        policy,
+        bound.map(|bound| (&gas, bound)),
+    )?;
+    Some(gas.get())
+}
+
+/// Hill climbing over [`Policy`] genomes: mutate the best genome, rerun the greedy scheduler and
+/// keep the mutant if it is no more expensive. Equal-cost mutants are accepted to drift across
+/// plateaus.
+fn search_policy(
+    finalization: BlockFinalization,
+    config: ShuffleConfig,
+    graph: &OpGraph,
+    effort: u32,
+) -> Policy {
+    let mut best = Policy::graph_order(graph);
+    let n = graph.total_ops() as usize;
+    if effort == 0 || n == 0 {
+        return best;
+    }
+    let flippable: Vec<usize> = graph
+        .op_ids()
+        .filter(|&op| matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_)))
+        .map(|op| op.idx())
+        .collect();
+    if n == 1 && flippable.is_empty() {
+        return best;
+    }
+
+    let start = Instant::now();
+    let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
+    let mut best_gas = policy_gas(finalization, config, graph, &best, None).expect("unbounded");
+    let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D));
+    let stagnation_limit = STAGNATION_MIN.max(STAGNATION_PER_OP * n as u32);
+    let mut stagnant = 0u32;
+    let mut candidate = best.clone();
+
+    while best_gas > 0 && stagnant < stagnation_limit && start.elapsed() < budget {
+        candidate.priority.clone_from(&best.priority);
+        candidate.flips.clone_from(&best.flips);
+        let mutations = 1 + rng.below(3).saturating_sub(1);
+        for _ in 0..mutations {
+            mutate(&mut candidate, &flippable, &mut rng);
+        }
+        stagnant += 1;
+        if let Some(gas) = policy_gas(finalization, config, graph, &candidate, Some(best_gas)) {
+            if gas < best_gas {
+                stagnant = 0;
+            }
+            best_gas = gas;
+            std::mem::swap(&mut best, &mut candidate);
+        }
+    }
+
+    best
+}
+
+fn mutate(policy: &mut Policy, flippable: &[usize], rng: &mut Rng) {
+    let n = policy.priority.len();
+    if !flippable.is_empty() && (n == 1 || rng.below(4) == 0) {
+        let op = flippable[rng.below(flippable.len())];
+        policy.flips[op] = match (policy.flips[op], rng.below(2)) {
+            (FlipChoice::Cheapest, 0) | (FlipChoice::Flipped, _) => FlipChoice::Straight,
+            (FlipChoice::Cheapest, _) | (FlipChoice::Straight, 0) => FlipChoice::Flipped,
+            (FlipChoice::Straight, _) => FlipChoice::Cheapest,
+        };
+        return;
+    }
+    let a = rng.below(n);
+    match rng.below(3) {
+        0 => {
+            let b = rng.below(n);
+            policy.priority.swap(a, b);
+        }
+        1 => {
+            let b = rng.below(n);
+            let below = policy.priority[b].wrapping_sub(1 + rng.below(16) as u32);
+            policy.priority[a] = below;
+        }
+        _ => {
+            policy.priority[a] = rng.next() as u32;
+        }
+    }
+}
+
+/// Schedules every operation greedily in the order given by `policy`. With a `bound`, gives up
+/// and returns `None` as soon as the accumulated gas exceeds it.
 pub fn greedy_schedule(
     ops_sink: impl FnMut(StackOps),
     finalization: BlockFinalization,
     next_alloc_id: StaticAllocId,
     config: ShuffleConfig,
     graph: &OpGraph,
-) -> StaticAllocId {
+    policy: &Policy,
+    bound: Option<(&Cell<u64>, u64)>,
+) -> Option<StaticAllocId> {
+    let exceeded = || bound.is_some_and(|(gas, bound)| gas.get() > bound);
     let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
     completable_backing.resize(graph.words_per_set() as usize, 0);
     let mut completable = OpSetMut::new(&mut completable_backing, graph.total_ops());
@@ -66,25 +246,44 @@ pub fn greedy_schedule(
         graph.collect_next_completable_into(complete.as_ref(), &mut completable);
         // Cheapest-next-op selection is myopic: on the corpus it is 4-6% worse than
         // taking ready ops in graph order, which tracks the tree graph's operand order.
-        let Some(op) = completable.iter().next() else {
+        let Some(op) = completable.iter().min_by_key(|op| (policy.priority[op.idx()], op.idx()))
+        else {
             break 'schedule;
         };
-        let flipped = matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_)) && {
-            let op_cost = |flipped| {
-                let mut ops = Vec::new();
-                let mut trial_stack = stack.clone_with(|op| ops.push(op));
-                greedy_schedule_op(config, &mut trial_stack, graph, op, complete.as_ref(), flipped);
-                crate::stack::gas_cost(&ops, config)
+        let flipped = matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_))
+            && match policy.flips[op.idx()] {
+                FlipChoice::Straight => false,
+                FlipChoice::Flipped => true,
+                FlipChoice::Cheapest => {
+                    let op_cost = |flipped| {
+                        let mut ops = Vec::new();
+                        let mut trial_stack = stack.clone_with(|op| ops.push(op));
+                        greedy_schedule_op(
+                            config,
+                            &mut trial_stack,
+                            graph,
+                            op,
+                            complete.as_ref(),
+                            flipped,
+                        );
+                        crate::stack::gas_cost(&ops, config)
+                    };
+                    op_cost(true) < op_cost(false)
+                }
             };
-            op_cost(true) < op_cost(false)
-        };
         greedy_schedule_op(config, &mut stack, graph, op, complete.as_ref(), flipped);
         complete.add(op);
+        if exceeded() {
+            return None;
+        }
     }
 
     if finalization == BlockFinalization::ShuffleToOutputs {
         greedy_shuffler::shuffle(config, &mut stack, graph);
     }
+    if exceeded() {
+        return None;
+    }
 
-    stack.into_next_alloc_id()
+    Some(stack.into_next_alloc_id())
 }
