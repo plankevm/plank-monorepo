@@ -38,7 +38,8 @@ const MIN_CHOICES_FOR_RESTARTS: usize = 4;
 /// to the best policy found so far.
 const RESTART_KICK_BASE: usize = 3;
 const RESTART_KICK_OPS_PER_MUTATION: usize = 8;
-/// Blocks with fewer inputs rarely need spills, so the search leaves [`Policy::pre_spill`] at 0.
+/// Blocks with fewer inputs rarely need spills, so the search only varies [`Policy::pre_spill`]
+/// over their leading dead inputs.
 const PRE_SPILL_MIN_INPUTS: u32 = 14;
 const MAX_PRE_SPILL: u8 = 8;
 
@@ -64,9 +65,10 @@ pub struct Policy {
     pub flips: Vec<FlipChoice>,
     /// Permute the block inputs into [`pre_shuffle_layout`] before scheduling any operation.
     pub pre_shuffle: bool,
-    /// Number of block inputs spilled off the top of the stack before anything else. Deep blocks
-    /// often pass their top inputs through to deep output slots; storing them at once and
-    /// loading them at the end beats dragging them along past `dup`/`swap` reach.
+    /// Number of block inputs spilled (or popped, if dead) off the top of the stack before
+    /// anything else. Deep blocks often pass their top inputs through to deep output slots;
+    /// storing them at once and loading them at the end beats dragging them along past
+    /// `dup`/`swap` reach. Dead inputs on top otherwise get buried under operation results.
     pub pre_spill: u8,
 }
 
@@ -272,7 +274,7 @@ fn search_policy(
     let max_pre_spill = if graph.input_values_fifo().len() >= PRE_SPILL_MIN_INPUTS {
         MAX_PRE_SPILL.min(graph.input_values_fifo().len() as u8)
     } else {
-        0
+        graph.input_values_fifo().iter().take_while(|&value| is_dead(graph, value)).count() as u8
     };
     let restarts_allowed = n + flippable.len() >= MIN_CHOICES_FOR_RESTARTS;
     let mut stagnant = 0u32;
@@ -390,7 +392,11 @@ pub fn greedy_schedule(
         TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
     };
     for _ in 0..policy.pre_spill {
-        stack.spill_top();
+        if is_dead(graph, stack.top().expect("pre-spilled inputs are on the stack")) {
+            stack.pop();
+        } else {
+            stack.spill_top();
+        }
     }
     if policy.pre_shuffle {
         greedy_shuffler::shuffle_to(config, &mut stack, &pre_shuffle_layout(graph, policy), false);
@@ -446,6 +452,10 @@ pub fn greedy_schedule(
     }
 
     Some(stack.into_next_alloc_id())
+}
+
+fn is_dead(graph: &OpGraph, value: ValueNodeId) -> bool {
+    graph.get_consumers(value).count_members() == 0 && !graph.output_values_fifo().contains(&value)
 }
 
 /// Input layout that lets operations consume their inputs straight off the top: inputs feeding
