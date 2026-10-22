@@ -18,6 +18,9 @@ exactly or search stagnates), so the remaining graphs get more time per unit of 
 ~1,500 graphs the total stays below `effort` milliseconds (measured: about 0.6× at effort
 1000 and 0.7× at effort 23000).
 
+With effort > 0, 25% of that budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
+re-optimization (step 5); the rest is the search budget `B` for steps 1-4.
+
 ## 1. Exact search for small graphs (`exact.rs`)
 
 For graphs with at most 10 operations, at most 12 boundary values and no need to spill, run A*
@@ -30,8 +33,18 @@ swap moves two values, so ⌈misplaced such values / 2⌉ swaps are still needed
 operations are done, the bound is the larger of that and the number of misplaced positions
 below the top. A first run forbids duplicating a value beyond
 its remaining uses, which keeps the search small. A second run allows surplus dups, capped at
-the first run's move count. The two runs share half of the budget. If either succeeds, its
-schedule is returned.
+the first run's move count. The two runs share `B/2`. If either succeeds, its schedule is
+returned.
+
+## 1b. Beam search (graphs slightly too large for the A*)
+
+`exact::beam_schedule`, ≤16 ops, given 30% of what is left of `B`. Same states and moves as the
+A*. Layer k = states reached with k stack moves; free op moves are closed over inside a layer
+(capped at 8 × width states, since independent ready ops can interleave in exponentially many
+ways). The `width` states with the smallest heuristic (ties: more ops done) are expanded into
+layer k+1. A global seen-set dedupes states. Runs with width 4, 8, 16, ... until its deadline,
+keeping the cheapest goal reached. Its result replaces the polished schedule of step 4 if
+cheaper.
 
 ## 2. Greedy scheduler steered by a policy (`greedy_schedule`)
 
@@ -89,5 +102,28 @@ slower, thorough shuffle strategies.
 Every maximal run of swap/dup/pop between two other instructions moves the stack from one
 exact state to another. Each run is re-solved with the shuffler, and the shorter sequence is
 kept.
+
+## 5. Window re-optimization
+
+`exact::reoptimize_windows`, on any spill-free final schedule of a graph with ≤63 ops. Replay
+the schedule and record a boundary state (stack, done mask) right after every op, plus the final
+state. For window sizes w = 2, 3, ..., 8 ops: for each boundary i, take boundaries i and i+w
+(clamped to the end), and re-solve the segment between them with the A* of step 1
+(its pass-through swap bound uses the end boundary's stack as the goal) where
+
+- only ops done at the end boundary may run (op readers outside the window are ignored),
+- the goal is exactly the end boundary's stack (or, for the final window of a
+  `LastOpTerminates` block, just "all ops done"),
+- the move limit is the segment's current number of moves, so only strictly better segments
+  are returned.
+
+An improved segment is spliced in, boundaries are recomputed and the sweep restarts a little
+before the changed window. Each window size sweeps until no improvement; the pass stops at its
+deadline. Because both ends of a window are fixed, every replacement keeps the schedule valid
+and never increases gas.
+
+This step fixes the greedy operand preparer's myopia: e.g. preparing the operands of the last
+few ops so that the final output layout falls out without extra swaps, or picking which copy of
+a value to consume.
 
 The result is validated (`validation.rs`) before it is returned.
