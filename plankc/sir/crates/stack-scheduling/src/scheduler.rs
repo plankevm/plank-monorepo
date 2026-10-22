@@ -25,7 +25,7 @@ const SEARCH_NANOS_PER_EFFORT: u64 = 400;
 /// At high effort most small graphs end early (solved exactly or stagnated), so the per-graph
 /// budget grows by another `effort / EFFORT_RATE_DOUBLING` share to keep the total wall time
 /// near `effort` milliseconds. At low effort every graph uses its whole budget.
-const EFFORT_RATE_DOUBLING: u64 = 30_000;
+const EFFORT_RATE_DOUBLING: u64 = 22_000;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
 const EXACT_BUDGET_SHARE: f64 = 0.5;
 /// Stops the search once this many consecutive candidates failed to improve, scaled by graph
