@@ -85,23 +85,41 @@ pub fn schedule_with_effort(
     effort: u32,
 ) -> SearchResult {
     let trees = build_tree_graph(graph);
-    let policy = search_policy(finalization, shuffle, &trees.graph, effort);
+    let run = |graph: &OpGraph, policy: &Policy| {
+        let mut ops = Vec::new();
+        let new_next_alloc_id = greedy_schedule(
+            |op| ops.push(op),
+            finalization,
+            next_alloc_id,
+            shuffle,
+            graph,
+            policy,
+            None,
+            effort > 0,
+        )
+        .expect("unbounded schedule cannot be cut off");
+        (ops, new_next_alloc_id)
+    };
 
-    let mut ops = Vec::new();
-    let new_next_alloc_id = greedy_schedule(
-        |op| ops.push(op),
-        finalization,
-        next_alloc_id,
-        shuffle,
-        &trees.graph,
-        &policy,
-        None,
-        effort > 0,
-    )
-    .expect("unbounded schedule cannot be cut off");
+    let (tree_ops, tree_next_alloc_id) = {
+        let policy = search_policy(finalization, shuffle, &trees.graph, effort.div_ceil(2));
+        let (ops, next) = run(&trees.graph, &policy);
+        (trees.expand_schedule(graph, &ops), next)
+    };
+    // Tree graphs fix the order inside each tree, which occasionally rules out the best
+    // schedule, so the untransformed graph gets the other half of the budget.
+    let (ops, new_next_alloc_id) = if effort > 0 {
+        let policy = search_policy(finalization, shuffle, graph, effort / 2);
+        let (ops, next) = run(graph, &policy);
+        if crate::stack::gas_cost(&ops, shuffle) < crate::stack::gas_cost(&tree_ops, shuffle) {
+            (ops.into_boxed_slice(), next)
+        } else {
+            (tree_ops, tree_next_alloc_id)
+        }
+    } else {
+        (tree_ops, tree_next_alloc_id)
+    };
     let spill_count = new_next_alloc_id - next_alloc_id;
-
-    let ops = trees.expand_schedule(graph, &ops);
 
     validation::validate(graph, finalization, shuffle, next_alloc_id, new_next_alloc_id, &ops)
         .expect("stack scheduler produced an invalid schedule");
