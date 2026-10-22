@@ -188,7 +188,7 @@ pub fn schedule_with_effort(
         effort = effort.saturating_sub(spent as u32).max(1);
     }
     let trees = build_tree_graph(graph);
-    let run = |graph: &OpGraph, policy: &Policy| {
+    let run = |graph: &OpGraph, dag: &Dag, policy: &Policy| {
         let mut ops = Vec::new();
         let new_next_alloc_id = greedy_schedule(
             |op| ops.push(op),
@@ -196,6 +196,7 @@ pub fn schedule_with_effort(
             next_alloc_id,
             shuffle,
             graph,
+            dag,
             policy,
             None,
             effort > 0,
@@ -204,23 +205,26 @@ pub fn schedule_with_effort(
         (ops, new_next_alloc_id)
     };
 
+    let tree_dag = Dag::new(&trees.graph);
     let (tree_ops, tree_next_alloc_id, tree_policy) = {
         let policy = search_policy(
             finalization,
             shuffle,
             &trees.graph,
+            &tree_dag,
             effort.div_ceil(2),
             Policy::graph_order(&trees.graph),
         );
-        let (ops, next) = run(&trees.graph, &policy);
+        let (ops, next) = run(&trees.graph, &tree_dag, &policy);
         (trees.expand_schedule(graph, &ops), next, policy)
     };
     // Tree graphs fix the order inside each tree, which occasionally rules out the best
     // schedule, so the untransformed graph gets the other half of the budget.
     let (ops, new_next_alloc_id) = if effort > 0 {
         let seed = Policy::replaying(graph, &tree_ops, &tree_policy);
-        let policy = search_policy(finalization, shuffle, graph, effort / 2, seed);
-        let (ops, next) = run(graph, &policy);
+        let dag = Dag::new(graph);
+        let policy = search_policy(finalization, shuffle, graph, &dag, effort / 2, seed);
+        let (ops, next) = run(graph, &dag, &policy);
         if crate::stack::gas_cost(&ops, shuffle) < crate::stack::gas_cost(&tree_ops, shuffle) {
             (ops.into_boxed_slice(), next)
         } else {
@@ -272,6 +276,7 @@ fn policy_gas(
     finalization: BlockFinalization,
     config: ShuffleConfig,
     graph: &OpGraph,
+    dag: &Dag,
     policy: &Policy,
     bound: Option<u64>,
 ) -> Option<u64> {
@@ -282,6 +287,7 @@ fn policy_gas(
         StaticAllocId::ZERO,
         config,
         graph,
+        dag,
         policy,
         bound.map(|bound| (&gas, bound)),
         false,
@@ -296,6 +302,7 @@ fn search_policy(
     finalization: BlockFinalization,
     config: ShuffleConfig,
     graph: &OpGraph,
+    dag: &Dag,
     effort: u32,
     mut best: Policy,
 ) -> Policy {
@@ -311,7 +318,7 @@ fn search_policy(
 
     let start = Instant::now();
     let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
-    let mut best_gas = policy_gas(finalization, config, graph, &best, None).expect("unbounded");
+    let mut best_gas = policy_gas(finalization, config, graph, dag, &best, None).expect("unbounded");
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D));
     let stagnation_limit = STAGNATION_MIN.max(STAGNATION_PER_OP * n as u32);
     let max_pre_spill = if graph.input_values_fifo().len() >= PRE_SPILL_MIN_INPUTS {
@@ -336,7 +343,7 @@ fn search_policy(
                 mutate(&mut current, &flippable, max_pre_spill, max_pre_swap_depth, &mut rng);
             }
             current_gas =
-                policy_gas(finalization, config, graph, &current, None).expect("unbounded");
+                policy_gas(finalization, config, graph, dag, &current, None).expect("unbounded");
             stagnant = 0;
         }
         candidate.priority.clone_from(&current.priority);
@@ -350,7 +357,7 @@ fn search_policy(
             mutate(&mut candidate, &flippable, max_pre_spill, max_pre_swap_depth, &mut rng);
         }
         stagnant += 1;
-        if let Some(gas) = policy_gas(finalization, config, graph, &candidate, Some(current_gas)) {
+        if let Some(gas) = policy_gas(finalization, config, graph, dag, &candidate, Some(current_gas)) {
             if gas < current_gas {
                 stagnant = 0;
             }
@@ -427,6 +434,25 @@ fn mutate(
     }
 }
 
+/// Dependency edges of a graph in the form [`greedy_schedule`] needs to keep its set of ready
+/// operations up to date in time proportional to the edges instead of rescanning all operations
+/// after every step.
+pub struct Dag {
+    successors: Vec<Vec<OpNodeId>>,
+    predecessor_counts: Vec<u32>,
+}
+
+impl Dag {
+    pub fn new(graph: &OpGraph) -> Self {
+        let successors = graph.immediate_successors();
+        let mut predecessor_counts = vec![0; successors.len()];
+        for &successor in successors.iter().flatten() {
+            predecessor_counts[successor.idx()] += 1;
+        }
+        Self { successors, predecessor_counts }
+    }
+}
+
 /// Schedules every operation greedily in the order given by `policy`. With a `bound`, gives up
 /// and returns `None` as soon as the accumulated gas exceeds it. `thorough_final_shuffle` also
 /// tries the scrambled final shuffle strategies, which never cost more but are too slow to run
@@ -437,15 +463,12 @@ pub fn greedy_schedule(
     next_alloc_id: StaticAllocId,
     config: ShuffleConfig,
     graph: &OpGraph,
+    dag: &Dag,
     policy: &Policy,
     bound: Option<(&Cell<u64>, u64)>,
     thorough_final_shuffle: bool,
 ) -> Option<StaticAllocId> {
     let exceeded = || bound.is_some_and(|(gas, bound)| gas.get() > bound);
-    let mut completable_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
-    completable_backing.resize(graph.words_per_set() as usize, 0);
-    let mut completable = OpSetMut::new(&mut completable_backing, graph.total_ops());
-
     let mut complete_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
     complete_backing.resize(graph.words_per_set() as usize, 0);
     let mut complete = OpSetMut::new(&mut complete_backing, graph.total_ops());
@@ -473,15 +496,21 @@ pub fn greedy_schedule(
         greedy_shuffler::shuffle_to(config, &mut stack, &pre_shuffle_layout(graph, policy), false);
     }
 
-    'schedule: loop {
-        completable.clear();
-        graph.collect_next_completable_into(complete.as_ref(), &mut completable);
-        // Cheapest-next-op selection is myopic: on the corpus it is 4-6% worse than
-        // taking ready ops in graph order, which tracks the tree graph's operand order.
-        let Some(op) = completable.iter().min_by_key(|op| (policy.priority[op.idx()], op.idx()))
-        else {
-            break 'schedule;
-        };
+    let mut waiting_on: SmallVec<[u32; 64]> = SmallVec::from_slice(&dag.predecessor_counts);
+    let mut ready: SmallVec<[OpNodeId; 32]> =
+        graph.op_ids().filter(|op| waiting_on[op.idx()] == 0).collect();
+    // Cheapest-next-op selection is myopic: on the corpus it is 4-6% worse than
+    // taking ready ops in graph order, which tracks the tree graph's operand order.
+    while let Some((position, &op)) =
+        ready.iter().enumerate().min_by_key(|(_, op)| (policy.priority[op.idx()], op.idx()))
+    {
+        ready.swap_remove(position);
+        for &successor in &dag.successors[op.idx()] {
+            waiting_on[successor.idx()] -= 1;
+            if waiting_on[successor.idx()] == 0 {
+                ready.push(successor);
+            }
+        }
         for swap in policy.op_swaps[op.idx()] {
             if swap != 0 && usize::from(swap) < stack.len() as usize {
                 stack.swap(swap);

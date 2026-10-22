@@ -111,6 +111,15 @@ impl OpGraphStorage {
         }
 
         let producers = self.values.iter().map(|(producer, _)| *producer).collect();
+        let outputs = &self.values_arena[end_stack_fifo_start..];
+        let total_uses = self
+            .values
+            .enumerate_idx()
+            .map(|(value, (_, consumers))| {
+                let consumer_count: u32 = consumers.iter().map(|word| word.count_ones()).sum();
+                consumer_count + u32::from(outputs.contains(&value))
+            })
+            .collect();
 
         OpGraph {
             total_ops: total_ops.try_into().expect("overflow"),
@@ -124,6 +133,7 @@ impl OpGraphStorage {
             producers,
 
             bit_sets_arena,
+            total_uses,
         }
     }
 }

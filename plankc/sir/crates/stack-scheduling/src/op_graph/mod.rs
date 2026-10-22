@@ -35,7 +35,7 @@ struct StoredOpView {
     kind: OpNodeKind,
 }
 
-pub type BitsetWord = u8;
+pub type BitsetWord = u64;
 
 #[derive(Debug)]
 pub struct OpGraph {
@@ -52,6 +52,8 @@ pub struct OpGraph {
 
     /// Holds `op_predecessors ++ value_consumers`
     bit_sets_arena: Vec<BitsetWord>,
+    /// Per value: consumers plus one if it is a block output.
+    total_uses: IndexVec<ValueNodeId, u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -96,13 +98,7 @@ impl OpGraph {
     }
 
     pub fn uses_remaining(&self, completed: OpSet<'_>, value: ValueNodeId) -> u32 {
-        let consumers = self.get_consumers(value);
-        let mut total_uses = consumers.count_members();
-        if self.output_values_fifo().contains(&value) {
-            total_uses += 1;
-        }
-        let already_used = consumers.intersect_count(completed);
-        total_uses - already_used
+        self.total_uses[value] - self.get_consumers(value).intersect_count(completed)
     }
 
     pub const fn words_per_set(&self) -> u32 {
@@ -155,12 +151,25 @@ impl OpGraph {
         }
     }
 
-    pub fn collect_next_completable_into(&self, complete: OpSet<'_>, out: &mut OpSetMut<'_>) {
+    /// Successors of every operation in the transitive reduction of the graph, so schedulers can
+    /// track which operations become ready without rescanning every operation after each step.
+    pub fn immediate_successors(&self) -> Vec<Vec<OpNodeId>> {
+        let mut successors = vec![Vec::new(); self.total_ops as usize];
+        let mut immediate = vec![0; self.words_per_set() as usize];
         for op in self.op_ids() {
-            if !complete.contains(op) && complete.is_super(self.get_predecessors(op)) {
-                out.add(op);
+            let predecessors = self.get_predecessors(op);
+            immediate.copy_from_slice(predecessors.words);
+            for predecessor in predecessors.iter() {
+                let indirect = self.get_predecessors(predecessor).words;
+                for (word, &indirect) in immediate.iter_mut().zip(indirect) {
+                    *word &= !indirect;
+                }
+            }
+            for predecessor in (OpSet { words: &immediate, total_ops: self.total_ops }).iter() {
+                successors[predecessor.idx()].push(op);
             }
         }
+        successors
     }
 
     #[cfg(test)]
