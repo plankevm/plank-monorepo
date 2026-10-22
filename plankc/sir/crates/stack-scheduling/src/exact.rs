@@ -78,6 +78,8 @@ struct Problem {
     /// Per value used exactly once in the outputs: how many values sit below it in the goal
     /// stack. `u8::MAX` otherwise.
     goal_height: Vec<u8>,
+    /// Per value: its slot in the goal stack, `None` when the goal holds a value twice.
+    goal_position: Option<Vec<u8>>,
     surplus_dups: bool,
 }
 
@@ -147,10 +149,40 @@ impl Problem {
                 .zip(&self.goal_stack)
                 .skip(1)
                 .filter(|(have, want)| have != want)
-                .count();
-            return Some((misplaced as u32).max(misplaced_pass_through.div_ceil(2)));
+                .count() as u32;
+            return Some(
+                (misplaced + self.cycles_below_top(state)).max(misplaced_pass_through.div_ceil(2)),
+            );
         }
         Some(bound + misplaced_pass_through.div_ceil(2))
+    }
+
+    /// Permutation cycles not containing the top: each needs one swap beyond its length to bring
+    /// a member to the top first. Only defined when the goal holds distinct values.
+    fn cycles_below_top(&self, state: &State) -> u32 {
+        let Some(goal_position) = &self.goal_position else { return 0 };
+        let stack = state.fifo();
+        if stack.len() != self.goal_stack.len() {
+            return 0;
+        }
+        let mut visited = 0u32;
+        let mut cycles = 0;
+        for start in 1..stack.len() {
+            if visited & (1 << start) != 0 || stack[start] == self.goal_stack[start] {
+                continue;
+            }
+            let mut position = start;
+            let mut contains_top = false;
+            while visited & (1 << position) == 0 {
+                visited |= 1 << position;
+                contains_top |= position == 0;
+                position = usize::from(goal_position[usize::from(stack[position])]);
+            }
+            if !contains_top {
+                cycles += 1;
+            }
+        }
+        cycles
     }
 
     fn is_goal(&self, state: &State) -> bool {
@@ -446,6 +478,7 @@ fn build_problem(
     }
     let goal_done = if ops.len() == 64 { u64::MAX } else { (1u64 << ops.len()) - 1 };
     let goal_height = goal_heights(&goal_stack, &output_uses);
+    let goal_position = goal_positions(&goal_stack, values);
     let problem = Problem {
         ops,
         finalization,
@@ -460,6 +493,7 @@ fn build_problem(
         goal_done,
         goal_stack,
         goal_height,
+        goal_position,
         surplus_dups,
     };
     Some((problem, start_state))
@@ -473,6 +507,17 @@ fn goal_heights(goal_stack: &[u8], output_uses: &[u32]) -> Vec<u8> {
         }
     }
     goal_height
+}
+
+fn goal_positions(goal_stack: &[u8], values: usize) -> Option<Vec<u8>> {
+    let mut goal_position = vec![u8::MAX; values];
+    for (position, &value) in goal_stack.iter().enumerate() {
+        if goal_position[usize::from(value)] != u8::MAX {
+            return None;
+        }
+        goal_position[usize::from(value)] = position as u8;
+    }
+    Some(goal_position)
 }
 
 fn for_each_successor(problem: &Problem, state: &State, mut visit: impl FnMut(State, Move, u32)) {

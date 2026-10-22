@@ -26,6 +26,12 @@ const SEARCH_NANOS_PER_EFFORT: u64 = 400;
 /// budget grows by another `effort / EFFORT_RATE_DOUBLING` share to keep the total wall time
 /// near `effort` milliseconds. At low effort every graph uses its whole budget.
 const EFFORT_RATE_DOUBLING: u64 = 16_000;
+/// Graphs with more than `BUDGET_SCALE_OPS` operations get a budget proportional to their
+/// operation count, up to `MAX_BUDGET_SCALE` times the base budget. Large graphs are few, always
+/// use their whole budget and keep improving with more time, while small graphs mostly finish
+/// early.
+const BUDGET_SCALE_OPS: u64 = 32;
+const MAX_BUDGET_SCALE: u64 = 8;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
 const EXACT_BUDGET_SHARE: f64 = 0.5;
 /// Share of the budget left after the exact A* that the beam search may use.
@@ -152,6 +158,9 @@ pub fn schedule_with_effort(
     effort: u32,
 ) -> SearchResult {
     let effort = u64::from(effort) + u64::from(effort) * u64::from(effort) / EFFORT_RATE_DOUBLING;
+    let effort = effort
+        * u64::from(graph.total_ops()).clamp(BUDGET_SCALE_OPS, BUDGET_SCALE_OPS * MAX_BUDGET_SCALE)
+        / BUDGET_SCALE_OPS;
     let window_budget =
         Duration::from_nanos(effort * SEARCH_NANOS_PER_EFFORT).mul_f64(WINDOW_BUDGET_SHARE);
     let mut effort =

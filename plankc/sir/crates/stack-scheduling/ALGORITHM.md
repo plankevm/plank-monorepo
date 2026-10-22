@@ -16,7 +16,13 @@ The per-graph budget is `effort' * 400ns` with `effort' = effort + effort² / 16
 effort every graph uses its full budget. At high effort most small graphs stop early (solved
 exactly or search stagnates), so the remaining graphs get more time per unit of effort. For
 ~1,500 graphs the total stays below `effort` milliseconds (measured: about 0.6× at effort
-1000 and an estimated 0.8× at effort 23000).
+1000 and an estimated 0.9× at effort 23000).
+
+Graphs with more than 32 operations get `effort'` scaled by `ops / 32`, capped at 8× (so 64
+ops get 2×, 256+ ops get 8×). Large graphs are few (about 3% of the corpus have more than 63
+ops), always use their whole budget, and keep improving with more time, while small graphs
+mostly finish early. On the research corpus this cost about +10% wall time and saved about
+550 gas, mostly on graphs with 64–200 ops. Spending the same time on all graphs saves less.
 
 With effort > 0, 25% of that budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
 re-optimization (step 5); the rest is the search budget `B` for steps 1-4.
@@ -32,7 +38,9 @@ it still needs `uses - 1` dups, or one pop if it has no use. A value with a sing
 output slot can only change how many values sit below it through a swap that moves it. Each
 swap moves two values, so ⌈misplaced such values / 2⌉ swaps are still needed. Once all
 operations are done, the bound is the larger of that and the number of misplaced positions
-below the top. A first run forbids duplicating a value beyond
+below the top plus one for each permutation cycle that does not contain the top (such a cycle
+needs an extra swap to bring one of its members up first; only used when the goal holds no
+value twice). A first run forbids duplicating a value beyond
 its remaining uses, which keeps the search small. A second run allows surplus dups, capped at
 the first run's move count. The two runs share `B/2`. If either succeeds, its schedule is
 returned.
