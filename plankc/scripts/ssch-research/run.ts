@@ -25,7 +25,7 @@ const RUN = resolve(positionals[0]!);
 const WORKERS = Number(opt.workers), MAX_ATTEMPTS = Number(opt.attempts), STALL = Number(opt.stall);
 const PLANNERS = Number(opt.planners), DIRECTIONS = Number(opt.directions);
 // Validation runs twice: low effort is a pass/fail speed gate, high effort is what's compared on gas.
-const LOW_EFFORT = 512, LOW_TIME_CAP = 1, HIGH_EFFORT = 131072, HIGH_TIME_CAP = 23;
+const LOW_EFFORT = 1000, LOW_TIME_CAP = 1, HIGH_EFFORT = 23000, HIGH_TIME_CAP = 23;
 const DEADLINE = Date.now() + Number(opt.hours) * 3_600_000;
 
 const DATA = `${homedir()}/.local/share/plank-ssch-research/20260922-125218`;
@@ -161,7 +161,7 @@ Research data: corpus/stack-scheduling-db/canonical-blocks.sqlite3, 6,992 graphs
 Tools (cargo build --release -p ssch; binary at $CARGO_TARGET_DIR/release/ssch):
 - ssch bench [--json] [--worst N] [--per-graph out.tsv]: schedules and validates every graph, compares with best known.
 - ssch inspect <hash> | --random: shows a graph and replays its best-known schedule.
-Effort is passed with ssch bench -e N. On the hidden validation set (1,498 graphs), effort ${LOW_EFFORT} must finish in under ${LOW_TIME_CAP}s and effort ${HIGH_EFFORT} in at most ${HIGH_TIME_CAP}s; gas is compared at effort ${HIGH_EFFORT}. You may rewrite or replace anything in sir-stack-scheduling.
+Effort is passed with ssch bench -e N. On the hidden validation set (1,498 graphs), effort ${LOW_EFFORT} must finish in under ${LOW_TIME_CAP}s and effort ${HIGH_EFFORT} in at most ${HIGH_TIME_CAP}s (aim for effort ≈ milliseconds of wall time); gas is compared at effort ${HIGH_EFFORT}. You may rewrite or replace anything in sir-stack-scheduling.
 
 Rules: no per-graph constants or memorized schedules; schedules must be valid; don't look for validation or test data; never pass --save or write to any database; don't write to the archive, the judge records your attempt.
 

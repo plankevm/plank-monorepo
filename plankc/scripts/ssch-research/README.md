@@ -20,9 +20,9 @@ Options (defaults): `--workers 2 --attempts 20 --hours 24 --stall 6 --planners 3
   or combine any earlier attempt.
 - The judge builds, runs `cargo nextest run -p sir-stack-scheduling -p ssch` and benchmarks the
   research set, where an invalid schedule is a failure. If the candidate beats the champion's
-  research gas (both at effort 131072), the judge runs the validation set twice: at effort 512 it
-  must finish in under 1s (pass/fail only), and at effort 131072 it must finish within 23s. The
-  candidate becomes champion (branch `ssch-research/<run>/champion`) if its effort-131072 validation
+  research gas (both at effort 23000), the judge runs the validation set twice: at effort 1000 it
+  must finish in under 1s (pass/fail only), and at effort 23000 it must finish within 23s. The
+  candidate becomes champion (branch `ssch-research/<run>/champion`) if its effort-23000 validation
   gas is lower at all. The efforts and caps are constants at the top of `run.ts`.
 - After `--stall` attempts in a row without a new champion, planners each look at part of the
   champion's per-graph dashboard and part of the archive. Each proposes directions; an LLM drops
