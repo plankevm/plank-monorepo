@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     BlockFinalization,
+    exact::exact_schedule,
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     polish::polish,
@@ -21,6 +22,8 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 /// Search wall time granted per unit of effort for a single graph. Effort is calibrated so that
 /// a validation set of ~1,500 graphs takes roughly `effort` milliseconds in total.
 const SEARCH_NANOS_PER_EFFORT: u64 = 400;
+/// Share of the search budget the exact A* may use before falling back to the heuristic search.
+const EXACT_BUDGET_SHARE: f64 = 0.5;
 /// Stops the search once this many consecutive candidates failed to improve, scaled by graph
 /// size, so small graphs whose neighbourhood is exhausted do not burn their whole budget.
 const STAGNATION_PER_OP: u32 = 400;
@@ -119,6 +122,24 @@ pub fn schedule_with_effort(
     graph: &OpGraph,
     effort: u32,
 ) -> SearchResult {
+    let mut effort = effort;
+    if effort > 0 {
+        let start = Instant::now();
+        let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
+        let deadline = start + budget.mul_f64(EXACT_BUDGET_SHARE);
+        let restricted =
+            exact_schedule(graph, finalization, shuffle, next_alloc_id, false, u32::MAX, deadline);
+        if let Some(restricted) = restricted {
+            let moves = restricted.iter().filter(|op| op.gas_cost(shuffle) > 0).count() as u32;
+            let ops = exact_schedule(graph, finalization, shuffle, next_alloc_id, true, moves, deadline)
+                .unwrap_or(restricted);
+            validation::validate(graph, finalization, shuffle, next_alloc_id, next_alloc_id, &ops)
+                .expect("exact scheduler produced an invalid schedule");
+            return SearchResult { ops: ops.into_boxed_slice(), spill_count: 0 };
+        }
+        let spent = start.elapsed().as_nanos() as u64 / SEARCH_NANOS_PER_EFFORT;
+        effort = effort.saturating_sub(spent as u32).max(1);
+    }
     let trees = build_tree_graph(graph);
     let run = |graph: &OpGraph, policy: &Policy| {
         let mut ops = Vec::new();

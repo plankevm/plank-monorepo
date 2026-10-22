@@ -15,6 +15,7 @@ use crate::{
     scheduler::SearchResult,
     stack::StackOps,
 };
+mod exact;
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
