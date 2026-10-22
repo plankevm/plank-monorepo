@@ -14,8 +14,9 @@ greedy pass on the tree graph, steps 2 and 3 with no search).
 
 The per-graph budget is `effort' * 400ns` with `effort' = effort + effort² / 22000`. At low
 effort every graph uses its full budget. At high effort most small graphs stop early (solved
-exactly or search stagnates), so the remaining graphs get more time per unit of effort and
-the total stays close to `effort` milliseconds for ~1,500 graphs.
+exactly or search stagnates), so the remaining graphs get more time per unit of effort. For
+~1,500 graphs the total stays below `effort` milliseconds (measured: about 0.6× at effort
+1000 and 0.7× at effort 23000).
 
 ## 1. Exact search for small graphs (`exact.rs`)
 
