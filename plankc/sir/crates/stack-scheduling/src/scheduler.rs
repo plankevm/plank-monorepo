@@ -100,6 +100,10 @@ pub struct Policy {
     /// Per operation: up to two swaps applied right before preparing its operands (0 = none), to
     /// park values at the depth they are wanted later.
     pub op_swaps: Vec<[u8; 2]>,
+    /// Permute the stack into [`mid_shuffle_layout`] right before preparing the operands of this
+    /// operation. Some blocks are cheapest when a long permutation runs once an op or two has
+    /// shrunk the stack, which neither the up-front shuffle nor the op swaps reach.
+    pub shuffle_before: Option<OpNodeId>,
 }
 
 impl Policy {
@@ -112,6 +116,7 @@ impl Policy {
             pre_spill: 0,
             pre_swaps: [0; PRE_SWAPS],
             op_swaps: vec![[0; 2]; n],
+            shuffle_before: None,
         }
     }
 }
@@ -472,6 +477,7 @@ fn search_policy(
         candidate.pre_spill = current.pre_spill;
         candidate.pre_swaps = current.pre_swaps;
         candidate.op_swaps.clone_from(&current.op_swaps);
+        candidate.shuffle_before = current.shuffle_before;
         let mutations = 1 + rng.below(3).saturating_sub(1);
         for _ in 0..mutations {
             mutate(
@@ -543,6 +549,14 @@ fn mutate(
             } else {
                 policy.pre_spill - 1
             };
+        return;
+    }
+    if rng.below(16) == 0 {
+        policy.shuffle_before = if policy.shuffle_before.is_some() && rng.below(2) == 0 {
+            None
+        } else {
+            Some(OpNodeId::new(rng.below(n) as u32))
+        };
         return;
     }
     if rng.below(2) == 0 {
@@ -696,6 +710,10 @@ fn schedule_step<Sink: FnMut(StackOps)>(
     op: OpNodeId,
     complete: OpSet<'_>,
 ) {
+    if policy.shuffle_before == Some(op) {
+        let layout = mid_shuffle_layout(graph, policy, stack.fifo(), complete);
+        greedy_shuffler::shuffle_to(config, stack, &layout, false);
+    }
     for swap in policy.op_swaps[op.idx()] {
         if swap != 0 && usize::from(swap) < stack.len() as usize {
             stack.swap(swap);
@@ -814,6 +832,9 @@ fn policy_gas_resumed(
             if op != step.op
                 || reference.op_swaps[op.idx()] != candidate.op_swaps[op.idx()]
                 || reference.flips[op.idx()] != candidate.flips[op.idx()]
+                || (reference.shuffle_before == Some(op)) != (candidate.shuffle_before == Some(op))
+                || (candidate.shuffle_before == Some(op)
+                    && reference.priority != candidate.priority)
             {
                 break;
             }
@@ -912,5 +933,36 @@ fn pre_shuffle_layout(graph: &OpGraph, policy: &Policy) -> Vec<ValueNodeId> {
         }
     }
     layout.extend(passed_through);
+    layout
+}
+
+/// Stack layout for [`Policy::shuffle_before`]: values the remaining operations read come first in
+/// the order the policy consumes them, followed by the block outputs already on the stack, in
+/// output order. Values that are neither are dropped. Every value appears once, as the operand
+/// preparer expects a stack without duplicates.
+fn mid_shuffle_layout(
+    graph: &OpGraph,
+    policy: &Policy,
+    stack: &[ValueNodeId],
+    complete: OpSet<'_>,
+) -> Vec<ValueNodeId> {
+    let mut outputs = Vec::new();
+    for &value in graph.output_values_fifo().iter().rev() {
+        if stack.contains(&value) && !outputs.contains(&value) {
+            outputs.push(value);
+        }
+    }
+    outputs.reverse();
+    let mut order: Vec<OpNodeId> = graph.op_ids().filter(|&op| !complete.contains(op)).collect();
+    order.sort_by_key(|op| (policy.priority[op.idx()], op.idx()));
+    let mut layout = Vec::new();
+    for op in order {
+        for &value in graph.get_op(op).inputs_fifo {
+            if stack.contains(&value) && !layout.contains(&value) && !outputs.contains(&value) {
+                layout.push(value);
+            }
+        }
+    }
+    layout.extend(outputs);
     layout
 }
