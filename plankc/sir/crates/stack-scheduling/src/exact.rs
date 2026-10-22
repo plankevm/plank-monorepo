@@ -282,6 +282,9 @@ fn astar(
 pub const MAX_BEAM_OPS: u32 = 16;
 /// Ops beyond this no longer fit the `done` bitmask.
 const MAX_MASK_OPS: u32 = 63;
+/// The beam's result is only a candidate next to the policy searches, so unlike the A* it also
+/// runs on boundaries close to `dup`/`swap` reach.
+const MAX_BEAM_BOUNDARY_VALUES: usize = MAX_STACK - 1;
 const FIRST_BEAM_WIDTH: usize = 4;
 /// Operands-ready operations can be executed in any interleaving, so the free closure of a layer
 /// is capped at this many states per beam slot.
@@ -303,8 +306,8 @@ pub fn beam_schedule(
     let input_count = graph.input_values_fifo().len() as usize;
     if graph.total_ops() > MAX_BEAM_OPS
         || graph.total_values() > MAX_VALUES
-        || input_count > MAX_BOUNDARY_VALUES
-        || graph.output_values_fifo().len() > MAX_BOUNDARY_VALUES
+        || input_count > MAX_BEAM_BOUNDARY_VALUES
+        || graph.output_values_fifo().len() > MAX_BEAM_BOUNDARY_VALUES
     {
         return None;
     }
