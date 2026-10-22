@@ -8,7 +8,7 @@ use crate::{
     exact::{beam_schedule, exact_schedule, reoptimize_windows},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut, ValueNodeId},
+    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
     polish::polish,
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
@@ -272,29 +272,6 @@ impl Rng {
     }
 }
 
-fn policy_gas(
-    finalization: BlockFinalization,
-    config: ShuffleConfig,
-    graph: &OpGraph,
-    dag: &Dag,
-    policy: &Policy,
-    bound: Option<u64>,
-) -> Option<u64> {
-    let gas = Cell::new(0u64);
-    greedy_schedule(
-        |op| gas.set(gas.get() + u64::from(op.gas_cost(config))),
-        finalization,
-        StaticAllocId::ZERO,
-        config,
-        graph,
-        dag,
-        policy,
-        bound.map(|bound| (&gas, bound)),
-        false,
-    )?;
-    Some(gas.get())
-}
-
 /// Hill climbing over [`Policy`] genomes: mutate the best genome, rerun the greedy scheduler and
 /// keep the mutant if it is no more expensive. Equal-cost mutants are accepted to drift across
 /// plateaus.
@@ -318,7 +295,12 @@ fn search_policy(
 
     let start = Instant::now();
     let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
-    let mut best_gas = policy_gas(finalization, config, graph, dag, &best, None).expect("unbounded");
+    let mut trace = Trace::default();
+    let mut recorded = Vec::new();
+    let mut best_gas =
+        policy_gas_resumed(finalization, config, graph, dag, &best, None, None, &mut trace.steps)
+            .expect("unbounded")
+            .0;
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D));
     let stagnation_limit = STAGNATION_MIN.max(STAGNATION_PER_OP * n as u32);
     let max_pre_spill = if graph.input_values_fifo().len() >= PRE_SPILL_MIN_INPUTS {
@@ -342,8 +324,18 @@ fn search_policy(
             for _ in 0..RESTART_KICK_BASE + n / RESTART_KICK_OPS_PER_MUTATION {
                 mutate(&mut current, &flippable, max_pre_spill, max_pre_swap_depth, &mut rng);
             }
-            current_gas =
-                policy_gas(finalization, config, graph, dag, &current, None).expect("unbounded");
+            current_gas = policy_gas_resumed(
+                finalization,
+                config,
+                graph,
+                dag,
+                &current,
+                None,
+                None,
+                &mut trace.steps,
+            )
+            .expect("unbounded")
+            .0;
             stagnant = 0;
         }
         candidate.priority.clone_from(&current.priority);
@@ -357,7 +349,18 @@ fn search_policy(
             mutate(&mut candidate, &flippable, max_pre_spill, max_pre_swap_depth, &mut rng);
         }
         stagnant += 1;
-        if let Some(gas) = policy_gas(finalization, config, graph, dag, &candidate, Some(current_gas)) {
+        if let Some((gas, divergence)) = policy_gas_resumed(
+            finalization,
+            config,
+            graph,
+            dag,
+            &candidate,
+            Some((&current, &trace, current_gas)),
+            Some(current_gas),
+            &mut recorded,
+        ) {
+            trace.steps.truncate(divergence);
+            trace.steps.append(&mut recorded);
             if gas < current_gas {
                 stagnant = 0;
             }
@@ -480,21 +483,7 @@ pub fn greedy_schedule(
         }
         TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
     };
-    for _ in 0..policy.pre_spill {
-        if is_dead(graph, stack.top().expect("pre-spilled inputs are on the stack")) {
-            stack.pop();
-        } else {
-            stack.spill_top();
-        }
-    }
-    for depth in policy.pre_swaps {
-        if depth != 0 && usize::from(depth) < stack.len() as usize {
-            stack.swap(depth);
-        }
-    }
-    if policy.pre_shuffle {
-        greedy_shuffler::shuffle_to(config, &mut stack, &pre_shuffle_layout(graph, policy), false);
-    }
+    schedule_prelude(config, &mut stack, graph, policy);
 
     let mut waiting_on: SmallVec<[u32; 64]> = SmallVec::from_slice(&dag.predecessor_counts);
     let mut ready: SmallVec<[OpNodeId; 32]> =
@@ -511,33 +500,7 @@ pub fn greedy_schedule(
                 ready.push(successor);
             }
         }
-        for swap in policy.op_swaps[op.idx()] {
-            if swap != 0 && usize::from(swap) < stack.len() as usize {
-                stack.swap(swap);
-            }
-        }
-        let flipped = matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_))
-            && match policy.flips[op.idx()] {
-                FlipChoice::Straight => false,
-                FlipChoice::Flipped => true,
-                FlipChoice::Cheapest => {
-                    let op_cost = |flipped| {
-                        let mut ops = Vec::new();
-                        let mut trial_stack = stack.clone_with(|op| ops.push(op));
-                        greedy_schedule_op(
-                            config,
-                            &mut trial_stack,
-                            graph,
-                            op,
-                            complete.as_ref(),
-                            flipped,
-                        );
-                        crate::stack::gas_cost(&ops, config)
-                    };
-                    op_cost(true) < op_cost(false)
-                }
-            };
-        greedy_schedule_op(config, &mut stack, graph, op, complete.as_ref(), flipped);
+        schedule_step(config, &mut stack, graph, policy, op, complete.as_ref());
         complete.add(op);
         if exceeded() {
             return None;
@@ -557,6 +520,186 @@ pub fn greedy_schedule(
     }
 
     Some(stack.into_next_alloc_id())
+}
+
+fn schedule_prelude<Sink: FnMut(StackOps)>(
+    config: ShuffleConfig,
+    stack: &mut TrackedStack<Sink>,
+    graph: &OpGraph,
+    policy: &Policy,
+) {
+    for _ in 0..policy.pre_spill {
+        if is_dead(graph, stack.top().expect("pre-spilled inputs are on the stack")) {
+            stack.pop();
+        } else {
+            stack.spill_top();
+        }
+    }
+    for depth in policy.pre_swaps {
+        if depth != 0 && usize::from(depth) < stack.len() as usize {
+            stack.swap(depth);
+        }
+    }
+    if policy.pre_shuffle {
+        greedy_shuffler::shuffle_to(config, stack, &pre_shuffle_layout(graph, policy), false);
+    }
+}
+
+fn schedule_step<Sink: FnMut(StackOps)>(
+    config: ShuffleConfig,
+    stack: &mut TrackedStack<Sink>,
+    graph: &OpGraph,
+    policy: &Policy,
+    op: OpNodeId,
+    complete: OpSet<'_>,
+) {
+    for swap in policy.op_swaps[op.idx()] {
+        if swap != 0 && usize::from(swap) < stack.len() as usize {
+            stack.swap(swap);
+        }
+    }
+    let flipped = matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_))
+        && match policy.flips[op.idx()] {
+            FlipChoice::Straight => false,
+            FlipChoice::Flipped => true,
+            FlipChoice::Cheapest => {
+                let op_cost = |flipped| {
+                    let gas = Cell::new(0u64);
+                    let mut trial_stack =
+                        stack.clone_with(|op: StackOps| gas.set(gas.get() + u64::from(op.gas_cost(config))));
+                    greedy_schedule_op(config, &mut trial_stack, graph, op, complete, flipped);
+                    drop(trial_stack);
+                    gas.get()
+                };
+                op_cost(true) < op_cost(false)
+            }
+        };
+    greedy_schedule_op(config, stack, graph, op, complete, flipped);
+}
+
+/// Greedy state right before one step of a [`Trace`].
+struct Checkpoint {
+    op: OpNodeId,
+    gas: u64,
+    stack: SmallVec<[ValueNodeId; 32]>,
+    spilled: Vec<ValueNodeId>,
+}
+
+/// The steps of the greedy schedule of the policy the search currently holds. A mutant schedules
+/// exactly like it up to the first step where it picks a different op or treats the op
+/// differently, so its evaluation resumes from the checkpoint there instead of starting over.
+#[derive(Default)]
+struct Trace {
+    steps: Vec<Checkpoint>,
+}
+
+/// [`policy_gas`] that reuses the schedule prefix `candidate` shares with `reference`, whose steps
+/// are `trace` and whose gas is the last element. Records the candidate's checkpoints from the
+/// divergence on into `recorded` and returns the gas and the divergence step.
+fn policy_gas_resumed(
+    finalization: BlockFinalization,
+    config: ShuffleConfig,
+    graph: &OpGraph,
+    dag: &Dag,
+    candidate: &Policy,
+    reference: Option<(&Policy, &Trace, u64)>,
+    bound: Option<u64>,
+    recorded: &mut Vec<Checkpoint>,
+) -> Option<(u64, usize)> {
+    recorded.clear();
+    let mut complete_backing = SmallVec::<[BitsetWord; SCRATCH_OP_SET_INLINE_CAPACITY]>::new();
+    complete_backing.resize(graph.words_per_set() as usize, 0);
+    let mut complete = OpSetMut::new(&mut complete_backing, graph.total_ops());
+    let mut waiting_on: SmallVec<[u32; 64]> = SmallVec::from_slice(&dag.predecessor_counts);
+    let mut ready: SmallVec<[OpNodeId; 32]> =
+        graph.op_ids().filter(|op| waiting_on[op.idx()] == 0).collect();
+    let pick = |ready: &mut SmallVec<[OpNodeId; 32]>, waiting_on: &mut SmallVec<[u32; 64]>| {
+        let (position, &op) = ready
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, op)| (candidate.priority[op.idx()], op.idx()))?;
+        ready.swap_remove(position);
+        for &successor in &dag.successors[op.idx()] {
+            waiting_on[successor.idx()] -= 1;
+            if waiting_on[successor.idx()] == 0 {
+                ready.push(successor);
+            }
+        }
+        Some(op)
+    };
+
+    let same_prelude = reference.is_some_and(|(reference, _, _)| {
+        reference.pre_spill == candidate.pre_spill
+            && reference.pre_swaps == candidate.pre_swaps
+            && reference.pre_shuffle == candidate.pre_shuffle
+            && (!candidate.pre_shuffle || reference.priority == candidate.priority)
+    });
+    let mut divergence = 0;
+    let mut next = pick(&mut ready, &mut waiting_on);
+    if let Some((reference, trace, reference_gas)) = reference.filter(|_| same_prelude) {
+        while let Some(op) = next {
+            let step = &trace.steps[divergence];
+            if op != step.op
+                || reference.op_swaps[op.idx()] != candidate.op_swaps[op.idx()]
+                || reference.flips[op.idx()] != candidate.flips[op.idx()]
+            {
+                break;
+            }
+            complete.add(op);
+            divergence += 1;
+            next = pick(&mut ready, &mut waiting_on);
+        }
+        if next.is_none() {
+            return Some((reference_gas, divergence));
+        }
+    }
+
+    let gas = Cell::new(0u64);
+    let sink = |op: StackOps| gas.set(gas.get() + u64::from(op.gas_cost(config)));
+    let mut stack = match reference {
+        Some((_, trace, _)) if same_prelude => {
+            let step = &trace.steps[divergence];
+            gas.set(step.gas);
+            TrackedStack::new_from_parts(StaticAllocId::ZERO, sink, &step.stack, step.spilled.clone())
+        }
+        _ => {
+            let mut inner = EvmStack::new();
+            for input in graph.input_values_fifo().iter().rev() {
+                inner.push(input);
+            }
+            let mut stack = TrackedStack::new_from_evm(StaticAllocId::ZERO, sink, inner, 8);
+            schedule_prelude(config, &mut stack, graph, candidate);
+            stack
+        }
+    };
+    let exceeded = || bound.is_some_and(|bound| gas.get() > bound);
+    while let Some(op) = next {
+        recorded.push(Checkpoint {
+            op,
+            gas: gas.get(),
+            stack: SmallVec::from_slice(stack.fifo()),
+            spilled: stack.underlying_spilled().to_vec(),
+        });
+        schedule_step(config, &mut stack, graph, candidate, op, complete.as_ref());
+        complete.add(op);
+        if exceeded() {
+            return None;
+        }
+        next = pick(&mut ready, &mut waiting_on);
+    }
+    if finalization == BlockFinalization::ShuffleToOutputs {
+        greedy_shuffler::shuffle_to(
+            config,
+            &mut stack,
+            graph.output_values_fifo(),
+            graph.total_ops() == 0,
+        );
+    }
+    drop(stack);
+    if exceeded() {
+        return None;
+    }
+    Some((gas.get(), divergence))
 }
 
 fn is_dead(graph: &OpGraph, value: ValueNodeId) -> bool {
