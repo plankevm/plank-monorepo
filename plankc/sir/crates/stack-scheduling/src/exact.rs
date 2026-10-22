@@ -58,8 +58,10 @@ struct Node {
     step: Move,
 }
 
-struct Problem<'g> {
-    graph: &'g OpGraph,
+/// Values and operations are numbered locally: value `i` is the problem's `i`-th value, and the
+/// operation at `ops[i]` owns bit `i` of `done`. Operations outside `ops` count as already run.
+struct Problem {
+    ops: Vec<OpNodeId>,
     finalization: BlockFinalization,
     config: ShuffleConfig,
     /// Per value: operations reading it, with how many operand slots they read it in.
@@ -79,7 +81,7 @@ struct Problem<'g> {
     surplus_dups: bool,
 }
 
-impl Problem<'_> {
+impl Problem {
     fn needed(&self, value: usize, done: u64) -> u32 {
         self.output_uses[value]
             + self.readers[value]
@@ -179,21 +181,23 @@ pub fn exact_schedule(
     {
         return None;
     }
-    let problem = build_problem(graph, finalization, config, surplus_dups);
-    let start = {
-        let mut stack = [0u8; MAX_STACK];
-        for (slot, value) in stack.iter_mut().zip(graph.input_values_fifo().iter()) {
-            *slot = value.idx() as u8;
-        }
-        State { done: 0, len: input_count as u8, stack }
-    };
+    let ops: Vec<OpNodeId> = graph.op_ids().collect();
+    let (problem, start) = build_problem(
+        graph,
+        finalization,
+        config,
+        surplus_dups,
+        ops,
+        input_stack(graph).fifo(),
+        graph.output_values_fifo(),
+    )?;
 
     let (nodes, goal) = astar(&problem, start, move_limit, deadline)?;
     Some(replay(graph, next_alloc_id, &nodes, goal))
 }
 
 fn astar(
-    problem: &Problem<'_>,
+    problem: &Problem,
     start: State,
     move_limit: u32,
     deadline: Instant,
@@ -272,14 +276,16 @@ pub fn beam_schedule(
     {
         return None;
     }
-    let problem = build_problem(graph, finalization, config, false);
-    let start = {
-        let mut stack = [0u8; MAX_STACK];
-        for (slot, value) in stack.iter_mut().zip(graph.input_values_fifo().iter()) {
-            *slot = value.idx() as u8;
-        }
-        State { done: 0, len: input_count as u8, stack }
-    };
+    let ops: Vec<OpNodeId> = graph.op_ids().collect();
+    let (problem, start) = build_problem(
+        graph,
+        finalization,
+        config,
+        false,
+        ops,
+        input_stack(graph).fifo(),
+        graph.output_values_fifo(),
+    )?;
     problem.estimate(&start)?;
     let mut best = None;
     let mut width = FIRST_BEAM_WIDTH;
@@ -306,7 +312,7 @@ enum BeamPass {
 }
 
 fn beam_pass(
-    problem: &Problem<'_>,
+    problem: &Problem,
     start: State,
     width: usize,
     move_limit: u32,
@@ -375,47 +381,73 @@ fn beam_pass(
     BeamPass::NotFound
 }
 
+/// Builds the problem of running exactly `ops` (in some order) from the `start` stack to the
+/// `goal` stack. `None` if the problem has more values or operations than the state can encode.
 fn build_problem(
     graph: &OpGraph,
     finalization: BlockFinalization,
     config: ShuffleConfig,
     surplus_dups: bool,
-) -> Problem<'_> {
-    let values = graph.total_values() as usize;
-    let mut readers = vec![Vec::<(u64, u32)>::new(); values];
-    let mut producer_bit = vec![0u64; values];
+    ops: Vec<OpNodeId>,
+    start: &[ValueNodeId],
+    goal: &[ValueNodeId],
+) -> Option<(Problem, State)> {
+    if ops.len() > MAX_MASK_OPS as usize || start.len() > MAX_STACK {
+        return None;
+    }
+    let mut local = vec![u8::MAX; graph.total_values() as usize];
+    let mut values = 0usize;
+    let mut number = |value: ValueNodeId| -> Option<u8> {
+        if local[value.idx()] == u8::MAX {
+            if values >= MAX_VALUES as usize {
+                return None;
+            }
+            local[value.idx()] = values as u8;
+            values += 1;
+        }
+        Some(local[value.idx()])
+    };
+    let mut start_state = State { done: 0, len: start.len() as u8, stack: [0; MAX_STACK] };
+    for (slot, &value) in start_state.stack.iter_mut().zip(start) {
+        *slot = number(value)?;
+    }
     let mut predecessors = Vec::new();
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
     let mut flippable = Vec::new();
-    for op in graph.op_ids() {
+    for &op in &ops {
         let view = graph.get_op(op);
-        let bit = 1u64 << op.idx();
-        for &value in view.inputs_fifo {
-            let entry = &mut readers[value.idx()];
+        predecessors.push(view.predecessors.iter().fold(0u64, |mask, pred| {
+            ops.iter().position(|&other| other == pred).map_or(mask, |bit| mask | 1 << bit)
+        }));
+        inputs.push(view.inputs_fifo.iter().map(|&value| number(value)).collect::<Option<_>>()?);
+        outputs.push(view.outputs_fifo.iter().map(|&value| number(value)).collect::<Option<_>>()?);
+        flippable.push(matches!(view.kind, OpNodeKind::Flippable(_)));
+    }
+    let goal_stack: Vec<u8> = goal.iter().map(|&value| number(value)).collect::<Option<_>>()?;
+    let mut readers = vec![Vec::<(u64, u32)>::new(); values];
+    let mut producer_bit = vec![0u64; values];
+    for (index, (op_inputs, op_outputs)) in inputs.iter().zip(&outputs).enumerate() {
+        let bit = 1u64 << index;
+        for &value in op_inputs {
+            let entry: &mut Vec<(u64, u32)> = &mut readers[usize::from(value)];
             match entry.iter_mut().find(|(reader, _)| *reader == bit) {
                 Some((_, slots)) => *slots += 1,
                 None => entry.push((bit, 1)),
             }
         }
-        for &value in view.outputs_fifo {
-            producer_bit[value.idx()] = bit;
+        for &value in op_outputs {
+            producer_bit[usize::from(value)] = bit;
         }
-        predecessors.push(view.predecessors.iter().fold(0u64, |mask, pred| mask | 1 << pred.idx()));
-        inputs.push(view.inputs_fifo.iter().map(|value| value.idx() as u8).collect());
-        outputs.push(view.outputs_fifo.iter().map(|value| value.idx() as u8).collect());
-        flippable.push(matches!(view.kind, OpNodeKind::Flippable(_)));
     }
     let mut output_uses = vec![0u32; values];
-    for &value in graph.output_values_fifo() {
-        output_uses[value.idx()] += 1;
+    for &value in &goal_stack {
+        output_uses[usize::from(value)] += 1;
     }
-    let goal_done = (1u64 << graph.total_ops()) - 1;
-    let goal_stack: Vec<u8> =
-        graph.output_values_fifo().iter().map(|value| value.idx() as u8).collect();
+    let goal_done = if ops.len() == 64 { u64::MAX } else { (1u64 << ops.len()) - 1 };
     let goal_height = goal_heights(&goal_stack, &output_uses);
-    Problem {
-        graph,
+    let problem = Problem {
+        ops,
         finalization,
         config,
         readers,
@@ -429,7 +461,8 @@ fn build_problem(
         goal_stack,
         goal_height,
         surplus_dups,
-    }
+    };
+    Some((problem, start_state))
 }
 
 fn goal_heights(goal_stack: &[u8], output_uses: &[u32]) -> Vec<u8> {
@@ -443,17 +476,15 @@ fn goal_heights(goal_stack: &[u8], output_uses: &[u32]) -> Vec<u8> {
 }
 
 fn for_each_successor(
-    problem: &Problem<'_>,
+    problem: &Problem,
     state: &State,
     mut visit: impl FnMut(State, Move, u32),
 ) {
     let fifo = state.fifo();
     let len = fifo.len();
-    for op in problem.graph.op_ids() {
-        let bit = 1u64 << op.idx();
-        let index = op.idx();
+    for (index, &op) in problem.ops.iter().enumerate() {
+        let bit = 1u64 << index;
         if state.done & bit != 0
-            || problem.goal_done & bit == 0
             || state.done & problem.predecessors[index] != problem.predecessors[index]
         {
             continue;
@@ -573,7 +604,8 @@ struct Boundary {
     /// Index into the schedule right after the boundary.
     position: usize,
     stack: EvmStack,
-    done: u64,
+    /// The operation the boundary follows, `None` for the start and a trailing shuffle.
+    op: Option<OpNodeId>,
 }
 
 /// Local exact re-optimization of a finished spill-free schedule: the stack states right after
@@ -589,9 +621,7 @@ pub fn reoptimize_windows(
     schedule: &[StackOps],
     deadline: Instant,
 ) -> Option<Vec<StackOps>> {
-    if graph.total_ops() > MAX_MASK_OPS
-        || graph.total_values() > MAX_VALUES
-        || !schedule.iter().all(|op| {
+    if !schedule.iter().all(|op| {
             matches!(
                 op,
                 StackOps::Swap(_)
@@ -605,7 +635,6 @@ pub fn reoptimize_windows(
     {
         return None;
     }
-    let base = build_problem(graph, finalization, config, true);
     let mut schedule = schedule.to_vec();
     let mut improved_any = false;
     for window_ops in WINDOW_OPS {
@@ -617,7 +646,6 @@ pub fn reoptimize_windows(
             finalization,
             config,
             next_alloc_id,
-            &base,
             &mut schedule,
             window_ops,
             deadline,
@@ -633,7 +661,6 @@ fn sweep_windows(
     finalization: BlockFinalization,
     config: ShuffleConfig,
     next_alloc_id: StaticAllocId,
-    base: &Problem<'_>,
     schedule: &mut Vec<StackOps>,
     window_ops: usize,
     deadline: Instant,
@@ -652,9 +679,8 @@ fn sweep_windows(
     let mut improved_any = false;
     let mut first = 0;
     loop {
-        let mut boundaries = vec![Boundary { position: 0, stack: input_stack(graph), done: 0 }];
+        let mut boundaries = vec![Boundary { position: 0, stack: input_stack(graph), op: None }];
         let mut stack = boundaries[0].stack.clone();
-        let mut done = 0u64;
         for (position, &operation) in schedule.iter().enumerate() {
             match operation {
                 StackOps::Swap(depth) => stack.swap_with_top(depth.into()),
@@ -671,17 +697,16 @@ fn sweep_windows(
                     for &output in view.outputs_fifo.iter().rev() {
                         stack.push(output);
                     }
-                    done |= 1 << op.idx();
                     boundaries.push(Boundary {
                         position: position + 1,
                         stack: stack.clone(),
-                        done,
+                        op: Some(op),
                     });
                 }
             }
         }
         if boundaries.last().is_some_and(|last| last.position < schedule.len()) {
-            boundaries.push(Boundary { position: schedule.len(), stack: stack.clone(), done });
+            boundaries.push(Boundary { position: schedule.len(), stack: stack.clone(), op: None });
         }
 
         let mut improvement = None;
@@ -702,46 +727,26 @@ fn sweep_windows(
             let terminates = end_index == boundaries.len() - 1
                 && to.position == schedule.len()
                 && finalization == BlockFinalization::LastOpTerminates;
-            let mut problem = Problem {
+            let ops = boundaries[start_index + 1..=end_index]
+                .iter()
+                .filter_map(|boundary| boundary.op)
+                .collect();
+            let (window_finalization, goal) = if terminates {
+                (BlockFinalization::LastOpTerminates, &[][..])
+            } else {
+                (BlockFinalization::ShuffleToOutputs, to.stack.fifo())
+            };
+            let Some((problem, state)) = build_problem(
                 graph,
-                finalization: if terminates {
-                    BlockFinalization::LastOpTerminates
-                } else {
-                    BlockFinalization::ShuffleToOutputs
-                },
+                window_finalization,
                 config,
-                readers: base
-                    .readers
-                    .iter()
-                    .map(|readers| {
-                        readers.iter().copied().filter(|&(bit, _)| to.done & bit != 0).collect()
-                    })
-                    .collect(),
-                output_uses: vec![0; base.output_uses.len()],
-                producer_bit: base.producer_bit.clone(),
-                predecessors: base.predecessors.clone(),
-                inputs: base.inputs.clone(),
-                outputs: base.outputs.clone(),
-                flippable: base.flippable.clone(),
-                goal_done: to.done,
-                goal_stack: to.stack.fifo().iter().map(|value| value.idx() as u8).collect(),
-                goal_height: Vec::new(),
-                surplus_dups: true,
+                true,
+                ops,
+                from.stack.fifo(),
+                goal,
+            ) else {
+                continue;
             };
-            if !terminates {
-                for &value in to.stack.fifo() {
-                    problem.output_uses[value.idx()] += 1;
-                }
-            }
-            problem.goal_height = goal_heights(&problem.goal_stack, &problem.output_uses);
-            let mut state = State {
-                done: from.done,
-                len: from.stack.fifo().len() as u8,
-                stack: [0; MAX_STACK],
-            };
-            for (slot, value) in state.stack.iter_mut().zip(from.stack.fifo()) {
-                *slot = value.idx() as u8;
-            }
             if let Some((nodes, goal)) = astar(&problem, state, moves, deadline) {
                 let replacement =
                     replay_from(graph, next_alloc_id, from.stack.fifo(), &nodes, goal);
