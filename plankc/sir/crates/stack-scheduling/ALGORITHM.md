@@ -83,7 +83,11 @@ returned.
 ## 1b. Beam search (graphs slightly too large for the A*)
 
 `exact::beam_schedule`, ≤16 ops, given 30% of what is left of `B`. Same states and moves as the
-A*. Layer k = states reached with k stack moves; free op moves are closed over inside a layer
+A*. Unlike the A*, it also runs on blocks with 13–16 inputs or outputs: its result is only a
+candidate next to the policy searches, so a spill-free schedule that is worse than one with
+spills does no harm. On the research corpus this saved about 80 gas, all on graphs of 1–10 ops
+with 12–16 boundary values. Those graphs mostly need a long permutation, and the beam's thread
+used to sit idle on them. Layer k = states reached with k stack moves; free op moves are closed over inside a layer
 (capped at 8 × width states, since independent ready ops can interleave in exponentially many
 ways). The `width` states with the smallest heuristic (ties: more ops done) are expanded into
 layer k+1. A global seen-set dedupes states. Runs with width 4, 8, 16, ... until its deadline,
@@ -168,8 +172,7 @@ kept.
 a boundary state (stack, op just run) right after every op and every spill `store`/`load`, plus
 the final state. For window sizes w = 2, 3, ..., 10 boundaries: for each boundary i, take
 boundaries i and i+w (clamped to the end), skip the segment between them if it contains a
-spill or a stack deeper than 17, and otherwise re-solve it with the A* of step 1 on a local
-subproblem where
+spill, and otherwise re-solve it with the A* of step 1 on a local subproblem where
 
 - only the segment's ops run; they get local bits and the values involved local ids (block
   size does not matter), op readers and predecessors outside the window are ignored,
@@ -177,7 +180,12 @@ subproblem where
 - the goal is exactly the end boundary's stack (or, for the final window of a
   `LastOpTerminates` block, just "all ops done"),
 - the move limit is the segment's current number of moves, so only strictly better segments
-  are returned.
+  are returned,
+- on deep stacks (either end deeper than 17) only the top 16 values are part of the problem.
+  The `max(len) - 16` values below must be the same at both ends, or the window is skipped. The
+  A* never touches them, and a window op that reads one of them makes the problem unsolvable.
+  The 16 leaves one slot free for a dup. These windows used to be skipped. Re-solving them saved
+  about 150 gas on the research corpus, mostly on blocks with 13 or more boundary values.
 
 An improved segment is spliced in, boundaries are recomputed and the sweep restarts a little
 before the changed window. Each window size sweeps until no improvement; the pass stops at its
