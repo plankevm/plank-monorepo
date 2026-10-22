@@ -7,6 +7,7 @@ use crate::{
     BlockFinalization,
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
+    polish::polish,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut, ValueNodeId},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
@@ -161,6 +162,7 @@ pub fn schedule_with_effort(
         (tree_ops, tree_next_alloc_id)
     };
     let spill_count = new_next_alloc_id - next_alloc_id;
+    let ops = if effort > 0 { polish(graph, shuffle, next_alloc_id, &ops) } else { ops };
 
     validation::validate(graph, finalization, shuffle, next_alloc_id, new_next_alloc_id, &ops)
         .expect("stack scheduler produced an invalid schedule");
