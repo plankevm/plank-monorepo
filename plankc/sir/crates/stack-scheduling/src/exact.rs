@@ -95,7 +95,7 @@ impl Problem {
 
     /// Lower bound on the remaining stack moves, `None` when a needed value is lost for good.
     fn estimate(&self, state: &State) -> Option<u32> {
-        let mut copies = [0u32; MAX_VALUES as usize];
+        let mut copies = [0u8; MAX_VALUES as usize];
         for &value in state.fifo() {
             copies[usize::from(value)] += 1;
         }
@@ -132,7 +132,7 @@ impl Problem {
                 continue;
             }
             let needed = self.needed(value, state.done);
-            let have = copies[value];
+            let have = u32::from(copies[value]);
             if needed > 0 && have == 0 {
                 return None;
             }
