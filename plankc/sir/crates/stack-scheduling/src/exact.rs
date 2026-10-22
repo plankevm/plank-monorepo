@@ -567,7 +567,7 @@ fn replay_from(
 }
 
 /// Window sizes, in operations, swept by [`reoptimize_windows`] from small to large.
-const WINDOW_OPS: std::ops::RangeInclusive<usize> = 2..=8;
+const WINDOW_OPS: std::ops::RangeInclusive<usize> = 2..=10;
 
 struct Boundary {
     /// Index into the schedule right after the boundary.
