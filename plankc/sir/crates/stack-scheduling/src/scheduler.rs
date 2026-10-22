@@ -7,7 +7,7 @@ use crate::{
     BlockFinalization,
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    op_graph::{BitsetWord, OpGraph, OpNodeKind, OpSetMut},
+    op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut, ValueNodeId},
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
     validation,
@@ -45,6 +45,8 @@ pub enum FlipChoice {
 pub struct Policy {
     pub priority: Vec<u32>,
     pub flips: Vec<FlipChoice>,
+    /// Permute the block inputs into [`pre_shuffle_layout`] before scheduling any operation.
+    pub pre_shuffle: bool,
 }
 
 impl Policy {
@@ -53,6 +55,7 @@ impl Policy {
         Self {
             priority: (0..n as u32).map(|i| i * PRIORITY_SPACING).collect(),
             flips: vec![FlipChoice::Cheapest; n],
+            pre_shuffle: false,
         }
     }
 }
@@ -153,9 +156,7 @@ fn search_policy(
         .filter(|&op| matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_)))
         .map(|op| op.idx())
         .collect();
-    if n == 1 && flippable.is_empty() {
-        return best;
-    }
+
 
     let start = Instant::now();
     let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
@@ -168,6 +169,7 @@ fn search_policy(
     while best_gas > 0 && stagnant < stagnation_limit && start.elapsed() < budget {
         candidate.priority.clone_from(&best.priority);
         candidate.flips.clone_from(&best.flips);
+        candidate.pre_shuffle = best.pre_shuffle;
         let mutations = 1 + rng.below(3).saturating_sub(1);
         for _ in 0..mutations {
             mutate(&mut candidate, &flippable, &mut rng);
@@ -187,6 +189,10 @@ fn search_policy(
 
 fn mutate(policy: &mut Policy, flippable: &[usize], rng: &mut Rng) {
     let n = policy.priority.len();
+    if rng.below(16) == 0 {
+        policy.pre_shuffle = !policy.pre_shuffle;
+        return;
+    }
     if !flippable.is_empty() && (n == 1 || rng.below(4) == 0) {
         let op = flippable[rng.below(flippable.len())];
         policy.flips[op] = match (policy.flips[op], rng.below(2)) {
@@ -240,6 +246,9 @@ pub fn greedy_schedule(
         }
         TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
     };
+    if policy.pre_shuffle {
+        greedy_shuffler::shuffle_to(config, &mut stack, &pre_shuffle_layout(graph, policy), false);
+    }
 
     'schedule: loop {
         completable.clear();
@@ -286,4 +295,32 @@ pub fn greedy_schedule(
     }
 
     Some(stack.into_next_alloc_id())
+}
+
+/// Input layout that lets operations consume their inputs straight off the top: inputs feeding
+/// operations come first in the order the policy consumes them, followed by the inputs passed
+/// through to the block outputs, already in output order. Doing this permutation once up front is
+/// often cheaper than fixing up pass-through values at the end with deep swaps.
+fn pre_shuffle_layout(graph: &OpGraph, policy: &Policy) -> Vec<ValueNodeId> {
+    let mut passed_through = Vec::new();
+    for &value in graph.output_values_fifo().iter().rev() {
+        if graph.is_input(value) && !passed_through.contains(&value) {
+            passed_through.push(value);
+        }
+    }
+    passed_through.reverse();
+
+    let mut order: Vec<OpNodeId> = graph.op_ids().collect();
+    order.sort_by_key(|op| (policy.priority[op.idx()], op.idx()));
+    let mut layout = Vec::new();
+    for op in order {
+        for &value in graph.get_op(op).inputs_fifo {
+            if graph.is_input(value) && !layout.contains(&value) && !passed_through.contains(&value)
+            {
+                layout.push(value);
+            }
+        }
+    }
+    layout.extend(passed_through);
+    layout
 }

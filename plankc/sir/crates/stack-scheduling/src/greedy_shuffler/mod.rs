@@ -29,7 +29,15 @@ pub fn shuffle<Sink: FnMut(StackOps)>(
     current: &mut TrackedStack<Sink>,
     graph: &OpGraph,
 ) {
-    let target = graph.output_values_fifo();
+    shuffle_to(config, current, graph.output_values_fifo(), graph.total_ops() == 0);
+}
+
+pub fn shuffle_to<Sink: FnMut(StackOps)>(
+    config: ShuffleConfig,
+    current: &mut TrackedStack<Sink>,
+    target: &[ValueNodeId],
+    try_scrambled: bool,
+) {
     let needs_early_push =
         target.iter().enumerate().any(|(position, value)| target[position + 1..].contains(value));
     let mut best: Option<(u64, Vec<StackOps>)> = None;
@@ -55,7 +63,7 @@ pub fn shuffle<Sink: FnMut(StackOps)>(
             }
         }
     }
-    if graph.total_ops() == 0 {
+    if try_scrambled {
         for seed in 1_u32..32 {
             let mut candidate_ops = Vec::new();
             let mut candidate = current.clone_with(|op| candidate_ops.push(op));
