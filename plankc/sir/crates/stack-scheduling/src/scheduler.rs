@@ -66,6 +66,40 @@ impl Policy {
     }
 }
 
+impl Policy {
+    /// Policy that schedules the operations of `graph` in the order and orientation they appear
+    /// in `schedule`.
+    fn replaying(graph: &OpGraph, schedule: &[StackOps], pre_shuffle: bool) -> Self {
+        let mut policy = Self::graph_order(graph);
+        policy.pre_shuffle = pre_shuffle;
+        let mut position = 0;
+        for &scheduled in schedule {
+            let (operation, flipped, ret_dest_push) = match scheduled {
+                StackOps::Op(operation) => (operation, false, false),
+                StackOps::Flipped(operation) => (operation, true, false),
+                StackOps::CallRetPush(operation) => (operation, false, true),
+                _ => continue,
+            };
+            let op = graph
+                .op_ids()
+                .find(|&op| match graph.get_op(op).kind {
+                    OpNodeKind::Flippable(idx) | OpNodeKind::Normal(idx) => {
+                        !ret_dest_push && idx == operation
+                    }
+                    OpNodeKind::RetDestPush(idx) => ret_dest_push && idx == operation,
+                })
+                .expect("scheduled operation missing from graph");
+            policy.priority[op.idx()] = position * PRIORITY_SPACING;
+            if matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_)) {
+                policy.flips[op.idx()] =
+                    if flipped { FlipChoice::Flipped } else { FlipChoice::Straight };
+            }
+            position += 1;
+        }
+        policy
+    }
+}
+
 const PRIORITY_SPACING: u32 = 1 << 16;
 
 pub fn schedule(
@@ -101,15 +135,22 @@ pub fn schedule_with_effort(
         (ops, new_next_alloc_id)
     };
 
-    let (tree_ops, tree_next_alloc_id) = {
-        let policy = search_policy(finalization, shuffle, &trees.graph, effort.div_ceil(2));
+    let (tree_ops, tree_next_alloc_id, tree_pre_shuffle) = {
+        let policy = search_policy(
+            finalization,
+            shuffle,
+            &trees.graph,
+            effort.div_ceil(2),
+            Policy::graph_order(&trees.graph),
+        );
         let (ops, next) = run(&trees.graph, &policy);
-        (trees.expand_schedule(graph, &ops), next)
+        (trees.expand_schedule(graph, &ops), next, policy.pre_shuffle)
     };
     // Tree graphs fix the order inside each tree, which occasionally rules out the best
     // schedule, so the untransformed graph gets the other half of the budget.
     let (ops, new_next_alloc_id) = if effort > 0 {
-        let policy = search_policy(finalization, shuffle, graph, effort / 2);
+        let seed = Policy::replaying(graph, &tree_ops, tree_pre_shuffle);
+        let policy = search_policy(finalization, shuffle, graph, effort / 2, seed);
         let (ops, next) = run(graph, &policy);
         if crate::stack::gas_cost(&ops, shuffle) < crate::stack::gas_cost(&tree_ops, shuffle) {
             (ops.into_boxed_slice(), next)
@@ -171,8 +212,8 @@ fn search_policy(
     config: ShuffleConfig,
     graph: &OpGraph,
     effort: u32,
+    mut best: Policy,
 ) -> Policy {
-    let mut best = Policy::graph_order(graph);
     let n = graph.total_ops() as usize;
     if effort == 0 || n == 0 {
         return best;
