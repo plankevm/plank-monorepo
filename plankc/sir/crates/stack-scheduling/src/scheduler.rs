@@ -363,7 +363,7 @@ fn mutate(
             };
         return;
     }
-    if rng.below(4) == 0 {
+    if rng.below(2) == 0 {
         let swap = &mut policy.op_swaps[rng.below(n)];
         *swap = if *swap != 0 && rng.below(2) == 0 { 0 } else { 1 + rng.below(16) as u8 };
         return;

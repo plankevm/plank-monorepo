@@ -23,7 +23,11 @@ For graphs with at most 10 operations, at most 12 boundary values and no need to
 over states (stack contents, set of completed operations). Moves are swap/dup/pop (unit
 cost), and executing a ready operation whose operands are already on top is free. The
 heuristic is admissible: copies each live value still lacks, plus surplus copies that must be
-popped, plus a permutation bound at the goal. A first run forbids duplicating a value beyond
+popped, plus a swap bound. A value with a single copy, no remaining readers and exactly one
+output slot can only change how many values sit below it through a swap that moves it. Each
+swap moves two values, so ⌈misplaced such values / 2⌉ swaps are still needed. Once all
+operations are done, the bound is the larger of that and the number of misplaced positions
+below the top. A first run forbids duplicating a value beyond
 its remaining uses, which keeps the search small. A second run allows surplus dups, capped at
 the first run's move count. The two runs share half of the budget. If either succeeds, its
 schedule is returned.
@@ -35,10 +39,18 @@ A `Policy` is a genome:
   next.
 - `flips[op]` for flippable (commutative) operations: Straight, Flipped, or Cheapest (try both
   orientations and keep the one that needs cheaper operand preparation).
-- `pre_spill: u8`: store the top `k` block inputs to memory before anything else. Deep blocks
-  often pass their top inputs through to deep output slots. Storing them at once and loading
-  them when an operation or the final layout needs them beats dragging them along past reach.
-  The search only changes it for blocks with at least 14 inputs, up to 8.
+- `pre_spill: u8`: store the top `k` block inputs to memory before anything else, or pop them
+  if dead (no readers, not an output). Deep blocks often pass their top inputs through to deep
+  output slots. Storing them at once and loading them when an operation or the final layout
+  needs them beats dragging them along past reach. The search changes it for blocks with at
+  least 14 inputs (up to 8), and otherwise only over the run of dead inputs on top.
+- `pre_swaps: [u8; 3]`: swaps applied after the pre-spills (0 = none, depths beyond the stack
+  are skipped). They sink pass-through inputs towards their output slots while still in reach.
+- `op_swaps[op]`: a swap of depth 1–16 (0 = none, depths beyond the stack are skipped) applied
+  right before preparing the operands of `op`. The greedy operand preparer only cares about the
+  next operation. This gene lets the search park a value at the depth it is wanted later, so
+  later operations and the final layout need fewer moves. On the research corpus it was the
+  single largest improvement (−2.7% gas).
 - `pre_shuffle`: permute the remaining inputs once up front into consumption order (inputs used
   by operations in policy order, then pass-through inputs in output order).
 
@@ -50,9 +62,10 @@ permutes the stack into the output layout, popping dead values and loading spill
 ## 3. Policy search (`search_policy`)
 
 Hill climbing with iterated-local-search restarts:
-- Mutations: swap two priorities; move an op just before another; random priority; cycle a flip
-  choice; toggle pre_shuffle (1/16); change pre_spill by ±1 (1/16, deep blocks only). Each
-  candidate gets 1–2 mutations.
+- Mutations: toggle pre_shuffle (1/16); set or clear a pre-swap (1/16); change pre_spill by ±1
+  (1/16 when allowed); set an op swap to a random depth or clear it (1/2 of the remaining); cycle a flip choice;
+  otherwise change priorities (swap two, move an op just before another, or randomise one).
+  Each candidate gets 1–2 mutations.
 - A candidate is evaluated by running the greedy scheduler while counting gas only. It is
   aborted as soon as it costs more than the current genome. Equal cost is accepted, so the
   search can drift across plateaus.
@@ -63,8 +76,9 @@ The search runs twice:
 1. On the tree graph (`treegraph`, after Park et al.): single-use chains are contracted into
    trees with a fixed internal order, which shrinks the search space. It gets half the effort.
    The result is expanded back to the original operations.
-2. On the untransformed graph, seeded with the tree winner's order, flips, pre_shuffle and
-   pre_spill. Tree contraction sometimes rules out the best order. It gets the other half.
+2. On the untransformed graph, seeded with the tree winner's order, flips, pre_shuffle,
+   pre_spill and pre_swaps. Op swaps start at 0 because tree operations do not map one-to-one
+   to graph operations. Tree contraction sometimes rules out the best order. It gets the other half.
 
 The cheaper of the two schedules is kept. The winner's final shuffle is redone with the
 slower, thorough shuffle strategies.
