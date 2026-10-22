@@ -127,7 +127,10 @@ A `Policy` is a genome:
   op has the shuffle in either genome (and, if the candidate's, when priorities differ, since
   the layout depends on them). Not carried from the tree search to the flat search. On the
   research corpus at effort 23000: −1,344 gas (159,567 → 158,223, side by side), same wall
-  time, gains in every size bucket, most on 6–32 ops. Two shuffle slots: no gain; rate 1/8: worse.
+  time, gains in every size bucket, most on 6–32 ops. Keeping outputs at their output positions
+  is what matters: putting consumed outputs in the consumption part instead (as `pre_shuffle`
+  does) loses almost all of the gain, and a gene bit choosing between the two layouts is +170.
+  Two shuffle slots: no gain; mutation rate 1/8: +190; 1/32: +50 (noise).
 
 Ready operations are tracked incrementally: each operation counts its unfinished immediate
 predecessors (transitive reduction of the dependency graph) and joins the ready list when the
