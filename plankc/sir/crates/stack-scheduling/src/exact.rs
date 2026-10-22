@@ -73,6 +73,9 @@ struct Problem<'g> {
     flippable: Vec<bool>,
     all_done: u64,
     goal_stack: Vec<u8>,
+    /// Per value used exactly once in the outputs: how many values sit below it in the goal
+    /// stack. `u8::MAX` otherwise.
+    goal_height: Vec<u8>,
     surplus_dups: bool,
 }
 
@@ -93,6 +96,23 @@ impl Problem<'_> {
             copies[usize::from(value)] += 1;
         }
         let mut bound = 0;
+        let mut misplaced_pass_through = 0u32;
+        if self.finalization == BlockFinalization::ShuffleToOutputs {
+            let len = state.fifo().len();
+            for (position, &value) in state.fifo().iter().enumerate() {
+                let value = usize::from(value);
+                // Nothing else consumes such a value and a single copy cannot be popped, so the
+                // number of values below it only changes when a swap moves it, and each swap
+                // moves two values.
+                if self.goal_height[value] != u8::MAX
+                    && copies[value] == 1
+                    && self.needed(value, state.done) == 1
+                    && usize::from(self.goal_height[value]) != len - 1 - position
+                {
+                    misplaced_pass_through += 1;
+                }
+            }
+        }
         for value in 0..self.readers.len() {
             let produced = state.done & self.producer_bit[value] == self.producer_bit[value];
             if !produced {
@@ -117,9 +137,9 @@ impl Problem<'_> {
                 .skip(1)
                 .filter(|(have, want)| have != want)
                 .count();
-            bound = misplaced as u32;
+            return Some((misplaced as u32).max(misplaced_pass_through.div_ceil(2)));
         }
-        Some(bound)
+        Some(bound + misplaced_pass_through.div_ceil(2))
     }
 
     fn is_goal(&self, state: &State) -> bool {
@@ -239,6 +259,13 @@ fn build_problem(
         output_uses[value.idx()] += 1;
     }
     let all_done = (1u64 << graph.total_ops()) - 1;
+    let outputs_len = graph.output_values_fifo().len();
+    let mut goal_height = vec![u8::MAX; values];
+    for (position, &value) in graph.output_values_fifo().iter().enumerate() {
+        if output_uses[value.idx()] == 1 {
+            goal_height[value.idx()] = (outputs_len - 1 - position) as u8;
+        }
+    }
     Problem {
         graph,
         finalization,
@@ -252,6 +279,7 @@ fn build_problem(
         flippable,
         all_done,
         goal_stack: graph.output_values_fifo().iter().map(|value| value.idx() as u8).collect(),
+        goal_height,
         surplus_dups,
     }
 }
