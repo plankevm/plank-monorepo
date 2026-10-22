@@ -8,8 +8,8 @@ use crate::{
     exact::exact_schedule,
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
-    polish::polish,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSetMut, ValueNodeId},
+    polish::polish,
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
     validation,
@@ -22,6 +22,10 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 /// Search wall time granted per unit of effort for a single graph. Effort is calibrated so that
 /// a validation set of ~1,500 graphs takes roughly `effort` milliseconds in total.
 const SEARCH_NANOS_PER_EFFORT: u64 = 400;
+/// At high effort most small graphs end early (solved exactly or stagnated), so the per-graph
+/// budget grows by another `effort / EFFORT_RATE_DOUBLING` share to keep the total wall time
+/// near `effort` milliseconds. At low effort every graph uses its whole budget.
+const EFFORT_RATE_DOUBLING: u64 = 30_000;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
 const EXACT_BUDGET_SHARE: f64 = 0.5;
 /// Stops the search once this many consecutive candidates failed to improve, scaled by graph
@@ -34,6 +38,9 @@ const MIN_CHOICES_FOR_RESTARTS: usize = 4;
 /// to the best policy found so far.
 const RESTART_KICK_BASE: usize = 3;
 const RESTART_KICK_OPS_PER_MUTATION: usize = 8;
+/// Blocks with fewer inputs rarely need spills, so the search leaves [`Policy::pre_spill`] at 0.
+const PRE_SPILL_MIN_INPUTS: u32 = 14;
+const MAX_PRE_SPILL: u8 = 8;
 
 pub struct SearchResult {
     pub ops: Box<[StackOps]>,
@@ -57,6 +64,10 @@ pub struct Policy {
     pub flips: Vec<FlipChoice>,
     /// Permute the block inputs into [`pre_shuffle_layout`] before scheduling any operation.
     pub pre_shuffle: bool,
+    /// Number of block inputs spilled off the top of the stack before anything else. Deep blocks
+    /// often pass their top inputs through to deep output slots; storing them at once and
+    /// loading them at the end beats dragging them along past `dup`/`swap` reach.
+    pub pre_spill: u8,
 }
 
 impl Policy {
@@ -66,6 +77,7 @@ impl Policy {
             priority: (0..n as u32).map(|i| i * PRIORITY_SPACING).collect(),
             flips: vec![FlipChoice::Cheapest; n],
             pre_shuffle: false,
+            pre_spill: 0,
         }
     }
 }
@@ -73,9 +85,10 @@ impl Policy {
 impl Policy {
     /// Policy that schedules the operations of `graph` in the order and orientation they appear
     /// in `schedule`.
-    fn replaying(graph: &OpGraph, schedule: &[StackOps], pre_shuffle: bool) -> Self {
+    fn replaying(graph: &OpGraph, schedule: &[StackOps], pre_shuffle: bool, pre_spill: u8) -> Self {
         let mut policy = Self::graph_order(graph);
         policy.pre_shuffle = pre_shuffle;
+        policy.pre_spill = pre_spill;
         let mut position = 0;
         for &scheduled in schedule {
             let (operation, flipped, ret_dest_push) = match scheduled {
@@ -122,7 +135,10 @@ pub fn schedule_with_effort(
     graph: &OpGraph,
     effort: u32,
 ) -> SearchResult {
-    let mut effort = effort;
+    let mut effort = u32::try_from(
+        u64::from(effort) + u64::from(effort) * u64::from(effort) / EFFORT_RATE_DOUBLING,
+    )
+    .unwrap_or(u32::MAX);
     if effort > 0 {
         let start = Instant::now();
         let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
@@ -131,8 +147,9 @@ pub fn schedule_with_effort(
             exact_schedule(graph, finalization, shuffle, next_alloc_id, false, u32::MAX, deadline);
         if let Some(restricted) = restricted {
             let moves = restricted.iter().filter(|op| op.gas_cost(shuffle) > 0).count() as u32;
-            let ops = exact_schedule(graph, finalization, shuffle, next_alloc_id, true, moves, deadline)
-                .unwrap_or(restricted);
+            let ops =
+                exact_schedule(graph, finalization, shuffle, next_alloc_id, true, moves, deadline)
+                    .unwrap_or(restricted);
             validation::validate(graph, finalization, shuffle, next_alloc_id, next_alloc_id, &ops)
                 .expect("exact scheduler produced an invalid schedule");
             return SearchResult { ops: ops.into_boxed_slice(), spill_count: 0 };
@@ -157,7 +174,7 @@ pub fn schedule_with_effort(
         (ops, new_next_alloc_id)
     };
 
-    let (tree_ops, tree_next_alloc_id, tree_pre_shuffle) = {
+    let (tree_ops, tree_next_alloc_id, tree_pre_shuffle, tree_pre_spill) = {
         let policy = search_policy(
             finalization,
             shuffle,
@@ -166,12 +183,12 @@ pub fn schedule_with_effort(
             Policy::graph_order(&trees.graph),
         );
         let (ops, next) = run(&trees.graph, &policy);
-        (trees.expand_schedule(graph, &ops), next, policy.pre_shuffle)
+        (trees.expand_schedule(graph, &ops), next, policy.pre_shuffle, policy.pre_spill)
     };
     // Tree graphs fix the order inside each tree, which occasionally rules out the best
     // schedule, so the untransformed graph gets the other half of the budget.
     let (ops, new_next_alloc_id) = if effort > 0 {
-        let seed = Policy::replaying(graph, &tree_ops, tree_pre_shuffle);
+        let seed = Policy::replaying(graph, &tree_ops, tree_pre_shuffle, tree_pre_spill);
         let policy = search_policy(finalization, shuffle, graph, effort / 2, seed);
         let (ops, next) = run(graph, &policy);
         if crate::stack::gas_cost(&ops, shuffle) < crate::stack::gas_cost(&tree_ops, shuffle) {
@@ -247,12 +264,16 @@ fn search_policy(
         .map(|op| op.idx())
         .collect();
 
-
     let start = Instant::now();
     let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
     let mut best_gas = policy_gas(finalization, config, graph, &best, None).expect("unbounded");
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (n as u64).wrapping_mul(0x2545_F491_4F6C_DD1D));
     let stagnation_limit = STAGNATION_MIN.max(STAGNATION_PER_OP * n as u32);
+    let max_pre_spill = if graph.input_values_fifo().len() >= PRE_SPILL_MIN_INPUTS {
+        MAX_PRE_SPILL.min(graph.input_values_fifo().len() as u8)
+    } else {
+        0
+    };
     let restarts_allowed = n + flippable.len() >= MIN_CHOICES_FOR_RESTARTS;
     let mut stagnant = 0u32;
     let mut current = best.clone();
@@ -266,17 +287,19 @@ fn search_policy(
             }
             current.clone_from(&best);
             for _ in 0..RESTART_KICK_BASE + n / RESTART_KICK_OPS_PER_MUTATION {
-                mutate(&mut current, &flippable, &mut rng);
+                mutate(&mut current, &flippable, max_pre_spill, &mut rng);
             }
-            current_gas = policy_gas(finalization, config, graph, &current, None).expect("unbounded");
+            current_gas =
+                policy_gas(finalization, config, graph, &current, None).expect("unbounded");
             stagnant = 0;
         }
         candidate.priority.clone_from(&current.priority);
         candidate.flips.clone_from(&current.flips);
         candidate.pre_shuffle = current.pre_shuffle;
+        candidate.pre_spill = current.pre_spill;
         let mutations = 1 + rng.below(3).saturating_sub(1);
         for _ in 0..mutations {
-            mutate(&mut candidate, &flippable, &mut rng);
+            mutate(&mut candidate, &flippable, max_pre_spill, &mut rng);
         }
         stagnant += 1;
         if let Some(gas) = policy_gas(finalization, config, graph, &candidate, Some(current_gas)) {
@@ -295,10 +318,19 @@ fn search_policy(
     best
 }
 
-fn mutate(policy: &mut Policy, flippable: &[usize], rng: &mut Rng) {
+fn mutate(policy: &mut Policy, flippable: &[usize], max_pre_spill: u8, rng: &mut Rng) {
     let n = policy.priority.len();
     if rng.below(16) == 0 {
         policy.pre_shuffle = !policy.pre_shuffle;
+        return;
+    }
+    if max_pre_spill > 0 && rng.below(16) == 0 {
+        policy.pre_spill =
+            if policy.pre_spill == 0 || (policy.pre_spill < max_pre_spill && rng.below(2) == 0) {
+                policy.pre_spill + 1
+            } else {
+                policy.pre_spill - 1
+            };
         return;
     }
     if !flippable.is_empty() && (n == 1 || rng.below(4) == 0) {
@@ -357,6 +389,9 @@ pub fn greedy_schedule(
         }
         TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
     };
+    for _ in 0..policy.pre_spill {
+        stack.spill_top();
+    }
     if policy.pre_shuffle {
         greedy_shuffler::shuffle_to(config, &mut stack, &pre_shuffle_layout(graph, policy), false);
     }
@@ -418,9 +453,10 @@ pub fn greedy_schedule(
 /// through to the block outputs, already in output order. Doing this permutation once up front is
 /// often cheaper than fixing up pass-through values at the end with deep swaps.
 fn pre_shuffle_layout(graph: &OpGraph, policy: &Policy) -> Vec<ValueNodeId> {
+    let pre_spilled = |value: ValueNodeId| value.idx() < usize::from(policy.pre_spill);
     let mut passed_through = Vec::new();
     for &value in graph.output_values_fifo().iter().rev() {
-        if graph.is_input(value) && !passed_through.contains(&value) {
+        if graph.is_input(value) && !pre_spilled(value) && !passed_through.contains(&value) {
             passed_through.push(value);
         }
     }
@@ -431,7 +467,10 @@ fn pre_shuffle_layout(graph: &OpGraph, policy: &Policy) -> Vec<ValueNodeId> {
     let mut layout = Vec::new();
     for op in order {
         for &value in graph.get_op(op).inputs_fifo {
-            if graph.is_input(value) && !layout.contains(&value) && !passed_through.contains(&value)
+            if graph.is_input(value)
+                && !pre_spilled(value)
+                && !layout.contains(&value)
+                && !passed_through.contains(&value)
             {
                 layout.push(value);
             }

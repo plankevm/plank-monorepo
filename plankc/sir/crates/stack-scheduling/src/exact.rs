@@ -7,11 +7,7 @@
 //! never lowers it, so the first goal popped from the queue is optimal among spill-free
 //! schedules that keep the stack within `dup`/`swap` reach.
 
-use std::{
-    cmp::Reverse,
-    collections::BinaryHeap,
-    time::Instant,
-};
+use std::{cmp::Reverse, collections::BinaryHeap, time::Instant};
 
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::Idx;
@@ -260,19 +256,27 @@ fn build_problem(
     }
 }
 
-fn for_each_successor(problem: &Problem<'_>, state: &State, mut visit: impl FnMut(State, Move, u32)) {
+fn for_each_successor(
+    problem: &Problem<'_>,
+    state: &State,
+    mut visit: impl FnMut(State, Move, u32),
+) {
     let fifo = state.fifo();
     let len = fifo.len();
     for op in problem.graph.op_ids() {
         let bit = 1u64 << op.idx();
         let index = op.idx();
-        if state.done & bit != 0 || state.done & problem.predecessors[index] != problem.predecessors[index]
+        if state.done & bit != 0
+            || state.done & problem.predecessors[index] != problem.predecessors[index]
         {
             continue;
         }
         let inputs = &problem.inputs[index];
-        let orientations: &[bool] =
-            if problem.flippable[index] && inputs[0] != inputs[1] { &[false, true] } else { &[false] };
+        let orientations: &[bool] = if problem.flippable[index] && inputs[0] != inputs[1] {
+            &[false, true]
+        } else {
+            &[false]
+        };
         for &flipped in orientations {
             if len < inputs.len() {
                 continue;
@@ -289,7 +293,8 @@ fn for_each_successor(problem: &Problem<'_>, state: &State, mut visit: impl FnMu
             if new_len > MAX_STACK {
                 continue;
             }
-            let mut next = State { done: state.done | bit, len: new_len as u8, stack: [0; MAX_STACK] };
+            let mut next =
+                State { done: state.done | bit, len: new_len as u8, stack: [0; MAX_STACK] };
             next.stack[..outputs.len()].copy_from_slice(outputs);
             next.stack[outputs.len()..new_len].copy_from_slice(&fifo[inputs.len()..]);
             visit(next, Move::Op(op, flipped), 0);
@@ -304,7 +309,8 @@ fn for_each_successor(problem: &Problem<'_>, state: &State, mut visit: impl FnMu
             let value = fifo[depth];
             // One surplus copy can pay off: duplicating a deep last use and popping the stale
             // original later is often cheaper than digging the original up.
-            let copies_after = if problem.surplus_dups { copies_of(value) } else { copies_of(value) + 1 };
+            let copies_after =
+                if problem.surplus_dups { copies_of(value) } else { copies_of(value) + 1 };
             if surplus(value, copies_after) {
                 continue;
             }
