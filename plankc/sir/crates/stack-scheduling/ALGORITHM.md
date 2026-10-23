@@ -10,57 +10,45 @@ must be spilled.
 Entry point: `scheduler::schedule_with_effort`. Effort 0 is the compiler's fast path (one
 greedy pass on the tree graph, steps 2 and 3 with no search).
 
-## 0. Time budget
+## 0. Work budget
 
-The per-graph budget is `effort' * 400ns` with `effort' = effort + effort² / 16000`. At low
-effort every graph uses its full budget. At high effort most small graphs stop early (solved
-exactly or search stagnates), so the remaining graphs get more time per unit of effort. For
-~1,500 graphs the total stays below `effort` milliseconds (measured: about 0.6× at effort
-1000 and an estimated 0.9× at effort 23000).
+Every search counts work instead of time, so the schedule is a function of the graph and the
+effort only: it never depends on the machine, its load, core count or thread scheduling. One
+work unit is one expanded A* or beam state, one window tried in step 5, or one greedy step of a
+policy candidate in step 3 (a candidate that resumes from a checkpoint only pays for the steps
+it reruns).
 
-Graphs with more than 32 operations get `effort'` scaled by `ops / 32`, capped at 8× (so 64
+The per-graph budget is `effort * 1.4` work units (`WORK_PER_THOUSAND_EFFORT`), linear in
+effort. Graphs with more than 32 operations get it scaled by `ops / 32`, capped at 8× (so 64
 ops get 2×, 256+ ops get 8×). Large graphs are few (about 3% of the corpus have more than 63
-ops), always use their whole budget, and keep improving with more time, while small graphs
-mostly finish early. On the research corpus this cost about +10% wall time and saved about
-550 gas, mostly on graphs with 64–200 ops. Spending the same time on all graphs saves less.
+ops), always use their whole budget, and keep improving with more work, while small graphs
+mostly finish early.
 
-With effort > 0, 25% of that budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
-re-optimization (step 5); the rest is the search budget `B` for steps 1-4.
+The constant is tuned on an M-series laptop: on the validation set (1,498 graphs) effort 1000
+takes about 0.9 s and effort 23000 about 14.5 s. Wall time is not linear in effort because at
+high effort most small graphs stop early (solved exactly or the search stagnates).
 
-## 0b. Parallel search
+With effort > 0, 25% of the budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
+re-optimization (step 5); the rest is the search budget `B` for steps 1-4. Work a step leaves
+unused passes on to the next.
 
-If the search budget `B` is at least 2,500 effort units (1 ms), steps 1–3 use up to 12 threads
-(`SEARCH_THREADS`, capped by the available cores). Lower budgets, such as most graphs at effort
-1000, run sequentially, because spawning threads costs tens of microseconds. All steps are
-deadline bound, so extra threads use more cores but no extra wall time.
+## 0b. Search order
 
-1. The A* of step 1 first runs alone for `0.1 B`. Easy graphs are solved here and never start
-   threads.
-2. If that fails:
-   - For graphs with at most 16 ops, one thread restarts the A* with a deadline of `0.5 B`,
-     then runs the beam search of step 1b until `B`. The other 11 threads each run the full
-     step 3 (tree search, then flat search) for the remaining budget. Each gets a different
-     random seed.
-   - For larger graphs, all 12 threads run step 3.
-3. If the A* succeeds, it sets a stop flag that ends the policy searches, and its schedule is
-   returned.
-4. Otherwise the search results, plus the beam schedule if there is one, are deduplicated.
-   Each distinct result runs steps 4 and 5
-   on its own thread: polish, then the beam schedule replaces it if cheaper, then windows
-   with their own `0.25`-share deadline. The cheapest finished schedule wins. A search result
-   that is slightly worse before the windows sometimes ends cheaper after them. Sequential
-   runs have a single result, so they finish it on the calling thread.
+Everything runs on the calling thread; the compiler already schedules blocks in parallel.
 
-On the research corpus at effort 23000 this cut gas from 163,023 to 160,791 (−1.4%). Wall
-time went from 91.5 s to 96.4 s, mostly thread overhead on small graphs. Most of the gain
-came from graphs with 17+ ops. Running the A* next to the searches, instead of before them,
-helped graphs of 6–16 ops by about 230 gas.
+1. The A* of step 1 gets `0.5 B`. If it succeeds, its schedule is returned.
+2. Otherwise the beam search of step 1b gets 30% of what is left.
+3. The rest is split evenly between `SEARCHES` = 2 runs of step 3 with random seeds 0 and 1.
+4. The search results, plus the beam schedule if there is one, are sorted by gas (ties keep
+   search order) and deduplicated. Each distinct result runs steps 4 and 5 with an equal share
+   of the window budget. The cheapest finished schedule wins, the first one on ties. A search
+   result that is slightly worse before the windows sometimes ends cheaper after them.
 
-Finishing every distinct search result instead of only the cheapest cut gas by about 700
-more (160,509 → 159,807 in the same contended batch). It helped every size bucket and cost
-about 2% wall time, which comes from waiting for the slowest finisher. Finishing the beam
-schedule as a candidate of its own, rather than only swapping it in when it is cheaper
-before the windows, saved about 100 more gas on graphs of 16 ops or fewer.
+On the validation set, at the same work, 2 searches beat 1 by about 250 gas at effort 1000
+and 110 at effort 23000; 4 searches are no better than 2. Running the searches and finishers
+on threads of their own gives the same schedules in less wall time (about 0.6× at effort
+23000), which buys about 1% gas at the same time limit on a benchmark that schedules one
+graph at a time, but nothing in the compiler.
 
 ## 1. Exact search for small graphs (`exact.rs`)
 
@@ -77,7 +65,7 @@ below the top plus one for each permutation cycle that does not contain the top 
 needs an extra swap to bring one of its members up first; only used when the goal holds no
 value twice). A first run forbids duplicating a value beyond
 its remaining uses, which keeps the search small. A second run allows surplus dups, capped at
-the first run's move count. The two runs share `B/2`. If either succeeds, its schedule is
+the first run's move count. The two runs share `0.5 B`. If either succeeds, its schedule is
 returned.
 
 ## 1b. Beam search (graphs slightly too large for the A*)
@@ -86,13 +74,11 @@ returned.
 A*. Unlike the A*, it also runs on blocks with 13–16 inputs or outputs: its result is only a
 candidate next to the policy searches, so a spill-free schedule that is worse than one with
 spills does no harm. On the research corpus this saved about 80 gas, all on graphs of 1–10 ops
-with 12–16 boundary values. Those graphs mostly need a long permutation, and the beam's thread
-used to sit idle on them. Layer k = states reached with k stack moves; free op moves are closed over inside a layer
+with 12–16 boundary values. Those graphs mostly need a long permutation. Layer k = states reached with k stack moves; free op moves are closed over inside a layer
 (capped at 8 × width states, since independent ready ops can interleave in exponentially many
 ways). The `width` states with the smallest heuristic (ties: more ops done) are expanded into
-layer k+1. A global seen-set dedupes states. Runs with width 4, 8, 16, ... until its deadline,
-keeping the cheapest goal reached. Its result replaces the polished schedule of step 4 if
-cheaper.
+layer k+1. A global seen-set dedupes states. Runs with width 4, 8, 16, ... until its budget runs out,
+keeping the cheapest goal reached. Its result is one more candidate for steps 4 and 5.
 
 ## 2. Greedy scheduler steered by a policy (`greedy_schedule`)
 
@@ -166,7 +152,8 @@ Hill climbing with iterated-local-search restarts:
 
 The search runs twice:
 1. On the tree graph (`treegraph`, after Park et al.): single-use chains are contracted into
-   trees with a fixed internal order, which shrinks the search space. It gets 3/4 of the effort.
+   trees with a fixed internal order, which shrinks the search space. It gets 3/4 of the search's
+   budget.
    The result is expanded back to the original operations.
 2. On the untransformed graph, seeded with the tree winner's order, flips, pre_shuffle,
    pre_spill and pre_swaps. Op swaps start at 0 because tree operations do not map one-to-one
@@ -207,8 +194,8 @@ spill, and otherwise re-solve it with the A* of step 1 on a local subproblem whe
   about 150 gas on the research corpus, mostly on blocks with 13 or more boundary values.
 
 An improved segment is spliced in, boundaries are recomputed and the sweep restarts a little
-before the changed window. Each window size sweeps until no improvement; the pass stops at its
-deadline. Because both ends of a window are fixed, every replacement keeps the schedule valid
+before the changed window. Each window size sweeps until no improvement; the pass stops when its
+budget runs out. Because both ends of a window are fixed, every replacement keeps the schedule valid
 and never increases gas.
 
 This step fixes the greedy operand preparer's myopia: e.g. preparing the operands of the last

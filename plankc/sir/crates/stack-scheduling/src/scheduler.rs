@@ -19,11 +19,11 @@ const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 /// Work units granted per thousand units of effort for a single graph. A work unit is one expanded
 /// A* or beam state, one window tried, or one greedy step of a policy candidate. Counting work
 /// instead of time makes the schedule a function of the graph and the effort only. Tuned so that a
-/// validation set of ~1,500 graphs takes roughly `effort` milliseconds on an M-series laptop.
-const WORK_PER_THOUSAND_EFFORT: u64 = 2_000;
+/// validation set of ~1,500 graphs takes under a second at effort 1000 on an M-series laptop.
+const WORK_PER_THOUSAND_EFFORT: u64 = 1_400;
 /// Graphs with more than `BUDGET_SCALE_OPS` operations get a budget proportional to their
 /// operation count, up to `MAX_BUDGET_SCALE` times the base budget. Large graphs are few, always
-/// use their whole budget and keep improving with more time, while small graphs mostly finish
+/// use their whole budget and keep improving with more work, while small graphs mostly finish
 /// early.
 const BUDGET_SCALE_OPS: u64 = 32;
 const MAX_BUDGET_SCALE: u64 = 8;
@@ -50,9 +50,7 @@ const MAX_PRE_SPILL: u8 = 8;
 const PRE_SWAPS: usize = 3;
 /// Number of independent policy searches, each with its own random seed and an equal share of
 /// the search budget.
-const SEARCHES: u64 = 4;
-/// Run the searches, and the finishing of their results, on threads of their own.
-const PARALLEL_SEARCH: bool = true;
+const SEARCHES: u64 = 2;
 /// Graphs with at most this many operations only mutate op swaps up to the deepest stack seen.
 const OP_SWAP_DEPTH_CAP_MAX_OPS: usize = 32;
 
@@ -269,7 +267,7 @@ pub fn schedule_with_effort(
     };
     // Independent policy searches with different random streams explore different basins.
     let searches = if effort > 0 { SEARCHES } else { 1 };
-    let mut searched = in_parallel((0..searches).map(|seed| move || search(seed)));
+    let mut searched: Vec<_> = (0..searches).map(search).collect();
     if let Some(beam) = beam {
         searched.push((beam.into_boxed_slice(), next_alloc_id));
     }
@@ -290,33 +288,17 @@ pub fn schedule_with_effort(
         (ops, new_next_alloc_id)
     };
     // `min_by_key` keeps the first of equal-cost results.
-    let (ops, new_next_alloc_id) =
-        in_parallel(searched.into_iter().map(|found| move || finish(found)))
-            .into_iter()
-            .min_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle))
-            .expect("at least one search ran");
+    let (ops, new_next_alloc_id) = searched
+        .into_iter()
+        .map(finish)
+        .min_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle))
+        .expect("at least one search ran");
     let spill_count = new_next_alloc_id - next_alloc_id;
 
     validation::validate(graph, finalization, shuffle, next_alloc_id, new_next_alloc_id, &ops)
         .expect("stack scheduler produced an invalid schedule");
 
     SearchResult { ops, spill_count }
-}
-
-/// Runs `jobs` and returns their results in order. Each job is independent and deterministic, so
-/// running them on threads changes the wall time, not the results.
-fn in_parallel<T: Send>(jobs: impl Iterator<Item = impl FnOnce() -> T + Send>) -> Vec<T> {
-    let mut jobs: Vec<_> = jobs.collect();
-    if !PARALLEL_SEARCH || jobs.len() < 2 {
-        return jobs.into_iter().map(|job| job()).collect();
-    }
-    let first = jobs.remove(0);
-    std::thread::scope(|scope| {
-        let rest: Vec<_> = jobs.into_iter().map(|job| scope.spawn(job)).collect();
-        let mut results = vec![first()];
-        results.extend(rest.into_iter().map(|job| job.join().expect("search panicked")));
-        results
-    })
 }
 
 struct Rng(u64);
