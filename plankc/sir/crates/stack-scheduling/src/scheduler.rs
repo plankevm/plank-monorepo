@@ -1,12 +1,8 @@
-use std::{
-    cell::Cell,
-    sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
-};
+use std::cell::Cell;
 
 use crate::{
     BlockFinalization,
-    exact::{MAX_BEAM_OPS, beam_schedule, exact_schedule, reoptimize_windows},
+    exact::{beam_schedule, exact_schedule, reoptimize_windows},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
@@ -20,13 +16,11 @@ use sir_data::StaticAllocId;
 use smallvec::SmallVec;
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
-/// Search wall time granted per unit of effort for a single graph. Effort is calibrated so that
-/// a validation set of ~1,500 graphs takes roughly `effort` milliseconds in total.
-const SEARCH_NANOS_PER_EFFORT: u64 = 400;
-/// At high effort most small graphs end early (solved exactly or stagnated), so the per-graph
-/// budget grows by another `effort / EFFORT_RATE_DOUBLING` share to keep the total wall time
-/// near `effort` milliseconds. At low effort every graph uses its whole budget.
-const EFFORT_RATE_DOUBLING: u64 = 16_000;
+/// Work units granted per thousand units of effort for a single graph. A work unit is one expanded
+/// A* or beam state, one window tried, or one greedy step of a policy candidate. Counting work
+/// instead of time makes the schedule a function of the graph and the effort only. Tuned so that a
+/// validation set of ~1,500 graphs takes roughly `effort` milliseconds on an M-series laptop.
+const WORK_PER_THOUSAND_EFFORT: u64 = 2_000;
 /// Graphs with more than `BUDGET_SCALE_OPS` operations get a budget proportional to their
 /// operation count, up to `MAX_BUDGET_SCALE` times the base budget. Large graphs are few, always
 /// use their whole budget and keep improving with more time, while small graphs mostly finish
@@ -35,10 +29,6 @@ const BUDGET_SCALE_OPS: u64 = 32;
 const MAX_BUDGET_SCALE: u64 = 8;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
 const EXACT_BUDGET_SHARE: f64 = 0.5;
-/// With parallel search, the A* first runs alone for this share of the search budget, so graphs
-/// it solves quickly never pay for threads. If that fails it is restarted on its own thread next
-/// to the policy searches, up to [`EXACT_BUDGET_SHARE`], followed by the beam search.
-const EXACT_SOLO_BUDGET_SHARE: f64 = 0.1;
 /// Share of the budget left after the exact A* that the beam search may use.
 const BEAM_BUDGET_SHARE: f64 = 0.3;
 /// Share of the whole budget reserved for [`reoptimize_windows`] on the final schedule.
@@ -58,12 +48,11 @@ const RESTART_KICK_OPS_PER_MUTATION: usize = 8;
 const PRE_SPILL_MIN_INPUTS: u32 = 14;
 const MAX_PRE_SPILL: u8 = 8;
 const PRE_SWAPS: usize = 3;
-/// Number of independent policy searches run in parallel threads (capped by the available
-/// cores). Searches are deadline bound, so extra threads cost no wall time, only cores.
-const SEARCH_THREADS: usize = 12;
-/// Spawning threads costs tens of microseconds, which matters for the short budgets of low
-/// effort, so only search budgets of at least this many effort units run in parallel.
-const MIN_PARALLEL_EFFORT: u32 = 2_500;
+/// Number of independent policy searches, each with its own random seed and an equal share of
+/// the search budget.
+const SEARCHES: u64 = 4;
+/// Run the searches, and the finishing of their results, on threads of their own.
+const PARALLEL_SEARCH: bool = true;
 /// Graphs with at most this many operations only mutate op swaps up to the deepest stack seen.
 const OP_SWAP_DEPTH_CAP_MAX_OPS: usize = 32;
 
@@ -175,59 +164,56 @@ pub fn schedule_with_effort(
     graph: &OpGraph,
     effort: u32,
 ) -> SearchResult {
-    let effort = u64::from(effort) + u64::from(effort) * u64::from(effort) / EFFORT_RATE_DOUBLING;
-    let effort = effort
+    let mut work = u64::from(effort)
+        * WORK_PER_THOUSAND_EFFORT
         * u64::from(graph.total_ops()).clamp(BUDGET_SCALE_OPS, BUDGET_SCALE_OPS * MAX_BUDGET_SCALE)
-        / BUDGET_SCALE_OPS;
-    let window_budget =
-        Duration::from_nanos(effort * SEARCH_NANOS_PER_EFFORT).mul_f64(WINDOW_BUDGET_SHARE);
-    let mut effort =
-        u32::try_from((effort as f64 * (1.0 - WINDOW_BUDGET_SHARE)) as u64).unwrap_or(u32::MAX);
-    let solve_exact = |deadline: Instant| {
-        let restricted =
-            exact_schedule(graph, finalization, shuffle, next_alloc_id, false, u32::MAX, deadline)?;
-        let moves = restricted.iter().filter(|op| op.gas_cost(shuffle) > 0).count() as u32;
-        Some(
-            exact_schedule(graph, finalization, shuffle, next_alloc_id, true, moves, deadline)
-                .unwrap_or(restricted),
-        )
-    };
+        / BUDGET_SCALE_OPS
+        / 1000;
+    let window_work = (work as f64 * WINDOW_BUDGET_SHARE) as u64;
+    work -= window_work;
     let exact_result = |ops: Vec<StackOps>| {
         validation::validate(graph, finalization, shuffle, next_alloc_id, next_alloc_id, &ops)
             .expect("exact scheduler produced an invalid schedule");
         SearchResult { ops: ops.into_boxed_slice(), spill_count: 0 }
     };
-    let threads =
-        std::thread::available_parallelism().map_or(1, |cores| cores.get()).min(SEARCH_THREADS);
-    let parallel = effort >= MIN_PARALLEL_EFFORT && threads > 2;
-    let stop = AtomicBool::new(false);
     let mut beam = None;
-    let mut exact_deadline = None;
     if effort > 0 {
-        let start = Instant::now();
-        let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
-        let share = if parallel { EXACT_SOLO_BUDGET_SHARE } else { EXACT_BUDGET_SHARE };
-        if let Some(ops) = solve_exact(start + budget.mul_f64(share)) {
-            return exact_result(ops);
+        let mut exact_work = (work as f64 * EXACT_BUDGET_SHARE) as u64;
+        let exact_budget = exact_work;
+        let restricted = exact_schedule(
+            graph,
+            finalization,
+            shuffle,
+            next_alloc_id,
+            false,
+            u32::MAX,
+            &mut exact_work,
+        );
+        if let Some(restricted) = restricted {
+            let moves = restricted.iter().filter(|op| op.gas_cost(shuffle) > 0).count() as u32;
+            let ops = exact_schedule(
+                graph,
+                finalization,
+                shuffle,
+                next_alloc_id,
+                true,
+                moves,
+                &mut exact_work,
+            );
+            return exact_result(ops.unwrap_or(restricted));
         }
-        if parallel {
-            if graph.total_ops() <= MAX_BEAM_OPS {
-                exact_deadline = Some((start + budget.mul_f64(EXACT_BUDGET_SHARE), start + budget));
-            }
-        } else {
-            let remaining = budget.saturating_sub(start.elapsed());
-            let beam_deadline = Instant::now() + remaining.mul_f64(BEAM_BUDGET_SHARE);
-            beam =
-                beam_schedule(graph, finalization, shuffle, next_alloc_id, u32::MAX, beam_deadline);
-        }
-        let spent = start.elapsed().as_nanos() as u64 / SEARCH_NANOS_PER_EFFORT;
-        effort = effort.saturating_sub(spent as u32).max(1);
+        work -= exact_budget - exact_work;
+        let mut beam_work = (work as f64 * BEAM_BUDGET_SHARE) as u64;
+        let beam_budget = beam_work;
+        beam = beam_schedule(graph, finalization, shuffle, next_alloc_id, u32::MAX, &mut beam_work);
+        work = (work - (beam_budget - beam_work)).max(1);
     }
     let trees = build_tree_graph(graph);
     let tree_dag = Dag::new(&trees.graph);
     let dag = Dag::new(graph);
+    let search_work = work.div_ceil(SEARCHES);
     let search = |seed: u64| {
-        let tree_effort = effort - effort / 4;
+        let tree_work = search_work - search_work / 4;
         let run = |graph: &OpGraph, dag: &Dag, policy: &Policy| {
             let mut ops = Vec::new();
             let new_next_alloc_id = greedy_schedule(
@@ -251,10 +237,9 @@ pub fn schedule_with_effort(
                 shuffle,
                 &trees.graph,
                 &tree_dag,
-                tree_effort,
+                tree_work,
                 Policy::graph_order(&trees.graph),
                 seed,
-                &stop,
             );
             let (ops, next) = run(&trees.graph, &tree_dag, &policy);
             (trees.expand_schedule(graph, &ops), next, policy)
@@ -268,10 +253,9 @@ pub fn schedule_with_effort(
                 shuffle,
                 graph,
                 &dag,
-                effort - tree_effort,
+                search_work - tree_work,
                 seed_policy,
                 seed,
-                &stop,
             );
             let (ops, next) = run(graph, &dag, &policy);
             if crate::stack::gas_cost(&ops, shuffle) < crate::stack::gas_cost(&tree_ops, shuffle) {
@@ -283,94 +267,56 @@ pub fn schedule_with_effort(
             (tree_ops, tree_next_alloc_id)
         }
     };
-    let parallel_search = |workers: u64| {
-        // Independent policy searches with different random streams explore different basins.
-        std::thread::scope(|scope| {
-            let workers: Vec<_> =
-                (1..workers).map(|worker| scope.spawn(move || search(worker))).collect();
-            let mut searched = vec![search(0)];
-            searched
-                .extend(workers.into_iter().map(|worker| worker.join().expect("search panicked")));
-            searched
-        })
-    };
-    let mut searched = if let Some((exact_deadline, beam_deadline)) = exact_deadline {
-        // The A* (then the beam search) runs on its own thread for the whole search budget, next
-        // to the policy searches. A proven optimum stops the searches.
-        let (exact, searched) = std::thread::scope(|scope| {
-            let exact = scope.spawn(|| match solve_exact(exact_deadline) {
-                Some(ops) => {
-                    stop.store(true, Ordering::Relaxed);
-                    Ok(ops)
-                }
-                None => Err(beam_schedule(
-                    graph,
-                    finalization,
-                    shuffle,
-                    next_alloc_id,
-                    u32::MAX,
-                    beam_deadline,
-                )),
-            });
-            let searched = parallel_search(threads as u64 - 1);
-            (exact.join().expect("exact search panicked"), searched)
-        });
-        match exact {
-            Ok(ops) => return exact_result(ops),
-            Err(found) => beam = found,
-        }
-        searched
-    } else if parallel {
-        parallel_search(threads as u64)
-    } else {
-        vec![search(0)]
-    };
-    if parallel && let Some(beam) = &beam {
-        searched.push((beam.clone().into_boxed_slice(), next_alloc_id));
+    // Independent policy searches with different random streams explore different basins.
+    let searches = if effort > 0 { SEARCHES } else { 1 };
+    let mut searched = in_parallel((0..searches).map(|seed| move || search(seed)));
+    if let Some(beam) = beam {
+        searched.push((beam.into_boxed_slice(), next_alloc_id));
     }
+    // Stable sort: equal-cost results stay in search order.
     searched.sort_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle));
     searched.dedup_by(|(a, _), (b, _)| a == b);
+    let finish_work = window_work / searched.len() as u64;
+    // Every distinct search result is polished and window-optimized: a slightly worse search
+    // result sometimes ends cheaper after the windows.
     let finish = |(ops, new_next_alloc_id): (Box<[StackOps]>, StaticAllocId)| {
-        let ops = if effort > 0 { polish(graph, shuffle, next_alloc_id, &ops) } else { ops };
-        let (ops, new_next_alloc_id) = match &beam {
-            Some(beam)
-                if crate::stack::gas_cost(beam, shuffle)
-                    < crate::stack::gas_cost(&ops, shuffle) =>
-            {
-                (beam.clone().into_boxed_slice(), next_alloc_id)
-            }
-            _ => (ops, new_next_alloc_id),
-        };
-        let ops = if effort > 0 {
-            let deadline = Instant::now() + window_budget;
-            reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, deadline)
-                .map_or(ops, Vec::into_boxed_slice)
-        } else {
-            ops
-        };
+        if effort == 0 {
+            return (ops, new_next_alloc_id);
+        }
+        let ops = polish(graph, shuffle, next_alloc_id, &ops);
+        let mut work = finish_work;
+        let ops = reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, &mut work)
+            .map_or(ops, Vec::into_boxed_slice);
         (ops, new_next_alloc_id)
     };
-    // Every distinct search result is polished and window-optimized on its own thread: a
-    // slightly worse search result sometimes ends cheaper after the windows.
-    let (ops, new_next_alloc_id) = if searched.len() > 1 {
-        std::thread::scope(|scope| {
-            let finishers: Vec<_> =
-                searched.into_iter().map(|found| scope.spawn(move || finish(found))).collect();
-            finishers
-                .into_iter()
-                .map(|finisher| finisher.join().expect("finishing panicked"))
-                .min_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle))
-                .expect("at least one search ran")
-        })
-    } else {
-        finish(searched.pop().expect("at least one search ran"))
-    };
+    // `min_by_key` keeps the first of equal-cost results.
+    let (ops, new_next_alloc_id) =
+        in_parallel(searched.into_iter().map(|found| move || finish(found)))
+            .into_iter()
+            .min_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle))
+            .expect("at least one search ran");
     let spill_count = new_next_alloc_id - next_alloc_id;
 
     validation::validate(graph, finalization, shuffle, next_alloc_id, new_next_alloc_id, &ops)
         .expect("stack scheduler produced an invalid schedule");
 
     SearchResult { ops, spill_count }
+}
+
+/// Runs `jobs` and returns their results in order. Each job is independent and deterministic, so
+/// running them on threads changes the wall time, not the results.
+fn in_parallel<T: Send>(jobs: impl Iterator<Item = impl FnOnce() -> T + Send>) -> Vec<T> {
+    let mut jobs: Vec<_> = jobs.collect();
+    if !PARALLEL_SEARCH || jobs.len() < 2 {
+        return jobs.into_iter().map(|job| job()).collect();
+    }
+    let first = jobs.remove(0);
+    std::thread::scope(|scope| {
+        let rest: Vec<_> = jobs.into_iter().map(|job| scope.spawn(job)).collect();
+        let mut results = vec![first()];
+        results.extend(rest.into_iter().map(|job| job.join().expect("search panicked")));
+        results
+    })
 }
 
 struct Rng(u64);
@@ -396,13 +342,12 @@ fn search_policy(
     config: ShuffleConfig,
     graph: &OpGraph,
     dag: &Dag,
-    effort: u32,
+    mut work: u64,
     mut best: Policy,
     seed: u64,
-    stop: &AtomicBool,
 ) -> Policy {
     let n = graph.total_ops() as usize;
-    if effort == 0 || n == 0 {
+    if work == 0 || n == 0 {
         return best;
     }
     let flippable: Vec<usize> = graph
@@ -411,8 +356,6 @@ fn search_policy(
         .map(|op| op.idx())
         .collect();
 
-    let start = Instant::now();
-    let budget = Duration::from_nanos(u64::from(effort) * SEARCH_NANOS_PER_EFFORT);
     let mut trace = Trace::default();
     let mut recorded = Vec::new();
     let mut best_gas =
@@ -439,7 +382,7 @@ fn search_policy(
     let mut current_gas = best_gas;
     let mut candidate = best.clone();
 
-    while best_gas > 0 && start.elapsed() < budget && !stop.load(Ordering::Relaxed) {
+    while best_gas > 0 && work > 0 {
         if stagnant >= stagnation_limit {
             if !restarts_allowed {
                 break;
@@ -467,6 +410,7 @@ fn search_policy(
             )
             .expect("unbounded")
             .0;
+            work = work.saturating_sub(trace.steps.len() as u64 + 1);
             if cap_op_swap_depth {
                 max_op_swap_depth = max_op_swap_depth.max(deepest_swap(&trace.steps));
             }
@@ -491,7 +435,7 @@ fn search_policy(
             );
         }
         stagnant += 1;
-        if let Some((gas, divergence)) = policy_gas_resumed(
+        let evaluated = policy_gas_resumed(
             finalization,
             config,
             graph,
@@ -500,7 +444,9 @@ fn search_policy(
             Some((&current, &trace, current_gas)),
             Some(current_gas),
             &mut recorded,
-        ) {
+        );
+        work = work.saturating_sub(recorded.len() as u64 + 1);
+        if let Some((gas, divergence)) = evaluated {
             if cap_op_swap_depth {
                 max_op_swap_depth = max_op_swap_depth.max(deepest_swap(&recorded));
             }

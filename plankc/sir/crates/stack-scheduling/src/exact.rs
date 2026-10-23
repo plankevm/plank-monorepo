@@ -7,7 +7,7 @@
 //! never lowers it, so the first goal popped from the queue is optimal among spill-free
 //! schedules that keep the stack within `dup`/`swap` reach.
 
-use std::{cmp::Reverse, collections::BinaryHeap, time::Instant};
+use std::{cmp::Reverse, collections::BinaryHeap};
 
 use hashbrown::{HashMap, hash_map::Entry};
 use plank_core::Idx;
@@ -27,7 +27,6 @@ const MAX_OPS: u32 = 10;
 /// that briefly exceed it.
 const MAX_BOUNDARY_VALUES: usize = 12;
 const MAX_VALUES: u32 = 255;
-const DEADLINE_CHECK_INTERVAL: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct State {
@@ -193,9 +192,9 @@ impl Problem {
 }
 
 /// Returns an optimal spill-free schedule with fewer than `move_limit` stack moves, or `None` if
-/// the graph is outside the supported size, there is no such schedule or the search does not
-/// finish before `deadline`. Without `surplus_dups` a value is never duplicated beyond its
-/// remaining uses, which shrinks the search a lot but can miss the optimum.
+/// the graph is outside the supported size, there is no such schedule or the search runs out of
+/// `work` (one unit per expanded state). Without `surplus_dups` a value is never duplicated beyond
+/// its remaining uses, which shrinks the search a lot but can miss the optimum.
 pub fn exact_schedule(
     graph: &OpGraph,
     finalization: BlockFinalization,
@@ -203,7 +202,7 @@ pub fn exact_schedule(
     next_alloc_id: StaticAllocId,
     surplus_dups: bool,
     move_limit: u32,
-    deadline: Instant,
+    work: &mut u64,
 ) -> Option<Vec<StackOps>> {
     let input_count = graph.input_values_fifo().len() as usize;
     if graph.total_ops() > MAX_OPS
@@ -224,7 +223,7 @@ pub fn exact_schedule(
         graph.output_values_fifo(),
     )?;
 
-    let (nodes, goal) = astar(&problem, start, move_limit, deadline)?;
+    let (nodes, goal) = astar(&problem, start, move_limit, work)?;
     Some(replay(graph, next_alloc_id, &nodes, goal))
 }
 
@@ -232,14 +231,13 @@ fn astar(
     problem: &Problem,
     start: State,
     move_limit: u32,
-    deadline: Instant,
+    work: &mut u64,
 ) -> Option<(Vec<Node>, u32)> {
     let mut nodes = vec![Node { state: start, parent: 0, step: Move::Start }];
     let mut best_cost = HashMap::new();
     best_cost.insert(start, 0u32);
     let mut queue = BinaryHeap::new();
     queue.push((Reverse(problem.estimate(&start)?), 0u32, 0u32));
-    let mut expanded = 0usize;
 
     while let Some((_, cost, index)) = queue.pop() {
         let state = nodes[index as usize].state;
@@ -249,8 +247,7 @@ fn astar(
         if problem.is_goal(&state) {
             return Some((nodes, index));
         }
-        expanded += 1;
-        if expanded.is_multiple_of(DEADLINE_CHECK_INTERVAL) && Instant::now() >= deadline {
+        if !spend(work) {
             return None;
         }
         for_each_successor(problem, &state, |next, step, step_cost| {
@@ -279,7 +276,7 @@ fn astar(
 }
 
 /// The beam only beats the policy search on graphs slightly beyond the exact A*'s reach.
-pub const MAX_BEAM_OPS: u32 = 16;
+const MAX_BEAM_OPS: u32 = 16;
 /// Ops beyond this no longer fit the `done` bitmask.
 const MAX_MASK_OPS: u32 = 63;
 /// The beam's result is only a candidate next to the policy searches, so unlike the A* it also
@@ -293,7 +290,7 @@ const CLOSURE_PER_WIDTH: usize = 8;
 /// Anytime beam search over the same states and moves as [`exact_schedule`] for graphs the A*
 /// cannot finish: layer `k` holds states reached with `k` stack moves (operations are free and
 /// join the layer they are executed in), only the `width` states with the smallest lower bound
-/// are expanded further. Reruns with doubled width until `deadline`, keeping the cheapest
+/// are expanded further. Reruns with doubled width until `work` runs out, keeping the cheapest
 /// schedule. Returns `None` if no beam reached the goal within `move_limit` moves.
 pub fn beam_schedule(
     graph: &OpGraph,
@@ -301,7 +298,7 @@ pub fn beam_schedule(
     config: ShuffleConfig,
     next_alloc_id: StaticAllocId,
     mut move_limit: u32,
-    deadline: Instant,
+    work: &mut u64,
 ) -> Option<Vec<StackOps>> {
     let input_count = graph.input_values_fifo().len() as usize;
     if graph.total_ops() > MAX_BEAM_OPS
@@ -325,15 +322,15 @@ pub fn beam_schedule(
     let mut best = None;
     let mut width = FIRST_BEAM_WIDTH;
     loop {
-        match beam_pass(&problem, start, width, move_limit, deadline) {
+        match beam_pass(&problem, start, width, move_limit, work) {
             BeamPass::Found(moves, nodes, goal) => {
                 move_limit = moves;
                 best = Some(replay(graph, next_alloc_id, &nodes, goal));
             }
             BeamPass::NotFound => {}
-            BeamPass::OutOfTime => return best,
+            BeamPass::OutOfWork => return best,
         }
-        if Instant::now() >= deadline || move_limit == 0 {
+        if *work == 0 || move_limit == 0 {
             return best;
         }
         width = width.saturating_mul(2);
@@ -343,7 +340,7 @@ pub fn beam_schedule(
 enum BeamPass {
     Found(u32, Vec<Node>, u32),
     NotFound,
-    OutOfTime,
+    OutOfWork,
 }
 
 fn beam_pass(
@@ -351,14 +348,13 @@ fn beam_pass(
     start: State,
     width: usize,
     move_limit: u32,
-    deadline: Instant,
+    work: &mut u64,
 ) -> BeamPass {
     let mut nodes = vec![Node { state: start, parent: 0, step: Move::Start }];
     let mut seen = hashbrown::HashSet::new();
     seen.insert(start);
     let mut layer = vec![0u32];
     let mut ranked = Vec::new();
-    let mut expanded = 0usize;
     for moves in 0..move_limit {
         let mut cursor = 0;
         let closure_cap = layer.len() + CLOSURE_PER_WIDTH * width;
@@ -369,8 +365,8 @@ fn beam_pass(
             if problem.is_goal(&state) {
                 return BeamPass::Found(moves, nodes, index);
             }
-            if cursor.is_multiple_of(DEADLINE_CHECK_INTERVAL) && Instant::now() >= deadline {
-                return BeamPass::OutOfTime;
+            if !spend(work) {
+                return BeamPass::OutOfWork;
             }
             if layer.len() >= closure_cap {
                 continue;
@@ -398,9 +394,8 @@ fn beam_pass(
         layer.clear();
         for &(_, _, index) in &ranked {
             let state = nodes[index as usize].state;
-            expanded += 1;
-            if expanded.is_multiple_of(DEADLINE_CHECK_INTERVAL) && Instant::now() >= deadline {
-                return BeamPass::OutOfTime;
+            if !spend(work) {
+                return BeamPass::OutOfWork;
             }
             for_each_successor(problem, &state, |next, step, step_cost| {
                 if step_cost == 1 && seen.insert(next) {
@@ -656,14 +651,14 @@ struct Boundary {
 /// each operation are fixed points, and the moves and operations between two points a few
 /// operations apart (sizes from [`WINDOW_OPS`]) are re-solved by the A* with the end state as
 /// goal. A window is replaced whenever the A* finds strictly fewer moves; returns `None` if
-/// nothing improved before `deadline`.
+/// nothing improved before `work` (one unit per window tried and per expanded A* state) ran out.
 pub fn reoptimize_windows(
     graph: &OpGraph,
     finalization: BlockFinalization,
     config: ShuffleConfig,
     next_alloc_id: StaticAllocId,
     schedule: &[StackOps],
-    deadline: Instant,
+    work: &mut u64,
 ) -> Option<Vec<StackOps>> {
     if !schedule.iter().all(|op| {
         matches!(
@@ -683,7 +678,7 @@ pub fn reoptimize_windows(
     let mut schedule = schedule.to_vec();
     let mut improved_any = false;
     for window_ops in WINDOW_OPS {
-        if Instant::now() >= deadline {
+        if *work == 0 {
             break;
         }
         improved_any |= sweep_windows(
@@ -693,7 +688,7 @@ pub fn reoptimize_windows(
             next_alloc_id,
             &mut schedule,
             window_ops,
-            deadline,
+            work,
         );
     }
     improved_any.then_some(schedule)
@@ -708,7 +703,7 @@ fn sweep_windows(
     next_alloc_id: StaticAllocId,
     schedule: &mut Vec<StackOps>,
     window_ops: usize,
-    deadline: Instant,
+    work: &mut u64,
 ) -> bool {
     let op_of = |operation: StackOps| {
         let (index, ret_dest_push) = match operation {
@@ -770,7 +765,7 @@ fn sweep_windows(
 
         let mut improvement = None;
         for start_index in first..boundaries.len().saturating_sub(1) {
-            if Instant::now() >= deadline {
+            if !spend(work) {
                 return improved_any;
             }
             let end_index = (start_index + window_ops).min(boundaries.len() - 1);
@@ -811,7 +806,7 @@ fn sweep_windows(
             else {
                 continue;
             };
-            if let Some((nodes, goal)) = astar(&problem, state, moves, deadline) {
+            if let Some((nodes, goal)) = astar(&problem, state, moves, work) {
                 let replacement = replay_from(graph, next_alloc_id, from_fifo, &nodes, goal);
                 improvement = Some((from.position, to.position, replacement, start_index));
                 break;
@@ -824,6 +819,13 @@ fn sweep_windows(
         improved_any = true;
         first = start_index.saturating_sub(window_ops);
     }
+}
+
+/// Takes one unit from `work`, or returns `false` if none is left.
+pub fn spend(work: &mut u64) -> bool {
+    let Some(left) = work.checked_sub(1) else { return false };
+    *work = left;
+    true
 }
 
 fn input_stack(graph: &OpGraph) -> EvmStack {
