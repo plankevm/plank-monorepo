@@ -83,8 +83,6 @@ A `Policy` is a genome:
   output slots. Storing them at once and loading them when an operation or the final layout
   needs them beats dragging them along past reach. The search changes it for blocks with at
   least 14 inputs (up to 8), and otherwise only over the run of dead inputs on top.
-- `pre_swaps: [u8; 3]`: swaps applied after the pre-spills (0 = none, depths beyond the stack
-  are skipped). They sink pass-through inputs towards their output slots while still in reach.
 - `op_swaps[op]`: two swap slots of depth 1–16 (0 = none, depths beyond the stack are skipped)
   applied right before preparing the operands of `op`. Mutations only pick depths up to the
   deepest stack seen so far in the search minus one, since deeper swaps are skipped anyway. The greedy operand preparer only cares about the
@@ -107,8 +105,9 @@ A `Policy` is a genome:
   up-front `pre_shuffle` gene did) loses almost all of the gain, and a gene bit choosing between the two layouts is +170.
   Two shuffle slots: no gain; mutation rate 1/8: +190; 1/32: +50 (noise).
 
-A `pre_shuffle` gene, permuting the inputs up front into consumption order, used to exist.
-Removing it together with the pre-swaps and moving to 3 searches: research corpus −540 gas at
+A `pre_shuffle` gene (permute the inputs up front into consumption order) and three
+`pre_swaps` (swaps right after the pre-spills) used to exist; `op_swaps` and `shuffle_before`
+cover them. Removing both and moving to 3 searches: research corpus −540 gas at
 effort 1000, +15 at 23000.
 
 Ready operations are tracked incrementally: each operation counts its unfinished immediate
@@ -124,7 +123,7 @@ permutes the stack into the output layout, popping dead values and loading spill
 ## 3. Policy search (`search_policy`)
 
 Hill climbing with iterated-local-search restarts:
-- Mutations: set or clear a pre-swap (1/16); change pre_spill by ±1
+- Mutations: change pre_spill by ±1
   (1/16 when allowed); set or clear shuffle_before (1/16); set one op-swap slot to a random depth or clear it (1/2 of the remaining); cycle a flip choice;
   otherwise change priorities (swap two, move an op just before another, or randomise one).
   Each candidate gets 1–2 mutations.
@@ -132,7 +131,7 @@ Hill climbing with iterated-local-search restarts:
   aborted as soon as it costs more than the current genome.
 - Evaluations resume instead of starting over. The search keeps a trace of the current genome's
   greedy run: for every step, the op run and the state before it (stack, spilled values, gas so
-  far). A candidate with the same prelude (pre_spill, pre_swaps) picks
+  far). A candidate with the same prelude (pre_spill) picks
   ops by its own priorities while they match the trace and the op has the same op-swaps and
   flip; the greedy run then starts from the checkpoint of the first differing step. If no step
   differs the candidate costs the same as the current genome. An accepted candidate's new steps

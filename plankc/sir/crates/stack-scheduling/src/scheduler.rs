@@ -44,7 +44,6 @@ const RESTART_KICK_OPS_PER_MUTATION: usize = 8;
 /// over their leading dead inputs.
 const PRE_SPILL_MIN_INPUTS: u32 = 14;
 const MAX_PRE_SPILL: u8 = 8;
-const PRE_SWAPS: usize = 3;
 /// Number of independent policy searches, each with its own random seed and an equal share of
 /// the search budget.
 const SEARCHES: u64 = 2;
@@ -76,9 +75,6 @@ pub struct Policy {
     /// storing them at once and loading them at the end beats dragging them along past
     /// `dup`/`swap` reach. Dead inputs on top otherwise get buried under operation results.
     pub pre_spill: u8,
-    /// Swaps applied right after the pre-spills (depth 0 = none). They let a pass-through input
-    /// sink towards its output slot while it is still cheap to reach.
-    pub pre_swaps: [u8; PRE_SWAPS],
     /// Per operation: up to two swaps applied right before preparing its operands (0 = none), to
     /// park values at the depth they are wanted later.
     pub op_swaps: Vec<[u8; 2]>,
@@ -95,7 +91,6 @@ impl Policy {
             priority: (0..n as u32).map(|i| i * PRIORITY_SPACING).collect(),
             flips: vec![FlipChoice::Cheapest; n],
             pre_spill: 0,
-            pre_swaps: [0; PRE_SWAPS],
             op_swaps: vec![[0; 2]; n],
             shuffle_before: None,
         }
@@ -254,7 +249,6 @@ fn search_policy(
     } else {
         graph.input_values_fifo().iter().take_while(|&value| is_dead(graph, value)).count() as u8
     };
-    let max_pre_swap_depth = (graph.input_values_fifo().len().saturating_sub(1) as u8).min(16);
     // Swaps deeper than any stack the search has seen only waste candidates on small graphs.
     // Larger graphs search better with the full range: such genes are latent, not wasted.
     let cap_op_swap_depth = n <= OP_SWAP_DEPTH_CAP_MAX_OPS;
@@ -272,14 +266,7 @@ fn search_policy(
             }
             current.clone_from(&best);
             for _ in 0..RESTART_KICK_BASE + n / RESTART_KICK_OPS_PER_MUTATION {
-                mutate(
-                    &mut current,
-                    &flippable,
-                    max_pre_spill,
-                    max_pre_swap_depth,
-                    max_op_swap_depth,
-                    &mut rng,
-                );
+                mutate(&mut current, &flippable, max_pre_spill, max_op_swap_depth, &mut rng);
             }
             current_gas = policy_gas_resumed(
                 finalization,
@@ -302,19 +289,11 @@ fn search_policy(
         candidate.priority.clone_from(&current.priority);
         candidate.flips.clone_from(&current.flips);
         candidate.pre_spill = current.pre_spill;
-        candidate.pre_swaps = current.pre_swaps;
         candidate.op_swaps.clone_from(&current.op_swaps);
         candidate.shuffle_before = current.shuffle_before;
         let mutations = 1 + rng.below(3).saturating_sub(1);
         for _ in 0..mutations {
-            mutate(
-                &mut candidate,
-                &flippable,
-                max_pre_spill,
-                max_pre_swap_depth,
-                max_op_swap_depth,
-                &mut rng,
-            );
+            mutate(&mut candidate, &flippable, max_pre_spill, max_op_swap_depth, &mut rng);
         }
         stagnant += 1;
         let evaluated = policy_gas_resumed(
@@ -353,20 +332,10 @@ fn mutate(
     policy: &mut Policy,
     flippable: &[usize],
     max_pre_spill: u8,
-    max_pre_swap_depth: u8,
     max_op_swap_depth: u8,
     rng: &mut Rng,
 ) {
     let n = policy.priority.len();
-    if max_pre_swap_depth > 0 && rng.below(16) == 0 {
-        let swap = &mut policy.pre_swaps[rng.below(PRE_SWAPS)];
-        *swap = if *swap != 0 && rng.below(2) == 0 {
-            0
-        } else {
-            1 + rng.below(usize::from(max_pre_swap_depth)) as u8
-        };
-        return;
-    }
     if max_pre_spill > 0 && rng.below(16) == 0 {
         policy.pre_spill =
             if policy.pre_spill == 0 || (policy.pre_spill < max_pre_spill && rng.below(2) == 0) {
@@ -516,11 +485,6 @@ fn schedule_prelude<Sink: FnMut(StackOps)>(
             stack.spill_top();
         }
     }
-    for depth in policy.pre_swaps {
-        if depth != 0 && usize::from(depth) < stack.len() as usize {
-            stack.swap(depth);
-        }
-    }
 }
 
 fn schedule_step<Sink: FnMut(StackOps)>(
@@ -639,9 +603,8 @@ fn policy_gas_resumed(
         Some(op)
     };
 
-    let same_prelude = reference.is_some_and(|(reference, _, _)| {
-        reference.pre_spill == candidate.pre_spill && reference.pre_swaps == candidate.pre_swaps
-    });
+    let same_prelude =
+        reference.is_some_and(|(reference, _, _)| reference.pre_spill == candidate.pre_spill);
     let mut divergence = 0;
     let mut next = pick(&mut ready, &mut waiting_on);
     if let Some((reference, trace, reference_gas)) = reference.filter(|_| same_prelude) {
