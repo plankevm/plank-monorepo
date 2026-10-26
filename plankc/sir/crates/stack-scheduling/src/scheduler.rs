@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use crate::{
     BlockFinalization,
-    exact::{beam_schedule, exact_schedule, reoptimize_windows},
+    exact::{exact_schedule, reoptimize_windows},
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 
 const SCRATCH_OP_SET_INLINE_CAPACITY: usize = 512 / BitsetWord::BITS as usize;
 /// Work units granted per thousand units of effort for a single graph. A work unit is one expanded
-/// A* or beam state, one window tried, or one greedy step of a policy candidate. Counting work
+/// A* state, one window tried, or one greedy step of a policy candidate. Counting work
 /// instead of time makes the schedule a function of the graph and the effort only. Tuned so that a
 /// validation set of ~1,500 graphs takes under a second at effort 1000 on an M-series laptop.
 const WORK_PER_THOUSAND_EFFORT: u64 = 1_400;
@@ -29,8 +29,6 @@ const BUDGET_SCALE_OPS: u64 = 32;
 const MAX_BUDGET_SCALE: u64 = 8;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
 const EXACT_BUDGET_SHARE: f64 = 0.5;
-/// Share of the budget left after the exact A* that the beam search may use.
-const BEAM_BUDGET_SHARE: f64 = 0.3;
 /// Share of the whole budget reserved for [`reoptimize_windows`] on the final schedule.
 const WINDOW_BUDGET_SHARE: f64 = 0.25;
 /// Stops the search once this many consecutive candidates failed to improve, scaled by graph
@@ -138,7 +136,6 @@ pub fn schedule_with_effort(
             .expect("exact scheduler produced an invalid schedule");
         SearchResult { ops: ops.into_boxed_slice(), spill_count: 0 }
     };
-    let mut beam = None;
     if effort > 0 {
         let mut exact_work = (work as f64 * EXACT_BUDGET_SHARE) as u64;
         let exact_budget = exact_work;
@@ -164,11 +161,7 @@ pub fn schedule_with_effort(
             );
             return exact_result(ops.unwrap_or(restricted));
         }
-        work -= exact_budget - exact_work;
-        let mut beam_work = (work as f64 * BEAM_BUDGET_SHARE) as u64;
-        let beam_budget = beam_work;
-        beam = beam_schedule(graph, finalization, shuffle, next_alloc_id, u32::MAX, &mut beam_work);
-        work = (work - (beam_budget - beam_work)).max(1);
+        work = (work - (exact_budget - exact_work)).max(1);
     }
     let trees = build_tree_graph(graph);
     let tree_dag = Dag::new(&trees.graph);
@@ -201,9 +194,6 @@ pub fn schedule_with_effort(
     // Independent policy searches with different random streams explore different basins.
     let searches = if effort > 0 { SEARCHES } else { 1 };
     let mut searched: Vec<_> = (0..searches).map(search).collect();
-    if let Some(beam) = beam {
-        searched.push((beam.into_boxed_slice(), next_alloc_id));
-    }
     // Stable sort: equal-cost results stay in search order.
     searched.sort_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle));
     searched.dedup_by(|(a, _), (b, _)| a == b);

@@ -14,7 +14,7 @@ greedy pass on the tree graph, steps 2 and 3 with no search).
 
 Every search counts work instead of time, so the schedule is a function of the graph and the
 effort only: it never depends on the machine, its load, core count or thread scheduling. One
-work unit is one expanded A* or beam state, one window tried in step 5, or one greedy step of a
+work unit is one expanded A* state, one window tried in step 5, or one greedy step of a
 policy candidate in step 3 (a candidate that resumes from a checkpoint only pays for the steps
 it reruns).
 
@@ -37,9 +37,8 @@ unused passes on to the next.
 Everything runs on the calling thread; the compiler already schedules blocks in parallel.
 
 1. The A* of step 1 gets `0.5 B`. If it succeeds, its schedule is returned.
-2. Otherwise the beam search of step 1b gets 30% of what is left.
-3. The rest is split evenly between `SEARCHES` = 2 runs of step 3 with random seeds 0 and 1.
-4. The search results, plus the beam schedule if there is one, are sorted by gas (ties keep
+2. Otherwise the rest is split evenly between `SEARCHES` = 2 runs of step 3 with random seeds 0 and 1.
+3. The search results are sorted by gas (ties keep
    search order) and deduplicated. Each distinct result runs steps 4 and 5 with an equal share
    of the window budget. The cheapest finished schedule wins, the first one on ties. A search
    result that is slightly worse before the windows sometimes ends cheaper after them.
@@ -68,17 +67,10 @@ its remaining uses, which keeps the search small. A second run allows surplus du
 the first run's move count. The two runs share `0.5 B`. If either succeeds, its schedule is
 returned.
 
-## 1b. Beam search (graphs slightly too large for the A*)
-
-`exact::beam_schedule`, ≤16 ops, given 30% of what is left of `B`. Same states and moves as the
-A*. Unlike the A*, it also runs on blocks with 13–16 inputs or outputs: its result is only a
-candidate next to the policy searches, so a spill-free schedule that is worse than one with
-spills does no harm. On the research corpus this saved about 80 gas, all on graphs of 1–10 ops
-with 12–16 boundary values. Those graphs mostly need a long permutation. Layer k = states reached with k stack moves; free op moves are closed over inside a layer
-(capped at 8 × width states, since independent ready ops can interleave in exponentially many
-ways). The `width` states with the smallest heuristic (ties: more ops done) are expanded into
-layer k+1. A global seen-set dedupes states. Runs with width 4, 8, 16, ... until its budget runs out,
-keeping the cheapest goal reached. Its result is one more candidate for steps 4 and 5.
+A beam search over the same states and moves for graphs with at most 16 operations and up to
+15 boundary values used to run next, with 30% of what the A* left, its result one more candidate
+for steps 4 and 5. Giving that work to the policy searches is cheaper at every effort (research
+corpus: −348 gas at effort 1000 alone, −1,074 together with dropping the flat search of step 3).
 
 ## 2. Greedy scheduler steered by a policy (`greedy_schedule`)
 
