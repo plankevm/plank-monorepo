@@ -71,8 +71,6 @@ pub enum FlipChoice {
 pub struct Policy {
     pub priority: Vec<u32>,
     pub flips: Vec<FlipChoice>,
-    /// Permute the block inputs into [`pre_shuffle_layout`] before scheduling any operation.
-    pub pre_shuffle: bool,
     /// Number of block inputs spilled (or popped, if dead) off the top of the stack before
     /// anything else. Deep blocks often pass their top inputs through to deep output slots;
     /// storing them at once and loading them at the end beats dragging them along past
@@ -96,7 +94,6 @@ impl Policy {
         Self {
             priority: (0..n as u32).map(|i| i * PRIORITY_SPACING).collect(),
             flips: vec![FlipChoice::Cheapest; n],
-            pre_shuffle: false,
             pre_spill: 0,
             pre_swaps: [0; PRE_SWAPS],
             op_swaps: vec![[0; 2]; n],
@@ -304,7 +301,6 @@ fn search_policy(
         }
         candidate.priority.clone_from(&current.priority);
         candidate.flips.clone_from(&current.flips);
-        candidate.pre_shuffle = current.pre_shuffle;
         candidate.pre_spill = current.pre_spill;
         candidate.pre_swaps = current.pre_swaps;
         candidate.op_swaps.clone_from(&current.op_swaps);
@@ -362,10 +358,6 @@ fn mutate(
     rng: &mut Rng,
 ) {
     let n = policy.priority.len();
-    if rng.below(16) == 0 {
-        policy.pre_shuffle = !policy.pre_shuffle;
-        return;
-    }
     if max_pre_swap_depth > 0 && rng.below(16) == 0 {
         let swap = &mut policy.pre_swaps[rng.below(PRE_SWAPS)];
         *swap = if *swap != 0 && rng.below(2) == 0 {
@@ -473,7 +465,7 @@ pub fn greedy_schedule(
         }
         TrackedStack::new_from_evm(next_alloc_id, ops_sink, inner, 8)
     };
-    schedule_prelude(config, &mut stack, graph, policy);
+    schedule_prelude(&mut stack, graph, policy);
 
     let mut waiting_on: SmallVec<[u32; 64]> = SmallVec::from_slice(&dag.predecessor_counts);
     let mut ready: SmallVec<[OpNodeId; 32]> =
@@ -513,7 +505,6 @@ pub fn greedy_schedule(
 }
 
 fn schedule_prelude<Sink: FnMut(StackOps)>(
-    config: ShuffleConfig,
     stack: &mut TrackedStack<Sink>,
     graph: &OpGraph,
     policy: &Policy,
@@ -529,9 +520,6 @@ fn schedule_prelude<Sink: FnMut(StackOps)>(
         if depth != 0 && usize::from(depth) < stack.len() as usize {
             stack.swap(depth);
         }
-    }
-    if policy.pre_shuffle {
-        greedy_shuffler::shuffle_to(config, stack, &pre_shuffle_layout(graph, policy), false);
     }
 }
 
@@ -652,10 +640,7 @@ fn policy_gas_resumed(
     };
 
     let same_prelude = reference.is_some_and(|(reference, _, _)| {
-        reference.pre_spill == candidate.pre_spill
-            && reference.pre_swaps == candidate.pre_swaps
-            && reference.pre_shuffle == candidate.pre_shuffle
-            && (!candidate.pre_shuffle || reference.priority == candidate.priority)
+        reference.pre_spill == candidate.pre_spill && reference.pre_swaps == candidate.pre_swaps
     });
     let mut divergence = 0;
     let mut next = pick(&mut ready, &mut waiting_on);
@@ -699,7 +684,7 @@ fn policy_gas_resumed(
                 inner.push(input);
             }
             let mut stack = TrackedStack::new_from_evm(StaticAllocId::ZERO, sink, inner, 8);
-            schedule_prelude(config, &mut stack, graph, candidate);
+            schedule_prelude(&mut stack, graph, candidate);
             stack
         }
     };
@@ -735,38 +720,6 @@ fn policy_gas_resumed(
 
 fn is_dead(graph: &OpGraph, value: ValueNodeId) -> bool {
     graph.get_consumers(value).count_members() == 0 && !graph.output_values_fifo().contains(&value)
-}
-
-/// Input layout that lets operations consume their inputs straight off the top: inputs feeding
-/// operations come first in the order the policy consumes them, followed by the inputs passed
-/// through to the block outputs, already in output order. Doing this permutation once up front is
-/// often cheaper than fixing up pass-through values at the end with deep swaps.
-fn pre_shuffle_layout(graph: &OpGraph, policy: &Policy) -> Vec<ValueNodeId> {
-    let pre_spilled = |value: ValueNodeId| value.idx() < usize::from(policy.pre_spill);
-    let mut passed_through = Vec::new();
-    for &value in graph.output_values_fifo().iter().rev() {
-        if graph.is_input(value) && !pre_spilled(value) && !passed_through.contains(&value) {
-            passed_through.push(value);
-        }
-    }
-    passed_through.reverse();
-
-    let mut order: Vec<OpNodeId> = graph.op_ids().collect();
-    order.sort_by_key(|op| (policy.priority[op.idx()], op.idx()));
-    let mut layout = Vec::new();
-    for op in order {
-        for &value in graph.get_op(op).inputs_fifo {
-            if graph.is_input(value)
-                && !pre_spilled(value)
-                && !layout.contains(&value)
-                && !passed_through.contains(&value)
-            {
-                layout.push(value);
-            }
-        }
-    }
-    layout.extend(passed_through);
-    layout
 }
 
 /// Stack layout for [`Policy::shuffle_before`]: values the remaining operations read come first in
