@@ -69,7 +69,7 @@ the first run's move count, used to follow; it gained 15–27 gas on the researc
 
 A beam search over the same states and moves for graphs with at most 16 operations and up to
 15 boundary values used to run next, with 30% of what the A* left, its result one more candidate
-for steps 4 and 5. Giving that work to the policy searches is cheaper at every effort (research
+for step 5. Giving that work to the policy searches is cheaper at every effort (research
 corpus: −348 gas at effort 1000 alone, −1,074 together with dropping the flat search of step 3).
 
 ## 2. Greedy scheduler steered by a policy (`greedy_schedule`)
