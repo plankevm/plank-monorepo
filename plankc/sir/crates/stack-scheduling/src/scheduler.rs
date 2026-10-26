@@ -27,7 +27,7 @@ const WORK_PER_THOUSAND_EFFORT: u64 = 1_400;
 const BUDGET_SCALE_OPS: u64 = 32;
 const MAX_BUDGET_SCALE: u64 = 8;
 /// Share of the search budget the exact A* may use before falling back to the heuristic search.
-const EXACT_BUDGET_SHARE: f64 = 0.5;
+const EXACT_BUDGET_SHARE: f64 = 0.4;
 /// Share of the whole budget reserved for [`reoptimize_windows`] on the final schedule.
 const WINDOW_BUDGET_SHARE: f64 = 0.25;
 /// Stops the search once this many consecutive candidates failed to improve, scaled by graph
@@ -46,7 +46,7 @@ const PRE_SPILL_MIN_INPUTS: u32 = 14;
 const MAX_PRE_SPILL: u8 = 8;
 /// Number of independent policy searches, each with its own random seed and an equal share of
 /// the search budget.
-const SEARCHES: u64 = 3;
+const SEARCHES: u64 = 4;
 /// Graphs with at most this many operations only mutate op swaps up to the deepest stack seen.
 const OP_SWAP_DEPTH_CAP_MAX_OPS: usize = 32;
 
