@@ -37,14 +37,15 @@ unused passes on to the next.
 Everything runs on the calling thread; the compiler already schedules blocks in parallel.
 
 1. The A* of step 1 gets `0.5 B`. If it succeeds, its schedule is returned.
-2. Otherwise the rest is split evenly between `SEARCHES` = 2 runs of step 3 with random seeds 0 and 1.
+2. Otherwise the rest is split evenly between `SEARCHES` = 3 runs of step 3 with random seeds 0, 1 and 2.
 3. The search results are sorted by gas (ties keep
    search order) and deduplicated. Each distinct result runs step 5 with an equal share
    of the window budget. The cheapest finished schedule wins, the first one on ties. A search
    result that is slightly worse before the windows sometimes ends cheaper after them.
 
-On the validation set, at the same work, 2 searches beat 1 by about 250 gas at effort 1000
-and 110 at effort 23000; 4 searches are no better than 2. Running the searches and finishers
+On the research corpus, at the same work, 2 searches beat 1 by about 650 gas at effort 1000 and
+280 at effort 23000. With the beam, flat search, polish and the pre-genes gone, 3 searches beat
+2 by 27 gas at 1000 and 81 at 23000 (validation: 30 and 42). Running the searches and finishers
 on threads of their own gives the same schedules in less wall time (about 0.6× at effort
 23000), which buys about 1% gas at the same time limit on a benchmark that schedules one
 graph at a time, but nothing in the compiler.

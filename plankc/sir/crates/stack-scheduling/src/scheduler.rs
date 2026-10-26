@@ -46,7 +46,7 @@ const PRE_SPILL_MIN_INPUTS: u32 = 14;
 const MAX_PRE_SPILL: u8 = 8;
 /// Number of independent policy searches, each with its own random seed and an equal share of
 /// the search budget.
-const SEARCHES: u64 = 2;
+const SEARCHES: u64 = 3;
 /// Graphs with at most this many operations only mutate op swaps up to the deepest stack seen.
 const OP_SWAP_DEPTH_CAP_MAX_OPS: usize = 32;
 
