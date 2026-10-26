@@ -62,10 +62,9 @@ swap moves two values, so ⌈misplaced such values / 2⌉ swaps are still needed
 operations are done, the bound is the larger of that and the number of misplaced positions
 below the top plus one for each permutation cycle that does not contain the top (such a cycle
 needs an extra swap to bring one of its members up first; only used when the goal holds no
-value twice). A first run forbids duplicating a value beyond
-its remaining uses, which keeps the search small. A second run allows surplus dups, capped at
-the first run's move count. The two runs share `0.5 B`. If either succeeds, its schedule is
-returned.
+value twice). The search never duplicates a value beyond its remaining uses, which keeps it small. It gets
+`0.5 B`; if it succeeds, its schedule is returned. A second run allowing surplus dups, capped at
+the first run's move count, used to follow; it gained 15–27 gas on the research corpus.
 
 A beam search over the same states and moves for graphs with at most 16 operations and up to
 15 boundary values used to run next, with 30% of what the A* left, its result one more candidate

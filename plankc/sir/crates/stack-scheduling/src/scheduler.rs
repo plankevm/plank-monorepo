@@ -139,27 +139,10 @@ pub fn schedule_with_effort(
     if effort > 0 {
         let mut exact_work = (work as f64 * EXACT_BUDGET_SHARE) as u64;
         let exact_budget = exact_work;
-        let restricted = exact_schedule(
-            graph,
-            finalization,
-            shuffle,
-            next_alloc_id,
-            false,
-            u32::MAX,
-            &mut exact_work,
-        );
-        if let Some(restricted) = restricted {
-            let moves = restricted.iter().filter(|op| op.gas_cost(shuffle) > 0).count() as u32;
-            let ops = exact_schedule(
-                graph,
-                finalization,
-                shuffle,
-                next_alloc_id,
-                true,
-                moves,
-                &mut exact_work,
-            );
-            return exact_result(ops.unwrap_or(restricted));
+        if let Some(ops) =
+            exact_schedule(graph, finalization, shuffle, next_alloc_id, &mut exact_work)
+        {
+            return exact_result(ops);
         }
         work = (work - (exact_budget - exact_work)).max(1);
     }

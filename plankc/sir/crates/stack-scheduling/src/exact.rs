@@ -191,17 +191,15 @@ impl Problem {
     }
 }
 
-/// Returns an optimal spill-free schedule with fewer than `move_limit` stack moves, or `None` if
-/// the graph is outside the supported size, there is no such schedule or the search runs out of
-/// `work` (one unit per expanded state). Without `surplus_dups` a value is never duplicated beyond
-/// its remaining uses, which shrinks the search a lot but can miss the optimum.
+/// Returns an optimal spill-free schedule among those that never duplicate a value beyond its
+/// remaining uses, or `None` if the graph is outside the supported size or the search runs out of
+/// `work` (one unit per expanded state). Forbidding surplus dups shrinks the search a lot; the
+/// rare schedules that need one are left to the policy search.
 pub fn exact_schedule(
     graph: &OpGraph,
     finalization: BlockFinalization,
     config: ShuffleConfig,
     next_alloc_id: StaticAllocId,
-    surplus_dups: bool,
-    move_limit: u32,
     work: &mut u64,
 ) -> Option<Vec<StackOps>> {
     let input_count = graph.input_values_fifo().len() as usize;
@@ -217,13 +215,13 @@ pub fn exact_schedule(
         graph,
         finalization,
         config,
-        surplus_dups,
+        false,
         ops,
         input_stack(graph).fifo(),
         graph.output_values_fifo(),
     )?;
 
-    let (nodes, goal) = astar(&problem, start, move_limit, work)?;
+    let (nodes, goal) = astar(&problem, start, u32::MAX, work)?;
     Some(replay(graph, next_alloc_id, &nodes, goal))
 }
 
