@@ -19,7 +19,6 @@ mod exact;
 mod greedy_intra_op_scheduler;
 mod greedy_shuffler;
 mod layouts;
-mod polish;
 mod scheduler;
 pub mod stack;
 pub mod stack_ops;

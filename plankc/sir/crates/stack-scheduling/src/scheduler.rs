@@ -6,7 +6,6 @@ use crate::{
     greedy_intra_op_scheduler::greedy_schedule_op,
     greedy_shuffler,
     op_graph::{BitsetWord, OpGraph, OpNodeId, OpNodeKind, OpSet, OpSetMut, ValueNodeId},
-    polish::polish,
     stack::{EvmStack, ShuffleConfig, StackOps, TrackedStack},
     treegraph::build_tree_graph,
     validation,
@@ -181,13 +180,12 @@ pub fn schedule_with_effort(
     searched.sort_by_key(|(ops, _)| crate::stack::gas_cost(ops, shuffle));
     searched.dedup_by(|(a, _), (b, _)| a == b);
     let finish_work = window_work / searched.len() as u64;
-    // Every distinct search result is polished and window-optimized: a slightly worse search
+    // Every distinct search result is window-optimized: a slightly worse search
     // result sometimes ends cheaper after the windows.
     let finish = |(ops, new_next_alloc_id): (Box<[StackOps]>, StaticAllocId)| {
         if effort == 0 {
             return (ops, new_next_alloc_id);
         }
-        let ops = polish(graph, shuffle, next_alloc_id, &ops);
         let mut work = finish_work;
         let ops = reoptimize_windows(graph, finalization, shuffle, next_alloc_id, &ops, &mut work)
             .map_or(ops, Vec::into_boxed_slice);

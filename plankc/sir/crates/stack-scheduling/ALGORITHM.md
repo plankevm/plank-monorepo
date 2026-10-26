@@ -29,7 +29,7 @@ takes about 0.9 s and effort 23000 about 14.5 s. Wall time is not linear in effo
 high effort most small graphs stop early (solved exactly or the search stagnates).
 
 With effort > 0, 25% of the budget (`WINDOW_BUDGET_SHARE`) is reserved for the window
-re-optimization (step 5); the rest is the search budget `B` for steps 1-4. Work a step leaves
+re-optimization (step 5); the rest is the search budget `B` for steps 1-3. Work a step leaves
 unused passes on to the next.
 
 ## 0b. Search order
@@ -39,7 +39,7 @@ Everything runs on the calling thread; the compiler already schedules blocks in 
 1. The A* of step 1 gets `0.5 B`. If it succeeds, its schedule is returned.
 2. Otherwise the rest is split evenly between `SEARCHES` = 2 runs of step 3 with random seeds 0 and 1.
 3. The search results are sorted by gas (ties keep
-   search order) and deduplicated. Each distinct result runs steps 4 and 5 with an equal share
+   search order) and deduplicated. Each distinct result runs step 5 with an equal share
    of the window budget. The cheapest finished schedule wins, the first one on ties. A search
    result that is slightly worse before the windows sometimes ends cheaper after them.
 
@@ -152,11 +152,10 @@ to the tree search instead is cheaper at every effort (research corpus: −657 g
 The winner's final shuffle is redone with the
 slower, thorough shuffle strategies.
 
-## 4. Polish (`polish.rs`)
+## 4. Polish (removed)
 
-Every maximal run of swap/dup/pop between two other instructions moves the stack from one
-exact state to another. Each run is re-solved with the shuffler, and the shorter sequence is
-kept.
+Re-solving every maximal run of swap/dup/pop with the shuffler used to run before step 5. Step 5
+finds nearly all of it: dropping it cost 9–75 gas on the research corpus.
 
 ## 5. Window re-optimization
 
