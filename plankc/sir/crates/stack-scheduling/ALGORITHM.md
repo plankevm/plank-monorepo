@@ -111,7 +111,7 @@ A `Policy` is a genome:
   (4 ops, 13 inputs: run one op, rotate 10 values, run the rest; 45 → 39 gas). Mutation: 1/16
   of the remaining, set to a random op or clear. A resumed evaluation diverges at the step whose
   op has the shuffle in either genome (and, if the candidate's, when priorities differ, since
-  the layout depends on them). Not carried from the tree search to the flat search. On the
+  the layout depends on them). On the
   research corpus at effort 23000: −1,344 gas (159,567 → 158,223, side by side), same wall
   time, gains in every size bucket, most on 6–32 ops. Keeping outputs at their output positions
   is what matters: putting consumed outputs in the consumption part instead (as `pre_shuffle`
@@ -150,20 +150,15 @@ Hill climbing with iterated-local-search restarts:
 - After `max(2000, 400 * ops)` candidates without improvement, restart from the best genome
   with `3 + ops/8` random mutations. Tiny graphs with fewer than 4 choices just stop.
 
-The search runs twice:
-1. On the tree graph (`treegraph`, after Park et al.): single-use chains are contracted into
-   trees with a fixed internal order, which shrinks the search space. It gets 3/4 of the search's
-   budget.
-   The result is expanded back to the original operations.
-2. On the untransformed graph, seeded with the tree winner's order, flips, pre_shuffle,
-   pre_spill and pre_swaps. Op swaps start at 0 because tree operations do not map one-to-one
-   to graph operations. Tree contraction sometimes rules out the best order. It gets the remaining
-   quarter. Split tried on the research corpus at effort 23000 (tree share, gas against the 1/2
-   split in the same load): 1/3 +336, alternating 1/4 and 1/2 by thread +280, 2/3 −213 and
-   −102, 3/4 −207. The tree search finds most of the gain; the flat search mostly polishes.
-   Gains are largest on graphs with 33+ ops.
+The search runs on the tree graph (`treegraph`, after Park et al.): single-use chains are
+contracted into trees with a fixed internal order, which shrinks the search space. The result
+is expanded back to the original operations. Searching the untransformed graph instead is 7%
+worse. A second search on the untransformed graph, seeded with the tree winner, used to get a
+quarter of the budget (tree contraction sometimes rules out the best order); giving that quarter
+to the tree search instead is cheaper at every effort (research corpus: −657 gas at effort 1000,
+−495 at 23000), even without the window re-optimization of step 5.
 
-The cheaper of the two schedules is kept. The winner's final shuffle is redone with the
+The winner's final shuffle is redone with the
 slower, thorough shuffle strategies.
 
 ## 4. Polish (`polish.rs`)

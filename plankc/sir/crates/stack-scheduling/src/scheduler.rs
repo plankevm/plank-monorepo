@@ -108,42 +108,6 @@ impl Policy {
     }
 }
 
-impl Policy {
-    /// Policy that schedules the operations of `graph` in the order and orientation they appear
-    /// in `schedule`, with the same block prelude as `prelude`.
-    fn replaying(graph: &OpGraph, schedule: &[StackOps], prelude: &Policy) -> Self {
-        let mut policy = Self::graph_order(graph);
-        policy.pre_shuffle = prelude.pre_shuffle;
-        policy.pre_spill = prelude.pre_spill;
-        policy.pre_swaps = prelude.pre_swaps;
-        let mut position = 0;
-        for &scheduled in schedule {
-            let (operation, flipped, ret_dest_push) = match scheduled {
-                StackOps::Op(operation) => (operation, false, false),
-                StackOps::Flipped(operation) => (operation, true, false),
-                StackOps::CallRetPush(operation) => (operation, false, true),
-                _ => continue,
-            };
-            let op = graph
-                .op_ids()
-                .find(|&op| match graph.get_op(op).kind {
-                    OpNodeKind::Flippable(idx) | OpNodeKind::Normal(idx) => {
-                        !ret_dest_push && idx == operation
-                    }
-                    OpNodeKind::RetDestPush(idx) => ret_dest_push && idx == operation,
-                })
-                .expect("scheduled operation missing from graph");
-            policy.priority[op.idx()] = position * PRIORITY_SPACING;
-            if matches!(graph.get_op(op).kind, OpNodeKind::Flippable(_)) {
-                policy.flips[op.idx()] =
-                    if flipped { FlipChoice::Flipped } else { FlipChoice::Straight };
-            }
-            position += 1;
-        }
-        policy
-    }
-}
-
 const PRIORITY_SPACING: u32 = 1 << 16;
 
 pub fn schedule(
@@ -208,62 +172,31 @@ pub fn schedule_with_effort(
     }
     let trees = build_tree_graph(graph);
     let tree_dag = Dag::new(&trees.graph);
-    let dag = Dag::new(graph);
     let search_work = work.div_ceil(SEARCHES);
     let search = |seed: u64| {
-        let tree_work = search_work - search_work / 4;
-        let run = |graph: &OpGraph, dag: &Dag, policy: &Policy| {
-            let mut ops = Vec::new();
-            let new_next_alloc_id = greedy_schedule(
-                |op| ops.push(op),
-                finalization,
-                next_alloc_id,
-                shuffle,
-                graph,
-                dag,
-                policy,
-                None,
-                effort > 0,
-            )
-            .expect("unbounded schedule cannot be cut off");
-            (ops, new_next_alloc_id)
-        };
-
-        let (tree_ops, tree_next_alloc_id, tree_policy) = {
-            let policy = search_policy(
-                finalization,
-                shuffle,
-                &trees.graph,
-                &tree_dag,
-                tree_work,
-                Policy::graph_order(&trees.graph),
-                seed,
-            );
-            let (ops, next) = run(&trees.graph, &tree_dag, &policy);
-            (trees.expand_schedule(graph, &ops), next, policy)
-        };
-        // Tree graphs fix the order inside each tree, which occasionally rules out the best
-        // schedule, so the untransformed graph gets the remaining quarter of the budget.
-        if effort > 0 {
-            let seed_policy = Policy::replaying(graph, &tree_ops, &tree_policy);
-            let policy = search_policy(
-                finalization,
-                shuffle,
-                graph,
-                &dag,
-                search_work - tree_work,
-                seed_policy,
-                seed,
-            );
-            let (ops, next) = run(graph, &dag, &policy);
-            if crate::stack::gas_cost(&ops, shuffle) < crate::stack::gas_cost(&tree_ops, shuffle) {
-                (ops.into_boxed_slice(), next)
-            } else {
-                (tree_ops, tree_next_alloc_id)
-            }
-        } else {
-            (tree_ops, tree_next_alloc_id)
-        }
+        let policy = search_policy(
+            finalization,
+            shuffle,
+            &trees.graph,
+            &tree_dag,
+            search_work,
+            Policy::graph_order(&trees.graph),
+            seed,
+        );
+        let mut ops = Vec::new();
+        let new_next_alloc_id = greedy_schedule(
+            |op| ops.push(op),
+            finalization,
+            next_alloc_id,
+            shuffle,
+            &trees.graph,
+            &tree_dag,
+            &policy,
+            None,
+            effort > 0,
+        )
+        .expect("unbounded schedule cannot be cut off");
+        (trees.expand_schedule(graph, &ops), new_next_alloc_id)
     };
     // Independent policy searches with different random streams explore different basins.
     let searches = if effort > 0 { SEARCHES } else { 1 };
