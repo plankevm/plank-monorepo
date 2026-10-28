@@ -1385,16 +1385,13 @@ fn test_comptime_only_then_branch_implicit_else() {
         }
         "#,
         &[r#"
-        error: comptime-only value depends on runtime control flow
-         --> main.plk:3:23
+        error: `if` used as an expression is missing an `else` branch
+         --> main.plk:3:13
           |
         3 |     let T = if cond { u256 };
-          |                ----   ^^^^ comptime-only value
-          |                |
-          |                runtime condition here
+          |             ^^^^^^^^^^^^^^^^ this `if` must produce a value on every path
           |
-          = note: branches with runtime conditions must produce runtime-compatible values
-          = help: make the condition comptime-known to evaluate only the taken branch
+          = help: add an `else` branch that yields a value
         "#],
     );
 }
@@ -1756,7 +1753,7 @@ fn comptime_any_parameter() {
                 x and y
             } else if T == u256 {
                 x *% y
-            }
+            } else {}
         };
 
         init {

@@ -510,6 +510,14 @@ impl<'a> Parser<'a> {
         Some(self.close_node(conditional))
     }
 
+    fn nth_child(&self, node: NodeIdx, i: usize) -> Option<NodeIdx> {
+        std::iter::successors(self.nodes[node].first_child, |&c| self.nodes[c].next_sibling).nth(i)
+    }
+
+    fn is_else_less_if(&self, node: NodeIdx) -> bool {
+        self.nodes[node].kind == NodeKind::If && self.nth_child(node, 3).is_none()
+    }
+
     fn try_parse_match(&mut self) -> Option<NodeIdx> {
         let match_start = self.current_token_index();
         if !self.eat(Token::Match) {
@@ -1055,6 +1063,10 @@ impl<'a> Parser<'a> {
         }
 
         if self.eat(Token::Semicolon) {
+            return Some(StmtResult::Statement(expr));
+        }
+
+        if self.is_else_less_if(expr) {
             return Some(StmtResult::Statement(expr));
         }
 
