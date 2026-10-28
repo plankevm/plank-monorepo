@@ -1,7 +1,4 @@
-use plank_parser::{
-    ast,
-    lexer::{Token, TokenSpan},
-};
+use plank_parser::lexer::{Token, TokenSpan};
 use plank_session::{
     Annotations, Builtin, Claim, ClaimBuilder, Diagnostic, Element, Level, Session, SourceId,
     SourceSpan, StrId,
@@ -347,8 +344,8 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
-    pub(crate) fn emit_if_expr_missing_else(&self, if_expr: ast::IfExpr<'_>) {
-        let source_span = self.lexed.tokens_src_span(if_expr.node().span());
+    pub(crate) fn emit_if_expr_missing_else(&self, if_span: TokenSpan) {
+        let source_span = self.lexed.tokens_src_span(if_span);
         Diagnostic::error("`if` used as an expression is missing an `else` branch")
             .primary(self.source_id, source_span, "this `if` must produce a value on every path")
             .help("add an `else` branch that produces a compatible value")

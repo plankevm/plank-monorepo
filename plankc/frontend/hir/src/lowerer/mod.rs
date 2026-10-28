@@ -860,7 +860,7 @@ impl BlockLowerer<'_> {
                 if let Some(else_body) = if_expr.else_body() {
                     self.lower_if(if_expr, ElseBody::Explicit(else_body))
                 } else {
-                    self.emit_if_expr_missing_else(if_expr);
+                    self.emit_if_expr_missing_else(if_expr.node().span());
                     self.lower_expr_to_local(if_expr.condition());
                     ExprKind::POISON
                 }
@@ -1127,10 +1127,10 @@ impl BlockLowerer<'_> {
             return self.create_sub_block(first.node().span(), |this| {
                 let condition = this.lower_expr_to_local(first.condition());
                 let then_block = this.lower_branch_body(first.body(), result);
-                let else_body = match else_body {
-                    ElseBody::Explicit(body) => ElseBody::Explicit(body),
-                    ElseBody::Implicit(_) => ElseBody::Implicit(first.body().node().span()),
-                };
+                let mut else_body = else_body;
+                if let ElseBody::Implicit(_) = else_body {
+                    else_body = ElseBody::Implicit(first.body().node().span());
+                }
                 let else_block = this.lower_else_chain(result, branches, else_body);
                 this.emit(InstructionKind::If {
                     outer_result: None,
