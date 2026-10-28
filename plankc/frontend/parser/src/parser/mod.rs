@@ -514,7 +514,7 @@ impl<'a> Parser<'a> {
         std::iter::successors(self.nodes[node].first_child, |&c| self.nodes[c].next_sibling).nth(i)
     }
 
-    fn is_else_less_if(&self, node: NodeIdx) -> bool {
+    fn is_if_without_final_else(&self, node: NodeIdx) -> bool {
         self.nodes[node].kind == NodeKind::If && self.nth_child(node, 3).is_none()
     }
 
@@ -1066,7 +1066,7 @@ impl<'a> Parser<'a> {
             return Some(StmtResult::Statement(expr));
         }
 
-        if self.is_else_less_if(expr) {
+        if self.is_if_without_final_else(expr) {
             return Some(StmtResult::Statement(expr));
         }
 
