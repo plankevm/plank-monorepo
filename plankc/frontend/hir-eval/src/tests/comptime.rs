@@ -1375,31 +1375,6 @@ fn test_comptime_only_short_circuit_and() {
 }
 
 #[test]
-fn test_comptime_only_then_branch_implicit_else() {
-    assert_diagnostics(
-        r#"
-        init {
-            let cond = @evm_iszero(@evm_calldataload(0));
-            let T = if cond { u256 };
-            @evm_stop();
-        }
-        "#,
-        &[r#"
-        error: comptime-only value depends on runtime control flow
-         --> main.plk:3:23
-          |
-        3 |     let T = if cond { u256 };
-          |                ----   ^^^^ comptime-only value
-          |                |
-          |                runtime condition here
-          |
-          = note: branches with runtime conditions must produce runtime-compatible values
-          = help: make the condition comptime-known to evaluate only the taken branch
-        "#],
-    );
-}
-
-#[test]
 fn test_comptime_only_short_circuit_or() {
     assert_diagnostics(
         r#"
@@ -1756,6 +1731,8 @@ fn comptime_any_parameter() {
                 x and y
             } else if T == u256 {
                 x *% y
+            } else {
+                @compile_error("unsupported type")
             }
         };
 

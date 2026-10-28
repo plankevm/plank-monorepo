@@ -344,6 +344,14 @@ impl BlockLowerer<'_> {
             .emit(*self.session.borrow_mut());
     }
 
+    pub(crate) fn emit_if_expr_missing_else(&self, if_span: TokenSpan) {
+        let source_span = self.lexed.tokens_src_span(if_span);
+        Diagnostic::error("`if` used as an expression is missing an `else` branch")
+            .primary(self.source_id, source_span, "this `if` must produce a value on every path")
+            .help("add an `else` branch that produces a compatible value")
+            .emit(*self.session.borrow_mut());
+    }
+
     pub fn emit_return_not_allowed_here(&self, return_span: TokenSpan) {
         Diagnostic::error("return is not allowed outside of function bodies")
             .element(
