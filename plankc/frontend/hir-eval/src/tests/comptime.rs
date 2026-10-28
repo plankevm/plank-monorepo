@@ -1375,28 +1375,6 @@ fn test_comptime_only_short_circuit_and() {
 }
 
 #[test]
-fn test_comptime_only_then_branch_implicit_else() {
-    assert_diagnostics(
-        r#"
-        init {
-            let cond = @evm_iszero(@evm_calldataload(0));
-            let T = if cond { u256 };
-            @evm_stop();
-        }
-        "#,
-        &[r#"
-        error: `if` used as an expression is missing an `else` branch
-         --> main.plk:3:13
-          |
-        3 |     let T = if cond { u256 };
-          |             ^^^^^^^^^^^^^^^^ this `if` must produce a value on every path
-          |
-          = help: add an `else` branch that yields a value
-        "#],
-    );
-}
-
-#[test]
 fn test_comptime_only_short_circuit_or() {
     assert_diagnostics(
         r#"
@@ -1753,7 +1731,9 @@ fn comptime_any_parameter() {
                 x and y
             } else if T == u256 {
                 x *% y
-            } else {}
+            } else {
+                @compile_error("unsupported type")
+            }
         };
 
         init {

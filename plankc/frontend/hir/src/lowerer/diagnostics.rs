@@ -351,7 +351,7 @@ impl BlockLowerer<'_> {
         let source_span = self.lexed.tokens_src_span(if_expr.node().span());
         Diagnostic::error("`if` used as an expression is missing an `else` branch")
             .primary(self.source_id, source_span, "this `if` must produce a value on every path")
-            .help("add an `else` branch that yields a value")
+            .help("add an `else` branch that produces a compatible value")
             .emit(*self.session.borrow_mut());
     }
 

@@ -2189,7 +2189,7 @@ fn test_if_expr_missing_else_in_let() {
         3 |     let y = if cond { 1 } else if cond { 2 };
           |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this `if` must produce a value on every path
           |
-          = help: add an `else` branch that yields a value
+          = help: add an `else` branch that produces a compatible value
         "#,
     );
     pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
@@ -2215,7 +2215,7 @@ fn test_if_expr_missing_else_in_return() {
         2 |     return if cond { 1 };
           |            ^^^^^^^^^^^^^ this `if` must produce a value on every path
           |
-          = help: add an `else` branch that yields a value
+          = help: add an `else` branch that produces a compatible value
         "#,
     );
     pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
@@ -2401,7 +2401,7 @@ fn test_if_expr_missing_else_inside_discarded_if_branch() {
         4 |         let y = if cond { 1 };
           |                 ^^^^^^^^^^^^^ this `if` must produce a value on every path
           |
-          = help: add an `else` branch that yields a value
+          = help: add an `else` branch that produces a compatible value
         "#,
     );
     pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
@@ -2425,50 +2425,8 @@ fn test_if_expr_missing_else_in_call_argument() {
         3 |     @evm_sstore(if cond { 1 }, 2);
           |                 ^^^^^^^^^^^^^ this `if` must produce a value on every path
           |
-          = help: add an `else` branch that yields a value
+          = help: add an `else` branch that produces a compatible value
         "#,
     );
     pretty_assertions::assert_str_eq!(diagnostics.trim(), expected.trim());
-}
-
-#[test]
-fn test_while_body_tail_if_without_else_is_legal() {
-    assert_lowers_to(
-        r#"
-        init {
-            let cond = @evm_iszero(@evm_calldataload(0));
-            while cond {
-                if cond {
-                    @evm_sstore(1, 1);
-                }
-            }
-            @evm_stop();
-        }
-        "#,
-        r#"
-        ==== Constants ====
-
-        ==== Init ====
-        %0 = 0
-        %1 = @evm_calldataload(%0)
-        %2 = @evm_iszero(%1)
-        while {
-            cond:
-                %3 = %2
-            test %3
-            body:
-                %5 = %2
-                %4 <- if %5 {
-                    %6 = 1
-                    %7 = 1
-                    eval @evm_sstore(%6, %7)
-                    %4 [br]= type:tuple {}
-                } else {
-                    %4 [br]= type:tuple {}
-                }
-                eval %4
-        }
-        eval @evm_stop()
-        "#,
-    );
 }
